@@ -1,0 +1,9 @@
+ksnip/
+wayshot/
+target/
+capture-overlay/build/
+node_modules/
+dist/
+build/
+.cache/
+*.log
