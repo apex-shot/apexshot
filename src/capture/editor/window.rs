@@ -59,7 +59,7 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
     }
 
     let app = Application::builder()
-        .application_id("com.cleanshitx.capture.editor")
+        .application_id("com.apexshot.capture.editor")
         .build();
 
     app.connect_activate(move |application| {
@@ -67,15 +67,6 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
     });
 
     let _ = app.run_with_args::<String>(&[]);
-    Ok(())
-}
-
-pub fn open_image_editor_in_app(app: &Application, path: PathBuf) -> Result<(), EditorError> {
-    if !path.exists() {
-        return Err(EditorError::MissingFile(path));
-    }
-
-    setup_editor_window(app, path);
     Ok(())
 }
 
@@ -1163,7 +1154,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     // Canvas
     let drawing_area = DrawingArea::new();
-    drawing_area.set_hexpand(false);
+    drawing_area.set_hexpand(true);
     drawing_area.set_vexpand(false);
     drawing_area.set_content_width(img_width as i32);
     drawing_area.set_content_height(img_height as i32);
@@ -1171,7 +1162,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     drawing_area.add_css_class("editor-canvas");
 
     let canvas_overlay = Overlay::new();
-    canvas_overlay.set_hexpand(false);
+    canvas_overlay.set_hexpand(true);
     canvas_overlay.set_vexpand(false);
     canvas_overlay.set_size_request(img_width as i32, img_height as i32);
     canvas_overlay.set_child(Some(&drawing_area));
@@ -1180,8 +1171,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     canvas_scroller.set_hexpand(true);
     canvas_scroller.set_vexpand(true);
     canvas_scroller.set_has_frame(false);
-    canvas_scroller.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Automatic);
+    canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     canvas_scroller.set_child(Some(&canvas_overlay));
+
+    let canvas_padding = 24_i32;
 
     let canvas_eyedropper_ring = DrawingArea::new();
     canvas_eyedropper_ring.add_css_class("editor-screen-eyedropper-ring");
@@ -1228,21 +1221,48 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let state = state.clone();
         let drawing_area = drawing_area.clone();
         let canvas_overlay = canvas_overlay.clone();
+        let canvas_scroller = canvas_scroller.clone();
+        let canvas_padding = canvas_padding;
         move || {
-            let (w, h) = {
+            let (image_w, image_h) = {
                 let st = state.lock().unwrap();
                 (
                     st.working_image.width().max(1) as i32,
                     st.working_image.height().max(1) as i32,
                 )
             };
-            drawing_area.set_content_width(w);
-            drawing_area.set_content_height(h);
-            drawing_area.set_size_request(w, h);
-            canvas_overlay.set_size_request(w, h);
+
+            let available_width = canvas_scroller
+                .allocated_width()
+                .saturating_sub(canvas_padding * 2 + 2)
+                .max(1) as f64;
+            let scale = (available_width / image_w as f64).min(1.0);
+            let fitted_w = ((image_w as f64) * scale).round().max(1.0) as i32;
+            let fitted_h = ((image_h as f64) * scale).round().max(1.0) as i32;
+            let canvas_w = fitted_w + canvas_padding * 2;
+            let canvas_h = fitted_h + canvas_padding * 2;
+
+            drawing_area.set_content_width(canvas_w);
+            drawing_area.set_content_height(canvas_h);
+            drawing_area.set_size_request(canvas_w, canvas_h);
+            canvas_overlay.set_size_request(canvas_w, canvas_h);
         }
     });
     update_canvas_content_size();
+
+    {
+        let update_canvas_content_size_tick = update_canvas_content_size.clone();
+        let last_canvas_width = Rc::new(Cell::new(0));
+        let last_canvas_width_tick = last_canvas_width.clone();
+        canvas_scroller.add_tick_callback(move |scroller, _| {
+            let width = scroller.allocated_width();
+            if width > 0 && width != last_canvas_width_tick.get() {
+                last_canvas_width_tick.set(width);
+                update_canvas_content_size_tick();
+            }
+            glib::ControlFlow::Continue
+        });
+    }
 
     // Picker UI update functions
     let update_picker_ui: Rc<dyn Fn(PickerColorState)> = Rc::new({
@@ -1590,6 +1610,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let size_up_btn_draw = size_up_btn.clone();
     let cached_surface_draw = cached_surface.clone();
     let cached_surface_revision_draw = cached_surface_revision.clone();
+    let canvas_padding_draw = canvas_padding as f64;
     drawing_area.set_draw_func(move |_, context, width, height| {
         let st = state_draw.lock().unwrap();
         let (can_undo, can_redo) = st.history_availability();
@@ -1602,7 +1623,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             &size_down_btn_draw,
             &size_up_btn_draw,
         );
-        let inset = 0.0;
+        let inset = canvas_padding_draw;
         let view_width = (width as f64 - inset * 2.0).max(1.0);
         let view_height = (height as f64 - inset * 2.0).max(1.0);
 

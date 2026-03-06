@@ -57,6 +57,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 
 [[package]]
+name = "apexshot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "ashpd",
+ "async-trait",
+ "base64",
+ "chrono",
+ "dirs",
+ "futures-util",
+ "gdk4-x11",
+ "gstreamer",
+ "gstreamer-app",
+ "gstreamer-video",
+ "gtk4",
+ "gtk4-layer-shell",
+ "image 0.24.9",
+ "ksni",
+ "libc",
+ "mockall",
+ "pretty_assertions",
+ "rayon",
+ "relm4-icons",
+ "relm4-icons-build",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "tesseract",
+ "test-case",
+ "thiserror 2.0.16",
+ "tokio",
+ "tracing",
+ "url",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "x11rb",
+ "zbus",
+]
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -459,48 +501,6 @@ dependencies = [
  "textwrap",
  "unicode-width",
  "vec_map",
-]
-
-[[package]]
-name = "cleanshitx"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arboard",
- "ashpd",
- "async-trait",
- "base64",
- "chrono",
- "dirs",
- "futures-util",
- "gdk4-x11",
- "gstreamer",
- "gstreamer-app",
- "gstreamer-video",
- "gtk4",
- "gtk4-layer-shell",
- "image 0.24.9",
- "ksni",
- "libc",
- "mockall",
- "pretty_assertions",
- "rayon",
- "relm4-icons",
- "relm4-icons-build",
- "serde",
- "serde_json",
- "serde_yml",
- "tesseract",
- "test-case",
- "thiserror 2.0.16",
- "tokio",
- "tracing",
- "url",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-wlr",
- "x11rb",
- "zbus",
 ]
 
 [[package]]

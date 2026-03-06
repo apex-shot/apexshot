@@ -178,7 +178,7 @@ pub fn custom_color_slots_css(colors: &[Option<DrawColor>]) -> String {
 
 pub fn persisted_custom_colors_path() -> Option<PathBuf> {
     let mut path = dirs::config_dir()?;
-    path.push("cleanshitx");
+    path.push("apexshot");
     path.push(CUSTOM_COLORS_CONFIG_FILE);
     Some(path)
 }

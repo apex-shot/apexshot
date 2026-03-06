@@ -1,4 +1,4 @@
-//! Persistent tray daemon for CleanShotX.
+//! Persistent tray daemon for ApexShot.
 //!
 //! A single long-running process that:
 //!   1. Shows a system tray icon (via ksni / StatusNotifierItem)
@@ -21,9 +21,15 @@ use ashpd::desktop::{
 
 use crate::{
     backend::DisplayBackend,
-    capture_overlay::{capture_area_via_cpp, capture_screen_via_cpp, capture_window_via_cpp, AreaCaptureResult},
-    capture::{save_capture, SaveConfig},
-    hotkeys::{accel_to_gnome, ensure_desktop_entry_pub, load_hotkey_config, HotkeyBinding},
+    capture::{save_capture, save_existing_png, SaveConfig},
+    capture_overlay::{
+        capture_area_file_via_cpp, capture_screen_file_via_cpp, capture_window_file_via_cpp,
+        AreaCapturePathResult,
+    },
+    hotkeys::{
+        accel_to_gnome, ensure_desktop_entry_pub, load_hotkey_config,
+        sync_gnome_hotkeys_for_current_desktop, HotkeyBinding,
+    },
     ocr::{extract_text, OcrConfig},
     tray::{spawn_tray, TrayAction},
 };
@@ -84,11 +90,11 @@ struct DaemonState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Well-known D-Bus name that the daemon registers.
-pub const DAEMON_BUS_NAME: &str = "org.cleanshitx.Daemon";
+pub const DAEMON_BUS_NAME: &str = "org.apexshot.Daemon";
 /// D-Bus object path.
-pub const DAEMON_OBJECT_PATH: &str = "/org/cleanshitx/Daemon";
+pub const DAEMON_OBJECT_PATH: &str = "/org/apexshot/Daemon";
 /// D-Bus interface.
-pub const DAEMON_INTERFACE: &str = "org.cleanshitx.Daemon";
+pub const DAEMON_INTERFACE: &str = "org.apexshot.Daemon";
 
 /// Try to trigger an action on an already-running daemon via D-Bus.
 /// Returns `true` if the daemon was found and the call succeeded.
@@ -124,7 +130,10 @@ pub async fn import_web_scroll_capture(
     };
 
     proxy
-        .call::<_, _, bool>("ImportWebScrollCapture", &(png_base64, page_url, page_title))
+        .call::<_, _, bool>(
+            "ImportWebScrollCapture",
+            &(png_base64, page_url, page_title),
+        )
         .await
         .unwrap_or(false)
 }
@@ -165,28 +174,25 @@ pub async fn run_daemon() -> anyhow::Result<()> {
 /// This is called at startup to ensure scroll functionality works.
 fn ensure_ydotoold_running() {
     use std::process::Command;
-    
+
     // Check if ydotoold is already running
-    let output = Command::new("pgrep")
-        .arg("-x")
-        .arg("ydotoold")
-        .output();
-    
+    let output = Command::new("pgrep").arg("-x").arg("ydotoold").output();
+
     if let Ok(output) = output {
         if output.status.success() {
             eprintln!("[daemon] ydotoold is already running");
             return;
         }
     }
-    
+
     // Try to start ydotoold daemon
     eprintln!("[daemon] Starting ydotoold daemon for scroll capture...");
-    
+
     let result = Command::new("ydotoold")
         .arg("--socket-path=/tmp/.ydotool_socket")
         .arg("--socket-own=1000:1000")
         .spawn();
-    
+
     match result {
         Ok(_) => {
             // Give it a moment to start
@@ -204,7 +210,7 @@ async fn run_daemon_inner(
     gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
     layer_shell_supported: bool,
 ) -> anyhow::Result<()> {
-    eprintln!("[daemon] CleanShotX daemon starting…");
+    eprintln!("[daemon] ApexShot daemon starting…");
 
     // Ensure ydotoold is running for scroll capture on Wayland
     ensure_ydotoold_running();
@@ -247,30 +253,48 @@ async fn run_daemon_inner(
 
     // ── Hotkey listener ──────────────────────────────────────────────────────
     // On GNOME, hotkeys are handled via gsettings custom keybindings that
-    // spawn `cleanshitx capture area` etc., which relay to us via D-Bus IPC.
+    // spawn `apexshot capture area` etc., which relay to us via D-Bus IPC.
     // We do NOT use the portal GlobalShortcuts here because it grabs keys
     // exclusively and prevents gsd-media-keys from grabbing the same keys.
     // Portal listener is only started as a last resort on non-GNOME desktops.
-    let hotkey_tx = action_tx.clone();
-    tokio::spawn(async move {
-        if std::env::var_os("GNOME_SETUP_DISPLAY").is_some()
-            || std::env::var("XDG_CURRENT_DESKTOP")
-                .unwrap_or_default()
-                .to_ascii_uppercase()
-                .contains("GNOME")
-        {
-            eprintln!(
-                "[daemon] GNOME detected — hotkeys via gsettings custom keybindings + D-Bus IPC."
-            );
-        } else {
-            // Non-GNOME: try portal GlobalShortcuts.
+    let gnome_session = std::env::var_os("GNOME_SETUP_DISPLAY").is_some()
+        || std::env::var("XDG_CURRENT_DESKTOP")
+            .unwrap_or_default()
+            .to_ascii_uppercase()
+            .contains("GNOME");
+
+    if gnome_session {
+        eprintln!("[daemon] GNOME detected — validating custom keybindings for D-Bus hotkeys.");
+        match sync_gnome_hotkeys_for_current_desktop(None) {
+            Ok(result) if result.updated => {
+                eprintln!("[daemon] GNOME hotkeys refreshed for the current executable path.");
+                for issue in result.issues {
+                    eprintln!("[daemon]   repaired: {issue}");
+                }
+            }
+            Ok(_) => {
+                eprintln!("[daemon] GNOME hotkeys already point at the current executable.");
+            }
+            Err(e) => {
+                eprintln!(
+                    "[daemon] GNOME hotkeys are not active: {e}. Run `cargo run -- hotkeys install` to repair them."
+                );
+            }
+        }
+    } else {
+        let hotkey_tx = action_tx.clone();
+        tokio::spawn(async move {
             if let Err(e) = run_hotkey_listener(hotkey_tx).await {
                 eprintln!("[daemon] Hotkey listener error: {e}");
             }
-        }
-    });
+        });
+    }
 
-    eprintln!("[daemon] Ready. Listening for hotkeys and tray events.");
+    if gnome_session {
+        eprintln!("[daemon] Ready. Tray active; GNOME hotkeys use custom keybindings + D-Bus IPC.");
+    } else {
+        eprintln!("[daemon] Ready. Listening for hotkeys and tray events.");
+    }
 
     // ── Action loop ──────────────────────────────────────────────────────────
     while let Ok(action) = action_rx.recv() {
@@ -324,7 +348,7 @@ async fn run_daemon_inner(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D-Bus IPC server — exposes org.cleanshitx.Daemon with Trigger(action) method
+// D-Bus IPC server — exposes org.apexshot.Daemon with Trigger(action) method
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The D-Bus interface object. Holds a channel sender to forward actions to
@@ -391,18 +415,16 @@ impl ScrollInjector {
             .response()
             .map_err(|e| format!("RemoteDesktop start denied: {e}"))?;
 
-        let (stream_node_id, stream_pos, stream_size) = if let Some(stream) = selected
-            .streams()
-            .and_then(|streams| streams.first())
-        {
-            (
-                Some(stream.pipe_wire_node_id()),
-                stream.position().unwrap_or((0, 0)),
-                stream.size(),
-            )
-        } else {
-            (None, (0, 0), None)
-        };
+        let (stream_node_id, stream_pos, stream_size) =
+            if let Some(stream) = selected.streams().and_then(|streams| streams.first()) {
+                (
+                    Some(stream.pipe_wire_node_id()),
+                    stream.position().unwrap_or((0, 0)),
+                    stream.size(),
+                )
+            } else {
+                (None, (0, 0), None)
+            };
 
         self.portal = Some(PortalScrollSession {
             remote,
@@ -412,7 +434,10 @@ impl ScrollInjector {
             stream_size,
         });
         self.focused = false;
-        eprintln!("[daemon] RemoteDesktop scroll session started (stream={:?})", stream_node_id);
+        eprintln!(
+            "[daemon] RemoteDesktop scroll session started (stream={:?})",
+            stream_node_id
+        );
         Ok(true)
     }
 
@@ -563,7 +588,7 @@ async fn try_gnome_shell_capture_area(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_micros())
         .unwrap_or(0);
-    let requested_path = format!("/tmp/cleanshitx_gnome_{timestamp}.png");
+    let requested_path = format!("/tmp/apexshot_gnome_{timestamp}.png");
 
     let (success, filename_used): (bool, String) = proxy
         .call(
@@ -610,7 +635,7 @@ async fn try_gnome_shell_capture_fullscreen() -> Result<String, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_micros())
         .unwrap_or(0);
-    let requested_path = format!("/tmp/cleanshitx_gnome_fs_{timestamp}.png");
+    let requested_path = format!("/tmp/apexshot_gnome_fs_{timestamp}.png");
 
     let (success, filename_used): (bool, String) = proxy
         .call("Screenshot", &(false, false, requested_path.clone()))
@@ -636,7 +661,7 @@ async fn try_gnome_shell_capture_fullscreen() -> Result<String, String> {
     Ok(resolved_path)
 }
 
-#[zbus::interface(name = "org.cleanshitx.Daemon")]
+#[zbus::interface(name = "org.apexshot.Daemon")]
 impl DaemonIpc {
     fn trigger(&self, action: String) -> zbus::fdo::Result<()> {
         eprintln!("[daemon] D-Bus Trigger: {action}");
@@ -664,7 +689,13 @@ impl DaemonIpc {
 
     /// Allows the untrusted C++ overlay process to request an area screenshot
     /// via the trusted daemon on GNOME Wayland.
-    async fn capture_area_gnome(&self, x: i32, y: i32, width: i32, height: i32) -> zbus::fdo::Result<String> {
+    async fn capture_area_gnome(
+        &self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) -> zbus::fdo::Result<String> {
         eprintln!("[daemon] D-Bus capture_area_gnome called: {x} {y} {width} {height}");
         if width <= 0 || height <= 0 {
             return Err(zbus::fdo::Error::InvalidArgs(format!(
@@ -727,10 +758,7 @@ impl DaemonIpc {
     async fn scroll_begin_gnome(&self) -> zbus::fdo::Result<bool> {
         eprintln!("[daemon] D-Bus scroll_begin_gnome called");
         let mut injector = self.scroll_injector.lock().await;
-        injector
-            .begin()
-            .await
-            .map_err(zbus::fdo::Error::Failed)
+        injector.begin().await.map_err(zbus::fdo::Error::Failed)
     }
 
     async fn scroll_step_gnome(&self, x: i32, y: i32, steps: i32) -> zbus::fdo::Result<bool> {
@@ -751,14 +779,19 @@ impl DaemonIpc {
         page_url: String,
         page_title: String,
     ) -> zbus::fdo::Result<bool> {
-        eprintln!("[daemon] D-Bus import_web_scroll_capture called (url={})", page_url);
+        eprintln!(
+            "[daemon] D-Bus import_web_scroll_capture called (url={})",
+            page_url
+        );
         self.tx
             .send(DaemonAction::ImportWebScrollCapture {
                 png_base64,
                 page_url,
                 page_title,
             })
-            .map_err(|e| zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}")))?;
+            .map_err(|e| {
+                zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
+            })?;
         Ok(true)
     }
 }
@@ -819,8 +852,8 @@ async fn run_hotkey_listener(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyho
 /// Set GIO_LAUNCHED_DESKTOP_FILE env vars if not already set, so GNOME Shell
 /// treats this process as a trusted desktop-launched application.
 fn ensure_gio_desktop_env() {
-    let app_id = std::env::var("CLEANSHITX_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.cleanshitx".to_string());
+    let app_id = std::env::var("APEXSHOT_APP_ID")
+        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
 
     if let Ok(desktop_path) = ensure_desktop_entry_pub(&app_id) {
         if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
@@ -848,7 +881,7 @@ fn maybe_relaunch_via_desktop() -> bool {
         return false;
     }
 
-    if std::env::var_os("CLEANSHITX_DAEMON_DESKTOP_RELAUNCHED").is_some() {
+    if std::env::var_os("APEXSHOT_DAEMON_DESKTOP_RELAUNCHED").is_some() {
         return false;
     }
 
@@ -857,8 +890,8 @@ fn maybe_relaunch_via_desktop() -> bool {
         return false;
     }
 
-    let app_id = std::env::var("CLEANSHITX_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.cleanshitx".to_string());
+    let app_id = std::env::var("APEXSHOT_APP_ID")
+        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
 
     let desktop_path = match ensure_desktop_entry_pub(&app_id) {
         Ok(path) => path,
@@ -870,7 +903,7 @@ fn maybe_relaunch_via_desktop() -> bool {
 
     let mut cmd = std::process::Command::new("gtk-launch");
     cmd.arg(&app_id)
-        .env("CLEANSHITX_DAEMON_DESKTOP_RELAUNCHED", "1");
+        .env("APEXSHOT_DAEMON_DESKTOP_RELAUNCHED", "1");
 
     match cmd.spawn() {
         Ok(_) => {
@@ -969,8 +1002,8 @@ async fn run_hotkey_listener_portal(
     use std::collections::HashMap;
     use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
-    let app_id = std::env::var("CLEANSHITX_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.cleanshitx".to_string());
+    let app_id = std::env::var("APEXSHOT_APP_ID")
+        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
 
     let conn = zbus::Connection::session()
         .await
@@ -1007,7 +1040,7 @@ async fn run_hotkey_listener_portal(
             .unwrap_or_default()
             .as_nanos();
         // Portal token charset: [A-Za-z0-9_] only.
-        format!("cleanshitx_{pid}_{nanos}")
+        format!("apexshot_{pid}_{nanos}")
     };
 
     let mk_request_path = |tok: &str| -> anyhow::Result<OwnedObjectPath> {
@@ -1252,18 +1285,23 @@ fn capture_full_screen() -> Option<crate::backend::CaptureData> {
 }
 
 fn capture_to_temp_png_path(capture: crate::backend::CaptureData) -> Result<String, String> {
-    let path = save_temp_png_daemon(&capture)
-        .ok_or_else(|| "Failed to save temporary PNG".to_string())?;
+    let path =
+        save_temp_png_daemon(&capture).ok_or_else(|| "Failed to save temporary PNG".to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
 
 fn capture_fullscreen_to_temp_png_path() -> Result<String, String> {
-    let capture =
-        capture_full_screen().ok_or_else(|| "No display backend available for fullscreen capture".to_string())?;
+    let capture = capture_full_screen()
+        .ok_or_else(|| "No display backend available for fullscreen capture".to_string())?;
     capture_to_temp_png_path(capture)
 }
 
-fn capture_area_to_temp_png_path(x: i32, y: i32, width: i32, height: i32) -> Result<String, String> {
+fn capture_area_to_temp_png_path(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<String, String> {
     if width <= 0 || height <= 0 {
         return Err(format!("Invalid capture area: {width}x{height}"));
     }
@@ -1273,7 +1311,9 @@ fn capture_area_to_temp_png_path(x: i32, y: i32, width: i32, height: i32) -> Res
             Ok(capture) => return capture_to_temp_png_path(capture),
             Err(area_err) => {
                 let full = backend.capture_screen_impl().map_err(|e| {
-                    format!("Wayland area capture failed ({area_err}); fullscreen fallback failed: {e}")
+                    format!(
+                        "Wayland area capture failed ({area_err}); fullscreen fallback failed: {e}"
+                    )
                 })?;
                 let crop_x = x.max(0) as u32;
                 let crop_y = y.max(0) as u32;
@@ -1288,11 +1328,7 @@ fn capture_area_to_temp_png_path(x: i32, y: i32, width: i32, height: i32) -> Res
 
     if let Some(backend) = make_x11_backend() {
         match <crate::backend::X11Backend as DisplayBackend>::capture_area(
-            &backend,
-            x,
-            y,
-            width,
-            height,
+            &backend, x, y, width, height,
         ) {
             Ok(capture) => return capture_to_temp_png_path(capture),
             Err(area_err) => {
@@ -1317,7 +1353,9 @@ fn capture_area_to_temp_png_path(x: i32, y: i32, width: i32, height: i32) -> Res
 }
 
 fn capture_full_screen_for_area_selector() -> Option<crate::backend::CaptureData> {
-    eprintln!("[capture] capture_full_screen_for_area_selector: starting background capture for selector");
+    eprintln!(
+        "[capture] capture_full_screen_for_area_selector: starting background capture for selector"
+    );
     if let Some(b) = make_wayland_backend() {
         eprintln!("[capture] capture_full_screen_for_area_selector: using Wayland backend (capture_screen_for_selection_impl)");
         let result = b.capture_screen_for_selection_impl().ok();
@@ -1378,14 +1416,28 @@ fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonSt
     }
 }
 
+fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mutex<DaemonState>>) {
+    match save_existing_png(&path, &SaveConfig::default()) {
+        Ok(saved_path) => {
+            eprintln!("[daemon] Saved: {}", saved_path.display());
+            state.lock().unwrap().last_capture_path = Some(saved_path.clone());
+            show_preview_subprocess(saved_path);
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&path);
+            eprintln!("[daemon] Save error: {e}");
+        }
+    }
+}
+
 fn handle_import_web_scroll_capture(
     png_base64: String,
     page_url: String,
     page_title: String,
     state: Arc<Mutex<DaemonState>>,
 ) {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use crate::backend::{CaptureData, PixelFormat};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let decoded = match STANDARD.decode(png_base64.as_bytes()) {
         Ok(bytes) => bytes,
@@ -1426,7 +1478,10 @@ fn run_ocr_and_report(capture: crate::backend::CaptureData) {
     eprintln!("[daemon] OCR tool selected — extracting text from selected area...");
     match extract_text(&capture, &OcrConfig::default()) {
         Ok(result) => {
-            eprintln!("[daemon] OCR successful (confidence: {}%)", result.confidence);
+            eprintln!(
+                "[daemon] OCR successful (confidence: {}%)",
+                result.confidence
+            );
             if result.copied_to_clipboard {
                 send_desktop_notification("OCR complete", "Text copied to clipboard");
             } else {
@@ -1445,7 +1500,7 @@ fn run_ocr_and_report(capture: crate::backend::CaptureData) {
 
 fn send_desktop_notification(summary: &str, body: &str) {
     let mut cmd = std::process::Command::new("notify-send");
-    cmd.arg("-a").arg("CleanShotX").arg(summary);
+    cmd.arg("-a").arg("ApexShot").arg(summary);
     if !body.is_empty() {
         cmd.arg(body);
     }
@@ -1455,9 +1510,9 @@ fn send_desktop_notification(summary: &str, body: &str) {
     }
 }
 
-/// Spawn `cleanshitx preview <path>` as a subprocess so it gets its own GTK context.
+/// Spawn `apexshot preview <path>` as a subprocess so it gets its own GTK context.
 fn show_preview_subprocess(path: std::path::PathBuf) {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cleanshitx"));
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
     match std::process::Command::new(&exe)
         .arg("preview")
         .arg(&path)
@@ -1472,7 +1527,7 @@ fn show_preview_subprocess(path: std::path::PathBuf) {
 }
 
 fn show_settings_subprocess() {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cleanshitx"));
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
 
     if let Err(e) = std::process::Command::new(&exe).arg("settings").spawn() {
         eprintln!("[daemon] Failed to spawn settings window: {e}");
@@ -1488,7 +1543,7 @@ fn save_temp_png_daemon(capture: &crate::backend::CaptureData) -> Option<std::pa
     use image::{ImageBuffer, Rgba};
 
     let tmp = std::env::temp_dir().join(format!(
-        "cleanshitx_bg_{}.png",
+        "apexshot_bg_{}.png",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -1544,20 +1599,20 @@ fn save_temp_png_daemon(capture: &crate::backend::CaptureData) -> Option<std::pa
 }
 
 fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
-    match capture_area_via_cpp() {
-        Ok(AreaCaptureResult::Captured(capture)) => {
-            save_and_open(capture, state);
+    match capture_area_file_via_cpp() {
+        Ok(AreaCapturePathResult::Captured(path)) => {
+            save_existing_png_and_open(path, state);
             return;
         }
-        Ok(AreaCaptureResult::ScrollCaptured(capture)) => {
-            save_and_open(capture, state);
+        Ok(AreaCapturePathResult::ScrollCaptured(path)) => {
+            save_existing_png_and_open(path, state);
             return;
         }
-        Ok(AreaCaptureResult::OcrRequested(capture)) => {
+        Ok(AreaCapturePathResult::OcrRequested(capture)) => {
             run_ocr_and_report(capture);
             return;
         }
-        Ok(AreaCaptureResult::Cancelled) => {
+        Ok(AreaCapturePathResult::Cancelled) => {
             eprintln!("[daemon] Area selection cancelled.");
             return;
         }
@@ -1568,13 +1623,19 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
         }
     }
 
-    eprintln!("[daemon] handle_capture_area: START — thread={:?}", std::thread::current().id());
+    eprintln!(
+        "[daemon] handle_capture_area: START — thread={:?}",
+        std::thread::current().id()
+    );
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     eprintln!("[daemon] handle_capture_area: is_wayland={is_wayland}");
 
     // Get the gtk_tx from state (if available) to dispatch GTK work to the main thread.
     let gtk_tx = state.lock().unwrap().gtk_tx.clone();
-    eprintln!("[daemon] handle_capture_area: gtk_tx available={}", gtk_tx.is_some());
+    eprintln!(
+        "[daemon] handle_capture_area: gtk_tx available={}",
+        gtk_tx.is_some()
+    );
 
     if is_wayland {
         let Some(backend) = make_wayland_backend() else {
@@ -1591,52 +1652,55 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
         // Use the C++ overlay with screenshot background for area selection.
         // Capture full screen first, save as temp PNG, pass to C++ overlay.
         let state_for_window = state.clone();
-        let run_cpp_selector_fn = |bg: Option<&std::path::Path>| -> crate::overlay::SelectionResult {
-            let result = crate::capture_overlay::run_capture_overlay_with_window(bg);
-            // Handle sentinels from window picker toolbar
-            if let Ok(Some(ref area)) = result {
-                if area.x == i32::MIN {
-                    eprintln!("[daemon] Window capture sentinel");
-                    match capture_window_via_cpp() {
-                        Ok(capture) => save_and_open(capture, state_for_window.clone()),
-                        Err(e) => eprintln!("[daemon] Window capture failed: {e}"),
+        let run_cpp_selector_fn =
+            |bg: Option<&std::path::Path>| -> crate::overlay::SelectionResult {
+                let result = crate::capture_overlay::run_capture_overlay_with_window(bg);
+                // Handle sentinels from window picker toolbar
+                if let Ok(Some(ref area)) = result {
+                    if area.x == i32::MIN {
+                        eprintln!("[daemon] Window capture sentinel");
+                        match capture_window_file_via_cpp() {
+                            Ok(path) => save_existing_png_and_open(path, state_for_window.clone()),
+                            Err(e) => eprintln!("[daemon] Window capture failed: {e}"),
+                        }
+                        return Ok(None);
+                    } else if area.x == i32::MIN + 1 {
+                        eprintln!("[daemon] Switching to area mode from window picker");
+                        match capture_area_file_via_cpp() {
+                            Ok(AreaCapturePathResult::Captured(path)) => {
+                                save_existing_png_and_open(path, state_for_window.clone())
+                            }
+                            Ok(AreaCapturePathResult::ScrollCaptured(path)) => {
+                                save_existing_png_and_open(path, state_for_window.clone())
+                            }
+                            Ok(AreaCapturePathResult::OcrRequested(capture)) => {
+                                run_ocr_and_report(capture)
+                            }
+                            Ok(AreaCapturePathResult::Cancelled) => {
+                                eprintln!("[daemon] Area capture cancelled")
+                            }
+                            Err(e) => eprintln!("[daemon] Area capture failed: {e}"),
+                        }
+                        return Ok(None);
+                    } else if area.x == i32::MIN + 2 {
+                        eprintln!("[daemon] Switching to fullscreen from window picker");
+                        match capture_screen_file_via_cpp() {
+                            Ok(path) => save_existing_png_and_open(path, state_for_window.clone()),
+                            Err(e) => eprintln!("[daemon] Fullscreen capture failed: {e}"),
+                        }
+                        return Ok(None);
                     }
-                    return Ok(None);
-                } else if area.x == i32::MIN + 1 {
-                    eprintln!("[daemon] Switching to area mode from window picker");
-                    match capture_area_via_cpp() {
-                        Ok(AreaCaptureResult::Captured(capture)) => {
-                            save_and_open(capture, state_for_window.clone())
-                        }
-                        Ok(AreaCaptureResult::ScrollCaptured(capture)) => {
-                            save_and_open(capture, state_for_window.clone())
-                        }
-                        Ok(AreaCaptureResult::OcrRequested(capture)) => {
-                            run_ocr_and_report(capture)
-                        }
-                        Ok(AreaCaptureResult::Cancelled) => {
-                            eprintln!("[daemon] Area capture cancelled")
-                        }
-                        Err(e) => eprintln!("[daemon] Area capture failed: {e}"),
-                    }
-                    return Ok(None);
-                } else if area.x == i32::MIN + 2 {
-                    eprintln!("[daemon] Switching to fullscreen from window picker");
-                    match capture_screen_via_cpp() {
-                        Ok(capture) => save_and_open(capture, state_for_window.clone()),
-                        Err(e) => eprintln!("[daemon] Fullscreen capture failed: {e}"),
-                    }
-                    return Ok(None);
                 }
-            }
-            result
-        };
+                result
+            };
 
         let run_live_selector = || -> crate::overlay::SelectionResult {
             let bg_capture = backend.capture_screen_for_selection_impl().ok();
             let tmp_bg = bg_capture.as_ref().and_then(|c| save_temp_png_daemon(c));
             let result = run_cpp_selector_fn(tmp_bg.as_deref());
-            if let Some(ref p) = tmp_bg { let _ = std::fs::remove_file(p); }
+            if let Some(ref p) = tmp_bg {
+                let _ = std::fs::remove_file(p);
+            }
             result
         };
 
@@ -1712,14 +1776,23 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
         eprintln!("[daemon] No Layer Shell — using capture-after-selection (Option B): showing dark overlay selector first.");
         let selector_start = std::time::Instant::now();
         let area_result = run_live_selector();
-        eprintln!("[daemon] Dark overlay selector returned after {:.0}ms: {:?}", selector_start.elapsed().as_millis(), area_result.as_ref().map(|o| o.as_ref().map(|_| "area")));
+        eprintln!(
+            "[daemon] Dark overlay selector returned after {:.0}ms: {:?}",
+            selector_start.elapsed().as_millis(),
+            area_result.as_ref().map(|o| o.as_ref().map(|_| "area"))
+        );
         match area_result {
             Ok(Some(area)) => {
                 eprintln!("[daemon] Selection confirmed: ({}, {}, {}x{}); now capturing selected region...", area.x, area.y, area.width, area.height);
                 let capture_start = std::time::Instant::now();
                 match backend.capture_area_direct_impl(area.x, area.y, area.width, area.height) {
                     Ok(capture) => {
-                        eprintln!("[daemon] Region capture succeeded in {:.0}ms ({}x{})", capture_start.elapsed().as_millis(), capture.width, capture.height);
+                        eprintln!(
+                            "[daemon] Region capture succeeded in {:.0}ms ({}x{})",
+                            capture_start.elapsed().as_millis(),
+                            capture.width,
+                            capture.height
+                        );
                         save_and_open(capture, state.clone());
                     }
                     Err(err) => {
@@ -1737,7 +1810,9 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
                                     eprintln!("[daemon] Crop out of bounds.");
                                 }
                             }
-                            Err(full_err) => eprintln!("[daemon] Full-screen fallback capture failed: {full_err}"),
+                            Err(full_err) => eprintln!(
+                                "[daemon] Full-screen fallback capture failed: {full_err}"
+                            ),
                         }
                     }
                 }
@@ -1762,7 +1837,9 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
             None
         }
     };
-    if let Some(ref p) = tmp_bg { let _ = std::fs::remove_file(p); }
+    if let Some(ref p) = tmp_bg {
+        let _ = std::fs::remove_file(p);
+    }
 
     match area_opt {
         Some(area) => {
@@ -1783,9 +1860,9 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
 }
 
 fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
-    match capture_screen_via_cpp() {
-        Ok(capture) => {
-            save_and_open(capture, state);
+    match capture_screen_file_via_cpp() {
+        Ok(path) => {
+            save_existing_png_and_open(path, state);
             return;
         }
         Err(err) => {
@@ -1803,9 +1880,9 @@ fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
 
 fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
     eprintln!("[daemon] Window capture requested — using GNOME Shell DBus");
-    match capture_window_via_cpp() {
-        Ok(capture) => {
-            save_and_open(capture, state);
+    match capture_window_file_via_cpp() {
+        Ok(path) => {
+            save_existing_png_and_open(path, state);
         }
         Err(e) => {
             eprintln!("[daemon] Window capture failed: {e}; falling back to area capture.");
@@ -1870,7 +1947,10 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         }
     };
     let area = crate::overlay::SelectionArea {
-        x: cpp_area.x, y: cpp_area.y, width: cpp_area.width, height: cpp_area.height,
+        x: cpp_area.x,
+        y: cpp_area.y,
+        width: cpp_area.width,
+        height: cpp_area.height,
     };
 
     let mut config = RecordingConfig::default();

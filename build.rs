@@ -1,6 +1,6 @@
 /// Compile the C++ Qt5 capture overlay binary using CMake.
 /// The compiled binary is placed in OUT_DIR and its location is exported
-/// via the CLEANSHITX_CAPTURE_BIN_DIR env var (embedded at compile time
+/// via the APEXSHOT_CAPTURE_BIN_DIR env var (embedded at compile time
 /// via `option_env!` in capture_overlay.rs).
 fn build_capture_overlay() {
     use std::path::PathBuf;
@@ -56,24 +56,25 @@ fn build_capture_overlay() {
     }
 
     // Export the directory so capture_overlay.rs can find the binary at runtime
-    // (via option_env!("CLEANSHITX_CAPTURE_BIN_DIR"))
-    println!("cargo:rustc-env=CLEANSHITX_CAPTURE_BIN_DIR={}", build_dir.display());
+    // (via option_env!("APEXSHOT_CAPTURE_BIN_DIR"))
+    println!(
+        "cargo:rustc-env=APEXSHOT_CAPTURE_BIN_DIR={}",
+        build_dir.display()
+    );
 
     // Also copy the binary next to the Rust binary in the target directory
     // so it's available when running `cargo run` during development.
-    let binary_src = build_dir.join("cleanshitx-capture");
+    let binary_src = build_dir.join("apexshot-capture");
     if binary_src.exists() {
         // Walk up from OUT_DIR to find target/{debug,release}/
         // OUT_DIR is typically: target/{profile}/build/<crate>-<hash>/out
-        if let Some(target_dir) = PathBuf::from(&out_dir)
-            .ancestors()
-            .find(|p| {
-                p.join("cleanshitx").exists() || p.file_name()
+        if let Some(target_dir) = PathBuf::from(&out_dir).ancestors().find(|p| {
+            p.join("apexshot").exists()
+                || p.file_name()
                     .map(|n| n == "debug" || n == "release")
                     .unwrap_or(false)
-            })
-        {
-            let dest = target_dir.join("cleanshitx-capture");
+        }) {
+            let dest = target_dir.join("apexshot-capture");
             let _ = std::fs::copy(&binary_src, &dest);
         }
     }
@@ -84,7 +85,7 @@ fn main() {
 
     relm4_icons_build::bundle_icons(
         "icon_names.rs",
-        Some("com.cleanshitx.editor"),
+        Some("com.apexshot.editor"),
         None::<&str>,
         None::<&str>,
         [

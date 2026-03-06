@@ -27,7 +27,7 @@ QString makeTempPngPath()
 {
     const auto token = QUuid::createUuid().toString(QUuid::Id128);
     return QDir(QDir::tempPath())
-      .filePath(QStringLiteral("cleanshitx_cpp_%1.png").arg(token));
+      .filePath(QStringLiteral("apexshot_cpp_%1.png").arg(token));
 }
 
 #if defined(Q_OS_LINUX)
@@ -89,13 +89,13 @@ bool captureViaGnomeShellFullscreen(QString& outPath,
                                     QSize& outSize,
                                     QString& outError)
 {
-    QDBusInterface wrapperInterface(QStringLiteral("org.cleanshitx.Daemon"),
-                                  QStringLiteral("/org/cleanshitx/Daemon"),
-                                  QStringLiteral("org.cleanshitx.Daemon"),
+    QDBusInterface wrapperInterface(QStringLiteral("org.apexshot.Daemon"),
+                                  QStringLiteral("/org/apexshot/Daemon"),
+                                  QStringLiteral("org.apexshot.Daemon"),
                                   QDBusConnection::sessionBus());
 
     if (!wrapperInterface.isValid()) {
-        outError = QStringLiteral("CleanShotX daemon interface unavailable: %1")
+        outError = QStringLiteral("ApexShot daemon interface unavailable: %1")
                      .arg(wrapperInterface.lastError().message());
         return false;
     }
@@ -142,13 +142,13 @@ bool captureViaGnomeShellArea(const QRect& logicalSelection,
         return false;
     }
 
-    QDBusInterface wrapperInterface(QStringLiteral("org.cleanshitx.Daemon"),
-                                  QStringLiteral("/org/cleanshitx/Daemon"),
-                                  QStringLiteral("org.cleanshitx.Daemon"),
+    QDBusInterface wrapperInterface(QStringLiteral("org.apexshot.Daemon"),
+                                  QStringLiteral("/org/apexshot/Daemon"),
+                                  QStringLiteral("org.apexshot.Daemon"),
                                   QDBusConnection::sessionBus());
 
     if (!wrapperInterface.isValid()) {
-        outError = QStringLiteral("CleanShotX daemon interface unavailable: %1")
+        outError = QStringLiteral("ApexShot daemon interface unavailable: %1")
                      .arg(wrapperInterface.lastError().message());
         return false;
     }

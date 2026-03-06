@@ -76,7 +76,7 @@ pub fn prefers_dark_glass_theme() -> bool {
 }
 
 pub fn prefers_reduced_transparency() -> bool {
-    if let Some(value) = parse_env_bool("CLEANSHITX_REDUCED_TRANSPARENCY") {
+    if let Some(value) = parse_env_bool("APEXSHOT_REDUCED_TRANSPARENCY") {
         return value;
     }
 

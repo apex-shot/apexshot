@@ -256,8 +256,8 @@ fn apply_adaptive_threshold(data: &mut [u8], width: u32, height: u32) {
 ///
 /// # Example
 /// ```no_run
-/// use cleanshitx::ocr::{extract_text, OcrConfig};
-/// use cleanshitx::backend::{CaptureData, PixelFormat};
+/// use apexshot::ocr::{extract_text, OcrConfig};
+/// use apexshot::backend::{CaptureData, PixelFormat};
 ///
 /// // Create a dummy capture
 /// let capture = CaptureData::new(

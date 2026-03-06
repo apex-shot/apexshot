@@ -1277,7 +1277,7 @@ impl AreaSelector {
         // NON_UNIQUE: skip the single-instance check so the overlay can be
         // launched multiple times without GApplication refusing to activate.
         let app = Application::builder()
-            .application_id("com.cleanshitx.screenshot")
+            .application_id("com.apexshot.screenshot")
             .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
             .build();
 
@@ -1507,7 +1507,7 @@ fn setup_window(
         window.set_anchor(Edge::Right, true);
         window.set_keyboard_mode(KeyboardMode::Exclusive);
         window.set_monitor(Some(&monitor));
-        window.set_namespace(Some("cleanshitx-area-selector"));
+        window.set_namespace(Some("apexshot-area-selector"));
     } else {
         // X11 or Wayland-without-layer-shell (e.g. GNOME Wayland):
         // Use a regular fullscreen window. The compositor will grant it
@@ -1890,7 +1890,7 @@ fn setup_window(
                         y: 0,
                         width: screen_width,
                         height: screen_height,
-        };
+                    };
                     if let Some(background) = background_key.as_ref() {
                         full = map_selection_to_image(
                             full,
@@ -1908,7 +1908,7 @@ fn setup_window(
                         y: rect.top.floor() as i32,
                         width: rect.width().round() as i32,
                         height: rect.height().round() as i32,
-        };
+                    };
                     if let Some(background) = background_key.as_ref() {
                         map_selection_to_image(
                             area,
@@ -2137,7 +2137,7 @@ impl Default for AreaSelector {
 
 /// Run the interactive area selector.
 ///
-/// **Primary path:** launches the native C++ Qt5 `cleanshitx-capture` binary.
+/// **Primary path:** launches the native C++ Qt5 `apexshot-capture` binary.
 /// This works reliably on both X11 and Wayland (GNOME, KDE, Sway, etc.)
 /// because Qt handles compositor quirks natively.
 ///
@@ -2147,7 +2147,9 @@ pub fn select_area() -> SelectionResult {
     match crate::capture_overlay::run_capture_overlay(None) {
         Ok(result) => return Ok(result),
         Err(e) => {
-            eprintln!("[overlay] C++ capture overlay unavailable ({e}), falling back to GTK4 selector");
+            eprintln!(
+                "[overlay] C++ capture overlay unavailable ({e}), falling back to GTK4 selector"
+            );
         }
     }
     // GTK4 fallback
@@ -2157,12 +2159,12 @@ pub fn select_area() -> SelectionResult {
 
 /// Run area selection against a static screenshot image.
 ///
-/// Saves the image to a temp file, passes it to `cleanshitx-capture --background`,
+/// Saves the image to a temp file, passes it to `apexshot-capture --background`,
 /// then deletes the temp file. Falls back to the GTK4 path if unavailable.
 pub fn select_area_from_image(image: &RgbaImage) -> SelectionResult {
     // Write the image to a temp PNG for the C++ binary to load
     let tmp_path = std::env::temp_dir().join(format!(
-        "cleanshitx_bg_{}.png",
+        "apexshot_bg_{}.png",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -2314,12 +2316,12 @@ fn background_frame_from_capture(capture: &CaptureData) -> Result<BackgroundFram
 
 /// Run area selection directly from a raw `CaptureData` screenshot.
 ///
-/// Saves to a temp PNG, passes to `cleanshitx-capture --background`, then
+/// Saves to a temp PNG, passes to `apexshot-capture --background`, then
 /// crops the result from the capture data. Falls back to GTK4 if unavailable.
 pub fn select_area_from_capture(capture: &CaptureData) -> SelectionResult {
     // Write to temp PNG for the C++ binary
     let tmp_path = std::env::temp_dir().join(format!(
-        "cleanshitx_bg_{}.png",
+        "apexshot_bg_{}.png",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -2340,13 +2342,29 @@ pub fn select_area_from_capture(capture: &CaptureData) -> SelectionResult {
             for x in 0..w as usize {
                 let si = row_start + x * bpp;
                 let (r, g, b) = if fmt == PixelFormat::RGBA32 || fmt == PixelFormat::RGB32 {
-                    (capture.pixels[si], capture.pixels[si+1], capture.pixels[si+2])
+                    (
+                        capture.pixels[si],
+                        capture.pixels[si + 1],
+                        capture.pixels[si + 2],
+                    )
                 } else if fmt == PixelFormat::BGRA32 || fmt == PixelFormat::BGR32 {
-                    (capture.pixels[si+2], capture.pixels[si+1], capture.pixels[si])
+                    (
+                        capture.pixels[si + 2],
+                        capture.pixels[si + 1],
+                        capture.pixels[si],
+                    )
                 } else if fmt == PixelFormat::RGB24 {
-                    (capture.pixels[si], capture.pixels[si+1], capture.pixels[si+2])
+                    (
+                        capture.pixels[si],
+                        capture.pixels[si + 1],
+                        capture.pixels[si + 2],
+                    )
                 } else {
-                    (capture.pixels[si+2], capture.pixels[si+1], capture.pixels[si])
+                    (
+                        capture.pixels[si + 2],
+                        capture.pixels[si + 1],
+                        capture.pixels[si],
+                    )
                 };
                 rgba.extend_from_slice(&[r, g, b, 255]);
             }
@@ -2354,7 +2372,8 @@ pub fn select_area_from_capture(capture: &CaptureData) -> SelectionResult {
         let img: image::RgbaImage = image::ImageBuffer::from_raw(w, h, rgba)?;
         img.save(&tmp_path).ok()?;
         Some(())
-    })().is_some();
+    })()
+    .is_some();
 
     if write_ok {
         let result = crate::capture_overlay::run_capture_overlay(Some(&tmp_path));

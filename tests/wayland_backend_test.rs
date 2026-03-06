@@ -11,8 +11,8 @@
 //! On KDE/other compositors, behavior may vary.
 
 #![cfg(test)]
-use cleanshitx::backend::wayland::WaylandBackend;
-use cleanshitx::backend::DisplayBackend;
+use apexshot::backend::wayland::WaylandBackend;
+use apexshot::backend::DisplayBackend;
 
 /// Test basic backend creation and support detection
 #[test]

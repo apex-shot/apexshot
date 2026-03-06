@@ -1,4 +1,4 @@
-//! OpenShotX CLI - Screenshot tool for Linux
+//! ApexShot CLI - Screenshot tool for Linux
 //!
 //! Usage:
 //!   cargo run -- capture screen
@@ -11,12 +11,14 @@
 use gtk4;
 use gtk4_layer_shell;
 
-use cleanshitx::{
+use apexshot::{
     backend::{CaptureData, DisplayBackend, WaylandBackend, X11Backend},
     capture::{
         open_image_editor, save_capture, show_capture_preview_overlay, ImageFormat, SaveConfig,
     },
-    capture_overlay::{capture_area_via_cpp, capture_screen_via_cpp, run_capture_overlay, AreaCaptureResult},
+    capture_overlay::{
+        capture_area_via_cpp, capture_screen_via_cpp, run_capture_overlay, AreaCaptureResult,
+    },
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
         ensure_desktop_entry_pub, install_hotkeys_for_current_desktop, reset_hotkey_config,
@@ -49,7 +51,7 @@ async fn main() {
             while i < args.len() {
                 match args[i].as_str() {
                     "--debug-hotkeys" => {
-                        std::env::set_var("CLEANSHITX_HOTKEY_DEBUG", "1");
+                        std::env::set_var("APEXSHOT_HOTKEY_DEBUG", "1");
                         i += 1;
                     }
                     "--log" => {
@@ -57,12 +59,12 @@ async fn main() {
                             eprintln!("Error: --log requires a path");
                             std::process::exit(1);
                         }
-                        std::env::set_var("CLEANSHITX_HOTKEY_LOG", &args[i + 1]);
+                        std::env::set_var("APEXSHOT_HOTKEY_LOG", &args[i + 1]);
                         i += 2;
                     }
                     "--reset-config" => {
                         let config_path =
-                            std::env::var_os("CLEANSHITX_HOTKEY_CONFIG").map(PathBuf::from);
+                            std::env::var_os("APEXSHOT_HOTKEY_CONFIG").map(PathBuf::from);
                         match reset_hotkey_config(config_path) {
                             Ok(p) => println!("Hotkey config reset: {}", p.display()),
                             Err(e) => {
@@ -277,11 +279,11 @@ fn run_uninstall(args: &[String]) {
 }
 
 fn install_binary() {
-    let dest = std::path::Path::new("/usr/local/bin/cleanshitx");
+    let dest = std::path::Path::new("/usr/local/bin/apexshot");
 
     // Find the source binary: prefer the running executable itself.
     let src = std::env::current_exe()
-        .unwrap_or_else(|_| std::path::PathBuf::from("target/release/cleanshitx"));
+        .unwrap_or_else(|_| std::path::PathBuf::from("target/release/apexshot"));
 
     println!("Installing binary: {} → {}", src.display(), dest.display());
 
@@ -297,7 +299,7 @@ fn install_binary() {
         }
         Err(e) => {
             eprintln!("Error: failed to install binary: {e}");
-            eprintln!("Hint: try running with sudo, e.g.  sudo cleanshitx install");
+            eprintln!("Hint: try running with sudo, e.g.  sudo apexshot install");
             std::process::exit(1);
         }
     }
@@ -322,19 +324,19 @@ fn install_autostart() {
     }
 
     // The binary path to launch — prefer the installed system path.
-    let binary_path = if std::path::Path::new("/usr/local/bin/cleanshitx").exists() {
-        "/usr/local/bin/cleanshitx".to_string()
+    let binary_path = if std::path::Path::new("/usr/local/bin/apexshot").exists() {
+        "/usr/local/bin/apexshot".to_string()
     } else {
         std::env::current_exe()
             .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "cleanshitx".to_string())
+            .unwrap_or_else(|_| "apexshot".to_string())
     };
 
     let desktop_content = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=CleanShotX Daemon\n\
-         Comment=CleanShotX screenshot daemon — tray icon and hotkey listener\n\
+         Name=ApexShot Daemon\n\
+         Comment=ApexShot screenshot daemon — tray icon and hotkey listener\n\
          Exec={binary_path} daemon\n\
          Icon=camera-photo\n\
          Categories=Utility;\n\
@@ -346,7 +348,7 @@ fn install_autostart() {
          NoDisplay=true\n"
     );
 
-    let desktop_path = autostart_dir.join("cleanshitx-daemon.desktop");
+    let desktop_path = autostart_dir.join("apexshot-daemon.desktop");
     match std::fs::write(&desktop_path, &desktop_content) {
         Ok(()) => println!("✓ Autostart entry installed: {}", desktop_path.display()),
         Err(e) => {
@@ -368,7 +370,7 @@ fn uninstall_autostart() {
             });
         config_home.join("autostart")
     };
-    let desktop_path = autostart_dir.join("cleanshitx-daemon.desktop");
+    let desktop_path = autostart_dir.join("apexshot-daemon.desktop");
     match std::fs::remove_file(&desktop_path) {
         Ok(()) => println!("✓ Autostart entry removed: {}", desktop_path.display()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -409,18 +411,34 @@ fn user_config_dir() -> Result<PathBuf, String> {
 
 fn native_manifest_paths(target: BrowserTarget) -> Result<Vec<PathBuf>, String> {
     let config_dir = user_config_dir()?;
-    let filename = "io.github.codegoddy.cleanshitx.json";
+    let filename = "io.github.codegoddy.apexshot.json";
     let mut paths = Vec::new();
     match target {
         BrowserTarget::Chrome => {
-            paths.push(config_dir.join("google-chrome/NativeMessagingHosts").join(filename));
+            paths.push(
+                config_dir
+                    .join("google-chrome/NativeMessagingHosts")
+                    .join(filename),
+            );
         }
         BrowserTarget::Chromium => {
-            paths.push(config_dir.join("chromium/NativeMessagingHosts").join(filename));
+            paths.push(
+                config_dir
+                    .join("chromium/NativeMessagingHosts")
+                    .join(filename),
+            );
         }
         BrowserTarget::Both => {
-            paths.push(config_dir.join("google-chrome/NativeMessagingHosts").join(filename));
-            paths.push(config_dir.join("chromium/NativeMessagingHosts").join(filename));
+            paths.push(
+                config_dir
+                    .join("google-chrome/NativeMessagingHosts")
+                    .join(filename),
+            );
+            paths.push(
+                config_dir
+                    .join("chromium/NativeMessagingHosts")
+                    .join(filename),
+            );
         }
     }
     Ok(paths)
@@ -441,8 +459,8 @@ fn install_native_host_manifest(extension_id: &str, browser: BrowserTarget) -> R
 
     validate_extension_id(extension_id)?;
 
-    let binary_path = if std::path::Path::new("/usr/local/bin/cleanshitx").exists() {
-        PathBuf::from("/usr/local/bin/cleanshitx")
+    let binary_path = if std::path::Path::new("/usr/local/bin/apexshot").exists() {
+        PathBuf::from("/usr/local/bin/apexshot")
     } else {
         std::env::current_exe().map_err(|e| format!("current_exe failed: {e}"))?
     };
@@ -454,7 +472,7 @@ fn install_native_host_manifest(extension_id: &str, browser: BrowserTarget) -> R
     };
     std::fs::create_dir_all(&local_bin).map_err(|e| format!("create ~/.local/bin failed: {e}"))?;
 
-    let host_script = local_bin.join("cleanshitx-native-host");
+    let host_script = local_bin.join("apexshot-native-host");
     let script_content = format!(
         "#!/usr/bin/env bash\nexec \"{}\" native-host\n",
         binary_path.display()
@@ -465,8 +483,8 @@ fn install_native_host_manifest(extension_id: &str, browser: BrowserTarget) -> R
         .map_err(|e| format!("chmod native host launcher failed: {e}"))?;
 
     let manifest = serde_json::json!({
-        "name": "io.github.codegoddy.cleanshitx",
-        "description": "CleanShotX native host",
+        "name": "io.github.codegoddy.apexshot",
+        "description": "ApexShot native host",
         "path": host_script,
         "type": "stdio",
         "allowed_origins": [format!("chrome-extension://{}/", extension_id)],
@@ -493,7 +511,10 @@ fn uninstall_native_host_manifest(browser: BrowserTarget) -> Result<(), String> 
             Ok(()) => println!("✓ Native host manifest removed: {}", path.display()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
-                return Err(format!("failed to remove native manifest ({}): {e}", path.display()));
+                return Err(format!(
+                    "failed to remove native manifest ({}): {e}",
+                    path.display()
+                ));
             }
         }
     }
@@ -591,7 +612,7 @@ fn run_native_host_command(args: &[String]) {
 ///   - Background thread: Tokio async runtime running the daemon
 ///   - Communication: `std::sync::mpsc` channels between the two
 fn run_daemon_with_gtk_on_main_thread() {
-    use cleanshitx::daemon::GtkWork;
+    use apexshot::daemon::GtkWork;
 
     // Channel for the daemon to send GTK work to the main thread.
     let (gtk_tx, gtk_rx) = std::sync::mpsc::channel::<GtkWork>();
@@ -621,8 +642,7 @@ fn run_daemon_with_gtk_on_main_thread() {
     std::thread::spawn(move || {
         rt.block_on(async move {
             if let Err(e) =
-                cleanshitx::daemon::run_daemon_with_gtk_channel(gtk_tx, layer_shell_supported)
-                    .await
+                apexshot::daemon::run_daemon_with_gtk_channel(gtk_tx, layer_shell_supported).await
             {
                 eprintln!("Daemon failed: {e}");
                 std::process::exit(1);
@@ -639,25 +659,45 @@ fn run_daemon_with_gtk_on_main_thread() {
                 eprintln!("[gtk] SelectAreaLive received — launching C++ overlay");
                 let live_start = std::time::Instant::now();
                 let result = run_capture_overlay(None)
-                    .map(|opt| opt.map(|a| cleanshitx::SelectionArea {
-                        x: a.x, y: a.y, width: a.width, height: a.height,
-                    }))
-                    .map_err(|e| cleanshitx::SelectionError::InitError(e.to_string()));
-                eprintln!("[gtk] SelectAreaLive completed after {:.0}ms", live_start.elapsed().as_millis());
+                    .map(|opt| {
+                        opt.map(|a| apexshot::SelectionArea {
+                            x: a.x,
+                            y: a.y,
+                            width: a.width,
+                            height: a.height,
+                        })
+                    })
+                    .map_err(|e| apexshot::SelectionError::InitError(e.to_string()));
+                eprintln!(
+                    "[gtk] SelectAreaLive completed after {:.0}ms",
+                    live_start.elapsed().as_millis()
+                );
                 let _ = reply.send(result);
             }
             GtkWork::SelectArea { capture, reply } => {
-                eprintln!("[gtk] SelectArea received, launching C++ overlay ({}x{})...", capture.width, capture.height);
+                eprintln!(
+                    "[gtk] SelectArea received, launching C++ overlay ({}x{})...",
+                    capture.width, capture.height
+                );
                 let ui_start = std::time::Instant::now();
                 let tmp_bg = save_temp_png(&capture);
                 let area = run_capture_overlay(tmp_bg.as_deref())
                     .ok()
                     .flatten()
-                    .map(|a| cleanshitx::SelectionArea {
-                        x: a.x, y: a.y, width: a.width, height: a.height,
+                    .map(|a| apexshot::SelectionArea {
+                        x: a.x,
+                        y: a.y,
+                        width: a.width,
+                        height: a.height,
                     });
-                if let Some(ref p) = tmp_bg { let _ = std::fs::remove_file(p); }
-                eprintln!("[gtk] SelectArea result after {:.0}ms: {:?}", ui_start.elapsed().as_millis(), area);
+                if let Some(ref p) = tmp_bg {
+                    let _ = std::fs::remove_file(p);
+                }
+                eprintln!(
+                    "[gtk] SelectArea result after {:.0}ms: {:?}",
+                    ui_start.elapsed().as_millis(),
+                    area
+                );
                 let _ = reply.send(area);
             }
         }
@@ -665,7 +705,7 @@ fn run_daemon_with_gtk_on_main_thread() {
 }
 
 fn print_usage() {
-    println!("OpenShotX - Screenshot tool for Linux");
+    println!("ApexShot - Screenshot tool for Linux");
     println!();
     println!("Usage: cargo run -- <command> [options]");
     println!();
@@ -695,7 +735,7 @@ fn print_usage() {
     println!("Hotkeys subcommands:");
     println!("  setup [--config <path>]     Interactive wizard + install desktop keybindings");
     println!("  install [--config <path>]   Install desktop keybindings from config");
-    println!("  uninstall                   Remove desktop keybindings installed by CleanShotX");
+    println!("  uninstall                   Remove desktop keybindings installed by ApexShot");
     println!();
     println!("Capture types:");
     println!("  screen            Capture the entire screen");
@@ -780,8 +820,8 @@ fn ensure_gio_desktop_env_for_capture() {
         return;
     }
 
-    let app_id = std::env::var("CLEANSHITX_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.cleanshitx".to_string());
+    let app_id = std::env::var("APEXSHOT_APP_ID")
+        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
 
     if let Ok(desktop_path) = ensure_desktop_entry_pub(&app_id) {
         if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
@@ -932,14 +972,17 @@ fn run_capture(args: &[String]) {
                 println!("Select an area by dragging the mouse. Press ESC to cancel.");
 
                 // 1. Take full screenshot via Rust Wayland backend
-                let full_capture = backend.capture_screen_for_selection_impl()
+                let full_capture = backend
+                    .capture_screen_for_selection_impl()
                     .expect("Failed to capture screen for area selection");
 
                 // 2. Save to temp PNG and pass to C++ overlay as background
                 let tmp_bg = save_temp_png(&full_capture);
                 let selection = run_capture_overlay(tmp_bg.as_deref())
                     .expect("Failed to show area selection UI");
-                if let Some(ref p) = tmp_bg { let _ = std::fs::remove_file(p); }
+                if let Some(ref p) = tmp_bg {
+                    let _ = std::fs::remove_file(p);
+                }
 
                 let Some(area) = selection else {
                     eprintln!("Selection cancelled");
@@ -980,14 +1023,17 @@ fn run_capture(args: &[String]) {
                 println!("Select an area by dragging the mouse. Press ESC to cancel.");
 
                 // 1. Take full screenshot via Rust X11 backend
-                let full_capture = backend.capture_screen()
+                let full_capture = backend
+                    .capture_screen()
                     .expect("Failed to capture screen for area selection");
 
                 // 2. Save to temp PNG and pass to C++ overlay as background
                 let tmp_bg = save_temp_png(&full_capture);
                 let selection = run_capture_overlay(tmp_bg.as_deref())
                     .expect("Failed to show area selection UI");
-                if let Some(ref p) = tmp_bg { let _ = std::fs::remove_file(p); }
+                if let Some(ref p) = tmp_bg {
+                    let _ = std::fs::remove_file(p);
+                }
 
                 let Some(area) = selection else {
                     eprintln!("Selection cancelled");
@@ -1106,8 +1152,7 @@ fn run_capture(args: &[String]) {
 
     // Spawn the preview as a subprocess to avoid GTK conflicts
     // (the area selector already used GTK in this process).
-    let binary = std::env::current_exe()
-        .unwrap_or_else(|_| std::path::PathBuf::from("cleanshitx"));
+    let binary = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
 
     if let Err(e) = std::process::Command::new(&binary)
         .arg("preview")
@@ -1122,14 +1167,13 @@ fn run_capture(args: &[String]) {
     }
 }
 
-
 /// Save a CaptureData as a temp PNG for passing to the C++ overlay as background.
 /// Returns the path if successful, None on failure (overlay will run without background).
 fn save_temp_png(capture: &CaptureData) -> Option<std::path::PathBuf> {
     use image::{ImageBuffer, Rgba};
 
     let tmp = std::env::temp_dir().join(format!(
-        "cleanshitx_bg_{}.png",
+        "apexshot_bg_{}.png",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -1141,7 +1185,7 @@ fn save_temp_png(capture: &CaptureData) -> Option<std::path::PathBuf> {
     let w = capture.width;
     let h = capture.height;
 
-    use cleanshitx::backend::PixelFormat;
+    use apexshot::backend::PixelFormat;
     let is_bgr = capture.format == PixelFormat::BGR24
         || capture.format == PixelFormat::BGR32
         || capture.format == PixelFormat::BGRA32;
@@ -1387,7 +1431,8 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if std::env::var("WAYLAND_DISPLAY").is_err() && X11Backend::is_supported() {
             println!("Select an area to record by dragging the mouse. Press ESC to cancel.");
 
-            let selection = run_capture_overlay(None).map_err(|e| format!("Selection failed: {}", e))?;
+            let selection =
+                run_capture_overlay(None).map_err(|e| format!("Selection failed: {}", e))?;
             if let Some(area) = selection {
                 config.x = Some(area.x);
                 config.y = Some(area.y);
@@ -1475,6 +1520,41 @@ fn extract_png_base64(data_url: &str) -> Result<String, String> {
     Err("png_data_url must be a data:image/png;base64 URL".into())
 }
 
+fn import_web_scroll_capture_direct(
+    png_base64: String,
+    _page_url: String,
+    _page_title: String,
+) -> Result<PathBuf, String> {
+    use apexshot::backend::PixelFormat;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let decoded = STANDARD
+        .decode(png_base64.as_bytes())
+        .map_err(|e| format!("Invalid base64 payload: {e}"))?;
+    let image = image::load_from_memory(&decoded)
+        .map_err(|e| format!("Invalid image payload: {e}"))?
+        .to_rgba8();
+
+    let width = image.width();
+    let height = image.height();
+    if width == 0 || height == 0 {
+        return Err("Imported image is empty".into());
+    }
+
+    let capture = CaptureData::new(image.into_raw(), width, height, PixelFormat::RGBA32);
+    let saved_path = save_capture(&capture, &SaveConfig::default())
+        .map_err(|e| format!("Failed to save imported capture: {e}"))?;
+
+    let binary = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+    std::process::Command::new(&binary)
+        .arg("preview")
+        .arg(&saved_path)
+        .spawn()
+        .map_err(|e| format!("Failed to launch preview overlay: {e}"))?;
+
+    Ok(saved_path)
+}
+
 async fn run_native_host() -> Result<(), String> {
     let mut stdin = std::io::stdin();
 
@@ -1540,18 +1620,31 @@ async fn run_native_host() -> Result<(), String> {
 
         let page_url = req.page_url.unwrap_or_default();
         let page_title = req.page_title.unwrap_or_default();
-        let imported = import_web_scroll_capture(png_base64, page_url, page_title).await;
+        let imported =
+            import_web_scroll_capture(png_base64.clone(), page_url.clone(), page_title.clone())
+                .await;
 
         if imported {
             let _ = write_native_host_response(&NativeHostResponse {
                 ok: true,
                 message: "Imported web scroll capture".into(),
             });
-        } else {
-            let _ = write_native_host_response(&NativeHostResponse {
-                ok: false,
-                message: "Daemon not available or import failed".into(),
-            });
+            continue;
+        }
+
+        match import_web_scroll_capture_direct(png_base64, page_url, page_title) {
+            Ok(_) => {
+                let _ = write_native_host_response(&NativeHostResponse {
+                    ok: true,
+                    message: "Imported web scroll capture without daemon".into(),
+                });
+            }
+            Err(err) => {
+                let _ = write_native_host_response(&NativeHostResponse {
+                    ok: false,
+                    message: format!("Daemon not available and direct import failed: {err}"),
+                });
+            }
         }
     }
 }

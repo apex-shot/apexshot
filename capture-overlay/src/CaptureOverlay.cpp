@@ -1,4 +1,4 @@
-// CleanShotX — Qt5 full-screen area selector overlay
+// ApexShot — Qt5 full-screen area selector overlay
 // Ports the full custom UI from src/overlay.rs:
 //   • Frosted-glass toolbar panel with 8 icons + hover states
 //   • Size indicator panel
@@ -41,6 +41,7 @@
 #include <QVBoxLayout>
 #include <QPushButton>
 #include <QLabel>
+#include <QMessageBox>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
@@ -87,9 +88,9 @@ static void drawRoundedRect(QPainter& p, double x, double y,
 
 static bool callDaemonBool(const QString& method, int arg = 0, bool hasArg = false)
 {
-    QDBusInterface iface(QStringLiteral("org.cleanshitx.Daemon"),
-                         QStringLiteral("/org/cleanshitx/Daemon"),
-                         QStringLiteral("org.cleanshitx.Daemon"),
+    QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
+                         QStringLiteral("/org/apexshot/Daemon"),
+                         QStringLiteral("org.apexshot.Daemon"),
                          QDBusConnection::sessionBus());
     if (!iface.isValid()) {
         return false;
@@ -105,9 +106,9 @@ static bool callDaemonBool(const QString& method, int arg = 0, bool hasArg = fal
 
 static bool callDaemonScrollStep(int x, int y, int steps)
 {
-    QDBusInterface iface(QStringLiteral("org.cleanshitx.Daemon"),
-                         QStringLiteral("/org/cleanshitx/Daemon"),
-                         QStringLiteral("org.cleanshitx.Daemon"),
+    QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
+                         QStringLiteral("/org/apexshot/Daemon"),
+                         QStringLiteral("org.apexshot.Daemon"),
                          QDBusConnection::sessionBus());
     if (!iface.isValid()) {
         return false;
@@ -119,6 +120,17 @@ static bool callDaemonScrollStep(int x, int y, int steps)
     }
 
     return reply.arguments().constFirst().toBool();
+}
+
+static void showWebScrollCaptureInfo(QWidget* parent)
+{
+    QMessageBox messageBox(parent);
+    messageBox.setWindowTitle(QStringLiteral("Webpage scroll capture"));
+    messageBox.setIcon(QMessageBox::Information);
+    messageBox.setText(QStringLiteral("Scroll capture is available on webpages through the browser extension."));
+    messageBox.setInformativeText(QStringLiteral("Use the ApexShot browser extension on the page you want to capture. After the extension sends the capture to the app, it will open in the normal screenshot preview overlay."));
+    messageBox.setStandardButtons(QMessageBox::Ok);
+    messageBox.exec();
 }
 
 static bool shouldUseManualScrollAssistMode()
@@ -135,9 +147,9 @@ static bool shouldUseManualScrollAssistMode()
 
 static void callDaemonVoid(const QString& method)
 {
-    QDBusInterface iface(QStringLiteral("org.cleanshitx.Daemon"),
-                         QStringLiteral("/org/cleanshitx/Daemon"),
-                         QStringLiteral("org.cleanshitx.Daemon"),
+    QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
+                         QStringLiteral("/org/apexshot/Daemon"),
+                         QStringLiteral("org.apexshot.Daemon"),
                          QDBusConnection::sessionBus());
     if (!iface.isValid()) {
         return;
@@ -987,8 +999,10 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 }
                 return true;
             } else if (toolIndex == 4) {
-                // Scroll: keep selection, switch to scroll capture workflow.
-                enterScrollMode();
+                exitScrollMode();
+                m_captureIntent = CaptureIntent::Area;
+                update();
+                showWebScrollCaptureInfo(this);
                 return true;
             } else if (toolIndex == 6) {
                 // OCR: enter OCR intent mode and wait for Enter/Space/double-click.
@@ -1243,7 +1257,10 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         m_captureIntent = CaptureIntent::Area;
                         update();
                     } else if (i == 4) {
-                        enterScrollMode();
+                        exitScrollMode();
+                        m_captureIntent = CaptureIntent::Area;
+                        update();
+                        showWebScrollCaptureInfo(this);
                     } else if (i == 6) {
                         exitScrollMode();
                         m_captureIntent = CaptureIntent::Ocr;
@@ -1994,7 +2011,7 @@ bool CaptureOverlay::stitchScrollFrames(QString& outPath,
 
     const QString tempPath =
       QDir::tempPath() +
-      QStringLiteral("/cleanshitx-scroll-%1.png")
+      QStringLiteral("/apexshot-scroll-%1.png")
         .arg(QDateTime::currentMSecsSinceEpoch());
 
     if (!stitched.save(tempPath, "PNG")) {

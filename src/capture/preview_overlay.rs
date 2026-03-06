@@ -1,4 +1,3 @@
-use super::editor::open_image_editor_in_app;
 use crate::config::load_config;
 use gdk4x11::X11Surface;
 use gtk4::gdk::Key;
@@ -6,14 +5,15 @@ use gtk4::{
     gdk,
     glib::{self, ControlFlow},
     prelude::*,
-    Align, Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource,
-    DrawingArea, EventControllerKey, EventControllerMotion, Orientation, Overlay,
-    WidgetPaintable,
+    Align, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea, EventControllerKey,
+    EventControllerMotion, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use std::cell::RefCell;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -57,33 +57,24 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
         return Err(CapturePreviewError::MissingFile(path));
     }
 
-    // NON_UNIQUE: allow multiple preview windows to coexist without GApplication
-    // refusing to activate a second instance.
-    let app = Application::builder()
-        .application_id("com.cleanshitx.capture.preview")
-        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
-        .build();
+    if let Err(err) = gtk4::init() {
+        eprintln!("Preview GTK init warning: {err}");
+    }
 
-    // Suppress the "app is launching" startup-notification so the desktop
-    // environment does not show a bouncing cursor or window-open animation.
     unsafe {
         std::env::set_var("DESKTOP_STARTUP_ID", "");
     }
 
-    app.connect_activate(move |application| {
-        setup_preview_window(application, path.clone());
-    });
-
-    let _ = app.run_with_args::<String>(&[]);
-
+    let main_loop = glib::MainLoop::new(None, false);
+    setup_preview_window(&main_loop, path);
+    main_loop.run();
     Ok(())
 }
 
-fn setup_preview_window(app: &Application, path: PathBuf) {
+fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
     install_preview_css();
 
-    let window = ApplicationWindow::builder()
-        .application(app)
+    let window = Window::builder()
         .title("Screenshot")
         .default_width(PREVIEW_WIDTH)
         .default_height(PREVIEW_HEIGHT)
@@ -101,9 +92,9 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
     let edit_opened = Arc::new(AtomicBool::new(false));
     let auto_close_anchor = Arc::new(Mutex::new(Instant::now()));
     let auto_close_seconds = load_config().preview_auto_close_seconds as u64;
-    let source_bytes = std::fs::read(&path).ok().map(Arc::new);
+    let source_bytes = Arc::new(Mutex::new(None::<Arc<Vec<u8>>>));
 
-    let preview_area = build_preview_area(&path);
+    let preview_area = build_preview_area(path.clone());
     preview_area.set_widget_name("capture-preview-image");
 
     let card = Overlay::new();
@@ -204,7 +195,8 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
                     }
                 }
 
-                if min_x == i32::MAX || min_y == i32::MAX || max_x == i32::MIN || max_y == i32::MIN {
+                if min_x == i32::MAX || min_y == i32::MAX || max_x == i32::MIN || max_y == i32::MIN
+                {
                     (1280, 720)
                 } else {
                     ((max_x - min_x).max(1), (max_y - min_y).max(1))
@@ -363,7 +355,6 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
     drag_source.set_icon(Some(&drag_paintable), 24, 24);
 
     let window_weak_drag = window.downgrade();
-    let app_weak_drag = app.downgrade();
     let pinned_drag = pinned.clone();
     let edit_opened_drag = edit_opened.clone();
     drag_source.connect_drag_end(move |_, _, _| {
@@ -375,9 +366,6 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
         }
         if let Some(window) = window_weak_drag.upgrade() {
             window.close();
-        }
-        if let Some(app) = app_weak_drag.upgrade() {
-            app.quit();
         }
     });
     card.add_controller(drag_source);
@@ -417,13 +405,9 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
     });
 
     let window_weak_save = window.downgrade();
-    let app_weak_save = app.downgrade();
     save_btn.connect_clicked(move |_| {
         if let Some(window) = window_weak_save.upgrade() {
             window.close();
-        }
-        if let Some(app) = app_weak_save.upgrade() {
-            app.quit();
         }
     });
 
@@ -431,10 +415,13 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
     let source_bytes_edit = source_bytes.clone();
     let edit_opened_btn = edit_opened.clone();
     let window_weak_edit = window.downgrade();
-    let app_edit = app.clone();
     edit_btn.connect_clicked(move |_| {
         if !path_edit.exists() {
-            if let Some(bytes) = source_bytes_edit.as_ref() {
+            let cached_bytes = source_bytes_edit
+                .lock()
+                .ok()
+                .and_then(|guard| guard.clone());
+            if let Some(bytes) = cached_bytes {
                 if let Err(e) = std::fs::write(&path_edit, bytes.as_slice()) {
                     eprintln!("Edit failed: could not restore missing screenshot file: {e}");
                     return;
@@ -445,7 +432,8 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
             }
         }
 
-        if let Err(e) = open_image_editor_in_app(&app_edit, path_edit.clone()) {
+        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+        if let Err(e) = Command::new(&exe).arg("edit").arg(&path_edit).spawn() {
             eprintln!("Edit failed: {e}");
             return;
         }
@@ -488,7 +476,6 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
     window.add_controller(key_controller);
 
     let window_weak_timeout = window.downgrade();
-    let app_weak_timeout = app.downgrade();
     let pinned_timeout = pinned.clone();
     let edit_opened_timeout = edit_opened.clone();
     let auto_close_anchor_timeout = auto_close_anchor.clone();
@@ -506,23 +493,17 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
             if let Some(window) = window_weak_timeout.upgrade() {
                 window.close();
             }
-            if let Some(app) = app_weak_timeout.upgrade() {
-                app.quit();
-            }
             return ControlFlow::Break;
         }
 
         ControlFlow::Continue
     });
 
-    let app_weak = app.downgrade();
+    let main_loop_close = main_loop.clone();
     let edit_opened_close = edit_opened.clone();
     window.connect_close_request(move |_| {
-        if edit_opened_close.load(Ordering::Relaxed) {
-            return glib::Propagation::Proceed;
-        }
-        if let Some(app) = app_weak.upgrade() {
-            app.quit();
+        if !edit_opened_close.load(Ordering::Relaxed) {
+            main_loop_close.quit();
         }
         glib::Propagation::Proceed
     });
@@ -538,6 +519,16 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
         }
     });
 
+    let path_source_bytes = path.clone();
+    let source_bytes_cache = source_bytes.clone();
+    glib::idle_add_local_once(move || {
+        if let Ok(bytes) = std::fs::read(&path_source_bytes) {
+            if let Ok(mut cache) = source_bytes_cache.lock() {
+                *cache = Some(Arc::new(bytes));
+            }
+        }
+    });
+
     window.present();
 }
 
@@ -548,7 +539,7 @@ fn setup_preview_window(app: &Application, path: PathBuf) {
 ///
 /// Called from `connect_realize` so the hints are in place before the
 /// first MapNotify — the compositor therefore never starts an animation.
-fn suppress_x11_preview_window_type(window: &ApplicationWindow) {
+fn suppress_x11_preview_window_type(window: &Window) {
     let Some(surface) = window.surface() else {
         return;
     };
@@ -652,8 +643,6 @@ fn install_preview_css() {
             #capture-preview-hover-tint {
                 border-radius: 10px;
                 background: rgba(0, 0, 0, 0.52);
-                backdrop-filter: blur(20px);
-                -webkit-backdrop-filter: blur(20px);
                 box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18),
                             0 3px 8px rgba(0, 0, 0, 0.30);
             }
@@ -835,7 +824,7 @@ fn open_target(path: &Path) -> Result<(), CapturePreviewError> {
         .map_err(|e| CapturePreviewError::OpenTargetError(e.to_string()))
 }
 
-fn apply_fallback_input_region(window: &ApplicationWindow, card: &Overlay) {
+fn apply_fallback_input_region(window: &Window, card: &Overlay) {
     let Some(surface) = window.surface() else {
         return;
     };
@@ -859,7 +848,7 @@ fn is_non_x11_surface_error(err: &str) -> bool {
     err.contains("surface is not X11")
 }
 
-fn request_x11_always_on_top(window: &ApplicationWindow) -> Result<(), String> {
+fn request_x11_always_on_top(window: &Window) -> Result<(), String> {
     let surface = window
         .surface()
         .ok_or_else(|| "missing GTK surface".to_string())?;
@@ -930,16 +919,20 @@ fn send_net_wm_state_client_message<C: Connection>(
     Ok(())
 }
 
-fn build_preview_area(path: &Path) -> DrawingArea {
+fn build_preview_area(path: PathBuf) -> DrawingArea {
     let area = DrawingArea::new();
     area.set_size_request(PREVIEW_WIDTH, PREVIEW_HEIGHT);
     area.set_hexpand(false);
     area.set_vexpand(false);
     area.set_can_target(true);
 
-    let texture = preview_texture(path);
+    let texture = Rc::new(RefCell::new(None::<gdk::Texture>));
+    let texture_draw = texture.clone();
     area.set_draw_func(move |_area, cr, width, height| {
-        let Some(ref tex) = texture else { return };
+        let texture_ref = texture_draw.borrow();
+        let Some(tex) = texture_ref.as_ref() else {
+            return;
+        };
         let tw = tex.width() as f64;
         let th = tex.height() as f64;
         if tw <= 0.0 || th <= 0.0 {
@@ -960,11 +953,25 @@ fn build_preview_area(path: &Path) -> DrawingArea {
         }
     });
 
+    let area_weak = area.downgrade();
+    glib::idle_add_local_once(move || {
+        let Some(area) = area_weak.upgrade() else {
+            return;
+        };
+        *texture.borrow_mut() = preview_texture(&path);
+        area.queue_draw();
+    });
+
     area
 }
 
 fn preview_texture(path: &Path) -> Option<gdk::Texture> {
-    let source = match gtk4::gdk_pixbuf::Pixbuf::from_file(path) {
+    let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(
+        path,
+        PREVIEW_WIDTH,
+        PREVIEW_HEIGHT,
+        true,
+    ) {
         Ok(pixbuf) => pixbuf,
         Err(err) => {
             eprintln!(
@@ -975,41 +982,13 @@ fn preview_texture(path: &Path) -> Option<gdk::Texture> {
         }
     };
 
-    let source_width = source.width().max(1);
-    let source_height = source.height().max(1);
-    let scale = (PREVIEW_WIDTH as f64 / source_width as f64)
-        .min(PREVIEW_HEIGHT as f64 / source_height as f64)
-        .max(f64::EPSILON);
-
-    let target_width = ((source_width as f64 * scale).round() as i32).clamp(1, PREVIEW_WIDTH);
-    let target_height = ((source_height as f64 * scale).round() as i32).clamp(1, PREVIEW_HEIGHT);
-
-    let preview_pixbuf = if target_width == source_width && target_height == source_height {
-        source
-    } else {
-        match source.scale_simple(
-            target_width,
-            target_height,
-            gtk4::gdk_pixbuf::InterpType::Bilinear,
-        ) {
-            Some(scaled) => scaled,
-            None => {
-                eprintln!(
-                    "Preview thumbnail warning: failed to downscale screenshot to {}x{}.",
-                    target_width, target_height
-                );
-                return None;
-            }
-        }
-    };
-
     Some(gdk::Texture::for_pixbuf(&preview_pixbuf))
 }
 
-fn configure_window_positioning(window: &ApplicationWindow) -> bool {
+fn configure_window_positioning(window: &Window) -> bool {
     if gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
-        window.set_namespace(Some("cleanshitx-capture-preview"));
+        window.set_namespace(Some("apexshot-capture-preview"));
         window.set_layer(Layer::Overlay);
 
         // Keep preview docked bottom-left.

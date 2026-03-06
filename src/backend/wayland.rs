@@ -57,7 +57,7 @@ impl CaptureTarget {
 
 fn restore_token_path(target: CaptureTarget) -> Option<PathBuf> {
     let mut path = dirs::cache_dir()?;
-    path.push("cleanshitx");
+    path.push("apexshot");
     path.push(target.token_file_name());
     Some(path)
 }
@@ -253,7 +253,7 @@ impl WaylandBackend {
     fn capture_via_grim() -> DisplayResult<CaptureData> {
         // Write to a deterministic temp file so we don't have to parse stdout.
         let tmp = std::env::temp_dir().join(format!(
-            "openshot_grim_{}.png",
+            "apexshot_grim_{}.png",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -436,8 +436,14 @@ impl WaylandBackend {
                 eprintln!("[capture] Tier 0 (wlr-screencopy) succeeded in {:.0}ms — NO portal flash/sound.", t0_start.elapsed().as_millis());
                 return Ok(capture);
             }
-            Ok(None) => eprintln!("[capture] Tier 0 (wlr-screencopy) not supported by compositor ({:.0}ms).", t0_start.elapsed().as_millis()),
-            Err(e) => eprintln!("[capture] Tier 0 (wlr-screencopy) failed ({:.0}ms): {e}", t0_start.elapsed().as_millis()),
+            Ok(None) => eprintln!(
+                "[capture] Tier 0 (wlr-screencopy) not supported by compositor ({:.0}ms).",
+                t0_start.elapsed().as_millis()
+            ),
+            Err(e) => eprintln!(
+                "[capture] Tier 0 (wlr-screencopy) failed ({:.0}ms): {e}",
+                t0_start.elapsed().as_millis()
+            ),
         }
 
         // Tier 1: grim subprocess — wlroots compositors.
@@ -445,10 +451,16 @@ impl WaylandBackend {
         let t1_start = std::time::Instant::now();
         match Self::capture_via_grim() {
             Ok(capture) => {
-                eprintln!("[capture] Tier 1 (grim) succeeded in {:.0}ms — NO portal flash/sound.", t1_start.elapsed().as_millis());
+                eprintln!(
+                    "[capture] Tier 1 (grim) succeeded in {:.0}ms — NO portal flash/sound.",
+                    t1_start.elapsed().as_millis()
+                );
                 return Ok(capture);
             }
-            Err(e) => eprintln!("[capture] Tier 1 (grim) failed ({:.0}ms): {e}", t1_start.elapsed().as_millis()),
+            Err(e) => eprintln!(
+                "[capture] Tier 1 (grim) failed ({:.0}ms): {e}",
+                t1_start.elapsed().as_millis()
+            ),
         }
 
         if allow_screenshot_portal {
@@ -463,28 +475,44 @@ impl WaylandBackend {
                     eprintln!("[capture] Tier 2 (Screenshot portal) succeeded in {:.0}ms — portal flash/sound was triggered here.", t2_start.elapsed().as_millis());
                     return Ok(capture);
                 }
-                Err(e) => eprintln!("[capture] Tier 2 (Screenshot portal) failed ({:.0}ms): {e}", t2_start.elapsed().as_millis()),
+                Err(e) => eprintln!(
+                    "[capture] Tier 2 (Screenshot portal) failed ({:.0}ms): {e}",
+                    t2_start.elapsed().as_millis()
+                ),
             }
         } else {
-            eprintln!("[capture] Tier 2 (Screenshot portal): SKIPPED (allow_screenshot_portal=false)");
+            eprintln!(
+                "[capture] Tier 2 (Screenshot portal): SKIPPED (allow_screenshot_portal=false)"
+            );
         }
 
         if allow_screencast {
             // Tier 3: ScreenCast portal + PipeWire — last resort.
-            eprintln!("[capture] Tier 3 (ScreenCast portal + PipeWire): attempting (last resort)...");
+            eprintln!(
+                "[capture] Tier 3 (ScreenCast portal + PipeWire): attempting (last resort)..."
+            );
             let t3_start = std::time::Instant::now();
             let result = block_on_async(async {
                 Self::capture_via_screencast(CaptureTarget::Monitor, false).await
             });
             match &result {
-                Ok(d) => eprintln!("[capture] Tier 3 (ScreenCast) succeeded in {:.0}ms ({}x{}).", t3_start.elapsed().as_millis(), d.width, d.height),
-                Err(e) => eprintln!("[capture] Tier 3 (ScreenCast) failed ({:.0}ms): {e}", t3_start.elapsed().as_millis()),
+                Ok(d) => eprintln!(
+                    "[capture] Tier 3 (ScreenCast) succeeded in {:.0}ms ({}x{}).",
+                    t3_start.elapsed().as_millis(),
+                    d.width,
+                    d.height
+                ),
+                Err(e) => eprintln!(
+                    "[capture] Tier 3 (ScreenCast) failed ({:.0}ms): {e}",
+                    t3_start.elapsed().as_millis()
+                ),
             }
             result
         } else {
             eprintln!("[capture] Tier 3 (ScreenCast): SKIPPED (allow_screencast=false) — all tiers exhausted.");
             Err(DisplayError::CaptureError(
-                "No non-screencast Wayland capture path available (all tiers failed or skipped)".into(),
+                "No non-screencast Wayland capture path available (all tiers failed or skipped)"
+                    .into(),
             ))
         }
     }

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "CleanShotX Web Scroll Capture",
+  "name": "ApexShot Web Scroll Capture",
   "version": "0.1.0",
-  "description": "Capture full webpage scroll screenshots and send to CleanShotX.",
+  "description": "Capture full webpage scroll screenshots and send to ApexShot.",
   "permissions": [
     "activeTab",
     "scripting",

@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-exec /usr/local/bin/cleanshitx native-host

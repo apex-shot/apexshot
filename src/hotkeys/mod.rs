@@ -8,17 +8,17 @@ use std::path::{Path, PathBuf};
 use zbus::zvariant::OwnedValue;
 use zbus::zvariant::{OwnedObjectPath, Value};
 
-const DEFAULT_PORTAL_APP_ID: &str = "io.github.codegoddy.cleanshitx";
+const DEFAULT_PORTAL_APP_ID: &str = "io.github.codegoddy.apexshot";
 
 fn portal_app_id() -> String {
-    std::env::var("CLEANSHITX_APP_ID").unwrap_or_else(|_| DEFAULT_PORTAL_APP_ID.to_string())
+    std::env::var("APEXSHOT_APP_ID").unwrap_or_else(|_| DEFAULT_PORTAL_APP_ID.to_string())
 }
 
 fn desktop_exec_value() -> String {
     let exe = std::env::current_exe()
         .ok()
         .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "cleanshitx".to_string());
+        .unwrap_or_else(|| "apexshot".to_string());
 
     // Desktop entry Exec is not shell-parsed; spaces must be escaped per spec.
     let escaped_exe = exe.replace('\\', "\\\\").replace(' ', "\\ ");
@@ -27,13 +27,13 @@ fn desktop_exec_value() -> String {
 
 fn default_daemon_log_path() -> Option<PathBuf> {
     let mut dir = dirs::cache_dir()?;
-    dir.push("cleanshitx");
+    dir.push("apexshot");
     dir.push("hotkey-daemon.log");
     Some(dir)
 }
 
 fn open_daemon_log_if_needed() -> Option<(PathBuf, std::fs::File)> {
-    let path = if let Ok(p) = std::env::var("CLEANSHITX_HOTKEY_LOG") {
+    let path = if let Ok(p) = std::env::var("APEXSHOT_HOTKEY_LOG") {
         Some(PathBuf::from(p))
     } else if !std::io::stderr().is_terminal() {
         default_daemon_log_path()
@@ -62,7 +62,7 @@ fn log_line(log: &mut Option<std::fs::File>, msg: &str) {
 }
 
 fn hotkey_debug_enabled() -> bool {
-    std::env::var_os("CLEANSHITX_HOTKEY_DEBUG").is_some()
+    std::env::var_os("APEXSHOT_HOTKEY_DEBUG").is_some()
 }
 
 fn strip_deleted_suffix(path: &std::path::Path) -> PathBuf {
@@ -99,7 +99,7 @@ fn resolve_action_exe() -> anyhow::Result<PathBuf> {
 fn daemon_pid_file_path() -> anyhow::Result<PathBuf> {
     let mut dir =
         dirs::cache_dir().ok_or_else(|| anyhow::anyhow!("Failed to resolve cache dir"))?;
-    dir.push("cleanshitx");
+    dir.push("apexshot");
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create daemon state dir {}", dir.display()))?;
     dir.push("hotkey-daemon.pid");
@@ -155,7 +155,7 @@ fn acquire_daemon_pid_guard() -> anyhow::Result<DaemonPidGuard> {
                 if let Some(pid) = existing_pid {
                     if pid != current_pid && is_pid_running(pid) {
                         anyhow::bail!(
-                            "Hotkey daemon already running (pid {pid}). Stop it first (e.g. `pkill -f \"cleanshitx daemon\"`) and retry"
+                            "Hotkey daemon already running (pid {pid}). Stop it first (e.g. `pkill -f \"apexshot daemon\"`) and retry"
                         );
                     }
                 }
@@ -249,7 +249,7 @@ fn ensure_desktop_entry(app_id: &str) -> anyhow::Result<PathBuf> {
     // Minimal desktop entry: GlobalShortcuts uses this to associate the app_id with the caller.
     // Exec must reference a resolvable binary; otherwise GLib may ignore the app info.
     let content = format!(
-        "[Desktop Entry]\nType=Application\nName=CleanShotX\nExec={}\nTerminal=false\nCategories=Utility;\n",
+        "[Desktop Entry]\nType=Application\nName=ApexShot\nExec={}\nTerminal=false\nCategories=Utility;\n",
         desktop_exec_value()
     );
 
@@ -290,22 +290,22 @@ fn try_relaunch_via_desktop(
     config_path: &PathBuf,
     configure: bool,
 ) -> anyhow::Result<()> {
-    if std::env::var_os("CLEANSHITX_DESKTOP_RELAUNCHED").is_some() {
+    if std::env::var_os("APEXSHOT_DESKTOP_RELAUNCHED").is_some() {
         return Ok(());
     }
 
     let mut cmd = std::process::Command::new("gtk-launch");
     cmd.arg(app_id);
-    cmd.env("CLEANSHITX_DESKTOP_RELAUNCHED", "1");
-    cmd.env("CLEANSHITX_HOTKEY_CONFIG", config_path);
+    cmd.env("APEXSHOT_DESKTOP_RELAUNCHED", "1");
+    cmd.env("APEXSHOT_HOTKEY_CONFIG", config_path);
     if configure {
-        cmd.env("CLEANSHITX_HOTKEY_CONFIGURE", "1");
+        cmd.env("APEXSHOT_HOTKEY_CONFIGURE", "1");
     }
 
     // Ensure the desktop-launched daemon writes logs somewhere discoverable.
-    if std::env::var_os("CLEANSHITX_HOTKEY_LOG").is_none() {
+    if std::env::var_os("APEXSHOT_HOTKEY_LOG").is_none() {
         if let Some(p) = default_daemon_log_path() {
-            cmd.env("CLEANSHITX_HOTKEY_LOG", p);
+            cmd.env("APEXSHOT_HOTKEY_LOG", p);
         }
     }
 
@@ -448,6 +448,12 @@ pub struct HotkeyConfig {
     pub bindings: Vec<HotkeyBinding>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GnomeHotkeySyncResult {
+    pub updated: bool,
+    pub issues: Vec<String>,
+}
+
 impl Default for HotkeyConfig {
     fn default() -> Self {
         // Shortcut triggers are expressed using the XDG shortcuts specification
@@ -516,7 +522,7 @@ pub fn reset_hotkey_config(config_path: Option<PathBuf>) -> anyhow::Result<PathB
 
 fn default_config_path() -> PathBuf {
     let mut dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    dir.push("cleanshitx");
+    dir.push("apexshot");
     dir.push("hotkeys.yml");
     dir
 }
@@ -683,7 +689,7 @@ fn managed_gnome_path(binding: &HotkeyBinding, idx: usize) -> String {
             }
         })
         .collect::<String>();
-    format!("/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cleanshitx-{base}/")
+    format!("/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/apexshot-{base}/")
 }
 
 fn gnome_binding_command(exe: &Path, args: &[String]) -> String {
@@ -694,11 +700,160 @@ fn gnome_binding_command(exe: &Path, args: &[String]) -> String {
         .join(" ")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpectedGnomeBinding {
+    action_name: String,
+    path: String,
+    command_raw: String,
+    binding_raw: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct GnomeBindingSnapshot {
+    paths: HashSet<String>,
+    commands: HashMap<String, String>,
+    bindings: HashMap<String, String>,
+}
+
+fn gnome_binding_schema(path: &str) -> String {
+    format!("org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{path}")
+}
+
+fn gnome_binding_value(path: &str, key: &str) -> anyhow::Result<String> {
+    run_gsettings(&["get".into(), gnome_binding_schema(path), key.into()])
+}
+
+fn expected_gnome_bindings(cfg: &HotkeyConfig, action_exe: &Path) -> Vec<ExpectedGnomeBinding> {
+    cfg.bindings
+        .iter()
+        .enumerate()
+        .map(|(idx, binding)| ExpectedGnomeBinding {
+            action_name: pretty_action_name(binding, idx),
+            path: managed_gnome_path(binding, idx),
+            command_raw: gsettings_string(&gnome_binding_command(action_exe, &binding.args)),
+            binding_raw: gsettings_string(&as_gnome_accel(&binding.accelerator)),
+        })
+        .collect()
+}
+
+fn load_gnome_binding_snapshot(
+    expected: &[ExpectedGnomeBinding],
+) -> anyhow::Result<GnomeBindingSnapshot> {
+    let paths = gnome_custom_keybinding_paths()?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let mut snapshot = GnomeBindingSnapshot {
+        paths,
+        commands: HashMap::new(),
+        bindings: HashMap::new(),
+    };
+
+    for binding in expected {
+        if !snapshot.paths.contains(&binding.path) {
+            continue;
+        }
+        snapshot.commands.insert(
+            binding.path.clone(),
+            gnome_binding_value(&binding.path, "command")?,
+        );
+        snapshot.bindings.insert(
+            binding.path.clone(),
+            gnome_binding_value(&binding.path, "binding")?,
+        );
+    }
+
+    Ok(snapshot)
+}
+
+fn gnome_binding_issues_from_snapshot(
+    expected: &[ExpectedGnomeBinding],
+    snapshot: &GnomeBindingSnapshot,
+) -> Vec<String> {
+    let mut issues = Vec::new();
+
+    for binding in expected {
+        if !snapshot.paths.contains(&binding.path) {
+            issues.push(format!(
+                "{}: missing GNOME custom keybinding at {}",
+                binding.action_name, binding.path
+            ));
+            continue;
+        }
+
+        match snapshot.commands.get(&binding.path) {
+            Some(actual) if actual == &binding.command_raw => {}
+            Some(actual) => issues.push(format!(
+                "{}: stale GNOME command at {} (expected {}, found {})",
+                binding.action_name, binding.path, binding.command_raw, actual
+            )),
+            None => issues.push(format!(
+                "{}: could not read GNOME command at {}",
+                binding.action_name, binding.path
+            )),
+        }
+
+        match snapshot.bindings.get(&binding.path) {
+            Some(actual) if actual == &binding.binding_raw => {}
+            Some(actual) => issues.push(format!(
+                "{}: stale GNOME accelerator at {} (expected {}, found {})",
+                binding.action_name, binding.path, binding.binding_raw, actual
+            )),
+            None => issues.push(format!(
+                "{}: could not read GNOME accelerator at {}",
+                binding.action_name, binding.path
+            )),
+        }
+    }
+
+    issues
+}
+
+fn gnome_binding_issues(cfg: &HotkeyConfig) -> anyhow::Result<Vec<String>> {
+    let action_exe = resolve_action_exe()?;
+    let expected = expected_gnome_bindings(cfg, &action_exe);
+    let snapshot = load_gnome_binding_snapshot(&expected)?;
+    Ok(gnome_binding_issues_from_snapshot(&expected, &snapshot))
+}
+
+pub fn sync_gnome_hotkeys_for_current_desktop(
+    config_path: Option<PathBuf>,
+) -> anyhow::Result<GnomeHotkeySyncResult> {
+    let (_config_path, cfg) = load_or_create_config(config_path)?;
+    if cfg.bindings.is_empty() {
+        return Ok(GnomeHotkeySyncResult {
+            updated: false,
+            issues: Vec::new(),
+        });
+    }
+
+    let issues = gnome_binding_issues(&cfg)?;
+    if issues.is_empty() {
+        return Ok(GnomeHotkeySyncResult {
+            updated: false,
+            issues,
+        });
+    }
+
+    install_gnome_custom_keybindings(&cfg)?;
+    let remaining = gnome_binding_issues(&cfg)?;
+    if !remaining.is_empty() {
+        anyhow::bail!(
+            "GNOME custom keybindings remain out of sync after reinstall: {}",
+            remaining.join("; ")
+        );
+    }
+
+    Ok(GnomeHotkeySyncResult {
+        updated: true,
+        issues,
+    })
+}
+
 fn install_gnome_custom_keybindings(cfg: &HotkeyConfig) -> anyhow::Result<()> {
     let existing = gnome_custom_keybinding_paths()?;
     let unmanaged = existing
         .into_iter()
-        .filter(|p| !p.contains("/cleanshitx-"))
+        .filter(|p| !p.contains("/apexshot-"))
         .collect::<Vec<_>>();
 
     let action_exe = resolve_action_exe()?;
@@ -761,7 +916,7 @@ fn uninstall_gnome_custom_keybindings() -> anyhow::Result<()> {
     let existing = gnome_custom_keybinding_paths()?;
     let unmanaged = existing
         .into_iter()
-        .filter(|p| !p.contains("/cleanshitx-"))
+        .filter(|p| !p.contains("/apexshot-"))
         .collect::<Vec<_>>();
 
     run_gsettings(&[
@@ -779,7 +934,7 @@ pub fn install_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyh
 
     if is_gnome_desktop() {
         install_gnome_custom_keybindings(&cfg)?;
-        println!("Installed GNOME custom keybindings for CleanShotX (no daemon required).");
+        println!("Installed GNOME custom keybindings for ApexShot (no daemon required).");
         return Ok(());
     }
 
@@ -792,7 +947,7 @@ pub fn install_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyh
 pub fn uninstall_hotkeys_for_current_desktop() -> anyhow::Result<()> {
     if is_gnome_desktop() {
         uninstall_gnome_custom_keybindings()?;
-        println!("Removed CleanShotX GNOME custom keybindings.");
+        println!("Removed ApexShot GNOME custom keybindings.");
         return Ok(());
     }
 
@@ -806,7 +961,7 @@ pub fn setup_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyhow
     let (path, mut cfg) = load_or_create_config(config_path)?;
 
     println!(
-        "\nCleanShotX hotkey setup wizard (current desktop: {})",
+        "\nApexShot hotkey setup wizard (current desktop: {})",
         std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "unknown".into())
     );
     println!("Press Enter to keep current binding. Type 'none' to clear a binding.\n");
@@ -1095,7 +1250,7 @@ pub async fn run_portal_hotkey_daemon(
 
     if let Some(pid) = existing_daemon_pid() {
         let msg = format!(
-            "Hotkey daemon already running (pid {pid}). Stop it first (e.g. `pkill -f \"cleanshitx daemon\"`) and retry"
+            "Hotkey daemon already running (pid {pid}). Stop it first (e.g. `pkill -f \"apexshot daemon\"`) and retry"
         );
         log_line(&mut log, &msg);
         anyhow::bail!(msg);
@@ -1132,7 +1287,7 @@ pub async fn run_portal_hotkey_daemon(
                     &mut log,
                     "GNOME detected: relaunched hotkey daemon via desktop entry for reliable global shortcuts; exiting this terminal-started process.",
                 );
-                let follow_path = std::env::var_os("CLEANSHITX_HOTKEY_LOG")
+                let follow_path = std::env::var_os("APEXSHOT_HOTKEY_LOG")
                     .map(PathBuf::from)
                     .or_else(default_daemon_log_path)
                     .or(log_path);
@@ -1193,8 +1348,8 @@ pub async fn run_portal_hotkey_daemon(
     let sender_id = portal_sender_id(&conn)?;
 
     // Create session
-    let create_token = token("cleanshitx_hk");
-    let session_token = token("cleanshitx_hk_session");
+    let create_token = token("apexshot_hk");
+    let session_token = token("apexshot_hk_session");
     let mut create_opts: HashMap<String, Value> = HashMap::new();
     create_opts.insert("handle_token".into(), Value::from(create_token.clone()));
     create_opts.insert("session_handle_token".into(), Value::from(session_token));
@@ -1280,7 +1435,7 @@ pub async fn run_portal_hotkey_daemon(
         "Requesting global shortcuts via portal… (you may get a prompt)",
     );
 
-    let bind_token = token("cleanshitx_hk_bind");
+    let bind_token = token("apexshot_hk_bind");
     let mut bind_opts: HashMap<String, Value> = HashMap::new();
     bind_opts.insert("handle_token".into(), Value::from(bind_token.clone()));
 
@@ -1348,7 +1503,7 @@ pub async fn run_portal_hotkey_daemon(
     }
 
     // Show what triggers the portal actually configured.
-    let list_token = token("cleanshitx_hk_list");
+    let list_token = token("apexshot_hk_list");
     let mut list_opts: HashMap<String, Value> = HashMap::new();
     list_opts.insert("handle_token".into(), Value::from(list_token.clone()));
 
@@ -1557,5 +1712,55 @@ pub async fn run_hotkey_daemon_with_options(
 
             run_gnome_hotkey_daemon(config_path).await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_hotkey_config() -> HotkeyConfig {
+        HotkeyConfig {
+            bindings: vec![HotkeyBinding {
+                accelerator: "CTRL+ALT+A".into(),
+                args: vec!["capture".into(), "area".into()],
+                name: Some("capture_area".into()),
+            }],
+        }
+    }
+
+    #[test]
+    fn gnome_binding_snapshot_matches_expected_values() {
+        let cfg = sample_hotkey_config();
+        let expected = expected_gnome_bindings(&cfg, Path::new("/tmp/apexshot"));
+        let binding = &expected[0];
+        let snapshot = GnomeBindingSnapshot {
+            paths: HashSet::from([binding.path.clone()]),
+            commands: HashMap::from([(binding.path.clone(), binding.command_raw.clone())]),
+            bindings: HashMap::from([(binding.path.clone(), binding.binding_raw.clone())]),
+        };
+
+        assert!(gnome_binding_issues_from_snapshot(&expected, &snapshot).is_empty());
+    }
+
+    #[test]
+    fn gnome_binding_snapshot_detects_stale_command_path() {
+        let cfg = sample_hotkey_config();
+        let expected = expected_gnome_bindings(&cfg, Path::new("/new/location/apexshot"));
+        let binding = &expected[0];
+        let stale_command = gsettings_string(&gnome_binding_command(
+            Path::new("/old/location/apexshot"),
+            &cfg.bindings[0].args,
+        ));
+        let snapshot = GnomeBindingSnapshot {
+            paths: HashSet::from([binding.path.clone()]),
+            commands: HashMap::from([(binding.path.clone(), stale_command)]),
+            bindings: HashMap::from([(binding.path.clone(), binding.binding_raw.clone())]),
+        };
+
+        let issues = gnome_binding_issues_from_snapshot(&expected, &snapshot);
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].contains("stale GNOME command"));
+        assert!(issues[0].contains("/old/location/apexshot"));
     }
 }

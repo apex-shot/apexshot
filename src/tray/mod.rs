@@ -1,4 +1,4 @@
-//! System tray icon for CleanShotX.
+//! System tray icon for ApexShot.
 //!
 //! Uses the `ksni` crate which implements the StatusNotifierItem D-Bus protocol.
 //! This is supported on:
@@ -26,12 +26,12 @@ pub enum TrayAction {
 }
 
 /// The ksni tray icon state.
-pub struct CleanShotTray {
+pub struct ApexShotTray {
     /// Channel to send actions to the daemon main loop.
     tx: Sender<TrayAction>,
 }
 
-impl CleanShotTray {
+impl ApexShotTray {
     pub fn new(tx: Sender<TrayAction>) -> Self {
         Self { tx }
     }
@@ -213,7 +213,7 @@ fn capture_area_menu_icon_png() -> Vec<u8> {
     }
 }
 
-impl ksni::Tray for CleanShotTray {
+impl ksni::Tray for ApexShotTray {
     fn activate(&mut self, _x: i32, _y: i32) {
         // Primary click fallback on hosts that don't open the context menu on left-click.
         self.send(TrayAction::CaptureArea);
@@ -225,7 +225,7 @@ impl ksni::Tray for CleanShotTray {
     }
 
     fn id(&self) -> String {
-        "io.github.codegoddy.cleanshitx".to_string()
+        "io.github.codegoddy.apexshot".to_string()
     }
 
     fn text_direction(&self) -> ksni::TextDirection {
@@ -239,14 +239,14 @@ impl ksni::Tray for CleanShotTray {
     }
 
     fn title(&self) -> String {
-        "CleanShotX".to_string()
+        "ApexShot".to_string()
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
             icon_name: String::new(),
             icon_pixmap: vec![apex_icon(22)],
-            title: "CleanShotX".to_string(),
+            title: "ApexShot".to_string(),
             description: "Left-click: Capture Area • Right-click: Menu".to_string(),
         }
     }
@@ -335,8 +335,8 @@ impl ksni::Tray for CleanShotTray {
 /// and a `ksni::Handle` that can be used to update the tray state.
 ///
 /// The tray runs until the handle is dropped or `Quit` is triggered.
-pub fn spawn_tray(tx: Sender<TrayAction>) -> anyhow::Result<ksni::Handle<CleanShotTray>> {
-    let service = ksni::TrayService::new(CleanShotTray::new(tx));
+pub fn spawn_tray(tx: Sender<TrayAction>) -> anyhow::Result<ksni::Handle<ApexShotTray>> {
+    let service = ksni::TrayService::new(ApexShotTray::new(tx));
     let handle = service.handle();
     service.spawn();
     Ok(handle)

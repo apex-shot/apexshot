@@ -343,9 +343,9 @@ mod tests {
         let format = X11Backend::detect_pixel_format(&visual, &setup);
         assert_eq!(format.bits_per_pixel, 32);
         assert_eq!(format.bytes_per_pixel, 4);
-        assert_eq!(format.red_mask, 0xFF0000);
+        assert_eq!(format.red_mask, 0x0000FF);
         assert_eq!(format.green_mask, 0x00FF00);
-        assert_eq!(format.blue_mask, 0x0000FF);
+        assert_eq!(format.blue_mask, 0xFF0000);
     }
 
     #[test_case(-1, 0, 100, 100 ; "negative x")]

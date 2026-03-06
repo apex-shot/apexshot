@@ -8,7 +8,7 @@ mod ui_support;
 mod window;
 
 pub use types::EditorError;
-pub use window::{open_image_editor, open_image_editor_in_app};
+pub use window::open_image_editor;
 
 #[cfg(test)]
 mod tests {

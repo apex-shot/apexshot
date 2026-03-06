@@ -9,7 +9,7 @@ use gtk4::{
 
 pub fn show_settings_window() -> anyhow::Result<()> {
     let app = Application::builder()
-        .application_id("com.cleanshitx.settings")
+        .application_id("com.apexshot.settings")
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
@@ -23,7 +23,7 @@ fn build_settings_window(app: &Application) {
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("CleanShotX Settings")
+        .title("ApexShot Settings")
         .default_width(420)
         .default_height(220)
         .resizable(false)

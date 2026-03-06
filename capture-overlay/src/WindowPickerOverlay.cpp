@@ -260,9 +260,9 @@ static QList<AppWindowInfo> fetchWindowsFromExtension()
     };
 
     QDBusInterface iface(
-        QStringLiteral("org.cleanshitx.WindowList"),
-        QStringLiteral("/org/cleanshitx/WindowList"),
-        QStringLiteral("org.cleanshitx.WindowList"),
+        QStringLiteral("org.apexshot.WindowList"),
+        QStringLiteral("/org/apexshot/WindowList"),
+        QStringLiteral("org.apexshot.WindowList"),
         QDBusConnection::sessionBus());
 
     if (!iface.isValid()) {
@@ -272,7 +272,7 @@ static QList<AppWindowInfo> fetchWindowsFromExtension()
 
     auto captureWindowThumbnail = [&](quint64 windowId) -> QPixmap {
         const QString requestedPath = QDir::tempPath() +
-            QStringLiteral("/cleanshitx-thumb-%1-%2.png")
+            QStringLiteral("/apexshot-thumb-%1-%2.png")
                 .arg(QCoreApplication::applicationPid())
                 .arg(static_cast<qulonglong>(windowId));
 
@@ -490,7 +490,7 @@ void WindowPickerOverlay::paintEvent(QPaintEvent*)
         QFont f; f.setPointSizeF(13.0); p.setFont(f);
         p.setPen(QColor(255, 255, 255, 160));
         p.drawText(rect(), Qt::AlignCenter,
-            QStringLiteral("No windows found.\nEnable the CleanShotX extension."));
+            QStringLiteral("No windows found.\nEnable the ApexShot extension."));
         return;
     }
 

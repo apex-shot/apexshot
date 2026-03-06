@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// CleanShotX — Qt5 full-screen area selector overlay
+// ApexShot — Qt5 full-screen area selector overlay
 //
 // Full custom UI matching overlay.rs:
 //   • Frosted-glass toolbar with 8 icons + hover states + size panel

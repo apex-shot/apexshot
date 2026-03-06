@@ -284,7 +284,7 @@ use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 /// Uses `memfd_create` on Linux (no temp file, no filesystem entry).
 fn create_shm_file(size: usize) -> Result<OwnedFd, std::io::Error> {
     // memfd_create(2): anonymous memory file, kernel cleans it up automatically.
-    let name = c"cleanshitx-screencopy";
+    let name = c"apexshot-screencopy";
     let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
     if fd < 0 {
         return Err(std::io::Error::last_os_error());

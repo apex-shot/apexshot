@@ -1,4 +1,4 @@
-use cleanshitx::backend::{x11::X11Backend, DisplayBackend};
+use apexshot::backend::{x11::X11Backend, DisplayBackend};
 
 // Skip tests if X11 is not available
 fn should_skip_test() -> bool {

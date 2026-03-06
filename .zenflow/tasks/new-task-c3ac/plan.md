@@ -13,7 +13,8 @@ If you are blocked and need user clarification, mark the current step with `[!]`
 
 ## Workflow Steps
 
-### [ ] Step: Investigation and Planning
+### [x] Step: Investigation and Planning
+<!-- chat-id: ece7a543-7892-4e6e-bde9-3377aff55edd -->
 
 Analyze the bug report and design a solution.
 
@@ -30,7 +31,8 @@ Save findings to `{@artifacts_path}/investigation.md` with:
 - Affected components
 - Proposed solution
 
-### [ ] Step: Implementation
+### [x] Step: Implementation
+<!-- chat-id: cb820712-b500-4a99-b000-22c411e41848 -->
 Read `{@artifacts_path}/investigation.md`
 Implement the bug fix.
 

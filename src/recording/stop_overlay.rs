@@ -22,7 +22,7 @@ pub fn run_recording_stop_overlay(stop_tx: oneshot::Sender<()>) -> Result<(), St
     let stop_tx: Arc<Mutex<Option<oneshot::Sender<()>>>> = Arc::new(Mutex::new(Some(stop_tx)));
 
     let app = Application::builder()
-        .application_id("com.cleanshitx.recording")
+        .application_id("com.apexshot.recording")
         .build();
 
     let stop_tx_activate = stop_tx.clone();

@@ -96,7 +96,7 @@ int main(int argc, char* argv[])
     qputenv("QT_QPA_PLATFORM", "");
 
     QApplication app(argc, argv);
-    app.setApplicationName("cleanshitx-capture");
+    app.setApplicationName("ApexShot Capture");
 
     bool captureScreenMode = false;
     bool areaInitMode = false;
@@ -118,7 +118,7 @@ int main(int argc, char* argv[])
 
     if (captureScreenMode && areaInitMode) {
         std::fprintf(stderr,
-                     "cleanshitx-capture: --capture-screen and --area-init are mutually exclusive\n");
+                     "apexshot-capture: --capture-screen and --area-init are mutually exclusive\n");
         return 2;
     }
 
@@ -128,7 +128,7 @@ int main(int argc, char* argv[])
         QString error;
         if (!ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error)) {
             std::fprintf(stderr,
-                         "cleanshitx-capture: fullscreen capture failed: %s\n",
+                         "apexshot-capture: fullscreen capture failed: %s\n",
                          error.toLocal8Bit().constData());
             return 2;
         }
@@ -148,7 +148,7 @@ int main(int argc, char* argv[])
 
         // User selected a window — capture it via GNOME Shell DBus using XID
         AppWindowInfo selected = picker.selectedWindow();
-        std::fprintf(stderr, "cleanshitx-capture: capturing window '%s' (xid=%llu)\n",
+        std::fprintf(stderr, "apexshot-capture: capturing window '%s' (xid=%llu)\n",
             selected.title.toLocal8Bit().constData(),
             (unsigned long long)selected.xid);
 
@@ -164,13 +164,13 @@ int main(int argc, char* argv[])
                 return 0;
             }
             std::fprintf(stderr,
-                         "cleanshitx-capture: portal window capture failed, falling back to GNOME Shell API: %s\n",
+                         "apexshot-capture: portal window capture failed, falling back to GNOME Shell API: %s\n",
                          error.toLocal8Bit().constData());
         }
 
         // Use GNOME Shell ScreenshotWindow to capture the selected window
         // First focus the window, then capture
-        const QString tmpPath = QDir::tempPath() + QStringLiteral("/cleanshitx-window-%1.png")
+        const QString tmpPath = QDir::tempPath() + QStringLiteral("/apexshot-window-%1.png")
                                     .arg(QCoreApplication::applicationPid());
 
         QDBusInterface gnomeShot(
@@ -180,7 +180,7 @@ int main(int argc, char* argv[])
             QDBusConnection::sessionBus());
 
         if (!gnomeShot.isValid()) {
-            std::fprintf(stderr, "cleanshitx-capture: GNOME Shell Screenshot DBus not available\n");
+            std::fprintf(stderr, "apexshot-capture: GNOME Shell Screenshot DBus not available\n");
             return 2;
         }
 
@@ -193,7 +193,7 @@ int main(int argc, char* argv[])
 
         if (!reply.isValid() || !reply.value()) {
             // Fallback: capture the rect of the selected window from a fullscreen shot
-            std::fprintf(stderr, "cleanshitx-capture: ScreenshotWindow failed, using rect fallback\n");
+            std::fprintf(stderr, "apexshot-capture: ScreenshotWindow failed, using rect fallback\n");
             QString imagePath;
             QSize imageSize;
             QString error;
@@ -201,7 +201,7 @@ int main(int argc, char* argv[])
                 printCaptureScreenJson(imagePath, imageSize);
                 return 0;
             }
-            std::fprintf(stderr, "cleanshitx-capture: rect fallback also failed: %s\n",
+            std::fprintf(stderr, "apexshot-capture: rect fallback also failed: %s\n",
                 error.toLocal8Bit().constData());
             return 2;
         }
@@ -216,7 +216,7 @@ int main(int argc, char* argv[])
 
         QPixmap pm(actualPath);
         if (pm.isNull()) {
-            std::fprintf(stderr, "cleanshitx-capture: could not load window screenshot: %s\n",
+            std::fprintf(stderr, "apexshot-capture: could not load window screenshot: %s\n",
                          actualPath.toLocal8Bit().constData());
             return 2;
         }
@@ -229,7 +229,7 @@ int main(int argc, char* argv[])
     if (!backgroundPath.isEmpty()) {
         if (!background.load(backgroundPath)) {
             std::fprintf(stderr,
-                         "cleanshitx-capture: failed to load background image: %s\n",
+                         "apexshot-capture: failed to load background image: %s\n",
                          backgroundPath.toLocal8Bit().constData());
             return 2;
         }
@@ -253,7 +253,7 @@ int main(int argc, char* argv[])
         const QSize scrollSize = overlay.scrollCaptureSize();
         if (scrollPath.isEmpty() || scrollSize.isEmpty() || !QFileInfo::exists(scrollPath)) {
             std::fprintf(stderr,
-                         "cleanshitx-capture: scroll capture completed but output is missing\n");
+                         "apexshot-capture: scroll capture completed but output is missing\n");
             return 2;
         }
         printCaptureScreenJson(scrollPath, scrollSize, "scroll");
@@ -262,7 +262,7 @@ int main(int argc, char* argv[])
 
     const QRect sel = overlay.selection();
     if (sel.isEmpty()) {
-        std::fprintf(stderr, "cleanshitx-capture: empty selection\n");
+        std::fprintf(stderr, "apexshot-capture: empty selection\n");
         return 2;
     }
 
@@ -301,7 +301,7 @@ int main(int argc, char* argv[])
         }
         if (!ok) {
             std::fprintf(stderr,
-                         "cleanshitx-capture: area capture failed: %s\n",
+                         "apexshot-capture: area capture failed: %s\n",
                          error.toLocal8Bit().constData());
             return 2;
         }

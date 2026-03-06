@@ -32,7 +32,7 @@ impl AppConfig {
 
 pub fn config_path() -> Option<PathBuf> {
     let mut path = dirs::config_dir()?;
-    path.push("cleanshitx");
+    path.push("apexshot");
     path.push("config.yml");
     Some(path)
 }

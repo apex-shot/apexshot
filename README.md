@@ -1,10 +1,10 @@
 # <div style="font-size: 72px;">ALPHA AS FUCK</div>
 
-### openshotX
+### ApexShot
 
 screenshot++ tool for linux. handles x11 and wayland.
 
-ever since i moved from macos to linux CleanShot X is the one app i actually miss.
+ever since i moved from macos to linux ApexShot is the one app i actually miss.
 
 so let's rip it off and share it with the linux world for free.
 

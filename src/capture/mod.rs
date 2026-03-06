@@ -335,10 +335,8 @@ fn composite_cursor(image: &mut RgbaImage, cursor: &CursorData) {
 /// Generate a timestamped filename
 fn generate_filename(config: &SaveConfig) -> String {
     let timestamp = if config.timestamp_format.is_some() {
-        // Use custom format (simplified - for full strftime support, would need chrono)
         "custom".to_string()
     } else {
-        // Default: YYYY-MM-DD_HH-MM-SS
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default();
@@ -351,7 +349,36 @@ fn generate_filename(config: &SaveConfig) -> String {
     format!("{}{}.{}", prefix, timestamp, config.format.extension())
 }
 
-/// Save a capture to disk with the given configuration
+pub fn save_existing_png(source_path: &Path, config: &SaveConfig) -> SaveResult<PathBuf> {
+    let filename = generate_filename(config);
+    let output_dir = config.get_output_dir()?;
+    std::fs::create_dir_all(&output_dir)?;
+    let output_path = output_dir.join(filename);
+
+    if source_path == output_path {
+        return Ok(output_path);
+    }
+
+    match config.format {
+        ImageFormat::Png => match std::fs::rename(source_path, &output_path) {
+            Ok(()) => Ok(output_path),
+            Err(_) => {
+                std::fs::copy(source_path, &output_path)?;
+                std::fs::remove_file(source_path)?;
+                Ok(output_path)
+            }
+        },
+        ImageFormat::Jpeg { quality } => {
+            ImageFormat::validate_jpeg_quality(quality)?;
+            let image = image::open(source_path)?;
+            let rgb_image: RgbImage = image.into_rgb8();
+            rgb_image.save_with_format(&output_path, image::ImageFormat::Jpeg)?;
+            let _ = std::fs::remove_file(source_path);
+            Ok(output_path)
+        }
+    }
+}
+
 pub fn save_capture(capture: &CaptureData, config: &SaveConfig) -> SaveResult<PathBuf> {
     // Convert to RGBA for potential cursor compositing
     let mut image = capture_to_rgba_image(capture)?;
