@@ -29,12 +29,16 @@ fn test_is_supported() {
 
     // If WAYLAND_DISPLAY is set, is_supported should return true
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        assert!(supported, "WAYLAND_DISPLAY is set but backend not supported");
+        assert!(
+            supported,
+            "WAYLAND_DISPLAY is set but backend not supported"
+        );
     }
 }
 
 /// Test screen capture (may show portal dialog)
 #[test]
+#[ignore = "requires user interaction via xdg-desktop-portal"]
 fn test_capture_screen_wayland() {
     if !WaylandBackend::is_supported() {
         eprintln!("Wayland backend not supported, skipping test_capture_screen_wayland");
@@ -47,13 +51,30 @@ fn test_capture_screen_wayland() {
     match result {
         Ok(capture_data) => {
             eprintln!("Capture successful!");
-            eprintln!("  Dimensions: {}x{}", capture_data.width, capture_data.height);
+            eprintln!(
+                "  Dimensions: {}x{}",
+                capture_data.width, capture_data.height
+            );
             eprintln!("  Pixels: {} bytes", capture_data.pixels.len());
-            eprintln!("  Format: {:?} ({} bpp)", capture_data.format, capture_data.format.bits_per_pixel);
+            eprintln!(
+                "  Format: {:?} ({} bpp)",
+                capture_data.format, capture_data.format.bits_per_pixel
+            );
 
-            assert!(capture_data.width > 0, "Width should be positive, got {}", capture_data.width);
-            assert!(capture_data.height > 0, "Height should be positive, got {}", capture_data.height);
-            assert!(!capture_data.pixels.is_empty(), "Pixel data should not be empty");
+            assert!(
+                capture_data.width > 0,
+                "Width should be positive, got {}",
+                capture_data.width
+            );
+            assert!(
+                capture_data.height > 0,
+                "Height should be positive, got {}",
+                capture_data.height
+            );
+            assert!(
+                !capture_data.pixels.is_empty(),
+                "Pixel data should not be empty"
+            );
 
             // Validate pixel format - use u64 to avoid overflow
             let expected_pixels = (capture_data.width as u64) * (capture_data.height as u64);
@@ -79,6 +100,7 @@ fn test_capture_screen_wayland() {
 
 /// Test area capture (WILL show interactive dialog, parameters are ignored)
 #[test]
+#[ignore = "requires user interaction via xdg-desktop-portal"]
 fn test_capture_area_wayland() {
     if !WaylandBackend::is_supported() {
         eprintln!("Wayland backend not supported, skipping test_capture_area_wayland");
@@ -107,6 +129,7 @@ fn test_capture_area_wayland() {
 
 /// Test window capture (WILL show interactive dialog, window_id is ignored)
 #[test]
+#[ignore = "requires user interaction via xdg-desktop-portal"]
 fn test_capture_window_wayland() {
     if !WaylandBackend::is_supported() {
         eprintln!("Wayland backend not supported, skipping test_capture_window_wayland");
@@ -135,6 +158,7 @@ fn test_capture_window_wayland() {
 
 /// Test that pixel format is properly detected
 #[test]
+#[ignore = "requires user interaction via xdg-desktop-portal"]
 fn test_pixel_format_detection() {
     if !WaylandBackend::is_supported() {
         eprintln!("Wayland backend not supported, skipping test_pixel_format_detection");

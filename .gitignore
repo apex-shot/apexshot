@@ -15,3 +15,15 @@
 # OS specific files
 .DS_Store
 .env
+
+# Test directories
+test_gtk/
+Gradia/
+eyedropper/
+#flameshot/
+node_modules/
+dist/
+build/
+.cache/
+*.log
+capture-overlay/build/

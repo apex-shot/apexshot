@@ -1,0 +1,1561 @@
+use anyhow::Context;
+use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
+use std::io::{IsTerminal, Write};
+use std::path::{Path, PathBuf};
+use zbus::zvariant::OwnedValue;
+use zbus::zvariant::{OwnedObjectPath, Value};
+
+const DEFAULT_PORTAL_APP_ID: &str = "io.github.codegoddy.cleanshitx";
+
+fn portal_app_id() -> String {
+    std::env::var("CLEANSHITX_APP_ID").unwrap_or_else(|_| DEFAULT_PORTAL_APP_ID.to_string())
+}
+
+fn desktop_exec_value() -> String {
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "cleanshitx".to_string());
+
+    // Desktop entry Exec is not shell-parsed; spaces must be escaped per spec.
+    let escaped_exe = exe.replace('\\', "\\\\").replace(' ', "\\ ");
+    format!("{escaped_exe} daemon")
+}
+
+fn default_daemon_log_path() -> Option<PathBuf> {
+    let mut dir = dirs::cache_dir()?;
+    dir.push("cleanshitx");
+    dir.push("hotkey-daemon.log");
+    Some(dir)
+}
+
+fn open_daemon_log_if_needed() -> Option<(PathBuf, std::fs::File)> {
+    let path = if let Ok(p) = std::env::var("CLEANSHITX_HOTKEY_LOG") {
+        Some(PathBuf::from(p))
+    } else if !std::io::stderr().is_terminal() {
+        default_daemon_log_path()
+    } else {
+        None
+    }?;
+
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()?;
+
+    Some((path, file))
+}
+
+fn log_line(log: &mut Option<std::fs::File>, msg: &str) {
+    eprintln!("{msg}");
+    if let Some(file) = log.as_mut() {
+        let _ = writeln!(file, "{msg}");
+    }
+}
+
+fn hotkey_debug_enabled() -> bool {
+    std::env::var_os("CLEANSHITX_HOTKEY_DEBUG").is_some()
+}
+
+fn strip_deleted_suffix(path: &std::path::Path) -> PathBuf {
+    // When a binary is replaced while running (e.g. `cargo run` rebuilds), /proc/self/exe can
+    // resolve to a path ending with " (deleted)", which is not a real filesystem path.
+    let Some(s) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    let Some(stripped) = s.strip_suffix(" (deleted)") else {
+        return path.to_path_buf();
+    };
+    PathBuf::from(stripped)
+}
+
+fn resolve_action_exe() -> anyhow::Result<PathBuf> {
+    if let Some(arg0) = std::env::args_os().next() {
+        let p = strip_deleted_suffix(std::path::Path::new(&arg0));
+        if p.is_absolute() && p.exists() {
+            return Ok(p);
+        }
+        if let Ok(canon) = std::fs::canonicalize(&p) {
+            return Ok(canon);
+        }
+    }
+
+    let p = std::env::current_exe().context("Failed to get current executable")?;
+    let cleaned = strip_deleted_suffix(&p);
+    if cleaned.exists() {
+        return Ok(cleaned);
+    }
+    Ok(p)
+}
+
+fn daemon_pid_file_path() -> anyhow::Result<PathBuf> {
+    let mut dir =
+        dirs::cache_dir().ok_or_else(|| anyhow::anyhow!("Failed to resolve cache dir"))?;
+    dir.push("cleanshitx");
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("Failed to create daemon state dir {}", dir.display()))?;
+    dir.push("hotkey-daemon.pid");
+    Ok(dir)
+}
+
+fn is_pid_running(pid: u32) -> bool {
+    PathBuf::from(format!("/proc/{pid}")).exists()
+}
+
+fn existing_daemon_pid() -> Option<u32> {
+    let path = daemon_pid_file_path().ok()?;
+    let pid = std::fs::read_to_string(path)
+        .ok()?
+        .trim()
+        .parse::<u32>()
+        .ok()?;
+    if pid != std::process::id() && is_pid_running(pid) {
+        Some(pid)
+    } else {
+        None
+    }
+}
+
+struct DaemonPidGuard {
+    path: PathBuf,
+}
+
+impl Drop for DaemonPidGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn acquire_daemon_pid_guard() -> anyhow::Result<DaemonPidGuard> {
+    use std::io::ErrorKind;
+
+    let path = daemon_pid_file_path()?;
+    let current_pid = std::process::id();
+
+    for _ in 0..2 {
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                writeln!(file, "{current_pid}")
+                    .with_context(|| format!("Failed to write pid file {}", path.display()))?;
+                return Ok(DaemonPidGuard { path });
+            }
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                let existing_pid = std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u32>().ok());
+
+                if let Some(pid) = existing_pid {
+                    if pid != current_pid && is_pid_running(pid) {
+                        anyhow::bail!(
+                            "Hotkey daemon already running (pid {pid}). Stop it first (e.g. `pkill -f \"cleanshitx daemon\"`) and retry"
+                        );
+                    }
+                }
+
+                let _ = std::fs::remove_file(&path);
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to create daemon pid file {}: {}",
+                    path.display(),
+                    e
+                ));
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "Failed to acquire hotkey daemon pid file lock at {}",
+        path.display()
+    )
+}
+
+fn spawn_hotkey_action(
+    preferred_exe: Option<&PathBuf>,
+    args: &[String],
+) -> anyhow::Result<(std::process::Child, PathBuf)> {
+    use std::io::ErrorKind;
+    use std::process::Stdio;
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(exe) = preferred_exe {
+        candidates.push(exe.clone());
+    }
+    if let Ok(exe) = resolve_action_exe() {
+        candidates.push(exe);
+    }
+    candidates.push(PathBuf::from("/proc/self/exe"));
+    if let Ok(exe) = std::env::current_exe() {
+        candidates.push(strip_deleted_suffix(&exe));
+    }
+
+    let mut seen = HashSet::new();
+    candidates.retain(|p| seen.insert(p.clone()));
+
+    let mut not_found: Vec<PathBuf> = Vec::new();
+    for exe in candidates {
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        match cmd.spawn() {
+            Ok(child) => return Ok((child, exe)),
+            Err(e) if e.kind() == ErrorKind::NotFound => not_found.push(exe),
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "spawn failed via {} for args {:?}: {}",
+                    exe.display(),
+                    args,
+                    e
+                ));
+            }
+        }
+    }
+
+    if not_found.is_empty() {
+        anyhow::bail!("spawn failed for args {:?}: no executable candidates", args);
+    }
+
+    anyhow::bail!(
+        "spawn failed for args {:?}: executable not found (tried: {})",
+        args,
+        not_found
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn ensure_desktop_entry(app_id: &str) -> anyhow::Result<PathBuf> {
+    let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push("applications");
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("Failed to create applications dir {}", dir.display()))?;
+
+    let mut path = dir;
+    path.push(format!("{app_id}.desktop"));
+
+    // Minimal desktop entry: GlobalShortcuts uses this to associate the app_id with the caller.
+    // Exec must reference a resolvable binary; otherwise GLib may ignore the app info.
+    let content = format!(
+        "[Desktop Entry]\nType=Application\nName=CleanShotX\nExec={}\nTerminal=false\nCategories=Utility;\n",
+        desktop_exec_value()
+    );
+
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        if existing == content {
+            return Ok(path);
+        }
+    }
+
+    std::fs::write(&path, content)
+        .with_context(|| format!("Failed to write desktop entry {}", path.display()))?;
+
+    Ok(path)
+}
+
+fn is_gnome_desktop() -> bool {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    desktop.to_ascii_lowercase().contains("gnome")
+}
+
+fn apply_gio_desktop_launch_env(desktop_path: &PathBuf) {
+    // GNOME/portal backends often rely on these variables to associate an unsandboxed
+    // process with its .desktop file (and thus its application id).
+    // If we were launched from a terminal, they are typically unset.
+    if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", desktop_path);
+    }
+    if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
+        std::env::set_var(
+            "GIO_LAUNCHED_DESKTOP_FILE_PID",
+            std::process::id().to_string(),
+        );
+    }
+}
+
+fn try_relaunch_via_desktop(
+    app_id: &str,
+    config_path: &PathBuf,
+    configure: bool,
+) -> anyhow::Result<()> {
+    if std::env::var_os("CLEANSHITX_DESKTOP_RELAUNCHED").is_some() {
+        return Ok(());
+    }
+
+    let mut cmd = std::process::Command::new("gtk-launch");
+    cmd.arg(app_id);
+    cmd.env("CLEANSHITX_DESKTOP_RELAUNCHED", "1");
+    cmd.env("CLEANSHITX_HOTKEY_CONFIG", config_path);
+    if configure {
+        cmd.env("CLEANSHITX_HOTKEY_CONFIGURE", "1");
+    }
+
+    // Ensure the desktop-launched daemon writes logs somewhere discoverable.
+    if std::env::var_os("CLEANSHITX_HOTKEY_LOG").is_none() {
+        if let Some(p) = default_daemon_log_path() {
+            cmd.env("CLEANSHITX_HOTKEY_LOG", p);
+        }
+    }
+
+    cmd.spawn()
+        .map(|_| ())
+        .with_context(|| format!("Failed to relaunch via desktop (gtk-launch {app_id})"))
+}
+
+async fn register_portal_app_id(conn: &zbus::Connection, app_id: &str) -> anyhow::Result<()> {
+    // For unsandboxed applications, portal implementations may require associating the DBus peer
+    // with an app_id that matches a .desktop file basename.
+    let registry = zbus::Proxy::new(
+        conn,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.host.portal.Registry",
+    )
+    .await
+    .context("Failed to create host Registry proxy")?;
+
+    for attempt in 0..2 {
+        let opts: HashMap<String, Value> = HashMap::new();
+        let call: Result<(), zbus::Error> =
+            registry.call("Register", &(app_id.to_string(), opts)).await;
+
+        match call {
+            Ok(()) => {
+                eprintln!("Portal: registered app_id={}", app_id);
+                return Ok(());
+            }
+            Err(e) if attempt == 0 && e.to_string().contains("App info not found") => {
+                // Some portal backends may briefly fail to find a just-written desktop file.
+                // Retry once after a short delay.
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Registry.Register failed for app_id={app_id}: {e}"
+                ));
+            }
+        }
+    }
+
+    anyhow::bail!("Registry.Register failed for app_id={app_id}")
+}
+
+fn as_portal_trigger(input: &str) -> String {
+    // Portal expects triggers in the XDG shortcuts spec format, e.g. CTRL+SHIFT+Print.
+    // Accept legacy GNOME-style strings like <Ctrl><Shift>Print and convert.
+    if input.contains('<') && input.contains('>') {
+        let mut mods: Vec<String> = Vec::new();
+        let mut rest = input;
+
+        while let Some(stripped) = rest.strip_prefix('<') {
+            let Some(end) = stripped.find('>') else {
+                break;
+            };
+            let raw = &stripped[..end];
+            let upper = raw.to_ascii_uppercase();
+            let mapped = match upper.as_str() {
+                "PRIMARY" => "CTRL",
+                "CONTROL" | "CTRL" => "CTRL",
+                "ALT" => "ALT",
+                "SHIFT" => "SHIFT",
+                "SUPER" => "SUPER",
+                "META" => "META",
+                _ => upper.as_str(),
+            };
+            mods.push(mapped.to_string());
+            rest = &stripped[end + 1..];
+        }
+
+        let key = rest.trim();
+        if mods.is_empty() {
+            return key.to_string();
+        }
+        if key.is_empty() {
+            return mods.join("+");
+        }
+        return format!("{}+{}", mods.join("+"), key);
+    }
+
+    // Already portal-style; normalize common modifier spellings.
+    let parts: Vec<&str> = input.split('+').filter(|p| !p.is_empty()).collect();
+    if parts.len() <= 1 {
+        return input.trim().to_string();
+    }
+    let (mods, key) = parts.split_at(parts.len() - 1);
+    let mods = mods
+        .iter()
+        .map(|m| m.trim().to_ascii_uppercase())
+        .map(|m| match m.as_str() {
+            "PRIMARY" => "CTRL".to_string(),
+            "CONTROL" => "CTRL".to_string(),
+            other => other.to_string(),
+        })
+        .collect::<Vec<_>>();
+    format!("{}+{}", mods.join("+"), key[0].trim())
+}
+
+fn as_gnome_accel(input: &str) -> String {
+    // GNOME Shell expects accelerator strings like <Ctrl><Shift>Print.
+    // Accept portal-style triggers like CTRL+SHIFT+Print and convert.
+    if input.contains('<') && input.contains('>') {
+        return input.trim().to_string();
+    }
+
+    let parts: Vec<&str> = input.split('+').filter(|p| !p.is_empty()).collect();
+    if parts.len() <= 1 {
+        return input.trim().to_string();
+    }
+    let (mods, key) = parts.split_at(parts.len() - 1);
+    let mut out = String::new();
+    for m in mods {
+        let m = m.trim().to_ascii_uppercase();
+        let tag = match m.as_str() {
+            "CTRL" | "CONTROL" | "PRIMARY" => "<Ctrl>",
+            "ALT" => "<Alt>",
+            "SHIFT" => "<Shift>",
+            "SUPER" => "<Super>",
+            "META" => "<Meta>",
+            _ => continue,
+        };
+        out.push_str(tag);
+    }
+    out.push_str(key[0].trim());
+    out
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotkeyBinding {
+    pub accelerator: String,
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotkeyConfig {
+    pub bindings: Vec<HotkeyBinding>,
+}
+
+impl Default for HotkeyConfig {
+    fn default() -> Self {
+        // Shortcut triggers are expressed using the XDG shortcuts specification
+        // (e.g. CTRL+SHIFT+Print). The portal GlobalShortcuts API uses this format.
+        Self {
+            bindings: vec![
+                HotkeyBinding {
+                    name: Some("capture_area".into()),
+                    accelerator: "CTRL+ALT+A".into(),
+                    args: vec!["capture".into(), "area".into()],
+                },
+                HotkeyBinding {
+                    name: Some("capture_screen".into()),
+                    accelerator: "CTRL+ALT+S".into(),
+                    args: vec!["capture".into(), "screen".into()],
+                },
+                HotkeyBinding {
+                    name: Some("record_screen".into()),
+                    accelerator: "CTRL+ALT+R".into(),
+                    args: vec!["record".into(), "screen".into(), "--overlay-stop".into()],
+                },
+                HotkeyBinding {
+                    name: Some("record_area".into()),
+                    accelerator: "CTRL+ALT+SHIFT+R".into(),
+                    args: vec!["record".into(), "area".into(), "--overlay-stop".into()],
+                },
+            ],
+        }
+    }
+}
+
+/// Public wrapper so the daemon can load hotkey config without subprocess spawning.
+pub fn load_hotkey_config(config_path: Option<PathBuf>) -> anyhow::Result<(PathBuf, HotkeyConfig)> {
+    load_or_create_config(config_path)
+}
+
+/// Public wrapper so the daemon can convert accelerator strings to GNOME format.
+pub fn accel_to_gnome(input: &str) -> String {
+    as_gnome_accel(input)
+}
+
+/// Public wrapper so the daemon can convert accelerator strings to portal format.
+pub fn accel_to_portal(input: &str) -> String {
+    as_portal_trigger(input)
+}
+
+/// Public wrapper so the daemon can ensure the desktop entry exists and get its path.
+/// Used to set GIO_LAUNCHED_DESKTOP_FILE so GNOME trusts the daemon process.
+pub fn ensure_desktop_entry_pub(app_id: &str) -> anyhow::Result<std::path::PathBuf> {
+    ensure_desktop_entry(app_id)
+}
+
+pub fn reset_hotkey_config(config_path: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let path = config_path.unwrap_or_else(default_config_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create config dir {}", parent.display()))?;
+    }
+
+    let cfg = HotkeyConfig::default();
+    let raw = serde_yml::to_string(&cfg).context("Failed to serialize default hotkey config")?;
+    std::fs::write(&path, raw)
+        .with_context(|| format!("Failed to write hotkey config to {}", path.display()))?;
+    Ok(path)
+}
+
+fn default_config_path() -> PathBuf {
+    let mut dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push("cleanshitx");
+    dir.push("hotkeys.yml");
+    dir
+}
+
+fn load_or_create_config(path: Option<PathBuf>) -> anyhow::Result<(PathBuf, HotkeyConfig)> {
+    let path = path.unwrap_or_else(default_config_path);
+
+    if path.exists() {
+        let raw = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read hotkey config at {}", path.display()))?;
+        let cfg: HotkeyConfig = serde_yml::from_str(&raw)
+            .with_context(|| format!("Failed to parse YAML hotkey config at {}", path.display()))?;
+        return Ok((path, cfg));
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create config dir {}", parent.display()))?;
+    }
+
+    let cfg = HotkeyConfig::default();
+    let raw = serde_yml::to_string(&cfg).context("Failed to serialize default hotkey config")?;
+    std::fs::write(&path, raw).with_context(|| {
+        format!(
+            "Failed to write default hotkey config to {}",
+            path.display()
+        )
+    })?;
+
+    Ok((path, cfg))
+}
+
+fn save_hotkey_config(path: &Path, cfg: &HotkeyConfig) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create config dir {}", parent.display()))?;
+    }
+
+    let raw = serde_yml::to_string(cfg).context("Failed to serialize hotkey config")?;
+    std::fs::write(path, raw)
+        .with_context(|| format!("Failed to write hotkey config to {}", path.display()))?;
+    Ok(())
+}
+
+fn prompt_line(prompt: &str) -> anyhow::Result<String> {
+    print!("{prompt}");
+    std::io::stdout()
+        .flush()
+        .context("Failed to flush stdout")?;
+
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .context("Failed to read input")?;
+    Ok(input.trim().to_string())
+}
+
+fn pretty_action_name(binding: &HotkeyBinding, idx: usize) -> String {
+    let name = binding
+        .name
+        .as_deref()
+        .unwrap_or("binding")
+        .replace('_', " ")
+        .split_whitespace()
+        .map(|w| {
+            let mut chars = w.chars();
+            match chars.next() {
+                Some(c) => format!("{}{}", c.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if name.trim().is_empty() {
+        format!("Binding {}", idx + 1)
+    } else {
+        name
+    }
+}
+
+fn shell_quote(arg: &str) -> String {
+    let escaped = arg
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`");
+    format!("\"{escaped}\"")
+}
+
+fn gsettings_string(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+fn parse_gsettings_list(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+
+    for ch in raw.chars() {
+        if in_quote {
+            if ch == '\'' {
+                out.push(current.clone());
+                current.clear();
+                in_quote = false;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+
+        if ch == '\'' {
+            in_quote = true;
+        }
+    }
+
+    out
+}
+
+fn format_gsettings_list(values: &[String]) -> String {
+    let entries = values
+        .iter()
+        .map(|v| gsettings_string(v))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{entries}]")
+}
+
+fn run_gsettings(args: &[String]) -> anyhow::Result<String> {
+    let out = std::process::Command::new("gsettings")
+        .args(args)
+        .output()
+        .with_context(|| format!("Failed to run gsettings with args: {:?}", args))?;
+
+    if !out.status.success() {
+        anyhow::bail!(
+            "gsettings failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn gnome_custom_keybinding_paths() -> anyhow::Result<Vec<String>> {
+    Ok(parse_gsettings_list(&run_gsettings(&[
+        "get".into(),
+        "org.gnome.settings-daemon.plugins.media-keys".into(),
+        "custom-keybindings".into(),
+    ])?))
+}
+
+fn managed_gnome_path(binding: &HotkeyBinding, idx: usize) -> String {
+    let base = binding
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("binding_{idx}"))
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!("/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cleanshitx-{base}/")
+}
+
+fn gnome_binding_command(exe: &Path, args: &[String]) -> String {
+    std::iter::once(exe.to_string_lossy().to_string())
+        .chain(args.iter().cloned())
+        .map(|a| shell_quote(&a))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn install_gnome_custom_keybindings(cfg: &HotkeyConfig) -> anyhow::Result<()> {
+    let existing = gnome_custom_keybinding_paths()?;
+    let unmanaged = existing
+        .into_iter()
+        .filter(|p| !p.contains("/cleanshitx-"))
+        .collect::<Vec<_>>();
+
+    let action_exe = resolve_action_exe()?;
+    let managed_paths = cfg
+        .bindings
+        .iter()
+        .enumerate()
+        .map(|(idx, b)| managed_gnome_path(b, idx))
+        .collect::<Vec<_>>();
+
+    let merged = unmanaged
+        .iter()
+        .cloned()
+        .chain(managed_paths.iter().cloned())
+        .collect::<Vec<_>>();
+
+    run_gsettings(&[
+        "set".into(),
+        "org.gnome.settings-daemon.plugins.media-keys".into(),
+        "custom-keybindings".into(),
+        format_gsettings_list(&merged),
+    ])?;
+
+    for (idx, binding) in cfg.bindings.iter().enumerate() {
+        let path = managed_gnome_path(binding, idx);
+        let schema = format!(
+            "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{}",
+            path
+        );
+        let display_name = pretty_action_name(binding, idx);
+        let command = gnome_binding_command(&action_exe, &binding.args);
+        let accel = as_gnome_accel(&binding.accelerator);
+
+        run_gsettings(&[
+            "set".into(),
+            schema.clone(),
+            "name".into(),
+            gsettings_string(&display_name),
+        ])?;
+
+        run_gsettings(&[
+            "set".into(),
+            schema.clone(),
+            "command".into(),
+            gsettings_string(&command),
+        ])?;
+
+        run_gsettings(&[
+            "set".into(),
+            schema,
+            "binding".into(),
+            gsettings_string(&accel),
+        ])?;
+    }
+
+    Ok(())
+}
+
+fn uninstall_gnome_custom_keybindings() -> anyhow::Result<()> {
+    let existing = gnome_custom_keybinding_paths()?;
+    let unmanaged = existing
+        .into_iter()
+        .filter(|p| !p.contains("/cleanshitx-"))
+        .collect::<Vec<_>>();
+
+    run_gsettings(&[
+        "set".into(),
+        "org.gnome.settings-daemon.plugins.media-keys".into(),
+        "custom-keybindings".into(),
+        format_gsettings_list(&unmanaged),
+    ])?;
+
+    Ok(())
+}
+
+pub fn install_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyhow::Result<()> {
+    let (_config_path, cfg) = load_or_create_config(config_path)?;
+
+    if is_gnome_desktop() {
+        install_gnome_custom_keybindings(&cfg)?;
+        println!("Installed GNOME custom keybindings for CleanShotX (no daemon required).");
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "No-daemon hotkey install is currently supported on GNOME only (current desktop: {}).",
+        std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "unknown".into())
+    )
+}
+
+pub fn uninstall_hotkeys_for_current_desktop() -> anyhow::Result<()> {
+    if is_gnome_desktop() {
+        uninstall_gnome_custom_keybindings()?;
+        println!("Removed CleanShotX GNOME custom keybindings.");
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "No-daemon hotkey uninstall is currently supported on GNOME only (current desktop: {}).",
+        std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "unknown".into())
+    )
+}
+
+pub fn setup_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let (path, mut cfg) = load_or_create_config(config_path)?;
+
+    println!(
+        "\nCleanShotX hotkey setup wizard (current desktop: {})",
+        std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "unknown".into())
+    );
+    println!("Press Enter to keep current binding. Type 'none' to clear a binding.\n");
+
+    for (idx, binding) in cfg.bindings.iter_mut().enumerate() {
+        let action = pretty_action_name(binding, idx);
+        let command_preview = binding.args.join(" ");
+        let prompt = format!("{action} ({command_preview}) [{}]: ", binding.accelerator);
+        let entered = prompt_line(&prompt)?;
+        if entered.is_empty() {
+            continue;
+        }
+        if entered.eq_ignore_ascii_case("none") {
+            binding.accelerator.clear();
+            continue;
+        }
+        binding.accelerator = as_portal_trigger(&entered);
+    }
+
+    cfg.bindings.retain(|b| !b.accelerator.trim().is_empty());
+
+    if cfg.bindings.is_empty() {
+        anyhow::bail!("No bindings left after setup; aborting to avoid disabling all shortcuts");
+    }
+
+    save_hotkey_config(&path, &cfg)?;
+    println!("Saved hotkey config: {}", path.display());
+
+    if is_gnome_desktop() {
+        install_gnome_custom_keybindings(&cfg)?;
+        println!("Installed GNOME custom keybindings. Hotkeys now work without running daemon.");
+    } else {
+        println!("Config saved, but no-daemon install is currently GNOME-only.");
+    }
+
+    Ok(path)
+}
+
+fn print_trigger_count(cfg: &HotkeyConfig) -> usize {
+    cfg.bindings
+        .iter()
+        .filter(|binding| {
+            as_portal_trigger(&binding.accelerator)
+                .to_ascii_uppercase()
+                .ends_with("PRINT")
+        })
+        .count()
+}
+
+fn is_print_trigger(trigger: &str) -> bool {
+    trigger.to_ascii_uppercase().ends_with("PRINT")
+}
+
+pub async fn run_gnome_hotkey_daemon(config_path: Option<PathBuf>) -> anyhow::Result<()> {
+    let (config_path, cfg) = load_or_create_config(config_path)?;
+    if cfg.bindings.is_empty() {
+        anyhow::bail!("No bindings configured in {}", config_path.display());
+    }
+
+    let _pid_guard = acquire_daemon_pid_guard()?;
+
+    println!("Hotkey config: {}", config_path.display());
+
+    let conn = zbus::Connection::session()
+        .await
+        .context("Failed to connect to session DBus")?;
+
+    let shell = zbus::Proxy::new(
+        &conn,
+        "org.gnome.Shell",
+        "/org/gnome/Shell",
+        "org.gnome.Shell",
+    )
+    .await
+    .context("Failed to create org.gnome.Shell proxy (are you on GNOME?)")?;
+
+    let mut action_to_binding: HashMap<u32, HotkeyBinding> = HashMap::new();
+
+    // GNOME Shell DBus API (Shell 49):
+    // - GrabAccelerator(s accelerator, u modeFlags, u grabFlags) -> u action
+    // - GrabAccelerators(a(suu) accelerators) -> au actions
+    // modeFlags is a Shell.ActionMode bitmask; using 15 (ALL) is the most reliable.
+    let mode_flags: u32 = 15;
+    let grab_flags: u32 = 0;
+
+    // Prefer batch, fallback to single if needed.
+    let batch: Vec<(String, u32, u32)> = cfg
+        .bindings
+        .iter()
+        .map(|b| (as_gnome_accel(&b.accelerator), mode_flags, grab_flags))
+        .collect();
+    let grabbed: Result<Vec<u32>, zbus::Error> = shell.call("GrabAccelerators", &(batch)).await;
+
+    match grabbed {
+        Ok(actions) => {
+            if actions.len() != cfg.bindings.len() {
+                eprintln!(
+                    "Warning: GrabAccelerators returned {} actions for {} bindings",
+                    actions.len(),
+                    cfg.bindings.len()
+                );
+            }
+            for (idx, action) in actions.into_iter().enumerate() {
+                if let Some(binding) = cfg.bindings.get(idx) {
+                    if action == 0 {
+                        let name = binding.name.as_deref().unwrap_or("(unnamed)");
+                        eprintln!(
+                            "Warning: could not grab '{}' for {} (likely reserved by GNOME).",
+                            binding.accelerator, name
+                        );
+                        continue;
+                    }
+                    action_to_binding.insert(action, binding.clone());
+                }
+            }
+        }
+        Err(_) => {
+            for binding in &cfg.bindings {
+                let name = binding.name.as_deref().unwrap_or("(unnamed)");
+                let accel = as_gnome_accel(&binding.accelerator);
+                let res: Result<u32, zbus::Error> = shell
+                    .call("GrabAccelerator", &(accel, mode_flags, grab_flags))
+                    .await;
+
+                match res {
+                    Ok(action) => {
+                        if action == 0 {
+                            eprintln!(
+                                "Warning: could not grab '{}' for {} (likely reserved by GNOME).",
+                                binding.accelerator, name
+                            );
+                            continue;
+                        }
+                        action_to_binding.insert(action, binding.clone());
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: failed to grab '{}' for {}: {}",
+                            binding.accelerator, name, e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if action_to_binding.is_empty() {
+        anyhow::bail!(
+            "No accelerators could be grabbed. Edit {} to choose different shortcuts (or disable conflicting GNOME shortcuts).",
+            config_path.display()
+        );
+    }
+
+    println!("Hotkey daemon running (GNOME Shell)");
+    println!("Config: {}", config_path.display());
+    for (action, binding) in &action_to_binding {
+        let name = binding.name.as_deref().unwrap_or("(unnamed)");
+        println!("  action {}: {} -> {:?}", action, name, binding.args);
+    }
+
+    let match_rule = "type='signal',interface='org.gnome.Shell',member='AcceleratorActivated',path='/org/gnome/Shell'";
+    let rule: zbus::MatchRule = match_rule
+        .try_into()
+        .context("Failed to build DBus match rule")?;
+
+    let mut stream = zbus::MessageStream::for_match_rule(rule, &conn, None)
+        .await
+        .context("Failed to subscribe to AcceleratorActivated")?;
+
+    loop {
+        let msg = match stream.next().await {
+            Some(Ok(m)) => m,
+            Some(Err(e)) => return Err(anyhow::anyhow!("DBus stream error: {e}")),
+            None => return Err(anyhow::anyhow!("DBus stream ended")),
+        };
+
+        // Signature: (u action, a{sv} parameters)
+        let action_id = match msg
+            .body()
+            .deserialize::<(u32, HashMap<String, OwnedValue>)>()
+        {
+            Ok((action, _params)) => action,
+            Err(_) => continue,
+        };
+
+        let Some(binding) = action_to_binding.get(&action_id).cloned() else {
+            continue;
+        };
+
+        if let Err(e) = spawn_hotkey_action(None, &binding.args) {
+            eprintln!(
+                "Failed to spawn command for action {} ({:?}): {}",
+                action_id, binding.args, e
+            );
+        }
+    }
+}
+
+fn token(prefix: &str) -> String {
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    // xdg-desktop-portal expects a restricted token charset (commonly [A-Za-z0-9_]).
+    let prefix = prefix
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>();
+    format!("{prefix}_{pid}_{nanos}")
+}
+
+fn portal_sender_id(connection: &zbus::Connection) -> anyhow::Result<String> {
+    let unique = connection
+        .unique_name()
+        .ok_or_else(|| anyhow::anyhow!("DBus connection has no unique name"))?
+        .as_str();
+
+    Ok(unique.trim_start_matches(':').replace('.', "_"))
+}
+
+fn portal_request_path(sender_id: &str, token: &str) -> anyhow::Result<OwnedObjectPath> {
+    let path = format!("/org/freedesktop/portal/desktop/request/{sender_id}/{token}");
+    path.try_into().context("Invalid portal request path")
+}
+
+async fn portal_response_stream(
+    connection: &zbus::Connection,
+    request_path: &OwnedObjectPath,
+) -> anyhow::Result<zbus::MessageStream> {
+    let match_rule = format!(
+        "type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
+        request_path.as_str()
+    );
+
+    let rule: zbus::MatchRule = match_rule
+        .as_str()
+        .try_into()
+        .context("Failed to build portal match rule")?;
+
+    zbus::MessageStream::for_match_rule(rule, connection, Some(1))
+        .await
+        .context("Failed to create portal response stream")
+}
+
+async fn read_portal_response(
+    stream: &mut zbus::MessageStream,
+) -> anyhow::Result<(u32, HashMap<String, OwnedValue>)> {
+    let message = stream
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("No response from portal"))?
+        .context("Portal response stream error")?;
+
+    let (status, results): (u32, HashMap<String, OwnedValue>) = message
+        .body()
+        .deserialize()
+        .context("Failed to deserialize portal response")?;
+
+    Ok((status, results))
+}
+
+pub async fn run_portal_hotkey_daemon(
+    config_path: Option<PathBuf>,
+    configure: bool,
+    allow_desktop_relaunch: bool,
+) -> anyhow::Result<()> {
+    let mut log = None;
+    let log_path = open_daemon_log_if_needed().map(|(p, f)| {
+        log = Some(f);
+        p
+    });
+    if let Some(p) = &log_path {
+        log_line(&mut log, &format!("Hotkey daemon log: {}", p.display()));
+    }
+
+    let (config_path, cfg) = load_or_create_config(config_path)?;
+    if cfg.bindings.is_empty() {
+        anyhow::bail!("No bindings configured in {}", config_path.display());
+    }
+
+    log_line(
+        &mut log,
+        &format!("Hotkey config: {}", config_path.display()),
+    );
+
+    if let Some(pid) = existing_daemon_pid() {
+        let msg = format!(
+            "Hotkey daemon already running (pid {pid}). Stop it first (e.g. `pkill -f \"cleanshitx daemon\"`) and retry"
+        );
+        log_line(&mut log, &msg);
+        anyhow::bail!(msg);
+    }
+
+    // Ensure the portal can associate us with an application id.
+    let app_id = portal_app_id();
+    let desktop_path = ensure_desktop_entry(&app_id)?;
+    log_line(
+        &mut log,
+        &format!(
+            "Portal: using app_id={} (desktop: {})",
+            app_id,
+            desktop_path.display()
+        ),
+    );
+
+    // On GNOME, GlobalShortcuts portal activations are often not delivered if the app is
+    // launched from a terminal. Prefer relaunching via the .desktop entry.
+    let terminal_launch = std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none();
+    if is_gnome_desktop() && terminal_launch && !allow_desktop_relaunch {
+        log_line(
+            &mut log,
+            &format!(
+                "GNOME detected: this daemon was launched from a terminal; GlobalShortcuts activations often won't be delivered in this mode. Run without --no-desktop-relaunch (recommended) or start via the desktop entry (e.g. `gtk-launch {}`).",
+                app_id
+            ),
+        );
+    }
+    if is_gnome_desktop() && terminal_launch && allow_desktop_relaunch {
+        match try_relaunch_via_desktop(&app_id, &config_path, configure) {
+            Ok(()) => {
+                log_line(
+                    &mut log,
+                    "GNOME detected: relaunched hotkey daemon via desktop entry for reliable global shortcuts; exiting this terminal-started process.",
+                );
+                let follow_path = std::env::var_os("CLEANSHITX_HOTKEY_LOG")
+                    .map(PathBuf::from)
+                    .or_else(default_daemon_log_path)
+                    .or(log_path);
+                if let Some(p) = follow_path {
+                    log_line(
+                        &mut log,
+                        &format!("Follow logs with: tail -f {}", p.display()),
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                log_line(
+                    &mut log,
+                    &format!("GNOME detected but desktop relaunch failed (continuing anyway): {e}"),
+                );
+            }
+        }
+    }
+
+    if is_gnome_desktop() {
+        apply_gio_desktop_launch_env(&desktop_path);
+    }
+
+    let _pid_guard = match acquire_daemon_pid_guard() {
+        Ok(guard) => guard,
+        Err(e) => {
+            log_line(&mut log, &format!("{e}"));
+            return Err(e);
+        }
+    };
+
+    let conn = zbus::Connection::session()
+        .await
+        .context("Failed to connect to session DBus")?;
+    if let Err(e) = register_portal_app_id(&conn, &app_id).await {
+        log_line(
+            &mut log,
+            &format!("Portal: Registry.Register failed (continuing): {e}"),
+        );
+    }
+
+    let portal = zbus::Proxy::new(
+        &conn,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.GlobalShortcuts",
+    )
+    .await
+    .context("Failed to create GlobalShortcuts portal proxy")?;
+
+    let portal_version: u32 = portal.get_property("version").await.unwrap_or(1);
+    log_line(
+        &mut log,
+        &format!("Portal: GlobalShortcuts version={portal_version}"),
+    );
+
+    let sender_id = portal_sender_id(&conn)?;
+
+    // Create session
+    let create_token = token("cleanshitx_hk");
+    let session_token = token("cleanshitx_hk_session");
+    let mut create_opts: HashMap<String, Value> = HashMap::new();
+    create_opts.insert("handle_token".into(), Value::from(create_token.clone()));
+    create_opts.insert("session_handle_token".into(), Value::from(session_token));
+
+    // Avoid a race where the portal answers before we subscribe to Request::Response.
+    let expected_create_request_path = portal_request_path(&sender_id, &create_token)?;
+    let mut create_stream = portal_response_stream(&conn, &expected_create_request_path).await?;
+
+    log_line(&mut log, "Portal: calling CreateSession…");
+
+    let request_path: OwnedObjectPath = portal
+        .call("CreateSession", &(create_opts))
+        .await
+        .context("GlobalShortcuts.CreateSession call failed")?;
+
+    if request_path != expected_create_request_path {
+        eprintln!(
+            "Portal: CreateSession returned unexpected request path {} (expected {})",
+            request_path.as_str(),
+            expected_create_request_path.as_str()
+        );
+    }
+
+    log_line(
+        &mut log,
+        "Portal: waiting for CreateSession response… (approve any prompt)",
+    );
+
+    let (create_status, results) = read_portal_response(&mut create_stream)
+        .await
+        .context("CreateSession failed")?;
+
+    if create_status != 0 {
+        anyhow::bail!("CreateSession ended with response={create_status}");
+    }
+
+    // The portal returns session_handle as a string-typed variant containing an object path.
+    let session_handle_str: String = results
+        .get("session_handle")
+        .ok_or_else(|| anyhow::anyhow!("Portal response missing session_handle"))?
+        .try_clone()
+        .context("Failed to clone session_handle")?
+        .try_into()
+        .context("Invalid session_handle value")?;
+
+    let session_handle: OwnedObjectPath = session_handle_str
+        .try_into()
+        .context("Invalid session_handle object path")?;
+
+    // Bind shortcuts (will typically prompt user once)
+    let mut id_to_binding: HashMap<String, HotkeyBinding> = HashMap::new();
+    let mut shortcuts: Vec<(String, HashMap<String, Value>)> = Vec::new();
+
+    for (idx, binding) in cfg.bindings.iter().enumerate() {
+        let id = binding
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("binding_{idx}"));
+
+        let preferred_trigger = as_portal_trigger(&binding.accelerator);
+
+        let mut props: HashMap<String, Value> = HashMap::new();
+        props.insert(
+            "description".into(),
+            Value::from(binding.name.clone().unwrap_or_else(|| id.clone())),
+        );
+
+        if is_print_trigger(&preferred_trigger) {
+            eprintln!(
+                "Portal: '{}' uses Print-based trigger '{}' (often reserved). Omitting preferred trigger so you can assign a key in the portal dialog.",
+                id, preferred_trigger
+            );
+        } else {
+            props.insert("preferred_trigger".into(), Value::from(preferred_trigger));
+        }
+
+        shortcuts.push((id.clone(), props));
+        id_to_binding.insert(id, binding.clone());
+    }
+
+    log_line(
+        &mut log,
+        "Requesting global shortcuts via portal… (you may get a prompt)",
+    );
+
+    let bind_token = token("cleanshitx_hk_bind");
+    let mut bind_opts: HashMap<String, Value> = HashMap::new();
+    bind_opts.insert("handle_token".into(), Value::from(bind_token.clone()));
+
+    let expected_bind_request_path = portal_request_path(&sender_id, &bind_token)?;
+    let mut bind_stream = portal_response_stream(&conn, &expected_bind_request_path).await?;
+
+    let bind_request: OwnedObjectPath = portal
+        .call(
+            "BindShortcuts",
+            &(session_handle.clone(), shortcuts, "".to_string(), bind_opts),
+        )
+        .await
+        .context("GlobalShortcuts.BindShortcuts call failed")?;
+
+    if bind_request != expected_bind_request_path {
+        eprintln!(
+            "Portal: BindShortcuts returned unexpected request path {} (expected {})",
+            bind_request.as_str(),
+            expected_bind_request_path.as_str()
+        );
+    }
+
+    log_line(
+        &mut log,
+        "Portal: waiting for BindShortcuts response… (set/confirm shortcuts in the dialog)",
+    );
+
+    let (bind_status, bind_results) = read_portal_response(&mut bind_stream)
+        .await
+        .context("BindShortcuts failed")?;
+
+    match bind_status {
+        0 => {}
+        1 => anyhow::bail!("BindShortcuts ended with response=1 (user cancelled)"),
+        2 => {
+            let print_triggers = print_trigger_count(&cfg);
+            if print_triggers > 0 {
+                anyhow::bail!(
+                    "BindShortcuts ended with response=2. {print_triggers} configured shortcut(s) use Print-based triggers, which are often reserved by the desktop and rejected by the portal. Edit {} to use non-Print shortcuts, then run the daemon again",
+                    config_path.display()
+                );
+            }
+
+            anyhow::bail!(
+                "BindShortcuts ended with response=2 (portal backend rejected the request unexpectedly)"
+            );
+        }
+        other => anyhow::bail!("BindShortcuts ended with response={other}"),
+    }
+
+    // If the portal didn't bind any shortcuts, there's nothing to listen for.
+    // BindShortcuts returns the subset of shortcut ids that were actually bound.
+    if let Some(bound_value) = bind_results.get("shortcuts") {
+        let bound: Option<Vec<(String, HashMap<String, OwnedValue>)>> =
+            bound_value.try_clone().ok().and_then(|v| v.try_into().ok());
+
+        if let Some(bound) = bound {
+            if bound.is_empty() {
+                anyhow::bail!(
+                    "BindShortcuts did not bind any shortcuts. This usually means the portal backend rejected the triggers (often due to conflicts/reserved keys like Print). Try assigning a different key combo in the dialog (e.g. CTRL+ALT+P) or edit {}",
+                    config_path.display()
+                );
+            }
+        }
+    }
+
+    // Show what triggers the portal actually configured.
+    let list_token = token("cleanshitx_hk_list");
+    let mut list_opts: HashMap<String, Value> = HashMap::new();
+    list_opts.insert("handle_token".into(), Value::from(list_token.clone()));
+
+    let expected_list_request_path = portal_request_path(&sender_id, &list_token)?;
+    let mut list_stream = portal_response_stream(&conn, &expected_list_request_path).await?;
+    let list_request: OwnedObjectPath = portal
+        .call("ListShortcuts", &(session_handle.clone(), list_opts))
+        .await
+        .context("GlobalShortcuts.ListShortcuts call failed")?;
+
+    if list_request != expected_list_request_path {
+        eprintln!(
+            "Portal: ListShortcuts returned unexpected request path {} (expected {})",
+            list_request.as_str(),
+            expected_list_request_path.as_str()
+        );
+    }
+
+    if let Ok((list_status, list_results)) = read_portal_response(&mut list_stream).await {
+        if list_status != 0 {
+            eprintln!("Portal: ListShortcuts ended with response={list_status}");
+        }
+        if let Some(shortcuts_value) = list_results.get("shortcuts") {
+            let parsed: Result<Vec<(String, HashMap<String, OwnedValue>)>, _> = shortcuts_value
+                .try_clone()
+                .ok()
+                .and_then(|v| v.try_into().ok())
+                .ok_or_else(|| anyhow::anyhow!("Invalid shortcuts list"));
+
+            if let Ok(shortcuts) = parsed {
+                log_line(&mut log, "Configured shortcuts (portal):");
+                for (id, props) in shortcuts {
+                    let trigger_desc: Option<String> = props
+                        .get("trigger_description")
+                        .and_then(|v| v.try_clone().ok())
+                        .and_then(|v| v.try_into().ok());
+                    let preferred: Option<String> = props
+                        .get("preferred_trigger")
+                        .and_then(|v| v.try_clone().ok())
+                        .and_then(|v| v.try_into().ok());
+                    let desc: Option<String> = props
+                        .get("description")
+                        .and_then(|v| v.try_clone().ok())
+                        .and_then(|v| v.try_into().ok());
+
+                    log_line(
+                        &mut log,
+                        &format!(
+                            "  {}: {} | preferred={:?} | trigger={:?}",
+                            id,
+                            desc.as_deref().unwrap_or(""),
+                            preferred,
+                            trigger_desc
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    log_line(&mut log, "Hotkey daemon running (portal GlobalShortcuts)");
+    log_line(&mut log, &format!("Config: {}", config_path.display()));
+    for (id, binding) in &id_to_binding {
+        let name = binding.name.as_deref().unwrap_or("(unnamed)");
+        log_line(
+            &mut log,
+            &format!("  {}: {} -> {:?}", id, name, binding.args),
+        );
+    }
+
+    if configure {
+        if portal_version >= 2 {
+            let opts: HashMap<String, Value> = HashMap::new();
+            let call: Result<(), zbus::Error> = portal
+                .call(
+                    "ConfigureShortcuts",
+                    &(session_handle.clone(), "".to_string(), opts),
+                )
+                .await;
+
+            match call {
+                Ok(()) => log_line(&mut log, "Portal: opened shortcut configuration UI"),
+                Err(e) => log_line(
+                    &mut log,
+                    &format!(
+                        "Portal: ConfigureShortcuts failed (continuing without forcing UI): {e}"
+                    ),
+                ),
+            }
+        } else {
+            log_line(
+                &mut log,
+                "Portal: ConfigureShortcuts is not supported by this portal backend (version < 2). Use the BindShortcuts dialog (if it appears) or system settings to edit shortcuts."
+            );
+        }
+    }
+
+    let action_exe = resolve_action_exe()?;
+    log_line(
+        &mut log,
+        &format!("Hotkey actions will spawn: {}", action_exe.display()),
+    );
+
+    // Listen for activations.
+    // Different portal backends may emit signals on different object paths, so don't
+    // restrict the match rule by path; we filter by session_handle in the payload.
+    let debug = hotkey_debug_enabled();
+    if debug {
+        log_line(&mut log, "Hotkey debug: enabled");
+    }
+    let match_rule = if debug {
+        "type='signal',interface='org.freedesktop.portal.GlobalShortcuts'"
+    } else {
+        "type='signal',interface='org.freedesktop.portal.GlobalShortcuts',member='Activated'"
+    };
+    let rule: zbus::MatchRule = match_rule
+        .try_into()
+        .context("Failed to build GlobalShortcuts match rule")?;
+
+    let mut stream = zbus::MessageStream::for_match_rule(rule, &conn, None)
+        .await
+        .context("Failed to subscribe to GlobalShortcuts.Activated")?;
+
+    loop {
+        let msg = match stream.next().await {
+            Some(Ok(m)) => m,
+            Some(Err(e)) => return Err(anyhow::anyhow!("DBus stream error: {e}")),
+            None => return Err(anyhow::anyhow!("DBus stream ended")),
+        };
+
+        let parsed: Result<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>), _> =
+            msg.body().deserialize();
+
+        let (sess, shortcut_id, _ts, _opts) = match parsed {
+            Ok(v) => v,
+            Err(e) => {
+                if debug {
+                    log_line(&mut log, &format!("Hotkey debug: received non-Activated or unexpected GlobalShortcuts signal: {e}"));
+                    log_line(&mut log, &format!("Hotkey debug: raw message: {msg:?}"));
+                }
+                continue;
+            }
+        };
+
+        if sess != session_handle {
+            eprintln!(
+                "Ignoring activation for other session {} (expected {})",
+                sess.as_str(),
+                session_handle.as_str()
+            );
+            continue;
+        }
+
+        let Some(binding) = id_to_binding.get(&shortcut_id).cloned() else {
+            eprintln!("Activated unknown shortcut id: {}", shortcut_id);
+            continue;
+        };
+
+        log_line(&mut log, &format!("Activated shortcut: {}", shortcut_id));
+
+        match spawn_hotkey_action(Some(&action_exe), &binding.args) {
+            Ok((child, used_exe)) => {
+                log_line(
+                    &mut log,
+                    &format!(
+                        "Spawned: pid={} exe={} args={:?}",
+                        child.id(),
+                        used_exe.display(),
+                        binding.args
+                    ),
+                );
+            }
+            Err(e) => {
+                log_line(
+                    &mut log,
+                    &format!(
+                        "Failed to spawn command for shortcut {} ({:?}): {}",
+                        shortcut_id, binding.args, e
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// Default daemon entrypoint: prefer the portal GlobalShortcuts API (works on Wayland with consent),
+/// and fall back to GNOME Shell if the portal is unavailable.
+pub async fn run_hotkey_daemon(config_path: Option<PathBuf>) -> anyhow::Result<()> {
+    run_hotkey_daemon_with_options(config_path, false, true).await
+}
+
+pub async fn run_hotkey_daemon_with_options(
+    config_path: Option<PathBuf>,
+    configure: bool,
+    allow_desktop_relaunch: bool,
+) -> anyhow::Result<()> {
+    match run_portal_hotkey_daemon(config_path.clone(), configure, allow_desktop_relaunch).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            eprintln!("Portal hotkeys unavailable/failed:\n{e:#}");
+            // On Wayland, GNOME Shell accelerator grabbing is typically forbidden, so falling back
+            // just produces confusing AccessDenied errors.
+            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                return Err(e);
+            }
+
+            run_gnome_hotkey_daemon(config_path).await
+        }
+    }
+}

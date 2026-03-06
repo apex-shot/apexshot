@@ -3,9 +3,14 @@
 //! This module handles converting raw `CaptureData` into standard image formats
 //! and saving them to disk with proper naming conventions.
 
+mod editor;
+mod preview_overlay;
+pub use editor::{open_image_editor, EditorError};
+pub use preview_overlay::{show_capture_preview_overlay, CapturePreviewError};
+
 use crate::backend::{CaptureData, CursorData, PixelFormat};
-use image::{ImageBuffer, Rgba, RgbImage, RgbaImage};
 use image::buffer::ConvertBuffer;
+use image::{ImageBuffer, RgbImage, Rgba, RgbaImage};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use thiserror::Error;
@@ -46,7 +51,7 @@ impl ImageFormat {
 
     /// Validate JPEG quality (1-100)
     pub fn validate_jpeg_quality(quality: u8) -> SaveResult<()> {
-        if quality < 1 || quality > 100 {
+        if !(1..=100).contains(&quality) {
             return Err(SaveError::FilenameError(
                 "JPEG quality must be between 1 and 100".into(),
             ));
@@ -113,8 +118,9 @@ impl SaveConfig {
         if let Some(dir) = &self.output_dir {
             Ok(dir.clone())
         } else {
-            dirs::picture_dir()
-                .ok_or_else(|| SaveError::FilenameError("Could not determine Pictures directory".into()))
+            dirs::picture_dir().ok_or_else(|| {
+                SaveError::FilenameError("Could not determine Pictures directory".into())
+            })
         }
     }
 }
@@ -144,10 +150,10 @@ fn capture_to_rgb_image(capture: &CaptureData) -> Result<RgbImage, SaveError> {
             let row_start = (y * capture.stride) as usize;
             for x in 0..width {
                 let pixel_start = row_start + (x * 4) as usize;
-                pixels.push(capture.pixels[pixel_start]);     // R
+                pixels.push(capture.pixels[pixel_start]); // R
                 pixels.push(capture.pixels[pixel_start + 1]); // G
                 pixels.push(capture.pixels[pixel_start + 2]); // B
-                // Skip padding byte at pixel_start + 3
+                                                              // Skip padding byte at pixel_start + 3
             }
         }
         pixels
@@ -158,10 +164,10 @@ fn capture_to_rgb_image(capture: &CaptureData) -> Result<RgbImage, SaveError> {
             let row_start = (y * capture.stride) as usize;
             for x in 0..width {
                 let pixel_start = row_start + (x * 4) as usize;
-                pixels.push(capture.pixels[pixel_start]);     // R
+                pixels.push(capture.pixels[pixel_start]); // R
                 pixels.push(capture.pixels[pixel_start + 1]); // G
                 pixels.push(capture.pixels[pixel_start + 2]); // B
-                // Skip alpha at pixel_start + 3
+                                                              // Skip alpha at pixel_start + 3
             }
         }
         pixels
@@ -187,8 +193,8 @@ fn capture_to_rgb_image(capture: &CaptureData) -> Result<RgbImage, SaveError> {
                 let pixel_start = row_start + (x * 4) as usize;
                 pixels.push(capture.pixels[pixel_start + 2]); // B -> R
                 pixels.push(capture.pixels[pixel_start + 1]); // G
-                pixels.push(capture.pixels[pixel_start]);     // R -> B
-                // Skip padding at pixel_start + 3
+                pixels.push(capture.pixels[pixel_start]); // R -> B
+                                                          // Skip padding at pixel_start + 3
             }
         }
         pixels
@@ -201,8 +207,8 @@ fn capture_to_rgb_image(capture: &CaptureData) -> Result<RgbImage, SaveError> {
                 let pixel_start = row_start + (x * 4) as usize;
                 pixels.push(capture.pixels[pixel_start + 2]); // B -> R
                 pixels.push(capture.pixels[pixel_start + 1]); // G
-                pixels.push(capture.pixels[pixel_start]);     // R -> B
-                // Skip alpha at pixel_start + 3
+                pixels.push(capture.pixels[pixel_start]); // R -> B
+                                                          // Skip alpha at pixel_start + 3
             }
         }
         pixels
@@ -330,14 +336,14 @@ fn composite_cursor(image: &mut RgbaImage, cursor: &CursorData) {
 fn generate_filename(config: &SaveConfig) -> String {
     let timestamp = if config.timestamp_format.is_some() {
         // Use custom format (simplified - for full strftime support, would need chrono)
-        format!("custom")
+        "custom".to_string()
     } else {
         // Default: YYYY-MM-DD_HH-MM-SS
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default();
         let datetime = chrono::DateTime::from_timestamp(now.as_secs() as i64, now.subsec_nanos())
-            .unwrap_or_else(|| chrono::Utc::now());
+            .unwrap_or_else(chrono::Utc::now);
         datetime.format("%Y-%m-%d_%H-%M-%S").to_string()
     };
 
@@ -434,10 +440,10 @@ mod tests {
     fn test_rgb24_conversion() {
         // Create a 2x2 RGB24 image
         let pixels = vec![
-            255, 0, 0,    // Red
-            0, 255, 0,    // Green
-            0, 0, 255,    // Blue
-            255, 255, 0,  // Yellow
+            255, 0, 0, // Red
+            0, 255, 0, // Green
+            0, 0, 255, // Blue
+            255, 255, 0, // Yellow
         ];
         let capture = CaptureData::new(pixels, 2, 2, PixelFormat::RGB24);
         let img = capture_to_rgb_image(&capture).unwrap();
@@ -453,10 +459,10 @@ mod tests {
     fn test_bgr24_conversion() {
         // Create a 2x2 BGR24 image (stored as BGR)
         let pixels = vec![
-            0, 0, 255,    // Red (stored as BGR)
-            0, 255, 0,    // Green
-            255, 0, 0,    // Blue (stored as BGR)
-            0, 255, 255,  // Yellow (stored as BGR)
+            0, 0, 255, // Red (stored as BGR)
+            0, 255, 0, // Green
+            255, 0, 0, // Blue (stored as BGR)
+            0, 255, 255, // Yellow (stored as BGR)
         ];
         let capture = CaptureData::new(pixels, 2, 2, PixelFormat::BGR24);
         let img = capture_to_rgb_image(&capture).unwrap();
@@ -472,10 +478,10 @@ mod tests {
     fn test_rgba32_conversion() {
         // Create a 2x2 RGBA32 image
         let pixels = vec![
-            255, 0, 0, 255,    // Opaque red
-            0, 255, 0, 128,    // Half-transparent green
-            0, 0, 255, 255,    // Opaque blue
-            255, 255, 0, 0,    // Fully transparent yellow
+            255, 0, 0, 255, // Opaque red
+            0, 255, 0, 128, // Half-transparent green
+            0, 0, 255, 255, // Opaque blue
+            255, 255, 0, 0, // Fully transparent yellow
         ];
         let capture = CaptureData::new(pixels, 2, 2, PixelFormat::RGBA32);
         let img = capture_to_rgba_image(&capture).unwrap();
@@ -491,10 +497,10 @@ mod tests {
     fn test_rgb32_conversion() {
         // Create a 2x2 RGB32 image (with padding)
         let pixels = vec![
-            255, 0, 0, 0,     // Red + padding
-            0, 255, 0, 0,     // Green + padding
-            0, 0, 255, 0,     // Blue + padding
-            255, 255, 0, 0,   // Yellow + padding
+            255, 0, 0, 0, // Red + padding
+            0, 255, 0, 0, // Green + padding
+            0, 0, 255, 0, // Blue + padding
+            255, 255, 0, 0, // Yellow + padding
         ];
         let capture = CaptureData::new(pixels, 2, 2, PixelFormat::RGB32);
         let img = capture_to_rgb_image(&capture).unwrap();
@@ -516,10 +522,9 @@ mod tests {
 
         // Create a 2x2 red cursor at position (5, 5)
         let cursor = CursorData {
-            pixels: vec
-![255, 0, 0, 255, 255, 0, 0, 255,
-                        255, 0, 0, 255, 255, 0, 0, 255]
-, // 2x2 red, opaque
+            pixels: vec![
+                255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+            ], // 2x2 red, opaque
             width: 2,
             height: 2,
             x: 5,
@@ -551,10 +556,7 @@ mod tests {
 
         // Create a 2x2 black cursor with 50% alpha at position (5, 5)
         let cursor = CursorData {
-            pixels: vec
-![0, 0, 0, 128, 0, 0, 0, 128,
-                       0, 0, 0, 128, 0, 0, 0, 128]
-, // 2x2 black, 50% alpha
+            pixels: vec![0, 0, 0, 128, 0, 0, 0, 128, 0, 0, 0, 128, 0, 0, 0, 128], // 2x2 black, 50% alpha
             width: 2,
             height: 2,
             x: 5,
@@ -581,7 +583,7 @@ mod tests {
 
         // Create a cursor that extends beyond image bounds
         let mut pixels = vec![255u8; 36 * 4]; // 6x6 red cursor
-        // Fill with red (alpha is already 255)
+                                              // Fill with red (alpha is already 255)
         for i in (1..pixels.len()).step_by(4) {
             pixels[i] = 0;
             pixels[i + 1] = 0;

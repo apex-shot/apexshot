@@ -124,8 +124,8 @@ impl Default for PreprocessConfig {
     fn default() -> Self {
         Self {
             scale_factor: 3.0,
-            contrast: 1.1,  // Mild contrast enhancement (was 1.5, too aggressive)
-            threshold: false,  // Disabled - adaptive thresholding may hurt UI text OCR
+            contrast: 1.1,    // Mild contrast enhancement (was 1.5, too aggressive)
+            threshold: false, // Disabled - adaptive thresholding may hurt UI text OCR
         }
     }
 }
@@ -137,7 +137,7 @@ impl Default for PreprocessConfig {
 /// 2. Color inversion for dark-mode UIs (Tesseract expects dark-on-light)
 /// 3. Optional contrast enhancement
 fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
-    use image::imageops::{FilterType, resize};
+    use image::imageops::{resize, FilterType};
 
     // Step 1: Upscale the image for better OCR
     let original_width = image.width();
@@ -156,14 +156,12 @@ fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
     for pixel in resized.pixels() {
         // Skip fully transparent pixels (background)
         if pixel[3] < 50 {
-            luma_data.push(255);  // White background
+            luma_data.push(255); // White background
             continue;
         }
 
         // Standard ITU-R BT.709 luma calculation
-        let luma = 0.299 * pixel[0] as f32
-            + 0.587 * pixel[1] as f32
-            + 0.114 * pixel[2] as f32;
+        let luma = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
 
         // Invert: light text becomes dark, dark background becomes light
         let inverted = 255.0 - luma;
@@ -186,6 +184,17 @@ fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
     }
 
     luma_data
+}
+
+#[cfg(test)]
+fn rgba_to_luma(image: &RgbaImage) -> Vec<u8> {
+    let mut out = Vec::with_capacity((image.width() * image.height()) as usize);
+    for pixel in image.pixels() {
+        // Standard ITU-R BT.709 luma calculation (alpha ignored)
+        let luma = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
+        out.push(luma.round().clamp(0.0, 255.0) as u8);
+    }
+    out
 }
 
 /// Apply adaptive thresholding for better text separation
@@ -225,7 +234,11 @@ fn apply_adaptive_threshold(data: &mut [u8], width: u32, height: u32) {
 
             // Apply threshold with a slight bias toward dark (text)
             // This helps with anti-aliased text
-            let threshold = if local_avg > 128 { local_avg - 10 } else { local_avg + 10 };
+            let threshold = if local_avg > 128 {
+                local_avg - 10
+            } else {
+                local_avg + 10
+            };
 
             data[idx] = if pixel < threshold { 0 } else { 255 };
         }
@@ -278,22 +291,21 @@ pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrO
     let datapath = config.datapath.as_deref();
     let mut tesseract = tesseract::Tesseract::new(datapath, Some(&config.language))
         .map_err(|e| OcrError::InitializationError(e.to_string()))?
-        .set_variable("tessedit_pageseg_mode", "6")  // Assume a single uniform block of text
+        .set_variable("tessedit_pageseg_mode", "6") // Assume a single uniform block of text
         .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
-        .set_variable("textord_heavy_nr", "1")  // Prefer noise removal for cleaner text
+        .set_variable("textord_heavy_nr", "1") // Prefer noise removal for cleaner text
         .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
         .set_frame(
-            &luma_data,
-            width,
-            height,
-            1,  // bytes_per_pixel (grayscale)
-            width,  // bytes_per_line (no padding)
-        ).map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
+            &luma_data, width, height, 1,     // bytes_per_pixel (grayscale)
+            width, // bytes_per_line (no padding)
+        )
+        .map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
         .recognize()
         .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
 
     // Get the extracted text
-    let text = tesseract.get_text()
+    let text = tesseract
+        .get_text()
         .map_err(|e| OcrError::RecognitionError(format!("Failed to get text: {}", e)))?;
 
     // Get confidence score
@@ -344,10 +356,7 @@ pub fn copy_to_clipboard(text: &str) -> OcrResult<()> {
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
         // Use wl-copy for Wayland (more reliable than arboard for this use case)
         // Use spawn() instead of output() to avoid waiting for the background process
-        match std::process::Command::new("wl-copy")
-            .arg(text)
-            .spawn()
-        {
+        match std::process::Command::new("wl-copy").arg(text).spawn() {
             Ok(_) => return Ok(()),
             Err(e) => {
                 // Fall through to arboard if wl-copy fails
@@ -360,7 +369,8 @@ pub fn copy_to_clipboard(text: &str) -> OcrResult<()> {
     let mut clipboard = arboard::Clipboard::new()
         .map_err(|e| OcrError::ClipboardError(format!("Failed to access clipboard: {}", e)))?;
 
-    clipboard.set_text(text)
+    clipboard
+        .set_text(text)
         .map_err(|e| OcrError::ClipboardError(format!("Failed to set clipboard text: {}", e)))?;
 
     Ok(())
@@ -395,22 +405,21 @@ pub fn extract_text_from_path<P: AsRef<std::path::Path>>(
     let datapath = config.datapath.as_deref();
     let mut tesseract = tesseract::Tesseract::new(datapath, Some(&config.language))
         .map_err(|e| OcrError::InitializationError(e.to_string()))?
-        .set_variable("tessedit_pageseg_mode", "6")  // Assume a single uniform block of text
+        .set_variable("tessedit_pageseg_mode", "6") // Assume a single uniform block of text
         .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
-        .set_variable("textord_heavy_nr", "1")  // Prefer noise removal for cleaner text
+        .set_variable("textord_heavy_nr", "1") // Prefer noise removal for cleaner text
         .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
         .set_frame(
-            &luma_data,
-            width,
-            height,
-            1,  // bytes_per_pixel (grayscale)
-            width,  // bytes_per_line (no padding)
-        ).map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
+            &luma_data, width, height, 1,     // bytes_per_pixel (grayscale)
+            width, // bytes_per_line (no padding)
+        )
+        .map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
         .recognize()
         .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
 
     // Get the extracted text
-    let text = tesseract.get_text()
+    let text = tesseract
+        .get_text()
         .map_err(|e| OcrError::RecognitionError(format!("Failed to get text: {}", e)))?;
 
     // Get confidence score
@@ -484,12 +493,17 @@ mod tests {
     #[test]
     fn test_rgba_to_luma_conversion() {
         // Create a simple 2x2 RGBA image
-        let image: RgbaImage = image::ImageBuffer::from_raw(2, 2, vec![
-            255, 0, 0, 255,    // Red
-            0, 255, 0, 255,    // Green
-            0, 0, 255, 255,    // Blue
-            255, 255, 255, 255, // White
-        ]).unwrap();
+        let image: RgbaImage = image::ImageBuffer::from_raw(
+            2,
+            2,
+            vec![
+                255, 0, 0, 255, // Red
+                0, 255, 0, 255, // Green
+                0, 0, 255, 255, // Blue
+                255, 255, 255, 255, // White
+            ],
+        )
+        .unwrap();
 
         let luma = rgba_to_luma(&image);
 

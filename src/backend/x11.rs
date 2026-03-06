@@ -50,44 +50,49 @@ pub struct X11Backend {
 impl X11Backend {
     fn get_visual(screen: &Screen) -> Option<Visualtype> {
         // Try to find a visual that matches our needs (24/32 bit depth)
-        let depth = screen.allowed_depths.iter().find(|d| {
-            d.depth == 24 || d.depth == 32
-        })?;
+        let depth = screen
+            .allowed_depths
+            .iter()
+            .find(|d| d.depth == 24 || d.depth == 32)?;
 
-        depth.visuals.iter().find(|v| {
-            v.class == xproto::VisualClass::TRUE_COLOR
-            && v.bits_per_rgb_value == 8
-            && v.red_mask != 0
-            && v.green_mask != 0
-            && v.blue_mask != 0
-        }).cloned()
+        depth
+            .visuals
+            .iter()
+            .find(|v| {
+                v.class == xproto::VisualClass::TRUE_COLOR
+                    && v.bits_per_rgb_value == 8
+                    && v.red_mask != 0
+                    && v.green_mask != 0
+                    && v.blue_mask != 0
+            })
+            .cloned()
     }
 
     fn detect_pixel_format(visual: &Visualtype, setup: &Setup) -> PixelFormat {
         // Calculate total bits needed for RGB values
         let rgb_bits = visual.bits_per_rgb_value * 3;
-        
+
         // Pad to 32 bits if we need more than 24 bits or for alignment
-        let bits_per_pixel = if rgb_bits > 24 || visual.bits_per_rgb_value == 8 { 32 } else { 24 };
+        let bits_per_pixel = if rgb_bits > 24 || visual.bits_per_rgb_value == 8 {
+            32
+        } else {
+            24
+        };
         let bytes_per_pixel = (bits_per_pixel + 7) / 8;
 
-        // Handle different byte orders
+        // Handle different byte orders.
+        // On LSB_FIRST (little-endian) systems, X11 ZPixmap stores pixels as
+        // [BLUE, GREEN, RED, PAD] in memory even though visual masks say RGB.
+        // Swap red and blue masks so the PixelFormat reflects the actual byte
+        // layout (BGR32), which capture_to_rgb_image() already handles correctly.
         let (red_mask, green_mask, blue_mask) = match setup.image_byte_order {
-            ImageOrder::LSB_FIRST => (
-                visual.red_mask,
-                visual.green_mask,
-                visual.blue_mask,
-            ),
+            ImageOrder::LSB_FIRST => (visual.blue_mask, visual.green_mask, visual.red_mask),
             ImageOrder::MSB_FIRST => (
                 visual.red_mask.swap_bytes(),
                 visual.green_mask.swap_bytes(),
                 visual.blue_mask.swap_bytes(),
             ),
-            _ => (
-                visual.red_mask,
-                visual.green_mask,
-                visual.blue_mask,
-            ), // fallback to LSB for unknown orders
+            _ => (visual.red_mask, visual.green_mask, visual.blue_mask), // fallback to LSB for unknown orders
         };
 
         PixelFormat {
@@ -101,10 +106,10 @@ impl X11Backend {
 
     fn get_image(&self, x: i32, y: i32, width: u16, height: u16) -> Result<Vec<u8>, X11Error> {
         // Validate coordinates are within i16 range
-        if x < i16::MIN as i32 || x > i16::MAX as i32 || 
-           y < i16::MIN as i32 || y > i16::MAX as i32 {
+        if x < i16::MIN as i32 || x > i16::MAX as i32 || y < i16::MIN as i32 || y > i16::MAX as i32
+        {
             return Err(X11Error::Connection(
-                x11rb::errors::ConnectionError::UnknownError
+                x11rb::errors::ConnectionError::UnknownError,
             ));
         }
 
@@ -118,16 +123,15 @@ impl X11Backend {
             !0, // plane mask (all planes)
         )?;
 
-        cookie.reply()
+        cookie
+            .reply()
             .map(|reply| reply.data)
             .map_err(X11Error::from)
     }
 
     fn get_cursor(&self, x: i32, y: i32, width: i32, height: i32) -> Option<CursorData> {
         // Skip if XFixes not available
-        if self.xfixes_version.is_none() {
-            return None;
-        }
+        self.xfixes_version?;
 
         // Get cursor image
         // Convert Result to Option, discarding the error
@@ -141,8 +145,11 @@ impl X11Backend {
         let cursor_y = cursor.y as i32 - y;
 
         // Skip if cursor is outside capture area
-        if cursor_x >= width || cursor_y >= height || 
-           cursor_x + cursor.width as i32 <= 0 || cursor_y + cursor.height as i32 <= 0 {
+        if cursor_x >= width
+            || cursor_y >= height
+            || cursor_x + cursor.width as i32 <= 0
+            || cursor_y + cursor.height as i32 <= 0
+        {
             return None;
         }
 
@@ -172,8 +179,9 @@ impl DisplayBackend for X11Backend {
     fn new() -> DisplayResult<Self> {
         // Connect to X server
         // Connect to X server
-        let (conn, screen_num) = RustConnection::connect(None)
-            .map_err(|e| DisplayError::InitializationError(format!("Failed to connect to X server: {}", e)))?;
+        let (conn, screen_num) = RustConnection::connect(None).map_err(|e| {
+            DisplayError::InitializationError(format!("Failed to connect to X server: {}", e))
+        })?;
         let conn = Arc::new(conn);
 
         // Get screen and root window
@@ -182,10 +190,11 @@ impl DisplayBackend for X11Backend {
         let root = screen.root;
 
         // Find appropriate visual
-        let visual = Self::get_visual(screen)
-            .ok_or_else(|| DisplayError::InitializationError(
-                "No suitable visual found (need 24/32 bit TrueColor)".into()
-            ))?;
+        let visual = Self::get_visual(screen).ok_or_else(|| {
+            DisplayError::InitializationError(
+                "No suitable visual found (need 24/32 bit TrueColor)".into(),
+            )
+        })?;
 
         // Initialize XFixes if available
         let xfixes_version = match conn.xfixes_query_version(5, 0) {
@@ -210,7 +219,8 @@ impl DisplayBackend for X11Backend {
         let width = screen.width_in_pixels;
         let height = screen.height_in_pixels;
 
-        let pixels = self.get_image(0, 0, width, height)
+        let pixels = self
+            .get_image(0, 0, width, height)
             .map_err(|e| DisplayError::CaptureError(format!("Failed to capture screen: {}", e)))?;
 
         let format = Self::detect_pixel_format(&self.visual, self.conn.setup());
@@ -227,12 +237,14 @@ impl DisplayBackend for X11Backend {
     fn capture_area(&self, x: i32, y: i32, width: i32, height: i32) -> DisplayResult<CaptureData> {
         // Validate input dimensions and coordinates
         if width <= 0 || height <= 0 || x < 0 || y < 0 {
-            return Err(DisplayError::InvalidArea(
-                format!("Invalid dimensions: {}x{}", width, height)
-            ));
+            return Err(DisplayError::InvalidArea(format!(
+                "Invalid dimensions: {}x{}",
+                width, height
+            )));
         }
 
-        let pixels = self.get_image(x, y, width as u16, height as u16)
+        let pixels = self
+            .get_image(x, y, width as u16, height as u16)
             .map_err(|e| DisplayError::CaptureError(format!("Failed to capture area: {}", e)))?;
 
         let format = Self::detect_pixel_format(&self.visual, self.conn.setup());
@@ -248,10 +260,16 @@ impl DisplayBackend for X11Backend {
 
     fn capture_window(&self, window_id: u64) -> DisplayResult<CaptureData> {
         // Get window geometry
-        let geom = self.conn.get_geometry(window_id as u32)
-            .map_err(|e| DisplayError::CaptureError(format!("Failed to get window geometry: {}", e)))?
+        let geom = self
+            .conn
+            .get_geometry(window_id as u32)
+            .map_err(|e| {
+                DisplayError::CaptureError(format!("Failed to get window geometry: {}", e))
+            })?
             .reply()
-            .map_err(|e| DisplayError::CaptureError(format!("Failed to get window geometry reply: {}", e)))?;
+            .map_err(|e| {
+                DisplayError::CaptureError(format!("Failed to get window geometry reply: {}", e))
+            })?;
 
         let data = self.capture_area(
             geom.x as i32,

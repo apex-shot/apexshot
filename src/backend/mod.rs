@@ -1,9 +1,10 @@
-pub mod x11;
+pub mod screencopy;
 pub mod wayland;
+pub mod x11;
 
 // Re-export backend implementations
-pub use x11::X11Backend;
 pub use wayland::WaylandBackend;
+pub use x11::X11Backend;
 
 use thiserror::Error;
 
@@ -11,19 +12,19 @@ use thiserror::Error;
 pub enum DisplayError {
     #[error("Backend not supported: {0}")]
     UnsupportedBackend(String),
-    
+
     #[error("Failed to initialize display backend: {0}")]
     InitializationError(String),
-    
+
     #[error("Capture failed: {0}")]
     CaptureError(String),
-    
+
     #[error("Invalid area: {0}")]
     InvalidArea(String),
-    
+
     #[error("Portal error: {0}")]
     PortalError(String),
-    
+
     #[error(transparent)]
     IoError(#[from] std::io::Error),
 }
@@ -35,16 +36,16 @@ pub type DisplayResult<T> = Result<T, DisplayError>;
 pub struct PixelFormat {
     /// Bits per pixel (e.g. 24 for RGB, 32 for RGBA)
     pub bits_per_pixel: u8,
-    
+
     /// Bytes per pixel (e.g. 3 for RGB, 4 for RGBA)
     pub bytes_per_pixel: u8,
-    
+
     /// Bit mask for red channel
     pub red_mask: u32,
-    
+
     /// Bit mask for green channel
     pub green_mask: u32,
-    
+
     /// Bit mask for blue channel
     pub blue_mask: u32,
 }
@@ -110,41 +111,41 @@ impl PixelFormat {
 pub struct CursorData {
     /// Raw RGBA pixel data for cursor image
     pub pixels: Vec<u8>,
-    
+
     /// Cursor width in pixels
     pub width: u32,
-    
-    /// Cursor height in pixels 
+
+    /// Cursor height in pixels
     pub height: u32,
-    
+
     /// Cursor x position relative to capture area
     pub x: i32,
-    
+
     /// Cursor y position relative to capture area
     pub y: i32,
-    
+
     /// X offset of cursor hotspot
     pub xhot: u32,
-    
+
     /// Y offset of cursor hotspot
     pub yhot: u32,
 }
 
 /// Raw captured image data and metadata
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CaptureData {
     /// Raw pixel data in the specified format
     pub pixels: Vec<u8>,
-    
+
     /// Image width in pixels
     pub width: u32,
-    
+
     /// Image height in pixels
     pub height: u32,
-    
+
     /// Bytes per row (may include padding)
     pub stride: u32,
-    
+
     /// Pixel format specification
     pub format: PixelFormat,
 
@@ -159,16 +160,22 @@ impl CaptureData {
     }
 
     /// Create a new CaptureData instance with cursor data
-    pub fn with_cursor(pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat, cursor: Option<CursorData>) -> Self {
+    pub fn with_cursor(
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        cursor: Option<CursorData>,
+    ) -> Self {
         let stride = width * format.bytes_per_pixel as u32;
         let expected_size = height * stride;
-        
+
         assert_eq!(
             pixels.len() as u32,
             expected_size,
             "pixels length must match dimensions"
         );
-        
+
         Self {
             pixels,
             width,
@@ -188,28 +195,32 @@ impl CaptureData {
 /// Core trait for display server backends
 pub trait DisplayBackend {
     /// Initialize a new backend instance
-    fn new() -> DisplayResult<Self> where Self: Sized;
+    fn new() -> DisplayResult<Self>
+    where
+        Self: Sized;
 
     /// Capture the entire screen
     fn capture_screen(&self) -> DisplayResult<CaptureData>;
-    
+
     /// Capture a specific area
-    /// 
+    ///
     /// # Arguments
     /// * `x` - X coordinate of capture area
     /// * `y` - Y coordinate of capture area
     /// * `width` - Width of capture area
     /// * `height` - Height of capture area
     fn capture_area(&self, x: i32, y: i32, width: i32, height: i32) -> DisplayResult<CaptureData>;
-    
+
     /// Capture a specific window
-    /// 
+    ///
     /// # Arguments
     /// * `window_id` - ID of window to capture
     fn capture_window(&self, window_id: u64) -> DisplayResult<CaptureData>;
-    
+
     /// Check if this backend is supported on the current system
-    fn is_supported() -> bool where Self: Sized;
+    fn is_supported() -> bool
+    where
+        Self: Sized;
 }
 
 #[cfg(test)]
@@ -270,7 +281,11 @@ mod tests {
             "Portal error: permission denied"
         );
         assert_eq!(
-            DisplayError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found")).to_string(),
+            DisplayError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "file not found"
+            ))
+            .to_string(),
             "file not found"
         );
     }
@@ -278,14 +293,17 @@ mod tests {
     #[test]
     fn test_capture_data_creation() {
         let data = CaptureData::new(
-            vec![0; 12],  // 2x2 RGB24 image
+            vec![0; 12], // 2x2 RGB24 image
             2,
             2,
             PixelFormat::RGB24,
         );
 
         assert_eq!(data.pixels.len(), 12);
-        assert_eq!(data.width * data.height * data.format.bytes_per_pixel as u32, 12);
+        assert_eq!(
+            data.width * data.height * data.format.bytes_per_pixel as u32,
+            12
+        );
         assert_eq!(data.stride, data.width * data.format.bytes_per_pixel as u32);
         assert_eq!(data.size_bytes(), 12);
     }
@@ -293,13 +311,23 @@ mod tests {
     #[test_case(vec![0; 10], 2, 2, PixelFormat::RGB24 ; "too small buffer")]
     #[test_case(vec![0; 14], 2, 2, PixelFormat::RGB24 ; "too large buffer")]
     #[should_panic(expected = "pixels length must match dimensions")]
-    fn test_capture_data_invalid_sizes(pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat) {
+    fn test_capture_data_invalid_sizes(
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+    ) {
         let _data = CaptureData::new(pixels, width, height, format);
     }
 
     #[test_case(vec![0; 16], 2, 2, PixelFormat::RGBA32 ; "rgba32")]
     #[test_case(vec![0; 18], 3, 2, PixelFormat::BGR24 ; "bgr24")]
-    fn test_capture_data_different_formats(pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat) {
+    fn test_capture_data_different_formats(
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+    ) {
         let data = CaptureData::new(pixels.clone(), width, height, format);
         assert_eq!(data.pixels.len(), pixels.len());
         assert_eq!(data.stride, width * format.bytes_per_pixel as u32);

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=ApexShot
+GenericName=Screenshot Tool
+Comment=Persistent screenshot and recording daemon with system tray icon
+Exec=/home/codegoddy/Desktop/apexshot/backend/target/release/cleanshitx daemon
+Icon=camera-photo
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=screenshot;capture;record;screen;tray;
+NoDisplay=true
+StartupNotify=false

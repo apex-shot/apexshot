@@ -1,0 +1,1905 @@
+//! Persistent tray daemon for CleanShotX.
+//!
+//! A single long-running process that:
+//!   1. Shows a system tray icon (via ksni / StatusNotifierItem)
+//!   2. Listens for global hotkeys via GNOME Shell GrabAccelerators
+//!   3. On hotkey or tray-menu trigger → runs capture + overlay IN-PROCESS
+//!      (no subprocess spawn, no GTK cold-start delay)
+//!
+//! Because the daemon is launched once via its .desktop entry, GNOME Shell
+//! trusts it — so `org.gnome.Shell.Screenshot` D-Bus calls succeed (~50 ms),
+//! giving instant popup-free captures.
+
+use std::sync::{Arc, Mutex};
+
+use anyhow::Context;
+use ashpd::desktop::{
+    remote_desktop::{Axis, DeviceType, KeyState, RemoteDesktop},
+    screencast::{CursorMode, Screencast, SourceType},
+    PersistMode, Session,
+};
+
+use crate::{
+    backend::DisplayBackend,
+    capture_overlay::{capture_area_via_cpp, capture_screen_via_cpp, capture_window_via_cpp, AreaCaptureResult},
+    capture::{save_capture, SaveConfig},
+    hotkeys::{accel_to_gnome, ensure_desktop_entry_pub, load_hotkey_config, HotkeyBinding},
+    ocr::{extract_text, OcrConfig},
+    tray::{spawn_tray, TrayAction},
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Daemon action
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum DaemonAction {
+    CaptureArea,
+    CaptureScreen,
+    CaptureWindow,
+    RecordScreen,
+    RecordArea,
+    OpenLastCapture,
+    OpenSettings,
+    ImportWebScrollCapture {
+        png_base64: String,
+        page_url: String,
+        page_title: String,
+    },
+    Quit,
+}
+
+impl From<TrayAction> for DaemonAction {
+    fn from(a: TrayAction) -> Self {
+        match a {
+            TrayAction::CaptureArea => DaemonAction::CaptureArea,
+            TrayAction::CaptureScreen => DaemonAction::CaptureScreen,
+            TrayAction::CaptureWindow => DaemonAction::CaptureWindow,
+            TrayAction::RecordScreen => DaemonAction::RecordScreen,
+            TrayAction::RecordArea => DaemonAction::RecordArea,
+            TrayAction::OpenLastCapture => DaemonAction::OpenLastCapture,
+            TrayAction::OpenSettings => DaemonAction::OpenSettings,
+            TrayAction::Quit => DaemonAction::Quit,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared state
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct DaemonState {
+    last_capture_path: Option<std::path::PathBuf>,
+    /// Channel to send GTK work to the main OS thread. `None` when the daemon
+    /// owns the main thread itself (legacy / test mode).
+    gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
+    /// Whether the Wayland compositor supports the Layer Shell protocol.
+    /// Detected once on the GTK main thread (where GTK is initialized) and
+    /// stored here so worker threads can read it without calling GTK APIs.
+    layer_shell_supported: bool,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main daemon entry point
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Well-known D-Bus name that the daemon registers.
+pub const DAEMON_BUS_NAME: &str = "org.cleanshitx.Daemon";
+/// D-Bus object path.
+pub const DAEMON_OBJECT_PATH: &str = "/org/cleanshitx/Daemon";
+/// D-Bus interface.
+pub const DAEMON_INTERFACE: &str = "org.cleanshitx.Daemon";
+
+/// Try to trigger an action on an already-running daemon via D-Bus.
+/// Returns `true` if the daemon was found and the call succeeded.
+pub async fn trigger_daemon_action(action: &str) -> bool {
+    let Ok(conn) = zbus::Connection::session().await else {
+        return false;
+    };
+    let proxy = match zbus::Proxy::new(&conn, DAEMON_BUS_NAME, DAEMON_OBJECT_PATH, DAEMON_INTERFACE)
+        .await
+    {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    proxy
+        .call::<_, _, ()>("Trigger", &(action.to_string(),))
+        .await
+        .is_ok()
+}
+
+pub async fn import_web_scroll_capture(
+    png_base64: String,
+    page_url: String,
+    page_title: String,
+) -> bool {
+    let Ok(conn) = zbus::Connection::session().await else {
+        return false;
+    };
+    let proxy = match zbus::Proxy::new(&conn, DAEMON_BUS_NAME, DAEMON_OBJECT_PATH, DAEMON_INTERFACE)
+        .await
+    {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    proxy
+        .call::<_, _, bool>("ImportWebScrollCapture", &(png_base64, page_url, page_title))
+        .await
+        .unwrap_or(false)
+}
+
+/// A request for GTK work that must run on the main OS thread.
+/// The daemon sends these through a channel; the main thread executes them.
+pub enum GtkWork {
+    /// Show the interactive area-selector overlay without a pre-captured background.
+    /// `reply` receives selection result from overlay execution.
+    SelectAreaLive {
+        reply: std::sync::mpsc::SyncSender<crate::overlay::SelectionResult>,
+    },
+
+    /// Show the interactive area-selector overlay.
+    /// `reply` receives `Some(area)` on success or `None` if cancelled.
+    SelectArea {
+        capture: crate::backend::CaptureData,
+        reply: std::sync::mpsc::SyncSender<Option<crate::overlay::SelectionArea>>,
+    },
+}
+
+/// Entry point used when GTK runs on the main OS thread.
+/// The daemon sends `GtkWork` items through `gtk_tx`; the caller's main thread
+/// executes them and sends results back via the embedded reply channels.
+/// `layer_shell_supported` must be detected on the GTK main thread before calling this.
+pub async fn run_daemon_with_gtk_channel(
+    gtk_tx: std::sync::mpsc::Sender<GtkWork>,
+    layer_shell_supported: bool,
+) -> anyhow::Result<()> {
+    run_daemon_inner(Some(gtk_tx), layer_shell_supported).await
+}
+
+pub async fn run_daemon() -> anyhow::Result<()> {
+    run_daemon_inner(None, false).await
+}
+
+/// Ensure ydotoold daemon is running for scroll capture on Wayland.
+/// This is called at startup to ensure scroll functionality works.
+fn ensure_ydotoold_running() {
+    use std::process::Command;
+    
+    // Check if ydotoold is already running
+    let output = Command::new("pgrep")
+        .arg("-x")
+        .arg("ydotoold")
+        .output();
+    
+    if let Ok(output) = output {
+        if output.status.success() {
+            eprintln!("[daemon] ydotoold is already running");
+            return;
+        }
+    }
+    
+    // Try to start ydotoold daemon
+    eprintln!("[daemon] Starting ydotoold daemon for scroll capture...");
+    
+    let result = Command::new("ydotoold")
+        .arg("--socket-path=/tmp/.ydotool_socket")
+        .arg("--socket-own=1000:1000")
+        .spawn();
+    
+    match result {
+        Ok(_) => {
+            // Give it a moment to start
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            eprintln!("[daemon] ydotoold started successfully");
+        }
+        Err(e) => {
+            eprintln!("[daemon] Warning: Could not start ydotoold: {}", e);
+            eprintln!("[daemon] Scroll capture may not work on Wayland without ydotoold");
+        }
+    }
+}
+
+async fn run_daemon_inner(
+    gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
+    layer_shell_supported: bool,
+) -> anyhow::Result<()> {
+    eprintln!("[daemon] CleanShotX daemon starting…");
+
+    // Ensure ydotoold is running for scroll capture on Wayland
+    ensure_ydotoold_running();
+
+    if maybe_relaunch_via_desktop() {
+        return Ok(());
+    }
+
+    let state = Arc::new(Mutex::new(DaemonState {
+        last_capture_path: None,
+        gtk_tx,
+        layer_shell_supported,
+    }));
+
+    // Ensure GNOME Shell can associate this process with our desktop entry
+    // even when the daemon is launched from a terminal.
+    ensure_gio_desktop_env();
+
+    // Main action channel — both tray and hotkeys send here.
+    let (action_tx, action_rx) = std::sync::mpsc::channel::<DaemonAction>();
+
+    // ── Tray icon ────────────────────────────────────────────────────────────
+    let (tray_tx, tray_rx) = std::sync::mpsc::channel::<TrayAction>();
+    let tray_action_tx = action_tx.clone();
+    std::thread::spawn(move || {
+        while let Ok(a) = tray_rx.recv() {
+            let _ = tray_action_tx.send(DaemonAction::from(a));
+        }
+    });
+    let _tray_handle = spawn_tray(tray_tx).context("Failed to spawn tray icon")?;
+    eprintln!("[daemon] Tray icon active.");
+
+    // ── D-Bus IPC server ─────────────────────────────────────────────────────
+    let dbus_tx = action_tx.clone();
+    tokio::spawn(async move {
+        if let Err(e) = run_dbus_server(dbus_tx).await {
+            eprintln!("[daemon] D-Bus server error: {e}");
+        }
+    });
+
+    // ── Hotkey listener ──────────────────────────────────────────────────────
+    // On GNOME, hotkeys are handled via gsettings custom keybindings that
+    // spawn `cleanshitx capture area` etc., which relay to us via D-Bus IPC.
+    // We do NOT use the portal GlobalShortcuts here because it grabs keys
+    // exclusively and prevents gsd-media-keys from grabbing the same keys.
+    // Portal listener is only started as a last resort on non-GNOME desktops.
+    let hotkey_tx = action_tx.clone();
+    tokio::spawn(async move {
+        if std::env::var_os("GNOME_SETUP_DISPLAY").is_some()
+            || std::env::var("XDG_CURRENT_DESKTOP")
+                .unwrap_or_default()
+                .to_ascii_uppercase()
+                .contains("GNOME")
+        {
+            eprintln!(
+                "[daemon] GNOME detected — hotkeys via gsettings custom keybindings + D-Bus IPC."
+            );
+        } else {
+            // Non-GNOME: try portal GlobalShortcuts.
+            if let Err(e) = run_hotkey_listener(hotkey_tx).await {
+                eprintln!("[daemon] Hotkey listener error: {e}");
+            }
+        }
+    });
+
+    eprintln!("[daemon] Ready. Listening for hotkeys and tray events.");
+
+    // ── Action loop ──────────────────────────────────────────────────────────
+    while let Ok(action) = action_rx.recv() {
+        let state_clone = state.clone();
+        let action_tx_clone = action_tx.clone();
+        match action {
+            DaemonAction::CaptureArea => {
+                tokio::task::spawn_blocking(move || handle_capture_area(state_clone));
+            }
+            DaemonAction::CaptureScreen => {
+                tokio::task::spawn_blocking(move || handle_capture_screen(state_clone));
+            }
+            DaemonAction::CaptureWindow => {
+                tokio::task::spawn_blocking(move || handle_capture_window(state_clone));
+            }
+            DaemonAction::RecordScreen => {
+                tokio::spawn(handle_record_screen(action_tx_clone));
+            }
+            DaemonAction::RecordArea => {
+                tokio::spawn(handle_record_area(action_tx_clone));
+            }
+            DaemonAction::OpenLastCapture => {
+                let path = state.lock().unwrap().last_capture_path.clone();
+                if let Some(p) = path {
+                    tokio::task::spawn_blocking(move || open_file(p));
+                } else {
+                    eprintln!("[daemon] No capture yet.");
+                }
+            }
+            DaemonAction::OpenSettings => {
+                tokio::task::spawn_blocking(show_settings_subprocess);
+            }
+            DaemonAction::ImportWebScrollCapture {
+                png_base64,
+                page_url,
+                page_title,
+            } => {
+                tokio::task::spawn_blocking(move || {
+                    handle_import_web_scroll_capture(png_base64, page_url, page_title, state_clone)
+                });
+            }
+            DaemonAction::Quit => {
+                eprintln!("[daemon] Quit requested.");
+                break;
+            }
+        }
+    }
+
+    eprintln!("[daemon] Exiting.");
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D-Bus IPC server — exposes org.cleanshitx.Daemon with Trigger(action) method
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The D-Bus interface object. Holds a channel sender to forward actions to
+/// the daemon's main loop.
+struct PortalScrollSession {
+    remote: RemoteDesktop<'static>,
+    session: Session<'static, RemoteDesktop<'static>>,
+    stream_node_id: Option<u32>,
+    stream_pos: (i32, i32),
+    stream_size: Option<(i32, i32)>,
+}
+
+#[derive(Default)]
+struct ScrollInjector {
+    portal: Option<PortalScrollSession>,
+    focused: bool,
+}
+
+impl ScrollInjector {
+    async fn begin(&mut self) -> Result<bool, String> {
+        if self.portal.is_some() {
+            return Ok(true);
+        }
+
+        let remote: RemoteDesktop<'static> = RemoteDesktop::new()
+            .await
+            .map_err(|e| format!("RemoteDesktop proxy init failed: {e}"))?;
+
+        let screencast = Screencast::new()
+            .await
+            .map_err(|e| format!("Screencast proxy init failed: {e}"))?;
+
+        let session: Session<'static, RemoteDesktop<'static>> = remote
+            .create_session()
+            .await
+            .map_err(|e| format!("RemoteDesktop create_session failed: {e}"))?;
+
+        remote
+            .select_devices(
+                &session,
+                DeviceType::Pointer | DeviceType::Keyboard,
+                None,
+                PersistMode::DoNot,
+            )
+            .await
+            .map_err(|e| format!("RemoteDesktop select_devices failed: {e}"))?;
+
+        screencast
+            .select_sources(
+                &session,
+                CursorMode::Hidden,
+                SourceType::Monitor.into(),
+                false,
+                None,
+                PersistMode::DoNot,
+            )
+            .await
+            .map_err(|e| format!("Screencast select_sources failed: {e}"))?;
+
+        let selected = remote
+            .start(&session, None)
+            .await
+            .map_err(|e| format!("RemoteDesktop start request failed: {e}"))?
+            .response()
+            .map_err(|e| format!("RemoteDesktop start denied: {e}"))?;
+
+        let (stream_node_id, stream_pos, stream_size) = if let Some(stream) = selected
+            .streams()
+            .and_then(|streams| streams.first())
+        {
+            (
+                Some(stream.pipe_wire_node_id()),
+                stream.position().unwrap_or((0, 0)),
+                stream.size(),
+            )
+        } else {
+            (None, (0, 0), None)
+        };
+
+        self.portal = Some(PortalScrollSession {
+            remote,
+            session,
+            stream_node_id,
+            stream_pos,
+            stream_size,
+        });
+        self.focused = false;
+        eprintln!("[daemon] RemoteDesktop scroll session started (stream={:?})", stream_node_id);
+        Ok(true)
+    }
+
+    async fn step(&mut self, target_x: i32, target_y: i32, steps: i32) -> bool {
+        if self.begin().await != Ok(true) {
+            return false;
+        }
+
+        let Some(portal) = self.portal.as_ref() else {
+            return false;
+        };
+
+        let mut ok = false;
+
+        if let Some(stream_id) = portal.stream_node_id {
+            let (sx, sy) = portal.stream_pos;
+            let mut local_x = (target_x - sx).max(0) as f64;
+            let mut local_y = (target_y - sy).max(0) as f64;
+            if let Some((w, h)) = portal.stream_size {
+                local_x = local_x.min((w.saturating_sub(1)) as f64);
+                local_y = local_y.min((h.saturating_sub(1)) as f64);
+            }
+
+            if portal
+                .remote
+                .notify_pointer_motion_absolute(&portal.session, stream_id, local_x, local_y)
+                .await
+                .is_ok()
+            {
+                ok = true;
+                let press_ok = portal
+                    .remote
+                    .notify_pointer_button(&portal.session, 272, KeyState::Pressed)
+                    .await
+                    .is_ok();
+                let release_ok = portal
+                    .remote
+                    .notify_pointer_button(&portal.session, 272, KeyState::Released)
+                    .await
+                    .is_ok();
+                self.focused = press_ok && release_ok;
+                ok = ok || self.focused;
+            }
+        }
+
+        let count = std::cmp::max(1, steps);
+        for _ in 0..count {
+            let axis_ok = portal
+                .remote
+                .notify_pointer_axis_discrete(&portal.session, Axis::Vertical, -1)
+                .await
+                .is_ok();
+
+            let smooth_axis_ok = portal
+                .remote
+                .notify_pointer_axis(&portal.session, 0.0, 36.0, true)
+                .await
+                .is_ok();
+
+            let keysym_ok = portal
+                .remote
+                .notify_keyboard_keysym(&portal.session, 0xFF56, KeyState::Pressed)
+                .await
+                .is_ok()
+                && portal
+                    .remote
+                    .notify_keyboard_keysym(&portal.session, 0xFF56, KeyState::Released)
+                    .await
+                    .is_ok();
+
+            let keycode_ok = portal
+                .remote
+                .notify_keyboard_keycode(&portal.session, 109, KeyState::Pressed)
+                .await
+                .is_ok()
+                && portal
+                    .remote
+                    .notify_keyboard_keycode(&portal.session, 109, KeyState::Released)
+                    .await
+                    .is_ok();
+
+            let down_keycode_ok = portal
+                .remote
+                .notify_keyboard_keycode(&portal.session, 108, KeyState::Pressed)
+                .await
+                .is_ok()
+                && portal
+                    .remote
+                    .notify_keyboard_keycode(&portal.session, 108, KeyState::Released)
+                    .await
+                    .is_ok();
+
+            eprintln!(
+                "[daemon] portal scroll step: axis_ok={}, smooth_axis_ok={}, keysym_ok={}, keycode_ok={}, down_keycode_ok={}, focused={}, target=({}, {})",
+                axis_ok,
+                smooth_axis_ok,
+                keysym_ok,
+                keycode_ok,
+                down_keycode_ok,
+                self.focused,
+                target_x,
+                target_y
+            );
+
+            ok = ok || axis_ok || smooth_axis_ok || keysym_ok || keycode_ok || down_keycode_ok;
+        }
+
+        if !ok {
+            self.end().await;
+        }
+
+        ok
+    }
+
+    async fn end(&mut self) {
+        if let Some(portal) = self.portal.take() {
+            let _ = portal.session.close().await;
+            eprintln!("[daemon] RemoteDesktop scroll session ended");
+        }
+        self.focused = false;
+    }
+}
+
+struct DaemonIpc {
+    tx: std::sync::mpsc::Sender<DaemonAction>,
+    scroll_injector: tokio::sync::Mutex<ScrollInjector>,
+}
+async fn try_gnome_shell_capture_area(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<String, String> {
+    let conn = zbus::Connection::session()
+        .await
+        .map_err(|e| format!("Session bus error: {e}"))?;
+
+    let proxy = zbus::Proxy::new(
+        &conn,
+        "org.gnome.Shell",
+        "/org/gnome/Shell/Screenshot",
+        "org.gnome.Shell.Screenshot",
+    )
+    .await
+    .map_err(|e| format!("GNOME Shell proxy error: {e}"))?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0);
+    let requested_path = format!("/tmp/cleanshitx_gnome_{timestamp}.png");
+
+    let (success, filename_used): (bool, String) = proxy
+        .call(
+            "ScreenshotArea",
+            &(x, y, width, height, false, requested_path.clone()),
+        )
+        .await
+        .map_err(|e| format!("GNOME Shell screenshot call failed: {e}"))?;
+
+    if !success {
+        return Err("ScreenshotArea returned success=false".into());
+    }
+
+    let resolved_path = if filename_used.trim().is_empty() {
+        requested_path
+    } else {
+        filename_used
+    };
+
+    if !std::path::Path::new(&resolved_path).exists() {
+        return Err(format!(
+            "GNOME Shell screenshot output file missing: {resolved_path}"
+        ));
+    }
+
+    Ok(resolved_path)
+}
+
+async fn try_gnome_shell_capture_fullscreen() -> Result<String, String> {
+    let conn = zbus::Connection::session()
+        .await
+        .map_err(|e| format!("Session bus error: {e}"))?;
+
+    let proxy = zbus::Proxy::new(
+        &conn,
+        "org.gnome.Shell",
+        "/org/gnome/Shell/Screenshot",
+        "org.gnome.Shell.Screenshot",
+    )
+    .await
+    .map_err(|e| format!("GNOME Shell proxy error: {e}"))?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0);
+    let requested_path = format!("/tmp/cleanshitx_gnome_fs_{timestamp}.png");
+
+    let (success, filename_used): (bool, String) = proxy
+        .call("Screenshot", &(false, false, requested_path.clone()))
+        .await
+        .map_err(|e| format!("GNOME Shell screenshot call failed: {e}"))?;
+
+    if !success {
+        return Err("Screenshot returned success=false".into());
+    }
+
+    let resolved_path = if filename_used.trim().is_empty() {
+        requested_path
+    } else {
+        filename_used
+    };
+
+    if !std::path::Path::new(&resolved_path).exists() {
+        return Err(format!(
+            "GNOME Shell screenshot output file missing: {resolved_path}"
+        ));
+    }
+
+    Ok(resolved_path)
+}
+
+#[zbus::interface(name = "org.cleanshitx.Daemon")]
+impl DaemonIpc {
+    fn trigger(&self, action: String) -> zbus::fdo::Result<()> {
+        eprintln!("[daemon] D-Bus Trigger: {action}");
+        let daemon_action = match action.as_str() {
+            "capture_area" => DaemonAction::CaptureArea,
+            "capture_screen" => DaemonAction::CaptureScreen,
+            "capture_window" => DaemonAction::CaptureWindow,
+            "record_screen" => DaemonAction::RecordScreen,
+            "record_area" => DaemonAction::RecordArea,
+            "open_last" => DaemonAction::OpenLastCapture,
+            "settings" => DaemonAction::OpenSettings,
+            "quit" => DaemonAction::Quit,
+            other => {
+                eprintln!("[daemon] D-Bus Trigger: unknown action '{other}'");
+                return Err(zbus::fdo::Error::InvalidArgs(format!(
+                    "Unknown action: {other}"
+                )));
+            }
+        };
+        self.tx.send(daemon_action).map_err(|e| {
+            zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
+        })?;
+        Ok(())
+    }
+
+    /// Allows the untrusted C++ overlay process to request an area screenshot
+    /// via the trusted daemon on GNOME Wayland.
+    async fn capture_area_gnome(&self, x: i32, y: i32, width: i32, height: i32) -> zbus::fdo::Result<String> {
+        eprintln!("[daemon] D-Bus capture_area_gnome called: {x} {y} {width} {height}");
+        if width <= 0 || height <= 0 {
+            return Err(zbus::fdo::Error::InvalidArgs(format!(
+                "Invalid capture area: {width}x{height}"
+            )));
+        }
+
+        match try_gnome_shell_capture_area(x, y, width, height).await {
+            Ok(path) => Ok(path),
+            Err(shell_err) => {
+                eprintln!(
+                    "[daemon] GNOME Shell area screenshot failed ({shell_err}); trying backend fallback."
+                );
+
+                let fallback = tokio::task::spawn_blocking(move || {
+                    capture_area_to_temp_png_path(x, y, width, height)
+                })
+                .await
+                .map_err(|e| {
+                    zbus::fdo::Error::Failed(format!("Area fallback task join error: {e}"))
+                })?;
+
+                fallback.map_err(|fallback_err| {
+                    zbus::fdo::Error::Failed(format!(
+                        "GNOME Shell area screenshot failed: {shell_err}; backend fallback failed: {fallback_err}"
+                    ))
+                })
+            }
+        }
+    }
+
+    /// Allows the untrusted C++ overlay process to request a fullscreen screenshot
+    /// via the trusted daemon on GNOME Wayland.
+    async fn capture_fullscreen_gnome(&self) -> zbus::fdo::Result<String> {
+        eprintln!("[daemon] D-Bus capture_fullscreen_gnome called");
+        match try_gnome_shell_capture_fullscreen().await {
+            Ok(path) => Ok(path),
+            Err(shell_err) => {
+                eprintln!(
+                    "[daemon] GNOME Shell fullscreen screenshot failed ({shell_err}); trying backend fallback."
+                );
+
+                let fallback = tokio::task::spawn_blocking(capture_fullscreen_to_temp_png_path)
+                    .await
+                    .map_err(|e| {
+                        zbus::fdo::Error::Failed(format!(
+                            "Fullscreen fallback task join error: {e}"
+                        ))
+                    })?;
+
+                fallback.map_err(|fallback_err| {
+                    zbus::fdo::Error::Failed(format!(
+                        "GNOME Shell fullscreen screenshot failed: {shell_err}; backend fallback failed: {fallback_err}"
+                    ))
+                })
+            }
+        }
+    }
+
+    async fn scroll_begin_gnome(&self) -> zbus::fdo::Result<bool> {
+        eprintln!("[daemon] D-Bus scroll_begin_gnome called");
+        let mut injector = self.scroll_injector.lock().await;
+        injector
+            .begin()
+            .await
+            .map_err(zbus::fdo::Error::Failed)
+    }
+
+    async fn scroll_step_gnome(&self, x: i32, y: i32, steps: i32) -> zbus::fdo::Result<bool> {
+        let mut injector = self.scroll_injector.lock().await;
+        Ok(injector.step(x, y, steps).await)
+    }
+
+    async fn scroll_end_gnome(&self) -> zbus::fdo::Result<()> {
+        eprintln!("[daemon] D-Bus scroll_end_gnome called");
+        let mut injector = self.scroll_injector.lock().await;
+        injector.end().await;
+        Ok(())
+    }
+
+    fn import_web_scroll_capture(
+        &self,
+        png_base64: String,
+        page_url: String,
+        page_title: String,
+    ) -> zbus::fdo::Result<bool> {
+        eprintln!("[daemon] D-Bus import_web_scroll_capture called (url={})", page_url);
+        self.tx
+            .send(DaemonAction::ImportWebScrollCapture {
+                png_base64,
+                page_url,
+                page_title,
+            })
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}")))?;
+        Ok(true)
+    }
+}
+
+async fn run_dbus_server(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyhow::Result<()> {
+    use zbus::connection::Builder;
+
+    let ipc = DaemonIpc {
+        tx,
+        scroll_injector: tokio::sync::Mutex::new(ScrollInjector::default()),
+    };
+
+    let _conn = Builder::session()
+        .context("Failed to get session D-Bus")?
+        .name(DAEMON_BUS_NAME)
+        .context("Failed to request D-Bus name")?
+        .serve_at(DAEMON_OBJECT_PATH, ipc)
+        .context("Failed to serve D-Bus object")?
+        .build()
+        .await
+        .context("Failed to build D-Bus connection")?;
+
+    eprintln!("[daemon] D-Bus IPC ready on {DAEMON_BUS_NAME}");
+
+    // Keep the connection alive forever (until daemon exits).
+    std::future::pending::<()>().await;
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hotkey listener — tries GNOME Shell GrabAccelerators, then portal fallback
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn run_hotkey_listener(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyhow::Result<()> {
+    let (_config_path, cfg) = load_hotkey_config(None)?;
+    if cfg.bindings.is_empty() {
+        eprintln!("[daemon] No hotkey bindings configured.");
+        return Ok(());
+    }
+
+    // Ensure GIO_LAUNCHED_DESKTOP_FILE is set so GNOME trusts us even when
+    // launched from a terminal. The hotkeys module's ensure_desktop_entry()
+    // writes the file; we just need to export the env vars.
+    ensure_gio_desktop_env();
+
+    // Tier 1: GNOME Shell GrabAccelerators (fast, no dialog, works on GNOME).
+    match run_hotkey_listener_gnome_shell(&cfg, tx.clone()).await {
+        Ok(()) => return Ok(()),
+        Err(e) => {
+            eprintln!("[daemon] GNOME Shell hotkeys unavailable ({e}), trying portal…");
+        }
+    }
+
+    // Tier 2: XDG GlobalShortcuts portal (works on KDE, GNOME with portal, etc.)
+    run_hotkey_listener_portal(&cfg, tx).await
+}
+
+/// Set GIO_LAUNCHED_DESKTOP_FILE env vars if not already set, so GNOME Shell
+/// treats this process as a trusted desktop-launched application.
+fn ensure_gio_desktop_env() {
+    let app_id = std::env::var("CLEANSHITX_APP_ID")
+        .unwrap_or_else(|_| "io.github.codegoddy.cleanshitx".to_string());
+
+    if let Ok(desktop_path) = ensure_desktop_entry_pub(&app_id) {
+        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
+            std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
+        }
+        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
+            std::env::set_var(
+                "GIO_LAUNCHED_DESKTOP_FILE_PID",
+                std::process::id().to_string(),
+            );
+        }
+        eprintln!("[daemon] GIO desktop env set ({})", desktop_path.display());
+    }
+}
+
+fn is_gnome_desktop() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .contains("gnome")
+}
+
+fn maybe_relaunch_via_desktop() -> bool {
+    if !is_gnome_desktop() {
+        return false;
+    }
+
+    if std::env::var_os("CLEANSHITX_DAEMON_DESKTOP_RELAUNCHED").is_some() {
+        return false;
+    }
+
+    // Already desktop-launched (trusted GNOME context).
+    if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_some() {
+        return false;
+    }
+
+    let app_id = std::env::var("CLEANSHITX_APP_ID")
+        .unwrap_or_else(|_| "io.github.codegoddy.cleanshitx".to_string());
+
+    let desktop_path = match ensure_desktop_entry_pub(&app_id) {
+        Ok(path) => path,
+        Err(err) => {
+            eprintln!("[daemon] Desktop relaunch skipped: could not ensure desktop entry: {err}");
+            return false;
+        }
+    };
+
+    let mut cmd = std::process::Command::new("gtk-launch");
+    cmd.arg(&app_id)
+        .env("CLEANSHITX_DAEMON_DESKTOP_RELAUNCHED", "1");
+
+    match cmd.spawn() {
+        Ok(_) => {
+            eprintln!(
+                "[daemon] GNOME terminal launch detected; relaunched via desktop entry {} (app_id={app_id}).",
+                desktop_path.display()
+            );
+            true
+        }
+        Err(err) => {
+            eprintln!("[daemon] Desktop relaunch failed (continuing in terminal mode): {err}");
+            false
+        }
+    }
+}
+
+/// Tier 1: GNOME Shell `GrabAccelerators` / `AcceleratorActivated`.
+async fn run_hotkey_listener_gnome_shell(
+    cfg: &crate::hotkeys::HotkeyConfig,
+    tx: std::sync::mpsc::Sender<DaemonAction>,
+) -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+    use std::collections::HashMap;
+    use zbus::zvariant::OwnedValue;
+
+    let conn = zbus::Connection::session().await?;
+
+    let shell = zbus::Proxy::new(
+        &conn,
+        "org.gnome.Shell",
+        "/org/gnome/Shell",
+        "org.gnome.Shell",
+    )
+    .await?;
+
+    let grab_args: Vec<(String, u32, u32)> = cfg
+        .bindings
+        .iter()
+        .map(|b| (accel_to_gnome(&b.accelerator), 15u32, 0u32))
+        .collect();
+
+    let action_ids: Vec<u32> = shell
+        .call("GrabAccelerators", &(grab_args,))
+        .await
+        .context("GrabAccelerators call failed")?;
+
+    let mut action_map: HashMap<u32, HotkeyBinding> = HashMap::new();
+    for (idx, action_id) in action_ids.into_iter().enumerate() {
+        if action_id != 0 {
+            if let Some(binding) = cfg.bindings.get(idx) {
+                action_map.insert(action_id, binding.clone());
+            }
+        }
+    }
+
+    if action_map.is_empty() {
+        anyhow::bail!("GrabAccelerators returned no valid action IDs (all conflicts or refused)");
+    }
+
+    eprintln!(
+        "[daemon] {} hotkey(s) registered via GNOME Shell.",
+        action_map.len()
+    );
+
+    let match_rule = "type='signal',interface='org.gnome.Shell',member='AcceleratorActivated',path='/org/gnome/Shell'";
+    let rule: zbus::MatchRule = match_rule.try_into()?;
+    let mut stream = zbus::MessageStream::for_match_rule(rule, &conn, None).await?;
+
+    while let Some(Ok(msg)) = stream.next().await {
+        let Ok((action_id, _params)) = msg
+            .body()
+            .deserialize::<(u32, HashMap<String, OwnedValue>)>()
+        else {
+            continue;
+        };
+
+        if let Some(binding) = action_map.get(&action_id) {
+            if let Some(act) = binding_to_daemon_action(binding) {
+                eprintln!("[daemon] Hotkey fired: {:?}", act);
+                let _ = tx.send(act);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Tier 2: XDG GlobalShortcuts portal.
+/// Mirrors the working `run_portal_hotkey_daemon` in src/hotkeys/mod.rs exactly.
+async fn run_hotkey_listener_portal(
+    cfg: &crate::hotkeys::HotkeyConfig,
+    tx: std::sync::mpsc::Sender<DaemonAction>,
+) -> anyhow::Result<()> {
+    use crate::hotkeys::{accel_to_portal, ensure_desktop_entry_pub};
+    use futures_util::StreamExt;
+    use std::collections::HashMap;
+    use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
+
+    let app_id = std::env::var("CLEANSHITX_APP_ID")
+        .unwrap_or_else(|_| "io.github.codegoddy.cleanshitx".to_string());
+
+    let conn = zbus::Connection::session()
+        .await
+        .context("Failed to connect to session D-Bus")?;
+
+    // Register app_id with the portal so it can associate us with our .desktop file.
+    let _ = ensure_desktop_entry_pub(&app_id);
+    if let Err(e) = portal_register_app_id(&conn, &app_id).await {
+        eprintln!("[daemon] Portal Registry.Register failed (continuing): {e}");
+    }
+
+    let portal = zbus::Proxy::new(
+        &conn,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.GlobalShortcuts",
+    )
+    .await
+    .context("GlobalShortcuts portal not available")?;
+
+    // Helpers shared with hotkeys/mod.rs pattern.
+    let sender_id = conn
+        .unique_name()
+        .ok_or_else(|| anyhow::anyhow!("No D-Bus unique name"))?
+        .as_str()
+        .trim_start_matches(':')
+        .replace('.', "_")
+        .to_string();
+
+    let mk_token = || {
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        // Portal token charset: [A-Za-z0-9_] only.
+        format!("cleanshitx_{pid}_{nanos}")
+    };
+
+    let mk_request_path = |tok: &str| -> anyhow::Result<OwnedObjectPath> {
+        format!("/org/freedesktop/portal/desktop/request/{sender_id}/{tok}")
+            .try_into()
+            .context("Invalid portal request path")
+    };
+
+    // ── CreateSession ─────────────────────────────────────────────────────────
+    let create_tok = mk_token();
+    let session_tok = mk_token();
+    let mut create_opts: HashMap<String, Value> = HashMap::new();
+    create_opts.insert("handle_token".into(), Value::from(create_tok.clone()));
+    create_opts.insert("session_handle_token".into(), Value::from(session_tok));
+
+    let create_req_path = mk_request_path(&create_tok)?;
+    // Subscribe BEFORE the call to avoid a race condition.
+    let create_rule_str = format!(
+        "type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
+        create_req_path.as_str()
+    );
+    let create_rule: zbus::MatchRule = create_rule_str.as_str().try_into()?;
+    let mut create_stream =
+        zbus::MessageStream::for_match_rule(create_rule, &conn, Some(1)).await?;
+
+    let _req: OwnedObjectPath = portal
+        .call("CreateSession", &(create_opts))
+        .await
+        .context("GlobalShortcuts.CreateSession failed")?;
+
+    let (create_status, create_results) = {
+        let msg = create_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("No CreateSession response"))??;
+        msg.body()
+            .deserialize::<(u32, HashMap<String, OwnedValue>)>()
+            .context("Failed to deserialize CreateSession response")?
+    };
+    if create_status != 0 {
+        anyhow::bail!("CreateSession response={create_status}");
+    }
+
+    let session_handle_str: String = create_results
+        .get("session_handle")
+        .ok_or_else(|| anyhow::anyhow!("Missing session_handle in CreateSession response"))?
+        .try_clone()
+        .context("clone session_handle")?
+        .try_into()
+        .context("session_handle not a string")?;
+
+    let session_handle: OwnedObjectPath = session_handle_str
+        .try_into()
+        .context("Invalid session_handle object path")?;
+
+    eprintln!("[daemon] Portal session created.");
+
+    // ── BindShortcuts ─────────────────────────────────────────────────────────
+    let mut id_to_binding: HashMap<String, HotkeyBinding> = HashMap::new();
+    let mut shortcuts: Vec<(String, HashMap<String, Value>)> = Vec::new();
+
+    for (idx, binding) in cfg.bindings.iter().enumerate() {
+        let id = binding
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("binding_{idx}"));
+        let preferred_trigger = accel_to_portal(&binding.accelerator);
+        let mut props: HashMap<String, Value> = HashMap::new();
+        props.insert("description".into(), Value::from(id.replace('_', " ")));
+        // Skip Print-based triggers — they're often reserved on desktops.
+        if !preferred_trigger.to_ascii_uppercase().ends_with("PRINT") {
+            props.insert("preferred_trigger".into(), Value::from(preferred_trigger));
+        }
+        shortcuts.push((id.clone(), props));
+        id_to_binding.insert(id, binding.clone());
+    }
+
+    let bind_tok = mk_token();
+    let mut bind_opts: HashMap<String, Value> = HashMap::new();
+    bind_opts.insert("handle_token".into(), Value::from(bind_tok.clone()));
+
+    let bind_req_path = mk_request_path(&bind_tok)?;
+    let bind_rule_str = format!(
+        "type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
+        bind_req_path.as_str()
+    );
+    let bind_rule: zbus::MatchRule = bind_rule_str.as_str().try_into()?;
+    let mut bind_stream = zbus::MessageStream::for_match_rule(bind_rule, &conn, Some(1)).await?;
+
+    let _bind_req: OwnedObjectPath = portal
+        .call(
+            "BindShortcuts",
+            &(session_handle.clone(), shortcuts, "".to_string(), bind_opts),
+        )
+        .await
+        .context("GlobalShortcuts.BindShortcuts failed")?;
+
+    eprintln!("[daemon] Registering shortcuts with portal…");
+
+    let (bind_status, _bind_results) = {
+        let msg = bind_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("No BindShortcuts response"))??;
+        msg.body()
+            .deserialize::<(u32, HashMap<String, OwnedValue>)>()
+            .context("Failed to deserialize BindShortcuts response")?
+    };
+    match bind_status {
+        0 => eprintln!(
+            "[daemon] Portal shortcuts bound ({} shortcut(s)).",
+            id_to_binding.len()
+        ),
+        1 => anyhow::bail!("BindShortcuts cancelled by user"),
+        s => {
+            // Status 2 can mean "shortcuts set but user may need to confirm in Settings".
+            // This is non-fatal — activations will still be delivered.
+            eprintln!("[daemon] BindShortcuts response={s} (non-fatal, continuing to listen).");
+        }
+    }
+
+    // ── Listen for Activated signals ─────────────────────────────────────────
+    let activated_rule = format!(
+        "type='signal',interface='org.freedesktop.portal.GlobalShortcuts',member='Activated',path='{}'",
+        session_handle.as_str()
+    );
+    let rule: zbus::MatchRule = activated_rule.as_str().try_into()?;
+    let mut activated_stream = zbus::MessageStream::for_match_rule(rule, &conn, None).await?;
+
+    eprintln!("[daemon] Listening for portal hotkey activations…");
+
+    while let Some(Ok(msg)) = activated_stream.next().await {
+        // Signal body: (o session_handle, s shortcut_id, u timestamp, a{sv} options)
+        if let Ok((_session, shortcut_id, _ts, _opts)) =
+            msg.body()
+                .deserialize::<(OwnedObjectPath, String, u32, HashMap<String, OwnedValue>)>()
+        {
+            if let Some(binding) = id_to_binding.get(&shortcut_id) {
+                if let Some(act) = binding_to_daemon_action(binding) {
+                    eprintln!("[daemon] Portal hotkey fired: {:?}", act);
+                    let _ = tx.send(act);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Register this process's D-Bus peer with the portal's host Registry so it can
+/// be associated with our app_id / .desktop file.
+async fn portal_register_app_id(conn: &zbus::Connection, app_id: &str) -> anyhow::Result<()> {
+    use std::collections::HashMap;
+    use zbus::zvariant::Value;
+
+    let registry = zbus::Proxy::new(
+        conn,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.host.portal.Registry",
+    )
+    .await
+    .context("Failed to create host Registry proxy")?;
+
+    let opts: HashMap<String, Value> = HashMap::new();
+    for attempt in 0..2u8 {
+        let call: Result<(), zbus::Error> = registry
+            .call("Register", &(app_id.to_string(), opts.clone()))
+            .await;
+        match call {
+            Ok(()) => {
+                eprintln!("[daemon] Portal: registered app_id={app_id}");
+                return Ok(());
+            }
+            Err(e) if attempt == 0 && e.to_string().contains("App info not found") => {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            Err(e) => return Err(anyhow::anyhow!("Registry.Register failed: {e}")),
+        }
+    }
+    anyhow::bail!("Registry.Register failed after retries")
+}
+
+fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
+    // First try matching by the binding's name field.
+    if let Some(name) = binding.name.as_deref() {
+        match name {
+            "capture_area" | "capture-area" => return Some(DaemonAction::CaptureArea),
+            "capture_screen" | "capture-screen" => return Some(DaemonAction::CaptureScreen),
+            "capture_window" | "capture-window" => return Some(DaemonAction::CaptureWindow),
+            "record_screen" | "record-screen" => return Some(DaemonAction::RecordScreen),
+            "record_area" | "record-area" => return Some(DaemonAction::RecordArea),
+            _ => {}
+        }
+    }
+
+    // Fallback: derive action from the args list.
+    match binding.args.get(0).map(|s| s.as_str()) {
+        Some("capture") => match binding.args.get(1).map(|s| s.as_str()) {
+            Some("area") => Some(DaemonAction::CaptureArea),
+            Some("screen") => Some(DaemonAction::CaptureScreen),
+            Some("window") => Some(DaemonAction::CaptureWindow),
+            _ => None,
+        },
+        Some("record") => match binding.args.get(1).map(|s| s.as_str()) {
+            Some("screen") => Some(DaemonAction::RecordScreen),
+            Some("area") => Some(DaemonAction::RecordArea),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Capture helpers — run on blocking thread via spawn_blocking
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn make_wayland_backend() -> Option<crate::backend::WaylandBackend> {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        <crate::backend::WaylandBackend as DisplayBackend>::new().ok()
+    } else {
+        None
+    }
+}
+
+fn make_x11_backend() -> Option<crate::backend::X11Backend> {
+    if std::env::var_os("DISPLAY").is_some() {
+        <crate::backend::X11Backend as DisplayBackend>::new().ok()
+    } else {
+        None
+    }
+}
+
+fn capture_full_screen() -> Option<crate::backend::CaptureData> {
+    if let Some(b) = make_wayland_backend() {
+        b.capture_screen_impl().ok()
+    } else if let Some(b) = make_x11_backend() {
+        <crate::backend::X11Backend as DisplayBackend>::capture_screen(&b).ok()
+    } else {
+        None
+    }
+}
+
+fn capture_to_temp_png_path(capture: crate::backend::CaptureData) -> Result<String, String> {
+    let path = save_temp_png_daemon(&capture)
+        .ok_or_else(|| "Failed to save temporary PNG".to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+fn capture_fullscreen_to_temp_png_path() -> Result<String, String> {
+    let capture =
+        capture_full_screen().ok_or_else(|| "No display backend available for fullscreen capture".to_string())?;
+    capture_to_temp_png_path(capture)
+}
+
+fn capture_area_to_temp_png_path(x: i32, y: i32, width: i32, height: i32) -> Result<String, String> {
+    if width <= 0 || height <= 0 {
+        return Err(format!("Invalid capture area: {width}x{height}"));
+    }
+
+    if let Some(backend) = make_wayland_backend() {
+        match backend.capture_area_direct_impl(x, y, width, height) {
+            Ok(capture) => return capture_to_temp_png_path(capture),
+            Err(area_err) => {
+                let full = backend.capture_screen_impl().map_err(|e| {
+                    format!("Wayland area capture failed ({area_err}); fullscreen fallback failed: {e}")
+                })?;
+                let crop_x = x.max(0) as u32;
+                let crop_y = y.max(0) as u32;
+                let crop_w = width.max(1) as u32;
+                let crop_h = height.max(1) as u32;
+                let cropped = crop_capture_data(&full, crop_x, crop_y, crop_w, crop_h)
+                    .ok_or_else(|| "Wayland crop fallback was out of bounds".to_string())?;
+                return capture_to_temp_png_path(cropped);
+            }
+        }
+    }
+
+    if let Some(backend) = make_x11_backend() {
+        match <crate::backend::X11Backend as DisplayBackend>::capture_area(
+            &backend,
+            x,
+            y,
+            width,
+            height,
+        ) {
+            Ok(capture) => return capture_to_temp_png_path(capture),
+            Err(area_err) => {
+                let full = <crate::backend::X11Backend as DisplayBackend>::capture_screen(&backend)
+                    .map_err(|e| {
+                        format!(
+                            "X11 area capture failed ({area_err}); fullscreen fallback failed: {e}"
+                        )
+                    })?;
+                let crop_x = x.max(0) as u32;
+                let crop_y = y.max(0) as u32;
+                let crop_w = width.max(1) as u32;
+                let crop_h = height.max(1) as u32;
+                let cropped = crop_capture_data(&full, crop_x, crop_y, crop_w, crop_h)
+                    .ok_or_else(|| "X11 crop fallback was out of bounds".to_string())?;
+                return capture_to_temp_png_path(cropped);
+            }
+        }
+    }
+
+    Err("No display backend available for area capture".into())
+}
+
+fn capture_full_screen_for_area_selector() -> Option<crate::backend::CaptureData> {
+    eprintln!("[capture] capture_full_screen_for_area_selector: starting background capture for selector");
+    if let Some(b) = make_wayland_backend() {
+        eprintln!("[capture] capture_full_screen_for_area_selector: using Wayland backend (capture_screen_for_selection_impl)");
+        let result = b.capture_screen_for_selection_impl().ok();
+        match &result {
+            Some(d) => eprintln!("[capture] capture_full_screen_for_area_selector: Wayland capture succeeded ({}x{})", d.width, d.height),
+            None => eprintln!("[capture] capture_full_screen_for_area_selector: Wayland capture failed (returned None)"),
+        }
+        result
+    } else if let Some(b) = make_x11_backend() {
+        eprintln!("[capture] capture_full_screen_for_area_selector: using X11 backend");
+        let result = <crate::backend::X11Backend as DisplayBackend>::capture_screen(&b).ok();
+        match &result {
+            Some(d) => eprintln!("[capture] capture_full_screen_for_area_selector: X11 capture succeeded ({}x{})", d.width, d.height),
+            None => eprintln!("[capture] capture_full_screen_for_area_selector: X11 capture failed (returned None)"),
+        }
+        result
+    } else {
+        eprintln!("[capture] capture_full_screen_for_area_selector: no backend available");
+        None
+    }
+}
+
+fn crop_capture_data(
+    capture: &crate::backend::CaptureData,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+) -> Option<crate::backend::CaptureData> {
+    use crate::backend::CaptureData;
+    let bpp = capture.format.bytes_per_pixel as usize;
+    let stride = capture.stride as usize;
+    let row_len = w as usize * bpp;
+
+    if x + w > capture.width || y + h > capture.height || w == 0 || h == 0 {
+        return None;
+    }
+
+    let mut pixels = Vec::with_capacity(row_len * h as usize);
+    for row in 0..h as usize {
+        let src_y = y as usize + row;
+        let src_offset = src_y * stride + x as usize * bpp;
+        pixels.extend_from_slice(&capture.pixels[src_offset..src_offset + row_len]);
+    }
+
+    Some(CaptureData::new(pixels, w, h, capture.format))
+}
+
+fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonState>>) {
+    match save_capture(&capture, &SaveConfig::default()) {
+        Ok(path) => {
+            let path: std::path::PathBuf = path;
+            eprintln!("[daemon] Saved: {}", path.display());
+            state.lock().unwrap().last_capture_path = Some(path.clone());
+            show_preview_subprocess(path);
+        }
+        Err(e) => eprintln!("[daemon] Save error: {e}"),
+    }
+}
+
+fn handle_import_web_scroll_capture(
+    png_base64: String,
+    page_url: String,
+    page_title: String,
+    state: Arc<Mutex<DaemonState>>,
+) {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use crate::backend::{CaptureData, PixelFormat};
+
+    let decoded = match STANDARD.decode(png_base64.as_bytes()) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("[daemon] Web scroll import failed: invalid base64 payload: {e}");
+            return;
+        }
+    };
+
+    let dyn_image = match image::load_from_memory(&decoded) {
+        Ok(img) => img,
+        Err(e) => {
+            eprintln!("[daemon] Web scroll import failed: invalid image payload: {e}");
+            return;
+        }
+    };
+
+    let rgba = dyn_image.to_rgba8();
+    let width = rgba.width();
+    let height = rgba.height();
+    let pixels = rgba.into_raw();
+
+    if width == 0 || height == 0 {
+        eprintln!("[daemon] Web scroll import failed: empty image");
+        return;
+    }
+
+    eprintln!(
+        "[daemon] Importing web scroll capture ({}x{}, url={}, title={})",
+        width, height, page_url, page_title
+    );
+
+    let capture = CaptureData::new(pixels, width, height, PixelFormat::RGBA32);
+    save_and_open(capture, state);
+}
+
+fn run_ocr_and_report(capture: crate::backend::CaptureData) {
+    eprintln!("[daemon] OCR tool selected — extracting text from selected area...");
+    match extract_text(&capture, &OcrConfig::default()) {
+        Ok(result) => {
+            eprintln!("[daemon] OCR successful (confidence: {}%)", result.confidence);
+            if result.copied_to_clipboard {
+                send_desktop_notification("OCR complete", "Text copied to clipboard");
+            } else {
+                send_desktop_notification(
+                    "OCR complete",
+                    "Text extracted, but clipboard copy was unavailable",
+                );
+            }
+        }
+        Err(err) => {
+            eprintln!("[daemon] OCR failed: {err}");
+            send_desktop_notification("OCR failed", &err.to_string());
+        }
+    }
+}
+
+fn send_desktop_notification(summary: &str, body: &str) {
+    let mut cmd = std::process::Command::new("notify-send");
+    cmd.arg("-a").arg("CleanShotX").arg(summary);
+    if !body.is_empty() {
+        cmd.arg(body);
+    }
+
+    if let Err(e) = cmd.spawn() {
+        eprintln!("[daemon] Failed to send desktop notification: {e}");
+    }
+}
+
+/// Spawn `cleanshitx preview <path>` as a subprocess so it gets its own GTK context.
+fn show_preview_subprocess(path: std::path::PathBuf) {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cleanshitx"));
+    match std::process::Command::new(&exe)
+        .arg("preview")
+        .arg(&path)
+        .spawn()
+    {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("[daemon] Failed to spawn preview subprocess: {e}, falling back to xdg-open");
+            open_file(path);
+        }
+    }
+}
+
+fn show_settings_subprocess() {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cleanshitx"));
+
+    if let Err(e) = std::process::Command::new(&exe).arg("settings").spawn() {
+        eprintln!("[daemon] Failed to spawn settings window: {e}");
+    }
+}
+
+fn open_file(path: std::path::PathBuf) {
+    let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+}
+
+/// Save CaptureData as a temp PNG for the C++ overlay background.
+fn save_temp_png_daemon(capture: &crate::backend::CaptureData) -> Option<std::path::PathBuf> {
+    use image::{ImageBuffer, Rgba};
+
+    let tmp = std::env::temp_dir().join(format!(
+        "cleanshitx_bg_{}.png",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    ));
+
+    let bytes_per_pixel = capture.format.bytes_per_pixel as usize;
+    let stride = capture.stride as usize;
+    let w = capture.width;
+    let h = capture.height;
+
+    use crate::backend::PixelFormat;
+    let is_bgr = capture.format == PixelFormat::BGR24
+        || capture.format == PixelFormat::BGR32
+        || capture.format == PixelFormat::BGRA32;
+
+    let mut rgba: Vec<u8> = Vec::with_capacity((w * h * 4) as usize);
+    for row in 0..h as usize {
+        let row_start = row * stride;
+        let row_end = (row_start + w as usize * bytes_per_pixel).min(capture.pixels.len());
+        let row_data = &capture.pixels[row_start..row_end];
+        for px in row_data.chunks(bytes_per_pixel) {
+            if px.len() >= 4 {
+                if is_bgr {
+                    rgba.push(px[2]); // R (from BGR byte[2])
+                    rgba.push(px[1]); // G
+                    rgba.push(px[0]); // B (from BGR byte[0])
+                    rgba.push(px[3]); // A
+                } else {
+                    rgba.push(px[0]); // R
+                    rgba.push(px[1]); // G
+                    rgba.push(px[2]); // B
+                    rgba.push(px[3]); // A
+                }
+            } else if px.len() == 3 {
+                if is_bgr {
+                    rgba.push(px[2]);
+                    rgba.push(px[1]);
+                    rgba.push(px[0]);
+                } else {
+                    rgba.push(px[0]);
+                    rgba.push(px[1]);
+                    rgba.push(px[2]);
+                }
+                rgba.push(255);
+            }
+        }
+    }
+
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(w, h, rgba)?;
+    img.save(&tmp).ok()?;
+    Some(tmp)
+}
+
+fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
+    match capture_area_via_cpp() {
+        Ok(AreaCaptureResult::Captured(capture)) => {
+            save_and_open(capture, state);
+            return;
+        }
+        Ok(AreaCaptureResult::ScrollCaptured(capture)) => {
+            save_and_open(capture, state);
+            return;
+        }
+        Ok(AreaCaptureResult::OcrRequested(capture)) => {
+            run_ocr_and_report(capture);
+            return;
+        }
+        Ok(AreaCaptureResult::Cancelled) => {
+            eprintln!("[daemon] Area selection cancelled.");
+            return;
+        }
+        Err(err) => {
+            eprintln!(
+                "[daemon] C++ area-init capture path failed ({err}); falling back to Rust backend."
+            );
+        }
+    }
+
+    eprintln!("[daemon] handle_capture_area: START — thread={:?}", std::thread::current().id());
+    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    eprintln!("[daemon] handle_capture_area: is_wayland={is_wayland}");
+
+    // Get the gtk_tx from state (if available) to dispatch GTK work to the main thread.
+    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
+    eprintln!("[daemon] handle_capture_area: gtk_tx available={}", gtk_tx.is_some());
+
+    if is_wayland {
+        let Some(backend) = make_wayland_backend() else {
+            eprintln!("[daemon] No Wayland backend available for area capture.");
+            return;
+        };
+
+        // On Wayland compositors that don't support the Layer Shell protocol
+        // (e.g. GNOME Shell), a transparent live overlay is impossible.
+        // This was detected on the GTK main thread at startup and stored in state.
+        let layer_shell_supported = state.lock().unwrap().layer_shell_supported;
+        eprintln!("[daemon] handle_capture_area: layer_shell_supported={layer_shell_supported}");
+
+        // Use the C++ overlay with screenshot background for area selection.
+        // Capture full screen first, save as temp PNG, pass to C++ overlay.
+        let state_for_window = state.clone();
+        let run_cpp_selector_fn = |bg: Option<&std::path::Path>| -> crate::overlay::SelectionResult {
+            let result = crate::capture_overlay::run_capture_overlay_with_window(bg);
+            // Handle sentinels from window picker toolbar
+            if let Ok(Some(ref area)) = result {
+                if area.x == i32::MIN {
+                    eprintln!("[daemon] Window capture sentinel");
+                    match capture_window_via_cpp() {
+                        Ok(capture) => save_and_open(capture, state_for_window.clone()),
+                        Err(e) => eprintln!("[daemon] Window capture failed: {e}"),
+                    }
+                    return Ok(None);
+                } else if area.x == i32::MIN + 1 {
+                    eprintln!("[daemon] Switching to area mode from window picker");
+                    match capture_area_via_cpp() {
+                        Ok(AreaCaptureResult::Captured(capture)) => {
+                            save_and_open(capture, state_for_window.clone())
+                        }
+                        Ok(AreaCaptureResult::ScrollCaptured(capture)) => {
+                            save_and_open(capture, state_for_window.clone())
+                        }
+                        Ok(AreaCaptureResult::OcrRequested(capture)) => {
+                            run_ocr_and_report(capture)
+                        }
+                        Ok(AreaCaptureResult::Cancelled) => {
+                            eprintln!("[daemon] Area capture cancelled")
+                        }
+                        Err(e) => eprintln!("[daemon] Area capture failed: {e}"),
+                    }
+                    return Ok(None);
+                } else if area.x == i32::MIN + 2 {
+                    eprintln!("[daemon] Switching to fullscreen from window picker");
+                    match capture_screen_via_cpp() {
+                        Ok(capture) => save_and_open(capture, state_for_window.clone()),
+                        Err(e) => eprintln!("[daemon] Fullscreen capture failed: {e}"),
+                    }
+                    return Ok(None);
+                }
+            }
+            result
+        };
+
+        let run_live_selector = || -> crate::overlay::SelectionResult {
+            let bg_capture = backend.capture_screen_for_selection_impl().ok();
+            let tmp_bg = bg_capture.as_ref().and_then(|c| save_temp_png_daemon(c));
+            let result = run_cpp_selector_fn(tmp_bg.as_deref());
+            if let Some(ref p) = tmp_bg { let _ = std::fs::remove_file(p); }
+            result
+        };
+
+        // Fast path: show transparent live overlay immediately.
+        // Skip on compositors that don't support Layer Shell (e.g. GNOME Wayland) —
+        // we use the capture-after-selection (Option B) path below instead.
+        if !layer_shell_supported {
+            eprintln!(
+                "[daemon] Wayland compositor does not support Layer Shell; \
+                 will use dark-overlay selector + capture-after-selection."
+            );
+        }
+
+        let live_selector_result = if layer_shell_supported {
+            Some(run_live_selector())
+        } else {
+            None
+        };
+
+        // If we ran the live selector, process its result.
+        // None means we skipped it (no layer-shell), so fall through to screenshot-backed path.
+        match live_selector_result {
+            Some(Ok(Some(area))) => {
+                match backend.capture_area_direct_impl(area.x, area.y, area.width, area.height) {
+                    Ok(capture) => {
+                        save_and_open(capture, state.clone());
+                        return;
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "[daemon] Wayland area capture failed ({err}); trying full-screen crop fallback."
+                        );
+
+                        match backend.capture_screen_impl() {
+                            Ok(full) => {
+                                let x = area.x.max(0) as u32;
+                                let y = area.y.max(0) as u32;
+                                let w = area.width.max(1) as u32;
+                                let h = area.height.max(1) as u32;
+                                if let Some(cropped) = crop_capture_data(&full, x, y, w, h) {
+                                    save_and_open(cropped, state.clone());
+                                    return;
+                                }
+                                eprintln!("[daemon] Full-screen crop fallback was out of bounds.");
+                            }
+                            Err(full_err) => {
+                                eprintln!(
+                                    "[daemon] Full-screen fallback capture failed: {full_err}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            Some(Ok(None)) => {
+                eprintln!("[daemon] Area selection cancelled.");
+                return;
+            }
+            Some(Err(err)) => {
+                eprintln!(
+                    "[daemon] Live selector unavailable ({err}); falling back to screenshot-backed selector."
+                );
+            }
+            None => {
+                // Layer shell not supported — go straight to screenshot-backed selector.
+            }
+        }
+
+        // Option B path: on compositors without Layer Shell (e.g. GNOME Wayland),
+        // show the dark-overlay selector UI FIRST (no pre-capture, no flash/sound),
+        // then capture only the selected region AFTER the user confirms.
+        // The flash/sound from the portal fires after selection — feels like a shutter.
+        eprintln!("[daemon] No Layer Shell — using capture-after-selection (Option B): showing dark overlay selector first.");
+        let selector_start = std::time::Instant::now();
+        let area_result = run_live_selector();
+        eprintln!("[daemon] Dark overlay selector returned after {:.0}ms: {:?}", selector_start.elapsed().as_millis(), area_result.as_ref().map(|o| o.as_ref().map(|_| "area")));
+        match area_result {
+            Ok(Some(area)) => {
+                eprintln!("[daemon] Selection confirmed: ({}, {}, {}x{}); now capturing selected region...", area.x, area.y, area.width, area.height);
+                let capture_start = std::time::Instant::now();
+                match backend.capture_area_direct_impl(area.x, area.y, area.width, area.height) {
+                    Ok(capture) => {
+                        eprintln!("[daemon] Region capture succeeded in {:.0}ms ({}x{})", capture_start.elapsed().as_millis(), capture.width, capture.height);
+                        save_and_open(capture, state.clone());
+                    }
+                    Err(err) => {
+                        eprintln!("[daemon] Region capture failed ({:.0}ms): {err}; falling back to full-screen capture + crop.", capture_start.elapsed().as_millis());
+                        // Fallback: full-screen capture then crop
+                        match backend.capture_screen_impl() {
+                            Ok(full) => {
+                                let x = area.x.max(0) as u32;
+                                let y = area.y.max(0) as u32;
+                                let w = area.width.max(1) as u32;
+                                let h = area.height.max(1) as u32;
+                                if let Some(cropped) = crop_capture_data(&full, x, y, w, h) {
+                                    save_and_open(cropped, state.clone());
+                                } else {
+                                    eprintln!("[daemon] Crop out of bounds.");
+                                }
+                            }
+                            Err(full_err) => eprintln!("[daemon] Full-screen fallback capture failed: {full_err}"),
+                        }
+                    }
+                }
+            }
+            Ok(None) => eprintln!("[daemon] Area selection cancelled."),
+            Err(err) => eprintln!("[daemon] Dark overlay selector failed: {err}"),
+        }
+        return;
+    }
+
+    // X11 path: capture full screen, save as temp PNG, pass to C++ overlay.
+    let Some(full) = capture_full_screen_for_area_selector() else {
+        eprintln!("[daemon] Could not capture screen for area selector.");
+        return;
+    };
+
+    let tmp_bg = save_temp_png_daemon(&full);
+    let area_opt = match crate::capture_overlay::run_capture_overlay(tmp_bg.as_deref()) {
+        Ok(area) => area,
+        Err(e) => {
+            eprintln!("[daemon] C++ overlay failed: {e}");
+            None
+        }
+    };
+    if let Some(ref p) = tmp_bg { let _ = std::fs::remove_file(p); }
+
+    match area_opt {
+        Some(area) => {
+            // Crop from the already-captured frame.
+            let x = area.x.max(0) as u32;
+            let y = area.y.max(0) as u32;
+            let w = area.width.max(1) as u32;
+            let h = area.height.max(1) as u32;
+
+            if let Some(cropped) = crop_capture_data(&full, x, y, w, h) {
+                save_and_open(cropped, state);
+            } else {
+                eprintln!("[daemon] Crop out of bounds.");
+            }
+        }
+        None => eprintln!("[daemon] Area selection cancelled."),
+    }
+}
+
+fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
+    match capture_screen_via_cpp() {
+        Ok(capture) => {
+            save_and_open(capture, state);
+            return;
+        }
+        Err(err) => {
+            eprintln!(
+                "[daemon] C++ fullscreen capture failed ({err}); falling back to Rust backend."
+            );
+        }
+    }
+
+    match capture_full_screen() {
+        Some(c) => save_and_open(c, state),
+        None => eprintln!("[daemon] No backend available for screen capture."),
+    }
+}
+
+fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
+    eprintln!("[daemon] Window capture requested — using GNOME Shell DBus");
+    match capture_window_via_cpp() {
+        Ok(capture) => {
+            save_and_open(capture, state);
+        }
+        Err(e) => {
+            eprintln!("[daemon] Window capture failed: {e}; falling back to area capture.");
+            handle_capture_area(state);
+        }
+    }
+}
+
+async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
+    use crate::recording::{
+        run_recording_stop_overlay, start_recording_with_stop, RecordingConfig,
+    };
+
+    eprintln!("[daemon] Starting screen recording…");
+
+    let config = RecordingConfig::default();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let record_join = tokio::spawn(async move { start_recording_with_stop(config, stop_rx).await });
+
+    // Show stop overlay on a dedicated blocking thread (it runs a GTK loop).
+    let overlay_result =
+        tokio::task::spawn_blocking(move || run_recording_stop_overlay(stop_tx)).await;
+
+    match overlay_result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!("[daemon] Stop overlay error: {e}"),
+        Err(e) => eprintln!("[daemon] Stop overlay task panicked: {e}"),
+    }
+
+    match record_join.await {
+        Ok(Ok(path)) => eprintln!("[daemon] Recording saved: {}", path.display()),
+        Ok(Err(e)) => eprintln!("[daemon] Recording error: {e}"),
+        Err(e) => eprintln!("[daemon] Recording task panicked: {e}"),
+    }
+}
+
+async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
+    use crate::capture_overlay::run_capture_overlay;
+    use crate::recording::{
+        run_recording_stop_overlay, start_recording_with_stop, RecordingConfig,
+    };
+
+    eprintln!("[daemon] Selecting area for recording…");
+
+    // Show C++ overlay on a blocking thread.
+    let selection = tokio::task::spawn_blocking(|| run_capture_overlay(None)).await;
+
+    let cpp_area = match selection {
+        Ok(Ok(Some(a))) => a,
+        Ok(Ok(None)) => {
+            eprintln!("[daemon] Area selection cancelled.");
+            return;
+        }
+        Ok(Err(e)) => {
+            eprintln!("[daemon] Area selection error: {e}");
+            return;
+        }
+        Err(e) => {
+            eprintln!("[daemon] Area selection task panicked: {e}");
+            return;
+        }
+    };
+    let area = crate::overlay::SelectionArea {
+        x: cpp_area.x, y: cpp_area.y, width: cpp_area.width, height: cpp_area.height,
+    };
+
+    let mut config = RecordingConfig::default();
+    config.x = Some(area.x);
+    config.y = Some(area.y);
+    config.width = Some(area.width as u32);
+    config.height = Some(area.height as u32);
+
+    eprintln!(
+        "[daemon] Starting area recording ({},{} {}x{})…",
+        area.x, area.y, area.width, area.height
+    );
+
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let record_join = tokio::spawn(async move { start_recording_with_stop(config, stop_rx).await });
+
+    let overlay_result =
+        tokio::task::spawn_blocking(move || run_recording_stop_overlay(stop_tx)).await;
+
+    match overlay_result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!("[daemon] Stop overlay error: {e}"),
+        Err(e) => eprintln!("[daemon] Stop overlay task panicked: {e}"),
+    }
+
+    match record_join.await {
+        Ok(Ok(path)) => eprintln!("[daemon] Recording saved: {}", path.display()),
+        Ok(Err(e)) => eprintln!("[daemon] Recording error: {e}"),
+        Err(e) => eprintln!("[daemon] Recording task panicked: {e}"),
+    }
+}
