@@ -1,0 +1,55 @@
+[package]
+name = "apexshot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# display server
+x11rb = { version = "0.13.2", features = ["all-extensions"] }
+zbus = "5.11.0"  # for dbus/portal communication
+tokio = { version = "1.47.1", features = ["full"] }
+ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+url = "2.5"
+
+# GUI overlay for area selection (X11)
+gtk4 = "0.10"
+gdk4x11 = { package = "gdk4-x11", version = "0.10" }
+gtk4-layer-shell = "0.7.1"
+
+# error handling
+thiserror = "2.0.16"
+anyhow = "1.0.99"
+
+# utils
+dirs = "6.0.0"   # xdg dirs support
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.145"
+serde_yml = "0.0.12"
+base64 = "0.22.1"
+tracing = "0.1.41"
+futures-util = "0.3.31"
+async-trait = "0.1.89"
+image = { version = "0.24.9", features = ["png", "jpeg", "gif"] }
+rayon = "1.10"
+chrono = "0.4"
+
+# OCR
+tesseract = "0.15"
+arboard = { version = "3.6", features = ["wayland-data-control"] }
+gstreamer = "0.24.4"
+gstreamer-app = "0.24.4"
+gstreamer-video = "0.24.4"
+relm4-icons = "0.10.1"
+wayland-client = "0.31.12"
+wayland-protocols = "0.32.10"
+wayland-protocols-wlr = "0.3.10"
+libc = "0.2.182"
+ksni = "0.2"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"  # better test output
+test-case = "3.3.1"         # parameterized tests
+mockall = "0.13.1"          # mocking framework
+
+[build-dependencies]
+relm4-icons-build = "0.10.1"
