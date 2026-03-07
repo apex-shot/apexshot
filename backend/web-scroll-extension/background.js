@@ -4,6 +4,7 @@ const CAPTURE_RETRY_DELAY_MS = 1000;
 const MAX_CAPTURE_RETRIES = 3;
 const OVERLAP_PX = 80;
 const MAX_STEPS = 120;
+const BOTTOM_RECHECK_LIMIT = 2;
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab || !tab.id || typeof tab.windowId !== "number") {
@@ -38,33 +39,52 @@ async function captureAndStitch(tab, metrics) {
   const dpr = Math.max(1, metrics.devicePixelRatio || 1);
   const viewportHeightCss = Math.max(1, metrics.viewportHeight);
   const viewportWidthCss = Math.max(1, metrics.captureViewportWidth || metrics.viewportWidth);
-  const maxScrollY = Math.max(0, metrics.totalHeight - viewportHeightCss);
   const step = Math.max(1, viewportHeightCss - OVERLAP_PX);
 
   const slices = [];
   let targetY = 0;
   let lastCapturedY = null;
+  let knownMaxScrollY = Math.max(0, metrics.totalHeight - viewportHeightCss);
+  let dynamicTotalHeight = metrics.totalHeight;
+  let bottomRechecks = 0;
 
   await preparePageForCapture(tab.id);
   try {
     for (let i = 0; i < MAX_STEPS; i += 1) {
-      const actualY = await setScrollY(tab.id, targetY);
+      await setScrollY(tab.id, targetY);
       await sleep(SCROLL_DELAY_MS);
 
-      if (lastCapturedY !== null && Math.abs(actualY - lastCapturedY) < 1) {
-        break;
-      }
+      const scrollState = await getScrollState(tab.id);
+      const actualY = scrollState.scrollY;
+      knownMaxScrollY = Math.max(knownMaxScrollY, scrollState.maxScrollY);
+      dynamicTotalHeight = Math.max(dynamicTotalHeight, scrollState.totalHeight);
 
       await setFixedAndStickyVisibility(tab.id, i > 0);
 
       const dataUrl = await captureVisibleTabWithQuota(tab.windowId);
       slices.push({ yCss: actualY, dataUrl });
+
+      const stuckAtSameY = lastCapturedY !== null && Math.abs(actualY - lastCapturedY) < 1;
       lastCapturedY = actualY;
 
-      if (actualY >= maxScrollY) {
-        break;
+      if (actualY + 1 >= knownMaxScrollY) {
+        const refreshedState = await getScrollState(tab.id);
+        knownMaxScrollY = Math.max(knownMaxScrollY, refreshedState.maxScrollY);
+        dynamicTotalHeight = Math.max(dynamicTotalHeight, refreshedState.totalHeight);
+
+        if (actualY + 1 >= knownMaxScrollY) {
+          bottomRechecks += 1;
+          if (stuckAtSameY || bottomRechecks >= BOTTOM_RECHECK_LIMIT) {
+            break;
+          }
+        } else {
+          bottomRechecks = 0;
+        }
+      } else {
+        bottomRechecks = 0;
       }
-      targetY = Math.min(actualY + step, maxScrollY);
+
+      targetY = Math.min(actualY + step, knownMaxScrollY);
     }
   } finally {
     await restorePageAfterCapture(tab.id, metrics.initialScrollY);
@@ -75,7 +95,7 @@ async function captureAndStitch(tab, metrics) {
   }
 
   const outputWidthPx = Math.round(viewportWidthCss * dpr);
-  const outputHeightPx = Math.round(metrics.totalHeight * dpr);
+  const outputHeightPx = Math.round(dynamicTotalHeight * dpr);
 
   if (outputWidthPx <= 0 || outputHeightPx <= 0) {
     throw new Error("Invalid output dimensions");
@@ -270,6 +290,34 @@ async function setScrollY(tabId, y) {
 
   if (typeof result !== "number") {
     throw new Error("Unable to read scrolled position");
+  }
+
+  return result;
+}
+
+async function getScrollState(tabId) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const viewportHeight = window.innerHeight;
+      const totalHeight = Math.max(
+        document.body ? document.body.scrollHeight : 0,
+        document.documentElement ? document.documentElement.scrollHeight : 0,
+        document.body ? document.body.offsetHeight : 0,
+        document.documentElement ? document.documentElement.offsetHeight : 0,
+        viewportHeight
+      );
+      const maxScrollY = Math.max(0, totalHeight - viewportHeight);
+      return {
+        scrollY: window.scrollY,
+        totalHeight,
+        maxScrollY
+      };
+    }
+  });
+
+  if (!result || typeof result.scrollY !== "number" || typeof result.totalHeight !== "number" || typeof result.maxScrollY !== "number") {
+    throw new Error("Unable to read live scroll state");
   }
 
   return result;

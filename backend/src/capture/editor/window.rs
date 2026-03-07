@@ -428,7 +428,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let traffic_minimize = traffic_light_button("traffic-light-yellow", "Minimize");
     let traffic_zoom = traffic_light_button("traffic-light-green", "Zoom");
 
-    let traffic_lights = GtkBox::new(Orientation::Horizontal, 8);
+    let traffic_lights = GtkBox::new(Orientation::Horizontal, 6);
     traffic_lights.add_css_class("editor-traffic-lights");
     traffic_lights.append(&traffic_close);
     traffic_lights.append(&traffic_minimize);

@@ -279,9 +279,11 @@ fn run_uninstall(args: &[String]) {
 }
 
 fn install_binary() {
-    let dest = std::path::Path::new("/usr/local/bin/apexshot");
+    use std::os::unix::fs::PermissionsExt;
 
-    // Find the source binary: prefer the running executable itself.
+    let dest = std::path::Path::new("/usr/local/bin/apexshot");
+    let capture_dest = std::path::Path::new("/usr/local/bin/apexshot-capture");
+
     let src = std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("target/release/apexshot"));
 
@@ -289,8 +291,6 @@ fn install_binary() {
 
     match std::fs::copy(&src, dest) {
         Ok(_) => {
-            // Make it executable (rwxr-xr-x = 0o755).
-            use std::os::unix::fs::PermissionsExt;
             if let Err(e) = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755)) {
                 eprintln!("Warning: could not set executable permissions: {e}");
             } else {
@@ -299,6 +299,48 @@ fn install_binary() {
         }
         Err(e) => {
             eprintln!("Error: failed to install binary: {e}");
+            eprintln!("Hint: try running with sudo, e.g.  sudo apexshot install");
+            std::process::exit(1);
+        }
+    }
+
+    let capture_src = src
+        .with_file_name("apexshot-capture")
+        .exists()
+        .then(|| src.with_file_name("apexshot-capture"))
+        .or_else(|| {
+            option_env!("APEXSHOT_CAPTURE_BIN_DIR").and_then(|dir| {
+                let candidate = std::path::PathBuf::from(dir).join("apexshot-capture");
+                candidate.exists().then_some(candidate)
+            })
+        });
+
+    let Some(capture_src) = capture_src else {
+        eprintln!("Error: apexshot-capture binary not found next to the built binary");
+        eprintln!(
+            "Hint: build from the backend directory so the C++ helper is compiled before install"
+        );
+        std::process::exit(1);
+    };
+
+    println!(
+        "Installing capture helper: {} → {}",
+        capture_src.display(),
+        capture_dest.display()
+    );
+
+    match std::fs::copy(&capture_src, capture_dest) {
+        Ok(_) => {
+            if let Err(e) =
+                std::fs::set_permissions(capture_dest, std::fs::Permissions::from_mode(0o755))
+            {
+                eprintln!("Warning: could not set capture helper executable permissions: {e}");
+            } else {
+                println!("✓ Capture helper installed to {}", capture_dest.display());
+            }
+        }
+        Err(e) => {
+            eprintln!("Error: failed to install capture helper: {e}");
             eprintln!("Hint: try running with sudo, e.g.  sudo apexshot install");
             std::process::exit(1);
         }
@@ -672,6 +714,12 @@ fn run_daemon_with_gtk_on_main_thread() {
                     "[gtk] SelectAreaLive completed after {:.0}ms",
                     live_start.elapsed().as_millis()
                 );
+                let _ = reply.send(result);
+            }
+            GtkWork::CaptureAreaInit { reply } => {
+                eprintln!("[gtk] CaptureAreaInit received — launching C++ area-init");
+                let result = apexshot::capture_overlay::capture_area_file_via_cpp()
+                    .map_err(|e| e.to_string());
                 let _ = reply.send(result);
             }
             GtkWork::SelectArea { capture, reply } => {

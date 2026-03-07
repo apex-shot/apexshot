@@ -20,8 +20,8 @@ use crate::overlay::{SelectionArea, SelectionError, SelectionResult};
 ///
 /// Search order:
 /// 1. `APEXSHOT_CAPTURE_BIN` env variable (manual override).
-/// 2. Build-time output directory embedded by build.rs via `APEXSHOT_CAPTURE_BIN_DIR`.
-/// 3. Same directory as the currently-running executable.
+/// 2. Same directory as the currently-running executable.
+/// 3. Build-time output directory embedded by build.rs via `APEXSHOT_CAPTURE_BIN_DIR`.
 /// 4. Common target profile directories relative to the exe (handles `cargo run` edge cases).
 /// 5. PATH lookup.
 fn find_capture_binary() -> Option<PathBuf> {
@@ -37,24 +37,24 @@ fn find_capture_binary() -> Option<PathBuf> {
         }
     }
 
-    // 2. Build-time output directory embedded by build.rs
-    if let Some(dir) = option_env!("APEXSHOT_CAPTURE_BIN_DIR") {
-        let candidate = PathBuf::from(dir).join("apexshot-capture");
+    // 2. Same directory as the running executable — useful for installed bundles.
+    if let Ok(exe) = std::env::current_exe() {
+        let candidate = exe.with_file_name("apexshot-capture");
         if candidate.exists() {
             eprintln!(
-                "[capture_overlay] Found apexshot-capture via build dir: {}",
+                "[capture_overlay] Found apexshot-capture next to exe: {}",
                 candidate.display()
             );
             return Some(candidate);
         }
     }
 
-    // 3. Same directory as the running executable — useful for installed bundles.
-    if let Ok(exe) = std::env::current_exe() {
-        let candidate = exe.with_file_name("apexshot-capture");
+    // 3. Build-time output directory embedded by build.rs
+    if let Some(dir) = option_env!("APEXSHOT_CAPTURE_BIN_DIR") {
+        let candidate = PathBuf::from(dir).join("apexshot-capture");
         if candidate.exists() {
             eprintln!(
-                "[capture_overlay] Found apexshot-capture next to exe: {}",
+                "[capture_overlay] Found apexshot-capture via build dir: {}",
                 candidate.display()
             );
             return Some(candidate);
@@ -76,7 +76,6 @@ fn find_capture_binary() -> Option<PathBuf> {
                     return Some(candidate);
                 }
             }
-            // Check if this directory itself contains it
             let candidate = d.join("apexshot-capture");
             if candidate.exists() && candidate != exe.with_file_name("apexshot-capture") {
                 eprintln!(
@@ -120,7 +119,8 @@ fn run_capture_binary(
     })?;
 
     let mut cmd = Command::new(&binary);
-    cmd.stdin(Stdio::null())
+    cmd.env("QT_IM_MODULE", "compose")
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
 
