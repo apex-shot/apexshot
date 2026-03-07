@@ -67,7 +67,8 @@ public:
     };
 
     explicit CaptureOverlay(const QPixmap& background = QPixmap(),
-                             QWidget* parent = nullptr);
+                             QWidget* parent = nullptr,
+                             bool timerCaptureEnabled = false);
 
     /// Returns the selected rectangle in screen (logical pixel) coordinates.
     /// Only valid when QApplication exits with code 0.
@@ -76,6 +77,8 @@ public:
     bool scrollCaptureCompleted() const { return m_scrollCaptureReady; }
     QString scrollCapturePath() const { return m_scrollCapturePath; }
     QSize scrollCaptureSize() const { return m_scrollCaptureSize; }
+    int captureDelaySeconds() const { return m_captureDelaySeconds; }
+    bool countdownHandledInOverlay() const { return true; }
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -130,6 +133,7 @@ private:
     static int estimateOverlapRows(const QImage& prev, const QImage& next);
     static double overlapDiffScore(const QImage& prev, const QImage& next, int overlapRows);
 
+    void cycleCaptureDelay();
     void confirmSelection();
     void cancelSelection();
 
@@ -154,6 +158,11 @@ private:
     QRect     m_selectionAtDragStart;
     bool      m_fullscreenMode;     // true when Fullscreen tool is active
     bool      m_windowMode;         // true when Window tool is active
+    bool      m_timerCaptureEnabled;
+    bool      m_timerDelayActive;
+    int       m_captureDelaySeconds;
+    bool      m_countdownActive;
+    int       m_countdownValue;
     CaptureIntent m_captureIntent;   // current capture intent for confirmation
     ScrollStage m_scrollStage;       // inactive / ready / actively sampling scroll frames
 

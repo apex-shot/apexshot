@@ -10,6 +10,10 @@ mod window;
 pub use types::EditorError;
 pub use window::open_image_editor;
 
+pub fn copy_file_uri_to_clipboard(path: &std::path::Path) -> Result<(), String> {
+    io_ops::copy_uri_to_clipboard(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,6 +6,9 @@
 mod editor;
 mod preview_overlay;
 pub use editor::{open_image_editor, EditorError};
+pub fn copy_capture_uri_to_clipboard(path: &Path) -> Result<(), String> {
+    editor::copy_file_uri_to_clipboard(path)
+}
 pub use preview_overlay::{show_capture_preview_overlay, CapturePreviewError};
 
 use crate::backend::{CaptureData, CursorData, PixelFormat};

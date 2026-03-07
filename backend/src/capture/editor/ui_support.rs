@@ -179,8 +179,6 @@ pub fn install_editor_css() {
                 min-width: 12px;
                 min-height: 12px;
                 border-radius: 999px;
-                justify-content: center;
-                align-items: center;
                 transition: all 140ms ease;
                 border: 1px solid rgba(0, 0, 0, 0.45);
             }

@@ -468,7 +468,7 @@ void ScrollControlPanel::positionNear(const QRect& captureArea, const QSize& scr
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
-CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent)
+CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool timerCaptureEnabled)
     : QWidget(parent)
     , m_background(background)
     , m_hasSelection(false)
@@ -478,6 +478,11 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent)
     , m_dragStart(0, 0)
     , m_fullscreenMode(false)
     , m_windowMode(false)
+    , m_timerCaptureEnabled(timerCaptureEnabled)
+    , m_timerDelayActive(timerCaptureEnabled)
+    , m_captureDelaySeconds(5)
+    , m_countdownActive(false)
+    , m_countdownValue(0)
     , m_captureIntent(CaptureIntent::Area)
     , m_scrollStage(ScrollStage::Inactive)
     , m_scrollCaptureReady(false)
@@ -699,6 +704,32 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
     drawToolbar(p, sx, sy, selW, selH, sw, sh);
+
+    // ── Visible countdown overlay ─────────────────────────────────────────────
+    if (m_countdownActive && m_countdownValue > 0) {
+        const double bubbleSize = std::min(sw, sh) * 0.24;
+        const double bubbleDiameter = std::clamp(bubbleSize, 120.0, 220.0);
+        const QRectF bubbleRect((sw - bubbleDiameter) / 2.0,
+                                (sh - bubbleDiameter) / 2.0,
+                                bubbleDiameter,
+                                bubbleDiameter);
+
+        p.save();
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 176));
+        p.drawEllipse(bubbleRect);
+        p.setPen(QPen(QColor(255, 255, 255, 72), 2.0));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(bubbleRect.adjusted(1.5, 1.5, -1.5, -1.5));
+
+        QFont countdownFont(QStringLiteral("Sans"));
+        countdownFont.setBold(true);
+        countdownFont.setPointSizeF(bubbleDiameter * 0.34);
+        p.setFont(countdownFont);
+        p.setPen(QColor(255, 255, 255, 252));
+        p.drawText(bubbleRect, Qt::AlignCenter, QString::number(m_countdownValue));
+        p.restore();
+    }
 }
 
 // ── Draw toolbar (mirrors draw_feature_toolbar in overlay.rs) ─────────────────
@@ -720,7 +751,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     );
     const QImage* blurPtr = m_blurredBg.isNull() ? nullptr : &m_blurredBg;
 
-    int activeTool = 1; // Area mode by default
+    int activeTool = 1;
     if (scrollModeActive) {
         activeTool = 4;
     }
@@ -731,15 +762,20 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         activeTool = 6;
     }
 
-    // ── Tools panel frosted glass ─────────────────────────────────────────────
+    const bool timerToolEnabled = m_timerCaptureEnabled && !scrollModeActive;
+    const bool timerToolActive = timerToolEnabled && m_timerDelayActive && m_captureDelaySeconds > 0;
+
     drawFrostedPanel(p,
                      layout.toolsPanel.x(), layout.toolsPanel.y(),
                      layout.toolsPanel.width(), layout.toolsPanel.height(),
                      FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
 
-    // ── Selected style on active tool ────────────────────────────────────────
-    if (activeTool >= 0 && activeTool < NUM_TOOLS) {
-        QRectF cell = layout.itemCells[activeTool];
+    auto drawActiveToolCell = [&](int toolIndex) {
+        if (toolIndex < 0 || toolIndex >= NUM_TOOLS) {
+            return;
+        }
+
+        QRectF cell = layout.itemCells[toolIndex];
         double hx = cell.x() + 3.0, hy = cell.y() + 4.0;
         double hw = cell.width() - 6.0, hh = cell.height() - 8.0;
 
@@ -759,6 +795,11 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         roundedRectPath(rim, hx + 0.6, hy + 0.6, hw - 1.2, hh - 1.2, 7.5);
         p.drawPath(rim);
         p.restore();
+    };
+
+    drawActiveToolCell(activeTool);
+    if (timerToolActive && activeTool != 5) {
+        drawActiveToolCell(5);
     }
 
     // ── Hover highlight on hovered tool ──────────────────────────────────────
@@ -814,37 +855,48 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         QRectF cell = layout.itemCells[i];
         double cx = cell.x() + cell.width() / 2.0;
         bool hovered = (m_hoveredTool == i);
-        bool active = (activeTool == i);
-        double iconAlpha = (hovered || active) ? 1.0 : 0.98;
-        double shadowAlpha = hovered ? 0.30 : (active ? 0.38 : 0.52);
+        bool active = (activeTool == i) || (i == 5 && timerToolActive);
+        bool enabled = (i != 5) || timerToolEnabled;
+        double iconAlpha = enabled ? ((hovered || active) ? 1.0 : 0.98) : 0.42;
+        double shadowAlpha = enabled ? (hovered ? 0.30 : (active ? 0.38 : 0.52)) : 0.22;
         double iconY = layout.toolsPanel.y() + ((hovered || active) ? 15.5 : 16.0);
         QColor iconColor = active
             ? QColor(223, 241, 255, int(iconAlpha * 255))
             : QColor(255, 255, 255, int(iconAlpha * 255));
 
-        // Shadow pass
         drawToolbarIcon(p, i, cx + 0.6, iconY + 0.8,
                         QColor(0,0,0, int(shadowAlpha*255)));
-        // Icon pass
         drawToolbarIcon(p, i, cx, iconY, iconColor);
 
-        // Label
         QFont f; f.setFamily("Sans"); f.setPointSizeF(7.5);
         f.setBold(hovered || active); p.setFont(f);
         QFontMetricsF fm(f);
         QString label(TOOLBAR_LABELS[i]);
 
-        // Shadow
         p.setPen(QColor(0,0,0, int(shadowAlpha*255)));
         double tw = fm.horizontalAdvance(label);
         p.drawText(QPointF(cx - tw/2.0 + 0.6,
                            layout.toolsPanel.y() + 34.0 + 0.8), label);
-        // Foreground
         p.setPen(active
             ? QColor(223,241,255, int(iconAlpha * 255))
             : QColor(255,255,255, int(iconAlpha * 255)));
         p.drawText(QPointF(cx - tw/2.0,
                            layout.toolsPanel.y() + 34.0), label);
+
+        if (i == 5 && timerToolActive) {
+            const QString badgeText = QStringLiteral("%1s").arg(m_captureDelaySeconds);
+            QFont badgeFont; badgeFont.setFamily("Sans"); badgeFont.setPointSizeF(6.6); badgeFont.setBold(true);
+            p.setFont(badgeFont);
+            QFontMetricsF badgeMetrics(badgeFont);
+            const double badgeTextW = badgeMetrics.horizontalAdvance(badgeText);
+            const double badgeW = std::max(22.0, badgeTextW + 10.0);
+            const QRectF badgeRect(cell.right() - badgeW - 5.0, cell.y() + 5.0, badgeW, 14.0);
+            QPainterPath badgePath;
+            roundedRectPath(badgePath, badgeRect.x(), badgeRect.y(), badgeRect.width(), badgeRect.height(), 7.0);
+            p.fillPath(badgePath, QColor(0, 122, 255, 230));
+            p.setPen(QColor(255, 255, 255, 248));
+            p.drawText(badgeRect, Qt::AlignCenter, badgeText);
+        }
     }
 
     // ── Size label ("Size" header + "WxH" value) ──────────────────────────────
@@ -977,6 +1029,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 m_selection = QRect(defaultX, defaultY, defaultW, defaultH);
                 m_hasSelection = true;
                 m_fullscreenMode = false;
+                m_timerDelayActive = false;
                 m_captureIntent = CaptureIntent::Area;
                 update();
                 return true;
@@ -1004,14 +1057,26 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 update();
                 showWebScrollCaptureInfo(this);
                 return true;
+            } else if (toolIndex == 5) {
+                if (!m_timerCaptureEnabled) {
+                    return true;
+                }
+                if (!m_timerDelayActive) {
+                    m_timerDelayActive = true;
+                    if (m_captureDelaySeconds <= 0) {
+                        m_captureDelaySeconds = 5;
+                    }
+                    update();
+                } else {
+                    cycleCaptureDelay();
+                }
+                return true;
             } else if (toolIndex == 6) {
-                // OCR: enter OCR intent mode and wait for Enter/Space/double-click.
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Ocr;
                 update();
                 return true;
             } else {
-                // All other tools: confirm/capture
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Area;
                 confirmSelection();
@@ -1254,6 +1319,7 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         m_selection = QRect((width()-defaultW)/2, (height()-defaultH)/2, defaultW, defaultH);
                         m_hasSelection = true;
                         m_fullscreenMode = false;
+                        m_timerDelayActive = false;
                         m_captureIntent = CaptureIntent::Area;
                         update();
                     } else if (i == 4) {
@@ -1261,6 +1327,18 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         m_captureIntent = CaptureIntent::Area;
                         update();
                         showWebScrollCaptureInfo(this);
+                    } else if (i == 5) {
+                        if (m_timerCaptureEnabled) {
+                            if (!m_timerDelayActive) {
+                                m_timerDelayActive = true;
+                                if (m_captureDelaySeconds <= 0) {
+                                    m_captureDelaySeconds = 5;
+                                }
+                                update();
+                            } else {
+                                cycleCaptureDelay();
+                            }
+                        }
                     } else if (i == 6) {
                         exitScrollMode();
                         m_captureIntent = CaptureIntent::Ocr;
@@ -2315,18 +2393,53 @@ void CaptureOverlay::exitWindowMode()
     update();
 }
 
+void CaptureOverlay::cycleCaptureDelay()
+{
+    if (!m_timerCaptureEnabled || m_captureIntent == CaptureIntent::Scroll) {
+        return;
+    }
+
+    switch (m_captureDelaySeconds) {
+    case 0:
+        m_captureDelaySeconds = 3;
+        break;
+    case 3:
+        m_captureDelaySeconds = 5;
+        break;
+    case 5:
+        m_captureDelaySeconds = 10;
+        break;
+    default:
+        m_captureDelaySeconds = 0;
+        break;
+    }
+
+    update();
+}
+
 void CaptureOverlay::confirmSelection()
 {
     if (m_scrollCaptureTimer && m_scrollCaptureTimer->isActive()) {
         m_scrollCaptureTimer->stop();
     }
+
+    if (m_timerDelayActive && m_captureDelaySeconds > 0 && !m_countdownActive) {
+        m_countdownActive = true;
+        for (int remaining = m_captureDelaySeconds; remaining > 0; --remaining) {
+            m_countdownValue = remaining;
+            update();
+            QApplication::processEvents();
+            QThread::sleep(1);
+        }
+        m_countdownActive = false;
+        m_countdownValue = 0;
+        update();
+        QApplication::processEvents();
+    }
+
     releaseKeyboard();
-    // Hide the overlay immediately so it doesn't appear in the screenshot
     hide();
-    // Process all pending events so the compositor/X server has a chance
-    // to actually remove our window from the screen before we exit.
     QApplication::processEvents();
-    // Small delay to let the compositor flush the frame
     QThread::msleep(120);
     QApplication::exit(0);
 }

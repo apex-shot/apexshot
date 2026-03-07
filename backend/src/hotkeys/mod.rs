@@ -853,7 +853,7 @@ fn install_gnome_custom_keybindings(cfg: &HotkeyConfig) -> anyhow::Result<()> {
     let existing = gnome_custom_keybinding_paths()?;
     let unmanaged = existing
         .into_iter()
-        .filter(|p| !p.contains("/apexshot-"))
+        .filter(|p| !p.contains("/apexshot-") && !p.contains("/cleanshitx-"))
         .collect::<Vec<_>>();
 
     let action_exe = resolve_action_exe()?;

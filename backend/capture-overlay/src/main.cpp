@@ -14,6 +14,7 @@
 #include <QStandardPaths>
 #include <QUrl>
 #include <QEventLoop>
+#include <QThread>
 
 #include <QCoreApplication>
 #include <cstdio>
@@ -94,6 +95,7 @@ void printCaptureScreenJson(const QString& path, const QSize& size, const char* 
 int main(int argc, char* argv[])
 {
     qputenv("QT_QPA_PLATFORM", "");
+    qputenv("QT_IM_MODULE", "compose");
 
     QApplication app(argc, argv);
     app.setApplicationName("ApexShot Capture");
@@ -235,7 +237,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    CaptureOverlay overlay(background);
+    CaptureOverlay overlay(background, nullptr, areaInitMode);
     overlay.show();
 
     const int ret = app.exec();
