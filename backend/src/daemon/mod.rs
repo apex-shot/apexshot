@@ -10,7 +10,10 @@
 //! trusts it — so `org.gnome.Shell.Screenshot` D-Bus calls succeed (~50 ms),
 //! giving instant popup-free captures.
 
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Context;
 use ashpd::desktop::{
@@ -21,17 +24,21 @@ use ashpd::desktop::{
 
 use crate::{
     backend::DisplayBackend,
-    capture::{save_capture, save_existing_png, SaveConfig},
+    capture::{
+        copy_capture_uri_to_clipboard, open_image_editor, save_capture, save_existing_png,
+        SaveConfig,
+    },
     capture_overlay::{
         capture_area_file_via_cpp, capture_screen_file_via_cpp, capture_window_file_via_cpp,
         AreaCapturePathResult,
     },
+    config::load_config,
     hotkeys::{
         accel_to_gnome, ensure_desktop_entry_pub, load_hotkey_config,
         sync_gnome_hotkeys_for_current_desktop, HotkeyBinding,
     },
     ocr::{extract_text, OcrConfig},
-    tray::{spawn_tray, TrayAction},
+    tray::{spawn_tray, ApexShotTray, TrayAction},
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,6 +54,7 @@ pub enum DaemonAction {
     RecordArea,
     OpenLastCapture,
     OpenSettings,
+    SetTrayVisible(bool),
     ImportWebScrollCapture {
         png_base64: String,
         page_url: String,
@@ -138,17 +146,47 @@ pub async fn import_web_scroll_capture(
         .unwrap_or(false)
 }
 
+pub fn set_daemon_tray_visibility(visible: bool) -> bool {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let proxy = match zbus::blocking::Proxy::new(
+        &conn,
+        DAEMON_BUS_NAME,
+        DAEMON_OBJECT_PATH,
+        DAEMON_INTERFACE,
+    ) {
+        Ok(proxy) => proxy,
+        Err(_) => return false,
+    };
+
+    proxy
+        .call::<_, _, ()>("SetTrayVisible", &(visible,))
+        .is_ok()
+}
+
+fn spawn_daemon_tray(
+    action_tx: &std::sync::mpsc::Sender<DaemonAction>,
+) -> anyhow::Result<ksni::Handle<ApexShotTray>> {
+    let (tray_tx, tray_rx) = std::sync::mpsc::channel::<TrayAction>();
+    let tray_action_tx = action_tx.clone();
+    std::thread::spawn(move || {
+        while let Ok(action) = tray_rx.recv() {
+            let _ = tray_action_tx.send(DaemonAction::from(action));
+        }
+    });
+    spawn_tray(tray_tx).context("Failed to spawn tray icon")
+}
+
 /// A request for GTK work that must run on the main OS thread.
 /// The daemon sends these through a channel; the main thread executes them.
 pub enum GtkWork {
-    /// Show the interactive area-selector overlay without a pre-captured background.
-    /// `reply` receives selection result from overlay execution.
     SelectAreaLive {
         reply: std::sync::mpsc::SyncSender<crate::overlay::SelectionResult>,
     },
-
-    /// Show the interactive area-selector overlay.
-    /// `reply` receives `Some(area)` on success or `None` if cancelled.
+    CaptureAreaInit {
+        reply: std::sync::mpsc::SyncSender<Result<AreaCapturePathResult, String>>,
+    },
     SelectArea {
         capture: crate::backend::CaptureData,
         reply: std::sync::mpsc::SyncSender<Option<crate::overlay::SelectionArea>>,
@@ -233,15 +271,15 @@ async fn run_daemon_inner(
     let (action_tx, action_rx) = std::sync::mpsc::channel::<DaemonAction>();
 
     // ── Tray icon ────────────────────────────────────────────────────────────
-    let (tray_tx, tray_rx) = std::sync::mpsc::channel::<TrayAction>();
-    let tray_action_tx = action_tx.clone();
-    std::thread::spawn(move || {
-        while let Ok(a) = tray_rx.recv() {
-            let _ = tray_action_tx.send(DaemonAction::from(a));
-        }
-    });
-    let _tray_handle = spawn_tray(tray_tx).context("Failed to spawn tray icon")?;
-    eprintln!("[daemon] Tray icon active.");
+    let tray_enabled = load_config().sanitized().show_menu_bar_icon;
+    let mut tray_handle = if tray_enabled {
+        let handle = spawn_daemon_tray(&action_tx)?;
+        eprintln!("[daemon] Tray icon active.");
+        Some(handle)
+    } else {
+        eprintln!("[daemon] Tray icon disabled by settings.");
+        None
+    };
 
     // ── D-Bus IPC server ─────────────────────────────────────────────────────
     let dbus_tx = action_tx.clone();
@@ -326,6 +364,23 @@ async fn run_daemon_inner(
             }
             DaemonAction::OpenSettings => {
                 tokio::task::spawn_blocking(show_settings_subprocess);
+            }
+            DaemonAction::SetTrayVisible(visible) => {
+                if visible {
+                    if tray_handle.is_none() {
+                        match spawn_daemon_tray(&action_tx) {
+                            Ok(handle) => {
+                                tray_handle = Some(handle);
+                                eprintln!("[daemon] Tray icon enabled live.");
+                            }
+                            Err(e) => {
+                                eprintln!("[daemon] Failed to enable tray icon live: {e}");
+                            }
+                        }
+                    }
+                } else if tray_handle.take().is_some() {
+                    eprintln!("[daemon] Tray icon disabled live.");
+                }
             }
             DaemonAction::ImportWebScrollCapture {
                 png_base64,
@@ -770,6 +825,16 @@ impl DaemonIpc {
         eprintln!("[daemon] D-Bus scroll_end_gnome called");
         let mut injector = self.scroll_injector.lock().await;
         injector.end().await;
+        Ok(())
+    }
+
+    fn set_tray_visible(&self, visible: bool) -> zbus::fdo::Result<()> {
+        eprintln!("[daemon] D-Bus SetTrayVisible: {visible}");
+        self.tx
+            .send(DaemonAction::SetTrayVisible(visible))
+            .map_err(|e| {
+                zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
+            })?;
         Ok(())
     }
 
@@ -1404,24 +1469,143 @@ fn crop_capture_data(
     Some(CaptureData::new(pixels, w, h, capture.format))
 }
 
+fn screenshot_save_config() -> SaveConfig {
+    let app_config = load_config().sanitized();
+    let mut save_config = SaveConfig::default();
+    if !app_config.export_location.is_empty() {
+        save_config = save_config.with_output_dir(&app_config.export_location);
+    }
+    save_config
+}
+
+fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
+    let file_name = match sound_name {
+        "Camera" => "camera.ogg",
+        "Classic" => "classic.ogg",
+        "Pop" => "pop.ogg",
+        "None" => return None,
+        _ => return None,
+    };
+
+    let asset_paths = [
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets/sounds")
+            .join(file_name),
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                exe.parent()
+                    .map(|dir| dir.join("assets/sounds").join(file_name))
+            })
+            .unwrap_or_default(),
+    ];
+
+    asset_paths
+        .into_iter()
+        .find(|path| !path.as_os_str().is_empty() && path.exists())
+}
+
+fn play_shutter_sound_if_enabled() {
+    let config = load_config().sanitized();
+    if !config.play_sounds || config.shutter_sound == "None" {
+        return;
+    }
+
+    let Some(sound_path) = shutter_sound_asset_path(&config.shutter_sound) else {
+        eprintln!(
+            "[daemon] Shutter sound '{}' selected but asset file is not available yet",
+            config.shutter_sound
+        );
+        return;
+    };
+
+    let playback = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(
+            "if command -v pw-play >/dev/null 2>&1; then pw-play \"$1\"; \
+             elif command -v paplay >/dev/null 2>&1; then paplay \"$1\"; \
+             elif command -v aplay >/dev/null 2>&1; then aplay \"$1\"; \
+             else exit 127; fi",
+        )
+        .arg("sh")
+        .arg(&sound_path)
+        .spawn();
+
+    if let Err(e) = playback {
+        eprintln!(
+            "[daemon] Failed to start shutter sound playback for {}: {e}",
+            sound_path.display()
+        );
+    }
+}
+
+fn apply_screenshot_after_capture_actions(
+    saved_path: std::path::PathBuf,
+    state: Arc<Mutex<DaemonState>>,
+) {
+    let config = load_config().sanitized();
+    state.lock().unwrap().last_capture_path = Some(saved_path.clone());
+
+    if config.after_capture_copy_file_to_clipboard {
+        if let Err(e) = copy_capture_uri_to_clipboard(&saved_path) {
+            eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
+        }
+    }
+
+    if config.after_capture_open_annotate {
+        if let Err(e) = open_image_editor(saved_path.clone()) {
+            eprintln!("[daemon] Failed to open annotate editor: {e}");
+        }
+    }
+
+    if config.after_capture_show_quick_access {
+        show_preview_subprocess(saved_path);
+    }
+}
+
 fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonState>>) {
-    match save_capture(&capture, &SaveConfig::default()) {
+    let config = load_config().sanitized();
+    if !config.after_capture_save {
+        eprintln!(
+            "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
+        );
+        send_desktop_notification(
+            "Screenshot not saved",
+            "Save is disabled in After capture settings",
+        );
+        return;
+    }
+
+    match save_capture(&capture, &screenshot_save_config()) {
         Ok(path) => {
             let path: std::path::PathBuf = path;
             eprintln!("[daemon] Saved: {}", path.display());
-            state.lock().unwrap().last_capture_path = Some(path.clone());
-            show_preview_subprocess(path);
+            play_shutter_sound_if_enabled();
+            apply_screenshot_after_capture_actions(path, state);
         }
         Err(e) => eprintln!("[daemon] Save error: {e}"),
     }
 }
 
 fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mutex<DaemonState>>) {
-    match save_existing_png(&path, &SaveConfig::default()) {
+    let config = load_config().sanitized();
+    if !config.after_capture_save {
+        let _ = std::fs::remove_file(&path);
+        eprintln!(
+            "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
+        );
+        send_desktop_notification(
+            "Screenshot not saved",
+            "Save is disabled in After capture settings",
+        );
+        return;
+    }
+
+    match save_existing_png(&path, &screenshot_save_config()) {
         Ok(saved_path) => {
             eprintln!("[daemon] Saved: {}", saved_path.display());
-            state.lock().unwrap().last_capture_path = Some(saved_path.clone());
-            show_preview_subprocess(saved_path);
+            play_shutter_sound_if_enabled();
+            apply_screenshot_after_capture_actions(saved_path, state);
         }
         Err(e) => {
             let _ = std::fs::remove_file(&path);
@@ -1599,7 +1783,26 @@ fn save_temp_png_daemon(capture: &crate::backend::CaptureData) -> Option<std::pa
 }
 
 fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
-    match capture_area_file_via_cpp() {
+    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
+
+    let cpp_area_init = if let Some(gtk_tx) = gtk_tx.clone() {
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
+        match gtk_tx.send(GtkWork::CaptureAreaInit { reply: reply_tx }) {
+            Ok(()) => match reply_rx.recv() {
+                Ok(result) => result.map_err(anyhow::Error::msg),
+                Err(err) => Err(anyhow::anyhow!(
+                    "GTK main-thread area-init reply failed: {err}"
+                )),
+            },
+            Err(err) => Err(anyhow::anyhow!(
+                "GTK main-thread area-init dispatch failed: {err}"
+            )),
+        }
+    } else {
+        capture_area_file_via_cpp().map_err(anyhow::Error::from)
+    };
+
+    match cpp_area_init {
         Ok(AreaCapturePathResult::Captured(path)) => {
             save_existing_png_and_open(path, state);
             return;
@@ -1629,9 +1832,6 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
     );
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     eprintln!("[daemon] handle_capture_area: is_wayland={is_wayland}");
-
-    // Get the gtk_tx from state (if available) to dispatch GTK work to the main thread.
-    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
     eprintln!(
         "[daemon] handle_capture_area: gtk_tx available={}",
         gtk_tx.is_some()
