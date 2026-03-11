@@ -273,15 +273,11 @@ pub fn draw_censor_draft_rect(context: &gtk4::cairo::Context, rect: Rect) {
 
 pub fn draw_crop_overlay(
     context: &gtk4::cairo::Context,
-    image_width: f64,
-    image_height: f64,
+    _image_width: f64,
+    _image_height: f64,
     rect: Rect,
     active: bool,
 ) {
-    let Some(rect) = rect.clamp_to(image_width as u32, image_height as u32) else {
-        return;
-    };
-
     let x = rect.x as f64;
     let y = rect.y as f64;
     let width = rect.width as f64;
@@ -292,20 +288,32 @@ pub fn draw_crop_overlay(
     }
 
     let _ = context.save();
-    context.rectangle(0.0, 0.0, image_width, image_height);
     context.rectangle(x, y, width, height);
-    context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
-    context.set_source_rgba(0.0, 0.0, 0.0, if active { 0.45 } else { 0.35 });
-    let _ = context.fill();
-    let _ = context.restore();
-
-    let _ = context.save();
-    context.rectangle(x, y, width, height);
-    context.set_line_width(if active { 2.0 } else { 1.4 });
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.95);
+    context.set_line_width(if active { 1.0 } else { 0.8 });
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.52);
     let _ = context.stroke();
 
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+    let edge_dash_len = (width.min(height) * 0.13).clamp(14.0, 30.0);
+    let half_edge_dash_len = edge_dash_len / 2.0;
+    let mid_x = x + width / 2.0;
+    let mid_y = y + height / 2.0;
+
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_width(if active { 2.2 } else { 1.8 });
+    context.set_source_rgba(1.0, 1.0, 1.0, if active { 0.92 } else { 0.8 });
+
+    context.move_to(mid_x - half_edge_dash_len, y);
+    context.line_to(mid_x + half_edge_dash_len, y);
+    context.move_to(mid_x - half_edge_dash_len, y + height);
+    context.line_to(mid_x + half_edge_dash_len, y + height);
+    context.move_to(x, mid_y - half_edge_dash_len);
+    context.line_to(x, mid_y + half_edge_dash_len);
+    context.move_to(x + width, mid_y - half_edge_dash_len);
+    context.line_to(x + width, mid_y + half_edge_dash_len);
+    let _ = context.stroke();
+
+    context.set_line_cap(gtk4::cairo::LineCap::Butt);
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.36);
     context.set_line_width(1.0);
     for idx in 1..=2 {
         let dx = width * (idx as f64) / 3.0;
@@ -316,6 +324,28 @@ pub fn draw_crop_overlay(
         context.move_to(x, y + dy);
         context.line_to(x + width, y + dy);
     }
+    let _ = context.stroke();
+
+    let corner_len = (width.min(height) * 0.12).clamp(12.0, 26.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.98);
+    context.set_line_width(if active { 3.2 } else { 2.5 });
+
+    context.move_to(x, y + corner_len);
+    context.line_to(x, y);
+    context.line_to(x + corner_len, y);
+
+    context.move_to(x + width - corner_len, y);
+    context.line_to(x + width, y);
+    context.line_to(x + width, y + corner_len);
+
+    context.move_to(x, y + height - corner_len);
+    context.line_to(x, y + height);
+    context.line_to(x + corner_len, y + height);
+
+    context.move_to(x + width - corner_len, y + height);
+    context.line_to(x + width, y + height);
+    context.line_to(x + width, y + height - corner_len);
+
     let _ = context.stroke();
     let _ = context.restore();
 }
@@ -766,16 +796,44 @@ pub fn draw_canvas_checkerboard_background(
     context: &gtk4::cairo::Context,
     width: i32,
     height: i32,
+    tint: Option<DrawColor>,
 ) {
+    fn blend_channel(base: f64, overlay: f64, alpha: f64) -> f64 {
+        base * (1.0 - alpha) + overlay * alpha
+    }
+
     let tile_size = 14.0;
     let width = width.max(1) as f64;
     let height = height.max(1) as f64;
 
-    context.set_source_rgb(0.075, 0.075, 0.081);
+    let base_dark = (0.075, 0.075, 0.081);
+    let tile_dark = (0.095, 0.095, 0.102);
+    let (base_r, base_g, base_b, tile_r, tile_g, tile_b) = if let Some(color) = tint {
+        let alpha = color.a.clamp(0.0, 1.0);
+        (
+            blend_channel(base_dark.0, color.r, alpha),
+            blend_channel(base_dark.1, color.g, alpha),
+            blend_channel(base_dark.2, color.b, alpha),
+            blend_channel(tile_dark.0, color.r, alpha),
+            blend_channel(tile_dark.1, color.g, alpha),
+            blend_channel(tile_dark.2, color.b, alpha),
+        )
+    } else {
+        (
+            base_dark.0,
+            base_dark.1,
+            base_dark.2,
+            tile_dark.0,
+            tile_dark.1,
+            tile_dark.2,
+        )
+    };
+
+    context.set_source_rgb(base_r, base_g, base_b);
     context.rectangle(0.0, 0.0, width, height);
     let _ = context.fill();
 
-    context.set_source_rgb(0.095, 0.095, 0.102);
+    context.set_source_rgb(tile_r, tile_g, tile_b);
     let cols = (width / tile_size).ceil() as i32 + 1;
     let rows = (height / tile_size).ceil() as i32 + 1;
     for row in 0..rows {

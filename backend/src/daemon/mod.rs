@@ -165,6 +165,18 @@ pub fn set_daemon_tray_visibility(visible: bool) -> bool {
         .is_ok()
 }
 
+pub fn start_daemon_subprocess() -> anyhow::Result<()> {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+    std::process::Command::new(&exe)
+        .arg("daemon")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| format!("Failed to spawn daemon subprocess via {}", exe.display()))?;
+    Ok(())
+}
+
 fn spawn_daemon_tray(
     action_tx: &std::sync::mpsc::Sender<DaemonAction>,
 ) -> anyhow::Result<ksni::Handle<ApexShotTray>> {
@@ -378,7 +390,8 @@ async fn run_daemon_inner(
                             }
                         }
                     }
-                } else if tray_handle.take().is_some() {
+                } else if let Some(handle) = tray_handle.take() {
+                    handle.shutdown();
                     eprintln!("[daemon] Tray icon disabled live.");
                 }
             }

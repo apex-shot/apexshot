@@ -1,15 +1,18 @@
 use super::color::{
     clamp_stroke_size, clamp_text_size, selection_handle_hit_radius_for_scale,
-    selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX, DRAW_COLORS, STROKE_SIZE_STEP,
-    STROKE_WIDTH, TEXT_SIZE, TEXT_SIZE_STEP,
+    selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE,
+    STROKE_SIZE_STEP, STROKE_WIDTH, TEXT_SIZE, TEXT_SIZE_STEP,
 };
 use super::color::{BLUR_RADIUS, CENSOR_BLOCK_SIZE};
 use super::render::{apply_blur_rect, apply_censor_rect, apply_focus_rect};
 use super::selection::{
     action_contains_point_with_padding, action_resize_handle_at_point_with_radius, resize_action,
-    translate_action,
+    resize_rect_with_handle, translate_action,
 };
-use super::types::{AnnotationAction, DrawColor, EditorError, Point, Rect, SizeControlMode, Tool};
+use super::types::{
+    AnnotationAction, CropAspectRatio, DrawColor, EditorError, Point, Rect, SelectHandle,
+    SizeControlMode, Tool,
+};
 use image::RgbaImage;
 
 pub struct EditorState {
@@ -17,6 +20,9 @@ pub struct EditorState {
     pub working_image: RgbaImage,
     pub working_image_revision: u64,
     pub crop_selection: Option<Rect>,
+    pub crop_aspect_ratio: CropAspectRatio,
+    pub crop_background_color: DrawColor,
+    pub crop_background_color_explicit: bool,
     pub actions: Vec<AnnotationAction>,
     pub redo_actions: Vec<AnnotationAction>,
     pub selected_tool: Tool,
@@ -34,6 +40,136 @@ pub struct EditorState {
     pub drag_shift_active: bool,
 }
 
+fn resize_crop_rect_with_handle(
+    rect: &mut Rect,
+    handle: SelectHandle,
+    dx: f64,
+    dy: f64,
+    _image_width: i32,
+    _image_height: i32,
+) -> bool {
+    let left = rect.x as f64;
+    let top = rect.y as f64;
+    let right = left + rect.width as f64;
+    let bottom = top + rect.height as f64;
+
+    let updated = match handle {
+        SelectHandle::Left | SelectHandle::Right => {
+            let width = right - left;
+            let expansion = if handle == SelectHandle::Right { dx } else { -dx };
+            let clamped_expansion = expansion.max((SELECT_MIN_RESIZE_SIZE - width) / 2.0);
+            Rect::from_bounds(left - clamped_expansion, top, right + clamped_expansion, bottom)
+        }
+        SelectHandle::Top | SelectHandle::Bottom => {
+            let height = bottom - top;
+            let expansion = if handle == SelectHandle::Bottom { dy } else { -dy };
+            let clamped_expansion = expansion.max((SELECT_MIN_RESIZE_SIZE - height) / 2.0);
+            Rect::from_bounds(left, top - clamped_expansion, right, bottom + clamped_expansion)
+        }
+        _ => return false,
+    };
+
+    let Some(updated) = updated else {
+        return false;
+    };
+
+    let changed = updated.x != rect.x
+        || updated.y != rect.y
+        || updated.width != rect.width
+        || updated.height != rect.height;
+    if changed {
+        *rect = updated;
+    }
+
+    changed
+}
+
+fn crop_rect_with_aspect_fit(image_width: i32, image_height: i32, aspect_ratio: f64) -> Option<Rect> {
+    if image_width <= 1 || image_height <= 1 || aspect_ratio <= 0.0 {
+        return None;
+    }
+
+    let image_ratio = image_width as f64 / image_height as f64;
+    let (width, height) = if image_ratio >= aspect_ratio {
+        let height = image_height as f64;
+        (height * aspect_ratio, height)
+    } else {
+        let width = image_width as f64;
+        (width, width / aspect_ratio)
+    };
+
+    let x = (image_width as f64 - width) / 2.0;
+    let y = (image_height as f64 - height) / 2.0;
+    Rect::from_bounds(x, y, x + width, y + height)
+}
+
+fn constrained_crop_point(start: Point, end: Point, aspect_ratio: f64) -> Point {
+    if aspect_ratio <= 0.0 {
+        return end;
+    }
+
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let sign_x = if dx < 0.0 { -1.0 } else { 1.0 };
+    let sign_y = if dy < 0.0 { -1.0 } else { 1.0 };
+    let width = dx.abs().max(dy.abs() * aspect_ratio);
+    let height = width / aspect_ratio;
+
+    Point {
+        x: start.x + sign_x * width,
+        y: start.y + sign_y * height,
+    }
+}
+
+fn resize_crop_rect_with_fixed_aspect(
+    rect: &mut Rect,
+    handle: SelectHandle,
+    point: Point,
+    _image_width: i32,
+    _image_height: i32,
+    aspect_ratio: f64,
+) -> bool {
+    if aspect_ratio <= 0.0 {
+        return false;
+    }
+
+    let center = Point {
+        x: rect.x as f64 + rect.width as f64 / 2.0,
+        y: rect.y as f64 + rect.height as f64 / 2.0,
+    };
+    let min_half_width = SELECT_MIN_RESIZE_SIZE / 2.0;
+    let min_half_height = min_half_width / aspect_ratio;
+    let half_width = match handle {
+        SelectHandle::Left | SelectHandle::Right => (point.x - center.x).abs().max(min_half_width),
+        SelectHandle::Top | SelectHandle::Bottom => {
+            ((point.y - center.y).abs().max(min_half_height)) * aspect_ratio
+        }
+        _ => (point.x - center.x)
+            .abs()
+            .max((point.y - center.y).abs() * aspect_ratio)
+            .max(min_half_width),
+    };
+    let half_height = half_width / aspect_ratio;
+
+    let Some(updated) = Rect::from_bounds(
+        center.x - half_width,
+        center.y - half_height,
+        center.x + half_width,
+        center.y + half_height,
+    ) else {
+        return false;
+    };
+
+    let changed = updated.x != rect.x
+        || updated.y != rect.y
+        || updated.width != rect.width
+        || updated.height != rect.height;
+    if changed {
+        *rect = updated;
+    }
+    changed
+}
+
 impl EditorState {
     pub fn new(base_image: RgbaImage) -> Self {
         Self {
@@ -41,6 +177,9 @@ impl EditorState {
             base_image,
             working_image_revision: 1,
             crop_selection: None,
+            crop_aspect_ratio: CropAspectRatio::Freeform,
+            crop_background_color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+            crop_background_color_explicit: false,
             actions: Vec::new(),
             redo_actions: Vec::new(),
             selected_tool: Tool::Arrow,
@@ -72,10 +211,42 @@ impl EditorState {
         self.clear_drag();
     }
 
+    pub fn crop_aspect_ratio_value(&self) -> Option<f64> {
+        self.crop_aspect_ratio.aspect_ratio(
+            self.working_image.width() as i32,
+            self.working_image.height() as i32,
+        )
+    }
+
+    pub fn set_crop_aspect_ratio(&mut self, crop_aspect_ratio: CropAspectRatio) -> bool {
+        if self.crop_aspect_ratio == crop_aspect_ratio {
+            return false;
+        }
+
+        self.crop_aspect_ratio = crop_aspect_ratio;
+
+        let Some(rect) = self.crop_selection else {
+            return true;
+        };
+
+        let image_width = self.working_image.width() as i32;
+        let image_height = self.working_image.height() as i32;
+        self.crop_selection = match self.crop_aspect_ratio_value() {
+            Some(aspect_ratio) => crop_rect_with_aspect_fit(image_width, image_height, aspect_ratio),
+            None => Some(rect),
+        };
+        true
+    }
+
     pub fn set_color_index(&mut self, index: usize) {
         if let Some(color) = DRAW_COLORS.get(index).copied() {
             self.selected_color = color;
         }
+    }
+
+    pub fn set_crop_background_color(&mut self, color: DrawColor) {
+        self.crop_background_color = color;
+        self.crop_background_color_explicit = true;
     }
 
     pub fn set_stroke_size(&mut self, size: f64) -> bool {
@@ -462,6 +633,126 @@ impl EditorState {
         selected
     }
 
+    pub fn ensure_crop_selection_initialized(&mut self) -> bool {
+        if self.crop_selection.is_some() {
+            return false;
+        }
+
+        let image_width = self.working_image.width() as i32;
+        let image_height = self.working_image.height() as i32;
+        if image_width <= 1 || image_height <= 1 {
+            return false;
+        }
+
+        self.crop_selection = match self.crop_aspect_ratio_value() {
+            Some(aspect_ratio) => crop_rect_with_aspect_fit(image_width, image_height, aspect_ratio),
+            None => Some(Rect {
+                x: 0,
+                y: 0,
+                width: image_width,
+                height: image_height,
+            }),
+        };
+        self.crop_selection.is_some()
+    }
+
+    pub fn begin_crop_drag_with_scale(&mut self, point: Point, view_scale: f64) -> bool {
+        let Some(crop_rect) = self.crop_selection else {
+            return false;
+        };
+
+        let crop_action = AnnotationAction::Box {
+            rect: crop_rect,
+            color: self.selected_color,
+            stroke_size: self.stroke_size,
+        };
+        let handle_hit_radius = selection_handle_hit_radius_for_scale(view_scale);
+        if let Some(handle) =
+            action_resize_handle_at_point_with_radius(&crop_action, point, handle_hit_radius)
+        {
+            self.select_resize_handle = Some(handle);
+            self.select_drag_anchor = Some(point);
+            return true;
+        }
+
+        self.select_resize_handle = None;
+        let hit_padding = selection_hit_padding_for_scale(view_scale);
+        if action_contains_point_with_padding(&crop_action, point, hit_padding) {
+            self.select_drag_anchor = Some(point);
+            return true;
+        }
+
+        false
+    }
+
+    pub fn update_crop_drag(&mut self, point: Point) -> bool {
+        let Some(anchor) = self.select_drag_anchor else {
+            return false;
+        };
+        let aspect_ratio = self.crop_aspect_ratio_value();
+        let Some(rect) = self.crop_selection.as_mut() else {
+            return false;
+        };
+
+        let dx = point.x - anchor.x;
+        let dy = point.y - anchor.y;
+        if dx.abs() < 0.0001 && dy.abs() < 0.0001 {
+            return false;
+        }
+
+        let image_width = self.working_image.width() as i32;
+        let image_height = self.working_image.height() as i32;
+
+        let original = *rect;
+        let moved = if let Some(handle) = self.select_resize_handle {
+            let resized = if let Some(aspect_ratio) = aspect_ratio {
+                resize_crop_rect_with_fixed_aspect(
+                    rect,
+                    handle,
+                    point,
+                    image_width,
+                    image_height,
+                    aspect_ratio,
+                )
+            } else {
+                match handle {
+                    SelectHandle::Left
+                    | SelectHandle::Right
+                    | SelectHandle::Top
+                    | SelectHandle::Bottom => {
+                        resize_crop_rect_with_handle(rect, handle, dx, dy, image_width, image_height)
+                    }
+                    _ => resize_rect_with_handle(rect, handle, dx, dy),
+                }
+            };
+            resized
+        } else {
+            let dx_i = dx.round() as i32;
+            let dy_i = dy.round() as i32;
+            if dx_i == 0 && dy_i == 0 {
+                false
+            } else {
+                rect.x += dx_i;
+                rect.y += dy_i;
+                rect.x != original.x
+                    || rect.y != original.y
+                    || rect.width != original.width
+                    || rect.height != original.height
+            }
+        };
+
+        if !moved {
+            return false;
+        }
+
+        self.select_drag_anchor = Some(point);
+        true
+    }
+
+    pub fn end_crop_drag(&mut self) {
+        self.clear_drag();
+    }
+
     pub fn update_select_drag(&mut self, point: Point) -> bool {
         let Some(anchor) = self.select_drag_anchor else {
             return false;
@@ -676,7 +967,12 @@ impl EditorState {
             return None;
         }
 
-        Rect::from_points(self.drag_start?, self.drag_current?)
+        let start = self.drag_start?;
+        let end = match self.crop_aspect_ratio_value() {
+            Some(aspect_ratio) => constrained_crop_point(start, self.drag_current?, aspect_ratio),
+            None => self.drag_current?,
+        };
+        Rect::from_points(start, end)
     }
 
     pub fn finalize_drag_action(&mut self) -> Option<AnnotationAction> {
@@ -864,18 +1160,43 @@ impl EditorState {
     pub fn to_final_image(&self) -> Result<RgbaImage, EditorError> {
         let rendered = self.to_rendered_image()?;
 
-        if let Some(crop) = self
-            .crop_selection
-            .and_then(|rect| rect.clamp_to(rendered.width(), rendered.height()))
-        {
-            return Ok(image::imageops::crop_imm(
-                &rendered,
-                crop.x as u32,
-                crop.y as u32,
-                crop.width as u32,
-                crop.height as u32,
-            )
-            .to_image());
+        if let Some(crop) = self.crop_selection {
+            let crop_width = crop.width.max(0) as u32;
+            let crop_height = crop.height.max(0) as u32;
+            if crop_width == 0 || crop_height == 0 {
+                return Ok(rendered);
+            }
+
+            let background = image::Rgba([
+                (self.crop_background_color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (self.crop_background_color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (self.crop_background_color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (self.crop_background_color.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+            ]);
+            let mut output = RgbaImage::from_pixel(crop_width, crop_height, background);
+
+            let source_x = crop.x.max(0) as u32;
+            let source_y = crop.y.max(0) as u32;
+            let source_right = (crop.x + crop.width).clamp(0, rendered.width() as i32) as u32;
+            let source_bottom = (crop.y + crop.height).clamp(0, rendered.height() as i32) as u32;
+
+            if source_right > source_x && source_bottom > source_y {
+                let source_width = source_right - source_x;
+                let source_height = source_bottom - source_y;
+                let source = image::imageops::crop_imm(
+                    &rendered,
+                    source_x,
+                    source_y,
+                    source_width,
+                    source_height,
+                )
+                .to_image();
+                let dest_x = source_x as i64 - crop.x as i64;
+                let dest_y = source_y as i64 - crop.y as i64;
+                image::imageops::overlay(&mut output, &source, dest_x, dest_y);
+            }
+
+            return Ok(output);
         }
 
         Ok(rendered)
