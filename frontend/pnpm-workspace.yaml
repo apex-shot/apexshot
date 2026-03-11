@@ -1,6 +1,0 @@
-ignoredBuiltDependencies:
-  - sharp
-  - unrs-resolver
-
-onlyBuiltDependencies:
-  - '@tsparticles/engine'
