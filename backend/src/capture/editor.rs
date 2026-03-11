@@ -26,7 +26,7 @@ mod tests {
 
     #[test]
     fn tool_shortcuts_map_to_expected_tools() {
-        assert_eq!(tool_shortcut_target('0'), Some((Tool::Select, 0)));
+        assert_eq!(tool_shortcut_target('0'), Some((Tool::Select, 1)));
         assert_eq!(tool_shortcut_target('P'), Some((Tool::Pen, 2)));
         assert_eq!(tool_shortcut_target('t'), Some((Tool::Text, 7)));
         assert_eq!(tool_shortcut_target('l'), Some((Tool::Line, 6)));
@@ -36,7 +36,7 @@ mod tests {
         assert_eq!(tool_shortcut_target('h'), Some((Tool::Highlighter, 11)));
         assert_eq!(tool_shortcut_target('c'), Some((Tool::Censor, 9)));
         assert_eq!(tool_shortcut_target('n'), Some((Tool::Number, 10)));
-        assert_eq!(tool_shortcut_target('x'), Some((Tool::Crop, 1)));
+        assert_eq!(tool_shortcut_target('x'), Some((Tool::Crop, 0)));
         assert_eq!(tool_shortcut_target('b'), Some((Tool::Blur, 8)));
         assert_eq!(tool_shortcut_target('f'), Some((Tool::Focus, 12)));
         assert_eq!(tool_shortcut_target('q'), None);
@@ -175,6 +175,41 @@ mod tests {
         assert_eq!(
             cursor_name_for_view_point(&state, transform, Point { x: -4.0, y: -4.0 }),
             "default"
+        );
+    }
+
+    #[test]
+    fn cursor_name_for_view_point_uses_crop_drag_and_resize_states() {
+        let mut state = EditorState::new(RgbaImage::new(80, 80));
+        let transform = ViewTransform::fit(80.0, 80.0, 80.0, 80.0);
+        state.set_tool(Tool::Crop);
+        state.crop_selection = Some(Rect {
+            x: 20,
+            y: 16,
+            width: 24,
+            height: 18,
+        });
+
+        assert_eq!(
+            cursor_name_for_view_point(&state, transform, Point { x: 32.0, y: 16.0 }),
+            "ns-resize"
+        );
+        assert_eq!(
+            cursor_name_for_view_point(&state, transform, Point { x: 28.0, y: 22.0 }),
+            "grab"
+        );
+
+        state.select_drag_anchor = Some(Point { x: 32.0, y: 16.0 });
+        state.select_resize_handle = Some(SelectHandle::Right);
+        assert_eq!(
+            cursor_name_for_view_point(&state, transform, Point { x: 36.0, y: 22.0 }),
+            "ew-resize"
+        );
+
+        state.select_resize_handle = None;
+        assert_eq!(
+            cursor_name_for_view_point(&state, transform, Point { x: 30.0, y: 24.0 }),
+            "grabbing"
         );
     }
 
@@ -926,6 +961,63 @@ mod tests {
 
         state.set_tool(Tool::Arrow);
         assert!(state.crop_selection.is_none());
+    }
+
+    #[test]
+    fn ensure_crop_selection_initialized_creates_default_crop_frame() {
+        let mut state = EditorState::new(RgbaImage::new(200, 120));
+
+        assert!(state.ensure_crop_selection_initialized());
+        let crop = state.crop_selection.unwrap();
+        assert_eq!(crop.x, 0);
+        assert_eq!(crop.y, 0);
+        assert_eq!(crop.width, 200);
+        assert_eq!(crop.height, 120);
+        assert!(!state.ensure_crop_selection_initialized());
+    }
+
+    #[test]
+    fn crop_drag_moves_existing_selection_without_redrawing_first() {
+        let mut state = EditorState::new(RgbaImage::new(160, 100));
+        state.set_tool(Tool::Crop);
+        state.crop_selection = Some(Rect {
+            x: 20,
+            y: 18,
+            width: 80,
+            height: 48,
+        });
+
+        assert!(state.begin_crop_drag_with_scale(Point { x: 40.0, y: 30.0 }, 1.0));
+        assert!(state.update_crop_drag(Point { x: 52.0, y: 41.0 }));
+        state.end_crop_drag();
+
+        let crop = state.crop_selection.unwrap();
+        assert_eq!(crop.x, 32);
+        assert_eq!(crop.y, 29);
+        assert_eq!(crop.width, 80);
+        assert_eq!(crop.height, 48);
+    }
+
+    #[test]
+    fn crop_edge_drag_resizes_selection_symmetrically() {
+        let mut state = EditorState::new(RgbaImage::new(160, 100));
+        state.set_tool(Tool::Crop);
+        state.crop_selection = Some(Rect {
+            x: 20,
+            y: 18,
+            width: 80,
+            height: 48,
+        });
+
+        assert!(state.begin_crop_drag_with_scale(Point { x: 100.0, y: 42.0 }, 1.0));
+        assert!(state.update_crop_drag(Point { x: 92.0, y: 42.0 }));
+        state.end_crop_drag();
+
+        let crop = state.crop_selection.unwrap();
+        assert_eq!(crop.x, 28);
+        assert_eq!(crop.y, 18);
+        assert_eq!(crop.width, 64);
+        assert_eq!(crop.height, 48);
     }
 
     #[test]

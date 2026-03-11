@@ -235,6 +235,158 @@ pub fn install_editor_css() {
                 padding-right: 6px;
             }
 
+            .editor-crop-mode-group {
+                padding: 0;
+                background: transparent;
+                border: none;
+            }
+
+            .editor-crop-size-group {
+                padding-left: 8px;
+                padding-right: 8px;
+            }
+
+            .editor-crop-type-shell {
+                padding: 0 10px 0 12px;
+                box-shadow: none;
+            }
+
+            .editor-crop-type-shell:hover {
+                box-shadow: none;
+            }
+
+            .editor-crop-type-shell:active {
+                box-shadow: none;
+            }
+
+            .editor-crop-type-group {
+                padding: 0 1px;
+            }
+
+            button.editor-crop-type-button {
+                min-width: 68px;
+                min-height: 30px;
+                padding: 0;
+                margin: 0;
+                border: 1px solid rgba(255, 255, 255, 0.11);
+                border-radius: 6px;
+                background-color: #000000;
+                background-image: none;
+                box-shadow: none;
+            }
+
+            button.editor-crop-type-button > arrow {
+                min-width: 0;
+                min-height: 0;
+                opacity: 0;
+                color: transparent;
+            }
+
+            button.editor-crop-type-button:hover,
+            button.editor-crop-type-button:active,
+            button.editor-crop-type-button:focus {
+                background-color: #000000;
+                border: 1px solid rgba(255, 255, 255, 0.11);
+                box-shadow: none;
+                outline: none;
+            }
+
+            button.editor-crop-type-button image {
+                min-width: 0;
+                min-height: 0;
+                opacity: 0;
+            }
+
+            .editor-crop-type-label {
+                color: #f3f3f5;
+                font-size: 13px;
+            }
+
+            entry.editor-crop-size-entry {
+                min-height: 30px;
+                border-radius: 8px;
+                border: none;
+                background-color: #000000;
+                background-image: none;
+                color: #f3f3f5;
+                padding: 0 8px;
+                box-shadow: none;
+            }
+
+            entry.editor-crop-size-entry text {
+                color: #f7f8ff;
+                font-size: 13px;
+            }
+
+            .editor-crop-size-separator {
+                color: rgba(243, 243, 245, 0.74);
+                font-size: 13px;
+                margin-left: 2px;
+                margin-right: 2px;
+            }
+
+            .editor-crop-type-arrow-box {
+                min-width: 14px;
+                min-height: 14px;
+                padding: 0;
+            }
+
+            .editor-crop-type-arrow {
+                opacity: 0.76;
+                transition: all 140ms ease;
+            }
+
+            .editor-crop-type-shell:hover .editor-crop-type-arrow {
+                opacity: 1.0;
+                transform: translateY(0.5px);
+            }
+
+            .editor-crop-type-arrow-box image {
+                filter: brightness(0) invert(1);
+            }
+
+            popover.editor-crop-type-popover,
+            popover.editor-crop-type-popover > contents {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+            }
+
+            .editor-crop-type-popover-body {
+                padding: 8px;
+                border-radius: 12px;
+                background-image: linear-gradient(to bottom,
+                    rgba(28, 28, 34, 0.98),
+                    rgba(18, 18, 23, 0.98));
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                box-shadow:
+                    0 14px 32px rgba(0, 0, 0, 0.55),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            }
+
+            button.editor-crop-type-option {
+                min-width: 136px;
+                min-height: 30px;
+                padding: 0 12px;
+                border-radius: 8px;
+                border: 1px solid transparent;
+                background: rgba(255, 255, 255, 0.01);
+                color: #f3f3f5;
+                box-shadow: none;
+                transition: all 130ms ease;
+            }
+
+            button.editor-crop-type-option:hover {
+                background: rgba(255, 255, 255, 0.07);
+                border-color: rgba(255, 255, 255, 0.09);
+            }
+
+            button.editor-crop-type-option:active {
+                background: rgba(255, 255, 255, 0.04);
+                border-color: rgba(255, 255, 255, 0.14);
+            }
+
             .editor-size-group.size-group-inactive {
                 opacity: 0.42;
             }
@@ -782,7 +934,6 @@ pub fn install_editor_css() {
             entry.editor-hex-entry text,
             entry.editor-rgba-entry text {
                 color: #f7f8ff;
-                text-align: center;
             }
 
             .editor-color-field-label {

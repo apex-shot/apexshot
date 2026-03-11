@@ -1,6 +1,6 @@
 use crate::{
     config::{load_config, save_config, AppConfig},
-    daemon::set_daemon_tray_visibility,
+    daemon::{set_daemon_tray_visibility, start_daemon_subprocess},
 };
 use gtk4::{prelude::*, ApplicationWindow, CheckButton, ComboBoxText, Entry};
 
@@ -93,7 +93,15 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<AppConfig> {
         uninstall_autostart_entry()?;
     }
 
-    let _ = set_daemon_tray_visibility(config.show_menu_bar_icon);
+    let tray_visible = config.show_menu_bar_icon;
+    std::thread::spawn(move || {
+        if set_daemon_tray_visibility(tray_visible) {
+            return;
+        }
+        if tray_visible {
+            let _ = start_daemon_subprocess();
+        }
+    });
 
     Ok(config)
 }

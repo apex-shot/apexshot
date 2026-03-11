@@ -3,7 +3,7 @@ use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CenterBox,
     CssProvider, DragSource, DrawingArea, DropTarget, Entry, EventControllerKey,
     EventControllerMotion, GestureClick, GestureDrag, Image, Label, MenuButton, Orientation,
-    Overlay, Popover, Scale, ScrolledWindow,
+    Overlay, Popover, Scale, ScrolledWindow, Stack,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -31,8 +31,8 @@ use super::render::{
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::EditorState;
 use super::types::{
-    cursor_name_for_select_handle, AnnotationAction, EditorError, PickerColorState, Point, Tool,
-    ViewTransform,
+    cursor_name_for_select_handle, AnnotationAction, CropAspectRatio, EditorError,
+    PickerColorState, Point, Rect, Tool, ViewTransform,
 };
 use super::ui_support::{
     color_swatch_button, footer_icon_button, icon_tool_button, install_editor_css,
@@ -89,6 +89,37 @@ fn sample_editor_color_at_point(
 ) -> Option<super::types::DrawColor> {
     let rendered = state.to_rendered_image().ok()?;
     sample_rendered_color_at_point(&rendered, image_point)
+}
+
+fn crop_canvas_overflow(
+    crop_rect: Option<Rect>,
+    image_width: f64,
+    image_height: f64,
+    scale: f64,
+    crop_mode_active: bool,
+) -> (f64, f64, f64, f64) {
+    let (left, top, right, bottom) = if let Some(rect) = crop_rect {
+        (
+            (-rect.x).max(0) as f64 * scale,
+            (-rect.y).max(0) as f64 * scale,
+            ((rect.x + rect.width) as f64 - image_width).max(0.0) * scale,
+            ((rect.y + rect.height) as f64 - image_height).max(0.0) * scale,
+        )
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
+
+    if !crop_mode_active {
+        return (left.ceil(), top.ceil(), right.ceil(), bottom.ceil());
+    }
+
+    let reserve = 180.0;
+    (
+        left.max(reserve).ceil(),
+        top.max(reserve).ceil(),
+        right.max(reserve).ceil(),
+        bottom.max(reserve).ceil(),
+    )
 }
 
 fn sample_rendered_color_at_point(
@@ -277,11 +308,48 @@ pub fn select_hover_cursor_name(
     }
 }
 
+fn crop_hover_cursor_name(state: &EditorState, point: Point, view_scale: f64) -> &'static str {
+    if state.select_drag_anchor.is_some() {
+        if let Some(handle) = state.select_resize_handle {
+            return cursor_name_for_select_handle(handle);
+        }
+        return "grabbing";
+    }
+
+    if let Some(rect) = state.crop_selection {
+        let crop_action = AnnotationAction::Box {
+            rect,
+            color: state.selected_color,
+            stroke_size: state.stroke_size,
+        };
+        let handle_hit_radius = selection_handle_hit_radius_for_scale(view_scale);
+        if let Some(handle) = super::selection::action_resize_handle_at_point_with_radius(
+            &crop_action,
+            point,
+            handle_hit_radius,
+        ) {
+            return cursor_name_for_select_handle(handle);
+        }
+
+        let hit_padding = selection_hit_padding_for_scale(view_scale);
+        if super::selection::action_contains_point_with_padding(&crop_action, point, hit_padding) {
+            return "grab";
+        }
+    }
+
+    "crosshair"
+}
+
 pub fn cursor_name_for_view_point(
     state: &EditorState,
     transform: ViewTransform,
     view_point: Point,
 ) -> &'static str {
+    if state.selected_tool == Tool::Crop {
+        let image_point = transform.view_to_image(view_point);
+        return crop_hover_cursor_name(state, image_point, transform.scale);
+    }
+
     if !transform.contains_view(view_point) {
         return "default";
     }
@@ -290,8 +358,8 @@ pub fn cursor_name_for_view_point(
     match state.selected_tool {
         Tool::Select => select_hover_cursor_name(state, image_point, transform.scale),
         Tool::Text => "text",
-        Tool::Crop
-        | Tool::Pen
+        Tool::Crop => crop_hover_cursor_name(state, image_point, transform.scale),
+        Tool::Pen
         | Tool::Highlighter
         | Tool::Circle
         | Tool::Arrow
@@ -359,14 +427,18 @@ fn clear_active_color_picker_palette_state(color_buttons: &[Button]) {
     }
 }
 
+fn clear_color_picker_trigger_dot_state(trigger_dot: &GtkBox, color_classes: &[&str]) {
+    for class_name in color_classes {
+        trigger_dot.remove_css_class(class_name);
+    }
+}
+
 fn set_color_picker_trigger_dot_state(
     trigger_dot: &GtkBox,
     color_classes: &[&str],
     active_index: usize,
 ) {
-    for class_name in color_classes {
-        trigger_dot.remove_css_class(class_name);
-    }
+    clear_color_picker_trigger_dot_state(trigger_dot, color_classes);
 
     if let Some(class_name) = color_classes.get(active_index) {
         trigger_dot.add_css_class(class_name);
@@ -436,6 +508,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let select_btn = icon_tool_button("pointer-primary-click-symbolic", "Select");
     let crop_btn = icon_tool_button(icon_names::CROP, "Crop");
+    crop_btn.add_css_class("standalone-tool");
     let draw_btn = icon_tool_button(icon_names::DOCUMENT_EDIT_REGULAR, "Pen");
 
     let left_group = GtkBox::new(Orientation::Horizontal, 16);
@@ -1022,11 +1095,110 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     size_group.append(&size_down_btn);
     size_group.append(&size_up_btn);
 
+    let crop_tools_group = GtkBox::new(Orientation::Horizontal, 2);
+    crop_tools_group.add_css_class("editor-tools-group");
+    crop_tools_group.append(&crop_btn);
+
+    let crop_type_button = MenuButton::new();
+    crop_type_button.set_has_frame(false);
+    crop_type_button.set_focusable(false);
+    crop_type_button.set_icon_name("");
+    crop_type_button.add_css_class("editor-crop-type-button");
+    crop_type_button.add_css_class("editor-tool-button");
+    crop_type_button.add_css_class("flat");
+    crop_type_button.set_tooltip_text(Some("Crop type"));
+
+    let crop_type_label = Label::new(Some("Freeform"));
+    crop_type_label.add_css_class("editor-crop-type-label");
+    crop_type_label.set_xalign(0.0);
+
+    let crop_type_arrow_box = GtkBox::new(Orientation::Horizontal, 0);
+    crop_type_arrow_box.add_css_class("editor-crop-type-arrow-box");
+    crop_type_arrow_box.set_halign(gtk4::Align::Center);
+    crop_type_arrow_box.set_valign(gtk4::Align::Center);
+    let crop_type_arrow = Image::from_icon_name("pan-down-symbolic");
+    crop_type_arrow.set_pixel_size(10);
+    crop_type_arrow.add_css_class("editor-crop-type-arrow");
+    crop_type_arrow_box.append(&crop_type_arrow);
+
+    let crop_type_shell = GtkBox::new(Orientation::Horizontal, 8);
+    crop_type_shell.add_css_class("editor-crop-type-shell");
+    crop_type_shell.set_valign(gtk4::Align::Fill);
+    crop_type_shell.append(&crop_type_label);
+    crop_type_shell.append(&crop_type_arrow_box);
+
+    let crop_type_host = Overlay::new();
+    crop_type_host.set_size_request(68, 30);
+    crop_type_host.set_valign(gtk4::Align::Center);
+    crop_type_host.set_child(Some(&crop_type_shell));
+    crop_type_host.add_overlay(&crop_type_button);
+    crop_type_button.set_valign(gtk4::Align::Fill);
+    crop_type_button.set_halign(gtk4::Align::Fill);
+
+    let crop_type_popover = Popover::new();
+    crop_type_popover.set_has_arrow(false);
+    crop_type_popover.set_autohide(true);
+    crop_type_popover.set_position(gtk4::PositionType::Bottom);
+    crop_type_popover.set_offset(0, 4);
+    crop_type_popover.add_css_class("editor-crop-type-popover");
+
+    let crop_type_list = GtkBox::new(Orientation::Vertical, 4);
+    crop_type_list.add_css_class("editor-crop-type-popover-body");
+
+    crop_type_popover.set_child(Some(&crop_type_list));
+    crop_type_button.set_popover(Some(&crop_type_popover));
+
+    let crop_type_group = GtkBox::new(Orientation::Horizontal, 0);
+    crop_type_group.add_css_class("editor-tools-group");
+    crop_type_group.add_css_class("editor-crop-type-group");
+    crop_type_group.append(&crop_type_host);
+
+    let crop_type_shell_click = GestureClick::new();
+    let crop_type_button_popup = crop_type_button.clone();
+    crop_type_shell_click.connect_pressed(move |_, _, _, _| {
+        crop_type_button_popup.popup();
+    });
+    crop_type_shell.add_controller(crop_type_shell_click);
+
+    let crop_width_entry = Entry::new();
+    crop_width_entry.set_editable(false);
+    crop_width_entry.set_focusable(false);
+    crop_width_entry.set_width_chars(5);
+    crop_width_entry.set_max_width_chars(6);
+    crop_width_entry.set_width_request(68);
+    crop_width_entry.set_hexpand(false);
+    gtk4::prelude::EditableExt::set_alignment(&crop_width_entry, 0.5);
+    crop_width_entry.add_css_class("editor-crop-size-entry");
+
+    let crop_size_separator = Label::new(Some("×"));
+    crop_size_separator.add_css_class("editor-crop-size-separator");
+
+    let crop_height_entry = Entry::new();
+    crop_height_entry.set_editable(false);
+    crop_height_entry.set_focusable(false);
+    crop_height_entry.set_width_chars(5);
+    crop_height_entry.set_max_width_chars(6);
+    crop_height_entry.set_width_request(68);
+    crop_height_entry.set_hexpand(false);
+    gtk4::prelude::EditableExt::set_alignment(&crop_height_entry, 0.5);
+    crop_height_entry.add_css_class("editor-crop-size-entry");
+
+    let crop_size_group = GtkBox::new(Orientation::Horizontal, 4);
+    crop_size_group.add_css_class("editor-tools-group");
+    crop_size_group.add_css_class("editor-crop-size-group");
+    crop_size_group.append(&crop_width_entry);
+    crop_size_group.append(&crop_size_separator);
+    crop_size_group.append(&crop_height_entry);
+
+    let crop_mode_group = GtkBox::new(Orientation::Horizontal, 8);
+    crop_mode_group.add_css_class("editor-crop-mode-group");
+    crop_mode_group.append(&crop_type_group);
+    crop_mode_group.append(&crop_size_group);
+
     let primary_tools_group = GtkBox::new(Orientation::Horizontal, 2);
     primary_tools_group.add_css_class("editor-tools-group");
     primary_tools_group.add_css_class("editor-primary-tools-group");
     primary_tools_group.append(&select_btn);
-    primary_tools_group.append(&crop_btn);
     primary_tools_group.append(&draw_btn);
     primary_tools_group.append(&sep_1);
     primary_tools_group.append(&box_btn);
@@ -1041,13 +1213,36 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     primary_tools_group.append(&highlighter_btn);
     primary_tools_group.append(&sep_2);
 
+    let standard_mode_group = GtkBox::new(Orientation::Horizontal, 10);
+    standard_mode_group.add_css_class("editor-toolbar-mode-group");
+    standard_mode_group.append(&primary_tools_group);
+    standard_mode_group.append(&size_group);
+
+    let toolbar_mode_stack = Stack::new();
+    toolbar_mode_stack.add_css_class("editor-toolbar-mode-stack");
+    toolbar_mode_stack.set_hhomogeneous(false);
+    toolbar_mode_stack.set_vhomogeneous(false);
+    toolbar_mode_stack.add_named(&standard_mode_group, Some("standard"));
+    toolbar_mode_stack.add_named(&crop_mode_group, Some("crop"));
+    toolbar_mode_stack.set_visible_child_name("standard");
+
     let center_group = GtkBox::new(Orientation::Horizontal, 10);
     center_group.add_css_class("editor-toolbar-center");
-    center_group.append(&primary_tools_group);
+    center_group.append(&crop_tools_group);
+    center_group.append(&toolbar_mode_stack);
     center_group.append(&color_group);
-    center_group.append(&size_group);
+    left_group.append(&center_group);
 
-    toolbar.set_center_widget(Some(&center_group));
+    let update_toolbar_for_tool: Rc<dyn Fn(Tool)> = Rc::new({
+        let toolbar_mode_stack = toolbar_mode_stack.clone();
+        move |tool| {
+            toolbar_mode_stack.set_visible_child_name(if matches!(tool, Tool::Crop) {
+                "crop"
+            } else {
+                "standard"
+            });
+        }
+    });
 
     let undo_btn = icon_tool_button(icon_names::ARROW_UNDO_REGULAR, "Undo");
     let redo_btn = icon_tool_button(icon_names::ARROW_REDO_REGULAR, "Redo");
@@ -1126,8 +1321,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     footer.append(&footer_right);
 
     let tool_buttons = vec![
-        select_btn.clone(),
         crop_btn.clone(),
+        select_btn.clone(),
         draw_btn.clone(),
         box_btn.clone(),
         circle_btn.clone(),
@@ -1151,6 +1346,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let st = state.lock().unwrap();
         apply_size_control_ui_state(&st, &size_group, &size_down_btn, &size_up_btn);
     }
+    update_toolbar_for_tool(Tool::Arrow);
 
     // Canvas
     let drawing_area = DrawingArea::new();
@@ -1160,6 +1356,49 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     drawing_area.set_content_height(img_height as i32);
     drawing_area.set_size_request(img_width as i32, img_height as i32);
     drawing_area.add_css_class("editor-canvas");
+
+    let update_crop_size_fields: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let crop_width_entry = crop_width_entry.clone();
+        let crop_height_entry = crop_height_entry.clone();
+        move || {
+            let st = state.lock().unwrap();
+            if let Some(rect) = st.draft_crop_rect().or(st.crop_selection) {
+                crop_width_entry.set_text(&rect.width.max(0).to_string());
+                crop_height_entry.set_text(&rect.height.max(0).to_string());
+            } else {
+                crop_width_entry.set_text("");
+                crop_height_entry.set_text("");
+            }
+        }
+    });
+
+    for crop_type in CropAspectRatio::ALL {
+        let option_button = Button::with_label(crop_type.label());
+        option_button.set_has_frame(false);
+        option_button.add_css_class("editor-crop-type-option");
+        let crop_type_label_option = crop_type_label.clone();
+        let crop_type_popover_option = crop_type_popover.clone();
+        let state_crop_type_option = state.clone();
+        let drawing_area_crop_type_option = drawing_area.downgrade();
+        let update_crop_size_fields_option = update_crop_size_fields.clone();
+        option_button.connect_clicked(move |_| {
+            crop_type_label_option.set_label(crop_type.label());
+            {
+                let mut st = state_crop_type_option.lock().unwrap();
+                st.set_crop_aspect_ratio(crop_type);
+                if st.selected_tool == Tool::Crop {
+                    st.ensure_crop_selection_initialized();
+                }
+            }
+            update_crop_size_fields_option();
+            crop_type_popover_option.popdown();
+            if let Some(area) = drawing_area_crop_type_option.upgrade() {
+                area.queue_draw();
+            }
+        });
+        crop_type_list.append(&option_button);
+    }
 
     let canvas_overlay = Overlay::new();
     canvas_overlay.set_hexpand(true);
@@ -1224,23 +1463,37 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let canvas_scroller = canvas_scroller.clone();
         let canvas_padding = canvas_padding;
         move || {
-            let (image_w, image_h) = {
+            let (image_w, image_h, crop_rect, crop_mode_active) = {
                 let st = state.lock().unwrap();
                 (
                     st.working_image.width().max(1) as i32,
                     st.working_image.height().max(1) as i32,
+                    st.draft_crop_rect().or(st.crop_selection),
+                    st.selected_tool == Tool::Crop,
                 )
             };
 
-            let available_width = canvas_scroller
-                .allocated_width()
-                .saturating_sub(canvas_padding * 2 + 2)
-                .max(1) as f64;
+            let scroller_width = canvas_scroller.allocated_width().max(1) as f64;
+            let available_width = (scroller_width - (canvas_padding * 2 + 2) as f64).max(1.0);
             let scale = (available_width / image_w as f64).min(1.0);
             let fitted_w = ((image_w as f64) * scale).round().max(1.0) as i32;
             let fitted_h = ((image_h as f64) * scale).round().max(1.0) as i32;
-            let canvas_w = fitted_w + canvas_padding * 2;
-            let canvas_h = fitted_h + canvas_padding * 2;
+            let (overflow_left, overflow_top, overflow_right, overflow_bottom) =
+                crop_canvas_overflow(
+                    crop_rect,
+                    image_w as f64,
+                    image_h as f64,
+                    scale,
+                    crop_mode_active,
+                );
+            let canvas_w = fitted_w
+                + canvas_padding * 2
+                + overflow_left.round() as i32
+                + overflow_right.round() as i32;
+            let canvas_h = fitted_h
+                + canvas_padding * 2
+                + overflow_top.round() as i32
+                + overflow_bottom.round() as i32;
 
             drawing_area.set_content_width(canvas_w);
             drawing_area.set_content_height(canvas_h);
@@ -1252,12 +1505,30 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     {
         let update_canvas_content_size_tick = update_canvas_content_size.clone();
-        let last_canvas_width = Rc::new(Cell::new(0));
-        let last_canvas_width_tick = last_canvas_width.clone();
+        let state_canvas_tick = state.clone();
+        let last_canvas_signature = Rc::new(Cell::new((0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, false)));
+        let last_canvas_signature_tick = last_canvas_signature.clone();
         canvas_scroller.add_tick_callback(move |scroller, _| {
             let width = scroller.allocated_width();
-            if width > 0 && width != last_canvas_width_tick.get() {
-                last_canvas_width_tick.set(width);
+            let signature = {
+                let st = state_canvas_tick.lock().unwrap();
+                let crop_rect = st.draft_crop_rect().or(st.crop_selection);
+                let (crop_x, crop_y, crop_w, crop_h) = crop_rect
+                    .map(|rect| (rect.x, rect.y, rect.width, rect.height))
+                    .unwrap_or((0, 0, 0, 0));
+                (
+                    width,
+                    st.working_image.width().max(1) as i32,
+                    st.working_image.height().max(1) as i32,
+                    crop_x,
+                    crop_y,
+                    crop_w,
+                    crop_h,
+                    st.selected_tool == Tool::Crop,
+                )
+            };
+            if width > 0 && signature != last_canvas_signature_tick.get() {
+                last_canvas_signature_tick.set(signature);
                 update_canvas_content_size_tick();
             }
             glib::ControlFlow::Continue
@@ -1306,8 +1577,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         move |color| {
             {
                 let mut st = state_picker_apply.lock().unwrap();
-                st.selected_color = color;
-                let _ = st.set_selected_action_color(color);
+                if st.selected_tool == Tool::Crop {
+                    st.set_crop_background_color(color);
+                } else {
+                    st.selected_color = color;
+                    let _ = st.set_selected_action_color(color);
+                }
             }
 
             let nearest_index = super::color::palette_index_for_color(color);
@@ -1345,10 +1620,36 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
     });
 
-    {
-        let initial_color = state.lock().unwrap().selected_color;
-        sync_picker_from_color(initial_color);
-    }
+    let sync_picker_for_active_tool: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let color_buttons = color_buttons.clone();
+        let color_picker_dot = color_picker_dot.clone();
+        let color_class_names = color_class_names.clone();
+        let sync_picker_from_color = sync_picker_from_color.clone();
+        move || {
+            let (active_color, show_palette_state) = {
+                let st = state.lock().unwrap();
+                if st.selected_tool == Tool::Crop {
+                    (st.crop_background_color, st.crop_background_color_explicit)
+                } else {
+                    (st.selected_color, true)
+                }
+            };
+            sync_picker_from_color(active_color);
+            clear_active_color_picker_palette_state(&color_buttons);
+            if show_palette_state {
+                set_color_picker_trigger_dot_state(
+                    &color_picker_dot,
+                    &color_class_names,
+                    super::color::palette_index_for_color(active_color),
+                );
+            } else {
+                clear_color_picker_trigger_dot_state(&color_picker_dot, &color_class_names);
+            }
+        }
+    });
+
+    sync_picker_for_active_tool();
 
     // Hue slider
     let picker_state_hue = picker_state.clone();
@@ -1522,23 +1823,19 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     });
 
     // Universal button sync
-    let state_picker_open_arrow = state.clone();
-    let sync_picker_from_color_arrow = sync_picker_from_color.clone();
+    let sync_picker_for_active_tool_arrow = sync_picker_for_active_tool.clone();
     let picker_panel_arrow = picker_panel.clone();
     universal_arrow_btn.connect_clicked(move |_| {
         if picker_panel_arrow.is_visible() {
-            let selected_color = state_picker_open_arrow.lock().unwrap().selected_color;
-            sync_picker_from_color_arrow(selected_color);
+            sync_picker_for_active_tool_arrow();
         }
     });
 
-    let state_picker_open_wheel = state.clone();
-    let sync_picker_from_color_wheel = sync_picker_from_color.clone();
+    let sync_picker_for_active_tool_wheel = sync_picker_for_active_tool.clone();
     let picker_panel_wheel = picker_panel.clone();
     universal_color_btn.connect_clicked(move |_| {
         if picker_panel_wheel.is_visible() {
-            let selected_color = state_picker_open_wheel.lock().unwrap().selected_color;
-            sync_picker_from_color_wheel(selected_color);
+            sync_picker_for_active_tool_wheel();
         }
     });
 
@@ -1623,28 +1920,72 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             &size_down_btn_draw,
             &size_up_btn_draw,
         );
-        let inset = canvas_padding_draw;
-        let view_width = (width as f64 - inset * 2.0).max(1.0);
-        let view_height = (height as f64 - inset * 2.0).max(1.0);
+        let image_width = st.working_image.width() as f64;
+        let image_height = st.working_image.height() as f64;
+        let crop_rect = st.draft_crop_rect().or(st.crop_selection);
+        let crop_mode_active = st.selected_tool == Tool::Crop;
 
-        let mut t = ViewTransform::fit(
-            st.working_image.width() as f64,
-            st.working_image.height() as f64,
-            view_width,
-            view_height,
-        );
-        t.offset_x += inset;
-        t.offset_y += inset;
+        let base_view_width = (width as f64 - canvas_padding_draw * 2.0).max(1.0);
+        let base_scale = (base_view_width / image_width).min(1.0);
+        let (overflow_left, overflow_top, overflow_right, overflow_bottom) =
+            crop_canvas_overflow(
+                crop_rect,
+                image_width,
+                image_height,
+                base_scale,
+                crop_mode_active,
+            );
+        let view_width = (width as f64
+            - canvas_padding_draw * 2.0
+            - overflow_left
+            - overflow_right)
+            .max(1.0);
+        let view_height = (height as f64
+            - canvas_padding_draw * 2.0
+            - overflow_top
+            - overflow_bottom)
+            .max(1.0);
+
+        let mut t = ViewTransform::fit(image_width, image_height, view_width, view_height);
+        t.offset_x += canvas_padding_draw + overflow_left;
+        t.offset_y += canvas_padding_draw + overflow_top;
 
         *transform_draw.lock().unwrap() = t;
 
         context.set_operator(gtk4::cairo::Operator::Source);
-        draw_canvas_checkerboard_background(context, width, height);
+        draw_canvas_checkerboard_background(
+            context,
+            width,
+            height,
+            if crop_mode_active && st.crop_background_color_explicit {
+                Some(st.crop_background_color)
+            } else {
+                None
+            },
+        );
         context.set_operator(gtk4::cairo::Operator::Over);
 
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);
+
+        if crop_mode_active && st.crop_background_color_explicit {
+            if let Some(crop_rect) = crop_rect {
+                context.set_source_rgba(
+                    st.crop_background_color.r,
+                    st.crop_background_color.g,
+                    st.crop_background_color.b,
+                    st.crop_background_color.a,
+                );
+                context.rectangle(
+                    crop_rect.x as f64,
+                    crop_rect.y as f64,
+                    crop_rect.width as f64,
+                    crop_rect.height as f64,
+                );
+                let _ = context.fill();
+            }
+        }
 
         if cached_surface_revision_draw.get() != st.working_image_revision
             || cached_surface_draw.borrow().is_none()
@@ -1699,6 +2040,27 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
         }
 
+        if crop_mode_active {
+            if let Some(crop_rect) = crop_rect {
+                let canvas_left = -t.offset_x / t.scale;
+                let canvas_top = -t.offset_y / t.scale;
+                let canvas_width = width as f64 / t.scale;
+                let canvas_height = height as f64 / t.scale;
+                let _ = context.save();
+                context.rectangle(canvas_left, canvas_top, canvas_width, canvas_height);
+                context.rectangle(
+                    crop_rect.x as f64,
+                    crop_rect.y as f64,
+                    crop_rect.width as f64,
+                    crop_rect.height as f64,
+                );
+                context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
+                context.set_source_rgba(0.0, 0.0, 0.0, 140.0 / 255.0);
+                let _ = context.fill();
+                let _ = context.restore();
+            }
+        }
+
         if let Some(crop_rect) = st.draft_crop_rect().or(st.crop_selection) {
             draw_crop_overlay(
                 context,
@@ -1728,9 +2090,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_select = drawing_area.downgrade();
     let buttons_select = tool_buttons.clone();
     let apply_crop_btn_select = apply_crop_btn.clone();
+    let update_toolbar_for_tool_select = update_toolbar_for_tool.clone();
     select_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_select, 0);
+        set_active_tool_button(&buttons_select, 1);
         state_select.lock().unwrap().set_tool(Tool::Select);
+        update_toolbar_for_tool_select(Tool::Select);
         set_crop_apply_button_state(&apply_crop_btn_select, false, false);
         if let Some(area) = drawing_area_select.upgrade() {
             area.queue_draw();
@@ -1759,13 +2123,35 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_crop = drawing_area.downgrade();
     let buttons_crop = tool_buttons.clone();
     let apply_crop_btn_crop = apply_crop_btn.clone();
+    let update_toolbar_for_tool_crop = update_toolbar_for_tool.clone();
+    let update_crop_size_fields_crop = update_crop_size_fields.clone();
+    let sync_picker_for_active_tool_crop = sync_picker_for_active_tool.clone();
     crop_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_crop, 1);
-        let mut st = state_crop.lock().unwrap();
-        st.set_tool(Tool::Crop);
-        let has_selection = st.crop_selection.is_some();
-        drop(st);
-        set_crop_apply_button_state(&apply_crop_btn_crop, true, has_selection);
+        let (next_tool, has_selection) = {
+            let mut st = state_crop.lock().unwrap();
+            if st.selected_tool == Tool::Crop {
+                st.set_tool(Tool::Arrow);
+                (Tool::Arrow, false)
+            } else {
+                st.set_tool(Tool::Crop);
+                st.ensure_crop_selection_initialized();
+                (Tool::Crop, st.crop_selection.is_some())
+            }
+        };
+
+        if matches!(next_tool, Tool::Crop) {
+            set_active_tool_button(&buttons_crop, 0);
+        } else {
+            set_active_tool_button(&buttons_crop, 5);
+        }
+        update_toolbar_for_tool_crop(next_tool);
+        sync_picker_for_active_tool_crop();
+        set_crop_apply_button_state(
+            &apply_crop_btn_crop,
+            matches!(next_tool, Tool::Crop),
+            has_selection,
+        );
+        update_crop_size_fields_crop();
         if let Some(area) = drawing_area_crop.upgrade() {
             area.queue_draw();
         }
@@ -1775,9 +2161,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_draw_mode = drawing_area.downgrade();
     let buttons_draw_mode = tool_buttons.clone();
     let apply_crop_btn_draw_mode = apply_crop_btn.clone();
+    let update_toolbar_for_tool_draw_mode = update_toolbar_for_tool.clone();
     draw_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_draw_mode, 2);
         state_draw_mode.lock().unwrap().set_tool(Tool::Pen);
+        update_toolbar_for_tool_draw_mode(Tool::Pen);
         set_crop_apply_button_state(&apply_crop_btn_draw_mode, false, false);
         if let Some(area) = drawing_area_draw_mode.upgrade() {
             area.queue_draw();
@@ -1788,9 +2176,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_arrow = drawing_area.downgrade();
     let buttons_arrow = tool_buttons.clone();
     let apply_crop_btn_arrow = apply_crop_btn.clone();
+    let update_toolbar_for_tool_arrow = update_toolbar_for_tool.clone();
     arrow_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_arrow, 5);
         state_arrow.lock().unwrap().set_tool(Tool::Arrow);
+        update_toolbar_for_tool_arrow(Tool::Arrow);
         set_crop_apply_button_state(&apply_crop_btn_arrow, false, false);
         if let Some(area) = drawing_area_arrow.upgrade() {
             area.queue_draw();
@@ -1801,9 +2191,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_line = drawing_area.downgrade();
     let buttons_line = tool_buttons.clone();
     let apply_crop_btn_line = apply_crop_btn.clone();
+    let update_toolbar_for_tool_line = update_toolbar_for_tool.clone();
     line_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_line, 6);
         state_line.lock().unwrap().set_tool(Tool::Line);
+        update_toolbar_for_tool_line(Tool::Line);
         set_crop_apply_button_state(&apply_crop_btn_line, false, false);
         if let Some(area) = drawing_area_line.upgrade() {
             area.queue_draw();
@@ -1877,9 +2269,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_box = drawing_area.downgrade();
     let buttons_box = tool_buttons.clone();
     let apply_crop_btn_box = apply_crop_btn.clone();
+    let update_toolbar_for_tool_box = update_toolbar_for_tool.clone();
     box_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_box, 3);
         state_box.lock().unwrap().set_tool(Tool::Box);
+        update_toolbar_for_tool_box(Tool::Box);
         set_crop_apply_button_state(&apply_crop_btn_box, false, false);
         if let Some(area) = drawing_area_box.upgrade() {
             area.queue_draw();
@@ -1890,9 +2284,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_circle = drawing_area.downgrade();
     let buttons_circle = tool_buttons.clone();
     let apply_crop_btn_circle = apply_crop_btn.clone();
+    let update_toolbar_for_tool_circle = update_toolbar_for_tool.clone();
     circle_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_circle, 4);
         state_circle.lock().unwrap().set_tool(Tool::Circle);
+        update_toolbar_for_tool_circle(Tool::Circle);
         set_crop_apply_button_state(&apply_crop_btn_circle, false, false);
         if let Some(area) = drawing_area_circle.upgrade() {
             area.queue_draw();
@@ -1903,9 +2299,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_text = drawing_area.downgrade();
     let buttons_text = tool_buttons.clone();
     let apply_crop_btn_text = apply_crop_btn.clone();
+    let update_toolbar_for_tool_text = update_toolbar_for_tool.clone();
     text_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_text, 7);
         state_text.lock().unwrap().set_tool(Tool::Text);
+        update_toolbar_for_tool_text(Tool::Text);
         set_crop_apply_button_state(&apply_crop_btn_text, false, false);
         if let Some(area) = drawing_area_text.upgrade() {
             area.queue_draw();
@@ -1916,9 +2314,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_blur = drawing_area.downgrade();
     let buttons_blur = tool_buttons.clone();
     let apply_crop_btn_blur = apply_crop_btn.clone();
+    let update_toolbar_for_tool_blur = update_toolbar_for_tool.clone();
     blur_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_blur, 8);
         state_blur.lock().unwrap().set_tool(Tool::Blur);
+        update_toolbar_for_tool_blur(Tool::Blur);
         set_crop_apply_button_state(&apply_crop_btn_blur, false, false);
         if let Some(area) = drawing_area_blur.upgrade() {
             area.queue_draw();
@@ -1929,9 +2329,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_censor = drawing_area.downgrade();
     let buttons_censor = tool_buttons.clone();
     let apply_crop_btn_censor = apply_crop_btn.clone();
+    let update_toolbar_for_tool_censor = update_toolbar_for_tool.clone();
     censor_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_censor, 9);
         state_censor.lock().unwrap().set_tool(Tool::Censor);
+        update_toolbar_for_tool_censor(Tool::Censor);
         set_crop_apply_button_state(&apply_crop_btn_censor, false, false);
         if let Some(area) = drawing_area_censor.upgrade() {
             area.queue_draw();
@@ -1942,9 +2344,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_focus = drawing_area.downgrade();
     let buttons_focus = tool_buttons.clone();
     let apply_crop_btn_focus = apply_crop_btn.clone();
+    let update_toolbar_for_tool_focus = update_toolbar_for_tool.clone();
     focus_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_focus, 12);
         state_focus.lock().unwrap().set_tool(Tool::Focus);
+        update_toolbar_for_tool_focus(Tool::Focus);
         set_crop_apply_button_state(&apply_crop_btn_focus, false, false);
         if let Some(area) = drawing_area_focus.upgrade() {
             area.queue_draw();
@@ -1955,9 +2359,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_number = drawing_area.downgrade();
     let buttons_number = tool_buttons.clone();
     let apply_crop_btn_number = apply_crop_btn.clone();
+    let update_toolbar_for_tool_number = update_toolbar_for_tool.clone();
     number_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_number, 10);
         state_number.lock().unwrap().set_tool(Tool::Number);
+        update_toolbar_for_tool_number(Tool::Number);
         set_crop_apply_button_state(&apply_crop_btn_number, false, false);
         if let Some(area) = drawing_area_number.upgrade() {
             area.queue_draw();
@@ -1968,12 +2374,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_highlighter = drawing_area.downgrade();
     let buttons_highlighter = tool_buttons.clone();
     let apply_crop_btn_highlighter = apply_crop_btn.clone();
+    let update_toolbar_for_tool_highlighter = update_toolbar_for_tool.clone();
     highlighter_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_highlighter, 11);
         state_highlighter
             .lock()
             .unwrap()
             .set_tool(Tool::Highlighter);
+        update_toolbar_for_tool_highlighter(Tool::Highlighter);
         set_crop_apply_button_state(&apply_crop_btn_highlighter, false, false);
         if let Some(area) = drawing_area_highlighter.upgrade() {
             area.queue_draw();
@@ -2097,8 +2505,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let sync_picker_from_color_group = sync_picker_from_color.clone();
         button.connect_clicked(move |_| {
             let mut st = state_color.lock().unwrap();
-            st.set_color_index(index);
-            st.set_selected_action_color(DRAW_COLORS[index]);
+            if st.selected_tool == Tool::Crop {
+                st.set_crop_background_color(DRAW_COLORS[index]);
+            } else {
+                st.set_color_index(index);
+                st.set_selected_action_color(DRAW_COLORS[index]);
+            }
             drop(st);
 
             sync_picker_from_color_group(DRAW_COLORS[index]);
@@ -2143,6 +2555,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let buttons_apply_crop = tool_buttons.clone();
     let apply_crop_btn_click = apply_crop_btn.clone();
     let update_canvas_content_size_apply = update_canvas_content_size.clone();
+    let update_toolbar_for_tool_apply_crop = update_toolbar_for_tool.clone();
+    let update_crop_size_fields_apply_crop = update_crop_size_fields.clone();
+    let sync_picker_for_active_tool_apply_crop = sync_picker_for_active_tool.clone();
     apply_crop_btn.connect_clicked(move |_| {
         let apply_result = {
             let mut st = state_apply_crop.lock().unwrap();
@@ -2157,13 +2572,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             Ok(true) => {
                 update_canvas_content_size_apply();
                 set_active_tool_button(&buttons_apply_crop, 5);
+                update_toolbar_for_tool_apply_crop(Tool::Arrow);
+                sync_picker_for_active_tool_apply_crop();
                 set_crop_apply_button_state(&apply_crop_btn_click, false, false);
+                update_crop_size_fields_apply_crop();
                 if let Some(area) = drawing_area_apply_crop.upgrade() {
                     area.queue_draw();
                 }
             }
             Ok(false) => {
                 set_crop_apply_button_state(&apply_crop_btn_click, true, false);
+                update_crop_size_fields_apply_crop();
             }
             Err(e) => {
                 eprintln!("Failed to apply crop: {e}");
@@ -2253,6 +2672,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_begin = drawing_area.downgrade();
     let drag_last_redraw_begin = drag_last_redraw.clone();
     let apply_crop_btn_drag_begin = apply_crop_btn.clone();
+    let update_crop_size_fields_drag_begin = update_crop_size_fields.clone();
     drag.connect_drag_begin(move |gesture, x, y| {
         if eyedropper_mode_drag_begin.get() {
             return;
@@ -2260,7 +2680,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
         let t = *transform_drag_begin.lock().unwrap();
         let view_point = Point { x, y };
-        if !t.contains_view(view_point) {
+
+        let selected_tool = {
+            let st = state_drag_begin.lock().unwrap();
+            st.selected_tool
+        };
+        if !t.contains_view(view_point) && selected_tool != Tool::Crop {
             return;
         }
 
@@ -2286,18 +2711,38 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             return;
         }
 
+        if st.selected_tool == Tool::Crop {
+            let image_point = t.view_to_image(view_point);
+            st.drag_start_view = Some(view_point);
+            if st.begin_crop_drag_with_scale(image_point, t.scale) {
+                let has_selection = st.crop_selection.is_some();
+                drop(st);
+                set_crop_apply_button_state(&apply_crop_btn_drag_begin, true, has_selection);
+                update_crop_size_fields_drag_begin();
+                if let Some(area) = drawing_area_begin.upgrade() {
+                    area.queue_draw();
+                }
+                drag_last_redraw_begin.set(glib::monotonic_time());
+                return;
+            }
+
+            st.drag_shift_active = shift_pressed;
+            st.begin_drag(image_point);
+            st.crop_selection = None;
+            drop(st);
+            set_crop_apply_button_state(&apply_crop_btn_drag_begin, true, false);
+            update_crop_size_fields_drag_begin();
+            if let Some(area) = drawing_area_begin.upgrade() {
+                area.queue_draw();
+            }
+            drag_last_redraw_begin.set(glib::monotonic_time());
+            return;
+        }
+
         st.drag_shift_active = shift_pressed;
         st.begin_drag(t.view_to_image_clamped(view_point));
         st.drag_start_view = Some(view_point);
-        let is_crop_mode = st.selected_tool == Tool::Crop;
-        if is_crop_mode {
-            st.crop_selection = None;
-        }
         drop(st);
-
-        if is_crop_mode {
-            set_crop_apply_button_state(&apply_crop_btn_drag_begin, true, false);
-        }
 
         if let Some(area) = drawing_area_begin.upgrade() {
             area.queue_draw();
@@ -2310,6 +2755,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let transform_drag_update = transform.clone();
     let drawing_area_update = drawing_area.downgrade();
     let drag_last_redraw_update = drag_last_redraw.clone();
+    let update_crop_size_fields_drag_update = update_crop_size_fields.clone();
     drag.connect_drag_update(move |gesture, offset_x, offset_y| {
         if eyedropper_mode_drag_update.get() {
             return;
@@ -2349,6 +2795,28 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 return;
             }
 
+            if st.selected_tool == Tool::Crop {
+                let now = glib::monotonic_time();
+                if now - drag_last_redraw_update.get() < DRAG_REDRAW_INTERVAL_US {
+                    return;
+                }
+
+                let image_point = t.view_to_image(current_view);
+                if st.select_drag_anchor.is_some() {
+                    st.update_crop_drag(image_point);
+                } else {
+                    st.drag_shift_active = shift_pressed;
+                    st.update_drag(image_point);
+                }
+                drag_last_redraw_update.set(now);
+                drop(st);
+                update_crop_size_fields_drag_update();
+                if let Some(area) = drawing_area_update.upgrade() {
+                    area.queue_draw();
+                }
+                return;
+            }
+
             st.drag_shift_active = shift_pressed;
             st.update_drag(t.view_to_image_clamped(current_view));
             drop(st);
@@ -2368,6 +2836,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_end = drawing_area.downgrade();
     let drag_last_redraw_end = drag_last_redraw.clone();
     let apply_crop_btn_drag_end = apply_crop_btn.clone();
+    let update_crop_size_fields_drag_end = update_crop_size_fields.clone();
     drag.connect_drag_end(move |gesture, offset_x, offset_y| {
         if eyedropper_mode_drag_end.get() {
             return;
@@ -2403,12 +2872,19 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
 
             let mut crop_selection_ready = None;
-            st.drag_shift_active = shift_pressed;
-            st.update_drag(t.view_to_image_clamped(current_view));
             if st.selected_tool == Tool::Crop {
-                st.crop_selection = st.draft_crop_rect();
-                crop_selection_ready = Some(st.crop_selection.is_some());
-                st.clear_drag();
+                let image_point = t.view_to_image(current_view);
+                if st.select_drag_anchor.is_some() {
+                    st.update_crop_drag(image_point);
+                    crop_selection_ready = Some(st.crop_selection.is_some());
+                    st.end_crop_drag();
+                } else {
+                    st.drag_shift_active = shift_pressed;
+                    st.update_drag(image_point);
+                    st.crop_selection = st.draft_crop_rect();
+                    crop_selection_ready = Some(st.crop_selection.is_some());
+                    st.clear_drag();
+                }
             } else if let Some(action) = st.finalize_drag_action() {
                 st.push_action(action);
             } else {
@@ -2419,6 +2895,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             if let Some(has_selection) = crop_selection_ready {
                 set_crop_apply_button_state(&apply_crop_btn_drag_end, true, has_selection);
             }
+            update_crop_size_fields_drag_end();
 
             if let Some(area) = drawing_area_end.upgrade() {
                 area.queue_draw();
@@ -2639,6 +3116,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drawing_area_keys = drawing_area.downgrade();
     let tool_buttons_keys = tool_buttons.clone();
     let apply_crop_btn_keys = apply_crop_btn.clone();
+    let update_toolbar_for_tool_keys = update_toolbar_for_tool.clone();
+    let update_crop_size_fields_keys = update_crop_size_fields.clone();
+    let sync_picker_for_active_tool_keys = sync_picker_for_active_tool.clone();
     let eyedropper_mode_keys = eyedropper_mode.clone();
     let eyedropper_point_keys = eyedropper_point.clone();
     let eyedropper_rendered_keys = eyedropper_rendered.clone();
@@ -2692,13 +3172,19 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 let has_crop_selection = {
                     let mut st = state_keys.lock().unwrap();
                     st.set_tool(tool);
+                    if matches!(tool, Tool::Crop) {
+                        st.ensure_crop_selection_initialized();
+                    }
                     st.crop_selection.is_some()
                 };
+                update_toolbar_for_tool_keys(tool);
+                sync_picker_for_active_tool_keys();
                 set_crop_apply_button_state(
                     &apply_crop_btn_keys,
                     matches!(tool, Tool::Crop),
                     has_crop_selection,
                 );
+                update_crop_size_fields_keys();
                 if let Some(area) = drawing_area_keys.upgrade() {
                     area.queue_draw();
                 }

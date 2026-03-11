@@ -85,7 +85,10 @@ fn build_settings_window(app: &Application) {
     let title = Label::new(Some("General"));
     title.add_css_class("title-4");
     title.set_halign(Align::Center);
-    toolbar.set_center_widget(Some(&title));
+    let title_drag_area = GtkBox::new(Orientation::Horizontal, 0);
+    title_drag_area.set_halign(Align::Center);
+    title_drag_area.append(&title);
+    toolbar.set_center_widget(Some(&title_drag_area));
 
     let right_group = GtkBox::new(Orientation::Horizontal, 12);
     right_group.add_css_class("editor-toolbar-right");
@@ -99,7 +102,7 @@ fn build_settings_window(app: &Application) {
     right_group.append(&save_btn);
     toolbar.set_end_widget(Some(&right_group));
 
-    install_window_drag(&toolbar, &window);
+    install_window_drag(&title_drag_area, &window);
 
     let content = GtkBox::new(Orientation::Vertical, 0);
     content.set_margin_top(12);

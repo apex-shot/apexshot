@@ -38,6 +38,59 @@ pub enum SizeControlMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CropAspectRatio {
+    Freeform,
+    Original,
+    Square,
+    FourThree,
+    SixteenNine,
+    ThreeTwo,
+    NineSixteen,
+}
+
+impl CropAspectRatio {
+    pub const ALL: [Self; 7] = [
+        Self::Freeform,
+        Self::Original,
+        Self::Square,
+        Self::FourThree,
+        Self::SixteenNine,
+        Self::ThreeTwo,
+        Self::NineSixteen,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Freeform => "Freeform",
+            Self::Original => "Original",
+            Self::Square => "Square",
+            Self::FourThree => "4:3",
+            Self::SixteenNine => "16:9",
+            Self::ThreeTwo => "3:2",
+            Self::NineSixteen => "9:16",
+        }
+    }
+
+    pub fn aspect_ratio(self, image_width: i32, image_height: i32) -> Option<f64> {
+        match self {
+            Self::Freeform => None,
+            Self::Original => {
+                if image_width > 0 && image_height > 0 {
+                    Some(image_width as f64 / image_height as f64)
+                } else {
+                    None
+                }
+            }
+            Self::Square => Some(1.0),
+            Self::FourThree => Some(4.0 / 3.0),
+            Self::SixteenNine => Some(16.0 / 9.0),
+            Self::ThreeTwo => Some(3.0 / 2.0),
+            Self::NineSixteen => Some(9.0 / 16.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectHandle {
     TopLeft,
     Top,
@@ -155,15 +208,19 @@ impl ViewTransform {
             && point.y <= self.offset_y + draw_height
     }
 
-    pub fn view_to_image_clamped(&self, point: Point) -> Point {
+    pub fn view_to_image(&self, point: Point) -> Point {
         let scale = self.scale.max(0.0001);
-        let mut ix = (point.x - self.offset_x) / scale;
-        let mut iy = (point.y - self.offset_y) / scale;
+        Point {
+            x: (point.x - self.offset_x) / scale,
+            y: (point.y - self.offset_y) / scale,
+        }
+    }
 
-        ix = ix.clamp(0.0, self.image_width);
-        iy = iy.clamp(0.0, self.image_height);
-
-        Point { x: ix, y: iy }
+    pub fn view_to_image_clamped(&self, point: Point) -> Point {
+        let mut image_point = self.view_to_image(point);
+        image_point.x = image_point.x.clamp(0.0, self.image_width);
+        image_point.y = image_point.y.clamp(0.0, self.image_height);
+        image_point
     }
 }
 
@@ -375,7 +432,7 @@ pub fn tool_uses_stroke_size(tool: Tool) -> bool {
 
 pub fn tool_shortcut_target(key: char) -> Option<(Tool, usize)> {
     match key.to_ascii_lowercase() {
-        '0' | '`' | 's' => Some((Tool::Select, 0)),
+        '0' | '`' | 's' => Some((Tool::Select, 1)),
         '1' | 'd' | 'p' => Some((Tool::Pen, 2)),
         '2' | 't' => Some((Tool::Text, 7)),
         '3' | 'l' => Some((Tool::Line, 6)),
@@ -385,7 +442,7 @@ pub fn tool_shortcut_target(key: char) -> Option<(Tool, usize)> {
         '7' | 'h' => Some((Tool::Highlighter, 11)),
         '8' | 'c' => Some((Tool::Censor, 9)),
         '9' | 'n' => Some((Tool::Number, 10)),
-        'x' => Some((Tool::Crop, 1)),
+        'x' => Some((Tool::Crop, 0)),
         'b' => Some((Tool::Blur, 8)),
         'f' => Some((Tool::Focus, 12)),
         _ => None,
