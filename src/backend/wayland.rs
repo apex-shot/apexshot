@@ -89,6 +89,14 @@ fn clear_restore_token(target: CaptureTarget) {
     }
 }
 
+fn is_gnome_wayland_session() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && (std::env::var_os("GNOME_SETUP_DISPLAY").is_some()
+            || std::env::var("XDG_CURRENT_DESKTOP")
+                .map(|desktop| desktop.to_ascii_lowercase().contains("gnome"))
+                .unwrap_or(false))
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // GStreamer helpers (only used in the ScreenCast fallback)
 // ──────────────────────────────────────────────────────────────────────────────
@@ -420,6 +428,26 @@ impl WaylandBackend {
         capture
     }
 
+    fn capture_monitor_via_screencast() -> DisplayResult<CaptureData> {
+        let t3_start = std::time::Instant::now();
+        let result = block_on_async(async {
+            Self::capture_via_screencast(CaptureTarget::Monitor, false).await
+        });
+        match &result {
+            Ok(d) => eprintln!(
+                "[capture] Tier 3 (ScreenCast) succeeded in {:.0}ms ({}x{}).",
+                t3_start.elapsed().as_millis(),
+                d.width,
+                d.height
+            ),
+            Err(e) => eprintln!(
+                "[capture] Tier 3 (ScreenCast) failed ({:.0}ms): {e}",
+                t3_start.elapsed().as_millis()
+            ),
+        }
+        result
+    }
+
     fn capture_screen_chain(
         &self,
         allow_screenshot_portal: bool,
@@ -463,11 +491,22 @@ impl WaylandBackend {
             ),
         }
 
+        let prefer_screencast_first =
+            allow_screencast && allow_screenshot_portal && is_gnome_wayland_session();
+
+        if prefer_screencast_first {
+            eprintln!(
+                "[capture] GNOME Wayland detected — preferring ScreenCast before Screenshot portal to avoid flash/sound."
+            );
+            eprintln!(
+                "[capture] Tier 3 (ScreenCast portal + PipeWire): attempting before Screenshot portal..."
+            );
+            if let Ok(capture) = Self::capture_monitor_via_screencast() {
+                return Ok(capture);
+            }
+        }
+
         if allow_screenshot_portal {
-            // Tier 2: Screenshot portal — no persistent share tray/session.
-            // ⚠ WARNING: This calls org.freedesktop.portal.Screenshot which on GNOME
-            // triggers the system screenshot sound + screen flash feedback.
-            // This is the expected source of the flash/sound before the selector opens.
             eprintln!("[capture] Tier 2 (Screenshot portal): attempting — ⚠ THIS WILL TRIGGER PORTAL SCREENSHOT (flash/sound expected)");
             let t2_start = std::time::Instant::now();
             match block_on_async(Self::capture_via_screenshot_portal(false)) {
@@ -486,28 +525,16 @@ impl WaylandBackend {
             );
         }
 
-        if allow_screencast {
-            // Tier 3: ScreenCast portal + PipeWire — last resort.
+        if allow_screencast && !prefer_screencast_first {
             eprintln!(
                 "[capture] Tier 3 (ScreenCast portal + PipeWire): attempting (last resort)..."
             );
-            let t3_start = std::time::Instant::now();
-            let result = block_on_async(async {
-                Self::capture_via_screencast(CaptureTarget::Monitor, false).await
-            });
-            match &result {
-                Ok(d) => eprintln!(
-                    "[capture] Tier 3 (ScreenCast) succeeded in {:.0}ms ({}x{}).",
-                    t3_start.elapsed().as_millis(),
-                    d.width,
-                    d.height
-                ),
-                Err(e) => eprintln!(
-                    "[capture] Tier 3 (ScreenCast) failed ({:.0}ms): {e}",
-                    t3_start.elapsed().as_millis()
-                ),
-            }
-            result
+            Self::capture_monitor_via_screencast()
+        } else if allow_screencast {
+            Err(DisplayError::CaptureError(
+                "GNOME Wayland ScreenCast capture failed and Screenshot portal fallback also failed"
+                    .into(),
+            ))
         } else {
             eprintln!("[capture] Tier 3 (ScreenCast): SKIPPED (allow_screencast=false) — all tiers exhausted.");
             Err(DisplayError::CaptureError(

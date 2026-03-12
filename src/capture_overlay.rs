@@ -13,8 +13,11 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use crate::backend::{CaptureData, PixelFormat};
-use crate::overlay::{SelectionArea, SelectionError, SelectionResult};
+use crate::{
+    backend::{CaptureData, DisplayBackend, PixelFormat, WaylandBackend},
+    capture::{save_capture, ImageFormat, SaveConfig},
+    overlay::{SelectionArea, SelectionError, SelectionResult},
+};
 
 /// Find the `apexshot-capture` binary.
 ///
@@ -249,7 +252,32 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
     }
 }
 
+fn save_capture_to_temp_png(
+    capture: &CaptureData,
+    prefix: &str,
+) -> Result<PathBuf, SelectionError> {
+    save_capture(
+        capture,
+        &SaveConfig::default()
+            .with_output_dir(std::env::temp_dir())
+            .with_format(ImageFormat::Png)
+            .with_prefix(prefix),
+    )
+    .map_err(|e| SelectionError::InitError(format!("Failed to save temporary capture: {e}")))
+}
+
 pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
+    if WaylandBackend::is_supported() {
+        eprintln!("[capture_overlay] capture_window_file: using Wayland ScreenCast window capture");
+        let backend = WaylandBackend::new().map_err(|e| {
+            SelectionError::InitError(format!("Failed to initialize Wayland backend: {e}"))
+        })?;
+        let capture = backend.capture_window(0).map_err(|e| {
+            SelectionError::InitError(format!("Wayland window capture failed: {e}"))
+        })?;
+        return save_capture_to_temp_png(&capture, "window_");
+    }
+
     eprintln!("[capture_overlay] capture_window_via_cpp: launching --window-capture");
     let output = run_capture_binary(&["--window-capture"], None)?;
     let exit_code = output.status.code();

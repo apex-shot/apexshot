@@ -861,7 +861,7 @@ bool captureAreaToTempPngViaPortal(const QRect& logicalSelection,
 }
 
 bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
-                                          const QSize& overlaySize,
+                                          const QRect& overlayGeometry,
                                           QString& outPath,
                                           QSize& outSize,
                                           QString& outError)
@@ -872,8 +872,14 @@ bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
         return false;
     }
 
-    if (overlaySize.width() <= 0 || overlaySize.height() <= 0) {
-        outError = QStringLiteral("Overlay size is invalid");
+    if (overlayGeometry.width() <= 0 || overlayGeometry.height() <= 0) {
+        outError = QStringLiteral("Overlay geometry is invalid");
+        return false;
+    }
+
+    QRect desktopBounds;
+    if (!logicalDesktopBounds(desktopBounds)) {
+        outError = QStringLiteral("Unable to determine logical desktop bounds");
         return false;
     }
 
@@ -895,19 +901,22 @@ bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
         return false;
     }
 
-    // On GNOME Wayland without layer-shell, the selector window is often
-    // constrained below the top shell bar. We infer a stable mapping using
-    // horizontal scale and bottom alignment.
-    const double scale = static_cast<double>(fullImage.width()) /
-                         static_cast<double>(overlaySize.width());
-    const double mappedOverlayHeight = overlaySize.height() * scale;
-    const double topOffset =
-      qMax(0.0, static_cast<double>(fullImage.height()) - mappedOverlayHeight);
+    const QRect selectedGlobal = selected.translated(overlayGeometry.topLeft());
+    const QRect bounded = selectedGlobal.intersected(overlayGeometry).intersected(desktopBounds);
+    if (bounded.width() <= 0 || bounded.height() <= 0) {
+        outError = QStringLiteral("Selection is outside desktop bounds");
+        return false;
+    }
 
-    const int cropX = qRound(selected.x() * scale);
-    const int cropY = qRound(selected.y() * scale + topOffset);
-    const int cropW = qMax(1, qRound(selected.width() * scale));
-    const int cropH = qMax(1, qRound(selected.height() * scale));
+    const double scaleX = static_cast<double>(fullImage.width()) /
+                          static_cast<double>(desktopBounds.width());
+    const double scaleY = static_cast<double>(fullImage.height()) /
+                          static_cast<double>(desktopBounds.height());
+
+    const int cropX = qRound((bounded.x() - desktopBounds.x()) * scaleX);
+    const int cropY = qRound((bounded.y() - desktopBounds.y()) * scaleY);
+    const int cropW = qMax(1, qRound(bounded.width() * scaleX));
+    const int cropH = qMax(1, qRound(bounded.height() * scaleY));
 
     return saveCroppedToTemp(
       fullImage, QRect(cropX, cropY, cropW, cropH), outPath, outSize, outError);

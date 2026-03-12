@@ -6,7 +6,7 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea, EventControllerKey,
-    EventControllerMotion, Orientation, Overlay, WidgetPaintable, Window,
+    EventControllerMotion, Label, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::RefCell;
@@ -83,6 +83,10 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
         .build();
     window.add_css_class("capture-preview-window");
     let layer_shell_active = configure_window_positioning(&window);
+    let limited_always_on_top = should_warn_about_wayland_topmost(layer_shell_active);
+    if limited_always_on_top {
+        window.add_css_class("capture-preview-window-limited");
+    }
     // Intentionally silent when layer-shell is unavailable — the fallback
     // (bottom-left placement via X11 input-region) works correctly on X11
     // and non-layer-shell Wayland compositors. Logging this at startup every
@@ -161,11 +165,25 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
     bottom_controls.append(&bottom_spacer);
     bottom_controls.append(&upload_btn);
 
+    let fallback_notice = Label::new(Some("Not always-on-top on GNOME Wayland"));
+    fallback_notice.add_css_class("preview-warning-badge");
+    fallback_notice.set_halign(Align::Center);
+    fallback_notice.set_valign(Align::Start);
+    fallback_notice.set_margin_top(10);
+    fallback_notice.set_xalign(0.5);
+    fallback_notice.set_wrap(true);
+    fallback_notice.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    fallback_notice.set_justify(gtk4::Justification::Center);
+    fallback_notice.set_max_width_chars(24);
+    fallback_notice.set_visible(limited_always_on_top);
+    fallback_notice.set_can_target(false);
+
     top_controls.set_visible(false);
     center_controls.set_visible(false);
     bottom_controls.set_visible(false);
 
     card.add_overlay(&hover_tint);
+    card.add_overlay(&fallback_notice);
     card.add_overlay(&top_controls);
     card.add_overlay(&center_controls);
     card.add_overlay(&bottom_controls);
@@ -640,6 +658,23 @@ fn install_preview_css() {
                 box-shadow: 0 18px 54px alpha(black, 0.54), inset 0 1px 0 alpha(white, 0.20);
             }
 
+            .capture-preview-window-limited #capture-preview-card {
+                border-color: rgba(255, 197, 92, 0.82);
+                box-shadow: 0 14px 42px alpha(black, 0.45), inset 0 0 0 1px rgba(255, 197, 92, 0.24);
+            }
+
+            label.preview-warning-badge {
+                padding: 3px 10px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 222, 152, 0.68);
+                background: rgba(44, 28, 8, 0.88);
+                color: rgba(255, 238, 203, 0.98);
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+                box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+            }
+
             #capture-preview-hover-tint {
                 border-radius: 10px;
                 background: rgba(0, 0, 0, 0.52);
@@ -740,6 +775,28 @@ fn icon_button(icon_name: &str, _tooltip: &str) -> (Button, gtk4::Image) {
     button.add_css_class("preview-action");
 
     (button, image)
+}
+
+fn env_var_contains_case_insensitive(name: &str, needle: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| {
+            value
+                .to_ascii_lowercase()
+                .contains(&needle.to_ascii_lowercase())
+        })
+        .unwrap_or(false)
+}
+
+fn is_gnome_wayland_session() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && (env_var_contains_case_insensitive("XDG_CURRENT_DESKTOP", "gnome")
+            || env_var_contains_case_insensitive("DESKTOP_SESSION", "gnome")
+            || std::env::var_os("GNOME_DESKTOP_SESSION_ID").is_some())
+}
+
+fn should_warn_about_wayland_topmost(layer_shell_active: bool) -> bool {
+    !layer_shell_active && is_gnome_wayland_session()
 }
 
 fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {

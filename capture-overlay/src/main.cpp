@@ -286,7 +286,7 @@ int main(int argc, char* argv[])
 
         if (isGnomeWayland) {
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-              sel, overlay.size(), imagePath, imageSize, error);
+              sel, overlay.geometry(), imagePath, imageSize, error);
         } else {
             ok =
               ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
@@ -295,7 +295,7 @@ int main(int argc, char* argv[])
         if (!ok && isWayland && !isGnomeWayland) {
             QString fallbackError;
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-              sel, overlay.size(), imagePath, imageSize, fallbackError);
+              sel, overlay.geometry(), imagePath, imageSize, fallbackError);
             if (!ok) {
                 error = QStringLiteral("%1; overlay-local fallback failed (%2)")
                           .arg(error, fallbackError);

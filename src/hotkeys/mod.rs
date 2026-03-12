@@ -454,33 +454,59 @@ pub struct GnomeHotkeySyncResult {
     pub issues: Vec<String>,
 }
 
+fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
+    vec![
+        HotkeyBinding {
+            name: Some("capture_area".into()),
+            accelerator: "CTRL+ALT+A".into(),
+            args: vec!["capture".into(), "area".into()],
+        },
+        HotkeyBinding {
+            name: Some("capture_screen".into()),
+            accelerator: "CTRL+ALT+S".into(),
+            args: vec!["capture".into(), "screen".into()],
+        },
+        HotkeyBinding {
+            name: Some("show_last_preview".into()),
+            accelerator: "CTRL+ALT+P".into(),
+            args: vec!["show-last-preview".into()],
+        },
+        HotkeyBinding {
+            name: Some("record_screen".into()),
+            accelerator: "CTRL+ALT+R".into(),
+            args: vec!["record".into(), "screen".into(), "--overlay-stop".into()],
+        },
+        HotkeyBinding {
+            name: Some("record_area".into()),
+            accelerator: "CTRL+ALT+SHIFT+R".into(),
+            args: vec!["record".into(), "area".into(), "--overlay-stop".into()],
+        },
+    ]
+}
+
+fn merge_missing_default_hotkeys(cfg: &mut HotkeyConfig) -> bool {
+    let mut changed = false;
+
+    for default_binding in default_hotkey_bindings() {
+        let already_present = cfg.bindings.iter().any(|binding| {
+            binding.name == default_binding.name || binding.args == default_binding.args
+        });
+
+        if !already_present {
+            cfg.bindings.push(default_binding);
+            changed = true;
+        }
+    }
+
+    changed
+}
+
 impl Default for HotkeyConfig {
     fn default() -> Self {
         // Shortcut triggers are expressed using the XDG shortcuts specification
         // (e.g. CTRL+SHIFT+Print). The portal GlobalShortcuts API uses this format.
         Self {
-            bindings: vec![
-                HotkeyBinding {
-                    name: Some("capture_area".into()),
-                    accelerator: "CTRL+ALT+A".into(),
-                    args: vec!["capture".into(), "area".into()],
-                },
-                HotkeyBinding {
-                    name: Some("capture_screen".into()),
-                    accelerator: "CTRL+ALT+S".into(),
-                    args: vec!["capture".into(), "screen".into()],
-                },
-                HotkeyBinding {
-                    name: Some("record_screen".into()),
-                    accelerator: "CTRL+ALT+R".into(),
-                    args: vec!["record".into(), "screen".into(), "--overlay-stop".into()],
-                },
-                HotkeyBinding {
-                    name: Some("record_area".into()),
-                    accelerator: "CTRL+ALT+SHIFT+R".into(),
-                    args: vec!["record".into(), "area".into(), "--overlay-stop".into()],
-                },
-            ],
+            bindings: default_hotkey_bindings(),
         }
     }
 }
@@ -533,8 +559,11 @@ fn load_or_create_config(path: Option<PathBuf>) -> anyhow::Result<(PathBuf, Hotk
     if path.exists() {
         let raw = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read hotkey config at {}", path.display()))?;
-        let cfg: HotkeyConfig = serde_yml::from_str(&raw)
+        let mut cfg: HotkeyConfig = serde_yml::from_str(&raw)
             .with_context(|| format!("Failed to parse YAML hotkey config at {}", path.display()))?;
+        if merge_missing_default_hotkeys(&mut cfg) {
+            save_hotkey_config(&path, &cfg)?;
+        }
         return Ok((path, cfg));
     }
 

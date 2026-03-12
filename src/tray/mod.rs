@@ -20,6 +20,7 @@ pub enum TrayAction {
     CaptureWindow,
     RecordScreen,
     RecordArea,
+    ShowLastPreview,
     OpenLastCapture,
     OpenSettings,
     Quit,
@@ -140,79 +141,6 @@ fn apex_icon(size: i32) -> ksni::Icon {
     }
 }
 
-/// Generate a small PNG icon matching the toolbar's Area tool (L-corner brackets).
-fn capture_area_menu_icon_png() -> Vec<u8> {
-    use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
-
-    let size = 18u32;
-    let mut img = RgbaImage::from_pixel(size, size, Rgba([0, 0, 0, 0]));
-
-    // Neutral gray for readability on both light/dark menus.
-    let stroke = Rgba([120, 124, 132, 255]);
-
-    let cx = (size as f32 - 1.0) / 2.0;
-    let cy = cx;
-    let h = 5.2f32;
-    let stroke_half = 0.85f32;
-
-    let segments = [
-        // Top-left corner
-        (cx - 7.0, cy - 1.5, cx - 7.0, cy - h),
-        (cx - 7.0, cy - h, cx - 1.5, cy - h),
-        // Top-right corner
-        (cx + 1.5, cy - h, cx + 7.0, cy - h),
-        (cx + 7.0, cy - h, cx + 7.0, cy - 1.5),
-        // Bottom-left corner
-        (cx - 7.0, cy + 1.5, cx - 7.0, cy + h),
-        (cx - 7.0, cy + h, cx - 1.5, cy + h),
-        // Bottom-right corner
-        (cx + 1.5, cy + h, cx + 7.0, cy + h),
-        (cx + 7.0, cy + h, cx + 7.0, cy + 1.5),
-    ];
-
-    let dist_to_segment = |px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32| -> f32 {
-        let l2 = (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2);
-        if l2 == 0.0 {
-            return ((px - x1) * (px - x1) + (py - y1) * (py - y1)).sqrt();
-        }
-        let mut t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
-        t = t.clamp(0.0, 1.0);
-        let qx = x1 + t * (x2 - x1);
-        let qy = y1 + t * (y2 - y1);
-        ((px - qx) * (px - qx) + (py - qy) * (py - qy)).sqrt()
-    };
-
-    for y in 0..size {
-        for x in 0..size {
-            let fx = x as f32 + 0.5;
-            let fy = y as f32 + 0.5;
-            let mut alpha = 0.0f32;
-
-            for &(x1, y1, x2, y2) in &segments {
-                let d = dist_to_segment(fx, fy, x1, y1, x2, y2);
-                let a = (stroke_half - d + 0.5).clamp(0.0, 1.0);
-                alpha = alpha.max(a);
-            }
-
-            if alpha > 0.0 {
-                let mut color = stroke;
-                color.0[3] = (alpha * 255.0).round() as u8;
-                img.put_pixel(x, y, color);
-            }
-        }
-    }
-
-    let mut png = Vec::new();
-    if DynamicImage::ImageRgba8(img)
-        .write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
-        .is_ok()
-    {
-        png
-    } else {
-        Vec::new()
-    }
-}
-
 impl ksni::Tray for ApexShotTray {
     fn activate(&mut self, _x: i32, _y: i32) {
         // Primary click fallback on hosts that don't open the context menu on left-click.
@@ -254,29 +182,24 @@ impl ksni::Tray for ApexShotTray {
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::*;
 
-        let capture_area_icon = capture_area_menu_icon_png();
         let ltr = |label: &str| format!("\u{200E}{label}");
 
         vec![
             // ── Capture section ──────────────────────────────────────────
             StandardItem {
                 label: ltr("Capture Area"),
-                icon_name: String::new(),
-                icon_data: capture_area_icon,
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::CaptureArea)),
                 ..Default::default()
             }
             .into(),
             StandardItem {
                 label: ltr("Capture Screen"),
-                icon_name: "computer-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::CaptureScreen)),
                 ..Default::default()
             }
             .into(),
             StandardItem {
                 label: ltr("Capture Window"),
-                icon_name: "window-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::CaptureWindow)),
                 ..Default::default()
             }
@@ -286,14 +209,12 @@ impl ksni::Tray for ApexShotTray {
             // ── Recording section ─────────────────────────────────────────
             StandardItem {
                 label: ltr("Record Screen"),
-                icon_name: "media-record-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::RecordScreen)),
                 ..Default::default()
             }
             .into(),
             StandardItem {
                 label: ltr("Record Area"),
-                icon_name: "media-record-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::RecordArea)),
                 ..Default::default()
             }
@@ -302,15 +223,19 @@ impl ksni::Tray for ApexShotTray {
             MenuItem::Separator,
             // ── Utility section ───────────────────────────────────────────
             StandardItem {
+                label: ltr("Show Last Preview"),
+                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::ShowLastPreview)),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
                 label: ltr("Open Last Capture"),
-                icon_name: "document-open-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::OpenLastCapture)),
                 ..Default::default()
             }
             .into(),
             StandardItem {
                 label: ltr("Settings"),
-                icon_name: "preferences-system-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::OpenSettings)),
                 ..Default::default()
             }
@@ -320,7 +245,6 @@ impl ksni::Tray for ApexShotTray {
             // ── Quit ─────────────────────────────────────────────────────
             StandardItem {
                 label: ltr("Quit"),
-                icon_name: "application-exit-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::Quit)),
                 ..Default::default()
             }

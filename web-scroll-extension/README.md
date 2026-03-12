@@ -3,7 +3,7 @@
 ## Build and install ApexShot
 
 ```bash
-cd /home/codegoddy/Desktop/apexshot/backend/backend
+cd /home/codegoddy/Desktop/apexshot/backend
 cargo build --release
 sudo install -m 755 target/release/apexshot /usr/local/bin/apexshot
 sudo install -m 755 target/release/apexshot-capture /usr/local/bin/apexshot-capture
@@ -31,7 +31,7 @@ Example:
 4. Select:
 
 ```text
-/home/codegoddy/Desktop/apexshot/backend/backend/web-scroll-extension
+/home/codegoddy/Desktop/apexshot/backend/web-scroll-extension
 ```
 
 ## Start the ApexShot daemon

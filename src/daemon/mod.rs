@@ -52,6 +52,7 @@ pub enum DaemonAction {
     CaptureWindow,
     RecordScreen,
     RecordArea,
+    ShowLastPreview,
     OpenLastCapture,
     OpenSettings,
     SetTrayVisible(bool),
@@ -71,6 +72,7 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::CaptureWindow => DaemonAction::CaptureWindow,
             TrayAction::RecordScreen => DaemonAction::RecordScreen,
             TrayAction::RecordArea => DaemonAction::RecordArea,
+            TrayAction::ShowLastPreview => DaemonAction::ShowLastPreview,
             TrayAction::OpenLastCapture => DaemonAction::OpenLastCapture,
             TrayAction::OpenSettings => DaemonAction::OpenSettings,
             TrayAction::Quit => DaemonAction::Quit,
@@ -365,6 +367,14 @@ async fn run_daemon_inner(
             }
             DaemonAction::RecordArea => {
                 tokio::spawn(handle_record_area(action_tx_clone));
+            }
+            DaemonAction::ShowLastPreview => {
+                let path = state.lock().unwrap().last_capture_path.clone();
+                if let Some(p) = path {
+                    tokio::task::spawn_blocking(move || show_preview_subprocess(p));
+                } else {
+                    eprintln!("[daemon] No capture yet.");
+                }
             }
             DaemonAction::OpenLastCapture => {
                 let path = state.lock().unwrap().last_capture_path.clone();
@@ -739,6 +749,7 @@ impl DaemonIpc {
             "capture_window" => DaemonAction::CaptureWindow,
             "record_screen" => DaemonAction::RecordScreen,
             "record_area" => DaemonAction::RecordArea,
+            "show_last_preview" => DaemonAction::ShowLastPreview,
             "open_last" => DaemonAction::OpenLastCapture,
             "settings" => DaemonAction::OpenSettings,
             "quit" => DaemonAction::Quit,
@@ -1309,6 +1320,9 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
             "capture_area" | "capture-area" => return Some(DaemonAction::CaptureArea),
             "capture_screen" | "capture-screen" => return Some(DaemonAction::CaptureScreen),
             "capture_window" | "capture-window" => return Some(DaemonAction::CaptureWindow),
+            "show_last_preview" | "show-last-preview" => {
+                return Some(DaemonAction::ShowLastPreview);
+            }
             "record_screen" | "record-screen" => return Some(DaemonAction::RecordScreen),
             "record_area" | "record-area" => return Some(DaemonAction::RecordArea),
             _ => {}
@@ -1323,6 +1337,7 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
             Some("window") => Some(DaemonAction::CaptureWindow),
             _ => None,
         },
+        Some("show-last-preview") => Some(DaemonAction::ShowLastPreview),
         Some("record") => match binding.args.get(1).map(|s| s.as_str()) {
             Some("screen") => Some(DaemonAction::RecordScreen),
             Some("area") => Some(DaemonAction::RecordArea),
@@ -2092,7 +2107,7 @@ fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
 }
 
 fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
-    eprintln!("[daemon] Window capture requested — using GNOME Shell DBus");
+    eprintln!("[daemon] Window capture requested — using the shared window capture flow");
     match capture_window_file_via_cpp() {
         Ok(path) => {
             save_existing_png_and_open(path, state);
