@@ -56,15 +56,33 @@ fn resize_crop_rect_with_handle(
     let updated = match handle {
         SelectHandle::Left | SelectHandle::Right => {
             let width = right - left;
-            let expansion = if handle == SelectHandle::Right { dx } else { -dx };
+            let expansion = if handle == SelectHandle::Right {
+                dx
+            } else {
+                -dx
+            };
             let clamped_expansion = expansion.max((SELECT_MIN_RESIZE_SIZE - width) / 2.0);
-            Rect::from_bounds(left - clamped_expansion, top, right + clamped_expansion, bottom)
+            Rect::from_bounds(
+                left - clamped_expansion,
+                top,
+                right + clamped_expansion,
+                bottom,
+            )
         }
         SelectHandle::Top | SelectHandle::Bottom => {
             let height = bottom - top;
-            let expansion = if handle == SelectHandle::Bottom { dy } else { -dy };
+            let expansion = if handle == SelectHandle::Bottom {
+                dy
+            } else {
+                -dy
+            };
             let clamped_expansion = expansion.max((SELECT_MIN_RESIZE_SIZE - height) / 2.0);
-            Rect::from_bounds(left, top - clamped_expansion, right, bottom + clamped_expansion)
+            Rect::from_bounds(
+                left,
+                top - clamped_expansion,
+                right,
+                bottom + clamped_expansion,
+            )
         }
         _ => return false,
     };
@@ -84,7 +102,11 @@ fn resize_crop_rect_with_handle(
     changed
 }
 
-fn crop_rect_with_aspect_fit(image_width: i32, image_height: i32, aspect_ratio: f64) -> Option<Rect> {
+fn crop_rect_with_aspect_fit(
+    image_width: i32,
+    image_height: i32,
+    aspect_ratio: f64,
+) -> Option<Rect> {
     if image_width <= 1 || image_height <= 1 || aspect_ratio <= 0.0 {
         return None;
     }
@@ -232,7 +254,9 @@ impl EditorState {
         let image_width = self.working_image.width() as i32;
         let image_height = self.working_image.height() as i32;
         self.crop_selection = match self.crop_aspect_ratio_value() {
-            Some(aspect_ratio) => crop_rect_with_aspect_fit(image_width, image_height, aspect_ratio),
+            Some(aspect_ratio) => {
+                crop_rect_with_aspect_fit(image_width, image_height, aspect_ratio)
+            }
             None => Some(rect),
         };
         true
@@ -645,7 +669,9 @@ impl EditorState {
         }
 
         self.crop_selection = match self.crop_aspect_ratio_value() {
-            Some(aspect_ratio) => crop_rect_with_aspect_fit(image_width, image_height, aspect_ratio),
+            Some(aspect_ratio) => {
+                crop_rect_with_aspect_fit(image_width, image_height, aspect_ratio)
+            }
             None => Some(Rect {
                 x: 0,
                 y: 0,
@@ -719,9 +745,14 @@ impl EditorState {
                     SelectHandle::Left
                     | SelectHandle::Right
                     | SelectHandle::Top
-                    | SelectHandle::Bottom => {
-                        resize_crop_rect_with_handle(rect, handle, dx, dy, image_width, image_height)
-                    }
+                    | SelectHandle::Bottom => resize_crop_rect_with_handle(
+                        rect,
+                        handle,
+                        dx,
+                        dy,
+                        image_width,
+                        image_height,
+                    ),
                     _ => resize_rect_with_handle(rect, handle, dx, dy),
                 }
             };

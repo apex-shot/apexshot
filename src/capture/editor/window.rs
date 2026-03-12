@@ -1506,7 +1506,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     {
         let update_canvas_content_size_tick = update_canvas_content_size.clone();
         let state_canvas_tick = state.clone();
-        let last_canvas_signature = Rc::new(Cell::new((0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, false)));
+        let last_canvas_signature = Rc::new(Cell::new((
+            0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, false,
+        )));
         let last_canvas_signature_tick = last_canvas_signature.clone();
         canvas_scroller.add_tick_callback(move |scroller, _| {
             let width = scroller.allocated_width();
@@ -1927,24 +1929,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
         let base_view_width = (width as f64 - canvas_padding_draw * 2.0).max(1.0);
         let base_scale = (base_view_width / image_width).min(1.0);
-        let (overflow_left, overflow_top, overflow_right, overflow_bottom) =
-            crop_canvas_overflow(
-                crop_rect,
-                image_width,
-                image_height,
-                base_scale,
-                crop_mode_active,
-            );
-        let view_width = (width as f64
-            - canvas_padding_draw * 2.0
-            - overflow_left
-            - overflow_right)
-            .max(1.0);
-        let view_height = (height as f64
-            - canvas_padding_draw * 2.0
-            - overflow_top
-            - overflow_bottom)
-            .max(1.0);
+        let (overflow_left, overflow_top, overflow_right, overflow_bottom) = crop_canvas_overflow(
+            crop_rect,
+            image_width,
+            image_height,
+            base_scale,
+            crop_mode_active,
+        );
+        let view_width =
+            (width as f64 - canvas_padding_draw * 2.0 - overflow_left - overflow_right).max(1.0);
+        let view_height =
+            (height as f64 - canvas_padding_draw * 2.0 - overflow_top - overflow_bottom).max(1.0);
 
         let mut t = ViewTransform::fit(image_width, image_height, view_width, view_height);
         t.offset_x += canvas_padding_draw + overflow_left;

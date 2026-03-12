@@ -110,6 +110,13 @@ async fn main() {
             }
             return;
         }
+        "show-last-preview" => {
+            if !trigger_daemon_action("show_last_preview").await {
+                eprintln!("Show last preview requires a running ApexShot daemon.");
+                std::process::exit(1);
+            }
+            return;
+        }
         "capture" => {
             if args.len() < 3 {
                 eprintln!("Error: missing capture type");
@@ -676,7 +683,7 @@ fn run_daemon_with_gtk_on_main_thread() {
             "[daemon] Wayland compositor does not support Layer Shell (e.g. GNOME); \
              area selector will use screenshot-backed mode."
         );
-        eprintln!("[daemon] ⚠ On GNOME Wayland: background capture via Screenshot portal will trigger a screen flash + sound before the selector UI opens. This is the known bug being investigated.");
+        eprintln!("[daemon] On GNOME Wayland, ApexShot now prefers ScreenCast for background capture. If ScreenCast is unavailable, it may still fall back to the Screenshot portal and trigger a flash + sound.");
     }
 
     // Spawn the Tokio runtime on a background thread so GTK keeps the main thread.
@@ -764,6 +771,7 @@ fn print_usage() {
     println!("  record <type>     Record video (MP4/GIF)");
     println!("  ocr <image>       Extract text from an image");
     println!("  edit <image>      Open image editor window");
+    println!("  show-last-preview Reopen the last capture preview via daemon");
     println!("  settings          Open settings window");
     println!("  native-host <sub> Install/uninstall native messaging host");
     println!("  install           Install binary to /usr/local/bin/ and set up autostart");

@@ -19,7 +19,7 @@ bool captureAreaToTempPngViaPortal(const QRect& logicalSelection,
                                    QSize& outSize,
                                    QString& outError);
 bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
-                                          const QSize& overlaySize,
+                                          const QRect& overlayGeometry,
                                           QString& outPath,
                                           QSize& outSize,
                                           QString& outError);
