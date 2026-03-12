@@ -18,6 +18,7 @@ pub enum EditorError {
 pub enum Tool {
     Select,
     Crop,
+    Background,
     Pen,
     Highlighter,
     Circle,
@@ -432,19 +433,19 @@ pub fn tool_uses_stroke_size(tool: Tool) -> bool {
 
 pub fn tool_shortcut_target(key: char) -> Option<(Tool, usize)> {
     match key.to_ascii_lowercase() {
-        '0' | '`' | 's' => Some((Tool::Select, 1)),
-        '1' | 'd' | 'p' => Some((Tool::Pen, 2)),
-        '2' | 't' => Some((Tool::Text, 7)),
-        '3' | 'l' => Some((Tool::Line, 6)),
-        '4' | 'a' => Some((Tool::Arrow, 5)),
-        '5' | 'r' => Some((Tool::Box, 3)),
-        '6' | 'o' => Some((Tool::Circle, 4)),
-        '7' | 'h' => Some((Tool::Highlighter, 11)),
-        '8' | 'c' => Some((Tool::Censor, 9)),
-        '9' | 'n' => Some((Tool::Number, 10)),
+        '0' | '`' | 's' => Some((Tool::Select, 2)),
+        '1' | 'd' | 'p' => Some((Tool::Pen, 3)),
+        '2' | 't' => Some((Tool::Text, 8)),
+        '3' | 'l' => Some((Tool::Line, 7)),
+        '4' | 'a' => Some((Tool::Arrow, 6)),
+        '5' | 'r' => Some((Tool::Box, 4)),
+        '6' | 'o' => Some((Tool::Circle, 5)),
+        '7' | 'h' => Some((Tool::Highlighter, 12)),
+        '8' | 'c' => Some((Tool::Censor, 10)),
+        '9' | 'n' => Some((Tool::Number, 11)),
         'x' => Some((Tool::Crop, 0)),
-        'b' => Some((Tool::Blur, 8)),
-        'f' => Some((Tool::Focus, 12)),
+        'b' => Some((Tool::Blur, 9)),
+        'f' => Some((Tool::Focus, 13)),
         _ => None,
     }
 }

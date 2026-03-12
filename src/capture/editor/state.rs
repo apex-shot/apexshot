@@ -921,6 +921,7 @@ impl EditorState {
         match self.selected_tool {
             Tool::Select => None,
             Tool::Crop => None,
+            Tool::Background => None,
             Tool::Pen => {
                 if self.drag_path.len() >= 2 {
                     Some(AnnotationAction::Pen {
@@ -1068,6 +1069,7 @@ impl EditorState {
         match self.selected_tool {
             Tool::Select => None,
             Tool::Crop => None,
+            Tool::Background => None,
             Tool::Pen => None,
             Tool::Highlighter => None,
             Tool::Circle => Rect::from_points(start, end).map(|rect| AnnotationAction::Circle {
