@@ -1,0 +1,78 @@
+{
+    "checksum": "2568c31ea4271289dbe4def45920c35e475cfef69a32def26c9af5c7eb547cf6",
+    "data": {
+    "id": "884f833f-9a87-4fe4-a1b5-80dd0a510f5e",
+    "createdAt": 1773326106757,
+    "updatedAt": 1773326112885,
+    "title": "Friendly Hello Moment",
+    "messages": [
+        {
+            "id": "4bae7efa-73a9-44b2-8cae-61c63e684ce5",
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "hello"
+                }
+            ],
+            "context": {
+                "currentFile": {
+                    "fsPath": "/home/codegoddy/Desktop/apexshot/repo.md"
+                }
+            },
+            "createdAt": 1773326106788,
+            "isInternal": false,
+            "rawContent": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "hello"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "autoAppliedRules": []
+        },
+        {
+            "id": "resp_0ab3c6bbdbe31a160169b2cf1fac1c8194910ae5b67b0aa773",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Hello! What do you want me to work on in this codebase?"
+                }
+            ],
+            "context": {
+                "author": "Code agent",
+                "operationId": "6f8a5704-0081-4311-ac4e-f46d83c72791",
+                "cliSessionId": "718b6b20-0e1e-402c-a10b-2c22d7e55709",
+                "usageStatistics": {
+                    "llmCallsUsedForAnswer": 2.5,
+                    "llmCallsUsedTotal": 2.5,
+                    "llmCallsLimit": 280.0,
+                    "limitRenewalMillisecondTimestamp": 1773381600000
+                }
+            },
+            "createdAt": 1773326112885,
+            "isInternal": false
+        }
+    ],
+    "isAgent": true,
+    "isNameGenerated": true,
+    "isCustomAgent": false,
+    "isUnitTestsAgent": false,
+    "isE2EAgent": false,
+    "isWebDevAgent": false,
+    "isQnaAgent": false,
+    "isRepoInfoAgent": false,
+    "model": "gpt-5-4",
+    "lastUserMessageAt": 1773326106790,
+    "contextWindowTokensLimit": 155000,
+    "contextUsageTokens": 15441
+}
+}
