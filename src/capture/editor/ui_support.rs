@@ -1127,6 +1127,403 @@ pub fn install_editor_css() {
                 padding: 0;
             }
 
+            .editor-canvas-workspace {
+                background-color: transparent;
+            }
+
+            .editor-background-sidebar {
+                min-width: 296px;
+                padding: 18px 16px;
+                background: linear-gradient(to bottom,
+                    rgba(17, 17, 20, 0.96),
+                    rgba(12, 12, 15, 0.96));
+                border-right: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-background-sidebar-title {
+                color: #f5f5f7;
+                font-size: 14px;
+                font-weight: 700;
+            }
+
+            .editor-background-sidebar-body {
+                color: rgba(241, 241, 243, 0.7);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+
+            .editor-background-sidebar-options {
+                margin-top: 4px;
+            }
+
+            .editor-background-gradients-section {
+                margin-top: 10px;
+            }
+
+            .editor-background-section-title {
+                color: rgba(245, 245, 247, 0.92);
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+            }
+
+            .editor-background-gradients-grid {
+                margin-top: 4px;
+            }
+
+            .editor-background-wallpaper-section {
+                margin-top: 10px;
+            }
+
+            .editor-background-wallpaper-grid {
+                margin-top: 4px;
+            }
+
+            .editor-background-wallpaper-row {
+                min-height: 56px;
+            }
+
+            .editor-background-blurred-section {
+                margin-top: 10px;
+            }
+
+            .editor-background-blurred-row {
+                min-height: 46px;
+            }
+
+            .editor-background-plain-color-section {
+                margin-top: 10px;
+            }
+
+            .editor-background-plain-color-grid {
+                margin-top: 4px;
+            }
+
+            .editor-background-plain-color-row {
+                min-height: 18px;
+            }
+
+            .editor-background-plain-color-cell {
+                min-height: 18px;
+            }
+
+            .editor-background-plain-color-end-spacer {
+                min-width: 28px;
+            }
+
+            .editor-background-preview-spacer {
+                min-height: 46px;
+            }
+
+            .editor-background-divider-row {
+                margin-top: 12px;
+                margin-bottom: 2px;
+            }
+
+            .editor-background-divider {
+                min-height: 1px;
+                margin-top: 0;
+                margin-bottom: 0;
+                background: rgba(255, 255, 255, 0.10);
+            }
+
+            .editor-background-padding-section {
+                margin-top: 4px;
+            }
+
+            .editor-background-padding-slider-row {
+                margin-top: 2px;
+            }
+
+            .editor-background-padding-slider {
+                margin-top: 0;
+            }
+
+            .editor-background-compact-controls {
+                margin-top: 8px;
+            }
+
+            .editor-background-compact-controls-row {
+                margin-top: 2px;
+            }
+
+            .editor-background-compact-slider-section {
+                margin-top: 0;
+            }
+
+            .editor-background-compact-title-spacer {
+                min-height: 18px;
+            }
+
+            .editor-background-compact-slider-row {
+                margin-top: 2px;
+            }
+
+            .editor-background-compact-slider {
+                min-width: 0;
+            }
+
+            .editor-background-compact-control-spacer {
+                min-width: 0;
+                min-height: 30px;
+            }
+
+            .editor-background-alignment-grid {
+                margin-top: 2px;
+            }
+
+            .editor-background-alignment-row {
+                margin-top: 0;
+            }
+
+            button.editor-background-alignment-button {
+                min-height: 17px;
+                min-width: 26px;
+                border-radius: 6px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                padding: 0;
+                background: rgba(255, 255, 255, 0.03);
+            }
+
+            .editor-background-alignment-icon {
+                min-width: 26px;
+                min-height: 17px;
+                border: none;
+                border-radius: 3px;
+            }
+
+            .editor-background-alignment-icon-frame {
+                min-width: 6px;
+                min-height: 4px;
+                background: rgba(241, 241, 243, 0.88);
+                border-radius: 1px;
+                margin: 2px;
+                border: none;
+            }
+
+            button.editor-background-alignment-button:hover {
+                background: rgba(255, 255, 255, 0.08);
+            }
+
+            button.editor-background-alignment-button:active,
+            button.editor-background-alignment-button:focus-visible {
+                background: rgba(255, 255, 255, 0.12);
+            }
+
+            .editor-background-checkbox-row {
+                min-height: 30px;
+                margin-top: 0;
+                align-items: center;
+            }
+
+            checkbutton.editor-background-checkbox {
+                color: rgba(241, 241, 243, 0.88);
+                min-width: 0;
+                padding: 0;
+            }
+
+            checkbutton.editor-background-checkbox check {
+                border-radius: 5px;
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.16);
+            }
+
+            checkbutton.editor-background-checkbox label {
+                color: rgba(241, 241, 243, 0.88);
+                min-width: 0;
+            }
+
+            .editor-background-ratio-dropdown-row {
+                margin-top: 2px;
+            }
+
+            dropdown.editor-background-ratio-dropdown {
+                min-height: 32px;
+                min-width: 0;
+                padding: 0;
+            }
+
+            dropdown.editor-background-ratio-dropdown > button {
+                min-height: 32px;
+                min-width: 0;
+                border-radius: 8px;
+                padding: 0 6px;
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                color: rgba(241, 241, 243, 0.88);
+                box-shadow: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown > button > box {
+                border-spacing: 0;
+            }
+
+            dropdown.editor-background-ratio-dropdown > button:hover {
+                background: rgba(255, 255, 255, 0.06);
+                border-color: rgba(255, 255, 255, 0.16);
+            }
+
+            dropdown.editor-background-ratio-dropdown > button:active,
+            dropdown.editor-background-ratio-dropdown > button:focus-visible {
+                background: rgba(255, 255, 255, 0.08);
+                border-color: rgba(255, 255, 255, 0.20);
+            }
+
+            button.editor-background-option-button {
+                min-height: 36px;
+                border-radius: 8px;
+                padding: 0 12px;
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                color: rgba(241, 241, 243, 0.86);
+                box-shadow: none;
+            }
+
+            button.editor-background-option-button:hover {
+                background: rgba(255, 255, 255, 0.06);
+                border-color: rgba(255, 255, 255, 0.12);
+                color: #ffffff;
+            }
+
+            button.editor-background-option-button:active {
+                background: rgba(255, 255, 255, 0.04);
+                border-color: rgba(255, 255, 255, 0.16);
+            }
+
+            button.editor-background-option-button.active-background-option {
+                background: rgba(255, 255, 255, 0.12);
+                border-color: rgba(255, 255, 255, 0.20);
+                color: #ffffff;
+            }
+
+            button.editor-background-gradient-button {
+                min-width: 56px;
+                min-height: 56px;
+                padding: 0;
+                border-radius: 12px;
+                background-color: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                box-shadow: none;
+            }
+
+            button.editor-background-gradient-button:hover {
+                border-color: rgba(255, 255, 255, 0.18);
+                box-shadow: none;
+            }
+
+            button.editor-background-gradient-button:active {
+                border-color: rgba(255, 255, 255, 0.22);
+                box-shadow: none;
+            }
+
+            button.editor-background-add-button {
+                min-width: 56px;
+                min-height: 56px;
+                padding: 0;
+                border-radius: 12px;
+                background-color: rgba(255, 255, 255, 0.02);
+                border: 1px dashed rgba(255, 255, 255, 0.24);
+                color: rgba(245, 245, 247, 0.82);
+                box-shadow: none;
+            }
+
+            button.editor-background-add-button:hover {
+                background-color: rgba(255, 255, 255, 0.05);
+                border-color: rgba(255, 255, 255, 0.34);
+                color: #ffffff;
+            }
+
+            button.editor-background-add-button:active {
+                background-color: rgba(255, 255, 255, 0.03);
+                border-color: rgba(255, 255, 255, 0.4);
+            }
+
+            .editor-background-add-label {
+                font-size: 22px;
+                font-weight: 500;
+            }
+
+            button.editor-background-blurred-button {
+                background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.06) 100%);
+                border-color: rgba(255, 255, 255, 0.14);
+            }
+
+            button.editor-background-plain-color-button {
+                min-width: 18px;
+                min-height: 18px;
+                padding: 0;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                box-shadow: none;
+            }
+
+            button.editor-background-plain-color-button:hover {
+                border-color: rgba(255, 255, 255, 0.32);
+            }
+
+            button.editor-background-plain-color-button:active {
+                border-color: rgba(255, 255, 255, 0.4);
+            }
+
+            button.editor-background-plain-color-button.editor-background-plain-color-1 { background: #ffffff; }
+            button.editor-background-plain-color-button.editor-background-plain-color-2 { background: #e5e7eb; }
+            button.editor-background-plain-color-button.editor-background-plain-color-3 { background: #9ca3af; }
+            button.editor-background-plain-color-button.editor-background-plain-color-4 { background: #111827; }
+            button.editor-background-plain-color-button.editor-background-plain-color-5 { background: #ef4444; }
+            button.editor-background-plain-color-button.editor-background-plain-color-6 { background: #f97316; }
+            button.editor-background-plain-color-button.editor-background-plain-color-7 { background: #facc15; }
+            button.editor-background-plain-color-button.editor-background-plain-color-8 { background: #22c55e; }
+            button.editor-background-plain-color-button.editor-background-plain-color-9 { background: #14b8a6; }
+            button.editor-background-plain-color-button.editor-background-plain-color-10 { background: #06b6d4; }
+            button.editor-background-plain-color-button.editor-background-plain-color-11 { background: #3b82f6; }
+            button.editor-background-plain-color-button.editor-background-plain-color-12 { background: #6366f1; }
+            button.editor-background-plain-color-button.editor-background-plain-color-13 { background: #8b5cf6; }
+            button.editor-background-plain-color-button.editor-background-plain-color-14 { background: #a855f7; }
+            button.editor-background-plain-color-button.editor-background-plain-color-15 { background: #ec4899; }
+            button.editor-background-plain-color-button.editor-background-plain-color-16 { background: #f43f5e; }
+            button.editor-background-plain-color-button.editor-background-plain-color-17 { background: #92400e; }
+            button.editor-background-plain-color-button.editor-background-plain-color-18 { background: #0f766e; }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-1 {
+                background-image: linear-gradient(135deg, #4f46e5 0%, #9333ea 55%, #ec4899 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-2 {
+                background-image: linear-gradient(135deg, #0f172a 0%, #1d4ed8 48%, #38bdf8 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-3 {
+                background-image: linear-gradient(135deg, #f97316 0%, #fb7185 52%, #a855f7 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-4 {
+                background-image: linear-gradient(135deg, #134e4a 0%, #14b8a6 50%, #99f6e4 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-5 {
+                background-image: linear-gradient(135deg, #111827 0%, #374151 45%, #f59e0b 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-6 {
+                background-image: linear-gradient(135deg, #7c2d12 0%, #ea580c 50%, #fdba74 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-7 {
+                background-image: linear-gradient(135deg, #052e16 0%, #16a34a 50%, #bbf7d0 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-8 {
+                background-image: linear-gradient(135deg, #172554 0%, #2563eb 55%, #c4b5fd 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-9 {
+                background-image: linear-gradient(135deg, #4a044e 0%, #c026d3 48%, #f9a8d4 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-10 {
+                background-image: linear-gradient(135deg, #3f3f46 0%, #71717a 40%, #e4e4e7 100%);
+            }
+
             .editor-canvas {
                 border-radius: 0;
                 background-color: transparent;
@@ -1289,7 +1686,11 @@ pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
     button
 }
 
-pub fn recommended_window_size(image_width: i32, image_height: i32) -> (i32, i32) {
+pub fn recommended_window_size_with_extra_width(
+    image_width: i32,
+    image_height: i32,
+    extra_width: i32,
+) -> (i32, i32) {
     let (screen_width, screen_height) = if let Some(display) = gdk::Display::default() {
         let monitors = display.monitors();
         if monitors.n_items() > 0 {
@@ -1314,7 +1715,7 @@ pub fn recommended_window_size(image_width: i32, image_height: i32) -> (i32, i32
     let max_height = (screen_height as f64) * 0.85;
 
     let ui_height = 110.0;
-    let ui_width = 72.0;
+    let ui_width = 72.0 + extra_width.max(0) as f64;
     let min_editor_width = 980.0_f64.min(max_width);
     let min_editor_height = 560.0_f64.min(max_height);
 
@@ -1337,6 +1738,10 @@ pub fn recommended_window_size(image_width: i32, image_height: i32) -> (i32, i32
         (w + ui_width).round().max(min_editor_width.round()) as i32,
         (h + ui_height).round().max(min_editor_height.round()) as i32,
     )
+}
+
+pub fn recommended_window_size(image_width: i32, image_height: i32) -> (i32, i32) {
+    recommended_window_size_with_extra_width(image_width, image_height, 0)
 }
 
 pub fn set_active_tool_button(buttons: &[Button], active_index: usize) {

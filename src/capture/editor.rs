@@ -26,19 +26,19 @@ mod tests {
 
     #[test]
     fn tool_shortcuts_map_to_expected_tools() {
-        assert_eq!(tool_shortcut_target('0'), Some((Tool::Select, 1)));
-        assert_eq!(tool_shortcut_target('P'), Some((Tool::Pen, 2)));
-        assert_eq!(tool_shortcut_target('t'), Some((Tool::Text, 7)));
-        assert_eq!(tool_shortcut_target('l'), Some((Tool::Line, 6)));
-        assert_eq!(tool_shortcut_target('a'), Some((Tool::Arrow, 5)));
-        assert_eq!(tool_shortcut_target('r'), Some((Tool::Box, 3)));
-        assert_eq!(tool_shortcut_target('o'), Some((Tool::Circle, 4)));
-        assert_eq!(tool_shortcut_target('h'), Some((Tool::Highlighter, 11)));
-        assert_eq!(tool_shortcut_target('c'), Some((Tool::Censor, 9)));
-        assert_eq!(tool_shortcut_target('n'), Some((Tool::Number, 10)));
+        assert_eq!(tool_shortcut_target('0'), Some((Tool::Select, 2)));
+        assert_eq!(tool_shortcut_target('P'), Some((Tool::Pen, 3)));
+        assert_eq!(tool_shortcut_target('t'), Some((Tool::Text, 8)));
+        assert_eq!(tool_shortcut_target('l'), Some((Tool::Line, 7)));
+        assert_eq!(tool_shortcut_target('a'), Some((Tool::Arrow, 6)));
+        assert_eq!(tool_shortcut_target('r'), Some((Tool::Box, 4)));
+        assert_eq!(tool_shortcut_target('o'), Some((Tool::Circle, 5)));
+        assert_eq!(tool_shortcut_target('h'), Some((Tool::Highlighter, 12)));
+        assert_eq!(tool_shortcut_target('c'), Some((Tool::Censor, 10)));
+        assert_eq!(tool_shortcut_target('n'), Some((Tool::Number, 11)));
         assert_eq!(tool_shortcut_target('x'), Some((Tool::Crop, 0)));
-        assert_eq!(tool_shortcut_target('b'), Some((Tool::Blur, 8)));
-        assert_eq!(tool_shortcut_target('f'), Some((Tool::Focus, 12)));
+        assert_eq!(tool_shortcut_target('b'), Some((Tool::Blur, 9)));
+        assert_eq!(tool_shortcut_target('f'), Some((Tool::Focus, 13)));
         assert_eq!(tool_shortcut_target('q'), None);
     }
 
