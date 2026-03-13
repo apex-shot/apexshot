@@ -1,0 +1,695 @@
+use gtk4::{glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation};
+use image::RgbaImage;
+use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+
+use super::color::{selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX};
+use super::render::{
+    draw_annotation_action, draw_canvas_checkerboard_background, draw_crop_overlay,
+    draw_draft_action, draw_focus_overlay, draw_rgba_to_context, draw_selection_handles,
+    draw_selection_outline, rgba_image_to_surface,
+};
+use super::selection::{action_bounds_with_padding, action_resize_handles};
+use super::state::EditorState;
+use super::types::{AnnotationAction, CropAspectRatio, EditorError, Point, Tool, ViewTransform};
+use super::ui_support::{
+    install_editor_css, prefers_dark_glass_theme, prefers_reduced_transparency,
+    recommended_window_size, set_active_tool_button,
+};
+
+mod background_panel;
+mod canvas;
+pub mod color_picker;
+mod cursor;
+mod events;
+mod footer;
+mod toolbar;
+
+mod icon_names {
+    pub use shipped::*;
+    include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
+}
+
+pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
+    if !path.exists() {
+        return Err(EditorError::MissingFile(path));
+    }
+
+    let app = Application::builder()
+        .application_id("com.apexshot.capture.editor")
+        .build();
+
+    app.connect_activate(move |application| {
+        setup_editor_window(application, path.clone());
+    });
+
+    let _ = app.run_with_args::<String>(&[]);
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) use cursor::cursor_name_for_view_point;
+
+pub fn setup_editor_window(app: &Application, path: PathBuf) {
+    use std::sync::Once;
+    static INIT_ICONS: Once = Once::new();
+    INIT_ICONS.call_once(|| {
+        relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
+    });
+
+    install_editor_css();
+
+    let drawing_area_placeholder = Rc::new(RefCell::new(
+        None::<glib::object::WeakRef<gtk4::DrawingArea>>,
+    ));
+
+    let image = match image::open(&path) {
+        Ok(img) => img.to_rgba8(),
+        Err(e) => {
+            eprintln!("Failed to load image for editing: {e}");
+            app.quit();
+            return;
+        }
+    };
+
+    let (img_width, img_height) = image.dimensions();
+    let state = Arc::new(Mutex::new(EditorState::new(image)));
+    let transform = Arc::new(Mutex::new(ViewTransform::for_image(
+        img_width as f64,
+        img_height as f64,
+    )));
+
+    let (default_width, default_height) =
+        recommended_window_size(img_width as i32, img_height as i32);
+
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .title("Screenshot Editor")
+        .default_width(default_width)
+        .default_height(default_height)
+        .decorated(false)
+        .build();
+    window.add_css_class("editor-window");
+
+    let root = GtkBox::new(Orientation::Vertical, 0);
+    root.add_css_class("editor-root");
+
+    let _dark_glass = prefers_dark_glass_theme();
+    let reduced_transparency = prefers_reduced_transparency();
+    root.add_css_class("editor-theme-dark");
+    if reduced_transparency {
+        root.add_css_class("editor-reduced-transparency");
+    }
+
+    let toolbar::ToolbarBaseParts {
+        root: toolbar,
+        traffic_close,
+        traffic_minimize,
+        traffic_zoom,
+        left_group,
+        select_btn,
+        crop_btn,
+        background_btn,
+        draw_btn,
+        arrow_btn,
+        line_btn,
+        box_btn,
+        circle_btn,
+        text_btn,
+        number_btn,
+        highlighter_btn,
+        blur_btn,
+        focus_btn,
+        censor_btn,
+        sep_1,
+        sep_2,
+    } = toolbar::build_toolbar_base(toolbar::ToolbarBaseIconNames {
+        crop: icon_names::CROP,
+        draw: icon_names::DOCUMENT_EDIT_REGULAR,
+        arrow: icon_names::GO_NEXT,
+        line: icon_names::DRAW_LINE,
+        box_: icon_names::DRAW_RECTANGLE,
+        circle: icon_names::CIRCLE_LINE_REGULAR,
+        text: icon_names::INSERT_TEXT,
+        number: icon_names::PIN,
+        highlighter: icon_names::HIGHLIGHT_REGULAR,
+        blur: icon_names::FOG,
+        focus: icon_names::SMALL_RECTANGLE_IN_FOCUS,
+        censor: icon_names::EYE_OFF_REGULAR,
+    });
+
+    let canvas_queue_draw_signal: Rc<dyn Fn()> = Rc::new({
+        let drawing_area_placeholder = drawing_area_placeholder.clone();
+        move || {
+            if let Some(weak) = drawing_area_placeholder.borrow().as_ref() {
+                if let Some(area) = weak.upgrade() {
+                    area.queue_draw();
+                }
+            }
+        }
+    });
+
+    let color_picker_parts =
+        color_picker::build_color_picker(state.clone(), canvas_queue_draw_signal);
+    let color_picker_trigger_host = color_picker_parts.trigger_host;
+    let color_popover = color_picker_parts.popover;
+    let color_buttons = color_picker_parts.color_buttons;
+    let color_picker_dot = color_picker_parts.color_picker_dot;
+    let color_class_names = color_picker_parts.color_class_names;
+    let eyedropper_btn = color_picker_parts.eyedropper_btn;
+    let sync_picker_for_active_tool = color_picker_parts.sync_for_active_tool;
+    let sync_picker_from_color = color_picker_parts.sync_picker_from_color;
+    let apply_picker_color_to_editor = color_picker_parts.apply_picker_color;
+    let set_picker_panel_visibility = color_picker_parts.set_picker_panel_visibility;
+
+    let toolbar::ToolbarModeParts {
+        root: center_group,
+        toolbar_mode_stack,
+        size_group,
+        size_down_btn,
+        size_up_btn,
+        crop_type_label,
+        crop_type_popover,
+        crop_type_list,
+        crop_width_entry,
+        crop_height_entry,
+    } = toolbar::build_toolbar_mode_controls(
+        &crop_btn,
+        &background_btn,
+        &select_btn,
+        &draw_btn,
+        &box_btn,
+        &circle_btn,
+        &arrow_btn,
+        &line_btn,
+        &text_btn,
+        &blur_btn,
+        &focus_btn,
+        &censor_btn,
+        &number_btn,
+        &highlighter_btn,
+        &sep_1,
+        &sep_2,
+        &color_picker_trigger_host,
+    );
+    left_group.append(&center_group);
+
+    let background_panel_parts = background_panel::build_background_panel(&window);
+    let background_sidebar = background_panel_parts.sidebar;
+    let start_background_gradient_preview_loading =
+        background_panel_parts.start_gradient_preview_loading;
+
+    let update_toolbar_for_tool = toolbar::build_toolbar_tool_updater(
+        &toolbar_mode_stack,
+        &background_sidebar,
+        start_background_gradient_preview_loading.clone(),
+        &window,
+        img_width as i32,
+        img_height as i32,
+    );
+
+    let toolbar::ToolbarRightParts {
+        root: right_group,
+        undo_btn,
+        redo_btn,
+        delete_selected_btn,
+        save_btn,
+        apply_crop_btn,
+    } = toolbar::build_toolbar_right_controls(
+        icon_names::ARROW_UNDO_REGULAR,
+        icon_names::ARROW_REDO_REGULAR,
+    );
+    toolbar.set_end_widget(Some(&right_group));
+
+    let footer::FooterParts {
+        root: footer,
+        pin_btn,
+        pin_icon,
+        drag_btn,
+        copy_btn,
+        upload_btn,
+    } = footer::build_footer(
+        icon_names::VIEW_PIN,
+        icon_names::COPY_REGULAR,
+        icon_names::CLOUD_ARROW_UP_REGULAR,
+    );
+
+    let tool_buttons = vec![
+        crop_btn.clone(),
+        background_btn.clone(),
+        select_btn.clone(),
+        draw_btn.clone(),
+        box_btn.clone(),
+        circle_btn.clone(),
+        arrow_btn.clone(),
+        line_btn.clone(),
+        text_btn.clone(),
+        blur_btn.clone(),
+        censor_btn.clone(),
+        number_btn.clone(),
+        highlighter_btn.clone(),
+        focus_btn.clone(),
+    ];
+    set_active_tool_button(&tool_buttons, 6);
+    color_picker::set_active_color_picker_state(
+        &color_buttons,
+        &color_picker_dot,
+        &color_class_names,
+        DEFAULT_COLOR_INDEX,
+    );
+    {
+        let st = state.lock().unwrap();
+        color_picker::apply_size_control_ui_state(&st, &size_group, &size_down_btn, &size_up_btn);
+    }
+    update_toolbar_for_tool(Tool::Arrow);
+
+    let canvas::CanvasShellParts {
+        root: canvas,
+        drawing_area,
+        canvas_overlay,
+        canvas_scroller,
+        canvas_eyedropper_ring,
+    } = canvas::build_canvas_shell(
+        img_width as i32,
+        img_height as i32,
+        &background_sidebar,
+        canvas::EYEDROPPER_LOUPE_SIZE,
+    );
+    *drawing_area_placeholder.borrow_mut() = Some(drawing_area.downgrade());
+
+    let canvas_padding = canvas::CANVAS_PADDING;
+
+    let update_crop_size_fields: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let crop_width_entry = crop_width_entry.clone();
+        let crop_height_entry = crop_height_entry.clone();
+        move || {
+            let st = state.lock().unwrap();
+            if let Some(rect) = st.draft_crop_rect().or(st.crop_selection) {
+                crop_width_entry.set_text(&rect.width.max(0).to_string());
+                crop_height_entry.set_text(&rect.height.max(0).to_string());
+            } else {
+                crop_width_entry.set_text("");
+                crop_height_entry.set_text("");
+            }
+        }
+    });
+
+    for crop_type in CropAspectRatio::ALL {
+        let option_button = Button::with_label(crop_type.label());
+        option_button.set_has_frame(false);
+        option_button.add_css_class("editor-crop-type-option");
+        let crop_type_label_option = crop_type_label.clone();
+        let crop_type_popover_option = crop_type_popover.clone();
+        let state_crop_type_option = state.clone();
+        let drawing_area_crop_type_option = drawing_area.downgrade();
+        let update_crop_size_fields_option = update_crop_size_fields.clone();
+        option_button.connect_clicked(move |_| {
+            crop_type_label_option.set_label(crop_type.label());
+            {
+                let mut st = state_crop_type_option.lock().unwrap();
+                st.set_crop_aspect_ratio(crop_type);
+                if st.selected_tool == Tool::Crop {
+                    st.ensure_crop_selection_initialized();
+                }
+            }
+            update_crop_size_fields_option();
+            crop_type_popover_option.popdown();
+            if let Some(area) = drawing_area_crop_type_option.upgrade() {
+                area.queue_draw();
+            }
+        });
+        crop_type_list.append(&option_button);
+    }
+
+    let eyedropper_mode = Rc::new(Cell::new(false));
+    let eyedropper_point = Rc::new(RefCell::new(None::<Point>));
+    let eyedropper_rendered = Rc::new(RefCell::new(None::<RgbaImage>));
+
+    canvas_eyedropper_ring.set_draw_func({
+        let eyedropper_point_draw = eyedropper_point.clone();
+        let eyedropper_rendered_draw = eyedropper_rendered.clone();
+        move |_, context, width, height| {
+            let Some(point) = *eyedropper_point_draw.borrow() else {
+                return;
+            };
+
+            let rendered = eyedropper_rendered_draw.borrow();
+            let Some(rendered) = rendered.as_ref() else {
+                return;
+            };
+
+            canvas::draw_eyedropper_loupe(context, width, height, rendered, point);
+        }
+    });
+
+    root.append(&toolbar);
+    root.append(&canvas);
+    root.append(&footer);
+    window.set_child(Some(&root));
+
+    let update_canvas_content_size: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let drawing_area = drawing_area.clone();
+        let canvas_overlay = canvas_overlay.clone();
+        let canvas_scroller = canvas_scroller.clone();
+        let canvas_padding = canvas_padding;
+        move || {
+            let (image_w, image_h, crop_rect, crop_mode_active) = {
+                let st = state.lock().unwrap();
+                (
+                    st.working_image.width().max(1) as i32,
+                    st.working_image.height().max(1) as i32,
+                    st.draft_crop_rect().or(st.crop_selection),
+                    st.selected_tool == Tool::Crop,
+                )
+            };
+
+            let scroller_width = canvas_scroller.allocated_width().max(1) as f64;
+            let available_width = (scroller_width - (canvas_padding * 2 + 2) as f64).max(1.0);
+            let scale = (available_width / image_w as f64).min(1.0);
+            let fitted_w = ((image_w as f64) * scale).round().max(1.0) as i32;
+            let fitted_h = ((image_h as f64) * scale).round().max(1.0) as i32;
+            let (overflow_left, overflow_top, overflow_right, overflow_bottom) =
+                canvas::crop_canvas_overflow(
+                    crop_rect,
+                    image_w as f64,
+                    image_h as f64,
+                    scale,
+                    crop_mode_active,
+                );
+            let canvas_w = fitted_w
+                + canvas_padding * 2
+                + overflow_left.round() as i32
+                + overflow_right.round() as i32;
+            let canvas_h = fitted_h
+                + canvas_padding * 2
+                + overflow_top.round() as i32
+                + overflow_bottom.round() as i32;
+
+            drawing_area.set_content_width(canvas_w);
+            drawing_area.set_content_height(canvas_h);
+            drawing_area.set_size_request(canvas_w, canvas_h);
+            canvas_overlay.set_size_request(canvas_w, canvas_h);
+        }
+    });
+    update_canvas_content_size();
+
+    {
+        let update_canvas_content_size_tick = update_canvas_content_size.clone();
+        let state_canvas_tick = state.clone();
+        let last_canvas_signature = Rc::new(Cell::new((
+            0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, false,
+        )));
+        let last_canvas_signature_tick = last_canvas_signature.clone();
+        canvas_scroller.add_tick_callback(move |scroller, _| {
+            let width = scroller.allocated_width();
+            let signature = {
+                let st = state_canvas_tick.lock().unwrap();
+                let crop_rect = st.draft_crop_rect().or(st.crop_selection);
+                let (crop_x, crop_y, crop_w, crop_h) = crop_rect
+                    .map(|rect| (rect.x, rect.y, rect.width, rect.height))
+                    .unwrap_or((0, 0, 0, 0));
+                (
+                    width,
+                    st.working_image.width().max(1) as i32,
+                    st.working_image.height().max(1) as i32,
+                    crop_x,
+                    crop_y,
+                    crop_w,
+                    crop_h,
+                    st.selected_tool == Tool::Crop,
+                )
+            };
+            if width > 0 && signature != last_canvas_signature_tick.get() {
+                last_canvas_signature_tick.set(signature);
+                update_canvas_content_size_tick();
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    // Eyedropper
+    color_picker::connect_eyedropper_activation(
+        &eyedropper_btn,
+        &color_popover,
+        state.clone(),
+        eyedropper_mode.clone(),
+        eyedropper_point.clone(),
+        eyedropper_rendered.clone(),
+        &canvas_eyedropper_ring,
+        &drawing_area,
+        Rc::new({
+            let window = window.downgrade();
+            move || {
+                if let Some(window) = window.upgrade() {
+                    cursor::set_window_cursor_name(&window, Some("crosshair"));
+                }
+            }
+        }),
+    );
+
+    // Drawing area draw function
+    let cached_surface = Rc::new(std::cell::RefCell::new(None::<gtk4::cairo::ImageSurface>));
+    let cached_surface_revision = Rc::new(Cell::new(0_u64));
+
+    let state_draw = state.clone();
+    let transform_draw = transform.clone();
+    let undo_btn_draw = undo_btn.clone();
+    let redo_btn_draw = redo_btn.clone();
+    let delete_selected_btn_draw = delete_selected_btn.clone();
+    let size_group_draw = size_group.clone();
+    let size_down_btn_draw = size_down_btn.clone();
+    let size_up_btn_draw = size_up_btn.clone();
+    let cached_surface_draw = cached_surface.clone();
+    let cached_surface_revision_draw = cached_surface_revision.clone();
+    let canvas_padding_draw = canvas_padding as f64;
+    drawing_area.set_draw_func(move |_, context, width, height| {
+        let st = state_draw.lock().unwrap();
+        let (can_undo, can_redo) = st.history_availability();
+        undo_btn_draw.set_sensitive(can_undo);
+        redo_btn_draw.set_sensitive(can_redo);
+        delete_selected_btn_draw.set_sensitive(st.can_remove_selected_action());
+        color_picker::apply_size_control_ui_state(
+            &st,
+            &size_group_draw,
+            &size_down_btn_draw,
+            &size_up_btn_draw,
+        );
+        let image_width = st.working_image.width() as f64;
+        let image_height = st.working_image.height() as f64;
+        let crop_rect = st.draft_crop_rect().or(st.crop_selection);
+        let crop_mode_active = st.selected_tool == Tool::Crop;
+
+        let base_view_width = (width as f64 - canvas_padding_draw * 2.0).max(1.0);
+        let base_scale = (base_view_width / image_width).min(1.0);
+        let (overflow_left, overflow_top, overflow_right, overflow_bottom) =
+            canvas::crop_canvas_overflow(
+                crop_rect,
+                image_width,
+                image_height,
+                base_scale,
+                crop_mode_active,
+            );
+        let view_width =
+            (width as f64 - canvas_padding_draw * 2.0 - overflow_left - overflow_right).max(1.0);
+        let view_height =
+            (height as f64 - canvas_padding_draw * 2.0 - overflow_top - overflow_bottom).max(1.0);
+
+        let mut t = ViewTransform::fit(image_width, image_height, view_width, view_height);
+        t.offset_x += canvas_padding_draw + overflow_left;
+        t.offset_y += canvas_padding_draw + overflow_top;
+
+        *transform_draw.lock().unwrap() = t;
+
+        context.set_operator(gtk4::cairo::Operator::Source);
+        draw_canvas_checkerboard_background(
+            context,
+            width,
+            height,
+            if crop_mode_active && st.crop_background_color_explicit {
+                Some(st.crop_background_color)
+            } else {
+                None
+            },
+        );
+        context.set_operator(gtk4::cairo::Operator::Over);
+
+        let _ = context.save();
+        context.translate(t.offset_x, t.offset_y);
+        context.scale(t.scale, t.scale);
+
+        if crop_mode_active && st.crop_background_color_explicit {
+            if let Some(crop_rect) = crop_rect {
+                context.set_source_rgba(
+                    st.crop_background_color.r,
+                    st.crop_background_color.g,
+                    st.crop_background_color.b,
+                    st.crop_background_color.a,
+                );
+                context.rectangle(
+                    crop_rect.x as f64,
+                    crop_rect.y as f64,
+                    crop_rect.width as f64,
+                    crop_rect.height as f64,
+                );
+                let _ = context.fill();
+            }
+        }
+
+        if cached_surface_revision_draw.get() != st.working_image_revision
+            || cached_surface_draw.borrow().is_none()
+        {
+            *cached_surface_draw.borrow_mut() = rgba_image_to_surface(&st.working_image);
+            cached_surface_revision_draw.set(st.working_image_revision);
+        }
+
+        if let Some(surface) = cached_surface_draw.borrow().as_ref() {
+            if context.set_source_surface(surface, 0.0, 0.0).is_ok() {
+                let _ = context.paint();
+            }
+        } else {
+            draw_rgba_to_context(context, &st.working_image);
+        }
+
+        for action in &st.actions {
+            if let AnnotationAction::Focus { rect } = action {
+                draw_focus_overlay(
+                    context,
+                    st.working_image.width() as f64,
+                    st.working_image.height() as f64,
+                    *rect,
+                    false,
+                );
+            }
+        }
+
+        for action in &st.actions {
+            if matches!(
+                action,
+                AnnotationAction::Blur { .. }
+                    | AnnotationAction::Focus { .. }
+                    | AnnotationAction::Censor { .. }
+            ) {
+                continue;
+            }
+            draw_annotation_action(context, action);
+        }
+
+        if let Some(draft) = st.draft_action() {
+            if let AnnotationAction::Focus { rect } = &draft {
+                draw_focus_overlay(
+                    context,
+                    st.working_image.width() as f64,
+                    st.working_image.height() as f64,
+                    *rect,
+                    true,
+                );
+            } else {
+                draw_draft_action(context, &draft);
+            }
+        }
+
+        if crop_mode_active {
+            if let Some(crop_rect) = crop_rect {
+                let canvas_left = -t.offset_x / t.scale;
+                let canvas_top = -t.offset_y / t.scale;
+                let canvas_width = width as f64 / t.scale;
+                let canvas_height = height as f64 / t.scale;
+                let _ = context.save();
+                context.rectangle(canvas_left, canvas_top, canvas_width, canvas_height);
+                context.rectangle(
+                    crop_rect.x as f64,
+                    crop_rect.y as f64,
+                    crop_rect.width as f64,
+                    crop_rect.height as f64,
+                );
+                context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
+                context.set_source_rgba(0.0, 0.0, 0.0, 140.0 / 255.0);
+                let _ = context.fill();
+                let _ = context.restore();
+            }
+        }
+
+        if let Some(crop_rect) = st.draft_crop_rect().or(st.crop_selection) {
+            draw_crop_overlay(
+                context,
+                st.working_image.width() as f64,
+                st.working_image.height() as f64,
+                crop_rect,
+                st.selected_tool == Tool::Crop,
+            );
+        }
+
+        if let Some(selected_action) = st.selected_action() {
+            let selection_padding = selection_hit_padding_for_scale(t.scale);
+            if let Some(bounds) = action_bounds_with_padding(selected_action, selection_padding) {
+                draw_selection_outline(context, bounds, t.scale);
+            }
+
+            let handles = action_resize_handles(selected_action);
+            if !handles.is_empty() {
+                draw_selection_handles(context, &handles, st.select_resize_handle, t.scale);
+            }
+        }
+        let _ = context.restore();
+    });
+
+    events::wire_editor_events(events::EventContext {
+        app: app.clone(),
+        window: window.clone(),
+        path: path.clone(),
+        state: state.clone(),
+        transform: transform.clone(),
+        drawing_area: drawing_area.clone(),
+        tool_buttons: tool_buttons.clone(),
+        select_btn: select_btn.clone(),
+        crop_btn: crop_btn.clone(),
+        background_btn: background_btn.clone(),
+        draw_btn: draw_btn.clone(),
+        arrow_btn: arrow_btn.clone(),
+        line_btn: line_btn.clone(),
+        box_btn: box_btn.clone(),
+        circle_btn: circle_btn.clone(),
+        text_btn: text_btn.clone(),
+        number_btn: number_btn.clone(),
+        highlighter_btn: highlighter_btn.clone(),
+        blur_btn: blur_btn.clone(),
+        focus_btn: focus_btn.clone(),
+        censor_btn: censor_btn.clone(),
+        traffic_close: traffic_close.clone(),
+        traffic_minimize: traffic_minimize.clone(),
+        traffic_zoom: traffic_zoom.clone(),
+        pin_btn: pin_btn.clone(),
+        pin_icon: pin_icon.clone(),
+        drag_btn: drag_btn.clone(),
+        copy_btn: copy_btn.clone(),
+        upload_btn: upload_btn.clone(),
+        color_buttons: color_buttons.clone(),
+        color_picker_dot: color_picker_dot.clone(),
+        color_class_names: color_class_names.clone(),
+        color_popover: color_popover.clone(),
+        size_down_btn: size_down_btn.clone(),
+        size_up_btn: size_up_btn.clone(),
+        apply_crop_btn: apply_crop_btn.clone(),
+        undo_btn: undo_btn.clone(),
+        redo_btn: redo_btn.clone(),
+        delete_selected_btn: delete_selected_btn.clone(),
+        save_btn: save_btn.clone(),
+        eyedropper_mode: eyedropper_mode.clone(),
+        eyedropper_point: eyedropper_point.clone(),
+        eyedropper_rendered: eyedropper_rendered.clone(),
+        canvas_eyedropper_ring: canvas_eyedropper_ring.clone(),
+        update_toolbar_for_tool: update_toolbar_for_tool.clone(),
+        update_crop_size_fields: update_crop_size_fields.clone(),
+        update_canvas_content_size: update_canvas_content_size.clone(),
+        sync_picker_for_active_tool: sync_picker_for_active_tool.clone(),
+        sync_picker_from_color: sync_picker_from_color.clone(),
+        apply_picker_color_to_editor: apply_picker_color_to_editor.clone(),
+        set_picker_panel_visibility: set_picker_panel_visibility.clone(),
+    });
+
+    window.present();
+}

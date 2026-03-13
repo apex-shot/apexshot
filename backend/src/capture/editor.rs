@@ -5,6 +5,7 @@ mod selection;
 mod state;
 mod types;
 mod ui_support;
+#[path = "editor/window/mod.rs"]
 mod window;
 
 pub use types::EditorError;
