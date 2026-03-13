@@ -1,0 +1,10 @@
+/target/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+.env
+.cache/
+*.log
+capture-overlay/build/

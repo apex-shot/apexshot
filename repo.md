@@ -1,69 +1,62 @@
 # ApexShot Repository Information
 
-ApexShot is a premium screen capture tool for Linux, featuring a modern landing page and a powerful Rust-based backend.
+ApexShot is a premium Linux screen capture tool with a Next.js marketing frontend and a Rust desktop application backend.
 
 ## Project Structure
 
-- **`frontend/`**: The web landing page for ApexShot.
-- **`backend/`**: The core application logic and subprojects.
-    - **Rust Project**: The main implementation of the screen capture tool (in root of `backend/`).
-    - **`ksnip/`**: A C++ based tool (likely integrated for editing features).
-    - **`test_gtk/`**: A small Rust project for testing GTK integration.
+- **`frontend/`**: The Next.js landing page and marketing site.
+- **`backend/`**: The Rust desktop application and related subprojects.
+    - **Rust Project**: The main ApexShot application (`backend/Cargo.toml`).
+    - **`capture-overlay/`**: Native C++ overlay helpers.
+    - **`native-host/`**: Native messaging host files.
+    - **`test_gtk/`**: GTK integration sandbox project.
+    - **`tests/`**: Rust integration tests.
+    - **`web-scroll-extension/`**: Browser extension for scroll capture.
+- **`repo.md`**: High-level repository overview.
 
 ---
 
 ## 1. Frontend
 
-A beautiful, modern landing page built with the latest web technologies.
+A modern marketing site built with current web tooling.
 
 - **Tech Stack**:
     - **Framework**: [Next.js 16 (App Router)](https://nextjs.org/)
     - **Library**: [React 19](https://react.dev/)
     - **Styling**: [Tailwind CSS 4](https://tailwindcss.com/), [Framer Motion](https://www.framer.com/motion/)
-    - **Graphics**: [Three.js](https://threejs.org/) (via `@react-three/fiber`), [ShaderGradient](https://www.shadergradient.co/)
+    - **Graphics**: [Three.js](https://threejs.org/) via `@react-three/fiber`, [ShaderGradient](https://www.shadergradient.co/)
     - **Language**: [TypeScript](https://www.typescriptlang.org/)
-- **Key Features**:
-    - Mesh Gradient Backgrounds
-    - Mouse-following Spotlight effects
-    - Infinite scrolling Marquees
-    - Fully Responsive design
+- **Key Areas**:
+    - Marketing pages under `frontend/app/`
+    - Shared UI under `frontend/components/`
+    - Frontend utilities under `frontend/lib/`
 
 ---
 
-## 2. Backend (Rust)
+## 2. Backend
 
-The core engine of ApexShot, handling screen capture, OCR, and system integration on Linux.
+The Rust desktop application handles screen capture, editing, OCR, recording, and Linux desktop integration.
 
 - **Tech Stack**:
     - **Language**: [Rust](https://www.rust-lang.org/)
-    - **Runtime**: [Tokio](https://tokio.rs/) (Async)
+    - **Runtime**: [Tokio](https://tokio.rs/)
     - **GUI/Overlay**: [GTK4](https://www.gtk.org/), [gtk4-layer-shell](https://github.com/wmww/gtk4-layer-shell)
-    - **Display Servers**: [X11 (x11rb)](https://github.com/logical-robot/x11rb), [Wayland (wayland-client, ashpd)](https://github.com/fedora-selinux/ashpd)
+    - **Display Servers**: [x11rb](https://github.com/logical-robot/x11rb), [wayland-client](https://gitlab.freedesktop.org/wayland/wayland-rs), [ashpd](https://github.com/fedora-selinux/ashpd)
     - **Media Processing**: [GStreamer](https://gstreamer.freedesktop.org/)
     - **OCR**: [Tesseract](https://github.com/tesseract-ocr/tesseract)
     - **Clipboard**: [arboard](https://github.com/1Password/arboard)
-- **Sub-components**:
-    - **Capture Overlay**: C++ based overlay (`backend/capture-overlay/`).
-    - **Web Scroll Extension**: Browser extension for scrolling captures (`backend/web-scroll-extension/`).
+- **Notable Paths**:
+    - `backend/src/`: Main application source
+    - `backend/src/capture/editor/`: Editor implementation and background assets
+    - `backend/capture-overlay/`: C++ capture overlay project
+    - `backend/web-scroll-extension/`: Browser extension assets
 
 ---
 
-## 3. Ksnip (C++)
+## 3. Notes
 
-An integrated tool for screenshot editing and additional functionality.
-
-- **Tech Stack**:
-    - **Language**: C++
-    - **Framework**: [Qt](https://www.qt.io/)
-    - **Build System**: CMake
-
----
-
-## 4. Design & Documentation
-
-- **[AGENT.md](./AGENT.md)**: Agent-specific instructions and context.
-- **[ApexShot Landing Page Design Document (1).md](./ApexShot%20Landing%20Page%20Design%20Document%20(1).md)**: Detailed design specifications for the landing page.
-- **[setup-frontend.sh](./setup-frontend.sh)**: Script to automate frontend environment setup.
+- `backend/` is a normal folder inside the main repository and should not contain its own nested Git repository.
+- `frontend/` remains at the repository root.
 
 ---
 
