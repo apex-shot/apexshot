@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use super::color::{selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX};
+use super::color::selection_hit_padding_for_scale;
 use super::render::{
     draw_annotation_action, draw_canvas_checkerboard_background, draw_crop_overlay,
     draw_draft_action, draw_focus_overlay, draw_rgba_to_context, draw_selection_handles,
@@ -13,13 +13,16 @@ use super::render::{
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::EditorState;
-use super::types::{AnnotationAction, CropAspectRatio, EditorError, Point, Tool, ViewTransform};
+use super::types::{
+    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError, Point,
+    Rect, Tool, ViewTransform,
+};
 use super::ui_support::{
     install_editor_css, prefers_dark_glass_theme, prefers_reduced_transparency,
-    recommended_window_size, set_active_tool_button,
+    recommended_window_size,
 };
 
-mod background_panel;
+pub mod background_panel;
 mod canvas;
 pub mod color_picker;
 mod cursor;
@@ -196,74 +199,27 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     );
     left_group.append(&center_group);
 
-    let background_panel_parts = background_panel::build_background_panel(&window);
-    let background_sidebar = background_panel_parts.sidebar;
-    let start_background_gradient_preview_loading =
-        background_panel_parts.start_gradient_preview_loading;
-
-    let update_toolbar_for_tool = toolbar::build_toolbar_tool_updater(
-        &toolbar_mode_stack,
-        &background_sidebar,
-        start_background_gradient_preview_loading.clone(),
-        &window,
-        img_width as i32,
-        img_height as i32,
-    );
-
-    let toolbar::ToolbarRightParts {
-        root: right_group,
-        undo_btn,
-        redo_btn,
-        delete_selected_btn,
-        save_btn,
-        apply_crop_btn,
-    } = toolbar::build_toolbar_right_controls(
+    let toolbar_right_parts = toolbar::build_toolbar_right_controls(
         icon_names::ARROW_UNDO_REGULAR,
         icon_names::ARROW_REDO_REGULAR,
     );
-    toolbar.set_end_widget(Some(&right_group));
+    let undo_btn = toolbar_right_parts.undo_btn;
+    let redo_btn = toolbar_right_parts.redo_btn;
+    let delete_selected_btn = toolbar_right_parts.delete_selected_btn;
+    let save_btn = toolbar_right_parts.save_btn;
+    let apply_crop_btn = toolbar_right_parts.apply_crop_btn;
+    toolbar.set_end_widget(Some(&toolbar_right_parts.root));
 
-    let footer::FooterParts {
-        root: footer,
-        pin_btn,
-        pin_icon,
-        drag_btn,
-        copy_btn,
-        upload_btn,
-    } = footer::build_footer(
+    let footer_parts = footer::build_footer(
         icon_names::VIEW_PIN,
         icon_names::COPY_REGULAR,
         icon_names::CLOUD_ARROW_UP_REGULAR,
     );
-
-    let tool_buttons = vec![
-        crop_btn.clone(),
-        background_btn.clone(),
-        select_btn.clone(),
-        draw_btn.clone(),
-        box_btn.clone(),
-        circle_btn.clone(),
-        arrow_btn.clone(),
-        line_btn.clone(),
-        text_btn.clone(),
-        blur_btn.clone(),
-        censor_btn.clone(),
-        number_btn.clone(),
-        highlighter_btn.clone(),
-        focus_btn.clone(),
-    ];
-    set_active_tool_button(&tool_buttons, 6);
-    color_picker::set_active_color_picker_state(
-        &color_buttons,
-        &color_picker_dot,
-        &color_class_names,
-        DEFAULT_COLOR_INDEX,
-    );
-    {
-        let st = state.lock().unwrap();
-        color_picker::apply_size_control_ui_state(&st, &size_group, &size_down_btn, &size_up_btn);
-    }
-    update_toolbar_for_tool(Tool::Arrow);
+    let pin_btn = footer_parts.pin_btn;
+    let pin_icon = footer_parts.pin_icon;
+    let drag_btn = footer_parts.drag_btn;
+    let copy_btn = footer_parts.copy_btn;
+    let upload_btn = footer_parts.upload_btn;
 
     let canvas::CanvasShellParts {
         root: canvas,
@@ -274,10 +230,94 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     } = canvas::build_canvas_shell(
         img_width as i32,
         img_height as i32,
-        &background_sidebar,
+        &GtkBox::new(Orientation::Vertical, 0), // Placeholder, will be replaced
         canvas::EYEDROPPER_LOUPE_SIZE,
     );
+
+    // Background style cache
+    let cached_background_surface = Rc::new(std::cell::RefCell::new(None::<gtk4::cairo::ImageSurface>));
+    let cached_background_style = Rc::new(std::cell::RefCell::new(None::<BackgroundStyle>));
+
+    let gradient_surfaces = Rc::new(RefCell::new(vec![None::<gtk4::cairo::ImageSurface>; background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES.len()]));
+    let wallpaper_cache = Rc::new(RefCell::new(std::collections::HashMap::<PathBuf, gtk4::cairo::ImageSurface>::new()));
+    
+    let (wallpaper_loader_sender, receiver) = std::sync::mpsc::channel::<(Option<usize>, PathBuf, RgbaImage)>();
+
+    // Pre-load gradients and system wallpaper in background
+    {
+        let sender = wallpaper_loader_sender.clone();
+        // Background loader thread
+        std::thread::spawn({
+            move || {
+                // 1. System wallpaper (High Priority)
+                if let Some(path) = background_panel::detect_system_wallpaper_path() {
+                    println!("[DEBUG] Detected system wallpaper: {:?}", path);
+                    if let Some(rgba) = background_panel::load_background_image_optimized(&path) {
+                        let _ = sender.send((None, path, rgba));
+                    }
+                } else {
+                    println!("[DEBUG] No system wallpaper detected.");
+                    // Also load the fallback wallpaper into cache
+                    let fallback_path = background_panel::background_gradient_asset_path(background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES[0]);
+                    if let Some(rgba) = background_panel::load_background_image_optimized(&fallback_path) {
+                        let _ = sender.send((None, fallback_path, rgba));
+                    }
+                }
+
+                // 2. Gradients
+                for (idx, file_name) in background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES.iter().enumerate() {
+                    let path = background_panel::background_gradient_asset_path(file_name);
+                    if let Some(rgba) = background_panel::load_background_image_optimized(&path) {
+                        if sender.send((Some(idx), path, rgba)).is_err() { break; }
+                    }
+                }
+            }
+        });
+
+        let gradient_surfaces_main = gradient_surfaces.clone();
+        let wallpaper_cache_main = wallpaper_cache.clone();
+        let drawing_area_main = drawing_area.downgrade();
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            while let Ok((idx_opt, path, rgba)) = receiver.try_recv() {
+                if let Some(surface) = rgba_image_to_surface(&rgba) {
+                    if let Some(idx) = idx_opt {
+                        gradient_surfaces_main.borrow_mut()[idx] = Some(surface);
+                    } else {
+                        wallpaper_cache_main.borrow_mut().insert(path, surface);
+                    }
+                    if let Some(area) = drawing_area_main.upgrade() {
+                        area.queue_draw();
+                    }
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    let background_panel_parts =
+        background_panel::build_background_panel(&window, state.clone(), &drawing_area, wallpaper_loader_sender);
+    let background_sidebar = background_panel_parts.sidebar;
+    let start_background_gradient_preview_loading =
+        background_panel_parts.start_gradient_preview_loading;
+
+    // Re-parent sidebar into canvas workspace
+    if let Some(canvas_workspace) = canvas.first_child().and_then(|c| c.downcast::<GtkBox>().ok()) {
+        if let Some(placeholder) = canvas_workspace.first_child() {
+            canvas_workspace.remove(&placeholder);
+        }
+        canvas_workspace.prepend(&background_sidebar);
+    }
     *drawing_area_placeholder.borrow_mut() = Some(drawing_area.downgrade());
+
+    let update_toolbar_for_tool = toolbar::build_toolbar_tool_updater(
+        &toolbar_mode_stack,
+        &background_sidebar,
+        &canvas_scroller,
+        start_background_gradient_preview_loading.clone(),
+        &window,
+        img_width as i32,
+        img_height as i32,
+    );
 
     let canvas_padding = canvas::CANVAS_PADDING;
 
@@ -347,7 +387,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     root.append(&toolbar);
     root.append(&canvas);
-    root.append(&footer);
+    root.append(&footer_parts.root);
     window.set_child(Some(&root));
 
     let update_canvas_content_size: Rc<dyn Fn()> = Rc::new({
@@ -357,29 +397,58 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let canvas_scroller = canvas_scroller.clone();
         let canvas_padding = canvas_padding;
         move || {
-            let (image_w, image_h, crop_rect, crop_mode_active) = {
+            let (image_w, image_h, background_padding, background_aspect_ratio, has_background, crop_rect, crop_mode_active) = {
                 let st = state.lock().unwrap();
                 (
                     st.working_image.width().max(1) as i32,
                     st.working_image.height().max(1) as i32,
+                    st.background_padding,
+                    st.background_aspect_ratio,
+                    st.background_style != BackgroundStyle::None,
                     st.draft_crop_rect().or(st.crop_selection),
                     st.selected_tool == Tool::Crop,
                 )
             };
 
+            let mut virtual_w = image_w as f64;
+            let mut virtual_h = image_h as f64;
+
+            if has_background {
+                let ref_size = virtual_w.max(virtual_h);
+                let scale_factor = ref_size / 400.0;
+                let padding_px = background_padding * scale_factor;
+                virtual_w += padding_px * 2.0;
+                virtual_h += padding_px * 2.0;
+
+                if let Some(ratio) = background_aspect_ratio.aspect_ratio(virtual_w as i32, virtual_h as i32) {
+                    let current_ratio = virtual_w / virtual_h;
+                    if current_ratio < ratio {
+                        virtual_w = virtual_h * ratio;
+                    } else {
+                        virtual_h = virtual_w / ratio;
+                    }
+                }
+            }
+
             let scroller_width = canvas_scroller.allocated_width().max(1) as f64;
             let available_width = (scroller_width - (canvas_padding * 2 + 2) as f64).max(1.0);
-            let scale = (available_width / image_w as f64).min(1.0);
-            let fitted_w = ((image_w as f64) * scale).round().max(1.0) as i32;
-            let fitted_h = ((image_h as f64) * scale).round().max(1.0) as i32;
+            let scale = (available_width / virtual_w).min(1.0);
+            let fitted_w = (virtual_w * scale).round().max(1.0) as i32;
+            let fitted_h = (virtual_h * scale).round().max(1.0) as i32;
+            
             let (overflow_left, overflow_top, overflow_right, overflow_bottom) =
-                canvas::crop_canvas_overflow(
-                    crop_rect,
-                    image_w as f64,
-                    image_h as f64,
-                    scale,
-                    crop_mode_active,
-                );
+                if has_background {
+                    (0.0, 0.0, 0.0, 0.0)
+                } else {
+                    canvas::crop_canvas_overflow(
+                        crop_rect,
+                        image_w as f64,
+                        image_h as f64,
+                        scale,
+                        crop_mode_active,
+                    )
+                };
+
             let canvas_w = fitted_w
                 + canvas_padding * 2
                 + overflow_left.round() as i32
@@ -455,6 +524,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let cached_surface = Rc::new(std::cell::RefCell::new(None::<gtk4::cairo::ImageSurface>));
     let cached_surface_revision = Rc::new(Cell::new(0_u64));
 
+
     let state_draw = state.clone();
     let transform_draw = transform.clone();
     let undo_btn_draw = undo_btn.clone();
@@ -465,7 +535,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let size_up_btn_draw = size_up_btn.clone();
     let cached_surface_draw = cached_surface.clone();
     let cached_surface_revision_draw = cached_surface_revision.clone();
+    let cached_background_surface_draw = cached_background_surface.clone();
+    let cached_background_style_draw = cached_background_style.clone();
     let canvas_padding_draw = canvas_padding as f64;
+    let gradient_surfaces_draw = gradient_surfaces.clone();
+    let wallpaper_cache_draw = wallpaper_cache.clone();
     drawing_area.set_draw_func(move |_, context, width, height| {
         let st = state_draw.lock().unwrap();
         let (can_undo, can_redo) = st.history_availability();
@@ -483,27 +557,59 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let crop_rect = st.draft_crop_rect().or(st.crop_selection);
         let crop_mode_active = st.selected_tool == Tool::Crop;
 
+        let mut virtual_w = image_width;
+        let mut virtual_h = image_height;
+        let mut padding_px = 0.0;
+        let mut draw_scale_factor = 1.0;
+
+        let has_background = st.background_style != BackgroundStyle::None;
+        if has_background {
+            let ref_size = image_width.max(image_height);
+            let scale_factor = ref_size / 400.0;
+            padding_px = st.background_padding * scale_factor;
+            
+            virtual_w = image_width + padding_px * 2.0;
+            virtual_h = image_height + padding_px * 2.0;
+
+            if let Some(ratio) = st.background_aspect_ratio.aspect_ratio(virtual_w as i32, virtual_h as i32) {
+                let current_ratio = virtual_w / virtual_h;
+                if current_ratio < ratio {
+                    virtual_w = virtual_h * ratio;
+                } else {
+                    virtual_h = virtual_w / ratio;
+                }
+            }
+
+            let insert_ratio = st.background_insert / 200.0;
+            draw_scale_factor = 1.0 - insert_ratio;
+        }
+
         let base_view_width = (width as f64 - canvas_padding_draw * 2.0).max(1.0);
-        let base_scale = (base_view_width / image_width).min(1.0);
+        let base_scale = (base_view_width / virtual_w).min(1.0);
         let (overflow_left, overflow_top, overflow_right, overflow_bottom) =
-            canvas::crop_canvas_overflow(
-                crop_rect,
-                image_width,
-                image_height,
-                base_scale,
-                crop_mode_active,
-            );
+            if has_background {
+                (0.0, 0.0, 0.0, 0.0)
+            } else {
+                canvas::crop_canvas_overflow(
+                    crop_rect,
+                    image_width,
+                    image_height,
+                    base_scale,
+                    crop_mode_active,
+                )
+            };
+
         let view_width =
             (width as f64 - canvas_padding_draw * 2.0 - overflow_left - overflow_right).max(1.0);
         let view_height =
             (height as f64 - canvas_padding_draw * 2.0 - overflow_top - overflow_bottom).max(1.0);
 
-        let mut t = ViewTransform::fit(image_width, image_height, view_width, view_height);
+        let mut t = ViewTransform::fit(virtual_w, virtual_h, view_width, view_height);
         t.offset_x += canvas_padding_draw + overflow_left;
         t.offset_y += canvas_padding_draw + overflow_top;
 
-        *transform_draw.lock().unwrap() = t;
-
+        let canvas_t = t.clone();
+        
         context.set_operator(gtk4::cairo::Operator::Source);
         draw_canvas_checkerboard_background(
             context,
@@ -515,6 +621,135 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 None
             },
         );
+
+        if has_background {
+            context.set_operator(gtk4::cairo::Operator::Over);
+            let current_style = st.background_style.clone();
+            let mut bg_cache = cached_background_surface_draw.borrow_mut();
+            let mut bg_style_cache = cached_background_style_draw.borrow_mut();
+
+            if bg_style_cache.as_ref() != Some(&current_style) || bg_cache.is_none() {
+                if let BackgroundStyle::Gradient(idx) = &current_style {
+                    let surfaces = gradient_surfaces_draw.borrow();
+                    if let Some(surface) = surfaces.get(*idx).and_then(|s| s.as_ref()) {
+                        *bg_cache = Some(surface.clone());
+                    } else {
+                        let file_name = background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES[*idx];
+                        let path = background_panel::background_gradient_asset_path(file_name);
+                        *bg_cache = rgba_image_to_surface(&background_panel::load_background_image_optimized(&path).unwrap_or_else(|| RgbaImage::new(1, 1)));
+                    }
+                } else if let BackgroundStyle::Wallpaper(path) = &current_style {
+                    let cache = wallpaper_cache_draw.borrow();
+                    if let Some(surface) = cache.get(path) {
+                        *bg_cache = Some(surface.clone());
+                    } else {
+                        println!("[DEBUG] Cache miss for wallpaper: {:?}, loading synchronously", path);
+                        if let Some(rgba) = background_panel::load_background_image_optimized(path) {
+                            let surface = rgba_image_to_surface(&rgba);
+                            *bg_cache = surface;
+                        } else {
+                            println!("[DEBUG] Failed to load wallpaper synchronously: {:?}", path);
+                            *bg_cache = None;
+                        }
+                    }
+                } else if let BackgroundStyle::PlainColor(_color) = &current_style {
+                    *bg_cache = None;
+                } else if let BackgroundStyle::Blurred(_idx) = &current_style {
+                    let mut blurred_bg = st.working_image.clone();
+                    let (bw, bh) = blurred_bg.dimensions();
+                    super::render::apply_blur_rect(
+                        &mut blurred_bg,
+                        Rect {
+                            x: 0,
+                            y: 0,
+                            width: bw as i32,
+                            height: bh as i32,
+                        },
+                        20,
+                    );
+                    *bg_cache = rgba_image_to_surface(&blurred_bg);
+                }
+                *bg_style_cache = Some(current_style.clone());
+            }
+
+            if let Some(surface) = bg_cache.as_ref() {
+                let _ = context.save();
+                let sw = surface.width() as f64;
+                let sh = surface.height() as f64;
+                context.translate(canvas_t.offset_x, canvas_t.offset_y);
+                context.scale((virtual_w * canvas_t.scale) / sw, (virtual_h * canvas_t.scale) / sh);
+                context.set_source_surface(surface, 0.0, 0.0).unwrap();
+                let _ = context.paint();
+                let _ = context.restore();
+            } else if let BackgroundStyle::PlainColor(color) = &current_style {
+                context.set_source_rgba(color.r, color.g, color.b, color.a);
+                context.rectangle(canvas_t.offset_x, canvas_t.offset_y, virtual_w * canvas_t.scale, virtual_h * canvas_t.scale);
+                let _ = context.fill();
+            }
+
+            let draw_w = image_width * draw_scale_factor;
+            let draw_h = image_height * draw_scale_factor;
+            let padding_px_scaled = padding_px * canvas_t.scale;
+
+            let (sc_off_x, sc_off_y) = match st.background_alignment {
+                BackgroundAlignment::TopLeft => (padding_px_scaled, padding_px_scaled),
+                BackgroundAlignment::TopCenter => ((virtual_w * canvas_t.scale - draw_w * canvas_t.scale) / 2.0, padding_px_scaled),
+                BackgroundAlignment::TopRight => (virtual_w * canvas_t.scale - draw_w * canvas_t.scale - padding_px_scaled, padding_px_scaled),
+                BackgroundAlignment::CenterLeft => (padding_px_scaled, (virtual_h * canvas_t.scale - draw_h * canvas_t.scale) / 2.0),
+                BackgroundAlignment::Center => ((virtual_w * canvas_t.scale - draw_w * canvas_t.scale) / 2.0, (virtual_h * canvas_t.scale - draw_h * canvas_t.scale) / 2.0),
+                BackgroundAlignment::CenterRight => (virtual_w * canvas_t.scale - draw_w * canvas_t.scale - padding_px_scaled, (virtual_h * canvas_t.scale - draw_h * canvas_t.scale) / 2.0),
+                BackgroundAlignment::BottomLeft => (padding_px_scaled, virtual_h * canvas_t.scale - draw_h * canvas_t.scale - padding_px_scaled),
+                BackgroundAlignment::BottomCenter => ((virtual_w * canvas_t.scale - draw_w * canvas_t.scale) / 2.0, virtual_h * canvas_t.scale - draw_h * canvas_t.scale - padding_px_scaled),
+                BackgroundAlignment::BottomRight => (virtual_w * canvas_t.scale - draw_w * canvas_t.scale - padding_px_scaled, virtual_h * canvas_t.scale - draw_h * canvas_t.scale - padding_px_scaled),
+            };
+
+            t.offset_x = canvas_t.offset_x + sc_off_x;
+            t.offset_y = canvas_t.offset_y + sc_off_y;
+            t.scale = canvas_t.scale * draw_scale_factor;
+            *transform_draw.lock().unwrap() = t;
+
+            if st.background_shadow > 0.0 {
+                let shadow_radius = st.background_shadow * t.scale * 0.5;
+                let shadow_opacity = 0.4;
+                let _ = context.save();
+                context.set_source_rgba(0.0, 0.0, 0.0, shadow_opacity);
+                context.translate(t.offset_x, t.offset_y + shadow_radius * 0.3);
+                
+                let rect_w = image_width * t.scale;
+                let rect_h = image_height * t.scale;
+                let corner_r = st.background_corner_radius * t.scale;
+
+                context.new_sub_path();
+                context.arc(rect_w - corner_r, corner_r, corner_r, -std::f64::consts::FRAC_PI_2, 0.0);
+                context.arc(rect_w - corner_r, rect_h - corner_r, corner_r, 0.0, std::f64::consts::FRAC_PI_2);
+                context.arc(corner_r, rect_h - corner_r, corner_r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+                context.arc(corner_r, corner_r, corner_r, std::f64::consts::PI, std::f64::consts::PI * 1.5);
+                context.close_path();
+
+                for i in 1..=5 {
+                    context.set_line_width(shadow_radius * (i as f64 / 5.0));
+                    context.set_source_rgba(0.0, 0.0, 0.0, shadow_opacity / (i as f64));
+                    let _ = context.stroke_preserve();
+                }
+                let _ = context.fill();
+                let _ = context.restore();
+            }
+
+            let rect_w = image_width * t.scale;
+            let rect_h = image_height * t.scale;
+            let corner_r = st.background_corner_radius * t.scale;
+            
+            let _ = context.save();
+            context.translate(t.offset_x, t.offset_y);
+            context.new_sub_path();
+            context.arc(rect_w - corner_r, corner_r, corner_r, -std::f64::consts::FRAC_PI_2, 0.0);
+            context.arc(rect_w - corner_r, rect_h - corner_r, corner_r, 0.0, std::f64::consts::FRAC_PI_2);
+            context.arc(corner_r, rect_h - corner_r, corner_r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+            context.arc(corner_r, corner_r, corner_r, std::f64::consts::PI, std::f64::consts::PI * 1.5);
+            context.close_path();
+            context.clip();
+            context.translate(-t.offset_x, -t.offset_y);
+        }
         context.set_operator(gtk4::cairo::Operator::Over);
 
         let _ = context.save();
@@ -636,6 +871,23 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
         let _ = context.restore();
     });
+
+    let tool_buttons = vec![
+        crop_btn.clone(),
+        background_btn.clone(),
+        select_btn.clone(),
+        draw_btn.clone(),
+        box_btn.clone(),
+        circle_btn.clone(),
+        arrow_btn.clone(),
+        line_btn.clone(),
+        text_btn.clone(),
+        blur_btn.clone(),
+        censor_btn.clone(),
+        number_btn.clone(),
+        highlighter_btn.clone(),
+        focus_btn.clone(),
+    ];
 
     events::wire_editor_events(events::EventContext {
         app: app.clone(),

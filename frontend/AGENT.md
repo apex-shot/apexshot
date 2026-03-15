@@ -10,7 +10,7 @@ Avoid using generic file search (e.g., `grep`, `find`) or reading multiple files
 
 ## How to Use Codebase Memory MCP
 
-Here are common scenarios and the preferred `codebase-memory-mcp` tools to use:
+Here are common scenarios and the preferred `codebase-memory-mcp` Qtools to use:
 
 ### 1. Initial Project Indexing
 

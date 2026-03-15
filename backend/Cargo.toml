@@ -29,7 +29,7 @@ base64 = "0.22.1"
 tracing = "0.1.41"
 futures-util = "0.3.31"
 async-trait = "0.1.89"
-image = { version = "0.24.9", features = ["png", "jpeg", "gif"] }
+image = { version = "0.24.9", features = ["png", "jpeg", "gif", "webp"] }
 rayon = "1.10"
 chrono = "0.4"
 

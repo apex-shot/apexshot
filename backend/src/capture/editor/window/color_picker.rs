@@ -18,7 +18,7 @@ use super::super::color::{
     MAX_TEXT_SIZE, MIN_STROKE_SIZE, MIN_TEXT_SIZE,
 };
 use super::super::state::EditorState;
-use super::super::types::{DrawColor, PickerColorState, Point, Tool};
+use super::super::types::{BackgroundStyle, DrawColor, PickerColorState, Point, Tool};
 use super::super::ui_support::color_swatch_button;
 use crate::capture::editor::window::icon_names;
 
@@ -669,6 +669,9 @@ pub fn build_color_picker(
                 let mut st = state_picker_apply.lock().unwrap();
                 if st.selected_tool == Tool::Crop {
                     st.set_crop_background_color(color);
+                } else if st.selected_tool == Tool::Background {
+                    st.background_style = BackgroundStyle::PlainColor(color);
+                    st.mark_working_image_dirty();
                 } else {
                     st.selected_color = color;
                     let _ = st.set_selected_action_color(color);
@@ -719,6 +722,12 @@ pub fn build_color_picker(
                 let st = state.lock().unwrap();
                 if st.selected_tool == Tool::Crop {
                     (st.crop_background_color, st.crop_background_color_explicit)
+                } else if st.selected_tool == Tool::Background {
+                    if let BackgroundStyle::PlainColor(color) = st.background_style {
+                        (color, true)
+                    } else {
+                        (st.selected_color, false)
+                    }
                 } else {
                     (st.selected_color, true)
                 }

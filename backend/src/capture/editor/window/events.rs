@@ -15,7 +15,7 @@ use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
-    types::{tool_shortcut_target, DrawColor, Point, Tool, ViewTransform},
+    types::{tool_shortcut_target, BackgroundStyle, DrawColor, Point, Tool, ViewTransform},
     ui_support::{
         set_active_tool_button, set_crop_apply_button_state, show_text_dialog,
         show_text_edit_dialog,
@@ -215,10 +215,27 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_background = tool_buttons.clone();
     let apply_crop_btn_background = apply_crop_btn.clone();
     let update_toolbar_for_tool_background = update_toolbar_for_tool.clone();
+    let sync_picker_for_active_tool_background = sync_picker_for_active_tool.clone();
     background_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_background, 1);
-        state_background.lock().unwrap().set_tool(Tool::Background);
-        update_toolbar_for_tool_background(Tool::Background);
+        let next_tool = {
+            let mut st = state_background.lock().unwrap();
+            if st.selected_tool == Tool::Background {
+                st.set_tool(Tool::Arrow);
+                Tool::Arrow
+            } else {
+                st.set_tool(Tool::Background);
+                Tool::Background
+            }
+        };
+
+        if matches!(next_tool, Tool::Background) {
+            set_active_tool_button(&buttons_background, 1);
+        } else {
+            set_active_tool_button(&buttons_background, 6);
+        }
+
+        update_toolbar_for_tool_background(next_tool);
+        sync_picker_for_active_tool_background();
         set_crop_apply_button_state(&apply_crop_btn_background, false, false);
         if let Some(area) = drawing_area_background.upgrade() {
             area.queue_draw();
@@ -463,6 +480,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let mut st = state_color.lock().unwrap();
             if st.selected_tool == Tool::Crop {
                 st.set_crop_background_color(DRAW_COLORS[index]);
+            } else if st.selected_tool == Tool::Background {
+                st.background_style = BackgroundStyle::PlainColor(DRAW_COLORS[index]);
+                st.mark_working_image_dirty();
             } else {
                 st.set_color_index(index);
                 st.set_selected_action_color(DRAW_COLORS[index]);
