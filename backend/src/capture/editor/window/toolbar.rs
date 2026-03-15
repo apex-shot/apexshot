@@ -7,7 +7,8 @@ use std::rc::Rc;
 use super::super::{
     types::Tool,
     ui_support::{
-        icon_tool_button, recommended_window_size_with_extra_width, traffic_light_button,
+        icon_tool_button, recommended_window_size, recommended_window_size_with_extra_width,
+        traffic_light_button,
     },
 };
 use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
@@ -397,6 +398,7 @@ pub(super) fn build_toolbar_right_controls(
 pub(super) fn build_toolbar_tool_updater(
     toolbar_mode_stack: &Stack,
     background_sidebar: &GtkBox,
+    canvas_scroller: &gtk4::ScrolledWindow,
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
     window: &ApplicationWindow,
     image_width: i32,
@@ -404,6 +406,7 @@ pub(super) fn build_toolbar_tool_updater(
 ) -> Rc<dyn Fn(Tool)> {
     let toolbar_mode_stack = toolbar_mode_stack.clone();
     let background_sidebar = background_sidebar.clone();
+    let canvas_scroller = canvas_scroller.clone();
     let window = window.downgrade();
 
     Rc::new(move |tool| {
@@ -413,21 +416,33 @@ pub(super) fn build_toolbar_tool_updater(
             "standard"
         });
 
+        // Only allow vertical scrolling in Crop mode
+        if matches!(tool, Tool::Crop) {
+            canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+        } else {
+            canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Never);
+        }
+
         let background_mode = matches!(tool, Tool::Background);
         background_sidebar.set_visible(background_mode);
 
-        if background_mode {
-            start_background_gradient_preview_loading();
-            let (target_width, target_height) = recommended_window_size_with_extra_width(
-                image_width,
-                image_height,
-                BACKGROUND_SIDEBAR_WIDTH,
-            );
-            if let Some(window) = window.upgrade() {
+        if let Some(window) = window.upgrade() {
+            if background_mode {
+                start_background_gradient_preview_loading();
+                let (target_width, target_height) = recommended_window_size_with_extra_width(
+                    image_width,
+                    image_height,
+                    BACKGROUND_SIDEBAR_WIDTH,
+                );
                 window.set_default_size(
                     window.allocated_width().max(target_width),
                     window.allocated_height().max(target_height),
                 );
+            } else {
+                // Return window to standard recommended size when sidebar is hidden
+                let (base_width, base_height) = recommended_window_size(image_width, image_height);
+                window.set_default_size(base_width, base_height);
+                window.queue_resize();
             }
         }
     })

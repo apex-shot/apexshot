@@ -851,24 +851,24 @@ pub fn draw_canvas_checkerboard_background(
     let _ = context.fill();
 }
 
+use rayon::prelude::*;
+
 pub fn rgba_to_cairo_argb_bytes(image: &RgbaImage) -> Vec<u8> {
-    let mut out = Vec::with_capacity((image.width() * image.height() * 4) as usize);
-    for pixel in image.pixels() {
-        let r = pixel[0] as u32;
-        let g = pixel[1] as u32;
-        let b = pixel[2] as u32;
-        let a = pixel[3] as u32;
+    image
+        .par_chunks_exact(4)
+        .flat_map_iter(|pixel| {
+            let r = pixel[0] as u32;
+            let g = pixel[1] as u32;
+            let b = pixel[2] as u32;
+            let a = pixel[3] as u32;
 
-        let pr = ((r * a + 127) / 255) as u8;
-        let pg = ((g * a + 127) / 255) as u8;
-        let pb = ((b * a + 127) / 255) as u8;
+            let pr = ((r * a + 127) / 255) as u8;
+            let pg = ((g * a + 127) / 255) as u8;
+            let pb = ((b * a + 127) / 255) as u8;
 
-        out.push(pb);
-        out.push(pg);
-        out.push(pr);
-        out.push(a as u8);
-    }
-    out
+            [pb, pg, pr, a as u8]
+        })
+        .collect()
 }
 
 pub fn cairo_argb_to_rgba_image(width: u32, height: u32, stride: usize, data: &[u8]) -> RgbaImage {

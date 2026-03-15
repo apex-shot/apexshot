@@ -14,6 +14,28 @@ pub enum EditorError {
     ImageSave(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum BackgroundStyle {
+    None,
+    Gradient(usize),
+    Wallpaper(PathBuf),
+    Blurred(usize),
+    PlainColor(DrawColor),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundAlignment {
+    TopLeft,
+    TopCenter,
+    TopRight,
+    CenterLeft,
+    Center,
+    CenterRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Select,
@@ -45,17 +67,19 @@ pub enum CropAspectRatio {
     Square,
     FourThree,
     SixteenNine,
+    TwentyOneNine,
     ThreeTwo,
     NineSixteen,
 }
 
 impl CropAspectRatio {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Freeform,
         Self::Original,
         Self::Square,
         Self::FourThree,
         Self::SixteenNine,
+        Self::TwentyOneNine,
         Self::ThreeTwo,
         Self::NineSixteen,
     ];
@@ -67,6 +91,7 @@ impl CropAspectRatio {
             Self::Square => "Square",
             Self::FourThree => "4:3",
             Self::SixteenNine => "16:9",
+            Self::TwentyOneNine => "21:9",
             Self::ThreeTwo => "3:2",
             Self::NineSixteen => "9:16",
         }
@@ -85,6 +110,7 @@ impl CropAspectRatio {
             Self::Square => Some(1.0),
             Self::FourThree => Some(4.0 / 3.0),
             Self::SixteenNine => Some(16.0 / 9.0),
+            Self::TwentyOneNine => Some(21.0 / 9.0),
             Self::ThreeTwo => Some(3.0 / 2.0),
             Self::NineSixteen => Some(9.0 / 16.0),
         }

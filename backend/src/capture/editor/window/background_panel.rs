@@ -7,12 +7,97 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use super::super::render::rgba_image_to_surface;
+use super::super::state::EditorState;
+use super::super::types::{BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor};
 
-pub(super) const BACKGROUND_SIDEBAR_WIDTH: i32 = 228;
+pub(super) const BACKGROUND_SIDEBAR_WIDTH: i32 = 210;
 pub(super) const BACKGROUND_GRADIENT_PREVIEW_SIZE: u32 = 96;
-pub(super) const BACKGROUND_GRADIENT_PREVIEW_FILES: [&str; 10] = [
+pub(super) const MAX_BACKGROUND_DIMENSION: u32 = 2560;
+const BACKGROUND_PREVIEW_COLUMNS: usize = 5;
+
+const fn preview_grid_width(preview_button_size: i32, preview_row_spacing: i32) -> i32 {
+    preview_button_size * BACKGROUND_PREVIEW_COLUMNS as i32
+        + preview_row_spacing * (BACKGROUND_PREVIEW_COLUMNS as i32 - 1)
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct BackgroundSidebarDensity {
+    preview_button_size: i32,
+    preview_draw_size: i32,
+    preview_corner_radius: i32,
+    preview_row_spacing: i32,
+    section_spacing: i32,
+    content_spacing: i32,
+    divider_width: i32,
+    wide_slider_width: i32,
+    compact_slider_width: i32,
+    none_button_width: i32,
+    plain_color_row_width: i32,
+    plain_color_button_size: i32,
+    preview_size_class: &'static str,
+}
+
+impl BackgroundSidebarDensity {
+    fn for_gradient_count(gradient_count: usize) -> Self {
+        if gradient_count >= 15 {
+            let width = preview_grid_width(36, 4);
+            Self {
+                preview_button_size: 36,
+                preview_draw_size: 36,
+                preview_corner_radius: 8,
+                preview_row_spacing: 4,
+                section_spacing: 6,
+                content_spacing: 4,
+                divider_width: width,
+                wide_slider_width: width,
+                compact_slider_width: (width - 24) / 2,
+                none_button_width: width,
+                plain_color_row_width: width,
+                plain_color_button_size: 18,
+                preview_size_class: "editor-background-preview-size-compact",
+            }
+        } else if gradient_count >= 10 {
+            let width = preview_grid_width(42, 5);
+            Self {
+                preview_button_size: 42,
+                preview_draw_size: 42,
+                preview_corner_radius: 10,
+                preview_row_spacing: 5,
+                section_spacing: 7,
+                content_spacing: 6,
+                divider_width: width,
+                wide_slider_width: width,
+                compact_slider_width: (width - 24) / 2,
+                none_button_width: width,
+                plain_color_row_width: width,
+                plain_color_button_size: 21,
+                preview_size_class: "editor-background-preview-size-medium",
+            }
+        } else {
+            let width = preview_grid_width(48, 6);
+            Self {
+                preview_button_size: 48,
+                preview_draw_size: 48,
+                preview_corner_radius: 11,
+                preview_row_spacing: 6,
+                section_spacing: 8,
+                content_spacing: 7,
+                divider_width: width,
+                wide_slider_width: width,
+                compact_slider_width: (width - 24) / 2,
+                none_button_width: width,
+                plain_color_row_width: width,
+                plain_color_button_size: 24,
+                preview_size_class: "editor-background-preview-size-regular",
+            }
+        }
+    }
+}
+
+pub const BACKGROUND_GRADIENT_PREVIEW_FILES: [&str; 20] = [
     "codioful-formerly-gradienta-n2XqPm7Bqhk-unsplash.jpg",
     "codioful-formerly-gradienta-O10vBIDRkZw-unsplash.jpg",
     "kunal-patil-2hB-jhXLd3c-unsplash.jpg",
@@ -23,8 +108,18 @@ pub(super) const BACKGROUND_GRADIENT_PREVIEW_FILES: [&str; 10] = [
     "magicpattern-bevXKKL7E9g-unsplash.jpg",
     "magicpattern-oPH_5xuMgQw-unsplash.jpg",
     "milad-fakurian-nY14Fs8pxT8-unsplash.jpg",
+    "gradient-11.jpg",
+    "gradient-12.jpg",
+    "gradient-13.jpg",
+    "gradient-14.jpg",
+    "gradient-15.jpg",
+    "gradient-16.jpg",
+    "gradient-17.jpg",
+    "gradient-18.jpg",
+    "gradient-19.jpg",
+    "gradient-20.jpg",
 ];
-const BACKGROUND_GRADIENT_PREVIEW_CLASSES: [&str; 10] = [
+const BACKGROUND_GRADIENT_PREVIEW_CLASSES: [&str; 20] = [
     "editor-background-gradient-preview-1",
     "editor-background-gradient-preview-2",
     "editor-background-gradient-preview-3",
@@ -35,6 +130,16 @@ const BACKGROUND_GRADIENT_PREVIEW_CLASSES: [&str; 10] = [
     "editor-background-gradient-preview-8",
     "editor-background-gradient-preview-9",
     "editor-background-gradient-preview-10",
+    "editor-background-gradient-preview-11",
+    "editor-background-gradient-preview-12",
+    "editor-background-gradient-preview-13",
+    "editor-background-gradient-preview-14",
+    "editor-background-gradient-preview-15",
+    "editor-background-gradient-preview-16",
+    "editor-background-gradient-preview-17",
+    "editor-background-gradient-preview-18",
+    "editor-background-gradient-preview-19",
+    "editor-background-gradient-preview-20",
 ];
 const BACKGROUND_PLAIN_COLOR_CLASSES: [&str; 18] = [
     "editor-background-plain-color-1",
@@ -57,15 +162,44 @@ const BACKGROUND_PLAIN_COLOR_CLASSES: [&str; 18] = [
     "editor-background-plain-color-18",
 ];
 
-pub(super) fn background_gradient_asset_path(file_name: &str) -> PathBuf {
+const BACKGROUND_PLAIN_COLOR_VALUES: [DrawColor; 18] = [
+    DrawColor::new(1.0, 1.0, 1.0, 1.0),
+    DrawColor::new(0.898, 0.906, 0.922, 1.0),
+    DrawColor::new(0.612, 0.639, 0.686, 1.0),
+    DrawColor::new(0.067, 0.094, 0.153, 1.0),
+    DrawColor::new(0.937, 0.267, 0.267, 1.0),
+    DrawColor::new(0.976, 0.451, 0.086, 1.0),
+    DrawColor::new(0.98, 0.8, 0.082, 1.0),
+    DrawColor::new(0.133, 0.773, 0.369, 1.0),
+    DrawColor::new(0.078, 0.722, 0.651, 1.0),
+    DrawColor::new(0.024, 0.714, 0.831, 1.0),
+    DrawColor::new(0.231, 0.51, 0.965, 1.0),
+    DrawColor::new(0.388, 0.4, 0.945, 1.0),
+    DrawColor::new(0.545, 0.361, 0.965, 1.0),
+    DrawColor::new(0.659, 0.333, 0.969, 1.0),
+    DrawColor::new(0.925, 0.282, 0.6, 1.0),
+    DrawColor::new(0.957, 0.247, 0.369, 1.0),
+    DrawColor::new(0.573, 0.251, 0.055, 1.0),
+    DrawColor::new(0.059, 0.463, 0.431, 1.0),
+];
+
+pub fn background_gradient_asset_path(file_name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src/capture/editor/background-images")
         .join(file_name)
 }
-
 pub(super) fn load_background_preview_image(path: &Path, preview_size: u32) -> Option<RgbaImage> {
-    let image = image::open(path).ok()?.into_rgba8();
+    let img = match image::io::Reader::open(path) {
+        Ok(reader) => match reader.with_guessed_format() {
+            Ok(reader) => reader.decode().ok(),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    }?;
+
+    let image = img.into_rgba8();
     let (width, height) = image.dimensions();
+
     if width == 0 || height == 0 {
         return None;
     }
@@ -84,6 +218,34 @@ pub(super) fn load_background_preview_image(path: &Path, preview_size: u32) -> O
     ))
 }
 
+pub fn load_background_image_optimized(path: &Path) -> Option<RgbaImage> {
+    let img = match image::io::Reader::open(path) {
+        Ok(reader) => match reader.with_guessed_format() {
+            Ok(reader) => reader.decode().ok(),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    }?;
+
+    let image = img.into_rgba8();
+    let (width, height) = image.dimensions();
+
+    if width > MAX_BACKGROUND_DIMENSION || height > MAX_BACKGROUND_DIMENSION {
+        let scale = MAX_BACKGROUND_DIMENSION as f64 / (width.max(height) as f64);
+        let new_width = (width as f64 * scale) as u32;
+        let new_height = (height as f64 * scale) as u32;
+
+        return Some(image::imageops::resize(
+            &image,
+            new_width,
+            new_height,
+            image::imageops::FilterType::Triangle,
+        ));
+    }
+
+    Some(image)
+}
+
 pub(super) fn load_background_gradient_preview_image(
     file_name: &str,
     preview_size: u32,
@@ -99,12 +261,20 @@ fn parse_wallpaper_setting(raw_value: &str) -> Option<PathBuf> {
 
     if let Ok(uri) = url::Url::parse(trimmed) {
         if uri.scheme() == "file" {
-            return uri.to_file_path().ok().filter(|path| path.is_file());
+            if let Ok(path) = uri.to_file_path() {
+                if path.is_file() {
+                    return Some(path);
+                }
+            }
         }
     }
 
     let path = PathBuf::from(trimmed);
-    path.is_file().then_some(path)
+    if path.is_file() {
+        return Some(path);
+    }
+
+    None
 }
 
 pub(super) fn detect_system_wallpaper_path() -> Option<PathBuf> {
@@ -195,8 +365,9 @@ fn draw_preview_tile_surface(
     let _ = context.restore();
 }
 
-pub(super) fn build_background_gradient_preview_button(
+fn build_background_gradient_preview_button(
     index: usize,
+    density: BackgroundSidebarDensity,
 ) -> (
     Button,
     DrawingArea,
@@ -207,15 +378,16 @@ pub(super) fn build_background_gradient_preview_button(
     button.set_focusable(false);
     button.set_hexpand(false);
     button.set_vexpand(false);
-    button.set_size_request(56, 56);
+    button.set_size_request(density.preview_button_size, density.preview_button_size);
     button.add_css_class("editor-background-gradient-button");
+    button.add_css_class(density.preview_size_class);
     button.add_css_class(BACKGROUND_GRADIENT_PREVIEW_CLASSES[index]);
     button.set_tooltip_text(Some("Gradient"));
 
     let preview_area = DrawingArea::new();
     preview_area.add_css_class("editor-background-gradient-preview-area");
-    preview_area.set_content_width(56);
-    preview_area.set_content_height(56);
+    preview_area.set_content_width(density.preview_draw_size);
+    preview_area.set_content_height(density.preview_draw_size);
     preview_area.set_hexpand(false);
     preview_area.set_vexpand(false);
 
@@ -223,7 +395,13 @@ pub(super) fn build_background_gradient_preview_button(
     let preview_surface_draw = preview_surface.clone();
     preview_area.set_draw_func(move |_area, context, width, height| {
         if let Some(surface) = preview_surface_draw.borrow().as_ref() {
-            draw_preview_tile_surface(context, surface, width, height, 12.0);
+            draw_preview_tile_surface(
+                context,
+                surface,
+                width,
+                height,
+                density.preview_corner_radius as f64,
+            );
         }
     });
 
@@ -235,26 +413,34 @@ pub(super) fn build_background_gradient_preview_button(
 fn build_background_wallpaper_preview_button(
     surface: Option<gtk4::cairo::ImageSurface>,
     tooltip: &str,
+    density: BackgroundSidebarDensity,
 ) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
     button.set_focusable(false);
     button.set_hexpand(false);
     button.set_vexpand(false);
-    button.set_size_request(56, 56);
+    button.set_size_request(density.preview_button_size, density.preview_button_size);
     button.add_css_class("editor-background-gradient-button");
+    button.add_css_class(density.preview_size_class);
     button.set_tooltip_text(Some(tooltip));
 
     let preview_area = DrawingArea::new();
     preview_area.add_css_class("editor-background-gradient-preview-area");
-    preview_area.set_content_width(56);
-    preview_area.set_content_height(56);
+    preview_area.set_content_width(density.preview_draw_size);
+    preview_area.set_content_height(density.preview_draw_size);
     preview_area.set_hexpand(false);
     preview_area.set_vexpand(false);
 
     preview_area.set_draw_func(move |_area, context, width, height| {
         if let Some(surface) = surface.as_ref() {
-            draw_preview_tile_surface(context, surface, width, height, 12.0);
+            draw_preview_tile_surface(
+                context,
+                surface,
+                width,
+                height,
+                density.preview_corner_radius as f64,
+            );
         }
     });
 
@@ -262,38 +448,44 @@ fn build_background_wallpaper_preview_button(
     button
 }
 
-pub(super) fn build_background_add_wallpaper_button() -> Button {
+fn build_background_add_wallpaper_button(density: BackgroundSidebarDensity) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
     button.set_focusable(false);
     button.set_hexpand(false);
     button.set_vexpand(false);
-    button.set_size_request(56, 56);
+    button.set_size_request(density.preview_button_size, density.preview_button_size);
     button.add_css_class("editor-background-add-button");
+    button.add_css_class(density.preview_size_class);
     button.set_tooltip_text(Some("Add wallpaper"));
 
     let plus_label = Label::new(Some("+"));
     plus_label.add_css_class("editor-background-add-label");
+    plus_label.add_css_class(density.preview_size_class);
     button.set_child(Some(&plus_label));
 
     button
 }
 
-pub(super) fn build_background_blurred_preview_button(index: usize) -> Button {
+fn build_background_blurred_preview_button(
+    index: usize,
+    density: BackgroundSidebarDensity,
+) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
     button.set_focusable(false);
     button.set_hexpand(false);
     button.set_vexpand(false);
-    button.set_size_request(56, 56);
+    button.set_size_request(density.preview_button_size, density.preview_button_size);
     button.add_css_class("editor-background-gradient-button");
+    button.add_css_class(density.preview_size_class);
     button.add_css_class("editor-background-blurred-button");
     button.set_tooltip_text(Some(&format!("Blurred {}", index + 1)));
 
     let preview_area = DrawingArea::new();
     preview_area.add_css_class("editor-background-gradient-preview-area");
-    preview_area.set_content_width(56);
-    preview_area.set_content_height(56);
+    preview_area.set_content_width(density.preview_draw_size);
+    preview_area.set_content_height(density.preview_draw_size);
     preview_area.set_hexpand(false);
     preview_area.set_vexpand(false);
 
@@ -301,7 +493,7 @@ pub(super) fn build_background_blurred_preview_button(index: usize) -> Button {
     button
 }
 
-fn build_background_plain_color_button(index: usize) -> Button {
+fn build_background_plain_color_button(index: usize, density: BackgroundSidebarDensity) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
     button.set_focusable(false);
@@ -309,34 +501,92 @@ fn build_background_plain_color_button(index: usize) -> Button {
     button.set_vexpand(false);
     button.set_halign(gtk4::Align::Center);
     button.set_valign(gtk4::Align::Center);
-    button.set_size_request(18, 18);
+    button.set_size_request(
+        density.plain_color_button_size,
+        density.plain_color_button_size,
+    );
     button.add_css_class("editor-background-plain-color-button");
     button.add_css_class(BACKGROUND_PLAIN_COLOR_CLASSES[index]);
     button.set_tooltip_text(Some(&format!("Plain color {}", index + 1)));
     button
 }
 
-pub(super) fn build_background_plain_color_cell(index: usize) -> GtkBox {
+fn clear_active_alignment_classes(widget: &gtk4::Widget) {
+    if let Some(btn) = widget.downcast_ref::<Button>() {
+        btn.remove_css_class("active-alignment-option");
+    }
+
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        clear_active_alignment_classes(&c);
+        child = c.next_sibling();
+    }
+}
+
+pub(super) fn build_background_plain_color_cell(
+    index: usize,
+    density: BackgroundSidebarDensity,
+) -> GtkBox {
     let cell = GtkBox::new(Orientation::Vertical, 0);
     cell.add_css_class("editor-background-plain-color-cell");
-    cell.set_hexpand(true);
+    cell.set_hexpand(false);
     cell.set_halign(gtk4::Align::Fill);
     cell.set_valign(gtk4::Align::Center);
-    cell.append(&build_background_plain_color_button(index));
+    cell.append(&build_background_plain_color_button(index, density));
     cell
 }
 
-pub(super) fn rebuild_wallpaper_preview_grid(
+fn clear_active_background_classes(widget: &gtk4::Widget) {
+    if let Some(btn) = widget.downcast_ref::<Button>() {
+        btn.remove_css_class("active-background-option");
+    }
+
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        clear_active_background_classes(&c);
+        child = c.next_sibling();
+    }
+}
+
+fn rebuild_gradients_grid(
+    gradients_grid: &GtkBox,
+    all_previews: &[(Button, DrawingArea, Rc<RefCell<Option<gtk4::cairo::ImageSurface>>>)],
+    collapsed: bool,
+    density: BackgroundSidebarDensity,
+) {
+    while let Some(child) = gradients_grid.first_child() {
+        gradients_grid.remove(&child);
+    }
+
+    let count = if collapsed { 10 } else { all_previews.len() };
+
+    for chunk in all_previews[..count].chunks(BACKGROUND_PREVIEW_COLUMNS) {
+        let gradient_row = GtkBox::new(Orientation::Horizontal, density.preview_row_spacing);
+        gradient_row.add_css_class("editor-background-gradients-row");
+
+        for (preview_button, _, _) in chunk {
+            gradient_row.append(preview_button);
+        }
+
+        gradients_grid.append(&gradient_row);
+    }
+}
+
+fn rebuild_wallpaper_preview_grid(
     wallpaper_grid: &GtkBox,
-    wallpaper_previews: &[(String, Option<gtk4::cairo::ImageSurface>)],
+    wallpaper_previews: &[(String, Option<gtk4::cairo::ImageSurface>, PathBuf)],
     add_button: &Button,
+    density: BackgroundSidebarDensity,
+    state: Arc<Mutex<EditorState>>,
+    sidebar: GtkBox,
+    drawing_area: DrawingArea,
 ) {
     while let Some(child) = wallpaper_grid.first_child() {
         wallpaper_grid.remove(&child);
     }
 
     let new_row = || {
-        let row = GtkBox::new(Orientation::Horizontal, 8);
+        let row = GtkBox::new(Orientation::Horizontal, density.preview_row_spacing);
         row.add_css_class("editor-background-wallpaper-row");
         row
     };
@@ -344,19 +594,47 @@ pub(super) fn rebuild_wallpaper_preview_grid(
     let mut row = new_row();
     let mut items_in_row = 0usize;
 
-    for (tooltip, surface) in wallpaper_previews {
-        if items_in_row == 5 {
+    for (tooltip, surface, path) in wallpaper_previews {
+        if items_in_row == BACKGROUND_PREVIEW_COLUMNS {
             wallpaper_grid.append(&row);
             row = new_row();
             items_in_row = 0;
         }
 
-        let preview_button = build_background_wallpaper_preview_button(surface.clone(), tooltip);
+        let preview_button =
+            build_background_wallpaper_preview_button(surface.clone(), tooltip, density);
+
+        {
+            let st = state.lock().unwrap();
+            if let BackgroundStyle::Wallpaper(p) = &st.background_style {
+                if p == path {
+                    preview_button.add_css_class("active-background-option");
+                }
+            }
+        }
+
+        preview_button.connect_clicked({
+            let state = state.clone();
+            let sidebar = sidebar.clone();
+            let btn = preview_button.clone();
+            let path = path.clone();
+            let drawing_area = drawing_area.clone();
+            move |_| {
+                println!("[DEBUG] Wallpaper tile clicked: {:?}", path);
+                let mut st = state.lock().unwrap();
+                st.background_style = BackgroundStyle::Wallpaper(path.clone());
+                clear_active_background_classes(sidebar.upcast_ref());
+                btn.add_css_class("active-background-option");
+                st.mark_working_image_dirty();
+                drawing_area.queue_draw();
+            }
+        });
+
         row.append(&preview_button);
         items_in_row += 1;
     }
 
-    if items_in_row == 5 {
+    if items_in_row == BACKGROUND_PREVIEW_COLUMNS {
         wallpaper_grid.append(&row);
         row = new_row();
     }
@@ -370,62 +648,158 @@ pub(super) struct BackgroundPanelParts {
     pub start_gradient_preview_loading: Rc<dyn Fn()>,
 }
 
-pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPanelParts {
-    let background_sidebar = GtkBox::new(Orientation::Vertical, 10);
+pub(super) fn build_background_panel(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<EditorState>>,
+    drawing_area: &DrawingArea,
+    wallpaper_loader_sender: std::sync::mpsc::Sender<(Option<usize>, PathBuf, RgbaImage)>,
+) -> BackgroundPanelParts {
+    let density =
+        BackgroundSidebarDensity::for_gradient_count(BACKGROUND_GRADIENT_PREVIEW_FILES.len());
+
+    let left_column_group = gtk4::SizeGroup::new(gtk4::SizeGroupMode::Horizontal);
+    let right_column_group = gtk4::SizeGroup::new(gtk4::SizeGroupMode::Horizontal);
+
+    let background_sidebar = GtkBox::new(Orientation::Vertical, density.section_spacing);
     background_sidebar.add_css_class("editor-background-sidebar");
     background_sidebar.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
     background_sidebar.set_hexpand(false);
     background_sidebar.set_visible(false);
     background_sidebar.set_vexpand(true);
 
-    let background_sidebar_options = GtkBox::new(Orientation::Vertical, 8);
+    let background_sidebar_options = GtkBox::new(Orientation::Vertical, density.content_spacing);
     background_sidebar_options.add_css_class("editor-background-sidebar-options");
 
     let background_none_btn = Button::with_label("None");
     background_none_btn.set_has_frame(false);
-    background_none_btn.set_halign(gtk4::Align::Start);
+    background_none_btn.set_halign(gtk4::Align::Fill);
     background_none_btn.set_hexpand(false);
-    background_none_btn.set_size_request(312, -1);
+    background_none_btn.set_size_request(density.none_button_width, -1);
     background_none_btn.add_css_class("editor-background-option-button");
-    background_none_btn.add_css_class("active-background-option");
 
-    let gradients_section = GtkBox::new(Orientation::Vertical, 10);
+    {
+        let st = state.lock().unwrap();
+        if st.background_style == BackgroundStyle::None {
+            background_none_btn.add_css_class("active-background-option");
+        }
+    }
+
+    background_none_btn.connect_clicked({
+        let state = state.clone();
+        let sidebar = background_sidebar.clone();
+        let none_btn = background_none_btn.clone();
+        let drawing_area = drawing_area.clone();
+        move |_| {
+            let mut st = state.lock().unwrap();
+            st.background_style = BackgroundStyle::None;
+            clear_active_background_classes(sidebar.upcast_ref());
+            none_btn.add_css_class("active-background-option");
+            st.mark_working_image_dirty();
+            drawing_area.queue_draw();
+        }
+    });
+
+    let gradients_section = GtkBox::new(Orientation::Vertical, density.section_spacing);
     gradients_section.add_css_class("editor-background-gradients-section");
 
+    let gradients_header = GtkBox::new(Orientation::Horizontal, 0);
     let gradients_title = Label::new(Some("Gradients"));
     gradients_title.add_css_class("editor-background-section-title");
     gradients_title.set_xalign(0.0);
+    gradients_title.set_hexpand(true);
 
-    let gradients_grid = GtkBox::new(Orientation::Vertical, 8);
+    let gradients_collapsed = Rc::new(Cell::new(true));
+    let gradients_toggle_btn = Button::with_label("Show more");
+    gradients_toggle_btn.set_has_frame(false);
+    gradients_toggle_btn.add_css_class("editor-background-section-action-button");
+
+    gradients_header.append(&gradients_title);
+    gradients_header.append(&gradients_toggle_btn);
+
+    let gradients_grid = GtkBox::new(Orientation::Vertical, density.preview_row_spacing);
     gradients_grid.add_css_class("editor-background-gradients-grid");
 
-    let mut background_preview_areas: Vec<DrawingArea> =
-        Vec::with_capacity(BACKGROUND_GRADIENT_PREVIEW_FILES.len());
-    let mut background_preview_surfaces: Vec<Rc<RefCell<Option<gtk4::cairo::ImageSurface>>>> =
-        Vec::with_capacity(BACKGROUND_GRADIENT_PREVIEW_FILES.len());
+    let all_gradient_previews: Vec<(
+        Button,
+        DrawingArea,
+        Rc<RefCell<Option<gtk4::cairo::ImageSurface>>>,
+    )> = BACKGROUND_GRADIENT_PREVIEW_FILES
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            let (btn, area, surface) = build_background_gradient_preview_button(index, density);
 
-    for (row_index, chunk) in BACKGROUND_GRADIENT_PREVIEW_FILES.chunks(5).enumerate() {
-        let gradient_row = GtkBox::new(Orientation::Horizontal, 8);
-        gradient_row.add_css_class("editor-background-gradients-row");
+            {
+                let st = state.lock().unwrap();
+                if let BackgroundStyle::Gradient(i) = st.background_style {
+                    if i == index {
+                        btn.add_css_class("active-background-option");
+                    }
+                }
+            }
 
-        for (column_index, _) in chunk.iter().enumerate() {
-            let preview_index = row_index * 5 + column_index;
-            let (preview_button, preview_area, preview_surface) =
-                build_background_gradient_preview_button(preview_index);
-            background_preview_areas.push(preview_area);
-            background_preview_surfaces.push(preview_surface);
-            gradient_row.append(&preview_button);
+            btn.connect_clicked({
+                let state = state.clone();
+                let sidebar = background_sidebar.clone();
+                let btn = btn.clone();
+                let drawing_area = drawing_area.clone();
+                move |_| {
+                    let mut st = state.lock().unwrap();
+                    st.background_style = BackgroundStyle::Gradient(index);
+                    clear_active_background_classes(sidebar.upcast_ref());
+                    btn.add_css_class("active-background-option");
+                    st.mark_working_image_dirty();
+                    drawing_area.queue_draw();
+                }
+            });
+
+            (btn, area, surface)
+        })
+        .collect();
+
+    rebuild_gradients_grid(
+        &gradients_grid,
+        &all_gradient_previews,
+        gradients_collapsed.get(),
+        density,
+    );
+
+    gradients_toggle_btn.connect_clicked({
+        let gradients_collapsed = gradients_collapsed.clone();
+        let gradients_grid = gradients_grid.clone();
+        let all_gradient_previews = all_gradient_previews
+            .iter()
+            .map(|(b, d, s)| (b.clone(), d.clone(), s.clone()))
+            .collect::<Vec<_>>();
+        let gradients_toggle_btn = gradients_toggle_btn.clone();
+        let window_weak = window.downgrade();
+        move |_| {
+            let is_collapsed = gradients_collapsed.get();
+            gradients_collapsed.set(!is_collapsed);
+            gradients_toggle_btn.set_label(if !is_collapsed {
+                "Show more"
+            } else {
+                "Show less"
+            });
+            rebuild_gradients_grid(
+                &gradients_grid,
+                &all_gradient_previews,
+                gradients_collapsed.get(),
+                density,
+            );
+
+            if let Some(win) = window_weak.upgrade() {
+                win.queue_resize();
+            }
         }
+    });
 
-        gradients_grid.append(&gradient_row);
-    }
-
-    let background_preview_areas = Rc::new(background_preview_areas);
-    let background_preview_surfaces = Rc::new(background_preview_surfaces);
     let background_gradient_previews_started = Rc::new(Cell::new(false));
     let start_background_gradient_preview_loading: Rc<dyn Fn()> = Rc::new({
-        let background_preview_areas = background_preview_areas.clone();
-        let background_preview_surfaces = background_preview_surfaces.clone();
+        let all_gradient_previews = all_gradient_previews
+            .iter()
+            .map(|(_, d, s)| (d.clone(), s.clone()))
+            .collect::<Vec<_>>();
         let background_gradient_previews_started = background_gradient_previews_started.clone();
         move || {
             if background_gradient_previews_started.replace(true) {
@@ -446,14 +820,13 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
                 }
             });
 
-            let background_preview_areas = background_preview_areas.clone();
-            let background_preview_surfaces = background_preview_surfaces.clone();
+            let all_gradient_previews = all_gradient_previews.clone();
             glib::timeout_add_local(std::time::Duration::from_millis(16), move || loop {
                 match receiver.try_recv() {
                     Ok((index, preview_image)) => {
                         if let Some(surface) = rgba_image_to_surface(&preview_image) {
-                            *background_preview_surfaces[index].borrow_mut() = Some(surface);
-                            background_preview_areas[index].queue_draw();
+                            *all_gradient_previews[index].1.borrow_mut() = Some(surface);
+                            all_gradient_previews[index].0.queue_draw();
                         }
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -467,44 +840,55 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
         }
     });
 
-    gradients_section.append(&gradients_title);
+    gradients_section.append(&gradients_header);
     gradients_section.append(&gradients_grid);
 
-    let wallpaper_section = GtkBox::new(Orientation::Vertical, 10);
+    let wallpaper_section = GtkBox::new(Orientation::Vertical, density.section_spacing);
     wallpaper_section.add_css_class("editor-background-wallpaper-section");
 
     let wallpaper_title = Label::new(Some("Wallpaper"));
     wallpaper_title.add_css_class("editor-background-section-title");
     wallpaper_title.set_xalign(0.0);
 
-    let wallpaper_grid = GtkBox::new(Orientation::Vertical, 8);
+    let wallpaper_grid = GtkBox::new(Orientation::Vertical, density.preview_row_spacing);
     wallpaper_grid.add_css_class("editor-background-wallpaper-grid");
 
-    let wallpaper_preview_path = detect_system_wallpaper_path()
+    let wallpaper_previews = Rc::new(RefCell::new(Vec::<(String, Option<gtk4::cairo::ImageSurface>, PathBuf)>::new()));
+    
+    let wallpaper_path = detect_system_wallpaper_path()
         .unwrap_or_else(|| background_gradient_asset_path(BACKGROUND_GRADIENT_PREVIEW_FILES[0]));
-    let wallpaper_preview_surface =
-        load_background_preview_image(&wallpaper_preview_path, BACKGROUND_GRADIENT_PREVIEW_SIZE)
-            .and_then(|preview_image| rgba_image_to_surface(&preview_image));
-    let wallpaper_preview_label = wallpaper_preview_path
-        .file_name()
-        .and_then(|file_name| file_name.to_str())
-        .map(|file_name| format!("Wallpaper: {file_name}"))
+    
+    let surface = load_background_preview_image(&wallpaper_path, BACKGROUND_GRADIENT_PREVIEW_SIZE)
+        .and_then(|img| rgba_image_to_surface(&img));
+    let label = wallpaper_path.file_name()
+        .and_then(|f| f.to_str())
+        .map(|s| format!("Wallpaper: {s}"))
         .unwrap_or_else(|| "Wallpaper".to_string());
-    let wallpaper_previews = Rc::new(RefCell::new(vec![(
-        wallpaper_preview_label,
-        wallpaper_preview_surface,
-    )]));
-    let add_wallpaper_btn = build_background_add_wallpaper_button();
+    wallpaper_previews.borrow_mut().push((label, surface, wallpaper_path));
+
+    let add_wallpaper_btn = build_background_add_wallpaper_button(density);
 
     {
         let previews = wallpaper_previews.borrow();
-        rebuild_wallpaper_preview_grid(&wallpaper_grid, previews.as_slice(), &add_wallpaper_btn);
+        rebuild_wallpaper_preview_grid(
+            &wallpaper_grid,
+            previews.as_slice(),
+            &add_wallpaper_btn,
+            density,
+            state.clone(),
+            background_sidebar.clone(),
+            drawing_area.clone(),
+        );
     }
 
     add_wallpaper_btn.connect_clicked({
+        let state = state.clone();
         let wallpaper_previews = wallpaper_previews.clone();
         let wallpaper_grid = wallpaper_grid.clone();
         let add_wallpaper_btn = add_wallpaper_btn.clone();
+        let background_sidebar = background_sidebar.clone();
+        let drawing_area = drawing_area.clone();
+        let wallpaper_loader_sender = wallpaper_loader_sender.clone();
         let window_weak = window.downgrade();
         move |_| {
             let chooser = FileChooserNative::new(
@@ -532,10 +916,15 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
                 let wallpaper_previews = wallpaper_previews.clone();
                 let wallpaper_grid = wallpaper_grid.clone();
                 let add_wallpaper_btn = add_wallpaper_btn.clone();
+                let state = state.clone();
+                let background_sidebar = background_sidebar.clone();
+                let drawing_area = drawing_area.clone();
+                let wallpaper_loader_sender = wallpaper_loader_sender.clone();
                 move |dialog, response| {
-                    if response == ResponseType::Accept {
+                if response == ResponseType::Accept {
                         if let Some(file) = dialog.file() {
                             if let Some(path) = file.path() {
+                                // 1. Quick preview loading (as before, but optimized in next step if needed)
                                 if let Some(surface) = load_background_preview_image(
                                     &path,
                                     BACKGROUND_GRADIENT_PREVIEW_SIZE,
@@ -547,14 +936,29 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
                                         .and_then(|file_name| file_name.to_str())
                                         .map(|file_name| format!("Wallpaper: {file_name}"))
                                         .unwrap_or_else(|| "Wallpaper".to_string());
-                                    wallpaper_previews.borrow_mut().push((label, Some(surface)));
+                                    wallpaper_previews
+                                        .borrow_mut()
+                                        .push((label, Some(surface), path.clone()));
                                     let previews = wallpaper_previews.borrow();
                                     rebuild_wallpaper_preview_grid(
                                         &wallpaper_grid,
                                         previews.as_slice(),
                                         &add_wallpaper_btn,
+                                        density,
+                                        state.clone(),
+                                        background_sidebar.clone(),
+                                        drawing_area.clone(),
                                     );
                                 }
+
+                                // 2. Background load full image for cache
+                                let path_cache = path.clone();
+                                let sender = wallpaper_loader_sender.clone();
+                                std::thread::spawn(move || {
+                                    if let Some(rgba) = load_background_image_optimized(&path_cache) {
+                                        let _ = sender.send((None, path_cache, rgba));
+                                    }
+                                });
                             }
                         }
                     }
@@ -570,49 +974,97 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     wallpaper_section.append(&wallpaper_title);
     wallpaper_section.append(&wallpaper_grid);
 
-    let blurred_section = GtkBox::new(Orientation::Vertical, 10);
+    let blurred_section = GtkBox::new(Orientation::Vertical, density.section_spacing);
     blurred_section.add_css_class("editor-background-blurred-section");
 
     let blurred_title = Label::new(Some("Blurred"));
     blurred_title.add_css_class("editor-background-section-title");
     blurred_title.set_xalign(0.0);
 
-    let blurred_row = GtkBox::new(Orientation::Horizontal, 8);
+    let blurred_row = GtkBox::new(Orientation::Horizontal, density.preview_row_spacing);
     blurred_row.add_css_class("editor-background-blurred-row");
 
     for index in 0..3 {
-        let blurred_button = build_background_blurred_preview_button(index);
+        let blurred_button = build_background_blurred_preview_button(index, density);
+
+        {
+            let st = state.lock().unwrap();
+            if let BackgroundStyle::Blurred(i) = st.background_style {
+                if i == index {
+                    blurred_button.add_css_class("active-background-option");
+                }
+            }
+        }
+
+        blurred_button.connect_clicked({
+            let state = state.clone();
+            let sidebar = background_sidebar.clone();
+            let btn = blurred_button.clone();
+            let drawing_area = drawing_area.clone();
+            move |_| {
+                let mut st = state.lock().unwrap();
+                st.background_style = BackgroundStyle::Blurred(index);
+                clear_active_background_classes(sidebar.upcast_ref());
+                btn.add_css_class("active-background-option");
+                st.mark_working_image_dirty();
+                drawing_area.queue_draw();
+            }
+        });
         blurred_row.append(&blurred_button);
     }
 
     blurred_section.append(&blurred_title);
     blurred_section.append(&blurred_row);
 
-    let plain_color_section = GtkBox::new(Orientation::Vertical, 10);
+    let plain_color_section = GtkBox::new(Orientation::Vertical, density.section_spacing);
     plain_color_section.add_css_class("editor-background-plain-color-section");
 
     let plain_color_title = Label::new(Some("Plain color"));
     plain_color_title.add_css_class("editor-background-section-title");
     plain_color_title.set_xalign(0.0);
 
-    let plain_color_grid = GtkBox::new(Orientation::Vertical, 8);
+    let plain_color_grid = GtkBox::new(Orientation::Vertical, density.preview_row_spacing);
     plain_color_grid.add_css_class("editor-background-plain-color-grid");
 
     for row_index in 0..2 {
-        let plain_color_row = GtkBox::new(Orientation::Horizontal, 8);
+        let plain_color_row = GtkBox::new(Orientation::Horizontal, density.preview_row_spacing);
         plain_color_row.add_css_class("editor-background-plain-color-row");
-        plain_color_row.set_hexpand(true);
+        plain_color_row.set_hexpand(false);
+        plain_color_row.set_halign(gtk4::Align::Fill);
         plain_color_row.set_homogeneous(true);
+        plain_color_row.set_size_request(density.plain_color_row_width, -1);
 
         for column_index in 0..9 {
             let color_index = row_index * 9 + column_index;
-            let color_cell = build_background_plain_color_cell(color_index);
+            let color_cell = build_background_plain_color_cell(color_index, density);
+            if let Some(btn) = color_cell.first_child().and_then(|c| c.downcast::<Button>().ok()) {
+                {
+                    let st = state.lock().unwrap();
+                    if let BackgroundStyle::PlainColor(color) = st.background_style {
+                        if color == BACKGROUND_PLAIN_COLOR_VALUES[color_index] {
+                            btn.add_css_class("active-background-option");
+                        }
+                    }
+                }
+
+                btn.connect_clicked({
+                    let state = state.clone();
+                    let sidebar = background_sidebar.clone();
+                    let btn = btn.clone();
+                    let color = BACKGROUND_PLAIN_COLOR_VALUES[color_index];
+                    let drawing_area = drawing_area.clone();
+                    move |_| {
+                        let mut st = state.lock().unwrap();
+                        st.background_style = BackgroundStyle::PlainColor(color);
+                        clear_active_background_classes(sidebar.upcast_ref());
+                        btn.add_css_class("active-background-option");
+                        st.mark_working_image_dirty();
+                        drawing_area.queue_draw();
+                    }
+                });
+            }
             plain_color_row.append(&color_cell);
         }
-
-        let row_end_spacer = GtkBox::new(Orientation::Horizontal, 0);
-        row_end_spacer.add_css_class("editor-background-plain-color-end-spacer");
-        plain_color_row.append(&row_end_spacer);
 
         plain_color_grid.append(&plain_color_row);
     }
@@ -624,38 +1076,74 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     background_padding_divider_row.add_css_class("editor-background-divider-row");
     let background_padding_divider = GtkBox::new(Orientation::Horizontal, 0);
     background_padding_divider.add_css_class("editor-background-divider");
-    background_padding_divider.set_size_request(252, -1);
+    background_padding_divider.set_size_request(density.divider_width, -1);
     background_padding_divider_row.append(&background_padding_divider);
 
-    let padding_section = GtkBox::new(Orientation::Vertical, 10);
+    let padding_section = GtkBox::new(Orientation::Vertical, 4);
     padding_section.add_css_class("editor-background-padding-section");
 
     let padding_title = Label::new(Some("Padding"));
     padding_title.add_css_class("editor-background-section-title");
     padding_title.set_xalign(0.0);
 
-    let padding_slider_row = GtkBox::new(Orientation::Horizontal, 0);
-    padding_slider_row.add_css_class("editor-background-padding-slider-row");
     let padding_slider = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
     padding_slider.add_css_class("editor-opacity-slider");
     padding_slider.add_css_class("editor-background-padding-slider");
     padding_slider.set_draw_value(false);
     padding_slider.set_value(24.0);
-    padding_slider.set_size_request(252, -1);
-    padding_slider_row.append(&padding_slider);
+    padding_slider.set_size_request(density.wide_slider_width, -1);
+    padding_slider.set_halign(gtk4::Align::Fill);
+    padding_slider.set_hexpand(false);
+    padding_slider.set_margin_start(0);
+    padding_slider.set_margin_end(0);
+
+    let insert_slider_weak = Rc::new(RefCell::new(None::<Scale>));
+    let padding_slider_weak = Rc::new(RefCell::new(None::<Scale>));
+    let updating_sliders = Rc::new(Cell::new(false));
+
+    padding_slider.connect_value_changed({
+        let state = state.clone();
+        let drawing_area = drawing_area.clone();
+        let insert_slider_ref = insert_slider_weak.clone();
+        let updating = updating_sliders.clone();
+        move |s| {
+            if updating.get() { return; }
+            
+            let mut st = state.lock().unwrap();
+            st.background_padding = s.value();
+            
+            if st.auto_balance {
+                updating.set(true);
+                st.background_insert = s.value() * 0.8; 
+                if let Some(insert_s) = insert_slider_ref.borrow().as_ref() {
+                    insert_s.set_value(st.background_insert);
+                }
+                updating.set(false);
+            }
+            
+            st.mark_working_image_dirty();
+            drawing_area.queue_draw();
+        }
+    });
 
     padding_section.append(&padding_title);
-    padding_section.append(&padding_slider_row);
+    padding_section.append(&padding_slider);
+    *padding_slider_weak.borrow_mut() = Some(padding_slider.clone());
 
-    let compact_controls = GtkBox::new(Orientation::Vertical, 8);
+    let compact_controls = GtkBox::new(Orientation::Vertical, 4);
     compact_controls.add_css_class("editor-background-compact-controls");
 
-    let insert_shadow_row = GtkBox::new(Orientation::Horizontal, 16);
+    let insert_shadow_row = GtkBox::new(Orientation::Horizontal, 24);
     insert_shadow_row.add_css_class("editor-background-compact-controls-row");
     insert_shadow_row.set_homogeneous(true);
+    insert_shadow_row.set_size_request(density.wide_slider_width, -1);
+    insert_shadow_row.set_halign(gtk4::Align::Start);
+    insert_shadow_row.set_hexpand(false);
 
-    let insert_section = GtkBox::new(Orientation::Vertical, 10);
+    let insert_section = GtkBox::new(Orientation::Vertical, 4);
     insert_section.add_css_class("editor-background-compact-slider-section");
+    insert_section.set_size_request(density.compact_slider_width, -1);
+    left_column_group.add_widget(&insert_section);
 
     let insert_title = Label::new(Some("Insert"));
     insert_title.add_css_class("editor-background-section-title");
@@ -668,7 +1156,36 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     insert_slider.add_css_class("editor-background-compact-slider");
     insert_slider.set_draw_value(false);
     insert_slider.set_value(20.0);
-    insert_slider.set_size_request(136, -1);
+    insert_slider.set_halign(gtk4::Align::Fill);
+    insert_slider.set_hexpand(true);
+    insert_slider.set_margin_start(0);
+    insert_slider.set_margin_end(0);
+    insert_slider.connect_value_changed({
+        let state = state.clone();
+        let drawing_area = drawing_area.clone();
+        let padding_slider_ref = padding_slider_weak.clone();
+        let updating = updating_sliders.clone();
+        move |s| {
+            if updating.get() { return; }
+
+            let mut st = state.lock().unwrap();
+            st.background_insert = s.value();
+
+            if st.auto_balance {
+                updating.set(true);
+                st.background_padding = s.value() / 0.8;
+                if let Some(padding_s) = padding_slider_ref.borrow().as_ref() {
+                    padding_s.set_value(st.background_padding);
+                }
+                updating.set(false);
+            }
+
+            st.mark_working_image_dirty();
+            drawing_area.queue_draw();
+        }
+    });
+    *insert_slider_weak.borrow_mut() = Some(insert_slider.clone());
+
     insert_slider_row.append(&insert_slider);
 
     insert_section.append(&insert_title);
@@ -676,6 +1193,8 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
 
     let auto_balance_section = GtkBox::new(Orientation::Vertical, 2);
     auto_balance_section.add_css_class("editor-background-compact-slider-section");
+    auto_balance_section.set_size_request(density.compact_slider_width, -1);
+    right_column_group.add_widget(&auto_balance_section);
 
     let auto_balance_title = Label::new(Some("Auto-balance"));
     auto_balance_title.add_css_class("editor-background-section-title");
@@ -688,18 +1207,34 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     auto_balance_check.set_halign(gtk4::Align::Start);
     auto_balance_check_row.append(&auto_balance_check);
 
+    auto_balance_check.connect_toggled({
+        let state = state.clone();
+        let drawing_area = drawing_area.clone();
+        move |c| {
+            let mut st = state.lock().unwrap();
+            st.auto_balance = c.is_active();
+            st.mark_working_image_dirty();
+            drawing_area.queue_draw();
+        }
+    });
+
     auto_balance_section.append(&auto_balance_title);
     auto_balance_section.append(&auto_balance_check_row);
 
     insert_shadow_row.append(&insert_section);
     insert_shadow_row.append(&auto_balance_section);
 
-    let shadow_corners_row = GtkBox::new(Orientation::Horizontal, 16);
+    let shadow_corners_row = GtkBox::new(Orientation::Horizontal, 24);
     shadow_corners_row.add_css_class("editor-background-compact-controls-row");
     shadow_corners_row.set_homogeneous(true);
+    shadow_corners_row.set_size_request(density.wide_slider_width, -1);
+    shadow_corners_row.set_halign(gtk4::Align::Start);
+    shadow_corners_row.set_hexpand(false);
 
-    let shadow_section = GtkBox::new(Orientation::Vertical, 10);
+    let shadow_section = GtkBox::new(Orientation::Vertical, 4);
     shadow_section.add_css_class("editor-background-compact-slider-section");
+    shadow_section.set_size_request(density.compact_slider_width, -1);
+    left_column_group.add_widget(&shadow_section);
 
     let shadow_title = Label::new(Some("Shadow"));
     shadow_title.add_css_class("editor-background-section-title");
@@ -712,20 +1247,35 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     shadow_slider.add_css_class("editor-background-compact-slider");
     shadow_slider.set_draw_value(false);
     shadow_slider.set_value(28.0);
-    shadow_slider.set_size_request(136, -1);
+    shadow_slider.set_size_request(density.compact_slider_width, -1);
+    shadow_slider.set_halign(gtk4::Align::Fill);
+    shadow_slider.set_hexpand(true);
+    shadow_slider.set_margin_start(0);
+    shadow_slider.set_margin_end(0);
+    shadow_slider.connect_value_changed({
+        let state = state.clone();
+        let drawing_area = drawing_area.clone();
+        move |s| {
+            let mut st = state.lock().unwrap();
+            st.background_shadow = s.value();
+            st.mark_working_image_dirty();
+            drawing_area.queue_draw();
+        }
+    });
+
     shadow_slider_row.append(&shadow_slider);
 
     shadow_section.append(&shadow_title);
     shadow_section.append(&shadow_slider_row);
 
-    let alignment_section = GtkBox::new(Orientation::Vertical, 10);
+    let alignment_section = GtkBox::new(Orientation::Vertical, 4);
     alignment_section.add_css_class("editor-background-compact-slider-section");
 
     let alignment_title = Label::new(Some("Alignment"));
     alignment_title.add_css_class("editor-background-section-title");
     alignment_title.set_xalign(0.0);
 
-    let alignment_grid = GtkBox::new(Orientation::Vertical, 6);
+    let alignment_grid = GtkBox::new(Orientation::Vertical, 4);
     alignment_grid.add_css_class("editor-background-alignment-grid");
     alignment_grid.set_halign(gtk4::Align::Start);
 
@@ -748,7 +1298,7 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     ];
 
     for row_items in alignment_positions {
-        let alignment_row = GtkBox::new(Orientation::Horizontal, 6);
+        let alignment_row = GtkBox::new(Orientation::Horizontal, 4);
         alignment_row.add_css_class("editor-background-alignment-row");
         alignment_row.set_homogeneous(true);
 
@@ -810,6 +1360,41 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
             alignment_button.set_hexpand(true);
             alignment_button.set_tooltip_text(Some(tooltip));
             alignment_button.add_css_class("editor-background-alignment-button");
+            let alignment_btn_style = match position_class {
+                "top-left" => BackgroundAlignment::TopLeft,
+                "top-center" => BackgroundAlignment::TopCenter,
+                "top-right" => BackgroundAlignment::TopRight,
+                "center-left" => BackgroundAlignment::CenterLeft,
+                "center" => BackgroundAlignment::Center,
+                "center-right" => BackgroundAlignment::CenterRight,
+                "bottom-left" => BackgroundAlignment::BottomLeft,
+                "bottom-center" => BackgroundAlignment::BottomCenter,
+                "bottom-right" => BackgroundAlignment::BottomRight,
+                _ => BackgroundAlignment::Center,
+            };
+
+            alignment_button.connect_clicked({
+                let state = state.clone();
+                let grid = alignment_grid.clone();
+                let btn = alignment_button.clone();
+                let drawing_area = drawing_area.clone();
+                move |_| {
+                    let mut st = state.lock().unwrap();
+                    st.background_alignment = alignment_btn_style;
+                    clear_active_alignment_classes(grid.upcast_ref());
+                    btn.add_css_class("active-alignment-option");
+                    st.mark_working_image_dirty();
+                    drawing_area.queue_draw();
+                }
+            });
+
+            {
+                let st = state.lock().unwrap();
+                if st.background_alignment == alignment_btn_style {
+                    alignment_button.add_css_class("active-alignment-option");
+                }
+            }
+
             alignment_row.append(&alignment_button);
         }
 
@@ -820,10 +1405,12 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     alignment_section.append(&alignment_grid);
     shadow_section.append(&alignment_section);
 
-    let corners_section = GtkBox::new(Orientation::Vertical, 10);
+    let corners_section = GtkBox::new(Orientation::Vertical, 4);
     corners_section.add_css_class("editor-background-compact-slider-section");
+    corners_section.set_size_request(density.compact_slider_width, -1);
+    right_column_group.add_widget(&corners_section);
 
-    let ratio_section = GtkBox::new(Orientation::Vertical, 10);
+    let ratio_section = GtkBox::new(Orientation::Vertical, 4);
     ratio_section.add_css_class("editor-background-compact-slider-section");
 
     let ratio_title = Label::new(Some("Ratio"));
@@ -834,8 +1421,9 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     ratio_dropdown_row.add_css_class("editor-background-ratio-dropdown-row");
     let ratio_dropdown = gtk4::DropDown::from_strings(&["Original", "1:1", "4:3", "16:9", "21:9"]);
     ratio_dropdown.add_css_class("editor-background-ratio-dropdown");
-    ratio_dropdown.set_size_request(130, -1);
-    ratio_dropdown.set_halign(gtk4::Align::Start);
+    ratio_dropdown.set_size_request(density.compact_slider_width, -1);
+    ratio_dropdown.set_halign(gtk4::Align::Fill);
+    ratio_dropdown.set_hexpand(true);
     ratio_dropdown.set_selected(0);
     ratio_dropdown_row.append(&ratio_dropdown);
 
@@ -853,7 +1441,41 @@ pub(super) fn build_background_panel(window: &ApplicationWindow) -> BackgroundPa
     corners_slider.add_css_class("editor-background-compact-slider");
     corners_slider.set_draw_value(false);
     corners_slider.set_value(18.0);
-    corners_slider.set_size_request(136, -1);
+    corners_slider.set_size_request(density.compact_slider_width, -1);
+    corners_slider.set_halign(gtk4::Align::Fill);
+    corners_slider.set_hexpand(true);
+    corners_slider.set_margin_start(0);
+    corners_slider.connect_value_changed({
+        let state = state.clone();
+        let drawing_area = drawing_area.clone();
+        move |s| {
+            let mut st = state.lock().unwrap();
+            st.background_corner_radius = s.value();
+            st.mark_working_image_dirty();
+            drawing_area.queue_draw();
+        }
+    });
+
+    ratio_dropdown.connect_selected_item_notify({
+        let state = state.clone();
+        let drawing_area = drawing_area.clone();
+        move |d| {
+            let selected = d.selected();
+            let aspect = match selected {
+                0 => CropAspectRatio::Original,
+                1 => CropAspectRatio::Square,
+                2 => CropAspectRatio::FourThree,
+                3 => CropAspectRatio::SixteenNine,
+                4 => CropAspectRatio::TwentyOneNine,
+                _ => CropAspectRatio::Original,
+            };
+            let mut st = state.lock().unwrap();
+            st.background_aspect_ratio = aspect;
+            st.mark_working_image_dirty();
+            drawing_area.queue_draw();
+        }
+    });
+
     corners_slider_row.append(&corners_slider);
 
     corners_section.append(&corners_title);

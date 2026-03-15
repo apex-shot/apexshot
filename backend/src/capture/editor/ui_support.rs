@@ -1132,7 +1132,7 @@ pub fn install_editor_css() {
             }
 
             .editor-background-sidebar {
-                min-width: 296px;
+                min-width: 210px;
                 padding: 18px 16px;
                 background: linear-gradient(to bottom,
                     rgba(17, 17, 20, 0.96),
@@ -1167,6 +1167,28 @@ pub fn install_editor_css() {
                 letter-spacing: 0.02em;
             }
 
+            button.editor-background-section-action-button {
+                padding: 0;
+                margin: 0;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                color: #3b82f6;
+                font-size: 11px;
+                font-weight: 600;
+                transition: opacity 120ms ease;
+            }
+
+            button.editor-background-section-action-button:hover {
+                opacity: 0.8;
+                background: transparent;
+            }
+
+            button.editor-background-section-action-button:active {
+                opacity: 0.6;
+                background: transparent;
+            }
+
             .editor-background-gradients-grid {
                 margin-top: 4px;
             }
@@ -1180,7 +1202,6 @@ pub fn install_editor_css() {
             }
 
             .editor-background-wallpaper-row {
-                min-height: 56px;
             }
 
             .editor-background-blurred-section {
@@ -1188,7 +1209,6 @@ pub fn install_editor_css() {
             }
 
             .editor-background-blurred-row {
-                min-height: 46px;
             }
 
             .editor-background-plain-color-section {
@@ -1208,7 +1228,7 @@ pub fn install_editor_css() {
             }
 
             .editor-background-plain-color-end-spacer {
-                min-width: 28px;
+                min-width: 0;
             }
 
             .editor-background-preview-spacer {
@@ -1237,6 +1257,55 @@ pub fn install_editor_css() {
 
             .editor-background-padding-slider {
                 margin-top: 0;
+            }
+
+            .editor-background-padding-slider,
+            .editor-background-compact-slider,
+            .editor-background-padding-slider > contents,
+            .editor-background-compact-slider > contents,
+            .editor-background-padding-slider > contents > trough,
+            .editor-background-compact-slider > contents > trough {
+                min-width: 0;
+                padding: 0;
+                margin: 0;
+            }
+
+            .editor-background-padding-slider trough,
+            .editor-background-compact-slider trough {
+                min-height: 4px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.28);
+                background: rgba(203, 213, 225, 0.34);
+                background-image: none;
+            }
+
+            .editor-background-padding-slider highlight,
+            .editor-background-compact-slider highlight {
+                min-height: 4px;
+                min-width: 0;
+                border-radius: 999px;
+                background: #3b82f6;
+                background-image: none;
+            }
+
+            .editor-background-padding-slider slider,
+            .editor-background-compact-slider slider {
+                min-width: 12px;
+                min-height: 12px;
+                border-radius: 999px;
+                background: #f8fafc;
+                border: 1px solid rgba(15, 23, 42, 0.18);
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+            }
+
+            .editor-background-padding-slider slider:hover,
+            .editor-background-compact-slider slider:hover,
+            .editor-background-padding-slider slider:active,
+            .editor-background-compact-slider slider:active {
+                background: #ffffff;
+                border-color: rgba(59, 130, 246, 0.42);
+                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18), 0 1px 4px rgba(0, 0, 0, 0.24);
             }
 
             .editor-background-compact-controls {
@@ -1392,18 +1461,46 @@ pub fn install_editor_css() {
 
             button.editor-background-option-button.active-background-option {
                 background: rgba(255, 255, 255, 0.12);
-                border-color: rgba(255, 255, 255, 0.20);
+                border-color: #3584e4;
                 color: #ffffff;
+                border-width: 2px;
+            }
+
+            button.editor-background-alignment-button.active-alignment-option {
+                background: rgba(255, 255, 255, 0.15);
+                border: 1px solid #3584e4;
+                border-radius: 6px;
             }
 
             button.editor-background-gradient-button {
-                min-width: 56px;
-                min-height: 56px;
                 padding: 0;
-                border-radius: 12px;
                 background-color: rgba(255, 255, 255, 0.03);
                 border: 1px solid rgba(255, 255, 255, 0.10);
                 box-shadow: none;
+            }
+
+            button.editor-background-gradient-button.active-background-option {
+                border-color: #3584e4;
+                border-width: 2px;
+                background-color: rgba(255, 255, 255, 0.08);
+            }
+
+            button.editor-background-gradient-button.editor-background-preview-size-regular {
+                min-width: 56px;
+                min-height: 56px;
+                border-radius: 12px;
+            }
+
+            button.editor-background-gradient-button.editor-background-preview-size-medium {
+                min-width: 48px;
+                min-height: 48px;
+                border-radius: 11px;
+            }
+
+            button.editor-background-gradient-button.editor-background-preview-size-compact {
+                min-width: 44px;
+                min-height: 44px;
+                border-radius: 10px;
             }
 
             button.editor-background-gradient-button:hover {
@@ -1417,14 +1514,29 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-add-button {
-                min-width: 56px;
-                min-height: 56px;
                 padding: 0;
-                border-radius: 12px;
                 background-color: rgba(255, 255, 255, 0.02);
                 border: 1px dashed rgba(255, 255, 255, 0.24);
                 color: rgba(245, 245, 247, 0.82);
                 box-shadow: none;
+            }
+
+            button.editor-background-add-button.editor-background-preview-size-regular {
+                min-width: 56px;
+                min-height: 56px;
+                border-radius: 12px;
+            }
+
+            button.editor-background-add-button.editor-background-preview-size-medium {
+                min-width: 48px;
+                min-height: 48px;
+                border-radius: 11px;
+            }
+
+            button.editor-background-add-button.editor-background-preview-size-compact {
+                min-width: 44px;
+                min-height: 44px;
+                border-radius: 10px;
             }
 
             button.editor-background-add-button:hover {
@@ -1439,13 +1551,30 @@ pub fn install_editor_css() {
             }
 
             .editor-background-add-label {
-                font-size: 22px;
                 font-weight: 500;
+            }
+
+            .editor-background-add-label.editor-background-preview-size-regular {
+                font-size: 22px;
+            }
+
+            .editor-background-add-label.editor-background-preview-size-medium {
+                font-size: 19px;
+            }
+
+            .editor-background-add-label.editor-background-preview-size-compact {
+                font-size: 17px;
             }
 
             button.editor-background-blurred-button {
                 background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.06) 100%);
                 border-color: rgba(255, 255, 255, 0.14);
+            }
+
+            button.editor-background-blurred-button.active-background-option {
+                border-color: #3584e4;
+                border-width: 2px;
+                background-color: rgba(255, 255, 255, 0.12);
             }
 
             button.editor-background-plain-color-button {
@@ -1463,6 +1592,12 @@ pub fn install_editor_css() {
 
             button.editor-background-plain-color-button:active {
                 border-color: rgba(255, 255, 255, 0.4);
+            }
+
+            button.editor-background-plain-color-button.active-background-option {
+                border-color: #3584e4;
+                border-width: 2px;
+                background-color: rgba(255, 255, 255, 0.12);
             }
 
             button.editor-background-plain-color-button.editor-background-plain-color-1 { background: #ffffff; }
