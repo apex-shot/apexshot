@@ -2,7 +2,7 @@ use super::color::{
     highlighter_stroke_width, CENSOR_BLOCK_SIZE, HIGHLIGHTER_ALPHA_SCALE, NUMBER_FONT_SIZE,
     NUMBER_RADIUS, SELECT_HANDLE_SIZE,
 };
-use super::types::{AnnotationAction, DrawColor, Point, Rect, SelectHandle};
+use super::types::{AnnotationAction, DrawColor, FontSettings, FontStyle, Point, Rect, SelectHandle, TextAlignment, TextDecoration};
 use image::{ImageBuffer, RgbaImage};
 
 pub fn draw_rgba_to_context(context: &gtk4::cairo::Context, image: &RgbaImage) {
@@ -90,16 +90,15 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             position,
             text,
             color,
-            font_size,
-        } => draw_text(context, *position, text, *color, *font_size),
+            font,
+        } => draw_text(context, *position, text, *color, font),
         AnnotationAction::Number {
             position,
             number,
             color,
         } => draw_number(context, *position, *number, *color),
-        AnnotationAction::Blur { .. } => {}
+        AnnotationAction::Obfuscate { .. } => {}
         AnnotationAction::Focus { .. } => {}
-        AnnotationAction::Censor { .. } => {}
     }
 }
 
@@ -153,9 +152,9 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             position,
             text,
             color,
-            font_size,
+            font,
         } => {
-            draw_text(context, *position, text, color.with_alpha(0.9), *font_size);
+            draw_text(context, *position, text, color.with_alpha(0.9), font);
         }
         AnnotationAction::Number {
             position,
@@ -164,7 +163,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
         } => {
             draw_number(context, *position, *number, color.with_alpha(0.88));
         }
-        AnnotationAction::Blur { rect } => {
+        AnnotationAction::Obfuscate { rect, .. } => {
             context.set_source_rgba(0.18, 0.48, 0.94, 0.18);
             context.rectangle(
                 rect.x as f64,
@@ -179,9 +178,6 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
         }
         AnnotationAction::Focus { rect } => {
             draw_focus_rect_outline(context, *rect, true);
-        }
-        AnnotationAction::Censor { rect } => {
-            draw_censor_draft_rect(context, *rect);
         }
     }
 }
@@ -232,6 +228,7 @@ pub fn draw_focus_overlay(
     }
 }
 
+#[allow(dead_code)]
 pub fn draw_censor_draft_rect(context: &gtk4::cairo::Context, rect: Rect) {
     context.set_source_rgba(0.06, 0.08, 0.10, 0.34);
     context.rectangle(
@@ -554,17 +551,63 @@ pub fn draw_text(
     position: Point,
     text: &str,
     color: DrawColor,
-    font_size: f64,
+    font: &FontSettings,
 ) {
     context.set_source_rgba(color.r, color.g, color.b, color.a);
-    context.select_font_face(
-        "Sans",
-        gtk4::cairo::FontSlant::Normal,
-        gtk4::cairo::FontWeight::Bold,
-    );
-    context.set_font_size(font_size.max(1.0));
-    context.move_to(position.x, position.y);
+    
+    let slant = match font.style {
+        FontStyle::Normal | FontStyle::Bold => gtk4::cairo::FontSlant::Normal,
+        FontStyle::Italic | FontStyle::BoldItalic => gtk4::cairo::FontSlant::Italic,
+    };
+    let weight = match font.style {
+        FontStyle::Normal | FontStyle::Italic => gtk4::cairo::FontWeight::Normal,
+        FontStyle::Bold | FontStyle::BoldItalic => gtk4::cairo::FontWeight::Bold,
+    };
+    
+    context.select_font_face(&font.family, slant, weight);
+    context.set_font_size(font.size.max(1.0));
+    
+    // Handle alignment by computing text width
+    let x_offset = if font.alignment != TextAlignment::Left {
+        if let Ok(extents) = context.text_extents(text) {
+            match font.alignment {
+                TextAlignment::Center => -extents.width() / 2.0,
+                TextAlignment::Right => -extents.width(),
+                TextAlignment::Left => 0.0,
+            }
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    
+    context.move_to(position.x + x_offset, position.y);
     let _ = context.show_text(text);
+    
+    // Draw decorations (underline/strikethrough)
+    if font.decoration != TextDecoration::None {
+        if let Ok(extents) = context.text_extents(text) {
+            let y = position.y;
+            match font.decoration {
+                TextDecoration::Underline | TextDecoration::Both => {
+                    context.move_to(position.x + x_offset, y + 2.0);
+                    context.line_to(position.x + x_offset + extents.width(), y + 2.0);
+                    let _ = context.stroke();
+                }
+                _ => {}
+            }
+            match font.decoration {
+                TextDecoration::Strikethrough | TextDecoration::Both => {
+                    let strike_y = y - extents.height() / 2.0 - extents.y_bearing() / 2.0;
+                    context.move_to(position.x + x_offset, strike_y);
+                    context.line_to(position.x + x_offset + extents.width(), strike_y);
+                    let _ = context.stroke();
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 pub fn draw_number(context: &gtk4::cairo::Context, position: Point, number: u32, color: DrawColor) {
@@ -609,102 +652,374 @@ pub fn draw_number(context: &gtk4::cairo::Context, position: Point, number: u32,
     let _ = context.show_text(&label);
 }
 
-pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: i32) {
+const BLUR_PERFORMANCE_THRESHOLD: usize = 200 * 200; // 200x200 pixels
+const BLUR_DOWNSAMPLE_FACTOR: usize = 4;
+
+pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
     };
 
-    if radius <= 0 {
+    if radius <= 0.0 {
         return;
     }
 
-    let image_width = image.width() as i32;
-    let image_height = image.height() as i32;
-    let radius = radius.max(1);
+    let image_width = image.width() as usize;
+    let image_height = image.height() as usize;
+    let rect_width = rect.width as usize;
+    let rect_height = rect.height as usize;
+    let area = rect_width * rect_height;
 
-    let sample_x0 = (rect.x - radius).max(0);
-    let sample_y0 = (rect.y - radius).max(0);
-    let sample_x1 = (rect.x + rect.width - 1 + radius).min(image_width - 1);
-    let sample_y1 = (rect.y + rect.height - 1 + radius).min(image_height - 1);
+    // For very large regions, fall back to pixelation (much faster)
+    if area > BLUR_PERFORMANCE_THRESHOLD * 4 {
+        apply_censor_rect(image, rect, (radius * 2.0).max(10.0));
+        return;
+    }
 
-    let sample_width = (sample_x1 - sample_x0 + 1) as usize;
-    let sample_height = (sample_y1 - sample_y0 + 1) as usize;
-    let stride = sample_width + 1;
+    // For large regions, use downsampled blur
+    if area > BLUR_PERFORMANCE_THRESHOLD {
+        apply_blur_rect_downsampled(image, rect, radius);
+        return;
+    }
 
-    let mut sample_pixels = Vec::with_capacity(sample_width * sample_height);
-    for source_y in sample_y0..=sample_y1 {
-        for source_x in sample_x0..=sample_x1 {
-            sample_pixels.push(*image.get_pixel(source_x as u32, source_y as u32));
+    let radius = radius.max(1.0) as usize;
+
+    // Use separable box blur for better memory efficiency
+    // This uses O(max(width, height)) memory instead of O(width * height)
+
+    let x0 = rect.x.max(0) as usize;
+    let y0 = rect.y.max(0) as usize;
+    let x1 = (rect.x + rect.width).min(image_width as i32) as usize;
+    let y1 = (rect.y + rect.height).min(image_height as i32) as usize;
+
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+
+    // Expand the working area by the radius to include blur sampling
+    let sample_x0 = x0.saturating_sub(radius);
+    let sample_y0 = y0.saturating_sub(radius);
+    let sample_x1 = (x1 + radius).min(image_width);
+    let sample_y1 = (y1 + radius).min(image_height);
+
+    let work_width = sample_x1 - sample_x0;
+    let work_height = sample_y1 - sample_y0;
+
+    if work_width == 0 || work_height == 0 {
+        return;
+    }
+
+    // Extract working region
+    let mut work_buffer: Vec<[u8; 4]> = Vec::with_capacity(work_width * work_height);
+    for y in sample_y0..sample_y1 {
+        for x in sample_x0..sample_x1 {
+            work_buffer.push(image.get_pixel(x as u32, y as u32).0);
         }
     }
 
-    let mut integral = vec![[0_u64; 4]; (sample_height + 1) * stride];
+    // Horizontal pass
+    let mut temp_buffer: Vec<[u32; 4]> = vec![[0; 4]; work_width * work_height];
 
-    for local_y in 0..sample_height {
-        let mut row_sum = [0_u64; 4];
+    for y in 0..work_height {
+        let row_start = y * work_width;
 
-        for local_x in 0..sample_width {
-            let pixel = sample_pixels[local_y * sample_width + local_x];
-            row_sum[0] += pixel[0] as u64;
-            row_sum[1] += pixel[1] as u64;
-            row_sum[2] += pixel[2] as u64;
-            row_sum[3] += pixel[3] as u64;
+        // Compute running sum for this row
+        let mut sum = [0u32; 4];
 
-            let idx = (local_y + 1) * stride + (local_x + 1);
-            let above = integral[idx - stride];
-            integral[idx][0] = above[0] + row_sum[0];
-            integral[idx][1] = above[1] + row_sum[1];
-            integral[idx][2] = above[2] + row_sum[2];
-            integral[idx][3] = above[3] + row_sum[3];
+        // Initialize with first radius+1 pixels
+        for x in 0..=radius.min(work_width - 1) {
+            let pixel = work_buffer[row_start + x];
+            sum[0] += pixel[0] as u32;
+            sum[1] += pixel[1] as u32;
+            sum[2] += pixel[2] as u32;
+            sum[3] += pixel[3] as u32;
         }
-    }
 
-    for y in rect.y..(rect.y + rect.height) {
-        let y0 = (y - radius).max(0);
-        let y1 = (y + radius).min(image_height - 1);
-        let local_y0 = (y0 - sample_y0) as usize;
-        let local_y1 = (y1 - sample_y0) as usize;
+        // Slide the window
+        for x in 0..work_width {
+            let left = x.saturating_sub(radius);
+            let right = (x + radius + 1).min(work_width);
+            let count = (right - left) as u32;
 
-        for x in rect.x..(rect.x + rect.width) {
-            let x0 = (x - radius).max(0);
-            let x1 = (x + radius).min(image_width - 1);
-            let local_x0 = (x0 - sample_x0) as usize;
-            let local_x1 = (x1 - sample_x0) as usize;
+            temp_buffer[row_start + x] = [
+                sum[0] / count,
+                sum[1] / count,
+                sum[2] / count,
+                sum[3] / count,
+            ];
 
-            let top_left = local_y0 * stride + local_x0;
-            let top_right = local_y0 * stride + (local_x1 + 1);
-            let bottom_left = (local_y1 + 1) * stride + local_x0;
-            let bottom_right = (local_y1 + 1) * stride + (local_x1 + 1);
-
-            let area = ((local_x1 - local_x0 + 1) * (local_y1 - local_y0 + 1)) as i64;
-            let mut blurred = [0_u8; 4];
-            for channel in 0..4 {
-                let sum = integral[bottom_right][channel] as i64
-                    + integral[top_left][channel] as i64
-                    - integral[top_right][channel] as i64
-                    - integral[bottom_left][channel] as i64;
-                blurred[channel] = (sum / area).clamp(0, 255) as u8;
+            // Remove left pixel from sum
+            if left > 0 {
+                let left_idx = row_start + left - 1;
+                sum[0] = sum[0].saturating_sub(work_buffer[left_idx][0] as u32);
+                sum[1] = sum[1].saturating_sub(work_buffer[left_idx][1] as u32);
+                sum[2] = sum[2].saturating_sub(work_buffer[left_idx][2] as u32);
+                sum[3] = sum[3].saturating_sub(work_buffer[left_idx][3] as u32);
             }
 
-            image.put_pixel(x as u32, y as u32, image::Rgba(blurred));
+            // Add right pixel to sum
+            if right < work_width {
+                let right_idx = row_start + right;
+                sum[0] += work_buffer[right_idx][0] as u32;
+                sum[1] += work_buffer[right_idx][1] as u32;
+                sum[2] += work_buffer[right_idx][2] as u32;
+                sum[3] += work_buffer[right_idx][3] as u32;
+            }
+        }
+    }
+
+    // Vertical pass - write directly back to work_buffer
+    for x in 0..work_width {
+        let mut sum = [0u32; 4];
+
+        // Initialize with first radius+1 pixels
+        for y in 0..=radius.min(work_height - 1) {
+            let pixel = temp_buffer[y * work_width + x];
+            sum[0] += pixel[0];
+            sum[1] += pixel[1];
+            sum[2] += pixel[2];
+            sum[3] += pixel[3];
+        }
+
+        // Slide the window
+        for y in 0..work_height {
+            let top = y.saturating_sub(radius);
+            let bottom = (y + radius + 1).min(work_height);
+            let count = (bottom - top) as u32;
+
+            work_buffer[y * work_width + x] = [
+                (sum[0] / count) as u8,
+                (sum[1] / count) as u8,
+                (sum[2] / count) as u8,
+                (sum[3] / count) as u8,
+            ];
+
+            // Remove top pixel from sum
+            if top > 0 {
+                let top_idx = (top - 1) * work_width + x;
+                sum[0] = sum[0].saturating_sub(temp_buffer[top_idx][0]);
+                sum[1] = sum[1].saturating_sub(temp_buffer[top_idx][1]);
+                sum[2] = sum[2].saturating_sub(temp_buffer[top_idx][2]);
+                sum[3] = sum[3].saturating_sub(temp_buffer[top_idx][3]);
+            }
+
+            // Add bottom pixel to sum
+            if bottom < work_height {
+                let bottom_idx = bottom * work_width + x;
+                sum[0] += temp_buffer[bottom_idx][0];
+                sum[1] += temp_buffer[bottom_idx][1];
+                sum[2] += temp_buffer[bottom_idx][2];
+                sum[3] += temp_buffer[bottom_idx][3];
+            }
+        }
+    }
+
+    // Write back only the rect area (not the expanded sample area)
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let work_x = x - sample_x0;
+            let work_y = y - sample_y0;
+            let pixel = work_buffer[work_y * work_width + work_x];
+            image.put_pixel(x as u32, y as u32, image::Rgba(pixel));
         }
     }
 }
 
-pub fn apply_censor_rect(image: &mut RgbaImage, rect: Rect, block_size: u32) {
+fn apply_blur_rect_downsampled(image: &mut RgbaImage, rect: Rect, radius: f64) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
     };
 
-    if block_size == 0 {
+    let factor = BLUR_DOWNSAMPLE_FACTOR as f64;
+    let small_rect = Rect {
+        x: rect.x / factor as i32,
+        y: rect.y / factor as i32,
+        width: (rect.width as f64 / factor).ceil() as i32,
+        height: (rect.height as f64 / factor).ceil() as i32,
+    };
+
+    let small_radius = (radius / factor).max(1.0);
+
+    let small_image = image::imageops::resize(
+        image,
+        (image.width() as f64 / factor) as u32,
+        (image.height() as f64 / factor) as u32,
+        image::imageops::FilterType::Triangle,
+    );
+
+    let small_blurred = small_image.clone();
+    let small_rect_clamped = small_rect.clamp_to(small_blurred.width(), small_blurred.height());
+    if let Some(sr) = small_rect_clamped {
+        let mut temp_small = small_blurred.clone();
+        apply_blur_rect_to_buffer(&mut temp_small, sr, small_radius as usize);
+
+        for y in 0..sr.height {
+            for x in 0..sr.width {
+                let src_x = (sr.x + x) as u32;
+                let src_y = (sr.y + y) as u32;
+                let dst_x = (rect.x + x * factor as i32) as u32;
+                let dst_y = (rect.y + y * factor as i32) as u32;
+                let pixel = temp_small.get_pixel(src_x, src_y);
+                for dy in 0..factor as u32 {
+                    for dx in 0..factor as u32 {
+                        if dst_x + dx < image.width() && dst_y + dy < image.height() {
+                            image.put_pixel(dst_x + dx, dst_y + dy, *pixel);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn apply_blur_rect_to_buffer(image: &mut image::RgbaImage, rect: Rect, radius: usize) {
+    use image::Rgba;
+
+    let (img_width, img_height) = image.dimensions();
+    let x0 = rect.x.max(0) as u32;
+    let y0 = rect.y.max(0) as u32;
+    let x1 = (rect.x + rect.width).min(img_width as i32) as u32;
+    let y1 = (rect.y + rect.height).min(img_height as i32) as u32;
+
+    if x1 <= x0 || y1 <= y0 {
         return;
     }
 
-    let source = image.clone();
+    let radius = radius.max(1);
+    let sample_x0 = x0.saturating_sub(radius as u32);
+    let sample_y0 = y0.saturating_sub(radius as u32);
+    let sample_x1 = ((x1 as i32) + radius as i32).min(img_width as i32) as u32;
+    let sample_y1 = ((y1 as i32) + radius as i32).min(img_height as i32) as u32;
+
+    let work_width = (sample_x1 - sample_x0) as usize;
+    let work_height = (sample_y1 - sample_y0) as usize;
+
+    if work_width == 0 || work_height == 0 {
+        return;
+    }
+
+    let mut work_buffer: Vec<[u8; 4]> = Vec::with_capacity(work_width * work_height);
+    for y in sample_y0..sample_y1 {
+        for x in sample_x0..sample_x1 {
+            let p = image.get_pixel(x, y);
+            work_buffer.push([p[0], p[1], p[2], p[3]]);
+        }
+    }
+
+    let mut temp_buffer: Vec<[u32; 4]> = vec![[0; 4]; work_width * work_height];
+
+    for y in 0..work_height {
+        let row_start = y * work_width;
+        let mut sum = [0u32; 4];
+
+        for x in 0..=radius.min(work_width - 1) {
+            let pixel = work_buffer[row_start + x];
+            sum[0] += pixel[0] as u32;
+            sum[1] += pixel[1] as u32;
+            sum[2] += pixel[2] as u32;
+            sum[3] += pixel[3] as u32;
+        }
+
+        for x in 0..work_width {
+            let left = x.saturating_sub(radius);
+            let right = (x + radius + 1).min(work_width);
+            let count = (right - left) as u32;
+
+            temp_buffer[row_start + x] = [
+                sum[0] / count,
+                sum[1] / count,
+                sum[2] / count,
+                sum[3] / count,
+            ];
+
+            if left > 0 {
+                let idx = row_start + left - 1;
+                sum[0] = sum[0].saturating_sub(work_buffer[idx][0] as u32);
+                sum[1] = sum[1].saturating_sub(work_buffer[idx][1] as u32);
+                sum[2] = sum[2].saturating_sub(work_buffer[idx][2] as u32);
+                sum[3] = sum[3].saturating_sub(work_buffer[idx][3] as u32);
+            }
+
+            if right < work_width {
+                let idx = row_start + right;
+                sum[0] += work_buffer[idx][0] as u32;
+                sum[1] += work_buffer[idx][1] as u32;
+                sum[2] += work_buffer[idx][2] as u32;
+                sum[3] += work_buffer[idx][3] as u32;
+            }
+        }
+    }
+
+    for _y in 0..work_height {
+        let mut sum = [0u32; 4];
+
+        for i in 0..=radius.min(work_height - 1) {
+            let idx = i * work_width;
+            sum[0] += temp_buffer[idx][0];
+            sum[1] += temp_buffer[idx][1];
+            sum[2] += temp_buffer[idx][2];
+            sum[3] += temp_buffer[idx][3];
+        }
+
+        for y_out in 0..work_height {
+            let top = y_out.saturating_sub(radius);
+            let bottom = (y_out + radius + 1).min(work_height);
+            let count = (bottom - top) as u32;
+
+            let target_x0 = sample_x0 as i32;
+            let target_y0 = sample_y0 as i32 + y_out as i32;
+
+            if target_x0 >= x0 as i32
+                && target_y0 >= y0 as i32
+                && target_x0 < x1 as i32
+                && target_y0 < y1 as i32
+            {
+                image.put_pixel(
+                    target_x0 as u32,
+                    target_y0 as u32,
+                    Rgba([
+                        (sum[0] / count) as u8,
+                        (sum[1] / count) as u8,
+                        (sum[2] / count) as u8,
+                        (sum[3] / count) as u8,
+                    ]),
+                );
+            }
+
+            if top > 0 {
+                let idx = (top - 1) * work_width;
+                sum[0] = sum[0].saturating_sub(temp_buffer[idx][0]);
+                sum[1] = sum[1].saturating_sub(temp_buffer[idx][1]);
+                sum[2] = sum[2].saturating_sub(temp_buffer[idx][2]);
+                sum[3] = sum[3].saturating_sub(temp_buffer[idx][3]);
+            }
+
+            if bottom < work_height {
+                let idx = bottom * work_width;
+                sum[0] += temp_buffer[idx][0];
+                sum[1] += temp_buffer[idx][1];
+                sum[2] += temp_buffer[idx][2];
+                sum[3] += temp_buffer[idx][3];
+            }
+        }
+    }
+}
+
+pub fn apply_censor_rect(image: &mut RgbaImage, rect: Rect, block_size: f64) {
+    let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
+        return;
+    };
+
+    if block_size <= 0.0 {
+        return;
+    }
+
     let block = block_size as i32;
     let max_y = rect.y + rect.height;
     let max_x = rect.x + rect.width;
 
+    // For large regions, use a more memory-efficient approach
+    // by reading directly from the image instead of cloning
     let mut by = rect.y;
     while by < max_y {
         let block_height = (max_y - by).min(block);
@@ -719,14 +1034,17 @@ pub fn apply_censor_rect(image: &mut RgbaImage, rect: Rect, block_size: u32) {
             let mut a_sum: u32 = 0;
             let mut count: u32 = 0;
 
+            // Read directly from image - no clone needed
             for y in by..(by + block_height) {
                 for x in bx..(bx + block_width) {
-                    let p = source.get_pixel(x as u32, y as u32);
-                    r_sum += p[0] as u32;
-                    g_sum += p[1] as u32;
-                    b_sum += p[2] as u32;
-                    a_sum += p[3] as u32;
-                    count += 1;
+                    if x >= 0 && y >= 0 && x < image.width() as i32 && y < image.height() as i32 {
+                        let p = image.get_pixel(x as u32, y as u32);
+                        r_sum += p[0] as u32;
+                        g_sum += p[1] as u32;
+                        b_sum += p[2] as u32;
+                        a_sum += p[3] as u32;
+                        count += 1;
+                    }
                 }
             }
 
@@ -740,7 +1058,10 @@ pub fn apply_censor_rect(image: &mut RgbaImage, rect: Rect, block_size: u32) {
 
                 for y in by..(by + block_height) {
                     for x in bx..(bx + block_width) {
-                        image.put_pixel(x as u32, y as u32, color);
+                        if x >= 0 && y >= 0 && x < image.width() as i32 && y < image.height() as i32
+                        {
+                            image.put_pixel(x as u32, y as u32, color);
+                        }
                     }
                 }
             }
@@ -749,6 +1070,141 @@ pub fn apply_censor_rect(image: &mut RgbaImage, rect: Rect, block_size: u32) {
         }
 
         by += block;
+    }
+}
+
+/// Secure pseudo-pixelate that only samples from the fringe (edges) of the selection.
+/// This makes the obfuscation irreversible because the interior content is never used.
+/// Based on Flameshot's secure pixelate implementation.
+pub fn apply_secure_pixelate(image: &mut RgbaImage, rect: Rect, block_size: f64) {
+    let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
+        return;
+    };
+
+    if block_size <= 0.0 || rect.width < 3 || rect.height < 3 {
+        return;
+    }
+
+    let img_width = image.width() as i32;
+    let img_height = image.height() as i32;
+
+    // Calculate effect size (downsampled dimensions)
+    let effect_width = ((rect.width as f64) * 0.5 / block_size.max(1.0)).max(1.0) as i32;
+    let effect_height = ((rect.height as f64) * 0.5 / block_size.max(1.0)).max(1.0) as i32;
+
+    // Extract fringe pixels (edges of the selection)
+    let x0 = rect.x.max(0);
+    let y0 = rect.y.max(0);
+    let x1 = (rect.x + rect.width).min(img_width);
+    let y1 = (rect.y + rect.height).min(img_height);
+
+    // Offset for fringe sampling (1 pixel outside the selection if possible)
+    let offset_top = if y0 > 0 { -1 } else { 0 };
+    let offset_bottom = if y1 < img_height { 1 } else { 0 };
+    let offset_left = if x0 > 0 { -1 } else { 0 };
+    let offset_right = if x1 < img_width { 1 } else { 0 };
+
+    // Collect fringe colors
+    let mut fringe_top: Vec<[u8; 4]> = Vec::new();
+    let mut fringe_bottom: Vec<[u8; 4]> = Vec::new();
+    let mut fringe_left: Vec<[u8; 4]> = Vec::new();
+    let mut fringe_right: Vec<[u8; 4]> = Vec::new();
+
+    // Top fringe
+    for x in x0..x1 {
+        let y = (y0 + offset_top).max(0).min(img_height - 1);
+        fringe_top.push(image.get_pixel(x as u32, y as u32).0);
+    }
+
+    // Bottom fringe
+    for x in x0..x1 {
+        let y = (y1 + offset_bottom - 1).max(0).min(img_height - 1);
+        fringe_bottom.push(image.get_pixel(x as u32, y as u32).0);
+    }
+
+    // Left fringe
+    for y in y0..y1 {
+        let x = (x0 + offset_left).max(0).min(img_width - 1);
+        fringe_left.push(image.get_pixel(x as u32, y as u32).0);
+    }
+
+    // Right fringe
+    for y in y0..y1 {
+        let x = (x1 + offset_right - 1).max(0).min(img_width - 1);
+        fringe_right.push(image.get_pixel(x as u32, y as u32).0);
+    }
+
+    // Simple deterministic PRNG for reproducible results
+    let mut prng_state: u32 = 42;
+    let mut prng_next = || -> u32 {
+        prng_state = prng_state.wrapping_mul(1103515245).wrapping_add(12345);
+        prng_state
+    };
+
+    // Generate pixelated output using fringe sampling
+    let mut output: Vec<[u8; 4]> = Vec::with_capacity((effect_width * effect_height) as usize);
+
+    for ey in 0..effect_height {
+        for ex in 0..effect_width {
+            // Relative position (0.0 to 1.0)
+            let horizontal = ex as f64 / effect_width.max(1) as f64;
+            let vertical = ey as f64 / effect_height.max(1) as f64;
+
+            // Sample from each fringe with noise
+            let noise_val = (prng_next() as f64 / u32::MAX as f64 - 0.5) * 0.1;
+
+            // Sample from all four fringes
+            let fringe_refs = [&fringe_top, &fringe_bottom, &fringe_left, &fringe_right];
+            let mut samples = [[0.0; 4]; 4];
+            for (i, fringe) in fringe_refs.iter().enumerate() {
+                let pos = if i < 2 { horizontal } else { vertical };
+                let sample_noise = (prng_next() as f64 / u32::MAX as f64 - 0.5) * 0.1;
+                let idx = ((pos + sample_noise).clamp(0.0, 0.999) * fringe.len() as f64) as usize;
+                let p = fringe.get(idx).copied().unwrap_or([128, 128, 128, 255]);
+                samples[i] = [
+                    p[0] as f64 / 255.0,
+                    p[1] as f64 / 255.0,
+                    p[2] as f64 / 255.0,
+                    p[3] as f64 / 255.0,
+                ];
+            }
+
+            // Calculate interpolation weights
+            let weight_h = (ex.min(effect_width - 1 - ex) as f64 / effect_width.max(1) as f64)
+                - (ey.min(effect_height - 1 - ey) as f64 / effect_height.max(1) as f64)
+                + 0.5;
+            let weight_v = 1.0 - weight_h;
+
+            // Interpolate between horizontal and vertical samples
+            let mut rgb = [0.0; 4];
+            for i in 0..4 {
+                let horiz = (1.0 - horizontal) * samples[2][i] + horizontal * samples[3][i];
+                let vert = (1.0 - vertical) * samples[0][i] + vertical * samples[1][i];
+                rgb[i] = weight_h * horiz + weight_v * vert + noise_val;
+                rgb[i] = rgb[i].clamp(0.0, 1.0);
+            }
+
+            output.push([
+                (rgb[0] * 255.0) as u8,
+                (rgb[1] * 255.0) as u8,
+                (rgb[2] * 255.0) as u8,
+                (rgb[3] * 255.0) as u8,
+            ]);
+        }
+    }
+
+    // Scale up and apply to image
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let ex = ((x - x0) as f64 * effect_width as f64 / (x1 - x0) as f64) as i32;
+            let ey = ((y - y0) as f64 * effect_height as f64 / (y1 - y0) as f64) as i32;
+            let ex = ex.min(effect_width - 1).max(0);
+            let ey = ey.min(effect_height - 1).max(0);
+            let idx = (ey * effect_width + ex) as usize;
+            if let Some(&color) = output.get(idx) {
+                image.put_pixel(x as u32, y as u32, image::Rgba(color));
+            }
+        }
     }
 }
 

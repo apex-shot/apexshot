@@ -1308,6 +1308,39 @@ pub fn install_editor_css() {
                 box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18), 0 1px 4px rgba(0, 0, 0, 0.24);
             }
 
+            .editor-toolbar-size-slider {
+                margin: 0 4px;
+            }
+
+            .editor-toolbar-size-slider trough {
+                min-height: 4px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.28);
+                background: rgba(203, 213, 225, 0.22);
+            }
+
+            .editor-toolbar-size-slider highlight {
+                min-height: 4px;
+                border-radius: 999px;
+                background: #3b82f6;
+            }
+
+            .editor-toolbar-size-slider slider {
+                min-width: 12px;
+                min-height: 12px;
+                border-radius: 999px;
+                background: #f8fafc;
+                border: 1px solid rgba(15, 23, 42, 0.18);
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+            }
+
+            .editor-toolbar-size-slider slider:hover {
+                background: #ffffff;
+                border-color: rgba(59, 130, 246, 0.42);
+                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18), 0 1px 4px rgba(0, 0, 0, 0.24);
+            }
+
             .editor-background-compact-controls {
                 margin-top: 8px;
             }
@@ -2051,6 +2084,15 @@ pub fn show_text_dialog(
     font_size: f64,
     drawing_area: glib::WeakRef<DrawingArea>,
 ) {
+    use super::types::{FontSettings, FontStyle, TextAlignment, TextDecoration};
+    let font = FontSettings {
+        family: String::from("Sans"),
+        size: font_size,
+        style: FontStyle::Normal,
+        decoration: TextDecoration::None,
+        alignment: TextAlignment::Left,
+    };
+    
     show_text_modal(
         parent,
         "Add text",
@@ -2059,11 +2101,12 @@ pub fn show_text_dialog(
         None,
         false,
         move |text| {
+            let font = font.clone();
             state.lock().unwrap().push_action(AnnotationAction::Text {
                 position,
                 text,
                 color,
-                font_size,
+                font,
             });
             if let Some(area) = drawing_area.upgrade() {
                 area.queue_draw();

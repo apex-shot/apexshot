@@ -550,7 +550,11 @@ fn clear_active_background_classes(widget: &gtk4::Widget) {
 
 fn rebuild_gradients_grid(
     gradients_grid: &GtkBox,
-    all_previews: &[(Button, DrawingArea, Rc<RefCell<Option<gtk4::cairo::ImageSurface>>>)],
+    all_previews: &[(
+        Button,
+        DrawingArea,
+        Rc<RefCell<Option<gtk4::cairo::ImageSurface>>>,
+    )],
     collapsed: bool,
     density: BackgroundSidebarDensity,
 ) {
@@ -853,18 +857,25 @@ pub(super) fn build_background_panel(
     let wallpaper_grid = GtkBox::new(Orientation::Vertical, density.preview_row_spacing);
     wallpaper_grid.add_css_class("editor-background-wallpaper-grid");
 
-    let wallpaper_previews = Rc::new(RefCell::new(Vec::<(String, Option<gtk4::cairo::ImageSurface>, PathBuf)>::new()));
-    
+    let wallpaper_previews = Rc::new(RefCell::new(Vec::<(
+        String,
+        Option<gtk4::cairo::ImageSurface>,
+        PathBuf,
+    )>::new()));
+
     let wallpaper_path = detect_system_wallpaper_path()
         .unwrap_or_else(|| background_gradient_asset_path(BACKGROUND_GRADIENT_PREVIEW_FILES[0]));
-    
+
     let surface = load_background_preview_image(&wallpaper_path, BACKGROUND_GRADIENT_PREVIEW_SIZE)
         .and_then(|img| rgba_image_to_surface(&img));
-    let label = wallpaper_path.file_name()
+    let label = wallpaper_path
+        .file_name()
         .and_then(|f| f.to_str())
         .map(|s| format!("Wallpaper: {s}"))
         .unwrap_or_else(|| "Wallpaper".to_string());
-    wallpaper_previews.borrow_mut().push((label, surface, wallpaper_path));
+    wallpaper_previews
+        .borrow_mut()
+        .push((label, surface, wallpaper_path));
 
     let add_wallpaper_btn = build_background_add_wallpaper_button(density);
 
@@ -921,7 +932,7 @@ pub(super) fn build_background_panel(
                 let drawing_area = drawing_area.clone();
                 let wallpaper_loader_sender = wallpaper_loader_sender.clone();
                 move |dialog, response| {
-                if response == ResponseType::Accept {
+                    if response == ResponseType::Accept {
                         if let Some(file) = dialog.file() {
                             if let Some(path) = file.path() {
                                 // 1. Quick preview loading (as before, but optimized in next step if needed)
@@ -936,9 +947,11 @@ pub(super) fn build_background_panel(
                                         .and_then(|file_name| file_name.to_str())
                                         .map(|file_name| format!("Wallpaper: {file_name}"))
                                         .unwrap_or_else(|| "Wallpaper".to_string());
-                                    wallpaper_previews
-                                        .borrow_mut()
-                                        .push((label, Some(surface), path.clone()));
+                                    wallpaper_previews.borrow_mut().push((
+                                        label,
+                                        Some(surface),
+                                        path.clone(),
+                                    ));
                                     let previews = wallpaper_previews.borrow();
                                     rebuild_wallpaper_preview_grid(
                                         &wallpaper_grid,
@@ -955,7 +968,8 @@ pub(super) fn build_background_panel(
                                 let path_cache = path.clone();
                                 let sender = wallpaper_loader_sender.clone();
                                 std::thread::spawn(move || {
-                                    if let Some(rgba) = load_background_image_optimized(&path_cache) {
+                                    if let Some(rgba) = load_background_image_optimized(&path_cache)
+                                    {
                                         let _ = sender.send((None, path_cache, rgba));
                                     }
                                 });
@@ -1037,7 +1051,10 @@ pub(super) fn build_background_panel(
         for column_index in 0..9 {
             let color_index = row_index * 9 + column_index;
             let color_cell = build_background_plain_color_cell(color_index, density);
-            if let Some(btn) = color_cell.first_child().and_then(|c| c.downcast::<Button>().ok()) {
+            if let Some(btn) = color_cell
+                .first_child()
+                .and_then(|c| c.downcast::<Button>().ok())
+            {
                 {
                     let st = state.lock().unwrap();
                     if let BackgroundStyle::PlainColor(color) = st.background_style {
@@ -1107,20 +1124,22 @@ pub(super) fn build_background_panel(
         let insert_slider_ref = insert_slider_weak.clone();
         let updating = updating_sliders.clone();
         move |s| {
-            if updating.get() { return; }
-            
+            if updating.get() {
+                return;
+            }
+
             let mut st = state.lock().unwrap();
             st.background_padding = s.value();
-            
+
             if st.auto_balance {
                 updating.set(true);
-                st.background_insert = s.value() * 0.8; 
+                st.background_insert = s.value() * 0.8;
                 if let Some(insert_s) = insert_slider_ref.borrow().as_ref() {
                     insert_s.set_value(st.background_insert);
                 }
                 updating.set(false);
             }
-            
+
             st.mark_working_image_dirty();
             drawing_area.queue_draw();
         }
@@ -1166,7 +1185,9 @@ pub(super) fn build_background_panel(
         let padding_slider_ref = padding_slider_weak.clone();
         let updating = updating_sliders.clone();
         move |s| {
-            if updating.get() { return; }
+            if updating.get() {
+                return;
+            }
 
             let mut st = state.lock().unwrap();
             st.background_insert = s.value();

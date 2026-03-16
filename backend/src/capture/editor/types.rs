@@ -36,6 +36,13 @@ pub enum BackgroundAlignment {
     BottomRight,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ObfuscateMethod {
+    Blur,
+    Pixelate,
+    SecurePixelate,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Select,
@@ -49,15 +56,59 @@ pub enum Tool {
     Box,
     Text,
     Number,
-    Blur,
+    Obfuscate,
     Focus,
-    Censor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FontStyle {
+    Normal,
+    Bold,
+    Italic,
+    BoldItalic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextDecoration {
+    None,
+    Underline,
+    Strikethrough,
+    Both,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextAlignment {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FontSettings {
+    pub family: String,
+    pub size: f64,
+    pub style: FontStyle,
+    pub decoration: TextDecoration,
+    pub alignment: TextAlignment,
+}
+
+impl Default for FontSettings {
+    fn default() -> Self {
+        Self {
+            family: String::from("Sans"),
+            size: 16.0,
+            style: FontStyle::Normal,
+            decoration: TextDecoration::None,
+            alignment: TextAlignment::Left,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeControlMode {
     Stroke,
     Text,
+    Obfuscate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -357,20 +408,19 @@ pub enum AnnotationAction {
         position: Point,
         text: String,
         color: DrawColor,
-        font_size: f64,
+        font: FontSettings,
     },
     Number {
         position: Point,
         number: u32,
         color: DrawColor,
     },
-    Blur {
+    Obfuscate {
         rect: Rect,
+        method: ObfuscateMethod,
+        amount: f64,
     },
     Focus {
-        rect: Rect,
-    },
-    Censor {
         rect: Rect,
     },
 }
@@ -467,14 +517,14 @@ pub fn tool_shortcut_target(key: char) -> Option<(Tool, usize)> {
         '5' | 'r' => Some((Tool::Box, 4)),
         '6' | 'o' => Some((Tool::Circle, 5)),
         '7' | 'h' => Some((Tool::Highlighter, 12)),
-        '8' | 'c' => Some((Tool::Censor, 10)),
-        '9' | 'n' => Some((Tool::Number, 11)),
-        'x' => Some((Tool::Crop, 0)),
-        'b' => Some((Tool::Blur, 9)),
-        'f' => Some((Tool::Focus, 13)),
+        'c' | 'C' => Some((Tool::Obfuscate, 9)),
+        'n' | 'N' => Some((Tool::Number, 11)),
+        'x' | 'X' => Some((Tool::Crop, 0)),
+        'b' | 'B' => Some((Tool::Obfuscate, 9)),
+        'f' | 'F' => Some((Tool::Focus, 10)),
         _ => None,
-    }
-}
+        }
+        }
 
 pub fn constrained_drag_endpoint(
     tool: Tool,
