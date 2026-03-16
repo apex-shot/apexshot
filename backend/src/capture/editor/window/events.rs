@@ -15,7 +15,10 @@ use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
-    types::{tool_shortcut_target, BackgroundStyle, DrawColor, Point, Tool, ViewTransform},
+    types::{
+        tool_shortcut_target, BackgroundStyle, DrawColor, Point, Tool,
+        ViewTransform,
+    },
     ui_support::{
         set_active_tool_button, set_crop_apply_button_state, show_text_dialog,
         show_text_edit_dialog,
@@ -49,9 +52,8 @@ pub(super) struct EventContext {
     pub text_btn: Button,
     pub number_btn: Button,
     pub highlighter_btn: Button,
-    pub blur_btn: Button,
+    pub obfuscate_btn: Button,
     pub focus_btn: Button,
-    pub censor_btn: Button,
     pub traffic_close: Button,
     pub traffic_minimize: Button,
     pub traffic_zoom: Button,
@@ -64,8 +66,7 @@ pub(super) struct EventContext {
     pub color_picker_dot: GtkBox,
     pub color_class_names: Vec<&'static str>,
     pub color_popover: Popover,
-    pub size_down_btn: Button,
-    pub size_up_btn: Button,
+    pub size_slider: gtk4::Scale,
     pub apply_crop_btn: Button,
     pub undo_btn: Button,
     pub redo_btn: Button,
@@ -82,6 +83,8 @@ pub(super) struct EventContext {
     pub sync_picker_from_color: Rc<dyn Fn(DrawColor)>,
     pub apply_picker_color_to_editor: Rc<dyn Fn(DrawColor)>,
     pub set_picker_panel_visibility: Rc<dyn Fn(bool)>,
+    pub sync_size_control: Rc<dyn Fn()>,
+    pub rebuild_effects_async: Rc<dyn Fn()>,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -104,9 +107,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         text_btn,
         number_btn,
         highlighter_btn,
-        blur_btn,
+        obfuscate_btn,
         focus_btn,
-        censor_btn,
         traffic_close,
         traffic_minimize,
         traffic_zoom,
@@ -119,8 +121,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         color_picker_dot,
         color_class_names,
         color_popover,
-        size_down_btn,
-        size_up_btn,
+        size_slider,
         apply_crop_btn,
         undo_btn,
         redo_btn,
@@ -137,6 +138,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         sync_picker_from_color,
         apply_picker_color_to_editor,
         set_picker_panel_visibility,
+        sync_size_control,
+        rebuild_effects_async,
     } = ctx;
 
     let state_select = state.clone();
@@ -144,10 +147,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_select = tool_buttons.clone();
     let apply_crop_btn_select = apply_crop_btn.clone();
     let update_toolbar_for_tool_select = update_toolbar_for_tool.clone();
+    let sync_size_control_select = sync_size_control.clone();
+    let rebuild_effects_async_select = rebuild_effects_async.clone();
     select_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_select, 2);
-        state_select.lock().unwrap().set_tool(Tool::Select);
+        if state_select
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Select)
+        {
+            rebuild_effects_async_select();
+        }
         update_toolbar_for_tool_select(Tool::Select);
+        sync_size_control_select();
         set_crop_apply_button_state(&apply_crop_btn_select, false, false);
         if let Some(area) = drawing_area_select.upgrade() {
             area.queue_draw();
@@ -179,17 +191,23 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let update_toolbar_for_tool_crop = update_toolbar_for_tool.clone();
     let update_crop_size_fields_crop = update_crop_size_fields.clone();
     let sync_picker_for_active_tool_crop = sync_picker_for_active_tool.clone();
+    let sync_size_control_crop = sync_size_control.clone();
+    let rebuild_effects_async_crop = rebuild_effects_async.clone();
     crop_btn.connect_clicked(move |_| {
         let (next_tool, has_selection) = {
             let mut st = state_crop.lock().unwrap();
-            if st.selected_tool == Tool::Crop {
-                st.set_tool(Tool::Arrow);
-                (Tool::Arrow, false)
+            let rebuild = if st.selected_tool == Tool::Crop {
+                let r = st.set_tool_without_rebuild(Tool::Arrow);
+                (Tool::Arrow, false, r)
             } else {
-                st.set_tool(Tool::Crop);
+                let r = st.set_tool_without_rebuild(Tool::Crop);
                 st.ensure_crop_selection_initialized();
-                (Tool::Crop, st.crop_selection.is_some())
+                (Tool::Crop, st.crop_selection.is_some(), r)
+            };
+            if rebuild.2 {
+                rebuild_effects_async_crop();
             }
+            (rebuild.0, rebuild.1)
         };
 
         if matches!(next_tool, Tool::Crop) {
@@ -199,6 +217,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         }
         update_toolbar_for_tool_crop(next_tool);
         sync_picker_for_active_tool_crop();
+        sync_size_control_crop();
         set_crop_apply_button_state(
             &apply_crop_btn_crop,
             matches!(next_tool, Tool::Crop),
@@ -216,16 +235,22 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let apply_crop_btn_background = apply_crop_btn.clone();
     let update_toolbar_for_tool_background = update_toolbar_for_tool.clone();
     let sync_picker_for_active_tool_background = sync_picker_for_active_tool.clone();
+    let sync_size_control_background = sync_size_control.clone();
+    let rebuild_effects_async_background = rebuild_effects_async.clone();
     background_btn.connect_clicked(move |_| {
         let next_tool = {
             let mut st = state_background.lock().unwrap();
-            if st.selected_tool == Tool::Background {
-                st.set_tool(Tool::Arrow);
-                Tool::Arrow
+            let rebuild = if st.selected_tool == Tool::Background {
+                let r = st.set_tool_without_rebuild(Tool::Arrow);
+                (Tool::Arrow, r)
             } else {
-                st.set_tool(Tool::Background);
-                Tool::Background
+                let r = st.set_tool_without_rebuild(Tool::Background);
+                (Tool::Background, r)
+            };
+            if rebuild.1 {
+                rebuild_effects_async_background();
             }
+            rebuild.0
         };
 
         if matches!(next_tool, Tool::Background) {
@@ -236,6 +261,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         update_toolbar_for_tool_background(next_tool);
         sync_picker_for_active_tool_background();
+        sync_size_control_background();
         set_crop_apply_button_state(&apply_crop_btn_background, false, false);
         if let Some(area) = drawing_area_background.upgrade() {
             area.queue_draw();
@@ -247,10 +273,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_draw_mode = tool_buttons.clone();
     let apply_crop_btn_draw_mode = apply_crop_btn.clone();
     let update_toolbar_for_tool_draw_mode = update_toolbar_for_tool.clone();
+    let sync_size_control_draw = sync_size_control.clone();
+    let rebuild_effects_async_draw = rebuild_effects_async.clone();
     draw_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_draw_mode, 3);
-        state_draw_mode.lock().unwrap().set_tool(Tool::Pen);
+        if state_draw_mode
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Pen)
+        {
+            rebuild_effects_async_draw();
+        }
         update_toolbar_for_tool_draw_mode(Tool::Pen);
+        sync_size_control_draw();
         set_crop_apply_button_state(&apply_crop_btn_draw_mode, false, false);
         if let Some(area) = drawing_area_draw_mode.upgrade() {
             area.queue_draw();
@@ -262,10 +297,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_arrow = tool_buttons.clone();
     let apply_crop_btn_arrow = apply_crop_btn.clone();
     let update_toolbar_for_tool_arrow = update_toolbar_for_tool.clone();
+    let sync_size_control_arrow = sync_size_control.clone();
+    let rebuild_effects_async_arrow = rebuild_effects_async.clone();
     arrow_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_arrow, 6);
-        state_arrow.lock().unwrap().set_tool(Tool::Arrow);
+        if state_arrow
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Arrow)
+        {
+            rebuild_effects_async_arrow();
+        }
         update_toolbar_for_tool_arrow(Tool::Arrow);
+        sync_size_control_arrow();
         set_crop_apply_button_state(&apply_crop_btn_arrow, false, false);
         if let Some(area) = drawing_area_arrow.upgrade() {
             area.queue_draw();
@@ -277,10 +321,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_line = tool_buttons.clone();
     let apply_crop_btn_line = apply_crop_btn.clone();
     let update_toolbar_for_tool_line = update_toolbar_for_tool.clone();
+    let sync_size_control_line = sync_size_control.clone();
+    let rebuild_effects_async_line = rebuild_effects_async.clone();
     line_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_line, 7);
-        state_line.lock().unwrap().set_tool(Tool::Line);
+        if state_line
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Line)
+        {
+            rebuild_effects_async_line();
+        }
         update_toolbar_for_tool_line(Tool::Line);
+        sync_size_control_line();
         set_crop_apply_button_state(&apply_crop_btn_line, false, false);
         if let Some(area) = drawing_area_line.upgrade() {
             area.queue_draw();
@@ -350,10 +403,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_box = tool_buttons.clone();
     let apply_crop_btn_box = apply_crop_btn.clone();
     let update_toolbar_for_tool_box = update_toolbar_for_tool.clone();
+    let sync_size_control_box = sync_size_control.clone();
+    let rebuild_effects_async_box = rebuild_effects_async.clone();
     box_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_box, 4);
-        state_box.lock().unwrap().set_tool(Tool::Box);
+        if state_box
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Box)
+        {
+            rebuild_effects_async_box();
+        }
         update_toolbar_for_tool_box(Tool::Box);
+        sync_size_control_box();
         set_crop_apply_button_state(&apply_crop_btn_box, false, false);
         if let Some(area) = drawing_area_box.upgrade() {
             area.queue_draw();
@@ -365,10 +427,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_circle = tool_buttons.clone();
     let apply_crop_btn_circle = apply_crop_btn.clone();
     let update_toolbar_for_tool_circle = update_toolbar_for_tool.clone();
+    let sync_size_control_circle = sync_size_control.clone();
+    let rebuild_effects_async_circle = rebuild_effects_async.clone();
     circle_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_circle, 5);
-        state_circle.lock().unwrap().set_tool(Tool::Circle);
+        if state_circle
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Circle)
+        {
+            rebuild_effects_async_circle();
+        }
         update_toolbar_for_tool_circle(Tool::Circle);
+        sync_size_control_circle();
         set_crop_apply_button_state(&apply_crop_btn_circle, false, false);
         if let Some(area) = drawing_area_circle.upgrade() {
             area.queue_draw();
@@ -380,42 +451,45 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_text = tool_buttons.clone();
     let apply_crop_btn_text = apply_crop_btn.clone();
     let update_toolbar_for_tool_text = update_toolbar_for_tool.clone();
+    let sync_size_control_text = sync_size_control.clone();
+    let rebuild_effects_async_text = rebuild_effects_async.clone();
     text_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_text, 8);
-        state_text.lock().unwrap().set_tool(Tool::Text);
+        if state_text
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Text)
+        {
+            rebuild_effects_async_text();
+        }
         update_toolbar_for_tool_text(Tool::Text);
+        sync_size_control_text();
         set_crop_apply_button_state(&apply_crop_btn_text, false, false);
         if let Some(area) = drawing_area_text.upgrade() {
             area.queue_draw();
         }
     });
 
-    let state_blur = state.clone();
-    let drawing_area_blur = drawing_area.downgrade();
-    let buttons_blur = tool_buttons.clone();
-    let apply_crop_btn_blur = apply_crop_btn.clone();
-    let update_toolbar_for_tool_blur = update_toolbar_for_tool.clone();
-    blur_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_blur, 9);
-        state_blur.lock().unwrap().set_tool(Tool::Blur);
-        update_toolbar_for_tool_blur(Tool::Blur);
-        set_crop_apply_button_state(&apply_crop_btn_blur, false, false);
-        if let Some(area) = drawing_area_blur.upgrade() {
-            area.queue_draw();
+    let state_obfuscate = state.clone();
+    let drawing_area_obfuscate = drawing_area.downgrade();
+    let buttons_obfuscate = tool_buttons.clone();
+    let apply_crop_btn_obfuscate = apply_crop_btn.clone();
+    let update_toolbar_for_tool_obfuscate = update_toolbar_for_tool.clone();
+    let sync_size_control_obfuscate = sync_size_control.clone();
+    let rebuild_effects_async_obfuscate = rebuild_effects_async.clone();
+    obfuscate_btn.connect_clicked(move |_| {
+        set_active_tool_button(&buttons_obfuscate, 9);
+        if state_obfuscate
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Obfuscate)
+        {
+            rebuild_effects_async_obfuscate();
         }
-    });
-
-    let state_censor = state.clone();
-    let drawing_area_censor = drawing_area.downgrade();
-    let buttons_censor = tool_buttons.clone();
-    let apply_crop_btn_censor = apply_crop_btn.clone();
-    let update_toolbar_for_tool_censor = update_toolbar_for_tool.clone();
-    censor_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_censor, 10);
-        state_censor.lock().unwrap().set_tool(Tool::Censor);
-        update_toolbar_for_tool_censor(Tool::Censor);
-        set_crop_apply_button_state(&apply_crop_btn_censor, false, false);
-        if let Some(area) = drawing_area_censor.upgrade() {
+        update_toolbar_for_tool_obfuscate(Tool::Obfuscate);
+        sync_size_control_obfuscate();
+        set_crop_apply_button_state(&apply_crop_btn_obfuscate, false, false);
+        if let Some(area) = drawing_area_obfuscate.upgrade() {
             area.queue_draw();
         }
     });
@@ -425,10 +499,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_focus = tool_buttons.clone();
     let apply_crop_btn_focus = apply_crop_btn.clone();
     let update_toolbar_for_tool_focus = update_toolbar_for_tool.clone();
+    let sync_size_control_focus = sync_size_control.clone();
+    let rebuild_effects_async_focus = rebuild_effects_async.clone();
     focus_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_focus, 13);
-        state_focus.lock().unwrap().set_tool(Tool::Focus);
+        set_active_tool_button(&buttons_focus, 12);
+        if state_focus
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Focus)
+        {
+            rebuild_effects_async_focus();
+        }
         update_toolbar_for_tool_focus(Tool::Focus);
+        sync_size_control_focus();
         set_crop_apply_button_state(&apply_crop_btn_focus, false, false);
         if let Some(area) = drawing_area_focus.upgrade() {
             area.queue_draw();
@@ -440,10 +523,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_number = tool_buttons.clone();
     let apply_crop_btn_number = apply_crop_btn.clone();
     let update_toolbar_for_tool_number = update_toolbar_for_tool.clone();
+    let sync_size_control_number = sync_size_control.clone();
+    let rebuild_effects_async_number = rebuild_effects_async.clone();
     number_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_number, 11);
-        state_number.lock().unwrap().set_tool(Tool::Number);
+        set_active_tool_button(&buttons_number, 10);
+        if state_number
+            .lock()
+            .unwrap()
+            .set_tool_without_rebuild(Tool::Number)
+        {
+            rebuild_effects_async_number();
+        }
         update_toolbar_for_tool_number(Tool::Number);
+        sync_size_control_number();
         set_crop_apply_button_state(&apply_crop_btn_number, false, false);
         if let Some(area) = drawing_area_number.upgrade() {
             area.queue_draw();
@@ -455,13 +547,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let buttons_highlighter = tool_buttons.clone();
     let apply_crop_btn_highlighter = apply_crop_btn.clone();
     let update_toolbar_for_tool_highlighter = update_toolbar_for_tool.clone();
+    let sync_size_control_highlighter = sync_size_control.clone();
+    let rebuild_effects_async_highlighter = rebuild_effects_async.clone();
     highlighter_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_highlighter, 12);
-        state_highlighter
+        set_active_tool_button(&buttons_highlighter, 11);
+        if state_highlighter
             .lock()
             .unwrap()
-            .set_tool(Tool::Highlighter);
+            .set_tool_without_rebuild(Tool::Highlighter)
+        {
+            rebuild_effects_async_highlighter();
+        }
         update_toolbar_for_tool_highlighter(Tool::Highlighter);
+        sync_size_control_highlighter();
         set_crop_apply_button_state(&apply_crop_btn_highlighter, false, false);
         if let Some(area) = drawing_area_highlighter.upgrade() {
             area.queue_draw();
@@ -504,21 +602,18 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         });
     }
 
-    let state_size_down = state.clone();
-    let drawing_area_size_down = drawing_area.downgrade();
-    size_down_btn.connect_clicked(move |_| {
-        if state_size_down.lock().unwrap().adjust_active_size(-1.0) {
-            if let Some(area) = drawing_area_size_down.upgrade() {
-                area.queue_draw();
-            }
-        }
-    });
-
-    let state_size_up = state.clone();
-    let drawing_area_size_up = drawing_area.downgrade();
-    size_up_btn.connect_clicked(move |_| {
-        if state_size_up.lock().unwrap().adjust_active_size(1.0) {
-            if let Some(area) = drawing_area_size_up.upgrade() {
+    let state_size = state.clone();
+    let drawing_area_size = drawing_area.downgrade();
+    let rebuild_effects_async_size = rebuild_effects_async.clone();
+    size_slider.connect_value_changed(move |slider| {
+        let value = slider.value();
+        if state_size
+            .lock()
+            .unwrap()
+            .set_active_size_without_rebuild(value)
+        {
+            rebuild_effects_async_size();
+            if let Some(area) = drawing_area_size.upgrade() {
                 area.queue_draw();
             }
         }
@@ -566,8 +661,13 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
     let state_undo = state.clone();
     let drawing_area_undo = drawing_area.downgrade();
+    let sync_size_control_undo = sync_size_control.clone();
+    let rebuild_effects_async_undo = rebuild_effects_async.clone();
     undo_btn.connect_clicked(move |_| {
-        if state_undo.lock().unwrap().undo() {
+        let changed = state_undo.lock().unwrap().undo_without_rebuild();
+        if changed {
+            rebuild_effects_async_undo();
+            sync_size_control_undo();
             if let Some(area) = drawing_area_undo.upgrade() {
                 area.queue_draw();
             }
@@ -576,8 +676,13 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
     let state_redo = state.clone();
     let drawing_area_redo = drawing_area.downgrade();
+    let sync_size_control_redo = sync_size_control.clone();
+    let rebuild_effects_async_redo = rebuild_effects_async.clone();
     redo_btn.connect_clicked(move |_| {
-        if state_redo.lock().unwrap().redo() {
+        let changed = state_redo.lock().unwrap().redo_without_rebuild();
+        if changed {
+            rebuild_effects_async_redo();
+            sync_size_control_redo();
             if let Some(area) = drawing_area_redo.upgrade() {
                 area.queue_draw();
             }
@@ -586,12 +691,14 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
     let state_delete_selected = state.clone();
     let drawing_area_delete_selected = drawing_area.downgrade();
+    let rebuild_effects_async_delete = rebuild_effects_async.clone();
     delete_selected_btn.connect_clicked(move |_| {
         if state_delete_selected
             .lock()
             .unwrap()
-            .remove_selected_action()
+            .remove_selected_action_without_rebuild()
         {
+            rebuild_effects_async_delete();
             if let Some(area) = drawing_area_delete_selected.upgrade() {
                 area.queue_draw();
             }
@@ -807,6 +914,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let drag_last_redraw_end = drag_last_redraw.clone();
     let apply_crop_btn_drag_end = apply_crop_btn.clone();
     let update_crop_size_fields_drag_end = update_crop_size_fields.clone();
+    let sync_size_control_drag_end = sync_size_control.clone();
+    let rebuild_effects_async_drag_end = rebuild_effects_async.clone();
     drag.connect_drag_end(move |gesture, offset_x, offset_y| {
         if eyedropper_mode_drag_end.get() {
             return;
@@ -827,9 +936,12 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
             if st.selected_tool == Tool::Select {
                 st.update_select_drag(t.view_to_image_clamped(current_view));
-                st.end_select_drag();
+                if st.end_select_drag_without_rebuild_and_check_effect() {
+                    rebuild_effects_async_drag_end.clone()();
+                }
                 drop(st);
 
+                sync_size_control_drag_end();
                 if let Some(area) = drawing_area_end.upgrade() {
                     area.queue_draw();
                 }
@@ -856,11 +968,18 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     st.clear_drag();
                 }
             } else if let Some(action) = st.finalize_drag_action() {
+                // Check if this action requires async effect rebuild
+                let needs_async_rebuild = EditorState::action_requires_effect_rebuild(&action);
                 st.push_action(action);
+                drop(st);
+                if needs_async_rebuild {
+                    rebuild_effects_async_drag_end.clone()();
+                }
             } else {
                 st.clear_drag();
             }
-            drop(st);
+
+            sync_size_control_drag_end();
 
             if let Some(has_selection) = crop_selection_ready {
                 set_crop_apply_button_state(&apply_crop_btn_drag_end, true, has_selection);
@@ -891,6 +1010,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let canvas_eyedropper_ring_click = canvas_eyedropper_ring.clone();
     let apply_picker_color_to_editor_canvas_click = apply_picker_color_to_editor.clone();
     let sync_picker_from_color_canvas_click = sync_picker_from_color.clone();
+    let sync_size_control_canvas_click = sync_size_control.clone();
     click.connect_pressed(move |_, n_press, x, y| {
         let t = *transform_click.lock().unwrap();
         let view_point = Point { x, y };
@@ -966,6 +1086,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     }
                 };
 
+                sync_size_control_canvas_click();
+
                 if let Some(index) = selected_color_index {
                     color_picker::clear_active_color_picker_palette_state(&color_buttons_click);
                     color_picker::set_color_picker_trigger_dot_state(
@@ -1005,6 +1127,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             }
             Tool::Number => {
                 state_click.lock().unwrap().add_number_marker(image_point);
+                sync_size_control_canvas_click();
                 if let Some(area) = drawing_area_click.upgrade() {
                     area.queue_draw();
                 }

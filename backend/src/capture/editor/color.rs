@@ -1,20 +1,21 @@
 use super::types::{DrawColor, PersistedCustomColor, PersistedCustomColorSlots};
 use std::path::PathBuf;
 
-pub const STROKE_WIDTH: f64 = 3.0;
+pub const STROKE_WIDTH: f64 = 12.0;
 pub const HIGHLIGHTER_STROKE_WIDTH: f64 = 11.0;
 pub const HIGHLIGHTER_ALPHA_SCALE: f64 = 0.42;
 pub const MIN_STROKE_SIZE: f64 = 1.0;
 pub const MAX_STROKE_SIZE: f64 = 24.0;
-pub const STROKE_SIZE_STEP: f64 = 1.0;
-pub const TEXT_SIZE: f64 = 26.0;
+pub const TEXT_SIZE: f64 = 65.0;
 pub const MIN_TEXT_SIZE: f64 = 10.0;
 pub const MAX_TEXT_SIZE: f64 = 120.0;
-pub const TEXT_SIZE_STEP: f64 = 2.0;
 pub const NUMBER_RADIUS: f64 = 15.0;
 pub const NUMBER_FONT_SIZE: f64 = 14.0;
-pub const BLUR_RADIUS: i32 = 6;
-pub const CENSOR_BLOCK_SIZE: u32 = 12;
+pub const MIN_OBFUSCATE_AMOUNT: f64 = 1.0;
+pub const MAX_OBFUSCATE_AMOUNT: f64 = 25.0;
+pub const DEFAULT_OBFUSCATE_AMOUNT: f64 = 13.0;
+#[allow(dead_code)]
+pub const CENSOR_BLOCK_SIZE: i32 = 10;
 pub const DRAG_REDRAW_INTERVAL_US: i64 = 16_000;
 pub const DEFAULT_COLOR_INDEX: usize = 0;
 pub const SELECT_HIT_PADDING: f64 = 8.0;
@@ -63,6 +64,10 @@ pub fn clamp_text_size(size: f64) -> f64 {
 
 pub fn clamp_stroke_size(size: f64) -> f64 {
     size.clamp(MIN_STROKE_SIZE, MAX_STROKE_SIZE)
+}
+
+pub fn clamp_obfuscate_amount(amount: f64) -> f64 {
+    amount.clamp(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT)
 }
 
 pub fn highlighter_stroke_width(stroke_size: f64) -> f64 {

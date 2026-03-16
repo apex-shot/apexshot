@@ -1,17 +1,16 @@
 use super::color::{
-    clamp_stroke_size, clamp_text_size, selection_handle_hit_radius_for_scale,
-    selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE,
-    STROKE_SIZE_STEP, STROKE_WIDTH, TEXT_SIZE, TEXT_SIZE_STEP,
+    clamp_obfuscate_amount, clamp_stroke_size, clamp_text_size,
+    selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX,
+    DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
 };
-use super::color::{BLUR_RADIUS, CENSOR_BLOCK_SIZE};
-use super::render::{apply_blur_rect, apply_censor_rect, apply_focus_rect};
+use super::render::{apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_pixelate};
 use super::selection::{
     action_contains_point_with_padding, action_resize_handle_at_point_with_radius, resize_action,
     resize_rect_with_handle, translate_action,
 };
 use super::types::{
     AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
-    EditorError, Point, Rect, SelectHandle, SizeControlMode, Tool,
+    EditorError, ObfuscateMethod, Point, Rect, SelectHandle, SizeControlMode, Tool,
 };
 use image::RgbaImage;
 use std::path::Path;
@@ -31,9 +30,12 @@ pub struct EditorState {
     pub selected_color: DrawColor,
     pub stroke_size: f64,
     pub text_size: f64,
+    pub obfuscate_amount: f64,
     pub next_number: u32,
     pub select_drag_anchor: Option<Point>,
     pub select_resize_handle: Option<super::types::SelectHandle>,
+    pub select_effect_rebuild_pending: bool,
+    pub pending_effect_revision: u64,
     pub drag_start: Option<Point>,
     pub drag_current: Option<Point>,
     pub drag_start_view: Option<Point>,
@@ -218,9 +220,12 @@ impl EditorState {
             selected_color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
             stroke_size: STROKE_WIDTH,
             text_size: TEXT_SIZE,
+            obfuscate_amount: DEFAULT_OBFUSCATE_AMOUNT,
             next_number: 1,
             select_drag_anchor: None,
             select_resize_handle: None,
+            select_effect_rebuild_pending: false,
+            pending_effect_revision: 0,
             drag_start: None,
             drag_current: None,
             drag_start_view: None,
@@ -237,7 +242,15 @@ impl EditorState {
         }
     }
 
-    pub fn set_tool(&mut self, tool: Tool) {
+    pub fn set_tool(&mut self, tool: Tool) -> bool {
+        let rebuild = self.set_tool_without_rebuild(tool);
+        if rebuild {
+            self.rebuild_effect_layer();
+        }
+        rebuild
+    }
+
+    pub fn set_tool_without_rebuild(&mut self, tool: Tool) -> bool {
         if self.selected_tool == Tool::Crop && tool != Tool::Crop {
             self.crop_selection = None;
         }
@@ -247,7 +260,7 @@ impl EditorState {
             self.select_resize_handle = None;
         }
         self.selected_tool = tool;
-        self.clear_drag();
+        self.clear_drag_without_rebuild_and_check_effect()
     }
 
     pub fn crop_aspect_ratio_value(&self) -> Option<f64> {
@@ -300,6 +313,16 @@ impl EditorState {
         true
     }
 
+    pub fn set_obfuscate_amount(&mut self, amount: f64) -> bool {
+        let next = clamp_obfuscate_amount(amount);
+        if (next - self.obfuscate_amount).abs() <= f64::EPSILON {
+            return false;
+        }
+
+        self.obfuscate_amount = next;
+        true
+    }
+
     pub fn selected_action_stroke_size(&self) -> Option<f64> {
         match self.selected_action()? {
             AnnotationAction::Pen { stroke_size, .. }
@@ -310,9 +333,8 @@ impl EditorState {
             | AnnotationAction::Box { stroke_size, .. } => Some(*stroke_size),
             AnnotationAction::Text { .. }
             | AnnotationAction::Number { .. }
-            | AnnotationAction::Blur { .. }
-            | AnnotationAction::Focus { .. }
-            | AnnotationAction::Censor { .. } => None,
+            | AnnotationAction::Obfuscate { .. }
+            | AnnotationAction::Focus { .. } => None,
         }
     }
 
@@ -337,9 +359,8 @@ impl EditorState {
             | AnnotationAction::Box { stroke_size, .. } => stroke_size,
             AnnotationAction::Text { .. }
             | AnnotationAction::Number { .. }
-            | AnnotationAction::Blur { .. }
-            | AnnotationAction::Focus { .. }
-            | AnnotationAction::Censor { .. } => return false,
+            | AnnotationAction::Obfuscate { .. }
+            | AnnotationAction::Focus { .. } => return false,
         };
 
         if (*target - next).abs() <= f64::EPSILON {
@@ -348,16 +369,6 @@ impl EditorState {
 
         *target = next;
         self.redo_actions.clear();
-        true
-    }
-
-    pub fn adjust_stroke_size(&mut self, delta: f64) -> bool {
-        let changed = self.set_stroke_size(self.stroke_size + delta);
-        if !changed {
-            return false;
-        }
-
-        let _ = self.set_selected_action_stroke_size(self.stroke_size);
         true
     }
 
@@ -372,11 +383,11 @@ impl EditorState {
     }
 
     pub fn selected_text_action_size(&self) -> Option<f64> {
-        let AnnotationAction::Text { font_size, .. } = self.selected_action()? else {
+        let AnnotationAction::Text { font, .. } = self.selected_action()? else {
             return None;
         };
 
-        Some(*font_size)
+        Some(font.size)
     }
 
     pub fn set_selected_text_action_size(&mut self, size: f64) -> bool {
@@ -391,26 +402,62 @@ impl EditorState {
             return false;
         };
 
-        let AnnotationAction::Text { font_size, .. } = action else {
+        let AnnotationAction::Text { font, .. } = action else {
             return false;
         };
 
-        if (*font_size - next).abs() <= f64::EPSILON {
+        if (font.size - next).abs() <= f64::EPSILON {
             return false;
         }
 
-        *font_size = next;
+        font.size = next;
         self.redo_actions.clear();
         true
     }
 
-    pub fn adjust_text_size(&mut self, delta: f64) -> bool {
-        let changed = self.set_text_size(self.text_size + delta);
-        if !changed {
+    pub fn selected_obfuscate_action_amount(&self) -> Option<f64> {
+        let AnnotationAction::Obfuscate { amount, .. } = self.selected_action()? else {
+            return None;
+        };
+
+        Some(*amount)
+    }
+
+    #[allow(dead_code)]
+    pub fn set_selected_obfuscate_action_amount(&mut self, amount: f64) -> bool {
+        if self.set_selected_obfuscate_action_amount_without_rebuild(amount) {
+            self.rebuild_effect_layer();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn set_selected_obfuscate_action_amount_without_rebuild(&mut self, amount: f64) -> bool {
+        let next = clamp_obfuscate_amount(amount);
+
+        let Some(index) = self.selected_action_index else {
+            return false;
+        };
+
+        let Some(action) = self.actions.get_mut(index) else {
+            self.selected_action_index = None;
+            return false;
+        };
+
+        let AnnotationAction::Obfuscate {
+            amount: act_amount, ..
+        } = action
+        else {
+            return false;
+        };
+
+        if (*act_amount - next).abs() <= f64::EPSILON {
             return false;
         }
 
-        let _ = self.set_selected_text_action_size(self.text_size);
+        *act_amount = next;
+        self.redo_actions.clear();
         true
     }
 
@@ -422,11 +469,18 @@ impl EditorState {
             if self.selected_action_stroke_size().is_some() {
                 return Some(SizeControlMode::Stroke);
             }
+            if self.selected_obfuscate_action_amount().is_some() {
+                return Some(SizeControlMode::Obfuscate);
+            }
             return None;
         }
 
         if self.selected_tool == Tool::Text {
             return Some(SizeControlMode::Text);
+        }
+
+        if self.selected_tool == Tool::Obfuscate {
+            return Some(SizeControlMode::Obfuscate);
         }
 
         if super::types::tool_uses_stroke_size(self.selected_tool) {
@@ -455,18 +509,46 @@ impl EditorState {
                     Some(self.text_size)
                 }
             }
+            SizeControlMode::Obfuscate => {
+                if self.selected_tool == Tool::Select {
+                    Some(
+                        self.selected_obfuscate_action_amount()
+                            .unwrap_or(self.obfuscate_amount),
+                    )
+                } else {
+                    Some(self.obfuscate_amount)
+                }
+            }
         }
     }
 
-    pub fn adjust_active_size(&mut self, direction: f64) -> bool {
-        if direction.abs() <= f64::EPSILON {
-            return false;
+    #[allow(dead_code)]
+    pub fn set_active_size(&mut self, size: f64) -> bool {
+        if self.set_active_size_without_rebuild(size) {
+            self.rebuild_effect_layer();
+            true
+        } else {
+            false
         }
+    }
 
-        let step = direction.signum();
+    pub fn set_active_size_without_rebuild(&mut self, size: f64) -> bool {
         match self.active_size_control_mode() {
-            Some(SizeControlMode::Stroke) => self.adjust_stroke_size(STROKE_SIZE_STEP * step),
-            Some(SizeControlMode::Text) => self.adjust_text_size(TEXT_SIZE_STEP * step),
+            Some(SizeControlMode::Stroke) => {
+                let changed = self.set_stroke_size(size);
+                let _ = self.set_selected_action_stroke_size(self.stroke_size);
+                changed
+            }
+            Some(SizeControlMode::Text) => {
+                let changed = self.set_text_size(size);
+                let _ = self.set_selected_text_action_size(self.text_size);
+                changed
+            }
+            Some(SizeControlMode::Obfuscate) => {
+                let changed = self.set_obfuscate_amount(size);
+                let _ = self.set_selected_obfuscate_action_amount_without_rebuild(self.obfuscate_amount);
+                changed
+            }
             None => false,
         }
     }
@@ -481,9 +563,8 @@ impl EditorState {
             | AnnotationAction::Box { color, .. }
             | AnnotationAction::Text { color, .. }
             | AnnotationAction::Number { color, .. } => Some(*color),
-            AnnotationAction::Blur { .. }
-            | AnnotationAction::Focus { .. }
-            | AnnotationAction::Censor { .. } => None,
+            AnnotationAction::Obfuscate { .. }
+            | AnnotationAction::Focus { .. } => None,
         }
     }
 
@@ -506,9 +587,8 @@ impl EditorState {
             | AnnotationAction::Box { color, .. }
             | AnnotationAction::Text { color, .. }
             | AnnotationAction::Number { color, .. } => color,
-            AnnotationAction::Blur { .. }
-            | AnnotationAction::Focus { .. }
-            | AnnotationAction::Censor { .. } => return false,
+            AnnotationAction::Obfuscate { .. }
+            | AnnotationAction::Focus { .. } => return false,
         };
 
         if *target == color {
@@ -536,34 +616,80 @@ impl EditorState {
     pub fn push_action(&mut self, action: AnnotationAction) {
         self.actions.push(action);
         self.redo_actions.clear();
-        self.selected_action_index = None;
+        self.selected_action_index = Some(self.actions.len() - 1);
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
         self.sync_next_number();
-        self.rebuild_effect_layer();
+        // NOTE: Effect-requiring actions (Obfuscate, Focus) should NOT rebuild here
+        // synchronously as it blocks the UI. The caller should use the async pipeline
+        // via rebuild_effects_async callback after calling this method.
+    }
+
+    /// Check if an action modifies pixels and requires effect layer rebuild
+    pub fn action_requires_effect_rebuild(action: &AnnotationAction) -> bool {
+        matches!(
+            action,
+            AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
+        )
+    }
+
+    /// Like `push_action` but does NOT call `rebuild_effect_layer`.
+    /// Use this when you want to register the action immediately (so undo/history
+    /// work correctly) but defer the expensive pixel rebuild to a background thread.
+    pub fn push_action_without_rebuild(&mut self, action: AnnotationAction) {
+        self.actions.push(action);
+        self.redo_actions.clear();
+        self.selected_action_index = Some(self.actions.len() - 1);
+        self.select_drag_anchor = None;
+        self.select_resize_handle = None;
+        self.sync_next_number();
     }
 
     pub fn undo(&mut self) -> bool {
+        if self.undo_without_rebuild() {
+            // Check if any remaining actions require effect rebuild
+            if self.actions.iter().any(|a| Self::action_requires_effect_rebuild(a)) {
+                self.rebuild_effect_layer();
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn undo_without_rebuild(&mut self) -> bool {
         if let Some(action) = self.actions.pop() {
             self.redo_actions.push(action);
             self.selected_action_index = None;
             self.select_drag_anchor = None;
             self.select_resize_handle = None;
             self.sync_next_number();
-            self.rebuild_effect_layer();
             return true;
         }
         false
     }
 
     pub fn redo(&mut self) -> bool {
+        if self.redo_without_rebuild() {
+            // Only rebuild if the redone action requires it
+            if let Some(action) = self.actions.last() {
+                if Self::action_requires_effect_rebuild(action) {
+                    self.rebuild_effect_layer();
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn redo_without_rebuild(&mut self) -> bool {
         if let Some(action) = self.redo_actions.pop() {
             self.actions.push(action);
             self.selected_action_index = None;
             self.select_drag_anchor = None;
             self.select_resize_handle = None;
             self.sync_next_number();
-            self.rebuild_effect_layer();
             return true;
         }
         false
@@ -821,7 +947,7 @@ impl EditorState {
             };
             let effect_action = matches!(
                 action,
-                AnnotationAction::Blur { .. } | AnnotationAction::Censor { .. }
+                AnnotationAction::Obfuscate { .. }
             );
             (moved, effect_action)
         } else {
@@ -837,12 +963,23 @@ impl EditorState {
         self.select_drag_anchor = Some(point);
         self.redo_actions.clear();
         if effect_action {
-            self.rebuild_effect_layer();
+            self.select_effect_rebuild_pending = true;
         }
         true
     }
 
-    pub fn end_select_drag(&mut self) {
+    #[allow(dead_code)]
+    pub fn end_select_drag(&mut self) -> bool {
+        let rebuild = self.select_effect_rebuild_pending;
+        if rebuild {
+            self.rebuild_effect_layer();
+            self.select_effect_rebuild_pending = false;
+        }
+        self.end_select_drag_without_rebuild();
+        rebuild
+    }
+
+    pub fn end_select_drag_without_rebuild(&mut self) {
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
         self.drag_start = None;
@@ -851,7 +988,23 @@ impl EditorState {
         self.drag_path.clear();
     }
 
+    pub fn end_select_drag_without_rebuild_and_check_effect(&mut self) -> bool {
+        let rebuild = self.select_effect_rebuild_pending;
+        self.select_effect_rebuild_pending = false;
+        self.end_select_drag_without_rebuild();
+        rebuild
+    }
+
     pub fn remove_selected_action(&mut self) -> bool {
+        if self.remove_selected_action_without_rebuild() {
+            self.rebuild_effect_layer();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_selected_action_without_rebuild(&mut self) -> bool {
         let Some(index) = self.selected_action_index.take() else {
             return false;
         };
@@ -860,39 +1013,50 @@ impl EditorState {
             return false;
         }
 
-        let removed = self.actions.remove(index);
+        let _removed = self.actions.remove(index);
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
         self.redo_actions.clear();
         self.sync_next_number();
-
-        if matches!(
-            removed,
-            AnnotationAction::Blur { .. } | AnnotationAction::Censor { .. }
-        ) {
-            self.rebuild_effect_layer();
-        }
-
         true
     }
 
     pub fn rebuild_effect_layer(&mut self) {
-        self.working_image = self.base_image.clone();
-        for action in &self.actions {
-            match action {
-                AnnotationAction::Blur { rect } => {
-                    apply_blur_rect(&mut self.working_image, *rect, BLUR_RADIUS);
-                }
-                AnnotationAction::Censor { rect } => {
-                    apply_censor_rect(&mut self.working_image, *rect, CENSOR_BLOCK_SIZE);
-                }
-                _ => {}
-            }
-        }
+        let mut working = self.base_image.clone();
+        apply_effect_actions(&mut working, &self.actions);
+        self.working_image = working;
+        self.select_effect_rebuild_pending = false;
         self.mark_working_image_dirty();
     }
+}
+
+pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction]) {
+    for action in actions {
+        match action {
+            AnnotationAction::Obfuscate {
+                rect,
+                method,
+                amount,
+            } => match method {
+                ObfuscateMethod::Blur => {
+                    apply_blur_rect(image, *rect, *amount);
+                }
+                ObfuscateMethod::Pixelate => {
+                    apply_censor_rect(image, *rect, *amount);
+                }
+                ObfuscateMethod::SecurePixelate => {
+                    apply_secure_pixelate(image, *rect, *amount);
+                }
+            },
+            _ => {}
+        }
+    }
+}
+
+impl EditorState {
 
     pub fn begin_drag(&mut self, point: Point) {
+        self.selected_action_index = None;
         self.drag_start = Some(point);
         self.drag_current = Some(point);
         self.drag_path.clear();
@@ -914,7 +1078,15 @@ impl EditorState {
         }
     }
 
-    pub fn clear_drag(&mut self) {
+    pub fn clear_drag(&mut self) -> bool {
+        let rebuild = self.clear_drag_without_rebuild_and_check_effect();
+        if rebuild {
+            self.rebuild_effect_layer();
+        }
+        rebuild
+    }
+
+    pub fn clear_drag_without_rebuild(&mut self) {
         self.drag_start = None;
         self.drag_current = None;
         self.drag_start_view = None;
@@ -922,6 +1094,13 @@ impl EditorState {
         self.select_resize_handle = None;
         self.drag_path.clear();
         self.drag_shift_active = false;
+    }
+
+    pub fn clear_drag_without_rebuild_and_check_effect(&mut self) -> bool {
+        let rebuild = self.select_effect_rebuild_pending;
+        self.select_effect_rebuild_pending = false;
+        self.clear_drag_without_rebuild();
+        rebuild
     }
 
     pub fn draft_action(&self) -> Option<AnnotationAction> {
@@ -1000,12 +1179,13 @@ impl EditorState {
                 stroke_size,
             }),
             Tool::Number => None,
-            Tool::Blur => Rect::from_points(start, end).map(|rect| AnnotationAction::Blur { rect }),
+            Tool::Obfuscate => Rect::from_points(start, end).map(|rect| AnnotationAction::Obfuscate {
+                rect,
+                method: ObfuscateMethod::Blur,
+                amount: self.obfuscate_amount,
+            }),
             Tool::Focus => {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
-            }
-            Tool::Censor => {
-                Rect::from_points(start, end).map(|rect| AnnotationAction::Censor { rect })
             }
             Tool::Text => None,
         }
@@ -1112,12 +1292,13 @@ impl EditorState {
                 stroke_size,
             }),
             Tool::Number => None,
-            Tool::Blur => Rect::from_points(start, end).map(|rect| AnnotationAction::Blur { rect }),
+            Tool::Obfuscate => Rect::from_points(start, end).map(|rect| AnnotationAction::Obfuscate {
+                rect,
+                method: ObfuscateMethod::Blur,
+                amount: self.obfuscate_amount,
+            }),
             Tool::Focus => {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
-            }
-            Tool::Censor => {
-                Rect::from_points(start, end).map(|rect| AnnotationAction::Censor { rect })
             }
             Tool::Text => None,
         }
@@ -1184,9 +1365,8 @@ impl EditorState {
             for action in &self.actions {
                 if matches!(
                     action,
-                    AnnotationAction::Blur { .. }
+                    AnnotationAction::Obfuscate { .. }
                         | AnnotationAction::Focus { .. }
-                        | AnnotationAction::Censor { .. }
                 ) {
                     continue;
                 }
@@ -1308,7 +1488,7 @@ impl EditorState {
             }
             BackgroundStyle::Blurred(_idx) => {
                 let mut blurred = screenshot.clone();
-                apply_blur_rect(&mut blurred, Rect { x: 0, y: 0, width: screenshot_w as i32, height: screenshot_h as i32 }, 30);
+                apply_blur_rect(&mut blurred, Rect { x: 0, y: 0, width: screenshot_w as i32, height: screenshot_h as i32 }, 30.0);
                 image::imageops::resize(&blurred, canvas_w as u32, canvas_h as u32, image::imageops::FilterType::Triangle)
             }
             BackgroundStyle::None => return Ok(screenshot.clone()),

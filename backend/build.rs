@@ -98,7 +98,6 @@ fn main() {
             "insert-text",
             "fog",
             "small-rectangle-in-focus",
-            "eye-off-regular",
             "arrow-undo-regular",
             "arrow-redo-regular",
             "document-edit-regular",

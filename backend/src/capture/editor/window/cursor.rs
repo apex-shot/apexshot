@@ -121,8 +121,7 @@ pub fn cursor_name_for_view_point(
         | Tool::Line
         | Tool::Box
         | Tool::Number
-        | Tool::Blur
-        | Tool::Focus
-        | Tool::Censor => "crosshair",
+        | Tool::Obfuscate
+        | Tool::Focus => "crosshair",
     }
 }

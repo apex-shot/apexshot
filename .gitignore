@@ -17,15 +17,17 @@
 .env
 
 # Projects
-ksnip/
-wayshot/
 test_gtk/
-Gradia/
-eyedropper/
-#flameshot/
 node_modules/
 dist/
 build/
 .cache/
 *.log
 capture-overlay/build/
+
+.codeguardian
+.idea/
+.qoder
+.zencoder
+.zenflow
+.qodo

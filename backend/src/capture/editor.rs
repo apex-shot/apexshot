@@ -35,11 +35,11 @@ mod tests {
         assert_eq!(tool_shortcut_target('r'), Some((Tool::Box, 4)));
         assert_eq!(tool_shortcut_target('o'), Some((Tool::Circle, 5)));
         assert_eq!(tool_shortcut_target('h'), Some((Tool::Highlighter, 12)));
-        assert_eq!(tool_shortcut_target('c'), Some((Tool::Censor, 10)));
+        assert_eq!(tool_shortcut_target('c'), Some((Tool::Obfuscate, 9)));
         assert_eq!(tool_shortcut_target('n'), Some((Tool::Number, 11)));
         assert_eq!(tool_shortcut_target('x'), Some((Tool::Crop, 0)));
-        assert_eq!(tool_shortcut_target('b'), Some((Tool::Blur, 9)));
-        assert_eq!(tool_shortcut_target('f'), Some((Tool::Focus, 13)));
+        assert_eq!(tool_shortcut_target('b'), Some((Tool::Obfuscate, 9)));
+        assert_eq!(tool_shortcut_target('f'), Some((Tool::Focus, 10)));
         assert_eq!(tool_shortcut_target('q'), None);
     }
 
@@ -268,13 +268,15 @@ mod tests {
     #[test]
     fn set_selected_action_color_ignores_non_color_annotations() {
         let mut state = EditorState::new(RgbaImage::new(64, 64));
-        state.push_action(AnnotationAction::Blur {
+        state.push_action(AnnotationAction::Obfuscate {
             rect: Rect {
                 x: 10,
                 y: 10,
                 width: 18,
                 height: 18,
             },
+            method: ObfuscateMethod::Blur,
+            amount: DEFAULT_OBFUSCATE_AMOUNT,
         });
 
         state.selected_action_index = Some(0);
@@ -1260,18 +1262,20 @@ mod tests {
     }
 
     #[test]
-    fn draft_action_returns_censor_rect_when_tool_is_censor() {
+    fn draft_action_returns_obfuscate_rect_when_tool_is_obfuscate() {
         let mut state = EditorState::new(RgbaImage::new(20, 20));
-        state.set_tool(Tool::Censor);
+        state.set_tool(Tool::Obfuscate);
         state.begin_drag(Point { x: 1.0, y: 1.0 });
         state.update_drag(Point { x: 9.0, y: 8.0 });
 
         match state.draft_action().unwrap() {
-            AnnotationAction::Censor { rect } => {
+            AnnotationAction::Obfuscate { rect, method, amount } => {
                 assert_eq!(rect.x, 1);
                 assert_eq!(rect.y, 1);
                 assert_eq!(rect.width, 8);
                 assert_eq!(rect.height, 7);
+                assert_eq!(method, &ObfuscateMethod::Blur);
+                assert!(*amount > 0.0);
             }
             other => panic!("unexpected draft action: {:?}", other),
         }

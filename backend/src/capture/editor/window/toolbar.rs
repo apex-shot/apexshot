@@ -1,6 +1,6 @@
 use gtk4::{
     prelude::*, ApplicationWindow, Box as GtkBox, Button, CenterBox, Entry, GestureClick, Image,
-    Label, MenuButton, Orientation, Overlay, Popover, Stack,
+    Label, MenuButton, Orientation, Overlay, Popover, Scale, Stack,
 };
 use std::rc::Rc;
 
@@ -30,9 +30,8 @@ pub(super) struct ToolbarBaseParts {
     pub text_btn: Button,
     pub number_btn: Button,
     pub highlighter_btn: Button,
-    pub blur_btn: Button,
+    pub obfuscate_btn: Button,
     pub focus_btn: Button,
-    pub censor_btn: Button,
     pub sep_1: GtkBox,
     pub sep_2: GtkBox,
 }
@@ -47,9 +46,8 @@ pub(super) struct ToolbarBaseIconNames<'a> {
     pub text: &'a str,
     pub number: &'a str,
     pub highlighter: &'a str,
-    pub blur: &'a str,
+    pub obfuscate: &'a str,
     pub focus: &'a str,
-    pub censor: &'a str,
 }
 
 pub(super) struct ToolbarRightParts {
@@ -65,8 +63,7 @@ pub(super) struct ToolbarModeParts {
     pub root: GtkBox,
     pub toolbar_mode_stack: Stack,
     pub size_group: GtkBox,
-    pub size_down_btn: Button,
-    pub size_up_btn: Button,
+    pub size_slider: gtk4::Scale,
     pub crop_type_label: Label,
     pub crop_type_popover: Popover,
     pub crop_type_list: GtkBox,
@@ -107,9 +104,8 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     let text_btn = icon_tool_button(icon_names.text, "Text");
     let number_btn = icon_tool_button(icon_names.number, "Number");
     let highlighter_btn = icon_tool_button(icon_names.highlighter, "Highlighter");
-    let blur_btn = icon_tool_button(icon_names.blur, "Blur");
+    let obfuscate_btn = icon_tool_button(icon_names.obfuscate, "Obfuscate");
     let focus_btn = icon_tool_button(icon_names.focus, "Focus");
-    let censor_btn = icon_tool_button(icon_names.censor, "Censor");
 
     let sep_1 = GtkBox::new(Orientation::Vertical, 0);
     sep_1.add_css_class("editor-tools-divider");
@@ -136,9 +132,8 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         text_btn,
         number_btn,
         highlighter_btn,
-        blur_btn,
+        obfuscate_btn,
         focus_btn,
-        censor_btn,
         sep_1,
         sep_2,
     }
@@ -154,9 +149,8 @@ pub(super) fn build_toolbar_mode_controls(
     arrow_btn: &Button,
     line_btn: &Button,
     text_btn: &Button,
-    blur_btn: &Button,
+    obfuscate_btn: &Button,
     focus_btn: &Button,
-    censor_btn: &Button,
     number_btn: &Button,
     highlighter_btn: &Button,
     sep_1: &GtkBox,
@@ -167,21 +161,18 @@ pub(super) fn build_toolbar_mode_controls(
     color_group.add_css_class("editor-color-group");
     color_group.append(color_picker_trigger_host);
 
-    let size_down_btn = Button::with_label("-");
-    size_down_btn.set_has_frame(false);
-    size_down_btn.set_tooltip_text(Some("Decrease stroke size"));
-    size_down_btn.add_css_class("editor-tool-button");
+    let size_slider = Scale::with_range(Orientation::Horizontal, 1.0, 24.0, 1.0);
+    size_slider.add_css_class("editor-toolbar-size-slider");
+    size_slider.set_draw_value(false);
+    size_slider.set_size_request(100, -1);
+    size_slider.set_halign(gtk4::Align::Center);
+    size_slider.set_valign(gtk4::Align::Center);
+    size_slider.set_tooltip_text(Some("Stroke size"));
 
-    let size_up_btn = Button::with_label("+");
-    size_up_btn.set_has_frame(false);
-    size_up_btn.set_tooltip_text(Some("Increase stroke size"));
-    size_up_btn.add_css_class("editor-tool-button");
-
-    let size_group = GtkBox::new(Orientation::Horizontal, 2);
+    let size_group = GtkBox::new(Orientation::Horizontal, 0);
     size_group.add_css_class("editor-tools-group");
     size_group.add_css_class("editor-size-group");
-    size_group.append(&size_down_btn);
-    size_group.append(&size_up_btn);
+    size_group.append(&size_slider);
 
     let crop_tools_group = GtkBox::new(Orientation::Horizontal, 2);
     crop_tools_group.add_css_class("editor-tools-group");
@@ -298,9 +289,8 @@ pub(super) fn build_toolbar_mode_controls(
     primary_tools_group.append(arrow_btn);
     primary_tools_group.append(line_btn);
     primary_tools_group.append(text_btn);
-    primary_tools_group.append(blur_btn);
+    primary_tools_group.append(obfuscate_btn);
     primary_tools_group.append(focus_btn);
-    primary_tools_group.append(censor_btn);
     primary_tools_group.append(number_btn);
     primary_tools_group.append(highlighter_btn);
     primary_tools_group.append(sep_2);
@@ -329,8 +319,7 @@ pub(super) fn build_toolbar_mode_controls(
         root,
         toolbar_mode_stack,
         size_group,
-        size_down_btn,
-        size_up_btn,
+        size_slider,
         crop_type_label,
         crop_type_popover,
         crop_type_list,
