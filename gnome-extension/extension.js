@@ -1,84 +1,138 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// ApexShot Preview Helper - keeps preview windows on top
+// ApexShot Preview Helper
 
-import {Extension} from "resource:///org/gnome/shell/extensions/extension.js";
+import Meta from "gi://Meta";
 
-let _checkInterval = null;
-let _trackedWindows = new Map();
-
-export default class ApexShotPreview extends Extension {
-    _applyStacking(metaWindow) {
-        let windowId = metaWindow.get_id();
-        let title = metaWindow.get_title() || '(no title)';
-        
-        if (_trackedWindows.has(windowId)) {
-            metaWindow.make_above();
-            return;
-        }
-        
-        try {
-            metaWindow.make_above();
-            metaWindow.skip_taskbar = true;
-            metaWindow.skip_pager = true;
-            _trackedWindows.set(windowId, metaWindow);
-            console.log('ApexShot: Tracking ' + title);
-        } catch (e) {
-            console.log('ApexShot: Error: ' + e);
-        }
-    }
-
-    _scanForPreviewWindows() {
-        try {
-            let display = global.display;
-            let workspaces = display.get_workspaces();
-            
-            for (let wsi = 0; wsi < workspaces.length; wsi++) {
-                let windows = workspaces[wsi].list_windows();
-                
-                for (let i = 0; i < windows.length; i++) {
-                    let w = windows[i];
-                    let title = w.get_title() || '';
-                    
-                    if (title.includes('Screenshot') || title.includes('apexshot')) {
-                        this._applyStacking(w);
-                    }
-                }
-            }
-        } catch (e) {
-            console.log('ApexShot: Scan: ' + e);
-        }
-    }
-
-    _onFocusOut(display, event) {
-        try {
-            let focusedWindow = event.get_focused_window();
-            
-            if (focusedWindow && _trackedWindows.has(focusedWindow.get_id())) {
-                focusedWindow.raise();
-                focusedWindow.make_above();
-            }
-            
-            this._scanForPreviewWindows();
-        } catch (e) {
-            console.log('ApexShot: Focus: ' + e);
-        }
+export default class ApexShotPreview {
+    constructor() {
+        this._windowCreatedId = null;
+        this._trackedWindows = new Map();
+        this._pollInterval = null;
     }
 
     enable() {
-        console.log('ApexShot: Extension enabled');
+        // Connect to window-created signal
+        this._windowCreatedId = global.display.connect(
+            "window-created",
+            (display, window) => this._onWindowCreated(window)
+        );
+
+        // Check existing windows
+        this._checkExistingWindows();
         
-        _checkInterval = setInterval(() => this._scanForPreviewWindows(), 500);
-        global.display.connect('focus-out', (d, e) => this._onFocusOut(d, e));
-        this._scanForPreviewWindows();
+        // VERY aggressive polling - every 50ms
+        this._pollInterval = setInterval(() => {
+            this._pollWindows();
+        }, 50);
+        
+        // Watch focus changes
+        global.display.connect('notify::focus-window', () => {
+            this._onFocusChange();
+        });
     }
 
     disable() {
-        console.log('ApexShot: Extension disabled');
-        
-        if (_checkInterval) {
-            clearInterval(_checkInterval);
-            _checkInterval = null;
+        if (this._windowCreatedId) {
+            global.display.disconnect(this._windowCreatedId);
+            this._windowCreatedId = null;
         }
-        _trackedWindows.clear();
+        if (this._pollInterval) {
+            clearInterval(this._pollInterval);
+        }
+        this._trackedWindows.clear();
+    }
+
+    _checkExistingWindows() {
+        const windows = global.get_window_actors();
+        windows.forEach((actor) => {
+            const window = actor.get_meta_window();
+            if (window) {
+                this._processWindow(window);
+            }
+        });
+    }
+
+    _onWindowCreated(window) {
+        if (!window) {
+            return;
+        }
+
+        // Wait for title to be set
+        const sourceId = window.connect("notify::title", () => {
+            this._processWindow(window);
+            window.disconnect(sourceId);
+        });
+
+        this._processWindow(window);
+    }
+
+    _onFocusChange() {
+        // Whenever focus changes, re-apply to all tracked windows
+        for (let [id, data] of this._trackedWindows) {
+            if (data.window) {
+                this._applyAbove(data.window);
+            }
+        }
+    }
+
+    _pollWindows() {
+        // Check all windows for our preview
+        const windows = global.get_window_actors();
+        windows.forEach((actor) => {
+            const window = actor.get_meta_window();
+            if (window) {
+                this._processWindow(window);
+            }
+        });
+    }
+
+    _processWindow(window) {
+        if (!window) return;
+
+        let title = window.get_title() ?? "";
+        let wmClass = window.get_wm_class() ?? "";
+        let windowId = window.get_id();
+
+        // Check if this is our preview window
+        const isPreview = title.includes('Screenshot') || 
+                          wmClass.toLowerCase().includes('apexshot');
+
+        if (isPreview) {
+            // Only attach handlers once
+            if (!this._trackedWindows.has(windowId)) {
+                this._trackedWindows.set(windowId, { window: window, processed: true });
+                
+                // Watch for minimize state changes
+                window.connect('notify::minimized', () => {
+                    if (!window.minimized) {
+                        this._applyAbove(window);
+                    }
+                });
+                
+                // Watch for hidden state changes
+                window.connect('notify::hidden', () => {
+                    if (!window.is_hidden()) {
+                        this._applyAbove(window);
+                    }
+                });
+                
+                // Watch for window layer changes
+                window.connect('notify::layer', () => {
+                    this._applyAbove(window);
+                });
+            }
+            
+            this._applyAbove(window);
+        }
+    }
+
+    _applyAbove(window) {
+        try {
+            window.make_above();
+            window.stick();
+            window.unminimize();
+        } catch(e) {
+            // Ignore errors
+        }
     }
 }
