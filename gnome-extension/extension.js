@@ -1,137 +1,84 @@
-'use strict';
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// ApexShot Preview Helper - keeps preview windows on top
 
-const { GLib, Meta } = imports.gi;
+import {Extension} from "resource:///org/gnome/shell/extensions/extension.js";
 
-let _previewXids = new Set();
+let _checkInterval = null;
+let _trackedWindows = new Map();
 
-function _applyStackingConstraints(metaWindow) {
-    metaWindow.make_above();
-    metaWindow.skip_taskbar = true;
-    metaWindow.skip_pager = true;
-    
-    const xid = metaWindow.get_id();
-    _previewXids.add(xid);
-}
-
-function _removeStackingConstraints(metaWindow) {
-    metaWindow.make_above();
-    const xid = metaWindow.get_id();
-    _previewXids.delete(xid);
-}
-
-let _signalSubscription = null;
-
-function _connectToApexshot() {
-    try {
-        const connection = GLib.DBusConnection.get(GLib.BusType.SESSION, null);
+export default class ApexShotPreview extends Extension {
+    _applyStacking(metaWindow) {
+        let windowId = metaWindow.get_id();
+        let title = metaWindow.get_title() || '(no title)';
         
-        if (!connection) {
+        if (_trackedWindows.has(windowId)) {
+            metaWindow.make_above();
             return;
         }
         
-        _signalSubscription = connection.signal_subscribe(
-            null,
-            'org.apexshot.Preview',
-            'PreviewOpened',
-            '/org/apexshot/Preview',
-            null,
-            0,
-            (conn, sender, object_path, iface, signal, params) => {
-                const xid = params.get_child_value(0).get_uint32();
-                _onPreviewOpened(xid);
+        try {
+            metaWindow.make_above();
+            metaWindow.skip_taskbar = true;
+            metaWindow.skip_pager = true;
+            _trackedWindows.set(windowId, metaWindow);
+            console.log('ApexShot: Tracking ' + title);
+        } catch (e) {
+            console.log('ApexShot: Error: ' + e);
+        }
+    }
+
+    _scanForPreviewWindows() {
+        try {
+            let display = global.display;
+            let workspaces = display.get_workspaces();
+            
+            for (let wsi = 0; wsi < workspaces.length; wsi++) {
+                let windows = workspaces[wsi].list_windows();
+                
+                for (let i = 0; i < windows.length; i++) {
+                    let w = windows[i];
+                    let title = w.get_title() || '';
+                    
+                    if (title.includes('Screenshot') || title.includes('apexshot')) {
+                        this._applyStacking(w);
+                    }
+                }
             }
-        );
-        
-        connection.signal_subscribe(
-            null,
-            'org.apexshot.Preview',
-            'PreviewClosed',
-            '/org/apexshot/Preview',
-            null,
-            0,
-            (conn, sender, object_path, iface, signal, params) => {
-                const xid = params.get_child_value(0).get_uint32();
-                _onPreviewClosed(xid);
+        } catch (e) {
+            console.log('ApexShot: Scan: ' + e);
+        }
+    }
+
+    _onFocusOut(display, event) {
+        try {
+            let focusedWindow = event.get_focused_window();
+            
+            if (focusedWindow && _trackedWindows.has(focusedWindow.get_id())) {
+                focusedWindow.raise();
+                focusedWindow.make_above();
             }
-        );
+            
+            this._scanForPreviewWindows();
+        } catch (e) {
+            console.log('ApexShot: Focus: ' + e);
+        }
+    }
+
+    enable() {
+        console.log('ApexShot: Extension enabled');
         
-        log('ApexShot Preview Helper: Connected to D-Bus');
-    } catch (e) {
-        log(`ApexShot Preview Helper: Could not connect to D-Bus: ${e.message}`);
+        _checkInterval = setInterval(() => this._scanForPreviewWindows(), 500);
+        global.display.connect('focus-out', (d, e) => this._onFocusOut(d, e));
+        this._scanForPreviewWindows();
     }
-}
 
-function _onPreviewOpened(xid) {
-    const display = global.display;
-    
-    if (xid > 0) {
-        const windowActor = display.get_window_actors().find(
-            w => w.get_meta_window().get_id() === xid
-        );
-        if (windowActor) {
-            const metaWindow = windowActor.get_meta_window();
-            _applyStackingConstraints(metaWindow);
-            log(`ApexShot Preview Helper: Applied stacking to window ${xid}`);
-            return;
+    disable() {
+        console.log('ApexShot: Extension disabled');
+        
+        if (_checkInterval) {
+            clearInterval(_checkInterval);
+            _checkInterval = null;
         }
+        _trackedWindows.clear();
     }
-    
-    const windows = display.get_workspace(0).list_windows();
-    for (const w of windows) {
-        const title = w.get_title();
-        if (title && (title === 'Screenshot' || title.includes('apexshot') || title.includes('ApexShot'))) {
-            _applyStackingConstraints(w);
-            log(`ApexShot Preview Helper: Applied stacking to window by title: ${title}`);
-            break;
-        }
-    }
-}
-
-function _onPreviewClosed(xid) {
-    const display = global.display;
-    const windows = display.get_window_actors();
-    
-    for (const wa of windows) {
-        const mw = wa.get_meta_window();
-        if (xid > 0 && mw.get_id() === xid) {
-            _removeStackingConstraints(mw);
-            log(`ApexShot Preview Helper: Removed stacking from window ${xid}`);
-            break;
-        }
-    }
-}
-
-let _focusOutId = null;
-
-function _setupFocusOutHandler() {
-    _focusOutId = global.display.connect('focus-out', (display, event) => {
-        const focusedWindow = event.get_focused_window();
-        if (focusedWindow && _previewXids.has(focusedWindow.get_id())) {
-            focusedWindow.raise();
-            focusedWindow.make_above();
-        }
-    });
-}
-
-function init() {
-    _connectToApexshot();
-    _setupFocusOutHandler();
-}
-
-function enable() {
-    log('ApexShot Preview Helper: Extension enabled');
-}
-
-function disable() {
-    const display = global.display;
-    for (const wa of display.get_window_actors()) {
-        const mw = wa.get_meta_window();
-        if (_previewXids.has(mw.get_id())) {
-            mw.delete_property('above');
-            mw.skip_taskbar = false;
-            mw.skip_pager = false;
-        }
-    }
-    _previewXids.clear();
-    log('ApexShot Preview Helper: Extension disabled');
 }
