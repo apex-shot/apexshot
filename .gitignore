@@ -37,3 +37,6 @@ Thumbs.db
 # Common
 node_modules/
 backend/target
+
+# Worktrees
+.worktrees/
