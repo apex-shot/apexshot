@@ -1,0 +1,9 @@
+{
+  "uuid": "org.apexshot.PreviewStacking@apexshot.github.io",
+  "name": "ApexShot Preview Helper",
+  "description": "Keeps ApexShot preview windows on top during drag operations on GNOME Wayland",
+  "version": "1",
+  "shell-version": ["45", "46", "47"],
+  "url": "https://github.com/codegoddy/apexshot",
+  "author": "ApexShot Team"
+}
