@@ -93,8 +93,9 @@ export default class ApexShotPreview {
         let wmClass = window.get_wm_class() ?? "";
         let windowId = window.get_id();
 
-        // Check if this is our preview window
-        const isPreview = title.includes('Screenshot') || 
+        // Check if this is our preview window - exact match for "Screenshot"
+        const isPreview = title === 'Screenshot' || 
+                          title.includes('apexshot') ||
                           wmClass.toLowerCase().includes('apexshot');
 
         if (isPreview) {
