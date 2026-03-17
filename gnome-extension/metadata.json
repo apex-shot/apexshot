@@ -1,0 +1,8 @@
+{
+  "name": "ApexShot Preview Helper",
+  "description": "Keeps ApexShot preview windows on top of other windows on GNOME Wayland",
+  "uuid": "apexshot-preview-helper@apexshot.github.io",
+  "shell-version": ["45", "46", "47", "48", "49"],
+  "url": "https://github.com/codegoddy/apexshot",
+  "version": 1
+}
