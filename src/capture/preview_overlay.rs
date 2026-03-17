@@ -165,18 +165,9 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
     bottom_controls.append(&bottom_spacer);
     bottom_controls.append(&upload_btn);
 
-    let fallback_notice = Label::new(Some("Install GNOME extension for always-on-top"));
+    let fallback_notice = Label::new(None);
     fallback_notice.add_css_class("preview-warning-badge");
-    fallback_notice.set_halign(Align::Center);
-    fallback_notice.set_valign(Align::Start);
-    fallback_notice.set_margin_top(10);
-    fallback_notice.set_xalign(0.5);
-    fallback_notice.set_wrap(true);
-    fallback_notice.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-    fallback_notice.set_justify(gtk4::Justification::Center);
-    fallback_notice.set_max_width_chars(24);
-    fallback_notice.set_visible(limited_always_on_top);
-    fallback_notice.set_can_target(false);
+    fallback_notice.set_visible(false);
 
     top_controls.set_visible(false);
     center_controls.set_visible(false);
