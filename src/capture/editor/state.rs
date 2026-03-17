@@ -30,6 +30,7 @@ pub struct EditorState {
     pub selected_color: DrawColor,
     pub stroke_size: f64,
     pub text_size: f64,
+    pub text_font_family: String,
     pub obfuscate_amount: f64,
     pub next_number: u32,
     pub select_drag_anchor: Option<Point>,
@@ -220,6 +221,7 @@ impl EditorState {
             selected_color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
             stroke_size: STROKE_WIDTH,
             text_size: TEXT_SIZE,
+            text_font_family: String::from("Sans"),
             obfuscate_amount: DEFAULT_OBFUSCATE_AMOUNT,
             next_number: 1,
             select_drag_anchor: None,
@@ -372,6 +374,7 @@ impl EditorState {
         true
     }
 
+    #[allow(dead_code)]
     pub fn set_text_size(&mut self, size: f64) -> bool {
         let next = clamp_text_size(size);
         if (next - self.text_size).abs() <= f64::EPSILON {
@@ -411,6 +414,37 @@ impl EditorState {
         }
 
         font.size = next;
+        self.redo_actions.clear();
+        true
+    }
+
+    pub fn selected_text_font_family(&self) -> Option<String> {
+        let AnnotationAction::Text { font, .. } = self.selected_action()? else {
+            return None;
+        };
+
+        Some(font.family.clone())
+    }
+
+    pub fn set_selected_text_font_family(&mut self, family: String) -> bool {
+        let Some(index) = self.selected_action_index else {
+            return false;
+        };
+
+        let Some(action) = self.actions.get_mut(index) else {
+            self.selected_action_index = None;
+            return false;
+        };
+
+        let AnnotationAction::Text { font, .. } = action else {
+            return false;
+        };
+
+        if font.family == family {
+            return false;
+        }
+
+        font.family = family;
         self.redo_actions.clear();
         true
     }
@@ -463,9 +497,6 @@ impl EditorState {
 
     pub fn active_size_control_mode(&self) -> Option<SizeControlMode> {
         if self.selected_tool == Tool::Select {
-            if self.selected_text_action_size().is_some() {
-                return Some(SizeControlMode::Text);
-            }
             if self.selected_action_stroke_size().is_some() {
                 return Some(SizeControlMode::Stroke);
             }
@@ -476,7 +507,7 @@ impl EditorState {
         }
 
         if self.selected_tool == Tool::Text {
-            return Some(SizeControlMode::Text);
+            return None;
         }
 
         if self.selected_tool == Tool::Obfuscate {
@@ -500,13 +531,6 @@ impl EditorState {
                     )
                 } else {
                     Some(self.stroke_size)
-                }
-            }
-            SizeControlMode::Text => {
-                if self.selected_tool == Tool::Select {
-                    Some(self.selected_text_action_size().unwrap_or(self.text_size))
-                } else {
-                    Some(self.text_size)
                 }
             }
             SizeControlMode::Obfuscate => {
@@ -539,14 +563,10 @@ impl EditorState {
                 let _ = self.set_selected_action_stroke_size(self.stroke_size);
                 changed
             }
-            Some(SizeControlMode::Text) => {
-                let changed = self.set_text_size(size);
-                let _ = self.set_selected_text_action_size(self.text_size);
-                changed
-            }
             Some(SizeControlMode::Obfuscate) => {
                 let changed = self.set_obfuscate_amount(size);
-                let _ = self.set_selected_obfuscate_action_amount_without_rebuild(self.obfuscate_amount);
+                let _ = self
+                    .set_selected_obfuscate_action_amount_without_rebuild(self.obfuscate_amount);
                 changed
             }
             None => false,
@@ -563,8 +583,7 @@ impl EditorState {
             | AnnotationAction::Box { color, .. }
             | AnnotationAction::Text { color, .. }
             | AnnotationAction::Number { color, .. } => Some(*color),
-            AnnotationAction::Obfuscate { .. }
-            | AnnotationAction::Focus { .. } => None,
+            AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. } => None,
         }
     }
 
@@ -587,8 +606,7 @@ impl EditorState {
             | AnnotationAction::Box { color, .. }
             | AnnotationAction::Text { color, .. }
             | AnnotationAction::Number { color, .. } => color,
-            AnnotationAction::Obfuscate { .. }
-            | AnnotationAction::Focus { .. } => return false,
+            AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. } => return false,
         };
 
         if *target == color {
@@ -633,22 +651,14 @@ impl EditorState {
         )
     }
 
-    /// Like `push_action` but does NOT call `rebuild_effect_layer`.
-    /// Use this when you want to register the action immediately (so undo/history
-    /// work correctly) but defer the expensive pixel rebuild to a background thread.
-    pub fn push_action_without_rebuild(&mut self, action: AnnotationAction) {
-        self.actions.push(action);
-        self.redo_actions.clear();
-        self.selected_action_index = Some(self.actions.len() - 1);
-        self.select_drag_anchor = None;
-        self.select_resize_handle = None;
-        self.sync_next_number();
-    }
-
     pub fn undo(&mut self) -> bool {
         if self.undo_without_rebuild() {
             // Check if any remaining actions require effect rebuild
-            if self.actions.iter().any(|a| Self::action_requires_effect_rebuild(a)) {
+            if self
+                .actions
+                .iter()
+                .any(|a| Self::action_requires_effect_rebuild(a))
+            {
                 self.rebuild_effect_layer();
             }
             true
@@ -945,10 +955,7 @@ impl EditorState {
             } else {
                 translate_action(action, dx, dy)
             };
-            let effect_action = matches!(
-                action,
-                AnnotationAction::Obfuscate { .. }
-            );
+            let effect_action = matches!(action, AnnotationAction::Obfuscate { .. });
             (moved, effect_action)
         } else {
             self.selected_action_index = None;
@@ -1054,7 +1061,6 @@ pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction])
 }
 
 impl EditorState {
-
     pub fn begin_drag(&mut self, point: Point) {
         self.selected_action_index = None;
         self.drag_start = Some(point);
@@ -1179,11 +1185,13 @@ impl EditorState {
                 stroke_size,
             }),
             Tool::Number => None,
-            Tool::Obfuscate => Rect::from_points(start, end).map(|rect| AnnotationAction::Obfuscate {
-                rect,
-                method: ObfuscateMethod::Blur,
-                amount: self.obfuscate_amount,
-            }),
+            Tool::Obfuscate => {
+                Rect::from_points(start, end).map(|rect| AnnotationAction::Obfuscate {
+                    rect,
+                    method: ObfuscateMethod::Blur,
+                    amount: self.obfuscate_amount,
+                })
+            }
             Tool::Focus => {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
             }
@@ -1292,11 +1300,13 @@ impl EditorState {
                 stroke_size,
             }),
             Tool::Number => None,
-            Tool::Obfuscate => Rect::from_points(start, end).map(|rect| AnnotationAction::Obfuscate {
-                rect,
-                method: ObfuscateMethod::Blur,
-                amount: self.obfuscate_amount,
-            }),
+            Tool::Obfuscate => {
+                Rect::from_points(start, end).map(|rect| AnnotationAction::Obfuscate {
+                    rect,
+                    method: ObfuscateMethod::Blur,
+                    amount: self.obfuscate_amount,
+                })
+            }
             Tool::Focus => {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
             }
@@ -1365,8 +1375,7 @@ impl EditorState {
             for action in &self.actions {
                 if matches!(
                     action,
-                    AnnotationAction::Obfuscate { .. }
-                        | AnnotationAction::Focus { .. }
+                    AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
                 ) {
                     continue;
                 }
@@ -1445,14 +1454,17 @@ impl EditorState {
         // Base scaling factor for padding based on screenshot size
         let ref_size = screenshot_w.max(screenshot_h);
         let scale_factor = ref_size / 400.0;
-        
+
         // Padding increases the CANVAS size
         let padding_px = self.background_padding * scale_factor;
         let mut canvas_w = screenshot_w + padding_px * 2.0;
         let mut canvas_h = screenshot_h + padding_px * 2.0;
 
         // Apply background aspect ratio expansion if set
-        if let Some(ratio) = self.background_aspect_ratio.aspect_ratio(canvas_w as i32, canvas_h as i32) {
+        if let Some(ratio) = self
+            .background_aspect_ratio
+            .aspect_ratio(canvas_w as i32, canvas_h as i32)
+        {
             let current_ratio = canvas_w / canvas_h;
             if current_ratio < ratio {
                 canvas_w = canvas_h * ratio;
@@ -1488,8 +1500,22 @@ impl EditorState {
             }
             BackgroundStyle::Blurred(_idx) => {
                 let mut blurred = screenshot.clone();
-                apply_blur_rect(&mut blurred, Rect { x: 0, y: 0, width: screenshot_w as i32, height: screenshot_h as i32 }, 30.0);
-                image::imageops::resize(&blurred, canvas_w as u32, canvas_h as u32, image::imageops::FilterType::Triangle)
+                apply_blur_rect(
+                    &mut blurred,
+                    Rect {
+                        x: 0,
+                        y: 0,
+                        width: screenshot_w as i32,
+                        height: screenshot_h as i32,
+                    },
+                    30.0,
+                );
+                image::imageops::resize(
+                    &blurred,
+                    canvas_w as u32,
+                    canvas_h as u32,
+                    image::imageops::FilterType::Triangle,
+                )
             }
             BackgroundStyle::None => return Ok(screenshot.clone()),
         };
@@ -1502,15 +1528,27 @@ impl EditorState {
             BackgroundAlignment::TopRight => (canvas_w - draw_w - padding_px, padding_px),
             BackgroundAlignment::CenterLeft => (padding_px, (canvas_h - draw_h) / 2.0),
             BackgroundAlignment::Center => ((canvas_w - draw_w) / 2.0, (canvas_h - draw_h) / 2.0),
-            BackgroundAlignment::CenterRight => (canvas_w - draw_w - padding_px, (canvas_h - draw_h) / 2.0),
+            BackgroundAlignment::CenterRight => {
+                (canvas_w - draw_w - padding_px, (canvas_h - draw_h) / 2.0)
+            }
             BackgroundAlignment::BottomLeft => (padding_px, canvas_h - draw_h - padding_px),
-            BackgroundAlignment::BottomCenter => ((canvas_w - draw_w) / 2.0, canvas_h - draw_h - padding_px),
-            BackgroundAlignment::BottomRight => (canvas_w - draw_w - padding_px, canvas_h - draw_h - padding_px),
+            BackgroundAlignment::BottomCenter => {
+                ((canvas_w - draw_w) / 2.0, canvas_h - draw_h - padding_px)
+            }
+            BackgroundAlignment::BottomRight => (
+                canvas_w - draw_w - padding_px,
+                canvas_h - draw_h - padding_px,
+            ),
         };
 
         // Scale and handle corner radius
         let scaled_screenshot = if (draw_scale - 1.0).abs() > 0.001 {
-            image::imageops::resize(screenshot, draw_w as u32, draw_h as u32, image::imageops::FilterType::Triangle)
+            image::imageops::resize(
+                screenshot,
+                draw_w as u32,
+                draw_h as u32,
+                image::imageops::FilterType::Triangle,
+            )
         } else {
             screenshot.clone()
         };
@@ -1525,13 +1563,19 @@ impl EditorState {
         if self.background_shadow > 0.0 {
             let shadow_color = image::Rgba([0, 0, 0, 100]);
             let shadow_offset = (self.background_shadow * 0.15 * scale_factor * draw_scale) as i64;
-            
-            let mut shadow_layer = RgbaImage::from_pixel(draw_w as u32, draw_h as u32, shadow_color);
+
+            let mut shadow_layer =
+                RgbaImage::from_pixel(draw_w as u32, draw_h as u32, shadow_color);
             if self.background_corner_radius > 0.0 {
                 let radius = self.background_corner_radius * scale_factor * draw_scale;
                 apply_corner_radius(&mut shadow_layer, radius);
             }
-            image::imageops::overlay(&mut canvas, &shadow_layer, dest_x as i64, (dest_y + shadow_offset as f64) as i64);
+            image::imageops::overlay(
+                &mut canvas,
+                &shadow_layer,
+                dest_x as i64,
+                (dest_y + shadow_offset as f64) as i64,
+            );
         }
 
         image::imageops::overlay(&mut canvas, &final_screenshot, dest_x as i64, dest_y as i64);
@@ -1539,17 +1583,29 @@ impl EditorState {
         Ok(canvas)
     }
 
-    fn load_and_resize_background(&self, path: &Path, width: u32, height: u32) -> Result<RgbaImage, EditorError> {
+    fn load_and_resize_background(
+        &self,
+        path: &Path,
+        width: u32,
+        height: u32,
+    ) -> Result<RgbaImage, EditorError> {
         let img = image::open(path).map_err(|e| EditorError::ImageLoad(e.to_string()))?;
         let rgba = img.into_rgba8();
-        Ok(image::imageops::resize(&rgba, width, height, image::imageops::FilterType::Triangle))
+        Ok(image::imageops::resize(
+            &rgba,
+            width,
+            height,
+            image::imageops::FilterType::Triangle,
+        ))
     }
 }
 
 fn apply_corner_radius(image: &mut RgbaImage, radius: f64) {
     let (width, height) = image.dimensions();
-    if radius <= 0.0 { return; }
-    
+    if radius <= 0.0 {
+        return;
+    }
+
     let r2 = radius * radius;
     for y in 0..height {
         for x in 0..width {
@@ -1564,7 +1620,9 @@ fn apply_corner_radius(image: &mut RgbaImage, radius: f64) {
                 let dist2 = dx * dx + dy * dy;
                 if dist2 > r2 {
                     alpha_scale = (radius - (dist2.sqrt() - radius)).clamp(0.0, 1.0); // Anti-aliasing hack
-                    if dist2 > (radius + 1.0) * (radius + 1.0) { alpha_scale = 0.0; }
+                    if dist2 > (radius + 1.0) * (radius + 1.0) {
+                        alpha_scale = 0.0;
+                    }
                 }
             }
             // Top-right

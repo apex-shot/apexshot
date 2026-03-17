@@ -107,7 +107,6 @@ impl Default for FontSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeControlMode {
     Stroke,
-    Text,
     Obfuscate,
 }
 
@@ -523,8 +522,8 @@ pub fn tool_shortcut_target(key: char) -> Option<(Tool, usize)> {
         'b' | 'B' => Some((Tool::Obfuscate, 9)),
         'f' | 'F' => Some((Tool::Focus, 10)),
         _ => None,
-        }
-        }
+    }
+}
 
 pub fn constrained_drag_endpoint(
     tool: Tool,

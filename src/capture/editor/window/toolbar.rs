@@ -18,7 +18,6 @@ pub(super) struct ToolbarBaseParts {
     pub traffic_close: Button,
     pub traffic_minimize: Button,
     pub traffic_zoom: Button,
-    pub left_group: GtkBox,
     pub select_btn: Button,
     pub crop_btn: Button,
     pub background_btn: Button,
@@ -64,6 +63,12 @@ pub(super) struct ToolbarModeParts {
     pub toolbar_mode_stack: Stack,
     pub size_group: GtkBox,
     pub size_slider: gtk4::Scale,
+    pub text_size_group: GtkBox,
+    pub text_size_label: Label,
+    pub text_size_list: GtkBox,
+    pub font_family_group: GtkBox,
+    pub font_family_label: Label,
+    pub font_family_list: GtkBox,
     pub crop_type_label: Label,
     pub crop_type_popover: Popover,
     pub crop_type_list: GtkBox,
@@ -120,7 +125,6 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         traffic_close,
         traffic_minimize,
         traffic_zoom,
-        left_group,
         select_btn,
         crop_btn,
         background_btn,
@@ -149,6 +153,7 @@ pub(super) fn build_toolbar_mode_controls(
     arrow_btn: &Button,
     line_btn: &Button,
     text_btn: &Button,
+    _text_italic_icon: &str,
     obfuscate_btn: &Button,
     focus_btn: &Button,
     number_btn: &Button,
@@ -173,6 +178,104 @@ pub(super) fn build_toolbar_mode_controls(
     size_group.add_css_class("editor-tools-group");
     size_group.add_css_class("editor-size-group");
     size_group.append(&size_slider);
+
+    // Text Size Picker
+    let text_size_button = Button::new();
+    text_size_button.set_has_frame(false);
+    text_size_button.set_focusable(false);
+    text_size_button.add_css_class("editor-tool-button");
+    text_size_button.add_css_class("flat");
+    text_size_button.add_css_class("editor-text-size-button");
+    text_size_button.set_tooltip_text(Some("Text size"));
+
+    let text_size_button_box = GtkBox::new(Orientation::Horizontal, 2);
+    text_size_button_box.set_halign(gtk4::Align::Center);
+    text_size_button_box.set_valign(gtk4::Align::Center);
+    let text_size_label = Label::new(Some("24pt"));
+    text_size_label.add_css_class("editor-text-size-label");
+    let text_size_arrow = Image::from_icon_name("pan-down-symbolic");
+    text_size_arrow.set_pixel_size(10);
+    text_size_arrow.add_css_class("editor-text-size-arrow");
+    text_size_button_box.append(&text_size_label);
+    text_size_button_box.append(&text_size_arrow);
+    text_size_button.set_child(Some(&text_size_button_box));
+
+    let text_size_popover = Popover::new();
+    text_size_popover.set_has_arrow(false);
+    text_size_popover.set_autohide(true);
+    text_size_popover.add_css_class("editor-popover");
+    text_size_popover.set_parent(&text_size_button);
+    let text_size_list = GtkBox::new(Orientation::Vertical, 0);
+    text_size_list.add_css_class("editor-popover-list");
+    text_size_popover.set_child(Some(&text_size_list));
+
+    let p_size = text_size_popover.clone();
+    text_size_button.connect_clicked(move |_| {
+        p_size.popup();
+    });
+
+    for size in [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72] {
+        let label = format!("{}pt", size);
+        let btn = Button::builder()
+            .label(&label)
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .build();
+        text_size_list.append(&btn);
+    }
+
+    // Font Picker
+    let font_family_button = Button::new();
+    font_family_button.set_has_frame(false);
+    font_family_button.set_focusable(false);
+    font_family_button.add_css_class("editor-tool-button");
+    font_family_button.add_css_class("flat");
+    font_family_button.set_tooltip_text(Some("Font family"));
+
+    let font_family_button_box = GtkBox::new(Orientation::Horizontal, 2);
+    font_family_button_box.set_halign(gtk4::Align::Center);
+    font_family_button_box.set_valign(gtk4::Align::Center);
+    let font_family_label = Label::new(Some("Sans"));
+    font_family_label.add_css_class("editor-font-family-label");
+    let font_family_arrow = Image::from_icon_name("pan-down-symbolic");
+    font_family_arrow.set_pixel_size(10);
+    font_family_arrow.add_css_class("editor-font-family-arrow");
+    font_family_button_box.append(&font_family_label);
+    font_family_button_box.append(&font_family_arrow);
+    font_family_button.set_child(Some(&font_family_button_box));
+
+    let font_family_popover = Popover::new();
+    font_family_popover.set_has_arrow(false);
+    font_family_popover.set_autohide(true);
+    font_family_popover.add_css_class("editor-popover");
+    font_family_popover.set_parent(&font_family_button);
+    let font_family_list = GtkBox::new(Orientation::Vertical, 0);
+    font_family_list.add_css_class("editor-popover-list");
+    font_family_popover.set_child(Some(&font_family_list));
+
+    let p_font = font_family_popover.clone();
+    font_family_button.connect_clicked(move |_| {
+        p_font.popup();
+    });
+
+    for family in ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"] {
+        let btn = Button::builder()
+            .label(family)
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .build();
+        font_family_list.append(&btn);
+    }
+
+    let text_size_group = GtkBox::new(Orientation::Horizontal, 2);
+    text_size_group.add_css_class("editor-tools-group");
+    text_size_group.append(&text_size_button);
+    text_size_group.set_visible(false);
+
+    let font_family_group = GtkBox::new(Orientation::Horizontal, 2);
+    font_family_group.add_css_class("editor-tools-group");
+    font_family_group.append(&font_family_button);
+    font_family_group.set_visible(false);
 
     let crop_tools_group = GtkBox::new(Orientation::Horizontal, 2);
     crop_tools_group.add_css_class("editor-tools-group");
@@ -313,6 +416,8 @@ pub(super) fn build_toolbar_mode_controls(
     root.append(&crop_tools_group);
     root.append(&background_tools_group);
     root.append(&toolbar_mode_stack);
+    root.append(&text_size_group);
+    root.append(&font_family_group);
     root.append(&color_group);
 
     ToolbarModeParts {
@@ -320,6 +425,12 @@ pub(super) fn build_toolbar_mode_controls(
         toolbar_mode_stack,
         size_group,
         size_slider,
+        text_size_group,
+        text_size_label,
+        text_size_list,
+        font_family_group,
+        font_family_label,
+        font_family_list,
         crop_type_label,
         crop_type_popover,
         crop_type_list,
@@ -387,6 +498,8 @@ pub(super) fn build_toolbar_right_controls(
 pub(super) fn build_toolbar_tool_updater(
     toolbar_mode_stack: &Stack,
     background_sidebar: &GtkBox,
+    text_size_group: &GtkBox,
+    font_family_group: &GtkBox,
     canvas_scroller: &gtk4::ScrolledWindow,
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
     window: &ApplicationWindow,
@@ -395,6 +508,8 @@ pub(super) fn build_toolbar_tool_updater(
 ) -> Rc<dyn Fn(Tool)> {
     let toolbar_mode_stack = toolbar_mode_stack.clone();
     let background_sidebar = background_sidebar.clone();
+    let text_size_group = text_size_group.clone();
+    let font_family_group = font_family_group.clone();
     let canvas_scroller = canvas_scroller.clone();
     let window = window.downgrade();
 
@@ -404,6 +519,10 @@ pub(super) fn build_toolbar_tool_updater(
         } else {
             "standard"
         });
+
+        let is_text_tool = matches!(tool, Tool::Text);
+        text_size_group.set_visible(is_text_tool);
+        font_family_group.set_visible(is_text_tool);
 
         // Only allow vertical scrolling in Crop mode
         if matches!(tool, Tool::Crop) {
