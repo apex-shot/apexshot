@@ -1,43 +1,49 @@
 use std::process::Command;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-static PREVIEW_XID: AtomicU32 = AtomicU32::new(0);
+/// Emit `PreviewOpened(preview_id, pid, title, namespace, opened_at_ms)` on
+/// the session D-Bus.  The extension uses `preview_id` as the primary logical
+/// key and `pid` as the primary Wayland matching key.
+pub fn emit_preview_opened(preview_id: &str, pid: u32, title: &str, namespace: &str) {
+    let opened_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
 
-pub fn emit_preview_opened(xid: u32) {
-    PREVIEW_XID.store(xid, Ordering::SeqCst);
+    let preview_id = preview_id.to_owned();
+    let title = title.to_owned();
+    let namespace = namespace.to_owned();
 
     std::thread::spawn(move || {
         let _ = Command::new("dbus-send")
             .args([
                 "--session",
-                "--dest=org.apexshot.Preview",
+                "--type=signal",
                 "/org/apexshot/Preview",
                 "org.apexshot.Preview.PreviewOpened",
-                &format!("uint32:{}", xid),
+                &format!("string:{}", preview_id),
+                &format!("uint32:{}", pid),
+                &format!("string:{}", title),
+                &format!("string:{}", namespace),
+                &format!("uint64:{}", opened_at_ms),
             ])
             .spawn();
     });
 }
 
-pub fn emit_preview_closed() {
-    let xid = PREVIEW_XID.swap(0, Ordering::SeqCst);
-    if xid == 0 {
-        return;
-    }
+/// Emit `PreviewClosed(preview_id)` on the session D-Bus.
+pub fn emit_preview_closed(preview_id: &str) {
+    let preview_id = preview_id.to_owned();
 
     std::thread::spawn(move || {
         let _ = Command::new("dbus-send")
             .args([
                 "--session",
-                "--dest=org.apexshot.Preview",
+                "--type=signal",
                 "/org/apexshot/Preview",
                 "org.apexshot.Preview.PreviewClosed",
-                &format!("uint32:{}", xid),
+                &format!("string:{}", preview_id),
             ])
             .spawn();
     });
-}
-
-pub fn get_current_xid() -> u32 {
-    PREVIEW_XID.load(Ordering::SeqCst)
 }
