@@ -18,13 +18,22 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use x11rb::wrapper::ConnectionExt;
 use x11rb::{
     connection::Connection,
     protocol::xproto::{self, ConnectionExt as _},
 };
+
+/// Generate a unique preview ID based on PID and current timestamp (milliseconds).
+fn generate_preview_id(pid: u32) -> String {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("preview-{}-{}", pid, ts)
+}
 
 const PREVIEW_WIDTH: i32 = 211;
 const PREVIEW_HEIGHT: i32 = 151;
@@ -65,13 +74,16 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
         std::env::set_var("DESKTOP_STARTUP_ID", "");
     }
 
+    let pid = std::process::id();
+    let preview_id = generate_preview_id(pid);
+
     let main_loop = glib::MainLoop::new(None, false);
-    setup_preview_window(&main_loop, path);
+    setup_preview_window(&main_loop, path, preview_id);
     main_loop.run();
     Ok(())
 }
 
-fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
+fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: String) {
     install_preview_css();
 
     let window = Window::builder()
@@ -510,11 +522,12 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
 
     let main_loop_close = main_loop.clone();
     let edit_opened_close = edit_opened.clone();
+    let preview_id_close = preview_id.clone();
     window.connect_close_request(move |_| {
         if !edit_opened_close.load(Ordering::Relaxed) {
             main_loop_close.quit();
         }
-        crate::gnome_integration::emit_preview_closed();
+        crate::gnome_integration::emit_preview_closed(&preview_id_close);
         glib::Propagation::Proceed
     });
 
@@ -541,10 +554,24 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
 
     window.present();
 
+    // Emit PreviewOpened with structured metadata so the GNOME extension can
+    // track this preview by preview_id and match the Wayland window by PID.
+    // Skip this when layer_shell_active is true because:
+    // 1. Layer-shell Overlay already keeps the window above everything
+    // 2. Layer-shell surfaces are not exposed as MetaWindow, so the extension can't find it
+    if !layer_shell_active {
+        let pid = std::process::id();
+        crate::gnome_integration::emit_preview_opened(
+            &preview_id,
+            pid,
+            "Screenshot",
+            "apexshot-capture-preview",
+        );
+    }
+
     if let Some(surface) = window.surface() {
-        if let Ok(x11_surface) = surface.downcast::<X11Surface>() {
-            let xid = x11_surface.xid() as u32;
-            crate::gnome_integration::emit_preview_opened(xid);
+        if let Ok(_x11_surface) = surface.downcast::<X11Surface>() {
+            // On X11 the extension is not used; no additional signal needed.
         }
     }
 }
