@@ -523,6 +523,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
         if !edit_opened_close.load(Ordering::Relaxed) {
             main_loop_close.quit();
         }
+        crate::gnome_integration::emit_preview_closed();
         glib::Propagation::Proceed
     });
 
@@ -548,6 +549,13 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
     });
 
     window.present();
+
+    if let Some(surface) = window.surface() {
+        if let Ok(x11_surface) = surface.downcast::<X11Surface>() {
+            let xid = x11_surface.xid() as u32;
+            crate::gnome_integration::emit_preview_opened(xid);
+        }
+    }
 }
 
 /// On X11, set `_NET_WM_WINDOW_TYPE_NOTIFICATION` so the preview card:

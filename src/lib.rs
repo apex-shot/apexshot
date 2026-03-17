@@ -3,6 +3,7 @@ pub mod capture;
 pub mod capture_overlay;
 pub mod config;
 pub mod daemon;
+pub mod gnome_integration;
 pub mod hotkeys;
 pub mod ocr;
 pub mod overlay;
