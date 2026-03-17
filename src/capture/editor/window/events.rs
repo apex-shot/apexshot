@@ -1,6 +1,7 @@
 use gtk4::{
     gdk, glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
-    EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Image, Popover,
+    EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Image, Label, Popover,
+    Scale,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -15,10 +16,7 @@ use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
-    types::{
-        tool_shortcut_target, BackgroundStyle, DrawColor, Point, Tool,
-        ViewTransform,
-    },
+    types::{tool_shortcut_target, BackgroundStyle, DrawColor, Point, Tool, ViewTransform},
     ui_support::{
         set_active_tool_button, set_crop_apply_button_state, show_text_dialog,
         show_text_edit_dialog,
@@ -66,8 +64,11 @@ pub(super) struct EventContext {
     pub color_picker_dot: GtkBox,
     pub color_class_names: Vec<&'static str>,
     pub color_popover: Popover,
-    pub size_slider: gtk4::Scale,
+    pub size_slider: Scale,
+    pub text_size_label: Label,
+    pub font_family_label: Label,
     pub apply_crop_btn: Button,
+
     pub undo_btn: Button,
     pub redo_btn: Button,
     pub delete_selected_btn: Button,
@@ -122,6 +123,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         color_class_names,
         color_popover,
         size_slider,
+        text_size_label,
+        font_family_label,
         apply_crop_btn,
         undo_btn,
         redo_btn,
@@ -1011,7 +1014,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let apply_picker_color_to_editor_canvas_click = apply_picker_color_to_editor.clone();
     let sync_picker_from_color_canvas_click = sync_picker_from_color.clone();
     let sync_size_control_canvas_click = sync_size_control.clone();
-    click.connect_pressed(move |_, n_press, x, y| {
+    let text_size_label_click = text_size_label.clone();
+    let font_family_label_click = font_family_label.clone();
+    click.connect_pressed(move |_gesture, n_press, x, y| {
         let t = *transform_click.lock().unwrap();
         let view_point = Point { x, y };
 
@@ -1064,7 +1069,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         match selected_tool {
             Tool::Select => {
-                let (edit_target, selected_color_index) = {
+                let (edit_target, selected_color_index, selected_text_size, selected_font_family) = {
                     let mut st = state_click.lock().unwrap();
                     st.select_action_at_point_with_scale(image_point, t.scale);
                     let selected_color = st.selected_action_color();
@@ -1077,16 +1082,31 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     if let Some(stroke_size) = st.selected_action_stroke_size() {
                         st.stroke_size = stroke_size;
                     }
+                    if let Some(font_family) = st.selected_text_font_family() {
+                        st.text_font_family = font_family;
+                    }
 
                     let selected_color_index = selected_color.map(palette_index_for_color);
-                    if n_press >= 2 {
-                        (st.selected_text_action_data(), selected_color_index)
+                    let (selected_text_size, selected_font_family) = if st.selected_tool == Tool::Select {
+                        (Some(st.text_size), Some(st.text_font_family.clone()))
                     } else {
-                        (None, selected_color_index)
+                        (None, None)
+                    };
+
+                    if n_press >= 2 {
+                        (st.selected_text_action_data(), selected_color_index, selected_text_size, selected_font_family)
+                    } else {
+                        (None, selected_color_index, selected_text_size, selected_font_family)
                     }
                 };
 
                 sync_size_control_canvas_click();
+                if let Some(size) = selected_text_size {
+                    text_size_label_click.set_label(&format!("{}pt", size as i32));
+                }
+                if let Some(family) = selected_font_family {
+                    font_family_label_click.set_label(&family);
+                }
 
                 if let Some(index) = selected_color_index {
                     color_picker::clear_active_color_picker_palette_state(&color_buttons_click);
@@ -1112,16 +1132,17 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 }
             }
             Tool::Text => {
-                let (selected_color, text_size) = {
+                let (selected_color, text_size, font_family) = {
                     let st = state_click.lock().unwrap();
-                    (st.selected_color, st.text_size)
+                    (st.selected_color, st.text_size, st.text_font_family.clone())
                 };
+                text_size_label_click.set_label(&format!("{}pt", text_size as i32));
+                font_family_label_click.set_label(&font_family);
                 show_text_dialog(
                     &window_click,
                     state_click.clone(),
                     image_point,
                     selected_color,
-                    text_size,
                     drawing_area_click.clone(),
                 );
             }

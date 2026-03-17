@@ -2081,12 +2081,17 @@ pub fn show_text_dialog(
     state: Arc<Mutex<EditorState>>,
     position: Point,
     color: DrawColor,
-    font_size: f64,
     drawing_area: glib::WeakRef<DrawingArea>,
 ) {
     use super::types::{FontSettings, FontStyle, TextAlignment, TextDecoration};
+
+    let (font_size, font_family) = {
+        let st = state.lock().unwrap();
+        (st.text_size, st.text_font_family.clone())
+    };
+
     let font = FontSettings {
-        family: String::from("Sans"),
+        family: font_family,
         size: font_size,
         style: FontStyle::Normal,
         decoration: TextDecoration::None,

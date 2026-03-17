@@ -14,8 +14,7 @@ use std::sync::{Arc, Mutex};
 use super::super::color::{
     custom_color_slots_css, load_persisted_custom_slot_colors, move_custom_color_between_slots,
     parse_alpha_percent, parse_channel_u8, parse_hex_rgb, picker_dynamic_css,
-    save_persisted_custom_slot_colors, DEFAULT_COLOR_INDEX, DRAW_COLORS, MAX_OBFUSCATE_AMOUNT,
-    MAX_STROKE_SIZE, MAX_TEXT_SIZE, MIN_OBFUSCATE_AMOUNT, MIN_STROKE_SIZE, MIN_TEXT_SIZE,
+    save_persisted_custom_slot_colors, DEFAULT_COLOR_INDEX, DRAW_COLORS,
 };
 use super::super::state::EditorState;
 use super::super::types::{BackgroundStyle, DrawColor, PickerColorState, Point, Tool};
@@ -43,39 +42,6 @@ pub struct ColorPickerParts {
     pub sync_picker_from_color: Rc<dyn Fn(DrawColor)>,
     pub apply_picker_color: Rc<dyn Fn(DrawColor)>,
     pub set_picker_panel_visibility: Rc<dyn Fn(bool)>,
-}
-
-pub fn apply_size_control_ui_state(state: &EditorState, size_group: &GtkBox, size_slider: &Scale) {
-    size_group.set_visible(true);
-
-    let Some(mode) = state.active_size_control_mode() else {
-        size_group.add_css_class("size-group-inactive");
-        size_slider.set_tooltip_text(Some("Current tool does not support size changes"));
-        size_slider.set_sensitive(false);
-        return;
-    };
-
-    size_group.remove_css_class("size-group-inactive");
-    size_slider.set_sensitive(true);
-    let value = state.active_size_value().unwrap_or_default();
-
-    match mode {
-        super::super::types::SizeControlMode::Stroke => {
-            size_slider.set_range(MIN_STROKE_SIZE, MAX_STROKE_SIZE);
-            size_slider.set_value(value);
-            size_slider.set_tooltip_text(Some("Stroke size"));
-        }
-        super::super::types::SizeControlMode::Text => {
-            size_slider.set_range(MIN_TEXT_SIZE, MAX_TEXT_SIZE);
-            size_slider.set_value(value);
-            size_slider.set_tooltip_text(Some("Text size"));
-        }
-        super::super::types::SizeControlMode::Obfuscate => {
-            size_slider.set_range(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT);
-            size_slider.set_value(value);
-            size_slider.set_tooltip_text(Some("Obfuscation intensity"));
-        }
-    }
 }
 
 pub fn build_color_picker(

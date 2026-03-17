@@ -1,4 +1,6 @@
-use gtk4::{glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation};
+use gtk4::{
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation, Popover,
+};
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -111,7 +113,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         traffic_close,
         traffic_minimize,
         traffic_zoom,
-        left_group,
         select_btn,
         crop_btn,
         background_btn,
@@ -134,7 +135,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         line: icon_names::DRAW_LINE,
         box_: icon_names::DRAW_RECTANGLE,
         circle: icon_names::CIRCLE_LINE_REGULAR,
-        text: icon_names::INSERT_TEXT,
+        text: icon_names::TEXT_FONT_REGULAR,
         number: icon_names::PIN,
         highlighter: icon_names::HIGHLIGHT_REGULAR,
         obfuscate: icon_names::FOG,
@@ -170,6 +171,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         toolbar_mode_stack,
         size_group,
         size_slider,
+        text_size_group,
+        text_size_label,
+        text_size_list,
+        font_family_group,
+        font_family_label,
+        font_family_list,
         crop_type_label,
         crop_type_popover,
         crop_type_list,
@@ -185,6 +192,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &arrow_btn,
         &line_btn,
         &text_btn,
+        icon_names::TEXT_ITALIC_REGULAR,
         &obfuscate_btn,
         &focus_btn,
         &number_btn,
@@ -193,7 +201,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &sep_2,
         &color_picker_trigger_host,
     );
-    left_group.append(&center_group);
+    toolbar.set_center_widget(Some(&center_group));
 
     let toolbar_right_parts = toolbar::build_toolbar_right_controls(
         icon_names::ARROW_UNDO_REGULAR,
@@ -393,6 +401,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let update_toolbar_for_tool = toolbar::build_toolbar_tool_updater(
         &toolbar_mode_stack,
         &background_sidebar,
+        &text_size_group,
+        &font_family_group,
         &canvas_scroller,
         start_background_gradient_preview_loading.clone(),
         &window,
@@ -443,6 +453,58 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
         });
         crop_type_list.append(&option_button);
+    }
+
+    while let Some(child) = text_size_list.first_child() {
+        text_size_list.remove(&child);
+    }
+    for size in [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72] {
+        let label = format!("{}pt", size);
+        let btn = Button::builder()
+            .label(&label)
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .build();
+        let state = state.clone();
+        let text_size_label = text_size_label.clone();
+        let drawing_area = drawing_area.clone();
+        btn.connect_clicked(move |b| {
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+            text_size_label.set_label(&format!("{}pt", size));
+            let mut st = state.lock().unwrap();
+            st.text_size = size as f64;
+            st.set_selected_text_action_size(size as f64);
+            drawing_area.queue_draw();
+        });
+        text_size_list.append(&btn);
+    }
+
+    while let Some(child) = font_family_list.first_child() {
+        font_family_list.remove(&child);
+    }
+    for family in ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"] {
+        let btn = Button::builder()
+            .label(family)
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .build();
+        let state = state.clone();
+        let font_family_label = font_family_label.clone();
+        let drawing_area = drawing_area.clone();
+        let family_str = family.to_string();
+        btn.connect_clicked(move |b| {
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+            font_family_label.set_label(&family_str);
+            let mut st = state.lock().unwrap();
+            st.text_font_family = family_str.clone();
+            st.set_selected_text_font_family(family_str.clone());
+            drawing_area.queue_draw();
+        });
+        font_family_list.append(&btn);
     }
 
     let eyedropper_mode = Rc::new(Cell::new(false));
@@ -618,12 +680,23 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let state = state.clone();
         let size_group = size_group.clone();
         let size_slider = size_slider.clone();
+        let text_size_label = text_size_label.clone();
+        let font_family_label = font_family_label.clone();
         move || {
             // Extract all needed data BEFORE any GTK operations to avoid deadlock
-            let (mode, value) = {
+            let (mode, value, text_size, font_family) = {
                 let st = state.lock().unwrap();
-                (st.active_size_control_mode(), st.active_size_value().unwrap_or_default())
+                (
+                    st.active_size_control_mode(),
+                    st.active_size_value().unwrap_or_default(),
+                    st.text_size,
+                    st.text_font_family.clone(),
+                )
             };
+
+            text_size_label.set_label(&format!("{}pt", text_size as i32));
+            font_family_label.set_label(&font_family);
+
             // Now perform GTK operations WITHOUT holding the lock
             size_group.set_visible(true);
 
@@ -637,23 +710,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             size_group.remove_css_class("size-group-inactive");
             size_slider.set_sensitive(true);
 
+            use super::color::{MAX_STROKE_SIZE, MIN_STROKE_SIZE};
             use super::types::SizeControlMode;
-            use super::color::{MIN_STROKE_SIZE, MAX_STROKE_SIZE, MIN_TEXT_SIZE, MAX_TEXT_SIZE, MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT};
             match mode {
                 SizeControlMode::Stroke => {
                     size_slider.set_range(MIN_STROKE_SIZE, MAX_STROKE_SIZE);
                     size_slider.set_value(value);
                     size_slider.set_tooltip_text(Some("Stroke size"));
                 }
-                SizeControlMode::Text => {
-                    size_slider.set_range(MIN_TEXT_SIZE, MAX_TEXT_SIZE);
-                    size_slider.set_value(value);
-                    size_slider.set_tooltip_text(Some("Text size"));
-                }
                 SizeControlMode::Obfuscate => {
-                    size_slider.set_range(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT);
-                    size_slider.set_value(value);
-                    size_slider.set_tooltip_text(Some("Obfuscation intensity"));
+                    size_slider.set_sensitive(false);
+                    size_slider.set_tooltip_text(Some("Use toolbar controls"));
                 }
             }
         }
@@ -794,8 +861,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 } else if let BackgroundStyle::Blurred(_idx) = &current_style {
                     // Only recompute blur if the working image has changed
                     let current_revision = st.working_image_revision;
-                    let needs_recompute = cached_blurred_revision_draw.get() != current_revision || bg_cache.is_none();
-                    
+                    let needs_recompute = cached_blurred_revision_draw.get() != current_revision
+                        || bg_cache.is_none();
+
                     if needs_recompute {
                         let mut blurred_bg = st.working_image.clone();
                         let (bw, bh) = blurred_bg.dimensions();
@@ -1167,6 +1235,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         color_class_names: color_class_names.clone(),
         color_popover: color_popover.clone(),
         size_slider: size_slider.clone(),
+        text_size_label: text_size_label.clone(),
+        font_family_label: font_family_label.clone(),
         apply_crop_btn: apply_crop_btn.clone(),
         undo_btn: undo_btn.clone(),
         redo_btn: redo_btn.clone(),

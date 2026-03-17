@@ -165,7 +165,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf) {
     bottom_controls.append(&bottom_spacer);
     bottom_controls.append(&upload_btn);
 
-    let fallback_notice = Label::new(Some("Not always-on-top on GNOME Wayland"));
+    let fallback_notice = Label::new(Some("Install GNOME extension for always-on-top"));
     fallback_notice.add_css_class("preview-warning-badge");
     fallback_notice.set_halign(Align::Center);
     fallback_notice.set_valign(Align::Start);
