@@ -16,11 +16,11 @@ use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
-    types::{tool_shortcut_target, BackgroundStyle, DrawColor, Point, Tool, ViewTransform},
-    ui_support::{
-        set_active_tool_button, set_crop_apply_button_state, show_text_dialog,
-        show_text_edit_dialog,
+    types::{
+        tool_shortcut_target, BackgroundStyle, DrawColor, MoveHandle, Point, TextEditBounds, Tool,
+        ViewTransform,
     },
+    ui_support::{set_active_tool_button, set_crop_apply_button_state, show_text_edit_dialog},
 };
 use super::{
     canvas::{
@@ -1132,19 +1132,32 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 }
             }
             Tool::Text => {
+                // Start in-place text editing
                 let (selected_color, text_size, font_family) = {
                     let st = state_click.lock().unwrap();
                     (st.selected_color, st.text_size, st.text_font_family.clone())
                 };
+
                 text_size_label_click.set_label(&format!("{}pt", text_size as i32));
                 font_family_label_click.set_label(&font_family);
-                show_text_dialog(
-                    &window_click,
-                    state_click.clone(),
+
+                // Create text edit bounds
+                let text_bounds = TextEditBounds::new(
                     image_point,
-                    selected_color,
-                    drawing_area_click.clone(),
+                    200.0, // Initial width
+                    text_size + 16.0, // Initial height (text size + padding)
                 );
+
+                // Store in state
+                {
+                    let mut st = state_click.lock().unwrap();
+                    st.active_text_bounds = Some(text_bounds);
+                }
+
+                // Queue redraw to show border and handles
+                if let Some(area) = drawing_area_click.upgrade() {
+                    area.queue_draw();
+                }
             }
             Tool::Number => {
                 state_click.lock().unwrap().add_number_marker(image_point);
