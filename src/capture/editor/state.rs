@@ -10,8 +10,8 @@ use super::selection::{
 };
 use super::types::{
     AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
-    EditorError, MoveHandle, ObfuscateMethod, Point, Rect, ResizeHandle, SelectHandle,
-    SizeControlMode, TextEditBounds, Tool,
+    EditorError, FontSettings, MoveHandle, ObfuscateMethod, Point, Rect, ResizeHandle,
+    SelectHandle, SizeControlMode, TextEditBounds, Tool,
 };
 use gtk4;
 use image::RgbaImage;
@@ -1048,6 +1048,47 @@ impl EditorState {
         self.working_image = working;
         self.select_effect_rebuild_pending = false;
         self.mark_working_image_dirty();
+    }
+
+    pub fn commit_text_edit(
+        &mut self,
+        bounds: &TextEditBounds,
+        text: String,
+        color: DrawColor,
+        font: FontSettings,
+    ) {
+        if text.trim().is_empty() {
+            self.cancel_text_edit();
+            return;
+        }
+
+        let position = Point {
+            x: bounds.rect.x as f64,
+            y: bounds.rect.y as f64,
+        };
+
+        self.actions.push(AnnotationAction::Text {
+            position,
+            text,
+            color,
+            font,
+        });
+
+        self.active_text_edit = None;
+        self.active_text_entry = None;
+        self.active_text_bounds = None;
+        self.active_text_is_dragging = false;
+        self.active_text_drag_handle = None;
+        self.active_text_drag_start = None;
+    }
+
+    pub fn cancel_text_edit(&mut self) {
+        self.active_text_edit = None;
+        self.active_text_entry = None;
+        self.active_text_bounds = None;
+        self.active_text_is_dragging = false;
+        self.active_text_drag_handle = None;
+        self.active_text_drag_start = None;
     }
 }
 
