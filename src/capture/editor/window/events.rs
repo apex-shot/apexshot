@@ -17,11 +17,14 @@ use super::super::{
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
     types::{
-        tool_shortcut_target, BackgroundStyle, DrawColor, Point, TextEditBounds, Tool,
+        tool_shortcut_target, BackgroundStyle, DrawColor, MoveHandle, Point, TextEditBounds, Tool,
         ViewTransform,
     },
     ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
+
+const MOVE_HANDLE_DRAG_RADIUS: f64 = 10.0;
+const RESIZE_HANDLE_DRAG_SIZE: f64 = 18.0;
 use super::{
     canvas::{
         eyedropper_loupe_position, sample_editor_color_at_point, sample_rendered_color_at_point,
@@ -1020,6 +1023,44 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let t = *transform_click.lock().unwrap();
         let view_point = Point { x, y };
 
+        // Check for text edit handle click
+        if let Some(bounds) = state_click.lock().unwrap().active_text_bounds.as_ref() {
+            let view_point = Point { x, y };
+            let image_point = t.view_to_image(view_point);
+            
+            // Check move handles
+            for (handle, center) in &bounds.move_handles {
+                let center_view = Point {
+                    x: center.x * t.scale + t.offset_x,
+                    y: center.y * t.scale + t.offset_y,
+                };
+                let dx = x - center_view.x;
+                let dy = y - center_view.y;
+                if (dx * dx + dy * dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS * 1.5 {
+                    state_click.lock().unwrap().active_text_is_dragging = true;
+                    state_click.lock().unwrap().active_text_drag_handle = Some(handle.clone());
+                    state_click.lock().unwrap().active_text_drag_start = Some(image_point);
+                    return;
+                }
+            }
+            
+            // Check resize handle
+            if let Some((_, resize_pos)) = &bounds.resize_handle {
+                let resize_view = Point {
+                    x: resize_pos.x * t.scale + t.offset_x,
+                    y: resize_pos.y * t.scale + t.offset_y,
+                };
+                let dx = x - resize_view.x;
+                let dy = y - resize_view.y;
+                if dx.abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5 && dy.abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5 {
+                    state_click.lock().unwrap().active_text_is_dragging = true;
+                    state_click.lock().unwrap().active_text_drag_handle = None; // None = resize
+                    state_click.lock().unwrap().active_text_drag_start = Some(image_point);
+                    return;
+                }
+            }
+        }
+
         if eyedropper_mode_click.get() {
             if !t.contains_view(view_point) {
                 return;
@@ -1159,6 +1200,22 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             _ => {}
         }
     });
+
+    let state_release = state.clone();
+    let drawing_area_release = drawing_area.downgrade();
+    click.connect_released(move |_gesture, _n_press, _x, _y| {
+        // End text edit drag
+        if state_release.lock().unwrap().active_text_is_dragging {
+            state_release.lock().unwrap().active_text_is_dragging = false;
+            state_release.lock().unwrap().active_text_drag_handle = None;
+            state_release.lock().unwrap().active_text_drag_start = None;
+            // Queue redraw to update handle appearance
+            if let Some(area) = drawing_area_release.upgrade() {
+                area.queue_draw();
+            }
+        }
+    });
+
     drawing_area.add_controller(click);
 
     let motion = EventControllerMotion::new();
@@ -1168,6 +1225,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let state_motion = state.clone();
     let transform_motion = transform.clone();
     let window_motion = window.downgrade();
+    let drawing_area_motion = drawing_area.downgrade();
     motion.connect_motion(move |_, x, y| {
         let t = *transform_motion.lock().unwrap();
         let view_point = Point { x, y };
@@ -1202,6 +1260,104 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         if let Some(window) = window_motion.upgrade() {
             set_window_cursor_name(&window, Some(cursor_name));
+        }
+
+        // Check for text edit handle hover
+        let text_bounds = state_motion.lock().unwrap().active_text_bounds.clone();
+        if let Some(bounds) = &text_bounds {
+            let t = *transform_motion.lock().unwrap();
+            let view_point = Point { x, y };
+            let _image_point = t.view_to_image(view_point);
+
+            // Check move handles (convert to view coordinates)
+            for (handle, center) in &bounds.move_handles {
+                let center_view = Point {
+                    x: center.x * t.scale + t.offset_x,
+                    y: center.y * t.scale + t.offset_y,
+                };
+                let dx = x - center_view.x;
+                let dy = y - center_view.y;
+                if (dx * dx + dy * dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS {
+                    if let Some(window) = window_motion.upgrade() {
+                        set_window_cursor_name(&window, Some("grab"));
+                    }
+                    return;
+                }
+            }
+
+            // Check resize handle
+            if let Some((_, resize_pos)) = &bounds.resize_handle {
+                let resize_view = Point {
+                    x: resize_pos.x * t.scale + t.offset_x,
+                    y: resize_pos.y * t.scale + t.offset_y,
+                };
+                let dx = x - resize_view.x;
+                let dy = y - resize_view.y;
+                if dx.abs() < RESIZE_HANDLE_DRAG_SIZE && dy.abs() < RESIZE_HANDLE_DRAG_SIZE {
+                    if let Some(window) = window_motion.upgrade() {
+                        set_window_cursor_name(&window, Some("nwse-resize"));
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Handle text edit dragging
+        if let Some(bounds) = state_motion.lock().unwrap().active_text_bounds.as_mut() {
+            if state_motion.lock().unwrap().active_text_is_dragging {
+                if let Some(start_point) = state_motion.lock().unwrap().active_text_drag_start {
+                    let view_point = Point { x, y };
+                    let t = *transform_motion.lock().unwrap();
+                    let current_point = t.view_to_image(view_point);
+
+                    let dx = current_point.x - start_point.x;
+
+                    let handle = &state_motion.lock().unwrap().active_text_drag_handle;
+
+                    match handle {
+                        Some(MoveHandle::Left) | Some(MoveHandle::Right) => {
+                            // Move text horizontally
+                            bounds.rect.x = (bounds.rect.x as f64 + dx) as i32;
+
+                            // Update handle positions
+                            let height = bounds.rect.height as f64;
+                            bounds.move_handles[0].1 = Point {
+                                x: bounds.rect.x as f64,
+                                y: bounds.rect.y as f64 + height / 2.0,
+                            };
+                            bounds.move_handles[1].1 = Point {
+                                x: bounds.rect.x as f64 + bounds.rect.width as f64,
+                                y: bounds.rect.y as f64 + height / 2.0,
+                            };
+                        }
+                        None => {
+                            // Resize - adjust width
+                            let new_width = (bounds.rect.width as f64 + dx).max(50.0);
+                            bounds.rect.width = new_width as i32;
+
+                            // Update handle positions
+                            let height = bounds.rect.height as f64;
+                            bounds.move_handles[1].1 = Point {
+                                x: bounds.rect.x as f64 + bounds.rect.width as f64,
+                                y: bounds.rect.y as f64 + height / 2.0,
+                            };
+                            if let Some((_, pos)) = &mut bounds.resize_handle {
+                                pos.x = bounds.rect.x as f64 + bounds.rect.width as f64;
+                                pos.y = bounds.rect.y as f64 + bounds.rect.height as f64;
+                            }
+                        }
+                    }
+
+                    // Update drag start for next frame
+                    state_motion.lock().unwrap().active_text_drag_start = Some(current_point);
+
+                    // Queue redraw
+                    if let Some(area) = drawing_area_motion.upgrade() {
+                        area.queue_draw();
+                    }
+                    return;
+                }
+            }
         }
     });
 

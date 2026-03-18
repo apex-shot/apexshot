@@ -10,7 +10,8 @@ use super::selection::{
 };
 use super::types::{
     AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
-    EditorError, ObfuscateMethod, Point, Rect, SelectHandle, SizeControlMode, TextEditBounds, Tool,
+    EditorError, MoveHandle, ObfuscateMethod, Point, Rect, SelectHandle, SizeControlMode,
+    TextEditBounds, Tool,
 };
 use image::RgbaImage;
 use std::path::Path;
@@ -51,6 +52,9 @@ pub struct EditorState {
     pub background_corner_radius: f64,
     pub background_aspect_ratio: CropAspectRatio,
     pub active_text_bounds: Option<TextEditBounds>,
+    pub active_text_is_dragging: bool,
+    pub active_text_drag_handle: Option<super::types::MoveHandle>,
+    pub active_text_drag_start: Option<Point>,
 }
 
 fn resize_crop_rect_with_handle(
@@ -243,6 +247,9 @@ impl EditorState {
             background_corner_radius: 18.0,
             background_aspect_ratio: CropAspectRatio::Original,
             active_text_bounds: None,
+            active_text_is_dragging: false,
+            active_text_drag_handle: None,
+            active_text_drag_start: None,
         }
     }
 
