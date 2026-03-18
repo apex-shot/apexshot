@@ -1,5 +1,6 @@
 use gtk4::{
-    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation, Popover,
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation, Overlay,
+    Popover,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
