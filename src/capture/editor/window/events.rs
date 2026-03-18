@@ -17,10 +17,10 @@ use super::super::{
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
     types::{
-        tool_shortcut_target, BackgroundStyle, DrawColor, MoveHandle, Point, TextEditBounds, Tool,
+        tool_shortcut_target, BackgroundStyle, DrawColor, Point, TextEditBounds, Tool,
         ViewTransform,
     },
-    ui_support::{set_active_tool_button, set_crop_apply_button_state, show_text_edit_dialog},
+    ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
 use super::{
     canvas::{
@@ -1119,16 +1119,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
                 if let Some(area) = drawing_area_click.upgrade() {
                     area.queue_draw();
-                }
-
-                if let Some((action_index, current_text)) = edit_target {
-                    show_text_edit_dialog(
-                        &window_click,
-                        state_click.clone(),
-                        action_index,
-                        &current_text,
-                        drawing_area_click.clone(),
-                    );
                 }
             }
             Tool::Text => {
