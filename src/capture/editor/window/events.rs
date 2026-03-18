@@ -17,7 +17,8 @@ use super::super::{
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
     types::{
-        tool_shortcut_target, BackgroundStyle, DrawColor, MoveHandle, Point, Tool, ViewTransform,
+        tool_shortcut_target, BackgroundStyle, DrawColor, MoveHandle, Point, TextEditBounds, Tool,
+        ViewTransform,
     },
     ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
@@ -1214,12 +1215,37 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 }
             }
             Tool::Text => {
-                let (selected_color, text_size, font_family) = {
+                let (selected_color, text_size, font_family, image_width, image_height) = {
                     let st = state_click.lock().unwrap();
-                    (st.selected_color, st.text_size, st.text_font_family.clone())
+                    (
+                        st.selected_color,
+                        st.text_size,
+                        st.text_font_family.clone(),
+                        st.base_image.width() as f64,
+                        st.base_image.height() as f64,
+                    )
                 };
+
+                let constrained_x = image_point.x.min(image_width - 200.0).max(0.0);
+                let constrained_y = image_point.y.min(image_height - (text_size + 16.0)).max(0.0);
+
+                let text_bounds = TextEditBounds::new(
+                    Point { x: constrained_x, y: constrained_y },
+                    200.0,
+                    text_size + 16.0,
+                );
+
+                state_click
+                    .lock()
+                    .unwrap()
+                    .active_text_bounds = Some(text_bounds);
+
                 text_size_label_click.set_label(&format!("{}pt", text_size as i32));
                 font_family_label_click.set_label(&font_family);
+
+                if let Some(area) = drawing_area_click.upgrade() {
+                    area.queue_draw();
+                }
             }
             Tool::Number => {
                 state_click.lock().unwrap().add_number_marker(image_point);
@@ -1350,6 +1376,18 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                             // Move text horizontally
                             bounds.rect.x = (bounds.rect.x as f64 + dx) as i32;
 
+                            // Get image dimensions for constraint
+                            let image_width =
+                                state_motion.lock().unwrap().base_image.width() as f64;
+
+                            // Constrain position within image bounds
+                            bounds.rect.x = bounds
+                                .rect
+                                .x
+                                .max(0)
+                                .min((image_width - bounds.rect.width as f64) as i32)
+                                as i32;
+
                             // Update handle positions
                             let height = bounds.rect.height as f64;
                             bounds.move_handles[0].1 = Point {
@@ -1365,6 +1403,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                             // Resize - adjust width
                             let new_width = (bounds.rect.width as f64 + dx).max(50.0);
                             bounds.rect.width = new_width as i32;
+
+                            // Get image dimensions for constraint
+                            let image_width =
+                                state_motion.lock().unwrap().base_image.width() as f64;
+
+                            // Constrain width within image bounds
+                            bounds.rect.width = bounds
+                                .rect
+                                .width
+                                .max(50)
+                                .min((image_width - bounds.rect.x as f64) as i32)
+                                as i32;
+                            bounds.rect.width = bounds.rect.width.min(image_width as i32);
 
                             // Update handle positions
                             let height = bounds.rect.height as f64;
