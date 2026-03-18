@@ -10,8 +10,10 @@ use super::selection::{
 };
 use super::types::{
     AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
-    EditorError, ObfuscateMethod, Point, Rect, SelectHandle, SizeControlMode, Tool,
+    EditorError, MoveHandle, ObfuscateMethod, Point, Rect, ResizeHandle, SelectHandle,
+    SizeControlMode, TextEditBounds, Tool,
 };
+use gtk4;
 use image::RgbaImage;
 use std::path::Path;
 
@@ -36,6 +38,12 @@ pub struct EditorState {
     pub select_drag_anchor: Option<Point>,
     pub select_resize_handle: Option<super::types::SelectHandle>,
     pub select_effect_rebuild_pending: bool,
+    pub active_text_edit: Option<()>,
+    pub active_text_entry: Option<gtk4::Entry>,
+    pub active_text_bounds: Option<TextEditBounds>,
+    pub active_text_is_dragging: bool,
+    pub active_text_drag_handle: Option<MoveHandle>,
+    pub active_text_drag_start: Option<Point>,
     pub pending_effect_revision: u64,
     pub drag_start: Option<Point>,
     pub drag_current: Option<Point>,
@@ -227,6 +235,12 @@ impl EditorState {
             select_drag_anchor: None,
             select_resize_handle: None,
             select_effect_rebuild_pending: false,
+            active_text_edit: None,
+            active_text_entry: None,
+            active_text_bounds: None,
+            active_text_is_dragging: false,
+            active_text_drag_handle: None,
+            active_text_drag_start: None,
             pending_effect_revision: 0,
             drag_start: None,
             drag_current: None,
