@@ -11,13 +11,13 @@ use super::color::selection_hit_padding_for_scale;
 use super::render::{
     draw_annotation_action, draw_canvas_checkerboard_background, draw_crop_overlay,
     draw_draft_action, draw_focus_overlay, draw_rgba_to_context, draw_selection_handles,
-    draw_selection_outline, rgba_image_to_surface,
+    draw_selection_outline, draw_text_edit_border, draw_text_edit_handles, rgba_image_to_surface,
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
 use super::types::{
-    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError, Point,
-    Rect, Tool, ViewTransform,
+    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError,
+    MoveHandle, Point, Rect, TextEditBounds, Tool, ViewTransform,
 };
 use super::ui_support::{
     install_editor_css, prefers_dark_glass_theme, prefers_reduced_transparency,
@@ -1180,6 +1180,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 if !handles.is_empty() {
                     draw_selection_handles(context, &handles, st.select_resize_handle, t.scale);
                 }
+            }
+
+            // Draw active text edit overlay (border + handles)
+            if let Some(bounds) = st.active_text_bounds.as_ref() {
+                draw_text_edit_border(context, bounds, t.scale);
+                draw_text_edit_handles(context, bounds, None, t.scale); // None = no active handle initially
             }
         }
         let _ = context.restore();
