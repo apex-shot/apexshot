@@ -17,8 +17,8 @@ use super::super::{
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
     types::{
-        tool_shortcut_target, BackgroundStyle, DrawColor, MoveHandle, Point, TextEditBounds, Tool,
-        ViewTransform,
+        tool_shortcut_target, AnnotationAction, BackgroundStyle, DrawColor, MoveHandle, Point,
+        TextEditBounds, Tool, ViewTransform,
     },
     ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
@@ -1163,20 +1163,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 }
             }
             Tool::Text => {
-                // Start in-place text editing
-                let (selected_color, text_size, font_family) = {
+                let text_size = {
                     let st = state_click.lock().unwrap();
-                    (st.selected_color, st.text_size, st.text_font_family.clone())
+                    st.text_size
                 };
 
                 text_size_label_click.set_label(&format!("{}pt", text_size as i32));
-                font_family_label_click.set_label(&font_family);
+                font_family_label_click.set_label("Sans");
 
                 // Create text edit bounds
                 let text_bounds = TextEditBounds::new(
                     image_point,
-                    200.0, // Initial width
-                    text_size + 16.0, // Initial height (text size + padding)
+                    200.0,
+                    text_size + 16.0,
                 );
 
                 // Store in state

@@ -299,6 +299,13 @@ impl ViewTransform {
         image_point.y = image_point.y.clamp(0.0, self.image_height);
         image_point
     }
+
+    pub fn image_to_view(&self, point: Point) -> Point {
+        Point {
+            x: point.x * self.scale + self.offset_x,
+            y: point.y * self.scale + self.offset_y,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
