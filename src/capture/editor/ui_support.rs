@@ -1511,6 +1511,12 @@ pub fn install_editor_css() {
                 background-color: rgba(255, 255, 255, 0.08);
             }
 
+            .text-entry-overlay {
+                background: transparent;
+                border: none;
+                outline: none;
+            }
+
             button.editor-background-gradient-button.editor-background-preview-size-regular {
                 min-width: 56px;
                 min-height: 56px;

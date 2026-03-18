@@ -2,7 +2,10 @@ use super::color::{
     highlighter_stroke_width, CENSOR_BLOCK_SIZE, HIGHLIGHTER_ALPHA_SCALE, NUMBER_FONT_SIZE,
     NUMBER_RADIUS, SELECT_HANDLE_SIZE,
 };
-use super::types::{AnnotationAction, DrawColor, FontSettings, FontStyle, Point, Rect, SelectHandle, TextAlignment, TextDecoration};
+use super::types::{
+    AnnotationAction, DrawColor, FontSettings, FontStyle, MoveHandle, Point, Rect, SelectHandle,
+    TextAlignment, TextDecoration, TextEditBounds,
+};
 use image::{ImageBuffer, RgbaImage};
 
 pub fn draw_rgba_to_context(context: &gtk4::cairo::Context, image: &RgbaImage) {
@@ -400,6 +403,156 @@ pub fn draw_selection_handles(
     let _ = context.restore();
 }
 
+const TEXT_EDIT_BORDER_COLOR: (f64, f64, f64) = (0.231, 0.510, 0.965); // #3b82f6
+const TEXT_EDIT_BORDER_WIDTH: f64 = 2.0;
+const TEXT_EDIT_BORDER_RADIUS: f64 = 4.0;
+
+pub fn draw_text_edit_border(
+    context: &gtk4::cairo::Context,
+    bounds: &TextEditBounds,
+    view_scale: f64,
+) {
+    let scale = view_scale.max(0.01);
+    let _ = context.save();
+
+    let rect = &bounds.rect;
+    let x = rect.x as f64;
+    let y = rect.y as f64;
+    let width = rect.width as f64;
+    let height = rect.height as f64;
+
+    // Draw rounded rectangle border
+    context.set_source_rgba(
+        TEXT_EDIT_BORDER_COLOR.0,
+        TEXT_EDIT_BORDER_COLOR.1,
+        TEXT_EDIT_BORDER_COLOR.2,
+        1.0,
+    );
+    context.set_line_width(TEXT_EDIT_BORDER_WIDTH / scale);
+
+    let radius = TEXT_EDIT_BORDER_RADIUS;
+    context.new_path();
+    context.move_to(x + radius, y);
+    context.line_to(x + width - radius, y);
+    context.arc(
+        x + width - radius,
+        y + radius,
+        radius,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    );
+    context.line_to(x + width, y + height - radius);
+    context.arc(
+        x + width - radius,
+        y + height - radius,
+        radius,
+        0.0,
+        std::f64::consts::FRAC_PI_2,
+    );
+    context.line_to(x + radius, y + height);
+    context.arc(
+        x + radius,
+        y + height - radius,
+        radius,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    context.line_to(x, y + radius);
+    context.arc(
+        x + radius,
+        y + radius,
+        radius,
+        std::f64::consts::PI,
+        -std::f64::consts::FRAC_PI_2,
+    );
+    context.close_path();
+
+    let _ = context.stroke();
+    let _ = context.restore();
+}
+
+const MOVE_HANDLE_RADIUS: f64 = 5.0;
+const MOVE_HANDLE_OUTLINE_WIDTH: f64 = 2.0;
+const RESIZE_HANDLE_SIZE: f64 = 12.0;
+
+pub fn draw_text_edit_handles(
+    context: &gtk4::cairo::Context,
+    bounds: &TextEditBounds,
+    active_handle: Option<MoveHandle>,
+    view_scale: f64,
+) {
+    let scale = view_scale.max(0.01);
+    let _ = context.save();
+
+    // Draw move handles (left and right circles)
+    for (handle, center) in &bounds.move_handles {
+        let is_active = active_handle.as_ref().is_some_and(|h| *h == *handle);
+        let radius = MOVE_HANDLE_RADIUS + if is_active { 1.0 } else { 0.0 };
+
+        // White outline
+        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        context.set_line_width(MOVE_HANDLE_OUTLINE_WIDTH / scale);
+        context.arc(
+            center.x,
+            center.y,
+            radius / scale,
+            0.0,
+            std::f64::consts::TAU,
+        );
+        let _ = context.stroke();
+
+        // Blue fill
+        context.set_source_rgba(
+            TEXT_EDIT_BORDER_COLOR.0,
+            TEXT_EDIT_BORDER_COLOR.1,
+            TEXT_EDIT_BORDER_COLOR.2,
+            1.0,
+        );
+        context.arc(
+            center.x,
+            center.y,
+            (radius - MOVE_HANDLE_OUTLINE_WIDTH) / scale,
+            0.0,
+            std::f64::consts::TAU,
+        );
+        let _ = context.fill();
+    }
+
+    // Draw resize handle (bottom-right box)
+    if let Some((_, resize_pos)) = &bounds.resize_handle {
+        let size = RESIZE_HANDLE_SIZE;
+        let half = size / 2.0;
+
+        // White outline
+        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        context.set_line_width(MOVE_HANDLE_OUTLINE_WIDTH / scale);
+        context.rectangle(
+            resize_pos.x - half / scale,
+            resize_pos.y - half / scale,
+            size / scale,
+            size / scale,
+        );
+        let _ = context.stroke();
+
+        // Blue fill
+        context.set_source_rgba(
+            TEXT_EDIT_BORDER_COLOR.0,
+            TEXT_EDIT_BORDER_COLOR.1,
+            TEXT_EDIT_BORDER_COLOR.2,
+            1.0,
+        );
+        context.rectangle(
+            resize_pos.x - half / scale + MOVE_HANDLE_OUTLINE_WIDTH / scale,
+            resize_pos.y - half / scale + MOVE_HANDLE_OUTLINE_WIDTH / scale,
+            (size - MOVE_HANDLE_OUTLINE_WIDTH * 2.0) / scale,
+            (size - MOVE_HANDLE_OUTLINE_WIDTH * 2.0) / scale,
+        );
+        let _ = context.fill();
+    }
+
+    let _ = context.restore();
+}
+
 pub fn draw_pen(
     context: &gtk4::cairo::Context,
     points: &[Point],
@@ -554,7 +707,7 @@ pub fn draw_text(
     font: &FontSettings,
 ) {
     context.set_source_rgba(color.r, color.g, color.b, color.a);
-    
+
     let slant = match font.style {
         FontStyle::Normal | FontStyle::Bold => gtk4::cairo::FontSlant::Normal,
         FontStyle::Italic | FontStyle::BoldItalic => gtk4::cairo::FontSlant::Italic,
@@ -563,10 +716,10 @@ pub fn draw_text(
         FontStyle::Normal | FontStyle::Italic => gtk4::cairo::FontWeight::Normal,
         FontStyle::Bold | FontStyle::BoldItalic => gtk4::cairo::FontWeight::Bold,
     };
-    
+
     context.select_font_face(&font.family, slant, weight);
     context.set_font_size(font.size.max(1.0));
-    
+
     // Handle alignment by computing text width
     let x_offset = if font.alignment != TextAlignment::Left {
         if let Ok(extents) = context.text_extents(text) {
@@ -581,10 +734,10 @@ pub fn draw_text(
     } else {
         0.0
     };
-    
+
     context.move_to(position.x + x_offset, position.y);
     let _ = context.show_text(text);
-    
+
     // Draw decorations (underline/strikethrough)
     if font.decoration != TextDecoration::None {
         if let Ok(extents) = context.text_extents(text) {
