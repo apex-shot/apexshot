@@ -424,6 +424,57 @@ pub enum AnnotationAction {
     },
 }
 
+#[derive(Debug, Clone)]
+pub enum MoveHandle {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResizeHandle {
+    BottomRight,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextEditBounds {
+    pub rect: Rect,
+    pub move_handles: Vec<(MoveHandle, Point)>,
+    pub resize_handle: Option<(ResizeHandle, Point)>,
+}
+
+impl TextEditBounds {
+    pub fn new(position: Point, width: f64, height: f64) -> Self {
+        let rect = Rect {
+            x: position.x as i32,
+            y: position.y as i32,
+            width: width as i32,
+            height: height as i32,
+        };
+
+        let left_center = Point {
+            x: position.x,
+            y: position.y + height / 2.0,
+        };
+        let right_center = Point {
+            x: position.x + width,
+            y: position.y + height / 2.0,
+        };
+        let resize_pos = Point {
+            x: position.x + width,
+            y: position.y + height,
+        };
+
+        Self {
+            rect,
+            move_handles: vec![
+                (MoveHandle::Left, left_center),
+                (MoveHandle::Right, right_center),
+            ],
+            resize_handle: Some((ResizeHandle::BottomRight, resize_pos)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PersistedCustomColor {
     pub r: u8,
