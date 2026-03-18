@@ -17,10 +17,7 @@ use super::super::{
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
     state::EditorState,
     types::{tool_shortcut_target, BackgroundStyle, DrawColor, Point, Tool, ViewTransform},
-    ui_support::{
-        set_active_tool_button, set_crop_apply_button_state, show_text_dialog,
-        show_text_edit_dialog,
-    },
+    ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
 use super::{
     canvas::{
@@ -1120,16 +1117,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 if let Some(area) = drawing_area_click.upgrade() {
                     area.queue_draw();
                 }
-
-                if let Some((action_index, current_text)) = edit_target {
-                    show_text_edit_dialog(
-                        &window_click,
-                        state_click.clone(),
-                        action_index,
-                        &current_text,
-                        drawing_area_click.clone(),
-                    );
-                }
             }
             Tool::Text => {
                 let (selected_color, text_size, font_family) = {
@@ -1138,13 +1125,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 };
                 text_size_label_click.set_label(&format!("{}pt", text_size as i32));
                 font_family_label_click.set_label(&font_family);
-                show_text_dialog(
-                    &window_click,
-                    state_click.clone(),
-                    image_point,
-                    selected_color,
-                    drawing_area_click.clone(),
-                );
             }
             Tool::Number => {
                 state_click.lock().unwrap().add_number_marker(image_point);
