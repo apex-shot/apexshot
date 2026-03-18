@@ -1,6 +1,7 @@
 #[cfg(test)]
 use super::color::SELECT_HANDLE_HIT_RADIUS;
 use super::color::{highlighter_stroke_width, SELECT_MIN_RESIZE_SIZE};
+use super::render::text_action_bounds;
 use super::types::{AnnotationAction, Point, Rect, SelectHandle};
 
 pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Option<Rect> {
@@ -51,16 +52,18 @@ pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Op
             position,
             text,
             font,
+            max_width,
             ..
         } => {
-            let text_size = font.size.max(1.0);
-            let width = (text.chars().count() as f64 * (text_size * 0.56)).max(text_size * 1.4);
-            let height = text_size * 1.45;
+            let surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1).ok()?;
+            let context = gtk4::cairo::Context::new(&surface).ok()?;
+            let available_width = max_width.unwrap_or(4096.0);
+            let bounds = text_action_bounds(&context, *position, text, font, Some(available_width));
             Rect::from_bounds(
-                position.x - 6.0 - padding,
-                position.y - height - padding,
-                position.x + width + 8.0 + padding,
-                position.y + 10.0 + padding,
+                bounds.rect.x as f64 - padding,
+                bounds.rect.y as f64 - padding,
+                (bounds.rect.x + bounds.rect.width) as f64 + padding,
+                (bounds.rect.y + bounds.rect.height) as f64 + padding,
             )
         }
         AnnotationAction::Number { position, .. } => {

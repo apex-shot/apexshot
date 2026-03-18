@@ -998,6 +998,18 @@ pub fn install_editor_css() {
                 border: 1px solid rgba(255, 255, 255, 0.16);
             }
 
+            entry.editor-text-entry {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+                margin: 0;
+            }
+
+            entry.editor-text-entry text {
+                background: transparent;
+            }
+
             button.editor-tool-button image,
             button.standalone-tool image,
             button.editor-footer-icon-button image,

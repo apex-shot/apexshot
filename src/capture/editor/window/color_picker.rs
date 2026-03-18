@@ -47,7 +47,9 @@ pub struct ColorPickerParts {
 pub fn build_color_picker(
     state: Arc<Mutex<EditorState>>,
     canvas_queue_draw_signal: Rc<dyn Fn()>,
+    drawing_area: Rc<RefCell<Option<glib::object::WeakRef<DrawingArea>>>>,
 ) -> ColorPickerParts {
+
     // Color specs
     let color_specs = [
         ("Black", "editor-color-black"),
@@ -625,19 +627,27 @@ pub fn build_color_picker(
         let color_buttons_picker = color_buttons.clone();
         let color_picker_dot_picker = color_picker_dot.clone();
         let color_class_names_picker = color_class_names.clone();
+        let drawing_area_picker = drawing_area.clone();
         move |color| {
-            {
+            let has_active_text = {
                 let mut st = state_picker_apply.lock().unwrap();
+                let has_active_text = st.active_text_input.is_some();
                 if st.selected_tool == Tool::Crop {
                     st.set_crop_background_color(color);
                 } else if st.selected_tool == Tool::Background {
                     st.background_style = BackgroundStyle::PlainColor(color);
                     st.mark_working_image_dirty();
-                } else {
+                } else if has_active_text {
                     st.selected_color = color;
                     let _ = st.set_selected_action_color(color);
+                } else {
+                    let changed_selected = st.set_selected_action_color(color);
+                    if !changed_selected {
+                        st.selected_color = color;
+                    }
                 }
-            }
+                has_active_text
+            };
 
             let nearest_index = super::super::color::palette_index_for_color(color);
             clear_active_color_picker_palette_state(&color_buttons_picker);
@@ -647,6 +657,15 @@ pub fn build_color_picker(
                 nearest_index,
             );
 
+            if has_active_text {
+                if let Some(area) = drawing_area_picker
+                    .borrow()
+                    .as_ref()
+                    .and_then(|weak| weak.upgrade())
+                {
+                    area.grab_focus();
+                }
+            }
             canvas_queue_draw_signal();
         }
     });
