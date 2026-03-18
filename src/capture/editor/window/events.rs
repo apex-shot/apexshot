@@ -999,6 +999,40 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     });
     drawing_area.add_controller(drag);
 
+    let key_controller = EventControllerKey::new();
+    let state_key = state.clone();
+    let drawing_area_key = drawing_area.downgrade();
+
+    key_controller.connect_key_pressed(move |_, key, _, _| {
+        let keyval = key;
+
+        if keyval == gdk::Key::Escape {
+            let has_active_edit = state_key.lock().unwrap().active_text_bounds.is_some();
+            if has_active_edit {
+                state_key.lock().unwrap().cancel_text_edit();
+                if let Some(area) = drawing_area_key.upgrade() {
+                    area.queue_draw();
+                }
+                return glib::Propagation::Stop;
+            }
+        }
+
+        if keyval == gdk::Key::Return || keyval == gdk::Key::KP_Enter {
+            let has_active_edit = state_key.lock().unwrap().active_text_bounds.is_some();
+            if has_active_edit {
+                state_key.lock().unwrap().cancel_text_edit();
+                if let Some(area) = drawing_area_key.upgrade() {
+                    area.queue_draw();
+                }
+                return glib::Propagation::Stop;
+            }
+        }
+
+        glib::Propagation::Proceed
+    });
+
+    drawing_area.add_controller(key_controller);
+
     let click = GestureClick::new();
     let window_click = window.clone();
     let state_click = state.clone();
@@ -1056,6 +1090,24 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     state_click.lock().unwrap().active_text_drag_handle = None; // None = resize
                     state_click.lock().unwrap().active_text_drag_start = Some(image_point);
                     return;
+                }
+            }
+        }
+
+        // Check if click is outside active text edit area
+        if let Some(bounds) = state_click.lock().unwrap().active_text_bounds.as_ref() {
+            let t = *transform_click.lock().unwrap();
+            let click_image = t.view_to_image(Point { x, y });
+            
+            let in_bounds = click_image.x >= bounds.rect.x as f64
+                && click_image.x <= (bounds.rect.x + bounds.rect.width) as f64
+                && click_image.y >= bounds.rect.y as f64
+                && click_image.y <= (bounds.rect.y + bounds.rect.height) as f64;
+            
+            if !in_bounds {
+                state_click.lock().unwrap().cancel_text_edit();
+                if let Some(area) = drawing_area_click.upgrade() {
+                    area.queue_draw();
                 }
             }
         }
