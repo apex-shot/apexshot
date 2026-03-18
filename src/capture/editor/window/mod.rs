@@ -1,5 +1,5 @@
 use gtk4::{
-    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation, Overlay,
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation,
     Popover,
 };
 use image::RgbaImage;
@@ -10,15 +10,16 @@ use std::sync::{Arc, Mutex};
 
 use super::color::selection_hit_padding_for_scale;
 use super::render::{
-    draw_annotation_action, draw_canvas_checkerboard_background, draw_crop_overlay,
-    draw_draft_action, draw_focus_overlay, draw_rgba_to_context, draw_selection_handles,
-    draw_selection_outline, draw_text_edit_border, draw_text_edit_handles, rgba_image_to_surface,
+    draw_active_text_input, draw_annotation_action, draw_canvas_checkerboard_background,
+    draw_crop_overlay, draw_draft_action, draw_focus_overlay, draw_rgba_to_context,
+    draw_selection_handles, draw_selection_outline, draw_text_edit_border,
+    draw_text_edit_handles, rgba_image_to_surface, text_action_bounds,
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
 use super::types::{
-    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError,
-    MoveHandle, Point, Rect, TextEditBounds, Tool, ViewTransform,
+    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError, Point,
+    Rect, Tool, ViewTransform,
 };
 use super::ui_support::{
     install_editor_css, prefers_dark_glass_theme, prefers_reduced_transparency,
@@ -155,7 +156,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     });
 
     let color_picker_parts =
-        color_picker::build_color_picker(state.clone(), canvas_queue_draw_signal);
+        color_picker::build_color_picker(state.clone(), canvas_queue_draw_signal, drawing_area_placeholder.clone());
     let color_picker_trigger_host = color_picker_parts.trigger_host;
     let color_popover = color_picker_parts.popover;
     let color_buttons = color_picker_parts.color_buttons;
@@ -475,8 +476,15 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
             text_size_label.set_label(&format!("{}pt", size));
             let mut st = state.lock().unwrap();
-            st.text_size = size as f64;
-            st.set_selected_text_action_size(size as f64);
+            let changed = st.set_text_size(size as f64);
+            let has_active_text = st.active_text_input.is_some();
+            if !changed && st.active_text_input.is_none() && st.selected_action_index.is_none() {
+                st.text_size = size as f64;
+            }
+            drop(st);
+            if has_active_text {
+                drawing_area.grab_focus();
+            }
             drawing_area.queue_draw();
         });
         text_size_list.append(&btn);
@@ -501,8 +509,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
             font_family_label.set_label(&family_str);
             let mut st = state.lock().unwrap();
-            st.text_font_family = family_str.clone();
-            st.set_selected_text_font_family(family_str.clone());
+            let changed = st.set_selected_text_font_family(family_str.clone());
+            let has_active_text = st.active_text_input.is_some();
+            if st.active_text_input.is_some() {
+                st.text_font_family = family_str.clone();
+            } else if !changed {
+                st.text_font_family = family_str.clone();
+            }
+            drop(st);
+            if has_active_text {
+                drawing_area.grab_focus();
+            }
             drawing_area.queue_draw();
         });
         font_family_list.append(&btn);
@@ -511,6 +528,28 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let eyedropper_mode = Rc::new(Cell::new(false));
     let eyedropper_point = Rc::new(RefCell::new(None::<Point>));
     let eyedropper_rendered = Rc::new(RefCell::new(None::<RgbaImage>));
+
+    {
+        let state_text_blink = state.clone();
+        let drawing_area_text_blink = drawing_area.downgrade();
+        glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+            let has_active_text = {
+                let mut st = state_text_blink.lock().unwrap();
+                if st.active_text_input.is_none() {
+                    false
+                } else {
+                    st.tick_cursor_blink();
+                    true
+                }
+            };
+            if has_active_text {
+                if let Some(area) = drawing_area_text_blink.upgrade() {
+                    area.queue_draw();
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
 
     canvas_eyedropper_ring.set_draw_func({
         let eyedropper_point_draw = eyedropper_point.clone();
@@ -1108,7 +1147,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
         }
 
-        for action in &st.actions {
+        let editing_action_index = st
+            .active_text_input
+            .as_ref()
+            .and_then(|input| input.editing_action_index);
+        for (index, action) in st.actions.iter().enumerate() {
+            if Some(index) == editing_action_index {
+                continue;
+            }
             if matches!(
                 action,
                 AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
@@ -1171,23 +1217,84 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 draw_draft_action(context, selected_action);
             }
 
-            let selection_padding = selection_hit_padding_for_scale(t.scale);
-            if let Some(bounds) = action_bounds_with_padding(selected_action, selection_padding) {
-                draw_selection_outline(context, bounds, t.scale);
-            }
-
             if st.selected_tool == Tool::Select {
-                let handles = action_resize_handles(selected_action);
-                if !handles.is_empty() {
-                    draw_selection_handles(context, &handles, st.select_resize_handle, t.scale);
+                match selected_action {
+                    AnnotationAction::Text {
+                        position,
+                        text,
+                        font,
+                        max_width,
+                        ..
+                    } => {
+                        let available_width = max_width.unwrap_or_else(|| {
+                            (st.base_image.width() as f64 - position.x).max(font.size * 1.8)
+                        });
+                        let mut text_bounds = text_action_bounds(
+                            context,
+                            *position,
+                            text,
+                            font,
+                            Some(available_width),
+                        );
+                        text_bounds.rect.x = text_bounds
+                            .rect
+                            .x
+                            .clamp(0, (st.base_image.width() as i32 - text_bounds.rect.width).max(0));
+                        text_bounds.rect.y = text_bounds
+                            .rect
+                            .y
+                            .clamp(0, (st.base_image.height() as i32 - text_bounds.rect.height).max(0));
+                        text_bounds.sync_handles();
+                        draw_text_edit_border(context, &text_bounds, t.scale);
+                        draw_text_edit_handles(context, &text_bounds, None, t.scale);
+                    }
+                    _ => {
+                        let selection_padding = selection_hit_padding_for_scale(t.scale);
+                        if let Some(bounds) = action_bounds_with_padding(selected_action, selection_padding) {
+                            draw_selection_outline(context, bounds, t.scale);
+                        }
+
+                        let handles = action_resize_handles(selected_action);
+                        if !handles.is_empty() {
+                            draw_selection_handles(context, &handles, st.select_resize_handle, t.scale);
+                        }
+                    }
                 }
             }
+        }
 
-            // Draw active text edit overlay (border + handles)
-            if let Some(bounds) = st.active_text_bounds.as_ref() {
-                draw_text_edit_border(context, bounds, t.scale);
-                draw_text_edit_handles(context, bounds, None, t.scale); // None = no active handle initially
+        // Draw active text edit overlay (border + handles)
+        if let Some(bounds) = st.active_text_bounds.as_ref() {
+            let mut bounds = bounds.clone();
+            bounds.rect.x = bounds
+                .rect
+                .x
+                .clamp(0, (st.base_image.width() as i32 - bounds.rect.width).max(0));
+            bounds.rect.y = bounds
+                .rect
+                .y
+                .clamp(0, (st.base_image.height() as i32 - bounds.rect.height).max(0));
+            bounds.sync_handles();
+            if let Some(input) = st.active_text_input.as_ref() {
+                let font = super::types::FontSettings {
+                    family: st.text_font_family.clone(),
+                    size: st.text_size,
+                    style: super::types::FontStyle::Normal,
+                    decoration: super::types::TextDecoration::None,
+                    alignment: super::types::TextAlignment::Left,
+                };
+                draw_active_text_input(
+                    context,
+                    &bounds,
+                    &input.text,
+                    input.cursor_position,
+                    input.cursor_visible,
+                    input.color,
+                    &font,
+                );
             }
+            draw_text_edit_border(context, &bounds, t.scale);
+            draw_text_edit_handles(context, &bounds, st.active_text_drag_handle.clone(), t.scale);
         }
         let _ = context.restore();
     });
