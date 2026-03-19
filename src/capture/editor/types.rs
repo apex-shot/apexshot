@@ -38,9 +38,35 @@ pub enum BackgroundAlignment {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ObfuscateMethod {
-    Blur,
     Pixelate,
-    SecurePixelate,
+    BlurSecure,
+    BlurSmooth,
+    Blackout,
+}
+
+#[allow(dead_code)]
+impl ObfuscateMethod {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ObfuscateMethod::Pixelate => "Pixelate",
+            ObfuscateMethod::BlurSecure => "Blur (Secure)",
+            ObfuscateMethod::BlurSmooth => "Blur (Smooth)",
+            ObfuscateMethod::Blackout => "Blackout",
+        }
+    }
+
+    pub fn icon_name(&self) -> &'static str {
+        match self {
+            ObfuscateMethod::Pixelate => "obfuscate-pixelate",
+            ObfuscateMethod::BlurSecure => "obfuscate-blur-secure",
+            ObfuscateMethod::BlurSmooth => "obfuscate-blur-smooth",
+            ObfuscateMethod::Blackout => "obfuscate-blackout",
+        }
+    }
+
+    pub fn has_slider(&self) -> bool {
+        !matches!(self, ObfuscateMethod::Blackout)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,6 +395,7 @@ impl Rect {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum AnnotationAction {
     Pen {

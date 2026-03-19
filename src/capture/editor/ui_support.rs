@@ -1,13 +1,8 @@
-use super::state::EditorState;
-use super::types::{AnnotationAction, DrawColor, Point};
 use gtk4::gdk;
 use gtk4::{
-    glib, prelude::*, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea, Entry,
-    EventControllerKey, Image, Label, Orientation, Window,
+    prelude::*, Box as GtkBox, Button, CssProvider, Image, Label, Orientation,
 };
 use std::process::Command;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
 pub fn parse_env_bool(name: &str) -> Option<bool> {
     let value = std::env::var(name).ok()?.trim().to_ascii_lowercase();

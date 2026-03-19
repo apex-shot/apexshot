@@ -1,17 +1,20 @@
 use super::color::{
-    clamp_obfuscate_amount, clamp_stroke_size, clamp_text_size,
+    clamp_blur_secure_amount, clamp_blur_smooth_amount, clamp_obfuscate_amount,
+    clamp_pixelate_amount, clamp_stroke_size, clamp_text_size,
     selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX,
     DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
 };
-use super::render::{apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_pixelate};
+use super::render::{
+    apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_blur,
+};
 use super::selection::{
     action_contains_point_with_padding, action_resize_handle_at_point_with_radius, resize_action,
     resize_rect_with_handle, translate_action,
 };
 use super::types::{
     AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
-    EditorError, FontSettings, MoveHandle, ObfuscateMethod, Point, Rect, ResizeHandle,
-    SelectHandle, SizeControlMode, TextEditBounds, Tool,
+    EditorError, FontSettings, MoveHandle, ObfuscateMethod, Point, Rect, SelectHandle,
+    SizeControlMode, TextEditBounds, Tool,
 };
 use gtk4;
 use image::RgbaImage;
@@ -33,11 +36,16 @@ pub struct EditorState {
     pub stroke_size: f64,
     pub text_size: f64,
     pub text_font_family: String,
-    pub obfuscate_amount: f64,
+    pub obfuscate_method: ObfuscateMethod,
+    pub obfuscate_pixelate_amount: f64,
+    pub obfuscate_blur_secure_amount: f64,
+    pub obfuscate_blur_smooth_amount: f64,
     pub next_number: u32,
     pub select_drag_anchor: Option<Point>,
     pub select_resize_handle: Option<super::types::SelectHandle>,
     pub select_effect_rebuild_pending: bool,
+    pub select_effect_rebuild_dirty: bool,
+    pub select_drag_effect_dirty: bool,
     pub active_text_edit: Option<()>,
     pub active_text_entry: Option<gtk4::Entry>,
     pub active_text_bounds: Option<TextEditBounds>,
@@ -45,6 +53,8 @@ pub struct EditorState {
     pub active_text_drag_handle: Option<MoveHandle>,
     pub active_text_drag_start: Option<Point>,
     pub pending_effect_revision: u64,
+    pub last_applied_effect_revision: u64,
+    pub last_effect_request_time_us: i64,
     pub drag_start: Option<Point>,
     pub drag_current: Option<Point>,
     pub drag_start_view: Option<Point>,
@@ -230,11 +240,16 @@ impl EditorState {
             stroke_size: STROKE_WIDTH,
             text_size: TEXT_SIZE,
             text_font_family: String::from("Sans"),
-            obfuscate_amount: DEFAULT_OBFUSCATE_AMOUNT,
+            obfuscate_method: ObfuscateMethod::Pixelate,
+            obfuscate_pixelate_amount: DEFAULT_OBFUSCATE_AMOUNT,
+            obfuscate_blur_secure_amount: DEFAULT_OBFUSCATE_AMOUNT,
+            obfuscate_blur_smooth_amount: DEFAULT_OBFUSCATE_AMOUNT,
             next_number: 1,
             select_drag_anchor: None,
             select_resize_handle: None,
             select_effect_rebuild_pending: false,
+            select_effect_rebuild_dirty: false,
+            select_drag_effect_dirty: false,
             active_text_edit: None,
             active_text_entry: None,
             active_text_bounds: None,
@@ -242,6 +257,8 @@ impl EditorState {
             active_text_drag_handle: None,
             active_text_drag_start: None,
             pending_effect_revision: 0,
+            last_applied_effect_revision: 0,
+            last_effect_request_time_us: 0,
             drag_start: None,
             drag_current: None,
             drag_start_view: None,
@@ -329,14 +346,45 @@ impl EditorState {
         true
     }
 
-    pub fn set_obfuscate_amount(&mut self, amount: f64) -> bool {
-        let next = clamp_obfuscate_amount(amount);
-        if (next - self.obfuscate_amount).abs() <= f64::EPSILON {
-            return false;
-        }
+    pub fn set_obfuscate_method(&mut self, method: ObfuscateMethod) {
+        self.obfuscate_method = method;
+    }
 
-        self.obfuscate_amount = next;
-        true
+    #[allow(dead_code)]
+    pub fn obfuscate_method(&self) -> ObfuscateMethod {
+        self.obfuscate_method
+    }
+
+    pub fn current_obfuscate_amount(&self) -> f64 {
+        match self.obfuscate_method {
+            ObfuscateMethod::Pixelate => self.obfuscate_pixelate_amount,
+            ObfuscateMethod::BlurSecure => self.obfuscate_blur_secure_amount,
+            ObfuscateMethod::BlurSmooth => self.obfuscate_blur_smooth_amount,
+            ObfuscateMethod::Blackout => 0.0,
+        }
+    }
+
+    pub fn set_current_obfuscate_amount(&mut self, amount: f64) {
+        match self.obfuscate_method {
+            ObfuscateMethod::Pixelate => {
+                self.obfuscate_pixelate_amount = clamp_pixelate_amount(amount)
+            }
+            ObfuscateMethod::BlurSecure => {
+                self.obfuscate_blur_secure_amount = clamp_blur_secure_amount(amount)
+            }
+            ObfuscateMethod::BlurSmooth => {
+                self.obfuscate_blur_smooth_amount = clamp_blur_smooth_amount(amount)
+            }
+            ObfuscateMethod::Blackout => {}
+        }
+    }
+
+    /// Like set_current_obfuscate_amount but returns true if the value actually changed.
+    pub fn set_current_obfuscate_amount_and_check(&mut self, amount: f64) -> bool {
+        let before = self.current_obfuscate_amount();
+        self.set_current_obfuscate_amount(amount);
+        let after = self.current_obfuscate_amount();
+        (after - before).abs() > f64::EPSILON
     }
 
     pub fn selected_action_stroke_size(&self) -> Option<f64> {
@@ -551,10 +599,10 @@ impl EditorState {
                 if self.selected_tool == Tool::Select {
                     Some(
                         self.selected_obfuscate_action_amount()
-                            .unwrap_or(self.obfuscate_amount),
+                            .unwrap_or_else(|| self.current_obfuscate_amount()),
                     )
                 } else {
-                    Some(self.obfuscate_amount)
+                    Some(self.current_obfuscate_amount())
                 }
             }
         }
@@ -578,9 +626,13 @@ impl EditorState {
                 changed
             }
             Some(SizeControlMode::Obfuscate) => {
-                let changed = self.set_obfuscate_amount(size);
-                let _ = self
-                    .set_selected_obfuscate_action_amount_without_rebuild(self.obfuscate_amount);
+                // Update the per-method amount for the current method only.
+                // This ensures Pixelate, BlurSecure, and BlurSmooth each have
+                // independent intensity values and don't interfere with each other.
+                let changed = self.set_current_obfuscate_amount_and_check(size);
+                // Also update any currently selected obfuscate action in-place.
+                let current_amount = self.current_obfuscate_amount();
+                let _ = self.set_selected_obfuscate_action_amount_without_rebuild(current_amount);
                 changed
             }
             None => false,
@@ -755,6 +807,7 @@ impl EditorState {
         Some((index, text.clone()))
     }
 
+    #[allow(dead_code)]
     pub fn update_text_action(&mut self, index: usize, new_text: String) -> bool {
         if index >= self.actions.len() {
             return false;
@@ -962,6 +1015,9 @@ impl EditorState {
         let dx = point.x - anchor.x;
         let dy = point.y - anchor.y;
 
+        let img_w = self.base_image.width() as i32;
+        let img_h = self.base_image.height() as i32;
+
         let resize_handle = self.select_resize_handle;
         let (moved, effect_action) = if let Some(action) = self.actions.get_mut(index) {
             let moved = if let Some(handle) = resize_handle {
@@ -969,6 +1025,12 @@ impl EditorState {
             } else {
                 translate_action(action, dx, dy)
             };
+
+            // Clamp the action so it cannot be moved/resized outside the image bounds.
+            if moved {
+                clamp_action_to_image(action, img_w, img_h);
+            }
+
             let effect_action = matches!(action, AnnotationAction::Obfuscate { .. });
             (moved, effect_action)
         } else {
@@ -984,17 +1046,17 @@ impl EditorState {
         self.select_drag_anchor = Some(point);
         self.redo_actions.clear();
         if effect_action {
-            self.select_effect_rebuild_pending = true;
+            self.select_drag_effect_dirty = true;
         }
         true
     }
 
     #[allow(dead_code)]
     pub fn end_select_drag(&mut self) -> bool {
-        let rebuild = self.select_effect_rebuild_pending;
+        let rebuild = self.select_drag_effect_dirty;
         if rebuild {
             self.rebuild_effect_layer();
-            self.select_effect_rebuild_pending = false;
+            self.select_drag_effect_dirty = false;
         }
         self.end_select_drag_without_rebuild();
         rebuild
@@ -1010,8 +1072,8 @@ impl EditorState {
     }
 
     pub fn end_select_drag_without_rebuild_and_check_effect(&mut self) -> bool {
-        let rebuild = self.select_effect_rebuild_pending;
-        self.select_effect_rebuild_pending = false;
+        let rebuild = self.select_drag_effect_dirty;
+        self.select_drag_effect_dirty = false;
         self.end_select_drag_without_rebuild();
         rebuild
     }
@@ -1050,6 +1112,7 @@ impl EditorState {
         self.mark_working_image_dirty();
     }
 
+    #[allow(dead_code)]
     pub fn commit_text_edit(
         &mut self,
         bounds: &TextEditBounds,
@@ -1092,6 +1155,45 @@ impl EditorState {
     }
 }
 
+/// Clamp an annotation action so it stays within the image bounds.
+/// For rect-based actions (Obfuscate, Focus, Box, Circle) the rect is clamped.
+/// For point-based actions (Text, Number, Pen, Arrow, Line) each point is clamped.
+fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) {
+    match action {
+        AnnotationAction::Obfuscate { rect, .. }
+        | AnnotationAction::Focus { rect }
+        | AnnotationAction::Box { rect, .. }
+        | AnnotationAction::Circle { rect, .. } => {
+            // Keep the rect fully inside the image.
+            let w = rect.width.min(img_w);
+            let h = rect.height.min(img_h);
+            rect.width = w;
+            rect.height = h;
+            rect.x = rect.x.max(0).min(img_w - w);
+            rect.y = rect.y.max(0).min(img_h - h);
+        }
+        AnnotationAction::Text { position, .. }
+        | AnnotationAction::Number { position, .. } => {
+            position.x = position.x.max(0.0).min(img_w as f64);
+            position.y = position.y.max(0.0).min(img_h as f64);
+        }
+        AnnotationAction::Pen { points, .. }
+        | AnnotationAction::Highlighter { points, .. } => {
+            for p in points {
+                p.x = p.x.max(0.0).min(img_w as f64);
+                p.y = p.y.max(0.0).min(img_h as f64);
+            }
+        }
+        AnnotationAction::Line { start, end, .. }
+        | AnnotationAction::Arrow { start, end, .. } => {
+            start.x = start.x.max(0.0).min(img_w as f64);
+            start.y = start.y.max(0.0).min(img_h as f64);
+            end.x = end.x.max(0.0).min(img_w as f64);
+            end.y = end.y.max(0.0).min(img_h as f64);
+        }
+    }
+}
+
 pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction]) {
     for action in actions {
         match action {
@@ -1100,14 +1202,17 @@ pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction])
                 method,
                 amount,
             } => match method {
-                ObfuscateMethod::Blur => {
-                    apply_blur_rect(image, *rect, *amount);
-                }
                 ObfuscateMethod::Pixelate => {
                     apply_censor_rect(image, *rect, *amount);
                 }
-                ObfuscateMethod::SecurePixelate => {
-                    apply_secure_pixelate(image, *rect, *amount);
+                ObfuscateMethod::BlurSecure => {
+                    apply_secure_blur(image, *rect, *amount);
+                }
+                ObfuscateMethod::BlurSmooth => {
+                    apply_blur_rect(image, *rect, *amount);
+                }
+                ObfuscateMethod::Blackout => {
+                    apply_blackout_rect(image, rect);
                 }
             },
             _ => {}
@@ -1243,8 +1348,8 @@ impl EditorState {
             Tool::Obfuscate => {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Obfuscate {
                     rect,
-                    method: ObfuscateMethod::Blur,
-                    amount: self.obfuscate_amount,
+                    method: self.obfuscate_method,
+                    amount: self.current_obfuscate_amount(),
                 })
             }
             Tool::Focus => {
@@ -1358,8 +1463,8 @@ impl EditorState {
             Tool::Obfuscate => {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Obfuscate {
                     rect,
-                    method: ObfuscateMethod::Blur,
-                    amount: self.obfuscate_amount,
+                    method: self.obfuscate_method,
+                    amount: self.current_obfuscate_amount(),
                 })
             }
             Tool::Focus => {
