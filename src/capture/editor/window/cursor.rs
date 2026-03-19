@@ -1,11 +1,23 @@
 use gtk4::gdk;
+use gtk4::gdk::Cursor;
+use gtk4::gdk_pixbuf::{Colorspace, Pixbuf};
 use gtk4::{prelude::*, ApplicationWindow};
 
 use super::super::color::{selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale};
 use super::super::state::EditorState;
+use super::super::text_detect::clamp_cursor_size;
 use super::super::types::{
     cursor_name_for_select_handle, AnnotationAction, Point, Tool, ViewTransform,
 };
+
+/// Default highlighter cursor size (when no text detected)
+pub const DEFAULT_HIGHLIGHTER_CURSOR_SIZE: f64 = 16.0;
+
+/// Cursor width ratio relative to height
+const CURSOR_WIDTH_RATIO: f64 = 1.5;
+
+/// Corner radius for highlighter cursor
+const CURSOR_CORNER_RADIUS: f64 = 4.0;
 
 pub(super) fn set_window_cursor_name(window: &ApplicationWindow, cursor_name: Option<&str>) {
     if let Some(surface) = window.surface() {
@@ -124,4 +136,79 @@ pub fn cursor_name_for_view_point(
         | Tool::Obfuscate
         | Tool::Focus => "crosshair",
     }
+}
+
+/// Create a rounded rectangle highlighter cursor surface
+pub fn create_highlighter_cursor_surface(
+    height: f64,
+    color: (f64, f64, f64, f64),
+) -> Option<gtk4::cairo::ImageSurface> {
+    let height = clamp_cursor_size(height);
+    let width = height * CURSOR_WIDTH_RATIO;
+
+    // Add padding for the rounded corners
+    let surface_width = (width + 4.0).ceil() as i32;
+    let surface_height = (height + 4.0).ceil() as i32;
+
+    let surface = gtk4::cairo::ImageSurface::create(
+        gtk4::cairo::Format::ARgb32,
+        surface_width,
+        surface_height,
+    )
+    .ok()?;
+
+    let context = gtk4::cairo::Context::new(&surface).ok()?;
+
+    // Draw rounded rectangle
+    let x = 2.0;
+    let y = 2.0;
+    let radius = CURSOR_CORNER_RADIUS.min(width / 2.0).min(height / 2.0);
+
+    context.new_sub_path();
+    context.arc(x + width - radius, y + radius, radius, -std::f64::consts::FRAC_PI_2, 0.0);
+    context.arc(x + width - radius, y + height - radius, radius, 0.0, std::f64::consts::FRAC_PI_2);
+    context.arc(x + radius, y + height - radius, radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+    context.arc(x + radius, y + radius, radius, std::f64::consts::PI, -std::f64::consts::FRAC_PI_2);
+    context.close_path();
+
+    context.set_source_rgba(color.0, color.1, color.2, color.3);
+    context.fill();
+
+    Some(surface)
+}
+
+/// Set custom highlighter cursor on window
+pub fn set_highlighter_cursor(
+    window: &gtk4::ApplicationWindow,
+    height: f64,
+    color: (f64, f64, f64, f64),
+) {
+    if let Some(surface) = create_highlighter_cursor_surface(height, color) {
+        if let Some(texture) = surface_to_texture(surface) {
+            let cursor = Cursor::from_texture(&texture, 0, (height / 2.0) as i32, None);
+            if let Some(surface) = window.surface() {
+                surface.set_cursor(Some(&cursor));
+            }
+        }
+    }
+}
+
+/// Convert cairo surface to gdk Texture
+fn surface_to_texture(mut surface: gtk4::cairo::ImageSurface) -> Option<gdk::Texture> {
+    let width = surface.width();
+    let height = surface.height();
+    let stride = surface.stride() as i32;
+    let data = surface.data().ok()?.to_vec();
+
+    let pixbuf = Pixbuf::from_bytes(
+        &gtk4::glib::Bytes::from(&data),
+        Colorspace::Rgb,
+        true,
+        8,
+        width,
+        height,
+        stride,
+    );
+
+    Some(gdk::Texture::for_pixbuf(&pixbuf))
 }
