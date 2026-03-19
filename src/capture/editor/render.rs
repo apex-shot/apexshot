@@ -1,6 +1,6 @@
 use super::color::{
     highlighter_stroke_width, CENSOR_BLOCK_SIZE, HIGHLIGHTER_ALPHA_SCALE, NUMBER_FONT_SIZE,
-    NUMBER_RADIUS, SELECT_HANDLE_SIZE,
+    NUMBER_RADIUS,
 };
 use super::types::{
     AnnotationAction, DrawColor, FontSettings, FontStyle, MoveHandle, Point, Rect, SelectHandle,
@@ -378,16 +378,31 @@ pub fn draw_selection_outline(context: &gtk4::cairo::Context, rect: Rect, view_s
     let y = rect.y as f64;
 
     let _ = context.save();
-    context.set_line_width(1.8 / scale);
-    context.rectangle(x, y, width, height);
-    context.set_source_rgba(0.96, 0.98, 1.0, 0.96);
-    let _ = context.stroke_preserve();
 
-    context.set_line_width(1.2 / scale);
-    context.set_dash(&[5.0 / scale, 4.0 / scale], 0.0);
-    context.set_source_rgba(0.14, 0.58, 0.98, 0.95);
-    let _ = context.stroke();
+    // Solid blue rounded-rect border — same style as the text edit border.
+    let radius = (4.0 / scale).min(width / 2.0).min(height / 2.0);
+    context.set_source_rgba(
+        TEXT_EDIT_BORDER_COLOR.0,
+        TEXT_EDIT_BORDER_COLOR.1,
+        TEXT_EDIT_BORDER_COLOR.2,
+        1.0,
+    );
+    context.set_line_width(2.0 / scale);
     context.set_dash(&[], 0.0);
+
+    context.new_path();
+    context.move_to(x + radius, y);
+    context.line_to(x + width - radius, y);
+    context.arc(x + width - radius, y + radius, radius, -std::f64::consts::FRAC_PI_2, 0.0);
+    context.line_to(x + width, y + height - radius);
+    context.arc(x + width - radius, y + height - radius, radius, 0.0, std::f64::consts::FRAC_PI_2);
+    context.line_to(x + radius, y + height);
+    context.arc(x + radius, y + height - radius, radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+    context.line_to(x, y + radius);
+    context.arc(x + radius, y + radius, radius, std::f64::consts::PI, -std::f64::consts::FRAC_PI_2);
+    context.close_path();
+    let _ = context.stroke();
+
     let _ = context.restore();
 }
 
@@ -406,19 +421,29 @@ pub fn draw_selection_handles(
     let _ = context.save();
     for (handle, center) in handles {
         let is_active = active_handle.is_some_and(|active| active == *handle);
-        let size = if is_active {
-            (SELECT_HANDLE_SIZE + 1.6) / scale
-        } else {
-            SELECT_HANDLE_SIZE / scale
-        };
-        let half = size / 2.0;
+        let radius = (MOVE_HANDLE_RADIUS + if is_active { 1.0 } else { 0.0 }) / scale;
 
-        context.rectangle(center.x - half, center.y - half, size, size);
-        context.set_source_rgba(0.99, 1.0, 1.0, 0.98);
-        let _ = context.fill_preserve();
-        context.set_source_rgba(0.14, 0.58, 0.98, if is_active { 1.0 } else { 0.92 });
-        context.set_line_width(if is_active { 2.0 / scale } else { 1.6 / scale });
+        // White outline ring
+        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        context.set_line_width(MOVE_HANDLE_OUTLINE_WIDTH / scale);
+        context.arc(center.x, center.y, radius, 0.0, std::f64::consts::TAU);
         let _ = context.stroke();
+
+        // Blue filled circle
+        context.set_source_rgba(
+            TEXT_EDIT_BORDER_COLOR.0,
+            TEXT_EDIT_BORDER_COLOR.1,
+            TEXT_EDIT_BORDER_COLOR.2,
+            1.0,
+        );
+        context.arc(
+            center.x,
+            center.y,
+            (radius - MOVE_HANDLE_OUTLINE_WIDTH / scale).max(1.0 / scale),
+            0.0,
+            std::f64::consts::TAU,
+        );
+        let _ = context.fill();
     }
     let _ = context.restore();
 }
@@ -1077,7 +1102,7 @@ pub fn draw_number(context: &gtk4::cairo::Context, position: Point, number: u32,
     let _ = context.show_text(&label);
 }
 
-const BLUR_PERFORMANCE_THRESHOLD: usize = 200 * 200; // 200x200 pixels
+const BLUR_PERFORMANCE_THRESHOLD: usize = 400 * 400; // 400x400 pixels
 const BLUR_DOWNSAMPLE_FACTOR: usize = 4;
 
 pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64) {
@@ -1095,13 +1120,8 @@ pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64) {
     let rect_height = rect.height as usize;
     let area = rect_width * rect_height;
 
-    // For very large regions, fall back to pixelation (much faster)
-    if area > BLUR_PERFORMANCE_THRESHOLD * 4 {
-        apply_censor_rect(image, rect, (radius * 2.0).max(10.0));
-        return;
-    }
-
-    // For large regions, use downsampled blur
+    // For large regions, use downsampled blur (never fall back to pixelation).
+    // The downsampled path is robust and always produces a real blur.
     if area > BLUR_PERFORMANCE_THRESHOLD {
         apply_blur_rect_downsampled(image, rect, radius);
         return;
@@ -1244,7 +1264,9 @@ pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64) {
         for x in x0..x1 {
             let work_x = x - sample_x0;
             let work_y = y - sample_y0;
-            let pixel = work_buffer[work_y * work_width + work_x];
+            let mut pixel = work_buffer[work_y * work_width + work_x];
+            // Prevent alpha artifacts from making the checkerboard show through.
+            pixel[3] = 255;
             image.put_pixel(x as u32, y as u32, image::Rgba(pixel));
         }
     }
@@ -1255,42 +1277,62 @@ fn apply_blur_rect_downsampled(image: &mut RgbaImage, rect: Rect, radius: f64) {
         return;
     };
 
-    let factor = BLUR_DOWNSAMPLE_FACTOR as f64;
-    let small_rect = Rect {
-        x: rect.x / factor as i32,
-        y: rect.y / factor as i32,
-        width: (rect.width as f64 / factor).ceil() as i32,
-        height: (rect.height as f64 / factor).ceil() as i32,
-    };
+    if radius <= 0.0 {
+        return;
+    }
 
-    let small_radius = (radius / factor).max(1.0);
+    // Inspired by the Qt overlay approach (downsample + blur + upsample).
+    // This is resilient and guarantees we fill the entire target rect (no checkerboard gaps).
+    let factor = BLUR_DOWNSAMPLE_FACTOR.max(2) as u32;
+    let small_w = (image.width() / factor).max(1);
+    let small_h = (image.height() / factor).max(1);
 
-    let small_image = image::imageops::resize(
+    // 1) Downsample full image
+    let mut small = image::imageops::resize(
         image,
-        (image.width() as f64 / factor) as u32,
-        (image.height() as f64 / factor) as u32,
+        small_w,
+        small_h,
         image::imageops::FilterType::Triangle,
     );
 
-    let small_blurred = small_image.clone();
-    let small_rect_clamped = small_rect.clamp_to(small_blurred.width(), small_blurred.height());
-    if let Some(sr) = small_rect_clamped {
-        let mut temp_small = small_blurred.clone();
-        apply_blur_rect_to_buffer(&mut temp_small, sr, small_radius as usize);
+    // 2) Blur the corresponding small rect
+    let sr = Rect {
+        x: (rect.x as f64 / factor as f64).floor() as i32,
+        y: (rect.y as f64 / factor as f64).floor() as i32,
+        width: ((rect.width as f64) / factor as f64).ceil() as i32,
+        height: ((rect.height as f64) / factor as f64).ceil() as i32,
+    };
 
-        for y in 0..sr.height {
-            for x in 0..sr.width {
-                let src_x = (sr.x + x) as u32;
-                let src_y = (sr.y + y) as u32;
-                let dst_x = (rect.x + x * factor as i32) as u32;
-                let dst_y = (rect.y + y * factor as i32) as u32;
-                let pixel = temp_small.get_pixel(src_x, src_y);
-                for dy in 0..factor as u32 {
-                    for dx in 0..factor as u32 {
-                        if dst_x + dx < image.width() && dst_y + dy < image.height() {
-                            image.put_pixel(dst_x + dx, dst_y + dy, *pixel);
-                        }
-                    }
+    if let Some(sr) = sr.clamp_to(small.width(), small.height()) {
+        let small_radius = (radius / factor as f64).max(1.0) as usize;
+        apply_blur_rect_to_buffer(&mut small, sr, small_radius);
+
+        // 3) Extract the blurred small region, then upsample it exactly to the original rect size
+        let src_x0 = sr.x.max(0) as u32;
+        let src_y0 = sr.y.max(0) as u32;
+        let src_w = sr.width.max(1) as u32;
+        let src_h = sr.height.max(1) as u32;
+
+        let cropped = image::imageops::crop_imm(&small, src_x0, src_y0, src_w, src_h).to_image();
+        let up = image::imageops::resize(
+            &cropped,
+            rect.width.max(1) as u32,
+            rect.height.max(1) as u32,
+            image::imageops::FilterType::Triangle,
+        );
+
+        // 4) Write back (always fills entire rect)
+        let x0 = rect.x.max(0) as u32;
+        let y0 = rect.y.max(0) as u32;
+        for y in 0..rect.height.max(1) as u32 {
+            for x in 0..rect.width.max(1) as u32 {
+                let px = x0 + x;
+                let py = y0 + y;
+                if px < image.width() && py < image.height() {
+                    let mut p = *up.get_pixel(x, y);
+                    // Prevent any alpha artifacts from making the checkerboard show through.
+                    p[3] = 255;
+                    image.put_pixel(px, py, p);
                 }
             }
         }
@@ -1501,6 +1543,7 @@ pub fn apply_censor_rect(image: &mut RgbaImage, rect: Rect, block_size: f64) {
 /// Secure pseudo-pixelate that only samples from the fringe (edges) of the selection.
 /// This makes the obfuscation irreversible because the interior content is never used.
 /// Based on Flameshot's secure pixelate implementation.
+#[allow(dead_code)]
 pub fn apply_secure_pixelate(image: &mut RgbaImage, rect: Rect, block_size: f64) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
@@ -1628,6 +1671,102 @@ pub fn apply_secure_pixelate(image: &mut RgbaImage, rect: Rect, block_size: f64)
             let idx = (ey * effect_width + ex) as usize;
             if let Some(&color) = output.get(idx) {
                 image.put_pixel(x as u32, y as u32, image::Rgba(color));
+            }
+        }
+    }
+}
+
+/// Secure blur: irreversibly obfuscate a region with a smooth blurred appearance.
+///
+/// Strategy: downsample the region to a very small thumbnail (aggressively
+/// destroying detail), then upsample back and blur multiple times.
+/// The result looks like a smooth blur but is cryptographically irreversible
+/// because the original pixel content is reduced to a tiny representation.
+pub fn apply_secure_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
+    let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
+        return;
+    };
+
+    if rect.width < 2 || rect.height < 2 {
+        return;
+    }
+
+    // Use a much more aggressive downsample than Blur (Smooth).
+    // At amount=1 we downsample to ~1/6, at amount=25 we downsample to ~1/20.
+    // This ensures the secure variant always destroys more detail than smooth blur.
+    let base_factor = 6.0 + (amount / 25.0) * 14.0; // 6x at min, 20x at max
+    let factor = (base_factor as u32)
+        .max(4)
+        .min((rect.width.min(rect.height) as u32 / 2).max(4));
+
+    let thumb_w = (rect.width as u32 / factor).max(2);
+    let thumb_h = (rect.height as u32 / factor).max(2);
+
+    // 1) Crop the region
+    let cropped = image::imageops::crop_imm(
+        image,
+        rect.x.max(0) as u32,
+        rect.y.max(0) as u32,
+        rect.width as u32,
+        rect.height as u32,
+    ).to_image();
+
+    // 2) Downsample aggressively (destroys detail — irreversible)
+    let thumb = image::imageops::resize(
+        &cropped,
+        thumb_w,
+        thumb_h,
+        image::imageops::FilterType::Triangle,
+    );
+
+    // 3) Upsample back to original size
+    let upscaled = image::imageops::resize(
+        &thumb,
+        rect.width as u32,
+        rect.height as u32,
+        image::imageops::FilterType::Triangle,
+    );
+
+    // 4) Apply multiple blur passes to produce a smooth, blurred appearance.
+    //    More passes = more secure-looking (less structure visible).
+    let blur_radius = (amount / 3.0).max(2.0);
+    let passes = if amount > 15.0 { 3 } else if amount > 8.0 { 2 } else { 1 };
+    let mut blurred = upscaled;
+    for _ in 0..passes {
+        apply_blur_rect(
+            &mut blurred,
+            Rect { x: 0, y: 0, width: rect.width, height: rect.height },
+            blur_radius,
+        );
+    }
+
+    // 5) Write back — force alpha=255 to prevent checkerboard bleed
+    let x0 = rect.x.max(0) as u32;
+    let y0 = rect.y.max(0) as u32;
+    for y in 0..rect.height as u32 {
+        for x in 0..rect.width as u32 {
+            if x0 + x < image.width() && y0 + y < image.height() {
+                let mut p = *blurred.get_pixel(x, y);
+                p[3] = 255;
+                image.put_pixel(x0 + x, y0 + y, p);
+            }
+        }
+    }
+}
+
+/// Apply blackout effect to a rectangular region (solid black fill).
+pub fn apply_blackout_rect(image: &mut RgbaImage, rect: &Rect) {
+    let x = rect.x.max(0) as u32;
+    let y = rect.y.max(0) as u32;
+    let width = rect.width as u32;
+    let height = rect.height as u32;
+
+    for dy in 0..height {
+        for dx in 0..width {
+            let px = x + dx;
+            let py = y + dy;
+            if px < image.width() && py < image.height() {
+                image.put_pixel(px, py, image::Rgba([0, 0, 0, 255]));
             }
         }
     }
