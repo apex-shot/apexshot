@@ -42,13 +42,13 @@ impl PenWeight {
         }
     }
 
-    /// Get icon name for the pen (using built-in icons)
+    /// Get icon name for the pen (using fallback icons)
     pub fn icon_name(self) -> &'static str {
         match self {
-            Self::Small => "pen-weight-small",
-            Self::Medium => "pen-weight-medium",
-            Self::Large => "pen-weight-large",
-            Self::ExtraLarge => "pen-weight-extralarge",
+            Self::Small => "format-text-smaller-symbolic",
+            Self::Medium => "format-text-smaller-symbolic",
+            Self::Large => "format-text-larger-symbolic",
+            Self::ExtraLarge => "format-text-larger-symbolic",
         }
     }
 
