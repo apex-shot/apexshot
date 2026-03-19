@@ -1,3 +1,4 @@
+use super::text_detect::TextDetector;
 use super::color::{
     clamp_blur_secure_amount, clamp_blur_smooth_amount, clamp_obfuscate_amount,
     clamp_pixelate_amount, clamp_stroke_size, clamp_text_size,
