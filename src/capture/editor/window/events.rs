@@ -1617,7 +1617,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     if is_resizing {
                         st.fit_active_text_to_layout_preserving_box();
                     } else {
-                        st.fit_active_text_to_layout_preserving_font_size();
+                        // For Left/Right handle drags the user is explicitly setting
+                        // the width — do NOT run obstacle/layout fitting which would
+                        // fight the drag and shrink the box. Just reflow the height
+                        // to match the new width while keeping x, y, and width fixed.
+                        st.fit_active_text_height_only();
                     }
                 }
                 // Keep the original drag anchor fixed while using drag-start bounds.
