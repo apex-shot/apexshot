@@ -192,6 +192,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         obfuscate_method_button,
         obfuscate_method_popover: _,
         obfuscate_method_list,
+        pen_weight_button: _pen_weight_button,
+        pen_weight_popover: _,
+        pen_weight_list: _pen_weight_list,
     } = toolbar::build_toolbar_mode_controls(
         &crop_btn,
         &background_btn,
