@@ -19,7 +19,7 @@ use super::super::{
     state::EditorState,
     types::{
         tool_shortcut_target, BackgroundStyle, DrawColor, FontSettings, FontStyle, MoveHandle,
-        Point, TextAlignment, TextDecoration, Tool, ViewTransform,
+        ObfuscateMethod, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
     },
     ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
@@ -90,6 +90,8 @@ pub(super) struct EventContext {
     pub set_picker_panel_visibility: Rc<dyn Fn(bool)>,
     pub sync_size_control: Rc<dyn Fn()>,
     pub rebuild_effects_async: Rc<dyn Fn()>,
+    pub obfuscate_method_button: Button,
+    pub obfuscate_method_list: gtk4::Box,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -147,6 +149,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         set_picker_panel_visibility,
         sync_size_control,
         rebuild_effects_async,
+        obfuscate_method_button,
+        obfuscate_method_list,
     } = ctx;
 
     let state_select = state.clone();
@@ -486,12 +490,25 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let rebuild_effects_async_obfuscate = rebuild_effects_async.clone();
     obfuscate_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_obfuscate, 9);
-        if state_obfuscate
-            .lock()
-            .unwrap()
-            .set_tool_without_rebuild(Tool::Obfuscate)
         {
-            rebuild_effects_async_obfuscate();
+            let mut st = state_obfuscate.lock().unwrap();
+            let changed = st.set_tool_without_rebuild(Tool::Obfuscate);
+
+            // If the app was backgrounded while an effects rebuild was in-flight, we can end up
+            // with the pending flag stuck and no further rebuilds scheduled. Clear it on tool
+            // activation and trigger a rebuild if we have any effect actions.
+            st.select_effect_rebuild_pending = false;
+
+            // If we changed tool or we have any effect actions, refresh the effect layer.
+            let has_effect_actions = st
+                .actions
+                .iter()
+                .any(|a| EditorState::action_requires_effect_rebuild(a));
+            drop(st);
+
+            if changed || has_effect_actions {
+                rebuild_effects_async_obfuscate();
+            }
         }
         update_toolbar_for_tool_obfuscate(Tool::Obfuscate);
         sync_size_control_obfuscate();
@@ -572,6 +589,74 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             area.queue_draw();
         }
     });
+
+    // Wire up obfuscate method list items
+    // NOTE: Do not remove children here; that would empty the popover and nothing would display.
+    let methods = [
+        ObfuscateMethod::Pixelate,
+        ObfuscateMethod::BlurSecure,
+        ObfuscateMethod::BlurSmooth,
+        ObfuscateMethod::Blackout,
+    ];
+
+    let obfuscate_method_button = obfuscate_method_button.clone();
+    let rebuild_effects_async_obfuscate_method = rebuild_effects_async.clone();
+    let sync_size_control_obfuscate_method = sync_size_control.clone();
+
+    let mut method_idx = 0usize;
+    let mut child_opt = obfuscate_method_list.first_child();
+    while let Some(child) = child_opt {
+        // Grab next sibling before we do anything else
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&method) = methods.get(method_idx) else {
+            break;
+        };
+        method_idx += 1;
+
+        let state_obfuscate_method = state.clone();
+        let drawing_area_obfuscate_method = drawing_area.downgrade();
+        let obfuscate_method_button = obfuscate_method_button.clone();
+        let rebuild_effects_async_obfuscate_method = rebuild_effects_async_obfuscate_method.clone();
+        let sync_size_control_obfuscate_method = sync_size_control_obfuscate_method.clone();
+
+        button.connect_clicked(move |b| {
+            {
+                let mut st = state_obfuscate_method.lock().unwrap();
+                st.set_obfuscate_method(method);
+            }
+
+            // Update the method button icon to reflect current selection.
+            if let Some(child) = obfuscate_method_button.child() {
+                if let Ok(img) = child.downcast::<Image>() {
+                    let icon_name = match method {
+                        ObfuscateMethod::Pixelate => "view-grid-symbolic",
+                        ObfuscateMethod::BlurSecure => "security-high-symbolic",
+                        ObfuscateMethod::BlurSmooth => "blur-symbolic",
+                        ObfuscateMethod::Blackout => "media-playback-stop-symbolic",
+                    };
+                    img.set_icon_name(Some(icon_name));
+                }
+            }
+
+            // Rebuild effects so existing obfuscate annotations update immediately.
+            rebuild_effects_async_obfuscate_method();
+
+            // Sync toolbar sizing / slider state.
+            sync_size_control_obfuscate_method();
+
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+            if let Some(area) = drawing_area_obfuscate_method.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
 
     for (index, button) in color_buttons.iter().enumerate() {
         let state_color = state.clone();
@@ -850,6 +935,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let drawing_area_update = drawing_area.downgrade();
     let drag_last_redraw_update = drag_last_redraw.clone();
     let update_crop_size_fields_drag_update = update_crop_size_fields.clone();
+    let rebuild_effects_async_drag_update = rebuild_effects_async.clone();
     drag.connect_drag_update(move |gesture, offset_x, offset_y| {
         if eyedropper_mode_drag_update.get() {
             return;
@@ -875,9 +961,22 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 }
 
                 let moved = st.update_select_drag(t.view_to_image_clamped(current_view));
+                // Check if we moved/resized an effect action (obfuscate/focus).
+                // If so, trigger a real-time async rebuild so the effect updates
+                // during the drag rather than only on release.
+                // Clear the dirty flag here so we don't re-schedule on every
+                // drag tick — the coalescing in rebuild_effects_async handles
+                // the case where a rebuild is already in-flight.
+                let needs_effect_rebuild = st.select_drag_effect_dirty;
+                if needs_effect_rebuild {
+                    st.select_drag_effect_dirty = false;
+                }
                 drag_last_redraw_update.set(now);
                 drop(st);
                 if moved {
+                    if needs_effect_rebuild {
+                        rebuild_effects_async_drag_update();
+                    }
                     if let Some(area) = drawing_area_update.upgrade() {
                         area.queue_draw();
                     }
@@ -994,6 +1093,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 }
             } else {
                 st.clear_drag();
+                drop(st); // MUST drop before calling sync_size_control which also locks state
             }
 
             sync_size_control_drag_end();
@@ -1414,6 +1514,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let view_point = Point { x, y };
             let _image_point = t.view_to_image(view_point);
 
+            // Check move handles (convert to view coordinates)
             for (_handle, center) in &bounds.move_handles {
                 let center_view = Point {
                     x: center.x * t.scale + t.offset_x,

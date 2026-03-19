@@ -19,6 +19,7 @@ pub const CENSOR_BLOCK_SIZE: i32 = 10;
 pub const DRAG_REDRAW_INTERVAL_US: i64 = 16_000;
 pub const DEFAULT_COLOR_INDEX: usize = 0;
 pub const SELECT_HIT_PADDING: f64 = 8.0;
+#[allow(dead_code)]
 pub const SELECT_HANDLE_SIZE: f64 = 8.0;
 pub const SELECT_HANDLE_HIT_RADIUS: f64 = 9.0;
 pub const SELECT_MIN_RESIZE_SIZE: f64 = 2.0;
@@ -67,6 +68,18 @@ pub fn clamp_stroke_size(size: f64) -> f64 {
 }
 
 pub fn clamp_obfuscate_amount(amount: f64) -> f64 {
+    amount.clamp(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT)
+}
+
+pub fn clamp_pixelate_amount(amount: f64) -> f64 {
+    amount.clamp(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT)
+}
+
+pub fn clamp_blur_secure_amount(amount: f64) -> f64 {
+    amount.clamp(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT)
+}
+
+pub fn clamp_blur_smooth_amount(amount: f64) -> f64 {
     amount.clamp(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT)
 }
 

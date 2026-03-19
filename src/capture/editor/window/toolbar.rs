@@ -5,7 +5,7 @@ use gtk4::{
 use std::rc::Rc;
 
 use super::super::{
-    types::Tool,
+    types::{ObfuscateMethod, Tool},
     ui_support::{
         icon_tool_button, recommended_window_size, recommended_window_size_with_extra_width,
         traffic_light_button,
@@ -35,6 +35,7 @@ pub(super) struct ToolbarBaseParts {
     pub sep_2: GtkBox,
 }
 
+#[allow(dead_code)]
 pub(super) struct ToolbarBaseIconNames<'a> {
     pub crop: &'a str,
     pub draw: &'a str,
@@ -47,6 +48,14 @@ pub(super) struct ToolbarBaseIconNames<'a> {
     pub highlighter: &'a str,
     pub obfuscate: &'a str,
     pub focus: &'a str,
+    #[allow(dead_code)]
+    pub obfuscate_pixelate: &'a str,
+    #[allow(dead_code)]
+    pub obfuscate_blur_secure: &'a str,
+    #[allow(dead_code)]
+    pub obfuscate_blur_smooth: &'a str,
+    #[allow(dead_code)]
+    pub obfuscate_blackout: &'a str,
 }
 
 pub(super) struct ToolbarRightParts {
@@ -74,6 +83,12 @@ pub(super) struct ToolbarModeParts {
     pub crop_type_list: GtkBox,
     pub crop_width_entry: Entry,
     pub crop_height_entry: Entry,
+    pub obfuscate_method_group: GtkBox,
+    #[allow(dead_code)]
+    pub obfuscate_method_button: Button,
+    #[allow(dead_code)]
+    pub obfuscate_method_popover: Popover,
+    pub obfuscate_method_list: GtkBox,
 }
 
 pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> ToolbarBaseParts {
@@ -141,6 +156,52 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         sep_1,
         sep_2,
     }
+}
+
+pub(super) fn build_obfuscate_method_controls() -> (
+    GtkBox,
+    Button,
+    Popover,
+    GtkBox,
+) {
+    let obfuscate_method_group = GtkBox::new(Orientation::Horizontal, 4);
+    obfuscate_method_group.add_css_class("editor-obfuscate-method-group");
+    obfuscate_method_group.add_css_class("editor-tools-group");
+    obfuscate_method_group.set_visible(false);
+
+    let obfuscate_method_button = Button::new();
+    obfuscate_method_button.set_has_frame(false);
+    obfuscate_method_button.set_focusable(false);
+    obfuscate_method_button.add_css_class("editor-tool-button");
+    obfuscate_method_button.add_css_class("flat");
+    obfuscate_method_button.set_tooltip_text(Some("Obfuscate method"));
+
+    let obfuscate_method_icon = Image::from_icon_name("view-grid-symbolic");
+    obfuscate_method_button.set_child(Some(&obfuscate_method_icon));
+
+    let obfuscate_method_popover = Popover::new();
+    obfuscate_method_popover.set_has_arrow(false);
+    obfuscate_method_popover.set_autohide(true);
+    obfuscate_method_popover.add_css_class("editor-popover");
+    obfuscate_method_popover.set_parent(&obfuscate_method_button);
+
+    let obfuscate_method_list = GtkBox::new(Orientation::Vertical, 0);
+    obfuscate_method_list.add_css_class("editor-popover-list");
+    obfuscate_method_popover.set_child(Some(&obfuscate_method_list));
+
+    let p_popover = obfuscate_method_popover.clone();
+    obfuscate_method_button.connect_clicked(move |_| {
+        p_popover.popup();
+    });
+
+    obfuscate_method_group.append(&obfuscate_method_button);
+
+    (
+        obfuscate_method_group,
+        obfuscate_method_button,
+        obfuscate_method_popover,
+        obfuscate_method_list,
+    )
 }
 
 pub(super) fn build_toolbar_mode_controls(
@@ -369,6 +430,39 @@ pub(super) fn build_toolbar_mode_controls(
     gtk4::prelude::EditableExt::set_alignment(&crop_height_entry, 0.5);
     crop_height_entry.add_css_class("editor-crop-size-entry");
 
+    // Build obfuscate method selector
+    let (
+        obfuscate_method_group,
+        obfuscate_method_button,
+        obfuscate_method_popover,
+        obfuscate_method_list,
+    ) = build_obfuscate_method_controls();
+
+    // Populate obfuscate method list with options
+    let methods = [
+        (ObfuscateMethod::Pixelate, "view-grid-symbolic", "Pixelate"),
+        (ObfuscateMethod::BlurSecure, "security-high-symbolic", "Blur (Secure)"),
+        (ObfuscateMethod::BlurSmooth, "blur-symbolic", "Blur (Smooth)"),
+        (ObfuscateMethod::Blackout, "media-playback-stop-symbolic", "Blackout"),
+    ];
+
+    for (_method, icon_name, label) in methods {
+        let btn = Button::builder()
+            .label(label)
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .build();
+
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        let icon = Image::from_icon_name(icon_name);
+        let label_widget = Label::new(Some(label));
+        btn_box.append(&icon);
+        btn_box.append(&label_widget);
+        btn.set_child(Some(&btn_box));
+
+        obfuscate_method_list.append(&btn);
+    }
+
     let crop_size_group = GtkBox::new(Orientation::Horizontal, 4);
     crop_size_group.add_css_class("editor-tools-group");
     crop_size_group.add_css_class("editor-crop-size-group");
@@ -401,6 +495,7 @@ pub(super) fn build_toolbar_mode_controls(
     let standard_mode_group = GtkBox::new(Orientation::Horizontal, 10);
     standard_mode_group.add_css_class("editor-toolbar-mode-group");
     standard_mode_group.append(&primary_tools_group);
+    standard_mode_group.append(&obfuscate_method_group);
     standard_mode_group.append(&size_group);
 
     let toolbar_mode_stack = Stack::new();
@@ -436,6 +531,10 @@ pub(super) fn build_toolbar_mode_controls(
         crop_type_list,
         crop_width_entry,
         crop_height_entry,
+        obfuscate_method_group,
+        obfuscate_method_button,
+        obfuscate_method_popover,
+        obfuscate_method_list,
     }
 }
 
@@ -500,6 +599,7 @@ pub(super) fn build_toolbar_tool_updater(
     background_sidebar: &GtkBox,
     text_size_group: &GtkBox,
     font_family_group: &GtkBox,
+    obfuscate_method_group: &GtkBox,
     canvas_scroller: &gtk4::ScrolledWindow,
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
     window: &ApplicationWindow,
@@ -510,6 +610,7 @@ pub(super) fn build_toolbar_tool_updater(
     let background_sidebar = background_sidebar.clone();
     let text_size_group = text_size_group.clone();
     let font_family_group = font_family_group.clone();
+    let obfuscate_method_group = obfuscate_method_group.clone();
     let canvas_scroller = canvas_scroller.clone();
     let window = window.downgrade();
 
@@ -523,6 +624,9 @@ pub(super) fn build_toolbar_tool_updater(
         let is_text_tool = matches!(tool, Tool::Text);
         text_size_group.set_visible(is_text_tool);
         font_family_group.set_visible(is_text_tool);
+
+        let is_obfuscate_tool = matches!(tool, Tool::Obfuscate);
+        obfuscate_method_group.set_visible(is_obfuscate_tool);
 
         // Only allow vertical scrolling in Crop mode
         if matches!(tool, Tool::Crop) {

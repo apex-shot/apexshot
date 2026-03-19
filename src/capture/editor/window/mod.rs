@@ -142,6 +142,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         highlighter: icon_names::HIGHLIGHT_REGULAR,
         obfuscate: icon_names::FOG,
         focus: icon_names::SMALL_RECTANGLE_IN_FOCUS,
+        obfuscate_pixelate: "view-grid-symbolic",
+        obfuscate_blur_secure: "security-high-symbolic",
+        obfuscate_blur_smooth: "blur-symbolic",
+        obfuscate_blackout: "media-playback-stop-symbolic",
     });
 
     let canvas_queue_draw_signal: Rc<dyn Fn()> = Rc::new({
@@ -184,6 +188,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         crop_type_list,
         crop_width_entry,
         crop_height_entry,
+        obfuscate_method_group,
+        obfuscate_method_button,
+        obfuscate_method_popover: _,
+        obfuscate_method_list,
     } = toolbar::build_toolbar_mode_controls(
         &crop_btn,
         &background_btn,
@@ -323,19 +331,50 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let (request_sender, request_receiver) =
         std::sync::mpsc::channel::<(RgbaImage, Vec<AnnotationAction>, u64)>();
 
+    // Used by the UI thread to coalesce effect rebuild requests.
+    let effects_request_sender = request_sender.clone();
+
     let state_effects = state.clone();
     let drawing_area_effects = drawing_area.downgrade();
     {
         glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
             while let Ok((new_image, revision)) = effects_receiver.try_recv() {
-                let mut st = state_effects.lock().unwrap();
-                if revision > st.working_image_revision {
-                    st.working_image = new_image;
-                    st.working_image_revision = revision;
-                    st.select_effect_rebuild_pending = false;
-                    st.mark_working_image_dirty();
-                    if let Some(area) = drawing_area_effects.upgrade() {
-                        area.queue_draw();
+                // Apply results, then if another rebuild was requested while pending,
+                // schedule one more rebuild.
+                let (should_schedule_next, base_image, actions, next_revision) = {
+                    let mut st = state_effects.lock().unwrap();
+                    if revision <= st.last_applied_effect_revision {
+                        (false, None, None, 0)
+                    } else {
+                        st.working_image = new_image;
+                        st.last_applied_effect_revision = revision;
+                        st.select_effect_rebuild_pending = false;
+                        st.mark_working_image_dirty();
+
+                        let should = st.select_effect_rebuild_dirty;
+                        if should {
+                            st.select_effect_rebuild_dirty = false;
+                            st.select_effect_rebuild_pending = true;
+                            st.pending_effect_revision += 1;
+                            (
+                                true,
+                                Some(st.base_image.clone()),
+                                Some(st.actions.clone()),
+                                st.pending_effect_revision,
+                            )
+                        } else {
+                            (false, None, None, 0)
+                        }
+                    }
+                };
+
+                if let Some(area) = drawing_area_effects.upgrade() {
+                    area.queue_draw();
+                }
+
+                if should_schedule_next {
+                    if let (Some(base_image), Some(actions)) = (base_image, actions) {
+                        let _ = effects_request_sender.send((base_image, actions, next_revision));
                     }
                 }
             }
@@ -365,18 +404,63 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let state = state.clone();
         let sender = request_sender;
         move || {
-            let (base_image, actions, revision) = {
+            let maybe_payload = {
                 let mut st = state.lock().unwrap();
+
+                // Avoid flooding the worker with rebuild requests while one is already pending.
+                // This helps prevent UI stalls when many effect-triggering actions happen quickly.
+                if st.select_effect_rebuild_pending {
+                    // A rebuild is already in-flight; remember that we need another pass.
+                    st.select_effect_rebuild_dirty = true;
+                    return;
+                }
+                st.select_effect_rebuild_pending = true;
+                st.select_effect_rebuild_dirty = false;
+                st.last_effect_request_time_us = glib::monotonic_time();
+
                 st.pending_effect_revision += 1;
-                (
+                Some((
                     st.base_image.clone(),
                     st.actions.clone(),
                     st.pending_effect_revision,
-                )
+                ))
             };
-            let _ = sender.send((base_image, actions, revision));
+
+            if let Some((base_image, actions, revision)) = maybe_payload {
+                let _ = sender.send((base_image, actions, revision));
+            }
         }
     });
+
+    // Effects rebuild watchdog: if we ever get stuck with `select_effect_rebuild_pending=true`
+    // (e.g., app was backgrounded / main loop paused), recover by clearing pending and
+    // scheduling a fresh rebuild.
+    {
+        let state = state.clone();
+        let rebuild_effects_async = rebuild_effects_async.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+            let should_recover = {
+                let st = state.lock().unwrap();
+                if !st.select_effect_rebuild_pending {
+                    false
+                } else {
+                    let elapsed = glib::monotonic_time() - st.last_effect_request_time_us;
+                    // 2 seconds without a result is considered stuck.
+                    elapsed > 2_000_000
+                }
+            };
+
+            if should_recover {
+                {
+                    let mut st = state.lock().unwrap();
+                    st.select_effect_rebuild_pending = false;
+                }
+                rebuild_effects_async();
+            }
+
+            glib::ControlFlow::Continue
+        });
+    }
 
     let background_panel_parts = background_panel::build_background_panel(
         &window,
@@ -405,6 +489,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &background_sidebar,
         &text_size_group,
         &font_family_group,
+        &obfuscate_method_group,
         &canvas_scroller,
         start_background_gradient_preview_loading.clone(),
         &window,
@@ -759,8 +844,29 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     size_slider.set_tooltip_text(Some("Stroke size"));
                 }
                 SizeControlMode::Obfuscate => {
-                    size_slider.set_sensitive(false);
-                    size_slider.set_tooltip_text(Some("Use toolbar controls"));
+                    use super::color::{MAX_OBFUSCATE_AMOUNT, MIN_OBFUSCATE_AMOUNT};
+                    // Blackout has no intensity — hide the slider.
+                    // For all other methods, enable it with the per-method current value.
+                    let method = {
+                        let st = state.lock().unwrap();
+                        st.obfuscate_method
+                    };
+                    if matches!(method, super::types::ObfuscateMethod::Blackout) {
+                        size_group.set_visible(false);
+                    } else {
+                        size_group.set_visible(true);
+                        size_group.remove_css_class("size-group-inactive");
+                        size_slider.set_sensitive(true);
+                        size_slider.set_range(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT);
+                        size_slider.set_value(value);
+                        let tooltip = match method {
+                            super::types::ObfuscateMethod::Pixelate => "Pixelate intensity",
+                            super::types::ObfuscateMethod::BlurSecure => "Blur (Secure) intensity",
+                            super::types::ObfuscateMethod::BlurSmooth => "Blur (Smooth) intensity",
+                            super::types::ObfuscateMethod::Blackout => "Blackout",
+                        };
+                        size_slider.set_tooltip_text(Some(tooltip));
+                    }
                 }
             }
         }
@@ -781,33 +887,94 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let gradient_surfaces_draw = gradient_surfaces.clone();
     let wallpaper_cache_draw = wallpaper_cache.clone();
     drawing_area.set_draw_func(move |_, context, width, height| {
-        let st = state_draw.lock().unwrap();
-        let (can_undo, can_redo) = st.history_availability();
+        // IMPORTANT: do not hold the state mutex while performing cairo drawing.
+        // The async effects pipeline also locks this mutex on the GTK thread to apply results;
+        // holding it here can cause UI stalls/deadlocks.
+        let (
+            can_undo,
+            can_redo,
+            can_delete,
+            working_image,
+            working_image_revision,
+            actions,
+            draft_action,
+            crop_rect,
+            crop_mode_active,
+            crop_background_color_explicit,
+            crop_background_color,
+            background_style,
+            background_padding,
+            background_aspect_ratio,
+            background_insert,
+            background_alignment,
+            background_shadow,
+            background_corner_radius,
+            selected_tool,
+            selected_action,
+            select_drag_anchor,
+            select_resize_handle,
+            active_text_bounds,
+            active_text_input,
+            active_text_drag_handle,
+            text_font_family,
+            text_size,
+        ) = {
+            let st = state_draw.lock().unwrap();
+            let (can_undo, can_redo) = st.history_availability();
+            (
+                can_undo,
+                can_redo,
+                st.can_remove_selected_action(),
+                st.working_image.clone(),
+                st.working_image_revision,
+                st.actions.clone(),
+                st.draft_action(),
+                st.draft_crop_rect().or(st.crop_selection),
+                st.selected_tool == Tool::Crop,
+                st.crop_background_color_explicit,
+                st.crop_background_color,
+                st.background_style.clone(),
+                st.background_padding,
+                st.background_aspect_ratio,
+                st.background_insert,
+                st.background_alignment,
+                st.background_shadow,
+                st.background_corner_radius,
+                st.selected_tool,
+                st.selected_action().cloned(),
+                st.select_drag_anchor,
+                st.select_resize_handle,
+                st.active_text_bounds.clone(),
+                st.active_text_input.clone(),
+                st.active_text_drag_handle.clone(),
+                st.text_font_family.clone(),
+                st.text_size,
+            )
+        };
+
         undo_btn_draw.set_sensitive(can_undo);
         redo_btn_draw.set_sensitive(can_redo);
-        delete_selected_btn_draw.set_sensitive(st.can_remove_selected_action());
+        delete_selected_btn_draw.set_sensitive(can_delete);
 
-        let image_width = st.working_image.width() as f64;
-        let image_height = st.working_image.height() as f64;
-        let crop_rect = st.draft_crop_rect().or(st.crop_selection);
-        let crop_mode_active = st.selected_tool == Tool::Crop;
+        let image_width = working_image.width() as f64;
+        let image_height = working_image.height() as f64;
+        let crop_mode_active = crop_mode_active;
 
         let mut virtual_w = image_width;
         let mut virtual_h = image_height;
         let mut padding_px = 0.0;
         let mut draw_scale_factor = 1.0;
 
-        let has_background = st.background_style != BackgroundStyle::None;
+        let has_background = background_style != BackgroundStyle::None;
         if has_background {
             let ref_size = image_width.max(image_height);
             let scale_factor = ref_size / 400.0;
-            padding_px = st.background_padding * scale_factor;
+            padding_px = background_padding * scale_factor;
 
             virtual_w = image_width + padding_px * 2.0;
             virtual_h = image_height + padding_px * 2.0;
 
-            if let Some(ratio) = st
-                .background_aspect_ratio
+            if let Some(ratio) = background_aspect_ratio
                 .aspect_ratio(virtual_w as i32, virtual_h as i32)
             {
                 let current_ratio = virtual_w / virtual_h;
@@ -818,7 +985,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 }
             }
 
-            let insert_ratio = st.background_insert / 200.0;
+            let insert_ratio = background_insert / 200.0;
             draw_scale_factor = 1.0 - insert_ratio;
         }
 
@@ -852,8 +1019,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             context,
             width,
             height,
-            if crop_mode_active && st.crop_background_color_explicit {
-                Some(st.crop_background_color)
+            if crop_mode_active && crop_background_color_explicit {
+                Some(crop_background_color)
             } else {
                 None
             },
@@ -861,7 +1028,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
         if has_background {
             context.set_operator(gtk4::cairo::Operator::Over);
-            let current_style = st.background_style.clone();
+            let current_style = background_style.clone();
             let mut bg_cache = cached_background_surface_draw.borrow_mut();
             let mut bg_style_cache = cached_background_style_draw.borrow_mut();
 
@@ -900,12 +1067,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     *bg_cache = None;
                 } else if let BackgroundStyle::Blurred(_idx) = &current_style {
                     // Only recompute blur if the working image has changed
-                    let current_revision = st.working_image_revision;
+                    let current_revision = working_image_revision;
                     let needs_recompute = cached_blurred_revision_draw.get() != current_revision
                         || bg_cache.is_none();
 
                     if needs_recompute {
-                        let mut blurred_bg = st.working_image.clone();
+                        let mut blurred_bg = working_image.clone();
                         let (bw, bh) = blurred_bg.dimensions();
 
                         // Optimization: Downsample for background blur to save CPU
@@ -965,7 +1132,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             let draw_h = image_height * draw_scale_factor;
             let padding_px_scaled = padding_px * canvas_t.scale;
 
-            let (sc_off_x, sc_off_y) = match st.background_alignment {
+            let (sc_off_x, sc_off_y) = match background_alignment {
                 BackgroundAlignment::TopLeft => (padding_px_scaled, padding_px_scaled),
                 BackgroundAlignment::TopCenter => (
                     (virtual_w * canvas_t.scale - draw_w * canvas_t.scale) / 2.0,
@@ -1005,8 +1172,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             t.offset_y = canvas_t.offset_y + sc_off_y;
             t.scale = canvas_t.scale * draw_scale_factor;
 
-            if st.background_shadow > 0.0 {
-                let shadow_radius = st.background_shadow * t.scale * 0.5;
+            if background_shadow > 0.0 {
+                let shadow_radius = background_shadow * t.scale * 0.5;
                 let shadow_opacity = 0.4;
                 let _ = context.save();
                 context.set_source_rgba(0.0, 0.0, 0.0, shadow_opacity);
@@ -1014,7 +1181,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
                 let rect_w = image_width * t.scale;
                 let rect_h = image_height * t.scale;
-                let corner_r = st.background_corner_radius * t.scale;
+                let corner_r = background_corner_radius * t.scale;
 
                 context.new_sub_path();
                 context.arc(
@@ -1058,7 +1225,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             let rect_w = image_width * t.scale;
             let rect_h = image_height * t.scale;
-            let corner_r = st.background_corner_radius * t.scale;
+            let corner_r = background_corner_radius * t.scale;
 
             let _ = context.save();
             context.translate(t.offset_x, t.offset_y);
@@ -1102,13 +1269,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);
 
-        if crop_mode_active && st.crop_background_color_explicit {
+        if crop_mode_active && crop_background_color_explicit {
             if let Some(crop_rect) = crop_rect {
                 context.set_source_rgba(
-                    st.crop_background_color.r,
-                    st.crop_background_color.g,
-                    st.crop_background_color.b,
-                    st.crop_background_color.a,
+                    crop_background_color.r,
+                    crop_background_color.g,
+                    crop_background_color.b,
+                    crop_background_color.a,
                 );
                 context.rectangle(
                     crop_rect.x as f64,
@@ -1120,11 +1287,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
         }
 
-        if cached_surface_revision_draw.get() != st.working_image_revision
+        if cached_surface_revision_draw.get() != working_image_revision
             || cached_surface_draw.borrow().is_none()
         {
-            *cached_surface_draw.borrow_mut() = rgba_image_to_surface(&st.working_image);
-            cached_surface_revision_draw.set(st.working_image_revision);
+            *cached_surface_draw.borrow_mut() = rgba_image_to_surface(&working_image);
+            cached_surface_revision_draw.set(working_image_revision);
         }
 
         if let Some(surface) = cached_surface_draw.borrow().as_ref() {
@@ -1132,26 +1299,25 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 let _ = context.paint();
             }
         } else {
-            draw_rgba_to_context(context, &st.working_image);
+            draw_rgba_to_context(context, &working_image);
         }
 
-        for action in &st.actions {
+        for action in &actions {
             if let AnnotationAction::Focus { rect } = action {
                 draw_focus_overlay(
                     context,
-                    st.working_image.width() as f64,
-                    st.working_image.height() as f64,
+                    working_image.width() as f64,
+                    working_image.height() as f64,
                     *rect,
                     false,
                 );
             }
         }
 
-        let editing_action_index = st
-            .active_text_input
+        let editing_action_index = active_text_input
             .as_ref()
             .and_then(|input| input.editing_action_index);
-        for (index, action) in st.actions.iter().enumerate() {
+        for (index, action) in actions.iter().enumerate() {
             if Some(index) == editing_action_index {
                 continue;
             }
@@ -1164,12 +1330,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             draw_annotation_action(context, action);
         }
 
-        if let Some(draft) = st.draft_action() {
+        if let Some(draft) = draft_action {
             if let AnnotationAction::Focus { rect } = &draft {
                 draw_focus_overlay(
                     context,
-                    st.working_image.width() as f64,
-                    st.working_image.height() as f64,
+                    working_image.width() as f64,
+                    working_image.height() as f64,
                     *rect,
                     true,
                 );
@@ -1199,25 +1365,24 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
         }
 
-        if let Some(crop_rect) = st.draft_crop_rect().or(st.crop_selection) {
+        if let Some(crop_rect) = crop_rect {
             draw_crop_overlay(
                 context,
-                st.working_image.width() as f64,
-                st.working_image.height() as f64,
+                working_image.width() as f64,
+                working_image.height() as f64,
                 crop_rect,
-                st.selected_tool == Tool::Crop,
+                selected_tool == Tool::Crop,
             );
         }
 
-        if let Some(selected_action) = st.selected_action() {
-            if st.selected_tool == Tool::Select
-                && st.select_drag_anchor.is_some()
+        if let Some(selected_action) = selected_action.as_ref() {
+            if selected_tool == Tool::Select && select_drag_anchor.is_some()
                 && matches!(selected_action, AnnotationAction::Obfuscate { .. })
             {
                 draw_draft_action(context, selected_action);
             }
 
-            if st.selected_tool == Tool::Select {
+            if selected_tool == Tool::Select {
                 match selected_action {
                     AnnotationAction::Text {
                         position,
@@ -1227,7 +1392,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                         ..
                     } => {
                         let available_width = max_width.unwrap_or_else(|| {
-                            (st.base_image.width() as f64 - position.x).max(font.size * 1.8)
+                            (working_image.width() as f64 - position.x).max(font.size * 1.8)
                         });
                         let mut text_bounds = text_action_bounds(
                             context,
@@ -1239,11 +1404,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                         text_bounds.rect.x = text_bounds
                             .rect
                             .x
-                            .clamp(0, (st.base_image.width() as i32 - text_bounds.rect.width).max(0));
+                            .clamp(0, (working_image.width() as i32 - text_bounds.rect.width).max(0));
                         text_bounds.rect.y = text_bounds
                             .rect
                             .y
-                            .clamp(0, (st.base_image.height() as i32 - text_bounds.rect.height).max(0));
+                            .clamp(0, (working_image.height() as i32 - text_bounds.rect.height).max(0));
                         text_bounds.sync_handles();
                         draw_text_edit_border(context, &text_bounds, t.scale);
                         draw_text_edit_handles(context, &text_bounds, None, t.scale);
@@ -1256,35 +1421,35 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
                         let handles = action_resize_handles(selected_action);
                         if !handles.is_empty() {
-                            draw_selection_handles(context, &handles, st.select_resize_handle, t.scale);
+                            draw_selection_handles(context, &handles, select_resize_handle, t.scale);
                         }
                     }
                 }
             }
 
             // Draw active text edit overlay (border + handles)
-            if let Some(bounds) = st.active_text_bounds.as_ref() {
+            if let Some(bounds) = active_text_bounds.as_ref() {
                 draw_text_edit_border(context, bounds, t.scale);
-                draw_text_edit_handles(context, bounds, None, t.scale); // None = no active handle initially
+                draw_text_edit_handles(context, bounds, None, t.scale);
             }
         }
 
         // Draw active text edit overlay (border + handles)
-        if let Some(bounds) = st.active_text_bounds.as_ref() {
+        if let Some(bounds) = active_text_bounds.as_ref() {
             let mut bounds = bounds.clone();
             bounds.rect.x = bounds
                 .rect
                 .x
-                .clamp(0, (st.base_image.width() as i32 - bounds.rect.width).max(0));
+                .clamp(0, (working_image.width() as i32 - bounds.rect.width).max(0));
             bounds.rect.y = bounds
                 .rect
                 .y
-                .clamp(0, (st.base_image.height() as i32 - bounds.rect.height).max(0));
+                .clamp(0, (working_image.height() as i32 - bounds.rect.height).max(0));
             bounds.sync_handles();
-            if let Some(input) = st.active_text_input.as_ref() {
+            if let Some(input) = active_text_input.as_ref() {
                 let font = super::types::FontSettings {
-                    family: st.text_font_family.clone(),
-                    size: st.text_size,
+                    family: text_font_family.clone(),
+                    size: text_size,
                     style: super::types::FontStyle::Normal,
                     decoration: super::types::TextDecoration::None,
                     alignment: super::types::TextAlignment::Left,
@@ -1300,7 +1465,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 );
             }
             draw_text_edit_border(context, &bounds, t.scale);
-            draw_text_edit_handles(context, &bounds, st.active_text_drag_handle.clone(), t.scale);
+            draw_text_edit_handles(context, &bounds, active_text_drag_handle.clone(), t.scale);
         }
         let _ = context.restore();
     });
@@ -1375,6 +1540,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         set_picker_panel_visibility: set_picker_panel_visibility.clone(),
         sync_size_control: sync_size_control.clone(),
         rebuild_effects_async: rebuild_effects_async.clone(),
+        obfuscate_method_button: obfuscate_method_button.clone(),
+        obfuscate_method_list: obfuscate_method_list.clone(),
     });
 
     window.present();
