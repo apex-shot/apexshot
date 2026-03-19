@@ -1,5 +1,6 @@
 mod color;
 mod io_ops;
+mod pen_weight;
 mod render;
 mod selection;
 mod state;
