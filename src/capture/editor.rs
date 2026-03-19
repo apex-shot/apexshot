@@ -3,6 +3,7 @@ mod io_ops;
 mod render;
 mod selection;
 mod state;
+mod text_detect;
 mod types;
 mod ui_support;
 #[path = "editor/window/mod.rs"]
