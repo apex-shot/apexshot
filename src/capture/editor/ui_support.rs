@@ -1,13 +1,6 @@
-use super::state::EditorState;
-use super::types::{AnnotationAction, DrawColor, Point};
 use gtk4::gdk;
-use gtk4::{
-    glib, prelude::*, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea, Entry,
-    EventControllerKey, Image, Label, Orientation, Window,
-};
+use gtk4::{prelude::*, Box as GtkBox, Button, CssProvider, Image, Label, Orientation};
 use std::process::Command;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
 pub fn parse_env_bool(name: &str) -> Option<bool> {
     let value = std::env::var(name).ok()?.trim().to_ascii_lowercase();
@@ -1003,6 +996,18 @@ pub fn install_editor_css() {
             .editor-color-trigger-dot.editor-color-white {
                 background: #f2f2f2;
                 border: 1px solid rgba(255, 255, 255, 0.16);
+            }
+
+            entry.editor-text-entry {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+                margin: 0;
+            }
+
+            entry.editor-text-entry text {
+                background: transparent;
             }
 
             button.editor-tool-button image,

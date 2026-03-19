@@ -15,10 +15,11 @@ use std::sync::{
 use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
+    render::cursor_position_for_text_point,
     state::EditorState,
     types::{
-        tool_shortcut_target, BackgroundStyle, DrawColor, MoveHandle, Point, TextEditBounds, Tool,
-        ViewTransform,
+        tool_shortcut_target, BackgroundStyle, DrawColor, FontSettings, FontStyle, MoveHandle,
+        Point, TextAlignment, TextDecoration, Tool, ViewTransform,
     },
     ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
@@ -581,17 +582,24 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let color_popover_group = color_popover.clone();
         let sync_picker_from_color_group = sync_picker_from_color.clone();
         button.connect_clicked(move |_| {
-            let mut st = state_color.lock().unwrap();
-            if st.selected_tool == Tool::Crop {
-                st.set_crop_background_color(DRAW_COLORS[index]);
-            } else if st.selected_tool == Tool::Background {
-                st.background_style = BackgroundStyle::PlainColor(DRAW_COLORS[index]);
-                st.mark_working_image_dirty();
-            } else {
-                st.set_color_index(index);
-                st.set_selected_action_color(DRAW_COLORS[index]);
-            }
-            drop(st);
+            let has_active_text = {
+                let mut st = state_color.lock().unwrap();
+                let has_active_text = st.active_text_input.is_some();
+                if st.selected_tool == Tool::Crop {
+                    st.set_crop_background_color(DRAW_COLORS[index]);
+                } else if st.selected_tool == Tool::Background {
+                    st.background_style = BackgroundStyle::PlainColor(DRAW_COLORS[index]);
+                    st.mark_working_image_dirty();
+                } else if has_active_text {
+                    st.set_color_index(index);
+                } else {
+                    let changed_selected = st.set_selected_action_color(DRAW_COLORS[index]);
+                    if !changed_selected {
+                        st.set_color_index(index);
+                    }
+                }
+                has_active_text
+            };
 
             sync_picker_from_color_group(DRAW_COLORS[index]);
 
@@ -603,6 +611,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             );
             color_popover_group.popdown();
             if let Some(area) = drawing_area_color.upgrade() {
+                if has_active_text {
+                    area.grab_focus();
+                }
                 area.queue_draw();
             }
         });
@@ -1057,59 +1068,106 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let t = *transform_click.lock().unwrap();
         let view_point = Point { x, y };
 
-        // Check for text edit handle click
-        if let Some(bounds) = state_click.lock().unwrap().active_text_bounds.as_ref() {
-            let view_point = Point { x, y };
-            let image_point = t.view_to_image(view_point);
-            
-            // Check move handles
-            for (handle, center) in &bounds.move_handles {
-                let center_view = Point {
-                    x: center.x * t.scale + t.offset_x,
-                    y: center.y * t.scale + t.offset_y,
-                };
-                let dx = x - center_view.x;
-                let dy = y - center_view.y;
-                if (dx * dx + dy * dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS * 1.5 {
-                    state_click.lock().unwrap().active_text_is_dragging = true;
-                    state_click.lock().unwrap().active_text_drag_handle = Some(handle.clone());
-                    state_click.lock().unwrap().active_text_drag_start = Some(image_point);
-                    return;
-                }
-            }
-            
-            // Check resize handle
-            if let Some((_, resize_pos)) = &bounds.resize_handle {
-                let resize_view = Point {
-                    x: resize_pos.x * t.scale + t.offset_x,
-                    y: resize_pos.y * t.scale + t.offset_y,
-                };
-                let dx = x - resize_view.x;
-                let dy = y - resize_view.y;
-                if dx.abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5 && dy.abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5 {
-                    state_click.lock().unwrap().active_text_is_dragging = true;
-                    state_click.lock().unwrap().active_text_drag_handle = None; // None = resize
-                    state_click.lock().unwrap().active_text_drag_start = Some(image_point);
-                    return;
-                }
-            }
-        }
+        let text_hit = {
+            let st = state_click.lock().unwrap();
+            st.active_text_bounds.as_ref().map(|bounds| {
+                let click_image = t.view_to_image_clamped(view_point);
+                let inside_bounds = click_image.x >= bounds.rect.x as f64
+                    && click_image.x <= (bounds.rect.x + bounds.rect.width) as f64
+                    && click_image.y >= bounds.rect.y as f64
+                    && click_image.y <= (bounds.rect.y + bounds.rect.height) as f64;
 
-        // Check if click is outside active text edit area
-        if let Some(bounds) = state_click.lock().unwrap().active_text_bounds.as_ref() {
-            let t = *transform_click.lock().unwrap();
-            let click_image = t.view_to_image(Point { x, y });
-            
-            let in_bounds = click_image.x >= bounds.rect.x as f64
-                && click_image.x <= (bounds.rect.x + bounds.rect.width) as f64
-                && click_image.y >= bounds.rect.y as f64
-                && click_image.y <= (bounds.rect.y + bounds.rect.height) as f64;
-            
-            if !in_bounds {
-                state_click.lock().unwrap().cancel_text_edit();
+                let handle_hit = bounds.move_handles.iter().find_map(|(handle, center)| {
+                    let center_view = Point {
+                        x: center.x * t.scale + t.offset_x,
+                        y: center.y * t.scale + t.offset_y,
+                    };
+                    let dx = x - center_view.x;
+                    let dy = y - center_view.y;
+                    if (dx * dx + dy * dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS * 1.5 {
+                        Some(handle.clone())
+                    } else {
+                        None
+                    }
+                });
+
+                let resize_hit = bounds.resize_handle.as_ref().is_some_and(|(_, resize_pos)| {
+                    let resize_view = Point {
+                        x: resize_pos.x * t.scale + t.offset_x,
+                        y: resize_pos.y * t.scale + t.offset_y,
+                    };
+                    let dx = x - resize_view.x;
+                    let dy = y - resize_view.y;
+                    dx.abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5 && dy.abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5
+                });
+
+                (click_image, inside_bounds, handle_hit, resize_hit)
+            })
+        };
+
+        if let Some((click_image, inside_bounds, handle_hit, resize_hit)) = text_hit {
+            if let Some(handle) = handle_hit {
+                let mut st = state_click.lock().unwrap();
+                st.active_text_is_dragging = true;
+                st.active_text_drag_handle = Some(handle);
+                st.active_text_drag_start = Some(click_image);
+                st.active_text_drag_start_bounds = st.active_text_bounds.as_ref().map(|b| b.rect);
+                st.active_text_is_resizing = false;
+                st.reset_text_cursor_blink();
+                return;
+            }
+
+            if resize_hit {
+                let mut st = state_click.lock().unwrap();
+                st.active_text_is_dragging = true;
+                st.active_text_drag_handle = None;
+                st.active_text_drag_start = Some(click_image);
+                st.active_text_drag_start_bounds = st.active_text_bounds.as_ref().map(|b| b.rect);
+                st.active_text_is_resizing = true;
+                st.reset_text_cursor_blink();
+                return;
+            }
+
+            if inside_bounds {
+                let mut st = state_click.lock().unwrap();
+                if let Some(input) = st.active_text_input.as_ref() {
+                    let surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1)
+                        .expect("create caret hit-test surface");
+                    let context = gtk4::cairo::Context::new(&surface)
+                        .expect("create caret hit-test context");
+                    let font = FontSettings {
+                        family: st.text_font_family.clone(),
+                        size: st.text_size,
+                        style: FontStyle::Normal,
+                        decoration: TextDecoration::None,
+                        alignment: TextAlignment::Left,
+                    };
+                    let cursor_position = cursor_position_for_text_point(
+                        &context,
+                        st.active_text_bounds.as_ref().unwrap(),
+                        &input.text,
+                        &font,
+                        click_image,
+                    );
+                    st.set_text_cursor_position(cursor_position);
+                } else {
+                    st.reset_text_cursor_blink();
+                }
                 if let Some(area) = drawing_area_click.upgrade() {
+                    area.grab_focus();
                     area.queue_draw();
                 }
+                return;
+            }
+
+            {
+                let mut st = state_click.lock().unwrap();
+                if let Some(action) = st.commit_text_input() {
+                    st.push_action(action);
+                }
+            }
+            if let Some(area) = drawing_area_click.upgrade() {
+                area.queue_draw();
             }
         }
 
@@ -1162,10 +1220,21 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         match selected_tool {
             Tool::Select => {
-                let (edit_target, selected_color_index, selected_text_size, selected_font_family) = {
+                let (selected_color_index, selected_text_size, selected_font_family, began_reedit) = {
                     let mut st = state_click.lock().unwrap();
+                    if st.active_text_input.is_some() {
+                        st.commit_active_text_input();
+                    }
                     st.select_action_at_point_with_scale(image_point, t.scale);
-                    let selected_color = st.selected_action_color();
+                    let mut began_reedit = false;
+                    if n_press >= 2 {
+                        began_reedit = st.begin_editing_selected_text();
+                    }
+                    let selected_color = if began_reedit {
+                        st.get_text_input().map(|input| input.color)
+                    } else {
+                        st.selected_action_color()
+                    };
                     if let Some(color) = selected_color {
                         st.selected_color = color;
                     }
@@ -1180,17 +1249,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     }
 
                     let selected_color_index = selected_color.map(palette_index_for_color);
-                    let (selected_text_size, selected_font_family) = if st.selected_tool == Tool::Select {
-                        (Some(st.text_size), Some(st.text_font_family.clone()))
-                    } else {
-                        (None, None)
-                    };
-
-                    if n_press >= 2 {
-                        (st.selected_text_action_data(), selected_color_index, selected_text_size, selected_font_family)
-                    } else {
-                        (None, selected_color_index, selected_text_size, selected_font_family)
-                    }
+                    let selected_text_size = Some(st.text_size);
+                    let selected_font_family = Some(st.text_font_family.clone());
+                    (selected_color_index, selected_text_size, selected_font_family, began_reedit)
                 };
 
                 sync_size_control_canvas_click();
@@ -1211,39 +1272,48 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 }
 
                 if let Some(area) = drawing_area_click.upgrade() {
+                    if began_reedit {
+                        area.grab_focus();
+                    }
                     area.queue_draw();
                 }
             }
             Tool::Text => {
-                let (selected_color, text_size, font_family, image_width, image_height) = {
-                    let st = state_click.lock().unwrap();
-                    (
-                        st.selected_color,
-                        st.text_size,
-                        st.text_font_family.clone(),
-                        st.base_image.width() as f64,
-                        st.base_image.height() as f64,
-                    )
+                let (text_size, font_family) = {
+                    let mut st = state_click.lock().unwrap();
+                    if st.active_text_input.is_some() {
+                        st.commit_active_text_input();
+                    }
+
+                    let began_reedit = if st.select_text_action_at_point_with_scale(image_point, t.scale) {
+                        if let Some(color) = st.selected_action_color() {
+                            st.selected_color = color;
+                        }
+                        if let Some(text_size) = st.selected_text_action_size() {
+                            st.text_size = text_size;
+                        }
+                        if let Some(font_family) = st.selected_text_font_family() {
+                            st.text_font_family = font_family;
+                        }
+                        st.begin_editing_selected_text()
+                    } else {
+                        false
+                    };
+
+                    if !began_reedit {
+                        let initial_width = (st.text_size * 1.8).max(140.0);
+                        let initial_height = (st.text_size * 1.45 + 16.0).max(44.0);
+                        st.begin_text_input(image_point, initial_width, initial_height);
+                    }
+
+                    (st.text_size, st.text_font_family.clone())
                 };
-
-                let constrained_x = image_point.x.min(image_width - 200.0).max(0.0);
-                let constrained_y = image_point.y.min(image_height - (text_size + 16.0)).max(0.0);
-
-                let text_bounds = TextEditBounds::new(
-                    Point { x: constrained_x, y: constrained_y },
-                    200.0,
-                    text_size + 16.0,
-                );
-
-                state_click
-                    .lock()
-                    .unwrap()
-                    .active_text_bounds = Some(text_bounds);
 
                 text_size_label_click.set_label(&format!("{}pt", text_size as i32));
                 font_family_label_click.set_label(&font_family);
 
                 if let Some(area) = drawing_area_click.upgrade() {
+                    area.grab_focus();
                     area.queue_draw();
                 }
             }
@@ -1261,15 +1331,33 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let state_release = state.clone();
     let drawing_area_release = drawing_area.downgrade();
     click.connect_released(move |_gesture, _n_press, _x, _y| {
-        // End text edit drag
-        if state_release.lock().unwrap().active_text_is_dragging {
-            state_release.lock().unwrap().active_text_is_dragging = false;
-            state_release.lock().unwrap().active_text_drag_handle = None;
-            state_release.lock().unwrap().active_text_drag_start = None;
-            // Queue redraw to update handle appearance
-            if let Some(area) = drawing_area_release.upgrade() {
-                area.queue_draw();
+        let should_refocus = {
+            let mut st = state_release.lock().unwrap();
+            if st.active_text_is_dragging {
+                let was_resizing = st.active_text_is_resizing;
+                st.active_text_is_dragging = false;
+                st.active_text_drag_handle = None;
+                st.active_text_drag_start = None;
+                st.active_text_drag_start_bounds = None;
+                st.active_text_is_resizing = false;
+                if st.active_text_input.is_some() {
+                    if was_resizing {
+                        st.fit_active_text_to_layout_preserving_box();
+                    } else {
+                        st.fit_active_text_to_layout_preserving_font_size();
+                    }
+                }
+                st.active_text_input.is_some()
+            } else {
+                false
             }
+        };
+        // Queue redraw to update handle appearance
+        if let Some(area) = drawing_area_release.upgrade() {
+            if should_refocus {
+                area.grab_focus();
+            }
+            area.queue_draw();
         }
     });
 
@@ -1326,8 +1414,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let view_point = Point { x, y };
             let _image_point = t.view_to_image(view_point);
 
-            // Check move handles (convert to view coordinates)
-            for (handle, center) in &bounds.move_handles {
+            for (_handle, center) in &bounds.move_handles {
                 let center_view = Point {
                     x: center.x * t.scale + t.offset_x,
                     y: center.y * t.scale + t.offset_y,
@@ -1359,87 +1446,88 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             }
         }
 
-        // Handle text edit dragging
-        if let Some(bounds) = state_motion.lock().unwrap().active_text_bounds.as_mut() {
-            if state_motion.lock().unwrap().active_text_is_dragging {
-                if let Some(start_point) = state_motion.lock().unwrap().active_text_drag_start {
-                    let view_point = Point { x, y };
-                    let t = *transform_motion.lock().unwrap();
-                    let current_point = t.view_to_image(view_point);
-
-                    let dx = current_point.x - start_point.x;
-
-                    let handle = &state_motion.lock().unwrap().active_text_drag_handle;
-
-                    match handle {
-                        Some(MoveHandle::Left) | Some(MoveHandle::Right) => {
-                            // Move text horizontally
-                            bounds.rect.x = (bounds.rect.x as f64 + dx) as i32;
-
-                            // Get image dimensions for constraint
-                            let image_width =
-                                state_motion.lock().unwrap().base_image.width() as f64;
-
-                            // Constrain position within image bounds
-                            bounds.rect.x = bounds
-                                .rect
-                                .x
-                                .max(0)
-                                .min((image_width - bounds.rect.width as f64) as i32)
-                                as i32;
-
-                            // Update handle positions
-                            let height = bounds.rect.height as f64;
-                            bounds.move_handles[0].1 = Point {
-                                x: bounds.rect.x as f64,
-                                y: bounds.rect.y as f64 + height / 2.0,
-                            };
-                            bounds.move_handles[1].1 = Point {
-                                x: bounds.rect.x as f64 + bounds.rect.width as f64,
-                                y: bounds.rect.y as f64 + height / 2.0,
-                            };
-                        }
-                        None => {
-                            // Resize - adjust width
-                            let new_width = (bounds.rect.width as f64 + dx).max(50.0);
-                            bounds.rect.width = new_width as i32;
-
-                            // Get image dimensions for constraint
-                            let image_width =
-                                state_motion.lock().unwrap().base_image.width() as f64;
-
-                            // Constrain width within image bounds
-                            bounds.rect.width = bounds
-                                .rect
-                                .width
-                                .max(50)
-                                .min((image_width - bounds.rect.x as f64) as i32)
-                                as i32;
-                            bounds.rect.width = bounds.rect.width.min(image_width as i32);
-
-                            // Update handle positions
-                            let height = bounds.rect.height as f64;
-                            bounds.move_handles[1].1 = Point {
-                                x: bounds.rect.x as f64 + bounds.rect.width as f64,
-                                y: bounds.rect.y as f64 + height / 2.0,
-                            };
-                            if let Some((_, pos)) = &mut bounds.resize_handle {
-                                pos.x = bounds.rect.x as f64 + bounds.rect.width as f64;
-                                pos.y = bounds.rect.y as f64 + bounds.rect.height as f64;
-                            }
-                        }
-                    }
-
-                    // Update drag start for next frame
-                    state_motion.lock().unwrap().active_text_drag_start = Some(current_point);
-
-                    // Queue redraw
-                    if let Some(area) = drawing_area_motion.upgrade() {
-                        area.queue_draw();
-                    }
-                    return;
-                }
+        let drag_state = {
+            let st = state_motion.lock().unwrap();
+            if st.active_text_is_dragging {
+                st.active_text_drag_start.map(|start| {
+                    (
+                        start,
+                        st.active_text_drag_handle.clone(),
+                        st.active_text_drag_start_bounds,
+                        st.active_text_is_resizing,
+                        st.base_image.width() as i32,
+                        st.base_image.height() as i32,
+                    )
+                })
+            } else {
+                None
             }
+        };
+        if let Some((start_point, handle, start_bounds, is_resizing, image_width, image_height)) = drag_state {
+            let view_point = Point { x, y };
+            let current_point = t.view_to_image(view_point);
+            let dx = current_point.x - start_point.x;
+            let dy = current_point.y - start_point.y;
+
+            {
+                let mut st = state_motion.lock().unwrap();
+                if let (Some(bounds), Some(start_bounds)) = (st.active_text_bounds.as_mut(), start_bounds) {
+                    let min_width = 50.0;
+                    let min_height = 44.0;
+                    if is_resizing {
+                        let max_width = (image_width - start_bounds.x).max(min_width as i32) as f64;
+                        let max_height = (image_height - start_bounds.y).max(min_height as i32) as f64;
+                        bounds.rect.x = start_bounds.x;
+                        bounds.rect.y = start_bounds.y;
+                        bounds.rect.width = ((start_bounds.width as f64 + dx).clamp(min_width, max_width))
+                            .round() as i32;
+                        bounds.rect.height = ((start_bounds.height as f64 + dy).clamp(min_height, max_height))
+                            .round() as i32;
+                    } else {
+                        match handle {
+                            Some(MoveHandle::Left) => {
+                                let right = (start_bounds.x + start_bounds.width).min(image_width);
+                                let max_width = right.max(min_width as i32) as f64;
+                                let proposed_width = start_bounds.width as f64 - dx;
+                                let new_width = if proposed_width <= min_width {
+                                    min_width as i32
+                                } else {
+                                    proposed_width.min(max_width).round() as i32
+                                };
+                                bounds.rect.width = new_width;
+                                bounds.rect.x = (right - new_width).max(0);
+                                bounds.rect.y = start_bounds.y;
+                                bounds.rect.height = start_bounds.height;
+                            }
+                            Some(MoveHandle::Right) => {
+                                let max_width = (image_width - start_bounds.x).max(min_width as i32) as f64;
+                                bounds.rect.x = start_bounds.x;
+                                bounds.rect.y = start_bounds.y;
+                                bounds.rect.height = start_bounds.height;
+                                bounds.rect.width = ((start_bounds.width as f64 + dx).clamp(min_width, max_width))
+                                    .round() as i32;
+                            }
+                            None => {}
+                        }
+                    }
+                    bounds.rect.x = bounds.rect.x.clamp(0, (image_width - bounds.rect.width).max(0));
+                    bounds.rect.y = bounds.rect.y.clamp(0, (image_height - bounds.rect.height).max(0));
+                    bounds.sync_handles();
+                }
+                if st.active_text_input.is_some() {
+                    if is_resizing {
+                        st.fit_active_text_to_layout_preserving_box();
+                    } else {
+                        st.fit_active_text_to_layout_preserving_font_size();
+                    }
+                }
+                // Keep the original drag anchor fixed while using drag-start bounds.
+            }
+
+            if let Some(area) = drawing_area_motion.upgrade() {
+                area.queue_draw();
+            }
+            return;
         }
     });
 
@@ -1491,6 +1579,58 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
         let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
         let pressed = key.to_unicode();
+
+        {
+            let mut st = state_keys.lock().unwrap();
+            if st.active_text_input.is_some() {
+                let mut should_commit = false;
+                let mut should_cancel = false;
+                let mut handled = true;
+
+                match key {
+                    gdk::Key::Escape => should_cancel = true,
+                    gdk::Key::Return | gdk::Key::KP_Enter => should_commit = true,
+                    gdk::Key::BackSpace => st.delete_text_input_char(),
+                    gdk::Key::space => st.add_text_input_char(' '),
+                    gdk::Key::Left => st.move_cursor_left(),
+                    gdk::Key::Right => st.move_cursor_right(),
+                    _ => {
+                        if !ctrl {
+                            if let Some(ch) = pressed {
+                                if !ch.is_control() {
+                                    st.add_text_input_char(ch);
+                                } else {
+                                    handled = false;
+                                }
+                            } else {
+                                handled = false;
+                            }
+                        } else {
+                            handled = false;
+                        }
+                    }
+                }
+
+                if should_cancel {
+                    st.cancel_text_input();
+                } else if should_commit {
+                    st.commit_active_text_input();
+                }
+
+                if handled && st.active_text_input.is_some() {
+                    st.fit_active_text_to_layout();
+                    st.reset_text_cursor_blink();
+                }
+
+                if handled || should_commit || should_cancel {
+                    drop(st);
+                    if let Some(area) = drawing_area_keys.upgrade() {
+                        area.queue_draw();
+                    }
+                    return glib::Propagation::Stop;
+                }
+            }
+        }
 
         if ctrl && (pressed == Some('z') || pressed == Some('Z')) {
             let changed = if shift {
