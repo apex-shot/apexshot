@@ -1,4 +1,5 @@
-use super::text_detect::TextDetector;
+use super::text_detect::{BackgroundTextDetection, TextDetector};
+use super::pen_weight::{HighlighterMode, PenWeight};
 use super::color::{
     clamp_blur_secure_amount, clamp_blur_smooth_amount, clamp_obfuscate_amount,
     clamp_pixelate_amount, clamp_stroke_size, clamp_text_size,
@@ -22,6 +23,8 @@ use super::types::{
 use gtk4;
 use image::RgbaImage;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 pub struct EditorState {
     pub base_image: RgbaImage,
@@ -76,6 +79,15 @@ pub struct EditorState {
     pub hovered_text_action_index: Option<usize>,
     #[allow(dead_code)]
     pub active_text_input: Option<TextInputState>,
+
+    // Text detection for highlighter
+    pub text_detector: Arc<Mutex<TextDetector>>,
+    pub text_detection_ready: Arc<AtomicBool>,
+    pub text_detection_handle: Option<BackgroundTextDetection>,
+
+    // Highlighter mode
+    pub highlighter_mode: HighlighterMode,
+    pub pen_weight: PenWeight,
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +307,12 @@ impl EditorState {
             active_text_is_resizing: false,
             hovered_text_action_index: None,
             active_text_input: None,
+
+            text_detector: Arc::new(Mutex::new(TextDetector::new_pending())),
+            text_detection_ready: Arc::new(AtomicBool::new(false)),
+            text_detection_handle: None,
+            highlighter_mode: HighlighterMode::default(),
+            pen_weight: PenWeight::default(),
         }
     }
 
