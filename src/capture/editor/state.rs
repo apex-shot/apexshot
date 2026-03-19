@@ -6,7 +6,7 @@ use super::color::{
 };
 use super::render::{
     apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_blur,
-    layout_wrapped_text, text_action_bounds,
+    layout_wrapped_text,
 };
 use super::selection::{
     action_bounds_with_padding, action_contains_point_with_padding,
@@ -617,7 +617,13 @@ impl EditorState {
                 let content_width = (width - 20.0).max(font.size * 0.8);
                 let layout = layout_wrapped_text(&context, &text, &font, content_width);
                 let line_height = (font.size * 1.2).max(font.size + 4.0);
-                let height = ((layout.lines.len().max(1) as f64 - 1.0).max(0.0) * line_height + font.size).max(44.0);
+                // Include top+bottom padding and border inset so the box is
+                // always tall enough that the bottom border never clips text.
+                // border_inset mirrors TEXT_EDIT_BORDER_WIDTH/2 + 1 from render.rs
+                let padding_y = 8.0;
+                let border_inset = 2.0; // = TEXT_EDIT_BORDER_WIDTH / 2.0 + 1.0
+                let text_block_height = (layout.lines.len().max(1) as f64 - 1.0).max(0.0) * line_height + font.size;
+                let height = (text_block_height + (padding_y + border_inset) * 2.0).max(44.0);
                 (layout, height)
             };
 
@@ -1299,19 +1305,27 @@ impl EditorState {
             return false;
         };
 
-        let bounds = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1)
+        // Use the stored max_width as the box width directly.
+        // Do NOT recompute from text_action_bounds() — that would shrink the box
+        // to fit the text tightly, then commit_text_input() would write that
+        // smaller width back, permanently changing the action's max_width.
+        let padding_y = 8.0;
+        let bounds_position = Point {
+            x: position.x,
+            y: position.y - font.size - padding_y,
+        };
+        let height = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1)
             .ok()
             .and_then(|surface| gtk4::cairo::Context::new(&surface).ok())
-            .map(|context| text_action_bounds(&context, position, &text, &font, Some(width)))
-            .unwrap_or_else(|| {
-                let padding_y = 8.0;
-                let bounds_position = Point {
-                    x: position.x,
-                    y: position.y - font.size - padding_y,
-                };
-                let height = (font.size * 1.45 + 16.0).max(44.0);
-                TextEditBounds::new(bounds_position, width, height)
-            });
+            .map(|context| {
+                let content_width = (width - 20.0).max(font.size * 0.8);
+                let layout = layout_wrapped_text(&context, &text, &font, content_width);
+                let line_height = (font.size * 1.2).max(font.size + 4.0);
+                (layout.lines.len().max(1) as f64 * line_height + font.size * 0.2 + padding_y * 2.0)
+                    .max(44.0)
+            })
+            .unwrap_or_else(|| (font.size * 1.45 + 16.0).max(44.0));
+        let bounds = TextEditBounds::new(bounds_position, width, height);
         self.active_text_bounds = Some(bounds);
         self.active_text_input = Some(TextInputState {
             cursor_position: text.chars().count(),

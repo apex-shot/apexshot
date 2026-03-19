@@ -1391,27 +1391,33 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                         max_width,
                         ..
                     } => {
-                        let available_width = max_width.unwrap_or_else(|| {
-                            (working_image.width() as f64 - position.x).max(font.size * 1.8)
-                        });
-                        let mut text_bounds = text_action_bounds(
-                            context,
-                            *position,
-                            text,
-                            font,
-                            Some(available_width),
-                        );
-                        text_bounds.rect.x = text_bounds
-                            .rect
-                            .x
-                            .clamp(0, (working_image.width() as i32 - text_bounds.rect.width).max(0));
-                        text_bounds.rect.y = text_bounds
-                            .rect
-                            .y
-                            .clamp(0, (working_image.height() as i32 - text_bounds.rect.height).max(0));
-                        text_bounds.sync_handles();
-                        draw_text_edit_border(context, &text_bounds, t.scale);
-                        draw_text_edit_handles(context, &text_bounds, None, t.scale);
+                        // Only draw the text selection border when NOT actively editing.
+                        // When active_text_bounds is Some, the outer block below handles
+                        // drawing the border + handles + cursor — drawing here too would
+                        // produce a duplicate border.
+                        if active_text_bounds.is_none() {
+                            let available_width = max_width.unwrap_or_else(|| {
+                                (working_image.width() as f64 - position.x).max(font.size * 1.8)
+                            });
+                            let mut text_bounds = text_action_bounds(
+                                context,
+                                *position,
+                                text,
+                                font,
+                                Some(available_width),
+                            );
+                            text_bounds.rect.x = text_bounds
+                                .rect
+                                .x
+                                .clamp(0, (working_image.width() as i32 - text_bounds.rect.width).max(0));
+                            text_bounds.rect.y = text_bounds
+                                .rect
+                                .y
+                                .clamp(0, (working_image.height() as i32 - text_bounds.rect.height).max(0));
+                            text_bounds.sync_handles();
+                            draw_text_edit_border(context, &text_bounds, t.scale);
+                            draw_text_edit_handles(context, &text_bounds, None, t.scale);
+                        }
                     }
                     _ => {
                         let selection_padding = selection_hit_padding_for_scale(t.scale);
@@ -1427,11 +1433,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 }
             }
 
-            // Draw active text edit overlay (border + handles)
-            if let Some(bounds) = active_text_bounds.as_ref() {
-                draw_text_edit_border(context, bounds, t.scale);
-                draw_text_edit_handles(context, bounds, None, t.scale);
-            }
+            // The active text edit overlay (border + handles) is drawn by the
+            // unconditional block below, which also handles clamping and cursor
+            // rendering. Do NOT draw it here a second time.
         }
 
         // Draw active text edit overlay (border + handles)
