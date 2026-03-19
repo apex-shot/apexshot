@@ -29,6 +29,8 @@ pub(super) fn build_canvas_shell(
     let drawing_area = DrawingArea::new();
     drawing_area.set_hexpand(true);
     drawing_area.set_vexpand(false);
+    drawing_area.set_focusable(true);
+    drawing_area.set_focus_on_click(true);
     drawing_area.set_content_width(img_width);
     drawing_area.set_content_height(img_height);
     drawing_area.set_size_request(img_width, img_height);

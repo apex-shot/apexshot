@@ -886,6 +886,88 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             return;
         }
 
+        // Text tool with a selected action: check handles first, then fall back to move.
+        if st.selected_tool == Tool::Text
+            && st.selected_action_index.is_some()
+            && st.active_text_input.is_none()
+        {
+            let image_point = t.view_to_image_clamped(view_point);
+
+            // Compute the committed action's TextEditBounds for handle hit-testing.
+            let bounds_opt = if let Some(index) = st.selected_action_index {
+                if let Some(super::super::types::AnnotationAction::Text {
+                    position, text, font, max_width, ..
+                }) = st.actions.get(index) {
+                    let surface = gtk4::cairo::ImageSurface::create(
+                        gtk4::cairo::Format::ARgb32, 1, 1,
+                    ).ok();
+                    surface.as_ref()
+                        .and_then(|s| gtk4::cairo::Context::new(s).ok())
+                        .map(|c| {
+                            let aw = max_width.unwrap_or_else(|| {
+                                (st.base_image.width() as f64 - position.x).max(font.size * 1.8)
+                            });
+                            super::super::render::text_action_bounds(
+                                &c, *position, text, font, Some(aw),
+                            )
+                        })
+                } else { None }
+            } else { None };
+
+            if let Some(bounds) = bounds_opt {
+                // Hit-test left/right circles.
+                let handle_hit = bounds.move_handles.iter().find_map(|(h, center)| {
+                    let cv = Point {
+                        x: center.x * t.scale + t.offset_x,
+                        y: center.y * t.scale + t.offset_y,
+                    };
+                    let dx = x - cv.x;
+                    let dy = y - cv.y;
+                    if (dx*dx + dy*dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS * 1.5 {
+                        Some(h.clone())
+                    } else { None }
+                });
+                // Hit-test bottom-right resize box.
+                let resize_hit = bounds.resize_handle.as_ref().is_some_and(|(_, rp)| {
+                    let rv = Point {
+                        x: rp.x * t.scale + t.offset_x,
+                        y: rp.y * t.scale + t.offset_y,
+                    };
+                    (x - rv.x).abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5
+                        && (y - rv.y).abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5
+                });
+
+                if handle_hit.is_some() || resize_hit {
+                    // Handle drag: set up active_text_is_dragging so the motion
+                    // handler takes over — same as the active-edit handle path.
+                    st.active_text_bounds = Some(bounds);
+                    st.active_text_is_dragging = true;
+                    st.active_text_drag_handle = handle_hit;
+                    st.active_text_drag_start = Some(image_point);
+                    st.active_text_drag_start_bounds =
+                        st.active_text_bounds.as_ref().map(|b| b.rect);
+                    st.active_text_is_resizing = resize_hit;
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    drag_last_redraw_begin.set(glib::monotonic_time());
+                    return;
+                }
+            }
+
+            // No handle hit — move the whole action.
+            st.drag_start_view = Some(view_point);
+            st.select_drag_anchor = Some(image_point);
+            st.select_resize_handle = None;
+            drop(st);
+            if let Some(area) = drawing_area_begin.upgrade() {
+                area.queue_draw();
+            }
+            drag_last_redraw_begin.set(glib::monotonic_time());
+            return;
+        }
+
         if matches!(st.selected_tool, Tool::Text | Tool::Number) {
             return;
         }
@@ -948,13 +1030,27 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             .current_event_state()
             .contains(gdk::ModifierType::SHIFT_MASK);
 
+        // Text tool handle drag: the motion handler handles updates via raw motion events.
+        // Just skip drag_update for handle drags — don't interfere.
+        if st.selected_tool == Tool::Text
+            && st.active_text_input.is_none()
+            && st.active_text_is_dragging
+        {
+            return;
+        }
+
         if let Some(start_view) = st.drag_start_view {
             let current_view = Point {
                 x: start_view.x + offset_x,
                 y: start_view.y + offset_y,
             };
 
-            if st.selected_tool == Tool::Select {
+            if st.selected_tool == Tool::Select
+                || (st.selected_tool == Tool::Text
+                    && st.selected_action_index.is_some()
+                    && st.active_text_input.is_none()
+                    && !st.active_text_is_dragging)
+            {
                 let now = glib::monotonic_time();
                 if now - drag_last_redraw_update.get() < DRAG_REDRAW_INTERVAL_US {
                     return;
@@ -984,7 +1080,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 return;
             }
 
-            if matches!(st.selected_tool, Tool::Text | Tool::Number) {
+            if matches!(st.selected_tool, Tool::Text | Tool::Number)
+                && !(st.selected_tool == Tool::Text && st.selected_action_index.is_some() && st.active_text_input.is_none())
+            {
                 return;
             }
 
@@ -1050,7 +1148,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 y: start_view.y + offset_y,
             };
 
-            if st.selected_tool == Tool::Select {
+            if st.selected_tool == Tool::Select
+                || (st.selected_tool == Tool::Text
+                    && st.active_text_input.is_none()
+                    && !st.active_text_is_dragging)
+            {
                 st.update_select_drag(t.view_to_image_clamped(current_view));
                 if st.end_select_drag_without_rebuild_and_check_effect() {
                     rebuild_effects_async_drag_end.clone()();
@@ -1381,26 +1483,112 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             Tool::Text => {
                 let (text_size, font_family) = {
                     let mut st = state_click.lock().unwrap();
+
+                    // Commit any active text input first.
                     if st.active_text_input.is_some() {
                         st.commit_active_text_input();
                     }
 
-                    let began_reedit = if st.select_text_action_at_point_with_scale(image_point, t.scale) {
+                    // Check if the click lands on an existing text action.
+                    let hit_index = st.actions.iter().enumerate().rev().find_map(|(index, action)| {
+                        if matches!(action, super::super::types::AnnotationAction::Text { .. })
+                            && super::super::selection::action_contains_point_with_padding(action, image_point, 0.0)
+                        {
+                            Some(index)
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(index) = hit_index {
+                        // Select the action and sync color/size state.
+                        st.selected_action_index = Some(index);
                         if let Some(color) = st.selected_action_color() {
                             st.selected_color = color;
                         }
-                        if let Some(text_size) = st.selected_text_action_size() {
-                            st.text_size = text_size;
+                        if let Some(sz) = st.selected_text_action_size() {
+                            st.text_size = sz;
                         }
-                        if let Some(font_family) = st.selected_text_font_family() {
-                            st.text_font_family = font_family;
+                        if let Some(fam) = st.selected_text_font_family() {
+                            st.text_font_family = fam;
                         }
-                        st.begin_editing_selected_text()
-                    } else {
-                        false
-                    };
 
-                    if !began_reedit {
+                        if n_press >= 2 {
+                            // Double-click: begin re-editing.
+                            st.begin_editing_selected_text();
+                        } else {
+                            // Single-click: first check if the click is on a
+                            // TextEditBounds handle (circles / resize box).
+                            // If yes → active_text_is_dragging path (motion handler).
+                            // If no  → select_drag_anchor path (GestureDrag move).
+                            let bounds_opt = if let Some(
+                                super::super::types::AnnotationAction::Text {
+                                    position, text, font, max_width, ..
+                                }
+                            ) = st.actions.get(index) {
+                                let surface = gtk4::cairo::ImageSurface::create(
+                                    gtk4::cairo::Format::ARgb32, 1, 1,
+                                ).ok();
+                                surface.as_ref()
+                                    .and_then(|s| gtk4::cairo::Context::new(s).ok())
+                                    .map(|c| {
+                                        let aw = max_width.unwrap_or_else(|| {
+                                            (st.base_image.width() as f64 - position.x)
+                                                .max(font.size * 1.8)
+                                        });
+                                        super::super::render::text_action_bounds(
+                                            &c, *position, text, font, Some(aw),
+                                        )
+                                    })
+                            } else { None };
+
+                            let mut handle_drag_started = false;
+                            if let Some(bounds) = bounds_opt {
+                                let handle_hit = bounds.move_handles.iter().find_map(|(h, center)| {
+                                    let cv = Point {
+                                        x: center.x * t.scale + t.offset_x,
+                                        y: center.y * t.scale + t.offset_y,
+                                    };
+                                    let dx = x - cv.x;
+                                    let dy = y - cv.y;
+                                    if (dx*dx + dy*dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS * 1.5 {
+                                        Some(h.clone())
+                                    } else { None }
+                                });
+                                let resize_hit = bounds.resize_handle.as_ref().is_some_and(
+                                    |(_, rp)| {
+                                        let rv = Point {
+                                            x: rp.x * t.scale + t.offset_x,
+                                            y: rp.y * t.scale + t.offset_y,
+                                        };
+                                        (x - rv.x).abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5
+                                            && (y - rv.y).abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5
+                                    }
+                                );
+
+                                if handle_hit.is_some() || resize_hit {
+                                    // Set up exactly like the active-edit handle path.
+                                    // The motion handler and click_released handle the rest.
+                                    st.active_text_bounds = Some(bounds);
+                                    st.active_text_is_dragging = true;
+                                    st.active_text_drag_handle = handle_hit;
+                                    st.active_text_drag_start = Some(image_point);
+                                    st.active_text_drag_start_bounds =
+                                        st.active_text_bounds.as_ref().map(|b| b.rect);
+                                    st.active_text_is_resizing = resize_hit;
+                                    handle_drag_started = true;
+                                }
+                            }
+
+                            if !handle_drag_started {
+                                // No handle hit — set anchor for GestureDrag move.
+                                st.select_drag_anchor = Some(image_point);
+                                st.select_resize_handle = None;
+                            }
+                        }
+                    } else {
+                        // Click on empty area: deselect and start a new text box.
+                        st.selected_action_index = None;
                         let initial_width = (st.text_size * 1.8).max(140.0);
                         let initial_height = (st.text_size * 1.45 + 16.0).max(44.0);
                         st.begin_text_input(image_point, initial_width, initial_height);
@@ -1440,19 +1628,36 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 st.active_text_drag_start = None;
                 st.active_text_drag_start_bounds = None;
                 st.active_text_is_resizing = false;
+
                 if st.active_text_input.is_some() {
+                    // Active edit session: reflow text to fit new bounds.
                     if was_resizing {
                         st.fit_active_text_to_layout_preserving_box();
                     } else {
                         st.fit_active_text_to_layout_preserving_font_size();
                     }
+                    true // refocus for typing
+                } else if let (Some(bounds), Some(index)) =
+                    (st.active_text_bounds.take(), st.selected_action_index)
+                {
+                    // Committed action handle resize: write new bounds back.
+                    if let Some(super::super::types::AnnotationAction::Text {
+                        position, font, max_width, ..
+                    }) = st.actions.get_mut(index) {
+                        let padding_y = 8.0;
+                        position.x = bounds.rect.x as f64;
+                        position.y = bounds.rect.y as f64 + font.size + padding_y;
+                        *max_width = Some(bounds.rect.width as f64);
+                    }
+                    st.redo_actions.clear();
+                    false
+                } else {
+                    false
                 }
-                st.active_text_input.is_some()
             } else {
                 false
             }
         };
-        // Queue redraw to update handle appearance
         if let Some(area) = drawing_area_release.upgrade() {
             if should_refocus {
                 area.grab_focus();
@@ -1505,6 +1710,40 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         if let Some(window) = window_motion.upgrade() {
             set_window_cursor_name(&window, Some(cursor_name));
+        }
+
+        // In Text tool mode: detect hover over existing text actions.
+        // Show outline border on hover and change cursor to "grab".
+        {
+            let mut st = state_motion.lock().unwrap();
+            if st.selected_tool == Tool::Text && st.active_text_input.is_none() {
+                let image_point = t.view_to_image_clamped(view_point);
+                let hit = st.actions.iter().enumerate().rev().find_map(|(index, action)| {
+                    if matches!(action, super::super::types::AnnotationAction::Text { .. })
+                        && super::super::selection::action_contains_point_with_padding(action, image_point, 0.0)
+                    {
+                        Some(index)
+                    } else {
+                        None
+                    }
+                });
+                if st.hovered_text_action_index != hit {
+                    st.hovered_text_action_index = hit;
+                    if let Some(area) = drawing_area_motion.upgrade() {
+                        area.queue_draw();
+                    }
+                }
+                if hit.is_some() {
+                    if let Some(window) = window_motion.upgrade() {
+                        set_window_cursor_name(&window, Some("grab"));
+                    }
+                }
+            } else if st.selected_tool != Tool::Text && st.hovered_text_action_index.is_some() {
+                st.hovered_text_action_index = None;
+                if let Some(area) = drawing_area_motion.upgrade() {
+                    area.queue_draw();
+                }
+            }
         }
 
         // Check for text edit handle hover
@@ -1572,8 +1811,13 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
             {
                 let mut st = state_motion.lock().unwrap();
+                // Compute min_width before the mutable borrow of active_text_bounds.
+                let min_width = if st.active_text_input.is_none() && !is_resizing {
+                    st.committed_text_min_width()
+                } else {
+                    50.0
+                };
                 if let (Some(bounds), Some(start_bounds)) = (st.active_text_bounds.as_mut(), start_bounds) {
-                    let min_width = 50.0;
                     let min_height = 44.0;
                     if is_resizing {
                         let max_width = (image_width - start_bounds.x).max(min_width as i32) as f64;
@@ -1617,12 +1861,12 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     if is_resizing {
                         st.fit_active_text_to_layout_preserving_box();
                     } else {
-                        // For Left/Right handle drags the user is explicitly setting
-                        // the width — do NOT run obstacle/layout fitting which would
-                        // fight the drag and shrink the box. Just reflow the height
-                        // to match the new width while keeping x, y, and width fixed.
                         st.fit_active_text_height_only();
                     }
+                } else if !is_resizing {
+                    // Committed action circle-handle resize: reflow height so
+                    // text never overflows the bottom of the box.
+                    st.fit_committed_text_height_only();
                 }
                 // Keep the original drag anchor fixed while using drag-start bounds.
             }

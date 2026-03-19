@@ -918,6 +918,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             active_text_drag_handle,
             text_font_family,
             text_size,
+            hovered_text_action_index,
         ) = {
             let st = state_draw.lock().unwrap();
             let (can_undo, can_redo) = st.history_availability();
@@ -949,6 +950,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 st.active_text_drag_handle.clone(),
                 st.text_font_family.clone(),
                 st.text_size,
+                st.hovered_text_action_index,
             )
         };
 
@@ -1375,6 +1377,28 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             );
         }
 
+        // In Text tool mode: draw hover outline for the text action under the cursor.
+        if selected_tool == Tool::Text && active_text_bounds.is_none() {
+            if let Some(hover_idx) = hovered_text_action_index {
+                if let Some(action) = actions.get(hover_idx) {
+                    if let AnnotationAction::Text { position, text, font, max_width, .. } = action {
+                        let available_width = max_width.unwrap_or_else(|| {
+                            (working_image.width() as f64 - position.x).max(font.size * 1.8)
+                        });
+                        let mut text_bounds = text_action_bounds(
+                            context, *position, text, font, Some(available_width),
+                        );
+                        text_bounds.rect.x = text_bounds.rect.x
+                            .clamp(0, (working_image.width() as i32 - text_bounds.rect.width).max(0));
+                        text_bounds.rect.y = text_bounds.rect.y
+                            .clamp(0, (working_image.height() as i32 - text_bounds.rect.height).max(0));
+                        text_bounds.sync_handles();
+                        draw_text_edit_border(context, &text_bounds, t.scale);
+                    }
+                }
+            }
+        }
+
         if let Some(selected_action) = selected_action.as_ref() {
             if selected_tool == Tool::Select && select_drag_anchor.is_some()
                 && matches!(selected_action, AnnotationAction::Obfuscate { .. })
@@ -1382,53 +1406,41 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 draw_draft_action(context, selected_action);
             }
 
-            if selected_tool == Tool::Select {
-                match selected_action {
-                    AnnotationAction::Text {
-                        position,
-                        text,
-                        font,
-                        max_width,
-                        ..
-                    } => {
-                        // Only draw the text selection border when NOT actively editing.
-                        // When active_text_bounds is Some, the outer block below handles
-                        // drawing the border + handles + cursor — drawing here too would
-                        // produce a duplicate border.
-                        if active_text_bounds.is_none() {
-                            let available_width = max_width.unwrap_or_else(|| {
-                                (working_image.width() as f64 - position.x).max(font.size * 1.8)
-                            });
-                            let mut text_bounds = text_action_bounds(
-                                context,
-                                *position,
-                                text,
-                                font,
-                                Some(available_width),
-                            );
-                            text_bounds.rect.x = text_bounds
-                                .rect
-                                .x
-                                .clamp(0, (working_image.width() as i32 - text_bounds.rect.width).max(0));
-                            text_bounds.rect.y = text_bounds
-                                .rect
-                                .y
-                                .clamp(0, (working_image.height() as i32 - text_bounds.rect.height).max(0));
-                            text_bounds.sync_handles();
-                            draw_text_edit_border(context, &text_bounds, t.scale);
-                            draw_text_edit_handles(context, &text_bounds, None, t.scale);
-                        }
-                    }
-                    _ => {
-                        let selection_padding = selection_hit_padding_for_scale(t.scale);
-                        if let Some(bounds) = action_bounds_with_padding(selected_action, selection_padding) {
-                            draw_selection_outline(context, bounds, t.scale);
-                        }
+            // Draw border + handles for a selected Text action in both
+            // Select tool mode and Text tool mode (e.g. during drag-to-move).
+            let show_text_handles = (selected_tool == Tool::Select || selected_tool == Tool::Text)
+                && active_text_bounds.is_none();
 
-                        let handles = action_resize_handles(selected_action);
-                        if !handles.is_empty() {
-                            draw_selection_handles(context, &handles, select_resize_handle, t.scale);
-                        }
+            if show_text_handles {
+                if let AnnotationAction::Text { position, text, font, max_width, .. } = selected_action {
+                    let available_width = max_width.unwrap_or_else(|| {
+                        (working_image.width() as f64 - position.x).max(font.size * 1.8)
+                    });
+                    let mut text_bounds = text_action_bounds(
+                        context, *position, text, font, Some(available_width),
+                    );
+                    text_bounds.rect.x = text_bounds.rect.x
+                        .clamp(0, (working_image.width() as i32 - text_bounds.rect.width).max(0));
+                    text_bounds.rect.y = text_bounds.rect.y
+                        .clamp(0, (working_image.height() as i32 - text_bounds.rect.height).max(0));
+                    text_bounds.sync_handles();
+                    draw_text_edit_border(context, &text_bounds, t.scale);
+                    draw_text_edit_handles(context, &text_bounds, None, t.scale);
+                }
+            }
+
+            if selected_tool == Tool::Select {
+                if let AnnotationAction::Text { .. } = selected_action {
+                    // Already handled above.
+                } else {
+                    let selection_padding = selection_hit_padding_for_scale(t.scale);
+                    if let Some(bounds) = action_bounds_with_padding(selected_action, selection_padding) {
+                        draw_selection_outline(context, bounds, t.scale);
+                    }
+
+                    let handles = action_resize_handles(selected_action);
+                    if !handles.is_empty() {
+                        draw_selection_handles(context, &handles, select_resize_handle, t.scale);
                     }
                 }
             }
