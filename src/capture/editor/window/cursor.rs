@@ -4,6 +4,7 @@ use gtk4::gdk_pixbuf::{Colorspace, Pixbuf};
 use gtk4::{prelude::*, ApplicationWindow};
 
 use super::super::color::{selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale};
+use super::super::pen_weight::HighlighterMode;
 use super::super::state::EditorState;
 use super::super::text_detect::clamp_cursor_size;
 use super::super::types::{
@@ -126,8 +127,12 @@ pub fn cursor_name_for_view_point(
         Tool::Text => "text",
         Tool::Crop => crop_hover_cursor_name(state, image_point, transform.scale),
         Tool::Background => "default",
+        Tool::Highlighter => {
+            // Note: Highlighter uses custom cursor set via update_cursor_for_position
+            // This returns crosshair as fallback
+            "crosshair"
+        }
         Tool::Pen
-        | Tool::Highlighter
         | Tool::Circle
         | Tool::Arrow
         | Tool::Line
@@ -189,6 +194,53 @@ pub fn set_highlighter_cursor(
             if let Some(surface) = window.surface() {
                 surface.set_cursor(Some(&cursor));
             }
+        }
+    }
+}
+
+/// Update cursor based on current state and position
+pub fn update_cursor_for_position(
+    window: &gtk4::ApplicationWindow,
+    state: &EditorState,
+    image_point: Point,
+    _view_scale: f64,
+) {
+    if state.selected_tool != Tool::Highlighter {
+        return;
+    }
+
+    match state.highlighter_mode {
+        HighlighterMode::TextAware => {
+            // Use text-aware cursor
+            if let Ok(detector) = state.text_detector.lock() {
+                if detector.is_ready() {
+                    if let Some(height) = detector.text_height_at_point(image_point) {
+                        let color = (
+                            state.selected_color.r,
+                            state.selected_color.g,
+                            state.selected_color.b,
+                            0.4, // Semi-transparent
+                        );
+                        set_highlighter_cursor(window, height, color);
+                        return;
+                    }
+                }
+            }
+            // Fallback to default cursor size
+            set_highlighter_cursor(
+                window,
+                DEFAULT_HIGHLIGHTER_CURSOR_SIZE,
+                (
+                    state.selected_color.r,
+                    state.selected_color.g,
+                    state.selected_color.b,
+                    0.4,
+                ),
+            );
+        }
+        HighlighterMode::Freehand => {
+            // Use crosshair for freehand mode
+            set_window_cursor_name(window, Some("crosshair"));
         }
     }
 }
