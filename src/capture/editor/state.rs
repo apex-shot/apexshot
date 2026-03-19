@@ -710,6 +710,54 @@ impl EditorState {
         self.fit_active_text_to_layout_with_constraints(false, false, false);
     }
 
+    /// Reflow only the box height to fit the current text at the current width
+    /// and font size. Does NOT touch x, y, or width — safe to call during a
+    /// Left/Right handle drag where the user is explicitly controlling width.
+    pub fn fit_active_text_height_only(&mut self) {
+        let Some(input) = self.active_text_input.as_ref() else {
+            return;
+        };
+        let Some(mut bounds) = self.active_text_bounds.clone() else {
+            return;
+        };
+
+        let text = input.text.clone();
+        let family = self.text_font_family.clone();
+        let size = self.text_size;
+
+        let surface = match gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let context = match gtk4::cairo::Context::new(&surface) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let font = FontSettings {
+            family,
+            size,
+            style: FontStyle::Normal,
+            decoration: TextDecoration::None,
+            alignment: TextAlignment::Left,
+        };
+        let content_width = (bounds.rect.width as f64 - 20.0).max(font.size * 0.8);
+        let layout = layout_wrapped_text(&context, &text, &font, content_width);
+        let line_height = (font.size * 1.2).max(font.size + 4.0);
+        let padding_y = 8.0;
+        let border_inset = 2.0;
+        let text_block_height =
+            (layout.lines.len().max(1) as f64 - 1.0).max(0.0) * line_height + font.size;
+        let new_height = (text_block_height + (padding_y + border_inset) * 2.0)
+            .max(44.0)
+            .round() as i32;
+
+        // Only update height — x, y, width are untouched.
+        bounds.rect.height = new_height;
+        bounds.sync_handles();
+        self.active_text_bounds = Some(bounds);
+    }
+
     pub fn crop_aspect_ratio_value(&self) -> Option<f64> {
         self.crop_aspect_ratio.aspect_ratio(
             self.working_image.width() as i32,
