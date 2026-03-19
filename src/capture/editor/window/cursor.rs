@@ -52,7 +52,7 @@ pub fn select_hover_cursor_name(
     if state.actions.iter().any(|action| {
         super::super::selection::action_contains_point_with_padding(action, point, hit_padding)
     }) {
-        "pointer"
+        "grab"
     } else {
         "default"
     }

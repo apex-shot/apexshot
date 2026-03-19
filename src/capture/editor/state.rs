@@ -3,15 +3,19 @@ use super::color::{
     selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX,
     DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
 };
-use super::render::{apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_pixelate};
+use super::render::{
+    apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_pixelate, layout_wrapped_text,
+    text_action_bounds,
+};
 use super::selection::{
-    action_contains_point_with_padding, action_resize_handle_at_point_with_radius, resize_action,
-    resize_rect_with_handle, translate_action,
+    action_bounds_with_padding, action_contains_point_with_padding,
+    action_resize_handle_at_point_with_radius, resize_action, resize_rect_with_handle,
+    translate_action,
 };
 use super::types::{
     AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
-    EditorError, FontSettings, MoveHandle, ObfuscateMethod, Point, Rect, ResizeHandle,
-    SelectHandle, SizeControlMode, TextEditBounds, Tool,
+    EditorError, FontSettings, FontStyle, MoveHandle, ObfuscateMethod, Point, Rect,
+    SelectHandle, SizeControlMode, TextAlignment, TextDecoration, TextEditBounds, Tool,
 };
 use gtk4;
 use image::RgbaImage;
@@ -58,6 +62,21 @@ pub struct EditorState {
     pub background_alignment: BackgroundAlignment,
     pub background_corner_radius: f64,
     pub background_aspect_ratio: CropAspectRatio,
+    pub active_text_drag_start_bounds: Option<Rect>,
+    pub active_text_is_resizing: bool,
+    #[allow(dead_code)]
+    pub active_text_input: Option<TextInputState>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct TextInputState {
+    pub text: String,
+    pub cursor_position: usize,
+    pub cursor_visible: bool,
+    pub cursor_blink_timer: u32,
+    pub color: DrawColor,
+    pub editing_action_index: Option<usize>,
 }
 
 fn resize_crop_rect_with_handle(
@@ -255,6 +274,9 @@ impl EditorState {
             background_alignment: BackgroundAlignment::Center,
             background_corner_radius: 18.0,
             background_aspect_ratio: CropAspectRatio::Original,
+            active_text_drag_start_bounds: None,
+            active_text_is_resizing: false,
+            active_text_input: None,
         }
     }
 
@@ -275,8 +297,396 @@ impl EditorState {
             self.select_drag_anchor = None;
             self.select_resize_handle = None;
         }
+        if tool != Tool::Text {
+            self.cancel_text_input();
+        }
         self.selected_tool = tool;
         self.clear_drag_without_rebuild_and_check_effect()
+    }
+
+    fn existing_text_bounds(&self, skip_index: Option<usize>) -> Vec<Rect> {
+        self.actions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, action)| {
+                if Some(index) == skip_index || !matches!(action, AnnotationAction::Text { .. }) {
+                    return None;
+                }
+                action_bounds_with_padding(action, 0.0)
+            })
+            .collect()
+    }
+
+    fn text_obstacle_limits(&self, bounds: &TextEditBounds, skip_index: Option<usize>) -> (f64, f64) {
+        let image_width = self.base_image.width() as f64;
+        let image_height = self.base_image.height() as f64;
+        let mut right_limit = image_width - bounds.rect.x as f64;
+        let mut bottom_limit = image_height - bounds.rect.y as f64;
+
+        for obstacle in self.existing_text_bounds(skip_index) {
+            let vertical_overlap = bounds.rect.y < obstacle.y + obstacle.height
+                && bounds.rect.y + bounds.rect.height > obstacle.y;
+            if vertical_overlap && obstacle.x >= bounds.rect.x {
+                right_limit = right_limit.min((obstacle.x - bounds.rect.x).max(50) as f64);
+            }
+
+            let horizontal_overlap = bounds.rect.x < obstacle.x + obstacle.width
+                && bounds.rect.x + bounds.rect.width > obstacle.x;
+            if horizontal_overlap && obstacle.y >= bounds.rect.y {
+                bottom_limit = bottom_limit.min((obstacle.y - bounds.rect.y).max(44) as f64);
+            }
+        }
+
+        (right_limit.max(50.0), bottom_limit.max(44.0))
+    }
+
+    pub fn begin_text_input(&mut self, position: Point, width: f64, height: f64) {
+        let image_width = self.base_image.width() as f64;
+        let image_height = self.base_image.height() as f64;
+        let baseline_y = position.y.clamp(self.text_size + 8.0, image_height - 8.0);
+        let max_width = (image_width - position.x).max(50.0);
+        let constrained_width = width.clamp(50.0, max_width);
+        let max_height = (image_height - (baseline_y - self.text_size - 8.0)).max(44.0);
+        let constrained_height = height.clamp(44.0, max_height);
+        let top_left = Point {
+            x: position.x.clamp(0.0, image_width - 50.0),
+            y: (baseline_y - self.text_size - 8.0).clamp(0.0, image_height - constrained_height),
+        };
+        let bounds = TextEditBounds::new(top_left, constrained_width, constrained_height);
+        self.active_text_bounds = Some(bounds);
+        self.active_text_is_dragging = false;
+        self.active_text_drag_handle = None;
+        self.active_text_drag_start = None;
+        self.active_text_drag_start_bounds = None;
+        self.active_text_is_resizing = false;
+        self.start_text_input();
+    }
+
+    #[allow(dead_code)]
+    pub fn start_text_input(&mut self) {
+        self.active_text_input = Some(TextInputState {
+            text: String::new(),
+            cursor_position: 0,
+            cursor_visible: true,
+            cursor_blink_timer: 0,
+            color: self.selected_color,
+            editing_action_index: None,
+        });
+    }
+
+    #[allow(dead_code)]
+    pub fn add_text_input_char(&mut self, c: char) {
+        if let Some(ref mut state) = self.active_text_input {
+            state.text.insert(state.cursor_position, c);
+            state.cursor_position += 1;
+            state.cursor_visible = true;
+            state.cursor_blink_timer = 0;
+        }
+    }
+
+    pub fn reset_text_cursor_blink(&mut self) {
+        if let Some(ref mut state) = self.active_text_input {
+            state.cursor_visible = true;
+            state.cursor_blink_timer = 0;
+        }
+    }
+
+    pub fn set_text_cursor_position(&mut self, position: usize) {
+        if let Some(ref mut state) = self.active_text_input {
+            state.cursor_position = position.min(state.text.chars().count());
+            state.cursor_visible = true;
+            state.cursor_blink_timer = 0;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_text_input_char(&mut self) {
+        if let Some(ref mut state) = self.active_text_input {
+            if state.cursor_position > 0 {
+                state.cursor_position -= 1;
+                state.text.remove(state.cursor_position);
+                state.cursor_blink_timer = 0;
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn move_cursor_left(&mut self) {
+        if let Some(ref mut state) = self.active_text_input {
+            if state.cursor_position > 0 {
+                state.cursor_position -= 1;
+                state.cursor_visible = true;
+                state.cursor_blink_timer = 0;
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn move_cursor_right(&mut self) {
+        if let Some(ref mut state) = self.active_text_input {
+            if state.cursor_position < state.text.len() {
+                state.cursor_position += 1;
+                state.cursor_visible = true;
+                state.cursor_blink_timer = 0;
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn tick_cursor_blink(&mut self) {
+        if let Some(ref mut state) = self.active_text_input {
+            state.cursor_blink_timer += 1;
+            if state.cursor_blink_timer >= 1 {
+                state.cursor_blink_timer = 0;
+                state.cursor_visible = !state.cursor_visible;
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn commit_text_input(&mut self) -> Option<AnnotationAction> {
+        if let Some(input_state) = self.active_text_input.take() {
+            let trimmed_text = input_state.text.trim().to_string();
+            let bounds = self.active_text_bounds.take();
+            self.active_text_is_dragging = false;
+            self.active_text_drag_handle = None;
+            self.active_text_drag_start = None;
+            self.active_text_drag_start_bounds = None;
+            self.active_text_is_resizing = false;
+
+            if let Some(index) = input_state.editing_action_index {
+                if trimmed_text.is_empty() {
+                    if index < self.actions.len() && matches!(self.actions[index], AnnotationAction::Text { .. }) {
+                        self.actions.remove(index);
+                        self.selected_action_index = None;
+                        self.select_drag_anchor = None;
+                        self.select_resize_handle = None;
+                        self.redo_actions.clear();
+                    }
+                    return None;
+                }
+
+                if let Some(b) = bounds {
+                    let Some(AnnotationAction::Text {
+                        position,
+                        text,
+                        color,
+                        font,
+                        max_width,
+                    }) = self.actions.get_mut(index) else {
+                        return None;
+                    };
+                    position.x = b.rect.x as f64;
+                    position.y = (b.rect.y as f64 + self.text_size + 8.0)
+                        .clamp(self.text_size + 8.0, self.base_image.height() as f64 - 8.0);
+                    *text = trimmed_text;
+                    *color = input_state.color;
+                    font.family = self.text_font_family.clone();
+                    font.size = self.text_size;
+                    font.style = FontStyle::Normal;
+                    font.decoration = TextDecoration::None;
+                    font.alignment = TextAlignment::Left;
+                    *max_width = Some(b.rect.width as f64);
+                    self.selected_action_index = Some(index);
+                    self.redo_actions.clear();
+                }
+                return None;
+            }
+
+            if trimmed_text.is_empty() {
+                self.clear_text_edit_state();
+                return None;
+            }
+
+            if let Some(b) = bounds {
+                let position = Point {
+                    x: b.rect.x as f64,
+                    y: (b.rect.y as f64 + self.text_size + 8.0)
+                        .clamp(self.text_size + 8.0, self.base_image.height() as f64 - 8.0),
+                };
+                let font = FontSettings {
+                    family: self.text_font_family.clone(),
+                    size: self.text_size,
+                    style: FontStyle::Normal,
+                    decoration: TextDecoration::None,
+                    alignment: TextAlignment::Left,
+                };
+                let clamped_position = Point {
+                    x: position.x.clamp(0.0, (self.base_image.width() as f64 - font.size * 1.8).max(0.0)),
+                    y: position.y.clamp(font.size, self.base_image.height() as f64),
+                };
+                let clamped_width = (b.rect.width as f64)
+                    .min((self.base_image.width() as f64 - clamped_position.x).max(font.size * 1.8));
+                return Some(AnnotationAction::Text {
+                    position: clamped_position,
+                    text: trimmed_text,
+                    color: input_state.color,
+                    font,
+                    max_width: Some(clamped_width),
+                });
+            }
+        }
+        None
+    }
+
+    #[allow(dead_code)]
+    pub fn cancel_text_input(&mut self) {
+        self.active_text_input = None;
+        self.clear_text_edit_state();
+    }
+
+    #[allow(dead_code)]
+    fn clear_text_edit_state(&mut self) {
+        self.active_text_bounds = None;
+        self.active_text_is_dragging = false;
+        self.active_text_drag_handle = None;
+        self.active_text_drag_start = None;
+        self.active_text_drag_start_bounds = None;
+        self.active_text_is_resizing = false;
+    }
+
+    #[allow(dead_code)]
+    pub fn get_text_input(&self) -> Option<&TextInputState> {
+        self.active_text_input.as_ref()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_text_bounds(&self) -> Option<&TextEditBounds> {
+        self.active_text_bounds.as_ref()
+    }
+
+    pub fn fit_active_text_to_layout_with_constraints(
+        &mut self,
+        preserve_width: bool,
+        preserve_height: bool,
+        preserve_font_size: bool,
+    ) {
+        let Some(input) = self.active_text_input.as_ref() else {
+            return;
+        };
+        let Some(mut bounds) = self.active_text_bounds.clone() else {
+            return;
+        };
+
+        let skip_index = input.editing_action_index;
+        let text = input.text.clone();
+        let family = self.text_font_family.clone();
+        let surface = match gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1) {
+            Ok(surface) => surface,
+            Err(_) => return,
+        };
+        let context = match gtk4::cairo::Context::new(&surface) {
+            Ok(context) => context,
+            Err(_) => return,
+        };
+
+        let mut fitted_size = self.text_size;
+        loop {
+            let (available_width_limit, available_height_limit) = self.text_obstacle_limits(&bounds, skip_index);
+            let available_height = if preserve_height {
+                bounds.rect.height.max(1) as f64
+            } else {
+                available_height_limit
+            };
+            let available_width = bounds.rect.width.max(1) as f64;
+            let mut max_width = available_width.min(available_width_limit);
+
+            let measure = |size: f64, width: f64| {
+                let font = FontSettings {
+                    family: family.clone(),
+                    size,
+                    style: FontStyle::Normal,
+                    decoration: TextDecoration::None,
+                    alignment: TextAlignment::Left,
+                };
+                let content_width = (width - 20.0).max(font.size * 0.8);
+                let layout = layout_wrapped_text(&context, &text, &font, content_width);
+                let line_height = (font.size * 1.2).max(font.size + 4.0);
+                let height = ((layout.lines.len().max(1) as f64 - 1.0).max(0.0) * line_height + font.size).max(44.0);
+                (layout, height)
+            };
+
+            if !preserve_font_size {
+                while fitted_size < 120.0 {
+                    let next_size = (fitted_size + 1.0).min(120.0);
+                    let (_, next_height) = measure(next_size, max_width);
+                    if next_height > available_height {
+                        break;
+                    }
+                    fitted_size = next_size;
+                }
+            }
+
+            let (_, mut height) = measure(fitted_size, max_width);
+            if !preserve_font_size {
+                while fitted_size > 10.0 && height > available_height {
+                    fitted_size = (fitted_size - 1.0).max(10.0);
+                    let measured = measure(fitted_size, max_width);
+                    height = measured.1;
+                }
+            }
+
+            if preserve_font_size {
+                if height > available_height {
+                    let mut low = max_width;
+                    let mut high = available_width_limit;
+                    while high - low > 1.0 {
+                        let mid = (low + high) / 2.0;
+                        let measured = measure(fitted_size, mid);
+                        if measured.1 > available_height {
+                            low = mid;
+                        } else {
+                            high = mid;
+                        }
+                    }
+                    max_width = high;
+                    height = measure(fitted_size, max_width).1;
+                }
+            }
+
+            let old_width = bounds.rect.width;
+            let old_height = bounds.rect.height;
+            let target_width = if preserve_width {
+                max_width.round().max(fitted_size * 1.8) as i32
+            } else {
+                max_width.round().max(fitted_size * 1.8) as i32
+            };
+            let target_height = if preserve_height {
+                bounds.rect.height
+            } else {
+                height.min(available_height.max(44.0)).round().max(1.0) as i32
+            };
+            bounds.rect.width = target_width;
+            bounds.rect.height = target_height;
+            bounds.sync_handles();
+
+            if bounds.rect.width == old_width && bounds.rect.height == old_height {
+                break;
+            }
+        }
+
+        self.text_size = fitted_size;
+        bounds.sync_handles();
+        self.active_text_bounds = Some(bounds);
+    }
+
+    #[allow(dead_code)]
+    pub fn fit_active_text_to_layout_preserving_height(&mut self, preserve_height: bool) {
+        self.fit_active_text_to_layout_with_constraints(false, preserve_height, false);
+    }
+
+    #[allow(dead_code)]
+    pub fn fit_active_text_to_layout_preserving_font_size(&mut self) {
+        self.fit_active_text_to_layout_with_constraints(true, false, true);
+    }
+
+    #[allow(dead_code)]
+    pub fn fit_active_text_to_layout_preserving_box(&mut self) {
+        self.fit_active_text_to_layout_with_constraints(true, true, false);
+    }
+
+    pub fn fit_active_text_to_layout(&mut self) {
+        self.fit_active_text_to_layout_with_constraints(false, false, false);
     }
 
     pub fn crop_aspect_ratio_value(&self) -> Option<f64> {
@@ -311,6 +721,9 @@ impl EditorState {
     pub fn set_color_index(&mut self, index: usize) {
         if let Some(color) = DRAW_COLORS.get(index).copied() {
             self.selected_color = color;
+            if let Some(input) = self.active_text_input.as_mut() {
+                input.color = color;
+            }
         }
     }
 
@@ -391,6 +804,35 @@ impl EditorState {
     #[allow(dead_code)]
     pub fn set_text_size(&mut self, size: f64) -> bool {
         let next = clamp_text_size(size);
+        if let Some(index) = self.active_text_input.as_ref().and_then(|input| input.editing_action_index) {
+            let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
+                return false;
+            };
+            if (font.size - next).abs() <= f64::EPSILON {
+                return false;
+            }
+            font.size = next;
+            self.text_size = next;
+            self.redo_actions.clear();
+            return true;
+        }
+
+        if self.active_text_input.is_some() {
+            if (next - self.text_size).abs() <= f64::EPSILON {
+                return false;
+            }
+            self.text_size = next;
+            return true;
+        }
+
+        if self.selected_action_index.is_some() {
+            if self.set_selected_text_action_size(next) {
+                self.text_size = next;
+                return true;
+            }
+            return false;
+        }
+
         if (next - self.text_size).abs() <= f64::EPSILON {
             return false;
         }
@@ -409,6 +851,18 @@ impl EditorState {
 
     pub fn set_selected_text_action_size(&mut self, size: f64) -> bool {
         let next = clamp_text_size(size);
+
+        if let Some(index) = self.active_text_input.as_ref().and_then(|input| input.editing_action_index) {
+            let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
+                return false;
+            };
+            if (font.size - next).abs() <= f64::EPSILON {
+                return false;
+            }
+            font.size = next;
+            self.redo_actions.clear();
+            return true;
+        }
 
         let Some(index) = self.selected_action_index else {
             return false;
@@ -441,6 +895,18 @@ impl EditorState {
     }
 
     pub fn set_selected_text_font_family(&mut self, family: String) -> bool {
+        if let Some(index) = self.active_text_input.as_ref().and_then(|input| input.editing_action_index) {
+            let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
+                return false;
+            };
+            if font.family == family {
+                return false;
+            }
+            font.family = family;
+            self.redo_actions.clear();
+            return true;
+        }
+
         let Some(index) = self.selected_action_index else {
             return false;
         };
@@ -602,6 +1068,11 @@ impl EditorState {
     }
 
     pub fn set_selected_action_color(&mut self, color: DrawColor) -> bool {
+        if let Some(input) = self.active_text_input.as_mut() {
+            input.color = color;
+            return true;
+        }
+
         let Some(index) = self.selected_action_index else {
             return false;
         };
@@ -746,15 +1217,70 @@ impl EditorState {
             .and_then(|index| self.actions.get(index))
     }
 
-    pub fn selected_text_action_data(&self) -> Option<(usize, String)> {
+    pub fn selected_text_action_data(&self) -> Option<(usize, String, DrawColor, FontSettings, Option<f64>, Point)> {
         let index = self.selected_action_index?;
-        let AnnotationAction::Text { text, .. } = self.actions.get(index)? else {
+        let AnnotationAction::Text {
+            position,
+            text,
+            color,
+            font,
+            max_width,
+        } = self.actions.get(index)? else {
             return None;
         };
 
-        Some((index, text.clone()))
+        Some((index, text.clone(), *color, font.clone(), *max_width, *position))
     }
 
+    #[allow(dead_code)]
+    pub fn commit_active_text_input(&mut self) -> bool {
+        if let Some(action) = self.commit_text_input() {
+            self.push_action(action);
+            return true;
+        }
+        false
+    }
+
+    pub fn begin_editing_selected_text(&mut self) -> bool {
+        let Some((index, text, color, font, max_width, position)) = self.selected_text_action_data() else {
+            return false;
+        };
+        let Some(width) = max_width else {
+            return false;
+        };
+
+        let bounds = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1)
+            .ok()
+            .and_then(|surface| gtk4::cairo::Context::new(&surface).ok())
+            .map(|context| text_action_bounds(&context, position, &text, &font, Some(width)))
+            .unwrap_or_else(|| {
+                let padding_y = 8.0;
+                let bounds_position = Point {
+                    x: position.x,
+                    y: position.y - font.size - padding_y,
+                };
+                let height = (font.size * 1.45 + 16.0).max(44.0);
+                TextEditBounds::new(bounds_position, width, height)
+            });
+        self.active_text_bounds = Some(bounds);
+        self.active_text_input = Some(TextInputState {
+            cursor_position: text.chars().count(),
+            text,
+            cursor_visible: true,
+            cursor_blink_timer: 0,
+            color,
+            editing_action_index: Some(index),
+        });
+        self.active_text_is_dragging = false;
+        self.active_text_drag_handle = None;
+        self.active_text_drag_start = None;
+        self.text_font_family = font.family.clone();
+        self.text_size = font.size;
+        self.selected_color = color;
+        true
+    }
+
+    #[allow(dead_code)]
     pub fn update_text_action(&mut self, index: usize, new_text: String) -> bool {
         if index >= self.actions.len() {
             return false;
@@ -797,6 +1323,22 @@ impl EditorState {
             .enumerate()
             .rev()
             .find(|(_, action)| action_contains_point_with_padding(action, point, hit_padding))
+            .map(|(index, _)| index);
+        self.select_drag_anchor = None;
+        self.select_resize_handle = None;
+        self.selected_action_index.is_some()
+    }
+
+    pub fn select_text_action_at_point_with_scale(&mut self, point: Point, _view_scale: f64) -> bool {
+        self.selected_action_index = self
+            .actions
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, action)| {
+                matches!(action, AnnotationAction::Text { .. })
+                    && action_contains_point_with_padding(action, point, 0.0)
+            })
             .map(|(index, _)| index);
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
@@ -1072,6 +1614,7 @@ impl EditorState {
             text,
             color,
             font,
+            max_width: Some(bounds.rect.width as f64),
         });
 
         self.active_text_edit = None;

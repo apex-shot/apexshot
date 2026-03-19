@@ -299,6 +299,14 @@ impl ViewTransform {
         image_point.y = image_point.y.clamp(0.0, self.image_height);
         image_point
     }
+
+    #[allow(dead_code)]
+    pub fn image_to_view(&self, point: Point) -> Point {
+        Point {
+            x: point.x * self.scale + self.offset_x,
+            y: point.y * self.scale + self.offset_y,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -403,11 +411,13 @@ pub enum AnnotationAction {
         color: DrawColor,
         stroke_size: f64,
     },
+    #[allow(dead_code)]
     Text {
         position: Point,
         text: String,
         color: DrawColor,
         font: FontSettings,
+        max_width: Option<f64>,
     },
     Number {
         position: Point,
@@ -444,33 +454,40 @@ pub struct TextEditBounds {
 
 impl TextEditBounds {
     pub fn new(position: Point, width: f64, height: f64) -> Self {
-        let rect = Rect {
-            x: position.x as i32,
-            y: position.y as i32,
-            width: width as i32,
-            height: height as i32,
-        };
-
-        let left_center = Point {
-            x: position.x,
-            y: position.y + height / 2.0,
-        };
-        let right_center = Point {
-            x: position.x + width,
-            y: position.y + height / 2.0,
-        };
-        let resize_pos = Point {
-            x: position.x + width,
-            y: position.y + height,
-        };
-
-        Self {
-            rect,
+        let mut bounds = Self {
+            rect: Rect {
+                x: position.x.round() as i32,
+                y: position.y.round() as i32,
+                width: width.round().max(1.0) as i32,
+                height: height.round().max(1.0) as i32,
+            },
             move_handles: vec![
-                (MoveHandle::Left, left_center),
-                (MoveHandle::Right, right_center),
+                (MoveHandle::Left, position),
+                (MoveHandle::Right, position),
             ],
-            resize_handle: Some((ResizeHandle::BottomRight, resize_pos)),
+            resize_handle: Some((ResizeHandle::BottomRight, position)),
+        };
+        bounds.sync_handles();
+        bounds
+    }
+
+    pub fn sync_handles(&mut self) {
+        let x = self.rect.x as f64;
+        let y = self.rect.y as f64;
+        let w = self.rect.width.max(1) as f64;
+        let h = self.rect.height.max(1) as f64;
+
+        if let Some((_, point)) = self.move_handles.get_mut(0) {
+            *point = Point { x, y: y + h / 2.0 };
+        }
+        if let Some((_, point)) = self.move_handles.get_mut(1) {
+            *point = Point {
+                x: x + w,
+                y: y + h / 2.0,
+            };
+        }
+        if let Some((_, point)) = &mut self.resize_handle {
+            *point = Point { x: x + w, y: y + h };
         }
     }
 }

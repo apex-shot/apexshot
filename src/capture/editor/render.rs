@@ -94,7 +94,18 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             text,
             color,
             font,
-        } => draw_text(context, *position, text, *color, font),
+            max_width,
+        } => {
+            let available_width = max_width.unwrap_or_else(|| {
+                context
+                    .clip_extents()
+                    .map(|(_, _, width, _)| width - position.x)
+                    .unwrap_or(f64::INFINITY)
+            })
+            .min(context.clip_extents().map(|(_, _, width, _)| width - position.x).unwrap_or(f64::INFINITY))
+            .max(font.size * 1.8);
+            draw_wrapped_text(context, *position, text, *color, font, Some(available_width));
+        },
         AnnotationAction::Number {
             position,
             number,
@@ -156,8 +167,17 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             text,
             color,
             font,
+            max_width,
         } => {
-            draw_text(context, *position, text, color.with_alpha(0.9), font);
+            let available_width = max_width.unwrap_or_else(|| {
+                context
+                    .clip_extents()
+                    .map(|(_, _, width, _)| width - position.x)
+                    .unwrap_or(f64::INFINITY)
+            })
+            .min(context.clip_extents().map(|(_, _, width, _)| width - position.x).unwrap_or(f64::INFINITY))
+            .max(font.size * 1.8);
+            draw_wrapped_text(context, *position, text, color.with_alpha(0.9), font, Some(available_width));
         }
         AnnotationAction::Number {
             position,
@@ -471,9 +491,33 @@ pub fn draw_text_edit_border(
     let _ = context.restore();
 }
 
-const MOVE_HANDLE_RADIUS: f64 = 5.0;
+const MOVE_HANDLE_RADIUS: f64 = 7.0;
 const MOVE_HANDLE_OUTLINE_WIDTH: f64 = 2.0;
-const RESIZE_HANDLE_SIZE: f64 = 12.0;
+const RESIZE_HANDLE_SIZE: f64 = 10.0;
+
+pub fn text_action_bounds(
+    context: &gtk4::cairo::Context,
+    position: Point,
+    text: &str,
+    font: &FontSettings,
+    max_width: Option<f64>,
+) -> TextEditBounds {
+    let padding_x = 10.0;
+    let padding_y = 8.0;
+    let content_width = max_width
+        .map(|width| (width - padding_x * 2.0).max(font.size * 0.8))
+        .unwrap_or_else(|| measure_text_width(context, text, font).max(font.size * 1.8));
+    let layout = layout_wrapped_text(context, text, font, content_width);
+    let line_height = (font.size * 1.2).max(font.size + 4.0);
+    let width = (layout.max_width + padding_x * 2.0).max(font.size * 1.8);
+    let height = (layout.lines.len().max(1) as f64 * line_height + font.size * 0.2 + padding_y * 2.0)
+        .max(44.0);
+    let top_left = Point {
+        x: position.x,
+        y: position.y - font.size - padding_y,
+    };
+    TextEditBounds::new(top_left, width, height)
+}
 
 pub fn draw_text_edit_handles(
     context: &gtk4::cairo::Context,
@@ -699,15 +743,7 @@ pub fn draw_box(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor, st
     let _ = context.stroke();
 }
 
-pub fn draw_text(
-    context: &gtk4::cairo::Context,
-    position: Point,
-    text: &str,
-    color: DrawColor,
-    font: &FontSettings,
-) {
-    context.set_source_rgba(color.r, color.g, color.b, color.a);
-
+fn apply_font_settings(context: &gtk4::cairo::Context, font: &FontSettings) {
     let slant = match font.style {
         FontStyle::Normal | FontStyle::Bold => gtk4::cairo::FontSlant::Normal,
         FontStyle::Italic | FontStyle::BoldItalic => gtk4::cairo::FontSlant::Italic,
@@ -719,6 +755,109 @@ pub fn draw_text(
 
     context.select_font_face(&font.family, slant, weight);
     context.set_font_size(font.size.max(1.0));
+}
+
+pub fn measure_text_width(
+    context: &gtk4::cairo::Context,
+    text: &str,
+    font: &FontSettings,
+) -> f64 {
+    let _ = context.save();
+    apply_font_settings(context, font);
+    let width = context
+        .text_extents(text)
+        .map(|extents| extents.x_advance().max(extents.width()))
+        .unwrap_or(0.0);
+    let _ = context.restore();
+    width
+}
+
+#[derive(Debug, Clone)]
+pub struct TextLayoutLine {
+    pub text: String,
+    pub start_char: usize,
+    pub end_char: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextLayout {
+    pub lines: Vec<TextLayoutLine>,
+    pub max_width: f64,
+}
+
+pub fn layout_wrapped_text(
+    context: &gtk4::cairo::Context,
+    text: &str,
+    font: &FontSettings,
+    max_width: f64,
+) -> TextLayout {
+    let allowed_width = max_width.max(font.size * 0.8).max(1.0);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_start = 0usize;
+    let mut current_end = 0usize;
+    let mut max_line_width: f64 = 0.0;
+
+    for (char_idx, ch) in text.chars().enumerate() {
+        if ch == '\n' {
+            max_line_width = max_line_width.max(measure_text_width(context, &current, font));
+            lines.push(TextLayoutLine {
+                text: current.clone(),
+                start_char: current_start,
+                end_char: current_end,
+            });
+            current.clear();
+            current_start = char_idx + 1;
+            current_end = char_idx + 1;
+            continue;
+        }
+
+        let mut candidate = current.clone();
+        candidate.push(ch);
+        let candidate_width = measure_text_width(context, &candidate, font);
+
+        if !current.is_empty() && candidate_width > allowed_width {
+            max_line_width = max_line_width.max(measure_text_width(context, &current, font));
+            lines.push(TextLayoutLine {
+                text: current.clone(),
+                start_char: current_start,
+                end_char: current_end,
+            });
+            current.clear();
+            current.push(ch);
+            current_start = char_idx;
+            current_end = char_idx + 1;
+        } else {
+            current = candidate;
+            current_end = char_idx + 1;
+            max_line_width = max_line_width.max(candidate_width.min(allowed_width));
+        }
+    }
+
+    if !current.is_empty() || lines.is_empty() {
+        max_line_width = max_line_width.max(measure_text_width(context, &current, font));
+        lines.push(TextLayoutLine {
+            text: current,
+            start_char: current_start,
+            end_char: current_end,
+        });
+    }
+
+    TextLayout {
+        lines,
+        max_width: max_line_width.min(allowed_width),
+    }
+}
+
+pub fn draw_text(
+    context: &gtk4::cairo::Context,
+    position: Point,
+    text: &str,
+    color: DrawColor,
+    font: &FontSettings,
+) {
+    context.set_source_rgba(color.r, color.g, color.b, color.a);
+    apply_font_settings(context, font);
 
     // Handle alignment by computing text width
     let x_offset = if font.alignment != TextAlignment::Left {
@@ -761,6 +900,139 @@ pub fn draw_text(
             }
         }
     }
+}
+
+pub fn draw_wrapped_text(
+    context: &gtk4::cairo::Context,
+    position: Point,
+    text: &str,
+    color: DrawColor,
+    font: &FontSettings,
+    max_width: Option<f64>,
+) {
+    if let Some(max_width) = max_width {
+        let layout = layout_wrapped_text(context, text, font, max_width.max(1.0));
+        let line_height = (font.size * 1.2).max(font.size + 4.0);
+        for (index, line) in layout.lines.iter().enumerate() {
+            draw_text(
+                context,
+                Point {
+                    x: position.x,
+                    y: position.y + index as f64 * line_height,
+                },
+                &line.text,
+                color,
+                font,
+            );
+        }
+    } else {
+        draw_text(context, position, text, color, font);
+    }
+}
+
+pub fn cursor_position_for_text_point(
+    context: &gtk4::cairo::Context,
+    bounds: &TextEditBounds,
+    text: &str,
+    font: &FontSettings,
+    point: Point,
+) -> usize {
+    let padding_x = 10.0;
+    let padding_y = 8.0;
+    let line_height = (font.size * 1.2).max(font.size + 4.0);
+    let content_width = (bounds.rect.width as f64 - padding_x * 2.0).max(1.0);
+    let layout = layout_wrapped_text(context, text, font, content_width);
+
+    if layout.lines.is_empty() {
+        return 0;
+    }
+
+    let relative_y = (point.y - bounds.rect.y as f64 - padding_y).max(0.0);
+    let line_index = ((relative_y / line_height).floor() as usize).min(layout.lines.len().saturating_sub(1));
+    let line = &layout.lines[line_index];
+    let relative_x = (point.x - bounds.rect.x as f64 - padding_x).max(0.0);
+
+    let mut best_position = line.start_char;
+    let mut best_distance = f64::INFINITY;
+    let char_count = line.text.chars().count();
+
+    for column in 0..=char_count {
+        let prefix: String = line.text.chars().take(column).collect();
+        let caret_x = measure_text_width(context, &prefix, font);
+        let distance = (caret_x - relative_x).abs();
+        if distance < best_distance {
+            best_distance = distance;
+            best_position = line.start_char + column;
+        }
+    }
+
+    best_position.min(text.chars().count())
+}
+
+pub fn draw_active_text_input(
+    context: &gtk4::cairo::Context,
+    bounds: &TextEditBounds,
+    text: &str,
+    cursor_position: usize,
+    cursor_visible: bool,
+    color: DrawColor,
+    font: &FontSettings,
+) {
+    let _ = context.save();
+    context.rectangle(
+        bounds.rect.x as f64,
+        bounds.rect.y as f64,
+        bounds.rect.width.max(1) as f64,
+        bounds.rect.height.max(1) as f64,
+    );
+    context.clip();
+
+    let padding_x = 10.0;
+    let line_height = (font.size * 1.2).max(font.size + 4.0);
+    let content_width = (bounds.rect.width as f64 - padding_x * 2.0).max(1.0);
+    let layout = layout_wrapped_text(context, text, font, content_width);
+    let clamped_cursor = cursor_position.min(text.chars().count());
+    let mut cursor_line = 0usize;
+    let mut cursor_column = 0usize;
+    let text_block_height = (layout.lines.len().max(1) as f64 * line_height).max(line_height);
+    let vertical_offset = ((bounds.rect.height as f64 - text_block_height) / 2.0).max(0.0);
+    let baseline_offset = font.size + ((line_height - font.size) / 2.0).max(0.0) - (font.size * 0.12);
+
+    for (index, line) in layout.lines.iter().enumerate() {
+        let baseline_y = bounds.rect.y as f64 + vertical_offset + baseline_offset + index as f64 * line_height;
+        draw_text(
+            context,
+            Point {
+                x: bounds.rect.x as f64 + padding_x,
+                y: baseline_y,
+            },
+            &line.text,
+            color,
+            font,
+        );
+
+        if clamped_cursor >= line.start_char && clamped_cursor <= line.end_char {
+            cursor_line = index;
+            cursor_column = clamped_cursor.saturating_sub(line.start_char);
+        }
+    }
+
+    if cursor_visible {
+        let line = layout.lines.get(cursor_line).or_else(|| layout.lines.last());
+        let prefix: String = line
+            .map(|line| line.text.chars().take(cursor_column).collect())
+            .unwrap_or_default();
+        let cursor_x = bounds.rect.x as f64 + padding_x + measure_text_width(context, &prefix, font);
+        let top = bounds.rect.y as f64 + vertical_offset + cursor_line as f64 * line_height;
+        let bottom = top + font.size.max(line_height - 2.0);
+        context.set_source_rgba(color.r, color.g, color.b, color.a.max(0.8));
+        context.set_line_width((font.size * 0.04).max(1.5));
+        context.move_to(cursor_x, top);
+        context.line_to(cursor_x, bottom);
+        let _ = context.stroke();
+    }
+
+    let _ = context.restore();
 }
 
 pub fn draw_number(context: &gtk4::cairo::Context, position: Point, number: u32, color: DrawColor) {
