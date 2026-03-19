@@ -72,6 +72,7 @@ pub struct EditorState {
     pub background_aspect_ratio: CropAspectRatio,
     pub active_text_drag_start_bounds: Option<Rect>,
     pub active_text_is_resizing: bool,
+    pub hovered_text_action_index: Option<usize>,
     #[allow(dead_code)]
     pub active_text_input: Option<TextInputState>,
 }
@@ -291,6 +292,7 @@ impl EditorState {
             background_aspect_ratio: CropAspectRatio::Original,
             active_text_drag_start_bounds: None,
             active_text_is_resizing: false,
+            hovered_text_action_index: None,
             active_text_input: None,
         }
     }
@@ -314,6 +316,7 @@ impl EditorState {
         }
         if tool != Tool::Text {
             self.cancel_text_input();
+            self.hovered_text_action_index = None;
         }
         self.selected_tool = tool;
         self.clear_drag_without_rebuild_and_check_effect()
@@ -603,8 +606,15 @@ impl EditorState {
             } else {
                 available_height_limit
             };
-            let available_width = bounds.rect.width.max(1) as f64;
-            let mut max_width = available_width.min(available_width_limit);
+            // When not preserving width, allow the box to grow up to the full
+            // available space (image edge or next obstacle). This lets text
+            // stay on one line and only wrap when it truly runs out of room.
+            // When preserving width, cap at the current box width.
+            let mut max_width = if preserve_width {
+                (bounds.rect.width.max(1) as f64).min(available_width_limit)
+            } else {
+                available_width_limit
+            };
 
             let measure = |size: f64, width: f64| {
                 let font = FontSettings {
@@ -638,7 +648,7 @@ impl EditorState {
                 }
             }
 
-            let (_, mut height) = measure(fitted_size, max_width);
+            let (layout, mut height) = measure(fitted_size, max_width);
             if !preserve_font_size {
                 while fitted_size > 10.0 && height > available_height {
                     fitted_size = (fitted_size - 1.0).max(10.0);
@@ -668,9 +678,17 @@ impl EditorState {
             let old_width = bounds.rect.width;
             let old_height = bounds.rect.height;
             let target_width = if preserve_width {
+                // Preserving width: keep the current box width (capped at available).
                 max_width.round().max(fitted_size * 1.8) as i32
             } else {
-                max_width.round().max(fitted_size * 1.8) as i32
+                // Not preserving width: size the box to the actual text width
+                // (with padding), only growing as wide as the text needs.
+                // Add padding_x * 2 to match draw_active_text_input's padding.
+                let padding_x = 10.0;
+                (layout.max_width + padding_x * 2.0)
+                    .max(fitted_size * 1.8)
+                    .min(max_width)
+                    .round() as i32
             };
             let target_height = if preserve_height {
                 bounds.rect.height
@@ -756,6 +774,82 @@ impl EditorState {
         bounds.rect.height = new_height;
         bounds.sync_handles();
         self.active_text_bounds = Some(bounds);
+    }
+
+    /// Like fit_active_text_height_only but reads text/font from the selected
+    /// committed action instead of active_text_input. Used during circle-handle
+    /// resizes of committed text actions (no active edit session open).
+    pub fn fit_committed_text_height_only(&mut self) {
+        let Some(mut bounds) = self.active_text_bounds.clone() else {
+            return;
+        };
+        let Some(index) = self.selected_action_index else {
+            return;
+        };
+        let (text, font) = match self.actions.get(index) {
+            Some(AnnotationAction::Text { text, font, .. }) => (text.clone(), font.clone()),
+            _ => return,
+        };
+
+        let surface = match gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let context = match gtk4::cairo::Context::new(&surface) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let content_width = (bounds.rect.width as f64 - 20.0).max(font.size * 0.8);
+        let layout = layout_wrapped_text(&context, &text, &font, content_width);
+        let line_height = (font.size * 1.2).max(font.size + 4.0);
+        let padding_y = 8.0;
+        let border_inset = 2.0;
+        let text_block_height =
+            (layout.lines.len().max(1) as f64 - 1.0).max(0.0) * line_height + font.size;
+        let new_height = (text_block_height + (padding_y + border_inset) * 2.0)
+            .max(44.0)
+            .round() as i32;
+
+        bounds.rect.height = new_height;
+        bounds.sync_handles();
+        self.active_text_bounds = Some(bounds);
+    }
+
+    /// Compute the minimum box width needed to display the committed text
+    /// action without any word being cut off. Returns the width of the longest
+    /// single word (plus padding), or a font-size-based floor if no action.
+    pub fn committed_text_min_width(&self) -> f64 {
+        let Some(index) = self.selected_action_index else {
+            return 50.0;
+        };
+        let (text, font) = match self.actions.get(index) {
+            Some(AnnotationAction::Text { text, font, .. }) => (text.as_str(), font),
+            _ => return 50.0,
+        };
+
+        let surface = match gtk4::cairo::ImageSurface::create(
+            gtk4::cairo::Format::ARgb32, 1, 1,
+        ) {
+            Ok(s) => s,
+            Err(_) => return 50.0,
+        };
+        let context = match gtk4::cairo::Context::new(&surface) {
+            Ok(c) => c,
+            Err(_) => return 50.0,
+        };
+
+        // Measure the width of each word; the widest word is the minimum.
+        let padding_x = 10.0;
+        let max_word_width = text
+            .split_whitespace()
+            .map(|word| super::render::measure_text_width(&context, word, font))
+            .fold(0.0_f64, f64::max);
+
+        // Add padding on both sides, floor at font_size * 1.8.
+        (max_word_width + padding_x * 2.0)
+            .max(font.size * 1.8)
+            .max(50.0)
     }
 
     pub fn crop_aspect_ratio_value(&self) -> Option<f64> {
@@ -1441,6 +1535,7 @@ impl EditorState {
         self.selected_action_index.is_some()
     }
 
+    #[allow(dead_code)]
     pub fn select_text_action_at_point_with_scale(&mut self, point: Point, _view_scale: f64) -> bool {
         self.selected_action_index = self
             .actions
@@ -1774,8 +1869,41 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
             rect.x = rect.x.max(0).min(img_w - w);
             rect.y = rect.y.max(0).min(img_h - h);
         }
-        AnnotationAction::Text { position, .. }
-        | AnnotationAction::Number { position, .. } => {
+        AnnotationAction::Text { position, text, font, max_width, .. } => {
+            // Compute the real rendered bounds so we clamp correctly for
+            // any number of lines at any font size.
+            let surface = match gtk4::cairo::ImageSurface::create(
+                gtk4::cairo::Format::ARgb32, 1, 1,
+            ) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let context = match gtk4::cairo::Context::new(&surface) {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let available_width = max_width.unwrap_or(font.size * 1.8).max(font.size * 1.8);
+            let bounds = super::render::text_action_bounds(
+                &context, *position, text, font, Some(available_width),
+            );
+            let box_w = bounds.rect.width as f64;
+            let box_h = bounds.rect.height as f64;
+
+            // Clamp box_left to [0, img_w - box_w]
+            let new_box_left = (bounds.rect.x as f64)
+                .max(0.0)
+                .min((img_w as f64 - box_w).max(0.0));
+            position.x = new_box_left; // position.x == box_left for Text
+
+            // Clamp box_top to [0, img_h - box_h], then recompute baseline
+            // position.y = box_top + font.size + padding_y
+            let padding_y = 8.0;
+            let new_box_top = (bounds.rect.y as f64)
+                .max(0.0)
+                .min((img_h as f64 - box_h).max(0.0));
+            position.y = new_box_top + font.size + padding_y;
+        }
+        AnnotationAction::Number { position, .. } => {
             position.x = position.x.max(0.0).min(img_w as f64);
             position.y = position.y.max(0.0).min(img_h as f64);
         }
