@@ -1004,15 +1004,20 @@ pub fn draw_active_text_input(
     font: &FontSettings,
 ) {
     let _ = context.save();
+
+    // Inset the clip rect by the border half-width so text is always drawn
+    // inside the border stroke, never underneath it.
+    let inset = TEXT_EDIT_BORDER_WIDTH / 2.0 + 1.0;
     context.rectangle(
-        bounds.rect.x as f64,
-        bounds.rect.y as f64,
-        bounds.rect.width.max(1) as f64,
-        bounds.rect.height.max(1) as f64,
+        bounds.rect.x as f64 + inset,
+        bounds.rect.y as f64 + inset,
+        (bounds.rect.width.max(1) as f64 - inset * 2.0).max(1.0),
+        (bounds.rect.height.max(1) as f64 - inset * 2.0).max(1.0),
     );
     context.clip();
 
     let padding_x = 10.0;
+    let padding_y = 8.0;
     let line_height = (font.size * 1.2).max(font.size + 4.0);
     let content_width = (bounds.rect.width as f64 - padding_x * 2.0).max(1.0);
     let layout = layout_wrapped_text(context, text, font, content_width);
@@ -1020,11 +1025,13 @@ pub fn draw_active_text_input(
     let mut cursor_line = 0usize;
     let mut cursor_column = 0usize;
     let text_block_height = (layout.lines.len().max(1) as f64 * line_height).max(line_height);
-    let vertical_offset = ((bounds.rect.height as f64 - text_block_height) / 2.0).max(0.0);
+    // Center the text block vertically within the inner content area (inset from border).
+    let inner_height = (bounds.rect.height as f64 - inset * 2.0).max(1.0);
+    let vertical_offset = ((inner_height - text_block_height) / 2.0).max(padding_y);
     let baseline_offset = font.size + ((line_height - font.size) / 2.0).max(0.0) - (font.size * 0.12);
 
     for (index, line) in layout.lines.iter().enumerate() {
-        let baseline_y = bounds.rect.y as f64 + vertical_offset + baseline_offset + index as f64 * line_height;
+        let baseline_y = bounds.rect.y as f64 + inset + vertical_offset + baseline_offset + index as f64 * line_height;
         draw_text(
             context,
             Point {
@@ -1048,7 +1055,7 @@ pub fn draw_active_text_input(
             .map(|line| line.text.chars().take(cursor_column).collect())
             .unwrap_or_default();
         let cursor_x = bounds.rect.x as f64 + padding_x + measure_text_width(context, &prefix, font);
-        let top = bounds.rect.y as f64 + vertical_offset + cursor_line as f64 * line_height;
+        let top = bounds.rect.y as f64 + inset + vertical_offset + cursor_line as f64 * line_height;
         let bottom = top + font.size.max(line_height - 2.0);
         context.set_source_rgba(color.r, color.g, color.b, color.a.max(0.8));
         context.set_line_width((font.size * 0.04).max(1.5));

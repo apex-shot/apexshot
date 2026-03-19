@@ -1587,16 +1587,14 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     } else {
                         match handle {
                             Some(MoveHandle::Left) => {
-                                let right = (start_bounds.x + start_bounds.width).min(image_width);
-                                let max_width = right.max(min_width as i32) as f64;
-                                let proposed_width = start_bounds.width as f64 - dx;
-                                let new_width = if proposed_width <= min_width {
-                                    min_width as i32
-                                } else {
-                                    proposed_width.min(max_width).round() as i32
-                                };
-                                bounds.rect.width = new_width;
-                                bounds.rect.x = (right - new_width).max(0);
+                                // Mirror the Right handle exactly:
+                                // right edge is fixed, x moves with dx, width = right - x.
+                                let right = start_bounds.x + start_bounds.width;
+                                let proposed_x = start_bounds.x + dx.round() as i32;
+                                // x can't go below 0 or past (right - min_width)
+                                let new_x = proposed_x.clamp(0, (right - min_width as i32).max(0));
+                                bounds.rect.x = new_x;
+                                bounds.rect.width = (right - new_x).max(min_width as i32);
                                 bounds.rect.y = start_bounds.y;
                                 bounds.rect.height = start_bounds.height;
                             }
