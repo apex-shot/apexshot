@@ -4,8 +4,10 @@
 //! enabling the highlighter tool to intelligently highlight text.
 
 use super::types::{Point, Rect};
+use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 // ============================================================================
 // Constants
@@ -280,6 +282,73 @@ impl Default for BackgroundTextDetection {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ============================================================================
+// Background Detection Functions
+// ============================================================================
+
+/// Run text detection in background thread
+///
+/// Returns immediately. Results are set on the provided detector.
+pub fn spawn_text_detection(
+    image: RgbaImage,
+    detector: Arc<Mutex<TextDetector>>,
+    ready_flag: Arc<AtomicBool>,
+) -> BackgroundTextDetection {
+    let handle = BackgroundTextDetection::new();
+
+    thread::spawn(move || {
+        match detect_text_regions(&image) {
+            Ok(regions) => {
+                if let Ok(mut det) = detector.lock() {
+                    det.set_results(regions);
+                }
+            }
+            Err(e) => {
+                if let Ok(mut det) = detector.lock() {
+                    det.set_failed(e);
+                }
+            }
+        }
+        ready_flag.store(true, Ordering::Relaxed);
+    });
+
+    handle
+}
+
+/// Detect text regions in an image using Tesseract
+fn detect_text_regions(image: &RgbaImage) -> Result<Vec<TextRegion>, String> {
+    use tesseract::Tesseract;
+
+    let (width, height) = image.dimensions();
+
+    // Preprocess: convert to grayscale with inversion for dark mode UIs
+    let mut luma_data = Vec::with_capacity((width * height) as usize);
+    for pixel in image.pixels() {
+        if pixel[3] < 50 {
+            luma_data.push(255);
+            continue;
+        }
+        let luma = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
+        let inverted = 255.0 - luma;
+        luma_data.push(inverted.clamp(0.0, 255.0) as u8);
+    }
+
+    // Initialize Tesseract
+    let _tesseract = Tesseract::new(None, Some("eng"))
+        .map_err(|e| format!("Tesseract init failed: {}", e))?
+        .set_variable("tessedit_pageseg_mode", "6")
+        .map_err(|e| format!("Failed to set psm: {}", e))?
+        .set_frame(&luma_data, width as i32, height as i32, 1, width as i32)
+        .map_err(|e| format!("Failed to set frame: {}", e))?
+        .recognize()
+        .map_err(|e| format!("Recognition failed: {}", e))?;
+
+    // Note: Full Tesseract component extraction requires additional API calls
+    // The tesseract crate doesn't expose GetComponentImages directly
+    // Return empty for now - will be enhanced in Task 10
+    Ok(Vec::new())
 }
 
 #[cfg(test)]
