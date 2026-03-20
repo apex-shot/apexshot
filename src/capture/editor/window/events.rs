@@ -26,6 +26,7 @@ use super::super::{
 
 const MOVE_HANDLE_DRAG_RADIUS: f64 = 10.0;
 const RESIZE_HANDLE_DRAG_SIZE: f64 = 18.0;
+use super::super::pen_weight::{HighlighterMode, PenWeight};
 use super::{
     canvas::{
         eyedropper_loupe_position, sample_editor_color_at_point, sample_rendered_color_at_point,
@@ -92,6 +93,8 @@ pub(super) struct EventContext {
     pub rebuild_effects_async: Rc<dyn Fn()>,
     pub obfuscate_method_button: Button,
     pub obfuscate_method_list: gtk4::Box,
+    pub pen_weight_button: Button,
+    pub pen_weight_list: gtk4::Box,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -151,6 +154,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         rebuild_effects_async,
         obfuscate_method_button,
         obfuscate_method_list,
+        pen_weight_button,
+        pen_weight_list,
     } = ctx;
 
     let state_select = state.clone();
@@ -572,23 +577,99 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let apply_crop_btn_highlighter = apply_crop_btn.clone();
     let update_toolbar_for_tool_highlighter = update_toolbar_for_tool.clone();
     let sync_size_control_highlighter = sync_size_control.clone();
+    let window_highlighter = window.clone();
     let rebuild_effects_async_highlighter = rebuild_effects_async.clone();
     highlighter_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_highlighter, 11);
-        if state_highlighter
-            .lock()
-            .unwrap()
-            .set_tool_without_rebuild(Tool::Highlighter)
-        {
-            rebuild_effects_async_highlighter();
+        let next_tool = {
+            let mut st = state_highlighter.lock().unwrap();
+            let rebuild = if st.selected_tool == Tool::Highlighter {
+                let r = st.set_tool_without_rebuild(Tool::Arrow);
+                (Tool::Arrow, r)
+            } else {
+                let r = st.set_tool_without_rebuild(Tool::Highlighter);
+                (Tool::Highlighter, r)
+            };
+            if rebuild.1 {
+                rebuild_effects_async_highlighter();
+            }
+            rebuild.0
+        };
+
+        if matches!(next_tool, Tool::Highlighter) {
+            set_active_tool_button(&buttons_highlighter, 11);
+            let st = state_highlighter.lock().unwrap();
+            super::cursor::update_cursor_for_position(
+                &window_highlighter,
+                &st,
+                Point { x: 0.0, y: 0.0 },
+                1.0,
+            );
+        } else {
+            set_active_tool_button(&buttons_highlighter, 6);
+            set_window_cursor_name(&window_highlighter, Some("default"));
         }
-        update_toolbar_for_tool_highlighter(Tool::Highlighter);
+
+        update_toolbar_for_tool_highlighter(next_tool);
         sync_size_control_highlighter();
         set_crop_apply_button_state(&apply_crop_btn_highlighter, false, false);
+
         if let Some(area) = drawing_area_highlighter.upgrade() {
             area.queue_draw();
         }
     });
+
+    // Wire up pen weight list items for highlighter freehand mode
+    // NOTE: Do not remove children here; that would empty the popover and nothing would display.
+    let weights = [
+        PenWeight::Small,
+        PenWeight::Medium,
+        PenWeight::Large,
+        PenWeight::ExtraLarge,
+    ];
+
+    let pen_weight_button_for_closure = pen_weight_button.clone();
+    let drawing_area_for_weight = drawing_area.downgrade();
+
+    let mut weight_idx = 0usize;
+    let mut child_opt = pen_weight_list.first_child();
+    while let Some(child) = child_opt {
+        // Grab next sibling before we do anything else
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&weight) = weights.get(weight_idx) else {
+            break;
+        };
+        weight_idx += 1;
+
+        let state_for_weight = state.clone();
+        let drawing_area_weight = drawing_area_for_weight.clone();
+        let pen_weight_button_clone = pen_weight_button_for_closure.clone();
+
+        button.connect_clicked(move |b| {
+            {
+                let mut st = state_for_weight.lock().unwrap();
+                st.set_pen_weight(weight);
+                st.set_highlighter_mode(HighlighterMode::Freehand);
+            }
+
+            let icon = gtk4::Image::from_icon_name(weight.icon_name());
+            icon.set_pixel_size(weight.icon_pixel_size());
+            pen_weight_button_clone.set_child(Some(&icon));
+
+            // Close the popover
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+
+            if let Some(area) = drawing_area_weight.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
 
     // Wire up obfuscate method list items
     // NOTE: Do not remove children here; that would empty the popover and nothing would display.
@@ -675,13 +756,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 } else if st.selected_tool == Tool::Background {
                     st.background_style = BackgroundStyle::PlainColor(DRAW_COLORS[index]);
                     st.mark_working_image_dirty();
-                } else if has_active_text {
-                    st.set_color_index(index);
                 } else {
-                    let changed_selected = st.set_selected_action_color(DRAW_COLORS[index]);
-                    if !changed_selected {
-                        st.set_color_index(index);
-                    }
+                    st.set_color_index(index);
                 }
                 has_active_text
             };
@@ -896,23 +972,36 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             // Compute the committed action's TextEditBounds for handle hit-testing.
             let bounds_opt = if let Some(index) = st.selected_action_index {
                 if let Some(super::super::types::AnnotationAction::Text {
-                    position, text, font, max_width, ..
-                }) = st.actions.get(index) {
-                    let surface = gtk4::cairo::ImageSurface::create(
-                        gtk4::cairo::Format::ARgb32, 1, 1,
-                    ).ok();
-                    surface.as_ref()
+                    position,
+                    text,
+                    font,
+                    max_width,
+                    ..
+                }) = st.actions.get(index)
+                {
+                    let surface =
+                        gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1).ok();
+                    surface
+                        .as_ref()
                         .and_then(|s| gtk4::cairo::Context::new(s).ok())
                         .map(|c| {
                             let aw = max_width.unwrap_or_else(|| {
                                 (st.base_image.width() as f64 - position.x).max(font.size * 1.8)
                             });
                             super::super::render::text_action_bounds(
-                                &c, *position, text, font, Some(aw),
+                                &c,
+                                *position,
+                                text,
+                                font,
+                                Some(aw),
                             )
                         })
-                } else { None }
-            } else { None };
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
             if let Some(bounds) = bounds_opt {
                 // Hit-test left/right circles.
@@ -923,9 +1012,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     };
                     let dx = x - cv.x;
                     let dy = y - cv.y;
-                    if (dx*dx + dy*dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS * 1.5 {
+                    if (dx * dx + dy * dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS * 1.5 {
                         Some(h.clone())
-                    } else { None }
+                    } else {
+                        None
+                    }
                 });
                 // Hit-test bottom-right resize box.
                 let resize_hit = bounds.resize_handle.as_ref().is_some_and(|(_, rp)| {
@@ -1081,7 +1172,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             }
 
             if matches!(st.selected_tool, Tool::Text | Tool::Number)
-                && !(st.selected_tool == Tool::Text && st.selected_action_index.is_some() && st.active_text_input.is_none())
+                && !(st.selected_tool == Tool::Text
+                    && st.selected_action_index.is_some()
+                    && st.active_text_input.is_none())
             {
                 return;
             }
@@ -1108,8 +1201,12 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 return;
             }
 
+            if !t.contains_view(current_view) {
+                return;
+            }
+
             st.drag_shift_active = shift_pressed;
-            st.update_drag(t.view_to_image_clamped(current_view));
+            st.update_drag(t.view_to_image(current_view));
             drop(st);
             let now = glib::monotonic_time();
             if now - drag_last_redraw_update.get() >= DRAG_REDRAW_INTERVAL_US {
@@ -1642,8 +1739,12 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 {
                     // Committed action handle resize: write new bounds back.
                     if let Some(super::super::types::AnnotationAction::Text {
-                        position, font, max_width, ..
-                    }) = st.actions.get_mut(index) {
+                        position,
+                        font,
+                        max_width,
+                        ..
+                    }) = st.actions.get_mut(index)
+                    {
                         let padding_y = 8.0;
                         position.x = bounds.rect.x as f64;
                         position.y = bounds.rect.y as f64 + font.size + padding_y;
@@ -1703,13 +1804,30 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             return;
         }
 
-        let cursor_name = {
+        let is_highlighter = {
             let st = state_motion.lock().unwrap();
-            cursor_name_for_view_point(&st, t, view_point)
+            st.selected_tool == Tool::Highlighter
         };
 
-        if let Some(window) = window_motion.upgrade() {
-            set_window_cursor_name(&window, Some(cursor_name));
+        if is_highlighter {
+            if let Some(window) = window_motion.upgrade() {
+                if !t.contains_view(view_point) {
+                    set_window_cursor_name(&window, Some("pointer"));
+                } else {
+                    let st = state_motion.lock().unwrap();
+                    let image_point = t.view_to_image_clamped(view_point);
+                    super::cursor::update_cursor_for_position(&window, &st, image_point, t.scale);
+                }
+            }
+        } else {
+            let cursor_name = {
+                let st = state_motion.lock().unwrap();
+                cursor_name_for_view_point(&st, t, view_point)
+            };
+
+            if let Some(window) = window_motion.upgrade() {
+                set_window_cursor_name(&window, Some(cursor_name));
+            }
         }
 
         // In Text tool mode: detect hover over existing text actions.
@@ -1718,15 +1836,24 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let mut st = state_motion.lock().unwrap();
             if st.selected_tool == Tool::Text && st.active_text_input.is_none() {
                 let image_point = t.view_to_image_clamped(view_point);
-                let hit = st.actions.iter().enumerate().rev().find_map(|(index, action)| {
-                    if matches!(action, super::super::types::AnnotationAction::Text { .. })
-                        && super::super::selection::action_contains_point_with_padding(action, image_point, 0.0)
-                    {
-                        Some(index)
-                    } else {
-                        None
-                    }
-                });
+                let hit = st
+                    .actions
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find_map(|(index, action)| {
+                        if matches!(action, super::super::types::AnnotationAction::Text { .. })
+                            && super::super::selection::action_contains_point_with_padding(
+                                action,
+                                image_point,
+                                0.0,
+                            )
+                        {
+                            Some(index)
+                        } else {
+                            None
+                        }
+                    });
                 if st.hovered_text_action_index != hit {
                     st.hovered_text_action_index = hit;
                     if let Some(area) = drawing_area_motion.upgrade() {
@@ -1803,7 +1930,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 None
             }
         };
-        if let Some((start_point, handle, start_bounds, is_resizing, image_width, image_height)) = drag_state {
+        if let Some((start_point, handle, start_bounds, is_resizing, image_width, image_height)) =
+            drag_state
+        {
             let view_point = Point { x, y };
             let current_point = t.view_to_image(view_point);
             let dx = current_point.x - start_point.x;
@@ -1817,17 +1946,22 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 } else {
                     50.0
                 };
-                if let (Some(bounds), Some(start_bounds)) = (st.active_text_bounds.as_mut(), start_bounds) {
+                if let (Some(bounds), Some(start_bounds)) =
+                    (st.active_text_bounds.as_mut(), start_bounds)
+                {
                     let min_height = 44.0;
                     if is_resizing {
                         let max_width = (image_width - start_bounds.x).max(min_width as i32) as f64;
-                        let max_height = (image_height - start_bounds.y).max(min_height as i32) as f64;
+                        let max_height =
+                            (image_height - start_bounds.y).max(min_height as i32) as f64;
                         bounds.rect.x = start_bounds.x;
                         bounds.rect.y = start_bounds.y;
-                        bounds.rect.width = ((start_bounds.width as f64 + dx).clamp(min_width, max_width))
-                            .round() as i32;
-                        bounds.rect.height = ((start_bounds.height as f64 + dy).clamp(min_height, max_height))
-                            .round() as i32;
+                        bounds.rect.width = ((start_bounds.width as f64 + dx)
+                            .clamp(min_width, max_width))
+                        .round() as i32;
+                        bounds.rect.height = ((start_bounds.height as f64 + dy)
+                            .clamp(min_height, max_height))
+                        .round() as i32;
                     } else {
                         match handle {
                             Some(MoveHandle::Left) => {
@@ -1843,18 +1977,26 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                                 bounds.rect.height = start_bounds.height;
                             }
                             Some(MoveHandle::Right) => {
-                                let max_width = (image_width - start_bounds.x).max(min_width as i32) as f64;
+                                let max_width =
+                                    (image_width - start_bounds.x).max(min_width as i32) as f64;
                                 bounds.rect.x = start_bounds.x;
                                 bounds.rect.y = start_bounds.y;
                                 bounds.rect.height = start_bounds.height;
-                                bounds.rect.width = ((start_bounds.width as f64 + dx).clamp(min_width, max_width))
-                                    .round() as i32;
+                                bounds.rect.width = ((start_bounds.width as f64 + dx)
+                                    .clamp(min_width, max_width))
+                                .round() as i32;
                             }
                             None => {}
                         }
                     }
-                    bounds.rect.x = bounds.rect.x.clamp(0, (image_width - bounds.rect.width).max(0));
-                    bounds.rect.y = bounds.rect.y.clamp(0, (image_height - bounds.rect.height).max(0));
+                    bounds.rect.x = bounds
+                        .rect
+                        .x
+                        .clamp(0, (image_width - bounds.rect.width).max(0));
+                    bounds.rect.y = bounds
+                        .rect
+                        .y
+                        .clamp(0, (image_height - bounds.rect.height).max(0));
                     bounds.sync_handles();
                 }
                 if st.active_text_input.is_some() {

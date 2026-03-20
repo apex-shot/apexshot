@@ -123,9 +123,9 @@ struct PreprocessConfig {
 impl Default for PreprocessConfig {
     fn default() -> Self {
         Self {
-            scale_factor: 3.0,
-            contrast: 1.1,    // Mild contrast enhancement (was 1.5, too aggressive)
-            threshold: false, // Disabled - adaptive thresholding may hurt UI text OCR
+            scale_factor: 2.0, // Reduced from 3.0 for faster processing (still good for OCR)
+            contrast: 1.05,    // Reduced contrast enhancement for speed
+            threshold: false,  // Disabled - adaptive thresholding may hurt UI text OCR
         }
     }
 }
@@ -451,6 +451,181 @@ pub fn extract_text_from_path<P: AsRef<std::path::Path>>(
         confidence,
         copied_to_clipboard,
     })
+}
+
+/// Bounding box for a detected text region
+#[derive(Debug, Clone)]
+pub struct BoundingBox {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Text region detected by OCR with bounding box
+#[derive(Debug, Clone)]
+pub struct DetectedTextRegion {
+    pub bounds: BoundingBox,
+    pub text: String,
+    pub confidence: i32,
+}
+
+/// Extract text with bounding boxes from an image
+pub fn extract_text_regions(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>, OcrError> {
+    extract_text_regions_tesseract(image)
+}
+
+/// Get both line-level and word-level text regions to maximize text detection.
+/// Words are returned when their bounding boxes are below a minimum threshold,
+/// catching small text elements like view counts that get grouped into lines.
+fn extract_text_regions_tesseract(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>, OcrError> {
+    use std::ffi::CString;
+
+    // Use faster preprocessing for highlighter text detection
+    let preprocess_config = fast_region_preprocess_config();
+    let luma_data = preprocess_image(image, &preprocess_config);
+    let scale = preprocess_config.scale_factor;
+    let width = (image.width() as f32 * scale) as i32;
+    let height = (image.height() as f32 * scale) as i32;
+
+    let mut api = tesseract::plumbing::TessBaseApi::create();
+    let lang = CString::new("eng").map_err(|e| OcrError::InitializationError(e.to_string()))?;
+    api.init_2(None, Some(&lang))
+        .map_err(|e| OcrError::InitializationError(format!("Init failed: {}", e)))?;
+
+    let psm_name = CString::new("tessedit_pageseg_mode").unwrap();
+    // Use PSM 3 (default auto page segmentation) - better for scattered UI text like YouTube
+    // PSM 6 assumes uniform block, misses small text below thumbnails
+    let psm_value = CString::new("3").unwrap();
+    api.set_variable(&psm_name, &psm_value)
+        .map_err(|e| OcrError::InitializationError(format!("Set psm failed: {}", e)))?;
+
+    // Set additional options for faster processing
+    let enable_dict_name = CString::new("load_system_dawg").unwrap();
+    let enable_dict_value = CString::new("0").unwrap();
+    let _ = api.set_variable(&enable_dict_name, &enable_dict_value); // Ignore errors
+
+    let freq_dawg_name = CString::new("load_freq_dawg").unwrap();
+    let freq_dawg_value = CString::new("0").unwrap();
+    let _ = api.set_variable(&freq_dawg_name, &freq_dawg_value);
+
+    api.set_image(&luma_data, width, height, 1, width)
+        .map_err(|e| OcrError::ImageError(format!("Set image failed: {}", e)))?;
+
+    api.recognize()
+        .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
+
+    let inv_scale = 1.0 / scale;
+    let mut regions = Vec::new();
+
+    // Get full text for line-by-line extraction
+    let full_text = api
+        .get_utf8_text()
+        .map_err(|e| OcrError::RecognitionError(format!("GetText failed: {}", e)))?;
+    let text_str = full_text.as_ref().to_str().unwrap_or("");
+    let text_lines: Vec<&str> = text_str.lines().collect();
+
+    // First pass: get text line bounding boxes
+    let textline_level: tesseract::plumbing::tesseract_sys::TessPageIteratorLevel = 2; // RIL_TEXTLINE
+    let line_boxes = api.get_component_images_1(textline_level, 1).map_err(|e| {
+        OcrError::RecognitionError(format!("GetComponentImages (lines) failed: {}", e))
+    })?;
+
+    let line_count = line_boxes.get_count();
+
+    // Collect line regions
+    let mut line_regions = Vec::new();
+    for i in 0..line_count {
+        if let Some(box_ref) = line_boxes.get_box_copied(i) {
+            let mut x: i32 = 0;
+            let mut y: i32 = 0;
+            let mut w: i32 = 0;
+            let mut h: i32 = 0;
+            box_ref.get_geometry(Some(&mut x), Some(&mut y), Some(&mut w), Some(&mut h));
+
+            let text = text_lines
+                .get(i as usize)
+                .copied()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+
+            line_regions.push(DetectedTextRegion {
+                bounds: BoundingBox {
+                    x: (x as f32 * inv_scale) as i32,
+                    y: (y as f32 * inv_scale) as i32,
+                    width: (w as f32 * inv_scale) as i32,
+                    height: (h as f32 * inv_scale) as i32,
+                },
+                text,
+                confidence: 0,
+            });
+        }
+    }
+
+    // Second pass: also get word-level boxes for better small text detection
+    // This catches small text elements like "1.2M views" that might be in a single line
+    let word_level: tesseract::plumbing::tesseract_sys::TessPageIteratorLevel = 3; // RIL_WORD
+    if let Ok(word_boxes) = api.get_component_images_1(word_level, 1) {
+        let word_count = word_boxes.get_count();
+        let mut word_regions = Vec::new();
+
+        for i in 0..word_count {
+            if let Some(box_ref) = word_boxes.get_box_copied(i) {
+                let mut x: i32 = 0;
+                let mut y: i32 = 0;
+                let mut w: i32 = 0;
+                let mut h: i32 = 0;
+                box_ref.get_geometry(Some(&mut x), Some(&mut y), Some(&mut w), Some(&mut h));
+
+                // Scale back to original coordinates
+                let orig_x = (x as f32 * inv_scale) as i32;
+                let orig_y = (y as f32 * inv_scale) as i32;
+                let orig_w = (w as f32 * inv_scale) as i32;
+                let orig_h = (h as f32 * inv_scale) as i32;
+
+                // Only add word regions that are not already covered by line regions
+                // This catches small text that Tesseract might group into a larger line
+                let is_covered = line_regions.iter().any(|lr| {
+                    lr.bounds.x <= orig_x
+                        && lr.bounds.y <= orig_y
+                        && (lr.bounds.x + lr.bounds.width) >= (orig_x + orig_w)
+                        && (lr.bounds.y + lr.bounds.height) >= (orig_y + orig_h)
+                });
+
+                if !is_covered {
+                    // Try to get text from the word iterator
+                    let word_text = format!("word_{i}"); // Placeholder - actual text comes from line regions
+                    word_regions.push(DetectedTextRegion {
+                        bounds: BoundingBox {
+                            x: orig_x,
+                            y: orig_y,
+                            width: orig_w,
+                            height: orig_h,
+                        },
+                        text: word_text,
+                        confidence: 0,
+                    });
+                }
+            }
+        }
+        regions.extend(word_regions);
+    }
+
+    // Add all line regions
+    regions.extend(line_regions);
+
+    Ok(regions)
+}
+
+/// Fast preprocessing config optimized for text region detection (highlighter cursor sizing)
+/// Uses higher upscaling to catch small text (11-12px view counts) and mild contrast
+fn fast_region_preprocess_config() -> PreprocessConfig {
+    PreprocessConfig {
+        scale_factor: 2.5, // Higher upscale for small text detection (view counts, channel names)
+        contrast: 1.15,    // Mild contrast enhancement to separate text from background
+        threshold: false,  // No adaptive thresholding (hurts anti-aliased text)
+    }
 }
 
 #[cfg(test)]

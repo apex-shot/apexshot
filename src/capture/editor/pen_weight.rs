@@ -1,26 +1,21 @@
 //! Pen weight types for highlighter freehand mode
 
-/// Preset pen weights for freehand highlighting
+/// Preset highlighter thickness levels for freehand highlighting
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PenWeight {
-    /// Small pen (8px)
+    /// Thin highlighter stroke (8px)
     Small,
-    /// Medium pen (16px)
+    /// Medium highlighter stroke (16px)
     Medium,
-    /// Large pen (24px)
+    /// Thick highlighter stroke (24px)
     Large,
-    /// Extra large pen (32px)
+    /// Very thick highlighter stroke (32px)
     ExtraLarge,
 }
 
 impl PenWeight {
     /// All available pen weights
-    pub const ALL: [Self; 4] = [
-        Self::Small,
-        Self::Medium,
-        Self::Large,
-        Self::ExtraLarge,
-    ];
+    pub const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::ExtraLarge];
 
     /// Get the stroke width in pixels
     pub fn stroke_width(self) -> f64 {
@@ -35,20 +30,25 @@ impl PenWeight {
     /// Get display label
     pub fn label(self) -> &'static str {
         match self {
-            Self::Small => "Small",
+            Self::Small => "Thin",
             Self::Medium => "Medium",
-            Self::Large => "Large",
-            Self::ExtraLarge => "Extra Large",
+            Self::Large => "Thick",
+            Self::ExtraLarge => "Very Thick",
         }
     }
 
-    /// Get icon name for the pen (using fallback icons)
+    /// Get icon name for the pen/highlighter control.
     pub fn icon_name(self) -> &'static str {
+        "document-edit-symbolic"
+    }
+
+    /// Get icon pixel size for visually representing thickness.
+    pub fn icon_pixel_size(self) -> i32 {
         match self {
-            Self::Small => "format-text-smaller-symbolic",
-            Self::Medium => "format-text-smaller-symbolic",
-            Self::Large => "format-text-larger-symbolic",
-            Self::ExtraLarge => "format-text-larger-symbolic",
+            Self::Small => 14,
+            Self::Medium => 17,
+            Self::Large => 20,
+            Self::ExtraLarge => 23,
         }
     }
 

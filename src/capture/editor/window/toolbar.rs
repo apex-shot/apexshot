@@ -91,10 +91,12 @@ pub(super) struct ToolbarModeParts {
     pub obfuscate_method_popover: Popover,
     pub obfuscate_method_list: GtkBox,
     /// Pen weight selector for highlighter
-    pub pen_weight_button: gtk4::MenuButton,
+    pub pen_weight_button: gtk4::Button,
     #[allow(dead_code)]
     pub pen_weight_popover: gtk4::Popover,
     pub pen_weight_list: gtk4::Box,
+    /// Group containing pen weight button (for visibility toggle)
+    pub pen_weight_group: GtkBox,
 }
 
 pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> ToolbarBaseParts {
@@ -164,12 +166,7 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     }
 }
 
-pub(super) fn build_obfuscate_method_controls() -> (
-    GtkBox,
-    Button,
-    Popover,
-    GtkBox,
-) {
+pub(super) fn build_obfuscate_method_controls() -> (GtkBox, Button, Popover, GtkBox) {
     let obfuscate_method_group = GtkBox::new(Orientation::Horizontal, 4);
     obfuscate_method_group.add_css_class("editor-obfuscate-method-group");
     obfuscate_method_group.add_css_class("editor-tools-group");
@@ -210,47 +207,46 @@ pub(super) fn build_obfuscate_method_controls() -> (
     )
 }
 
-fn build_pen_weight_dropdown() -> (gtk4::MenuButton, gtk4::Popover, gtk4::Box) {
-    let button = gtk4::MenuButton::new();
-    button.add_css_class("editor-pen-weight-button");
-    button.set_tooltip_text(Some("Pen Weight"));
+fn build_pen_weight_dropdown() -> (GtkBox, Button, Popover, GtkBox) {
+    let pen_weight_group = GtkBox::new(Orientation::Horizontal, 4);
+    pen_weight_group.add_css_class("editor-pen-weight-group");
+    pen_weight_group.add_css_class("editor-tools-group");
+    pen_weight_group.set_visible(false);
 
-    // Use icon_name for MenuButton
-    button.set_icon_name("document-edit-symbolic");
+    let pen_weight_button = Button::new();
+    pen_weight_button.set_has_frame(false);
+    pen_weight_button.set_focusable(false);
+    pen_weight_button.add_css_class("editor-tool-button");
+    pen_weight_button.add_css_class("flat");
+    pen_weight_button.set_tooltip_text(Some("Highlighter Thickness"));
 
-    let popover = gtk4::Popover::new();
-    popover.add_css_class("editor-pen-weight-popover");
+    let pen_weight_icon = Image::from_icon_name(PenWeight::Medium.icon_name());
+    pen_weight_icon.set_pixel_size(PenWeight::Medium.icon_pixel_size());
+    pen_weight_button.set_child(Some(&pen_weight_icon));
 
-    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-    list.add_css_class("editor-pen-weight-list");
-    list.set_margin_top(8);
-    list.set_margin_bottom(8);
-    list.set_margin_start(8);
-    list.set_margin_end(8);
+    let pen_weight_popover = Popover::new();
+    pen_weight_popover.set_has_arrow(false);
+    pen_weight_popover.set_autohide(true);
+    pen_weight_popover.add_css_class("editor-popover");
+    pen_weight_popover.set_parent(&pen_weight_button);
 
-    // Add pen weight options
-    for weight in PenWeight::ALL {
-        let item = gtk4::Button::new();
-        item.add_css_class("editor-pen-weight-item");
+    let pen_weight_list = GtkBox::new(Orientation::Vertical, 0);
+    pen_weight_list.add_css_class("editor-popover-list");
+    pen_weight_popover.set_child(Some(&pen_weight_list));
 
-        let box_ = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let p_popover = pen_weight_popover.clone();
+    pen_weight_button.connect_clicked(move |_| {
+        p_popover.popup();
+    });
 
-        // Pen icon with visual weight representation
-        let pen_icon = gtk4::Image::from_icon_name(weight.icon_name());
-        pen_icon.set_pixel_size(24);
-        box_.append(&pen_icon);
+    pen_weight_group.append(&pen_weight_button);
 
-        let label = gtk4::Label::new(Some(weight.label()));
-        box_.append(&label);
-
-        item.set_child(Some(&box_));
-        list.append(&item);
-    }
-
-    popover.set_child(Some(&list));
-    button.set_popover(Some(&popover));
-
-    (button, popover, list)
+    (
+        pen_weight_group,
+        pen_weight_button,
+        pen_weight_popover,
+        pen_weight_list,
+    )
 }
 
 pub(super) fn build_toolbar_mode_controls(
@@ -490,9 +486,21 @@ pub(super) fn build_toolbar_mode_controls(
     // Populate obfuscate method list with options
     let methods = [
         (ObfuscateMethod::Pixelate, "view-grid-symbolic", "Pixelate"),
-        (ObfuscateMethod::BlurSecure, "security-high-symbolic", "Blur (Secure)"),
-        (ObfuscateMethod::BlurSmooth, "blur-symbolic", "Blur (Smooth)"),
-        (ObfuscateMethod::Blackout, "media-playback-stop-symbolic", "Blackout"),
+        (
+            ObfuscateMethod::BlurSecure,
+            "security-high-symbolic",
+            "Blur (Secure)",
+        ),
+        (
+            ObfuscateMethod::BlurSmooth,
+            "blur-symbolic",
+            "Blur (Smooth)",
+        ),
+        (
+            ObfuscateMethod::Blackout,
+            "media-playback-stop-symbolic",
+            "Blackout",
+        ),
     ];
 
     for (_method, icon_name, label) in methods {
@@ -513,13 +521,33 @@ pub(super) fn build_toolbar_mode_controls(
     }
 
     // Build pen weight selector for highlighter
-    let (pen_weight_button, pen_weight_popover, pen_weight_list) = build_pen_weight_dropdown();
-    pen_weight_button.set_visible(false); // Initially hidden, shown when highlighter is selected
+    let (pen_weight_group, pen_weight_button, pen_weight_popover, pen_weight_list) =
+        build_pen_weight_dropdown();
 
-    let pen_weight_group = GtkBox::new(Orientation::Horizontal, 0);
-    pen_weight_group.add_css_class("editor-tools-group");
-    pen_weight_group.add_css_class("editor-pen-weight-group");
-    pen_weight_group.append(&pen_weight_button);
+    // Populate pen weight list with actual icon widgets instead of custom-drawn visuals.
+    for weight in PenWeight::ALL {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let icon = Image::from_icon_name(weight.icon_name());
+        icon.set_pixel_size(weight.icon_pixel_size());
+
+        let label_widget = Label::new(Some(weight.label()));
+
+        btn_box.append(&icon);
+        btn_box.append(&label_widget);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .child(&btn_box)
+            .build();
+
+        pen_weight_list.append(&btn);
+    }
 
     let crop_size_group = GtkBox::new(Orientation::Horizontal, 4);
     crop_size_group.add_css_class("editor-tools-group");
@@ -597,6 +625,7 @@ pub(super) fn build_toolbar_mode_controls(
         pen_weight_button,
         pen_weight_popover,
         pen_weight_list,
+        pen_weight_group,
     }
 }
 
@@ -662,6 +691,7 @@ pub(super) fn build_toolbar_tool_updater(
     text_size_group: &GtkBox,
     font_family_group: &GtkBox,
     obfuscate_method_group: &GtkBox,
+    pen_weight_group: &GtkBox,
     canvas_scroller: &gtk4::ScrolledWindow,
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
     window: &ApplicationWindow,
@@ -673,6 +703,7 @@ pub(super) fn build_toolbar_tool_updater(
     let text_size_group = text_size_group.clone();
     let font_family_group = font_family_group.clone();
     let obfuscate_method_group = obfuscate_method_group.clone();
+    let pen_weight_group = pen_weight_group.clone();
     let canvas_scroller = canvas_scroller.clone();
     let window = window.downgrade();
 
@@ -689,6 +720,9 @@ pub(super) fn build_toolbar_tool_updater(
 
         let is_obfuscate_tool = matches!(tool, Tool::Obfuscate);
         obfuscate_method_group.set_visible(is_obfuscate_tool);
+
+        let is_highlighter_tool = matches!(tool, Tool::Highlighter);
+        pen_weight_group.set_visible(is_highlighter_tool);
 
         // Only allow vertical scrolling in Crop mode
         if matches!(tool, Tool::Crop) {

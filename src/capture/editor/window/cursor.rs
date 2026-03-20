@@ -146,14 +146,14 @@ pub fn cursor_name_for_view_point(
 /// Create a rounded rectangle highlighter cursor surface
 pub fn create_highlighter_cursor_surface(
     height: f64,
-    color: (f64, f64, f64, f64),
+    _color: (f64, f64, f64, f64),
 ) -> Option<gtk4::cairo::ImageSurface> {
-    let height = clamp_cursor_size(height);
-    let width = height * CURSOR_WIDTH_RATIO;
+    let height = clamp_cursor_size(height) * CURSOR_WIDTH_RATIO;
+    let width = DEFAULT_HIGHLIGHTER_CURSOR_SIZE;
 
-    // Add padding for the rounded corners
-    let surface_width = (width + 4.0).ceil() as i32;
-    let surface_height = (height + 4.0).ceil() as i32;
+    let pad = 6.0;
+    let surface_width = (width + pad * 2.0).ceil() as i32;
+    let surface_height = (height + pad * 2.0).ceil() as i32;
 
     let surface = gtk4::cairo::ImageSurface::create(
         gtk4::cairo::Format::ARgb32,
@@ -164,20 +164,46 @@ pub fn create_highlighter_cursor_surface(
 
     let context = gtk4::cairo::Context::new(&surface).ok()?;
 
-    // Draw rounded rectangle
-    let x = 2.0;
-    let y = 2.0;
+    let x = pad;
+    let y = pad;
     let radius = CURSOR_CORNER_RADIUS.min(width / 2.0).min(height / 2.0);
 
-    context.new_sub_path();
-    context.arc(x + width - radius, y + radius, radius, -std::f64::consts::FRAC_PI_2, 0.0);
-    context.arc(x + width - radius, y + height - radius, radius, 0.0, std::f64::consts::FRAC_PI_2);
-    context.arc(x + radius, y + height - radius, radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-    context.arc(x + radius, y + radius, radius, std::f64::consts::PI, -std::f64::consts::FRAC_PI_2);
-    context.close_path();
+    fn rounded_rect(ctx: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        ctx.new_sub_path();
+        ctx.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+        ctx.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+        ctx.arc(
+            x + r,
+            y + h - r,
+            r,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+        );
+        ctx.arc(
+            x + r,
+            y + r,
+            r,
+            std::f64::consts::PI,
+            -std::f64::consts::FRAC_PI_2,
+        );
+        ctx.close_path();
+    }
 
-    context.set_source_rgba(color.0, color.1, color.2, color.3);
-    context.fill();
+    // White outline (wider stroke behind)
+    rounded_rect(&context, x, y, width, height, radius);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    context.set_line_width(3.5);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    let _ = context.stroke();
+
+    // Black stripe on top
+    rounded_rect(&context, x, y, width, height, radius);
+    context.set_source_rgba(0.0, 0.0, 0.0, 1.0);
+    context.set_line_width(1.5);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    let _ = context.stroke();
 
     Some(surface)
 }
@@ -190,7 +216,10 @@ pub fn set_highlighter_cursor(
 ) {
     if let Some(surface) = create_highlighter_cursor_surface(height, color) {
         if let Some(texture) = surface_to_texture(surface) {
-            let cursor = Cursor::from_texture(&texture, 0, (height / 2.0) as i32, None);
+            let pad = 6;
+            let hotspot_x = pad;
+            let hotspot_y = texture.height() / 2;
+            let cursor = Cursor::from_texture(&texture, hotspot_x, hotspot_y, None);
             if let Some(surface) = window.surface() {
                 surface.set_cursor(Some(&cursor));
             }
@@ -198,7 +227,10 @@ pub fn set_highlighter_cursor(
     }
 }
 
-/// Update cursor based on current state and position
+/// Update cursor based on current state and position.
+///
+/// In text-aware mode, the cursor only adopts a detected text height when
+/// the pointer is directly over a detected text region.
 pub fn update_cursor_for_position(
     window: &gtk4::ApplicationWindow,
     state: &EditorState,
@@ -209,38 +241,33 @@ pub fn update_cursor_for_position(
         return;
     }
 
+    let color = (
+        state.selected_color.r,
+        state.selected_color.g,
+        state.selected_color.b,
+        0.4,
+    );
+
+    if let Some(locked_height) = state.locked_highlighter_stroke_size {
+        set_highlighter_cursor(window, locked_height, color);
+        return;
+    }
+
     match state.highlighter_mode {
         HighlighterMode::TextAware => {
-            // Use text-aware cursor
             if let Ok(detector) = state.text_detector.lock() {
                 if detector.is_ready() {
-                    if let Some(height) = detector.text_height_at_point(image_point) {
-                        let color = (
-                            state.selected_color.r,
-                            state.selected_color.g,
-                            state.selected_color.b,
-                            0.4, // Semi-transparent
-                        );
+                    if let Some(height) = detector.best_text_height_at_point(image_point) {
                         set_highlighter_cursor(window, height, color);
                         return;
                     }
                 }
             }
             // Fallback to default cursor size
-            set_highlighter_cursor(
-                window,
-                DEFAULT_HIGHLIGHTER_CURSOR_SIZE,
-                (
-                    state.selected_color.r,
-                    state.selected_color.g,
-                    state.selected_color.b,
-                    0.4,
-                ),
-            );
+            set_highlighter_cursor(window, DEFAULT_HIGHLIGHTER_CURSOR_SIZE, color);
         }
         HighlighterMode::Freehand => {
-            // Use crosshair for freehand mode
-            set_window_cursor_name(window, Some("crosshair"));
+            set_highlighter_cursor(window, state.pen_weight.stroke_width(), color);
         }
     }
 }

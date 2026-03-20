@@ -1,11 +1,10 @@
-use super::text_detect::{BackgroundTextDetection, TextDetector};
-use super::pen_weight::{HighlighterMode, PenWeight};
 use super::color::{
     clamp_blur_secure_amount, clamp_blur_smooth_amount, clamp_obfuscate_amount,
     clamp_pixelate_amount, clamp_stroke_size, clamp_text_size,
     selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX,
     DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
 };
+use super::pen_weight::{HighlighterMode, PenWeight};
 use super::render::{
     apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_blur,
     layout_wrapped_text,
@@ -15,10 +14,11 @@ use super::selection::{
     action_resize_handle_at_point_with_radius, resize_action, resize_rect_with_handle,
     translate_action,
 };
+use super::text_detect::{BackgroundTextDetection, TextDetector};
 use super::types::{
     AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
-    EditorError, FontSettings, FontStyle, MoveHandle, ObfuscateMethod, Point, Rect,
-    SelectHandle, SizeControlMode, TextAlignment, TextDecoration, TextEditBounds, Tool,
+    EditorError, FontSettings, FontStyle, MoveHandle, ObfuscateMethod, Point, Rect, SelectHandle,
+    SizeControlMode, TextAlignment, TextDecoration, TextEditBounds, Tool,
 };
 use gtk4;
 use image::RgbaImage;
@@ -82,12 +82,15 @@ pub struct EditorState {
 
     // Text detection for highlighter
     pub text_detector: Arc<Mutex<TextDetector>>,
+    #[allow(dead_code)]
     pub text_detection_ready: Arc<AtomicBool>,
+    #[allow(dead_code)]
     pub text_detection_handle: Option<BackgroundTextDetection>,
 
     // Highlighter mode
     pub highlighter_mode: HighlighterMode,
     pub pen_weight: PenWeight,
+    pub locked_highlighter_stroke_size: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -313,6 +316,7 @@ impl EditorState {
             text_detection_handle: None,
             highlighter_mode: HighlighterMode::default(),
             pen_weight: PenWeight::default(),
+            locked_highlighter_stroke_size: None,
         }
     }
 
@@ -354,7 +358,11 @@ impl EditorState {
             .collect()
     }
 
-    fn text_obstacle_limits(&self, bounds: &TextEditBounds, skip_index: Option<usize>) -> (f64, f64) {
+    fn text_obstacle_limits(
+        &self,
+        bounds: &TextEditBounds,
+        skip_index: Option<usize>,
+    ) -> (f64, f64) {
         let image_width = self.base_image.width() as f64;
         let image_height = self.base_image.height() as f64;
         let mut right_limit = image_width - bounds.rect.x as f64;
@@ -493,7 +501,9 @@ impl EditorState {
 
             if let Some(index) = input_state.editing_action_index {
                 if trimmed_text.is_empty() {
-                    if index < self.actions.len() && matches!(self.actions[index], AnnotationAction::Text { .. }) {
+                    if index < self.actions.len()
+                        && matches!(self.actions[index], AnnotationAction::Text { .. })
+                    {
                         self.actions.remove(index);
                         self.selected_action_index = None;
                         self.select_drag_anchor = None;
@@ -510,7 +520,8 @@ impl EditorState {
                         color,
                         font,
                         max_width,
-                    }) = self.actions.get_mut(index) else {
+                    }) = self.actions.get_mut(index)
+                    else {
                         return None;
                     };
                     position.x = b.rect.x as f64;
@@ -549,11 +560,15 @@ impl EditorState {
                     alignment: TextAlignment::Left,
                 };
                 let clamped_position = Point {
-                    x: position.x.clamp(0.0, (self.base_image.width() as f64 - font.size * 1.8).max(0.0)),
+                    x: position.x.clamp(
+                        0.0,
+                        (self.base_image.width() as f64 - font.size * 1.8).max(0.0),
+                    ),
                     y: position.y.clamp(font.size, self.base_image.height() as f64),
                 };
-                let clamped_width = (b.rect.width as f64)
-                    .min((self.base_image.width() as f64 - clamped_position.x).max(font.size * 1.8));
+                let clamped_width = (b.rect.width as f64).min(
+                    (self.base_image.width() as f64 - clamped_position.x).max(font.size * 1.8),
+                );
                 return Some(AnnotationAction::Text {
                     position: clamped_position,
                     text: trimmed_text,
@@ -619,7 +634,8 @@ impl EditorState {
 
         let mut fitted_size = self.text_size;
         loop {
-            let (available_width_limit, available_height_limit) = self.text_obstacle_limits(&bounds, skip_index);
+            let (available_width_limit, available_height_limit) =
+                self.text_obstacle_limits(&bounds, skip_index);
             let available_height = if preserve_height {
                 bounds.rect.height.max(1) as f64
             } else {
@@ -651,7 +667,8 @@ impl EditorState {
                 // border_inset mirrors TEXT_EDIT_BORDER_WIDTH/2 + 1 from render.rs
                 let padding_y = 8.0;
                 let border_inset = 2.0; // = TEXT_EDIT_BORDER_WIDTH / 2.0 + 1.0
-                let text_block_height = (layout.lines.len().max(1) as f64 - 1.0).max(0.0) * line_height + font.size;
+                let text_block_height =
+                    (layout.lines.len().max(1) as f64 - 1.0).max(0.0) * line_height + font.size;
                 let height = (text_block_height + (padding_y + border_inset) * 2.0).max(44.0);
                 (layout, height)
             };
@@ -847,9 +864,7 @@ impl EditorState {
             _ => return 50.0,
         };
 
-        let surface = match gtk4::cairo::ImageSurface::create(
-            gtk4::cairo::Format::ARgb32, 1, 1,
-        ) {
+        let surface = match gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1) {
             Ok(s) => s,
             Err(_) => return 50.0,
         };
@@ -1017,7 +1032,11 @@ impl EditorState {
     #[allow(dead_code)]
     pub fn set_text_size(&mut self, size: f64) -> bool {
         let next = clamp_text_size(size);
-        if let Some(index) = self.active_text_input.as_ref().and_then(|input| input.editing_action_index) {
+        if let Some(index) = self
+            .active_text_input
+            .as_ref()
+            .and_then(|input| input.editing_action_index)
+        {
             let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
                 return false;
             };
@@ -1065,7 +1084,11 @@ impl EditorState {
     pub fn set_selected_text_action_size(&mut self, size: f64) -> bool {
         let next = clamp_text_size(size);
 
-        if let Some(index) = self.active_text_input.as_ref().and_then(|input| input.editing_action_index) {
+        if let Some(index) = self
+            .active_text_input
+            .as_ref()
+            .and_then(|input| input.editing_action_index)
+        {
             let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
                 return false;
             };
@@ -1108,7 +1131,11 @@ impl EditorState {
     }
 
     pub fn set_selected_text_font_family(&mut self, family: String) -> bool {
-        if let Some(index) = self.active_text_input.as_ref().and_then(|input| input.editing_action_index) {
+        if let Some(index) = self
+            .active_text_input
+            .as_ref()
+            .and_then(|input| input.editing_action_index)
+        {
             let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
                 return false;
             };
@@ -1434,7 +1461,9 @@ impl EditorState {
             .and_then(|index| self.actions.get(index))
     }
 
-    pub fn selected_text_action_data(&self) -> Option<(usize, String, DrawColor, FontSettings, Option<f64>, Point)> {
+    pub fn selected_text_action_data(
+        &self,
+    ) -> Option<(usize, String, DrawColor, FontSettings, Option<f64>, Point)> {
         let index = self.selected_action_index?;
         let AnnotationAction::Text {
             position,
@@ -1442,11 +1471,19 @@ impl EditorState {
             color,
             font,
             max_width,
-        } = self.actions.get(index)? else {
+        } = self.actions.get(index)?
+        else {
             return None;
         };
 
-        Some((index, text.clone(), *color, font.clone(), *max_width, *position))
+        Some((
+            index,
+            text.clone(),
+            *color,
+            font.clone(),
+            *max_width,
+            *position,
+        ))
     }
 
     #[allow(dead_code)]
@@ -1459,7 +1496,9 @@ impl EditorState {
     }
 
     pub fn begin_editing_selected_text(&mut self) -> bool {
-        let Some((index, text, color, font, max_width, position)) = self.selected_text_action_data() else {
+        let Some((index, text, color, font, max_width, position)) =
+            self.selected_text_action_data()
+        else {
             return false;
         };
         let Some(width) = max_width else {
@@ -1555,7 +1594,11 @@ impl EditorState {
     }
 
     #[allow(dead_code)]
-    pub fn select_text_action_at_point_with_scale(&mut self, point: Point, _view_scale: f64) -> bool {
+    pub fn select_text_action_at_point_with_scale(
+        &mut self,
+        point: Point,
+        _view_scale: f64,
+    ) -> bool {
         self.selected_action_index = self
             .actions
             .iter()
@@ -1888,12 +1931,17 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
             rect.x = rect.x.max(0).min(img_w - w);
             rect.y = rect.y.max(0).min(img_h - h);
         }
-        AnnotationAction::Text { position, text, font, max_width, .. } => {
+        AnnotationAction::Text {
+            position,
+            text,
+            font,
+            max_width,
+            ..
+        } => {
             // Compute the real rendered bounds so we clamp correctly for
             // any number of lines at any font size.
-            let surface = match gtk4::cairo::ImageSurface::create(
-                gtk4::cairo::Format::ARgb32, 1, 1,
-            ) {
+            let surface = match gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1)
+            {
                 Ok(s) => s,
                 Err(_) => return,
             };
@@ -1903,7 +1951,11 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
             };
             let available_width = max_width.unwrap_or(font.size * 1.8).max(font.size * 1.8);
             let bounds = super::render::text_action_bounds(
-                &context, *position, text, font, Some(available_width),
+                &context,
+                *position,
+                text,
+                font,
+                Some(available_width),
             );
             let box_w = bounds.rect.width as f64;
             let box_h = bounds.rect.height as f64;
@@ -1926,15 +1978,13 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
             position.x = position.x.max(0.0).min(img_w as f64);
             position.y = position.y.max(0.0).min(img_h as f64);
         }
-        AnnotationAction::Pen { points, .. }
-        | AnnotationAction::Highlighter { points, .. } => {
+        AnnotationAction::Pen { points, .. } | AnnotationAction::Highlighter { points, .. } => {
             for p in points {
                 p.x = p.x.max(0.0).min(img_w as f64);
                 p.y = p.y.max(0.0).min(img_h as f64);
             }
         }
-        AnnotationAction::Line { start, end, .. }
-        | AnnotationAction::Arrow { start, end, .. } => {
+        AnnotationAction::Line { start, end, .. } | AnnotationAction::Arrow { start, end, .. } => {
             start.x = start.x.max(0.0).min(img_w as f64);
             start.y = start.y.max(0.0).min(img_h as f64);
             end.x = end.x.max(0.0).min(img_w as f64);
@@ -1975,8 +2025,12 @@ impl EditorState {
         self.drag_start = Some(point);
         self.drag_current = Some(point);
         self.drag_path.clear();
+        self.locked_highlighter_stroke_size = None;
         if matches!(self.selected_tool, Tool::Pen | Tool::Highlighter) {
             self.drag_path.push(point);
+        }
+        if self.selected_tool == Tool::Highlighter {
+            self.locked_highlighter_stroke_size = Some(self.current_highlighter_stroke_size());
         }
     }
 
@@ -2009,6 +2063,7 @@ impl EditorState {
         self.select_resize_handle = None;
         self.drag_path.clear();
         self.drag_shift_active = false;
+        self.locked_highlighter_stroke_size = None;
     }
 
     pub fn clear_drag_without_rebuild_and_check_effect(&mut self) -> bool {
@@ -2065,7 +2120,7 @@ impl EditorState {
                     Some(AnnotationAction::Highlighter {
                         points,
                         color,
-                        stroke_size,
+                        stroke_size: self.current_highlighter_stroke_size(),
                     })
                 } else {
                     None
@@ -2108,6 +2163,29 @@ impl EditorState {
         }
     }
 
+    fn current_highlighter_stroke_size(&self) -> f64 {
+        if let Some(locked) = self.locked_highlighter_stroke_size {
+            return locked;
+        }
+
+        if self.highlighter_mode == HighlighterMode::TextAware {
+            let point = self
+                .drag_current
+                .or(self.drag_start)
+                .or_else(|| self.drag_path.last().copied());
+
+            if let Some(point) = point {
+                if let Ok(detector) = self.text_detector.lock() {
+                    if let Some(height) = detector.best_text_height_at_point(point) {
+                        return height;
+                    }
+                }
+            }
+        }
+
+        self.pen_weight.stroke_width()
+    }
+
     pub fn draft_crop_rect(&self) -> Option<Rect> {
         if self.selected_tool != Tool::Crop {
             return None;
@@ -2128,6 +2206,11 @@ impl EditorState {
             let stroke_size = self.stroke_size;
             let tool = self.selected_tool;
             let shift_active = self.drag_shift_active;
+            let highlighter_stroke_size = if tool == Tool::Highlighter {
+                Some(self.current_highlighter_stroke_size())
+            } else {
+                None
+            };
             self.clear_drag();
             return if points.len() >= 2 {
                 match tool {
@@ -2148,6 +2231,9 @@ impl EditorState {
                             );
                             points = vec![first, constrained_last];
                         }
+
+                        let stroke_size =
+                            highlighter_stroke_size.unwrap_or_else(|| self.pen_weight.stroke_width());
 
                         if points.len() >= 2
                             && ((points[0].x - points[1].x).abs() > 0.1
@@ -2506,6 +2592,14 @@ impl EditorState {
             height,
             image::imageops::FilterType::Triangle,
         ))
+    }
+
+    pub fn set_highlighter_mode(&mut self, mode: HighlighterMode) {
+        self.highlighter_mode = mode;
+    }
+
+    pub fn set_pen_weight(&mut self, weight: PenWeight) {
+        self.pen_weight = weight;
     }
 }
 
