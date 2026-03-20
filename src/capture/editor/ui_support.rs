@@ -1,7 +1,5 @@
 use gtk4::gdk;
-use gtk4::{
-    prelude::*, Box as GtkBox, Button, CssProvider, Image, Label, Orientation,
-};
+use gtk4::{prelude::*, Box as GtkBox, Button, CssProvider, Image, Label, Orientation};
 use std::process::Command;
 
 pub fn parse_env_bool(name: &str) -> Option<bool> {

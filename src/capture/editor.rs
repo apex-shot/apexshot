@@ -1,8 +1,12 @@
 mod color;
 mod io_ops;
+#[allow(dead_code)]
+mod pen_weight;
 mod render;
 mod selection;
 mod state;
+#[allow(dead_code)]
+mod text_detect;
 mod types;
 mod ui_support;
 #[path = "editor/window/mod.rs"]
@@ -1269,7 +1273,11 @@ mod tests {
         state.update_drag(Point { x: 9.0, y: 8.0 });
 
         match state.draft_action().unwrap() {
-            AnnotationAction::Obfuscate { rect, method, amount } => {
+            AnnotationAction::Obfuscate {
+                rect,
+                method,
+                amount,
+            } => {
                 assert_eq!(rect.x, 1);
                 assert_eq!(rect.y, 1);
                 assert_eq!(rect.width, 8);

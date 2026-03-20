@@ -96,16 +96,29 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             font,
             max_width,
         } => {
-            let available_width = max_width.unwrap_or_else(|| {
-                context
-                    .clip_extents()
-                    .map(|(_, _, width, _)| width - position.x)
-                    .unwrap_or(f64::INFINITY)
-            })
-            .min(context.clip_extents().map(|(_, _, width, _)| width - position.x).unwrap_or(f64::INFINITY))
-            .max(font.size * 1.8);
-            draw_wrapped_text(context, *position, text, *color, font, Some(available_width));
-        },
+            let available_width = max_width
+                .unwrap_or_else(|| {
+                    context
+                        .clip_extents()
+                        .map(|(_, _, width, _)| width - position.x)
+                        .unwrap_or(f64::INFINITY)
+                })
+                .min(
+                    context
+                        .clip_extents()
+                        .map(|(_, _, width, _)| width - position.x)
+                        .unwrap_or(f64::INFINITY),
+                )
+                .max(font.size * 1.8);
+            draw_wrapped_text(
+                context,
+                *position,
+                text,
+                *color,
+                font,
+                Some(available_width),
+            );
+        }
         AnnotationAction::Number {
             position,
             number,
@@ -169,15 +182,28 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             font,
             max_width,
         } => {
-            let available_width = max_width.unwrap_or_else(|| {
-                context
-                    .clip_extents()
-                    .map(|(_, _, width, _)| width - position.x)
-                    .unwrap_or(f64::INFINITY)
-            })
-            .min(context.clip_extents().map(|(_, _, width, _)| width - position.x).unwrap_or(f64::INFINITY))
-            .max(font.size * 1.8);
-            draw_wrapped_text(context, *position, text, color.with_alpha(0.9), font, Some(available_width));
+            let available_width = max_width
+                .unwrap_or_else(|| {
+                    context
+                        .clip_extents()
+                        .map(|(_, _, width, _)| width - position.x)
+                        .unwrap_or(f64::INFINITY)
+                })
+                .min(
+                    context
+                        .clip_extents()
+                        .map(|(_, _, width, _)| width - position.x)
+                        .unwrap_or(f64::INFINITY),
+                )
+                .max(font.size * 1.8);
+            draw_wrapped_text(
+                context,
+                *position,
+                text,
+                color.with_alpha(0.9),
+                font,
+                Some(available_width),
+            );
         }
         AnnotationAction::Number {
             position,
@@ -393,13 +419,37 @@ pub fn draw_selection_outline(context: &gtk4::cairo::Context, rect: Rect, view_s
     context.new_path();
     context.move_to(x + radius, y);
     context.line_to(x + width - radius, y);
-    context.arc(x + width - radius, y + radius, radius, -std::f64::consts::FRAC_PI_2, 0.0);
+    context.arc(
+        x + width - radius,
+        y + radius,
+        radius,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    );
     context.line_to(x + width, y + height - radius);
-    context.arc(x + width - radius, y + height - radius, radius, 0.0, std::f64::consts::FRAC_PI_2);
+    context.arc(
+        x + width - radius,
+        y + height - radius,
+        radius,
+        0.0,
+        std::f64::consts::FRAC_PI_2,
+    );
     context.line_to(x + radius, y + height);
-    context.arc(x + radius, y + height - radius, radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+    context.arc(
+        x + radius,
+        y + height - radius,
+        radius,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
     context.line_to(x, y + radius);
-    context.arc(x + radius, y + radius, radius, std::f64::consts::PI, -std::f64::consts::FRAC_PI_2);
+    context.arc(
+        x + radius,
+        y + radius,
+        radius,
+        std::f64::consts::PI,
+        -std::f64::consts::FRAC_PI_2,
+    );
     context.close_path();
     let _ = context.stroke();
 
@@ -535,8 +585,9 @@ pub fn text_action_bounds(
     let layout = layout_wrapped_text(context, text, font, content_width);
     let line_height = (font.size * 1.2).max(font.size + 4.0);
     let width = (layout.max_width + padding_x * 2.0).max(font.size * 1.8);
-    let height = (layout.lines.len().max(1) as f64 * line_height + font.size * 0.2 + padding_y * 2.0)
-        .max(44.0);
+    let height =
+        (layout.lines.len().max(1) as f64 * line_height + font.size * 0.2 + padding_y * 2.0)
+            .max(44.0);
     let top_left = Point {
         x: position.x,
         y: position.y - font.size - padding_y,
@@ -782,11 +833,7 @@ fn apply_font_settings(context: &gtk4::cairo::Context, font: &FontSettings) {
     context.set_font_size(font.size.max(1.0));
 }
 
-pub fn measure_text_width(
-    context: &gtk4::cairo::Context,
-    text: &str,
-    font: &FontSettings,
-) -> f64 {
+pub fn measure_text_width(context: &gtk4::cairo::Context, text: &str, font: &FontSettings) -> f64 {
     let _ = context.save();
     apply_font_settings(context, font);
     let width = context
@@ -973,7 +1020,8 @@ pub fn cursor_position_for_text_point(
     }
 
     let relative_y = (point.y - bounds.rect.y as f64 - padding_y).max(0.0);
-    let line_index = ((relative_y / line_height).floor() as usize).min(layout.lines.len().saturating_sub(1));
+    let line_index =
+        ((relative_y / line_height).floor() as usize).min(layout.lines.len().saturating_sub(1));
     let line = &layout.lines[line_index];
     let relative_x = (point.x - bounds.rect.x as f64 - padding_x).max(0.0);
 
@@ -1028,10 +1076,15 @@ pub fn draw_active_text_input(
     // Center the text block vertically within the inner content area (inset from border).
     let inner_height = (bounds.rect.height as f64 - inset * 2.0).max(1.0);
     let vertical_offset = ((inner_height - text_block_height) / 2.0).max(padding_y);
-    let baseline_offset = font.size + ((line_height - font.size) / 2.0).max(0.0) - (font.size * 0.12);
+    let baseline_offset =
+        font.size + ((line_height - font.size) / 2.0).max(0.0) - (font.size * 0.12);
 
     for (index, line) in layout.lines.iter().enumerate() {
-        let baseline_y = bounds.rect.y as f64 + inset + vertical_offset + baseline_offset + index as f64 * line_height;
+        let baseline_y = bounds.rect.y as f64
+            + inset
+            + vertical_offset
+            + baseline_offset
+            + index as f64 * line_height;
         draw_text(
             context,
             Point {
@@ -1050,11 +1103,15 @@ pub fn draw_active_text_input(
     }
 
     if cursor_visible {
-        let line = layout.lines.get(cursor_line).or_else(|| layout.lines.last());
+        let line = layout
+            .lines
+            .get(cursor_line)
+            .or_else(|| layout.lines.last());
         let prefix: String = line
             .map(|line| line.text.chars().take(cursor_column).collect())
             .unwrap_or_default();
-        let cursor_x = bounds.rect.x as f64 + padding_x + measure_text_width(context, &prefix, font);
+        let cursor_x =
+            bounds.rect.x as f64 + padding_x + measure_text_width(context, &prefix, font);
         let top = bounds.rect.y as f64 + inset + vertical_offset + cursor_line as f64 * line_height;
         let bottom = top + font.size.max(line_height - 2.0);
         context.set_source_rgba(color.r, color.g, color.b, color.a.max(0.8));
@@ -1716,7 +1773,8 @@ pub fn apply_secure_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
         rect.y.max(0) as u32,
         rect.width as u32,
         rect.height as u32,
-    ).to_image();
+    )
+    .to_image();
 
     // 2) Downsample aggressively (destroys detail — irreversible)
     let thumb = image::imageops::resize(
@@ -1737,12 +1795,23 @@ pub fn apply_secure_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
     // 4) Apply multiple blur passes to produce a smooth, blurred appearance.
     //    More passes = more secure-looking (less structure visible).
     let blur_radius = (amount / 3.0).max(2.0);
-    let passes = if amount > 15.0 { 3 } else if amount > 8.0 { 2 } else { 1 };
+    let passes = if amount > 15.0 {
+        3
+    } else if amount > 8.0 {
+        2
+    } else {
+        1
+    };
     let mut blurred = upscaled;
     for _ in 0..passes {
         apply_blur_rect(
             &mut blurred,
-            Rect { x: 0, y: 0, width: rect.width, height: rect.height },
+            Rect {
+                x: 0,
+                y: 0,
+                width: rect.width,
+                height: rect.height,
+            },
             blur_radius,
         );
     }
