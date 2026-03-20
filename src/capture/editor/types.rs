@@ -1,3 +1,4 @@
+use super::numbering_style::{NumberingStyle, NumberSize};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -450,6 +451,8 @@ pub enum AnnotationAction {
         position: Point,
         number: u32,
         color: DrawColor,
+        style: NumberingStyle,
+        size: NumberSize,
     },
     Obfuscate {
         rect: Rect,
