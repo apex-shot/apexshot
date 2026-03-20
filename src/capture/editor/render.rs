@@ -1,7 +1,5 @@
-use super::color::{
-    highlighter_stroke_width, CENSOR_BLOCK_SIZE, HIGHLIGHTER_ALPHA_SCALE, NUMBER_FONT_SIZE,
-    NUMBER_RADIUS,
-};
+use super::color::{highlighter_stroke_width, CENSOR_BLOCK_SIZE, HIGHLIGHTER_ALPHA_SCALE};
+use super::numbering_style::{NumberingStyle, NumberSize};
 use super::types::{
     AnnotationAction, DrawColor, FontSettings, FontStyle, MoveHandle, Point, Rect, SelectHandle,
     TextAlignment, TextDecoration, TextEditBounds,
@@ -123,7 +121,9 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             position,
             number,
             color,
-        } => draw_number(context, *position, *number, *color),
+            style,
+            size,
+        } => draw_number(context, *position, *number, *color, *style, *size),
         AnnotationAction::Obfuscate { .. } => {}
         AnnotationAction::Focus { .. } => {}
     }
@@ -209,8 +209,10 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             position,
             number,
             color,
+            style,
+            size,
         } => {
-            draw_number(context, *position, *number, color.with_alpha(0.88));
+            draw_number(context, *position, *number, color.with_alpha(0.88), *style, *size);
         }
         AnnotationAction::Obfuscate { rect, .. } => {
             context.set_source_rgba(0.18, 0.48, 0.94, 0.18);
@@ -1124,21 +1126,33 @@ pub fn draw_active_text_input(
     let _ = context.restore();
 }
 
-pub fn draw_number(context: &gtk4::cairo::Context, position: Point, number: u32, color: DrawColor) {
-    context.set_source_rgba(color.r, color.g, color.b, color.a);
-    context.arc(
-        position.x,
-        position.y,
-        NUMBER_RADIUS,
-        0.0,
-        std::f64::consts::TAU,
-    );
-    let _ = context.fill_preserve();
+pub fn draw_number(
+    context: &gtk4::cairo::Context,
+    position: Point,
+    number: u32,
+    color: DrawColor,
+    style: NumberingStyle,
+    size: NumberSize,
+) {
+    // Clear any existing path to prevent connecting lines between numbers
+    context.new_path();
 
+    let radius = size.radius();
+    let font_size = size.font_size();
+
+    // Draw filled circle
+    context.arc(position.x, position.y, radius, 0.0, std::f64::consts::TAU);
+    context.set_source_rgba(color.r, color.g, color.b, color.a);
+    let _ = context.fill();
+
+    // Draw border as a new path
+    context.new_path();
+    context.arc(position.x, position.y, radius, 0.0, std::f64::consts::TAU);
     context.set_source_rgba(0.02, 0.03, 0.05, 0.42);
     context.set_line_width(1.5);
     let _ = context.stroke();
 
+    // Calculate text color based on background luminance
     let luminance = (0.299 * color.r) + (0.587 * color.g) + (0.114 * color.b);
     let (text_r, text_g, text_b) = if luminance > 0.65 {
         (0.07, 0.08, 0.10)
@@ -1146,14 +1160,18 @@ pub fn draw_number(context: &gtk4::cairo::Context, position: Point, number: u32,
         (0.98, 0.99, 1.0)
     };
 
-    let label = number.to_string();
+    // Format number according to style
+    let label = style.format(number);
+
+    // Draw text
+    context.new_path();
     context.set_source_rgba(text_r, text_g, text_b, 0.98);
     context.select_font_face(
         "Sans",
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
-    context.set_font_size(NUMBER_FONT_SIZE);
+    context.set_font_size(font_size);
 
     if let Ok(extents) = context.text_extents(&label) {
         let text_x = position.x - (extents.width() / 2.0 + extents.x_bearing());

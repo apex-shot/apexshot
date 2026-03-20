@@ -97,6 +97,22 @@ pub(super) struct ToolbarModeParts {
     pub pen_weight_list: gtk4::Box,
     /// Group containing pen weight button (for visibility toggle)
     pub pen_weight_group: GtkBox,
+    #[allow(dead_code)]
+    pub number_options_popover: gtk4::Popover,
+    pub number_options_list: gtk4::Box,
+    /// Entry for starting number
+    pub number_start_entry: gtk4::Entry,
+    /// Increment button for starting number
+    pub number_inc_btn: gtk4::Button,
+    /// Decrement button for starting number
+    pub number_dec_btn: gtk4::Button,
+    /// Size submenu button for number tool
+    pub number_size_button: gtk4::Button,
+    #[allow(dead_code)]
+    pub number_size_popover: gtk4::Popover,
+    pub number_size_list: gtk4::Box,
+    /// Group containing number options button (for visibility toggle)
+    pub number_options_group: GtkBox,
 }
 
 pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> ToolbarBaseParts {
@@ -246,6 +262,192 @@ fn build_pen_weight_dropdown() -> (GtkBox, Button, Popover, GtkBox) {
         pen_weight_button,
         pen_weight_popover,
         pen_weight_list,
+    )
+}
+
+fn build_number_options_dropdown() -> (
+    GtkBox,
+    Button,
+    Popover,
+    GtkBox,
+    Entry,
+    Button,
+    Button,
+    Button,
+    Popover,
+    GtkBox,
+) {
+    use super::super::numbering_style::{NumberingStyle, NumberSize};
+
+    let number_options_group = GtkBox::new(Orientation::Horizontal, 4);
+    number_options_group.add_css_class("editor-number-options-group");
+    number_options_group.add_css_class("editor-tools-group");
+    number_options_group.set_visible(false);
+
+    // Main dropdown button with "123" label
+    let number_options_button = Button::new();
+    number_options_button.set_has_frame(false);
+    number_options_button.set_focusable(false);
+    number_options_button.add_css_class("editor-tool-button");
+    number_options_button.add_css_class("flat");
+    number_options_button.set_tooltip_text(Some("Number Options"));
+
+    let btn_box = GtkBox::new(Orientation::Horizontal, 2);
+    let btn_label = Label::new(Some("123"));
+    btn_label.add_css_class("editor-number-options-label");
+    let btn_arrow = Image::from_icon_name("pan-down-symbolic");
+    btn_arrow.set_pixel_size(10);
+    btn_box.append(&btn_label);
+    btn_box.append(&btn_arrow);
+    number_options_button.set_child(Some(&btn_box));
+
+    // Main popover
+    let number_options_popover = Popover::new();
+    number_options_popover.set_has_arrow(false);
+    number_options_popover.set_autohide(true);
+    number_options_popover.add_css_class("editor-popover");
+    number_options_popover.add_css_class("editor-number-options-popover");
+    number_options_popover.set_parent(&number_options_button);
+
+    // Main list container
+    let number_options_list = GtkBox::new(Orientation::Vertical, 4);
+    number_options_list.add_css_class("editor-popover-list");
+    number_options_list.set_margin_start(4);
+    number_options_list.set_margin_end(4);
+    number_options_list.set_margin_top(4);
+    number_options_list.set_margin_bottom(4);
+    number_options_popover.set_child(Some(&number_options_list));
+
+    // Numbering style options
+    for style in NumberingStyle::ALL {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        let check_icon = Image::from_icon_name("object-select-symbolic");
+        check_icon.set_pixel_size(12);
+        check_icon.set_visible(style == NumberingStyle::default());
+        check_icon.add_css_class("editor-number-style-check");
+
+        let label = Label::new(Some(style.label()));
+        label.set_hexpand(true);
+        label.set_halign(gtk4::Align::Start);
+
+        btn_box.append(&check_icon);
+        btn_box.append(&label);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat", "editor-number-style-option"])
+            .child(&btn_box)
+            .build();
+        number_options_list.append(&btn);
+    }
+
+    // Separator
+    let sep = GtkBox::new(Orientation::Horizontal, 0);
+    sep.add_css_class("editor-popover-separator");
+    sep.set_margin_top(4);
+    sep.set_margin_bottom(4);
+    number_options_list.append(&sep);
+
+    // Starting number control
+    let start_box = GtkBox::new(Orientation::Horizontal, 8);
+    start_box.set_margin_start(4);
+    start_box.set_margin_end(4);
+    start_box.add_css_class("editor-number-start-row");
+
+    let start_label = Label::new(Some("Start with:"));
+    start_label.add_css_class("editor-number-start-label");
+
+    let number_start_entry = Entry::new();
+    number_start_entry.set_width_chars(5);
+    number_start_entry.set_max_width_chars(5);
+    number_start_entry.set_text("1");
+    number_start_entry.set_editable(false);
+    number_start_entry.add_css_class("editor-number-start-entry");
+
+    let inc_btn = Button::with_label("+");
+    let dec_btn = Button::with_label("-");
+
+    start_box.append(&start_label);
+    start_box.append(&dec_btn);
+    start_box.append(&number_start_entry);
+    start_box.append(&inc_btn);
+    number_options_list.append(&start_box);
+
+    // Separator
+    let sep2 = GtkBox::new(Orientation::Horizontal, 0);
+    sep2.add_css_class("editor-popover-separator");
+    sep2.set_margin_top(4);
+    sep2.set_margin_bottom(4);
+    number_options_list.append(&sep2);
+
+    // Size submenu button
+    let number_size_button = Button::new();
+    number_size_button.set_has_frame(false);
+    number_size_button.set_focusable(false);
+    number_size_button.add_css_class("editor-popover-list-item");
+    number_size_button.add_css_class("flat");
+
+    let size_btn_box = GtkBox::new(Orientation::Horizontal, 8);
+    size_btn_box.set_margin_start(4);
+    size_btn_box.set_margin_end(4);
+    let size_label = Label::new(Some("Size"));
+    size_label.set_hexpand(true);
+    size_label.set_halign(gtk4::Align::Start);
+    let size_arrow = Image::from_icon_name("pan-end-symbolic");
+    size_arrow.set_pixel_size(10);
+    size_arrow.set_halign(gtk4::Align::End);
+    size_btn_box.append(&size_label);
+    size_btn_box.append(&size_arrow);
+    number_size_button.set_child(Some(&size_btn_box));
+
+    // Size popover (submenu)
+    let number_size_popover = Popover::new();
+    number_size_popover.set_has_arrow(false);
+    number_size_popover.set_autohide(true);
+    number_size_popover.add_css_class("editor-popover");
+    number_size_popover.set_position(gtk4::PositionType::Right);
+    number_size_popover.set_parent(&number_size_button);
+
+    let number_size_list = GtkBox::new(Orientation::Vertical, 0);
+    number_size_list.add_css_class("editor-popover-list");
+    number_size_popover.set_child(Some(&number_size_list));
+
+    for size in NumberSize::ALL {
+        let btn = Button::builder()
+            .label(size.label())
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat", "editor-number-size-option"])
+            .build();
+        number_size_list.append(&btn);
+    }
+
+    // Show size popover on click
+    let size_popover = number_size_popover.clone();
+    number_size_button.connect_clicked(move |_| {
+        size_popover.popup();
+    });
+
+    number_options_list.append(&number_size_button);
+
+    // Show main popover on click
+    let main_popover = number_options_popover.clone();
+    number_options_button.connect_clicked(move |_| {
+        main_popover.popup();
+    });
+
+    number_options_group.append(&number_options_button);
+
+    (
+        number_options_group,
+        number_options_button,
+        number_options_popover,
+        number_options_list,
+        number_start_entry,
+        inc_btn,
+        dec_btn,
+        number_size_button,
+        number_size_popover,
+        number_size_list,
     )
 }
 
@@ -549,6 +751,20 @@ pub(super) fn build_toolbar_mode_controls(
         pen_weight_list.append(&btn);
     }
 
+    // Build number options selector for number tool
+    let (
+        number_options_group,
+        _number_options_button,
+        number_options_popover,
+        number_options_list,
+        number_start_entry,
+        number_inc_btn,
+        number_dec_btn,
+        number_size_button,
+        number_size_popover,
+        number_size_list,
+    ) = build_number_options_dropdown();
+
     let crop_size_group = GtkBox::new(Orientation::Horizontal, 4);
     crop_size_group.add_css_class("editor-tools-group");
     crop_size_group.add_css_class("editor-crop-size-group");
@@ -583,6 +799,7 @@ pub(super) fn build_toolbar_mode_controls(
     standard_mode_group.append(&primary_tools_group);
     standard_mode_group.append(&obfuscate_method_group);
     standard_mode_group.append(&pen_weight_group);
+    standard_mode_group.append(&number_options_group);
     standard_mode_group.append(&size_group);
 
     let toolbar_mode_stack = Stack::new();
@@ -626,6 +843,15 @@ pub(super) fn build_toolbar_mode_controls(
         pen_weight_popover,
         pen_weight_list,
         pen_weight_group,
+        number_options_popover,
+        number_options_list,
+        number_start_entry,
+        number_inc_btn,
+        number_dec_btn,
+        number_size_button,
+        number_size_popover,
+        number_size_list,
+        number_options_group,
     }
 }
 
@@ -692,6 +918,7 @@ pub(super) fn build_toolbar_tool_updater(
     font_family_group: &GtkBox,
     obfuscate_method_group: &GtkBox,
     pen_weight_group: &GtkBox,
+    number_options_group: &GtkBox,
     canvas_scroller: &gtk4::ScrolledWindow,
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
     window: &ApplicationWindow,
@@ -704,6 +931,7 @@ pub(super) fn build_toolbar_tool_updater(
     let font_family_group = font_family_group.clone();
     let obfuscate_method_group = obfuscate_method_group.clone();
     let pen_weight_group = pen_weight_group.clone();
+    let number_options_group = number_options_group.clone();
     let canvas_scroller = canvas_scroller.clone();
     let window = window.downgrade();
 
@@ -723,6 +951,9 @@ pub(super) fn build_toolbar_tool_updater(
 
         let is_highlighter_tool = matches!(tool, Tool::Highlighter);
         pen_weight_group.set_visible(is_highlighter_tool);
+
+        let is_number_tool = matches!(tool, Tool::Number);
+        number_options_group.set_visible(is_number_tool);
 
         // Only allow vertical scrolling in Crop mode
         if matches!(tool, Tool::Crop) {
