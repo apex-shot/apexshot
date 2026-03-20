@@ -1,11 +1,24 @@
 use gtk4::gdk;
+use gtk4::gdk::Cursor;
+use gtk4::gdk_pixbuf::{Colorspace, Pixbuf};
 use gtk4::{prelude::*, ApplicationWindow};
 
 use super::super::color::{selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale};
+use super::super::pen_weight::HighlighterMode;
 use super::super::state::EditorState;
+use super::super::text_detect::clamp_cursor_size;
 use super::super::types::{
     cursor_name_for_select_handle, AnnotationAction, Point, Tool, ViewTransform,
 };
+
+/// Default highlighter cursor size (when no text detected)
+pub const DEFAULT_HIGHLIGHTER_CURSOR_SIZE: f64 = 16.0;
+
+/// Cursor width ratio relative to height
+const CURSOR_WIDTH_RATIO: f64 = 1.5;
+
+/// Corner radius for highlighter cursor
+const CURSOR_CORNER_RADIUS: f64 = 4.0;
 
 pub(super) fn set_window_cursor_name(window: &ApplicationWindow, cursor_name: Option<&str>) {
     if let Some(surface) = window.surface() {
@@ -114,8 +127,12 @@ pub fn cursor_name_for_view_point(
         Tool::Text => "text",
         Tool::Crop => crop_hover_cursor_name(state, image_point, transform.scale),
         Tool::Background => "default",
+        Tool::Highlighter => {
+            // Note: Highlighter uses custom cursor set via update_cursor_for_position
+            // This returns crosshair as fallback
+            "crosshair"
+        }
         Tool::Pen
-        | Tool::Highlighter
         | Tool::Circle
         | Tool::Arrow
         | Tool::Line
@@ -124,4 +141,153 @@ pub fn cursor_name_for_view_point(
         | Tool::Obfuscate
         | Tool::Focus => "crosshair",
     }
+}
+
+/// Create a rounded rectangle highlighter cursor surface
+pub fn create_highlighter_cursor_surface(
+    height: f64,
+    _color: (f64, f64, f64, f64),
+) -> Option<gtk4::cairo::ImageSurface> {
+    let height = clamp_cursor_size(height) * CURSOR_WIDTH_RATIO;
+    let width = DEFAULT_HIGHLIGHTER_CURSOR_SIZE;
+
+    let pad = 6.0;
+    let surface_width = (width + pad * 2.0).ceil() as i32;
+    let surface_height = (height + pad * 2.0).ceil() as i32;
+
+    let surface = gtk4::cairo::ImageSurface::create(
+        gtk4::cairo::Format::ARgb32,
+        surface_width,
+        surface_height,
+    )
+    .ok()?;
+
+    let context = gtk4::cairo::Context::new(&surface).ok()?;
+
+    let x = pad;
+    let y = pad;
+    let radius = CURSOR_CORNER_RADIUS.min(width / 2.0).min(height / 2.0);
+
+    fn rounded_rect(ctx: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        ctx.new_sub_path();
+        ctx.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+        ctx.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+        ctx.arc(
+            x + r,
+            y + h - r,
+            r,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+        );
+        ctx.arc(
+            x + r,
+            y + r,
+            r,
+            std::f64::consts::PI,
+            -std::f64::consts::FRAC_PI_2,
+        );
+        ctx.close_path();
+    }
+
+    // White outline (wider stroke behind)
+    rounded_rect(&context, x, y, width, height, radius);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    context.set_line_width(3.5);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    let _ = context.stroke();
+
+    // Black stripe on top
+    rounded_rect(&context, x, y, width, height, radius);
+    context.set_source_rgba(0.0, 0.0, 0.0, 1.0);
+    context.set_line_width(1.5);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    let _ = context.stroke();
+
+    Some(surface)
+}
+
+/// Set custom highlighter cursor on window
+pub fn set_highlighter_cursor(
+    window: &gtk4::ApplicationWindow,
+    height: f64,
+    color: (f64, f64, f64, f64),
+) {
+    if let Some(surface) = create_highlighter_cursor_surface(height, color) {
+        if let Some(texture) = surface_to_texture(surface) {
+            let pad = 6;
+            let hotspot_x = pad;
+            let hotspot_y = texture.height() / 2;
+            let cursor = Cursor::from_texture(&texture, hotspot_x, hotspot_y, None);
+            if let Some(surface) = window.surface() {
+                surface.set_cursor(Some(&cursor));
+            }
+        }
+    }
+}
+
+/// Update cursor based on current state and position.
+///
+/// In text-aware mode, the cursor only adopts a detected text height when
+/// the pointer is directly over a detected text region.
+pub fn update_cursor_for_position(
+    window: &gtk4::ApplicationWindow,
+    state: &EditorState,
+    image_point: Point,
+    _view_scale: f64,
+) {
+    if state.selected_tool != Tool::Highlighter {
+        return;
+    }
+
+    let color = (
+        state.selected_color.r,
+        state.selected_color.g,
+        state.selected_color.b,
+        0.4,
+    );
+
+    if let Some(locked_height) = state.locked_highlighter_stroke_size {
+        set_highlighter_cursor(window, locked_height, color);
+        return;
+    }
+
+    match state.highlighter_mode {
+        HighlighterMode::TextAware => {
+            if let Ok(detector) = state.text_detector.lock() {
+                if detector.is_ready() {
+                    if let Some(height) = detector.best_text_height_at_point(image_point) {
+                        set_highlighter_cursor(window, height, color);
+                        return;
+                    }
+                }
+            }
+            // Fallback to default cursor size
+            set_highlighter_cursor(window, DEFAULT_HIGHLIGHTER_CURSOR_SIZE, color);
+        }
+        HighlighterMode::Freehand => {
+            set_highlighter_cursor(window, state.pen_weight.stroke_width(), color);
+        }
+    }
+}
+
+/// Convert cairo surface to gdk Texture
+fn surface_to_texture(mut surface: gtk4::cairo::ImageSurface) -> Option<gdk::Texture> {
+    let width = surface.width();
+    let height = surface.height();
+    let stride = surface.stride() as i32;
+    let data = surface.data().ok()?.to_vec();
+
+    let pixbuf = Pixbuf::from_bytes(
+        &gtk4::glib::Bytes::from(&data),
+        Colorspace::Rgb,
+        true,
+        8,
+        width,
+        height,
+        stride,
+    );
+
+    Some(gdk::Texture::for_pixbuf(&pixbuf))
 }

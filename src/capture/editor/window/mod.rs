@@ -1,6 +1,5 @@
 use gtk4::{
-    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation,
-    Popover,
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation, Popover,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -12,14 +11,14 @@ use super::color::selection_hit_padding_for_scale;
 use super::render::{
     draw_active_text_input, draw_annotation_action, draw_canvas_checkerboard_background,
     draw_crop_overlay, draw_draft_action, draw_focus_overlay, draw_rgba_to_context,
-    draw_selection_handles, draw_selection_outline, draw_text_edit_border,
-    draw_text_edit_handles, rgba_image_to_surface, text_action_bounds,
+    draw_selection_handles, draw_selection_outline, draw_text_edit_border, draw_text_edit_handles,
+    rgba_image_to_surface, text_action_bounds,
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
 use super::types::{
-    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError,
-    Point, Rect, Tool, ViewTransform,
+    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError, Point,
+    Rect, Tool, ViewTransform,
 };
 use super::ui_support::{
     install_editor_css, prefers_dark_glass_theme, prefers_reduced_transparency,
@@ -29,6 +28,7 @@ use super::ui_support::{
 pub mod background_panel;
 mod canvas;
 pub mod color_picker;
+#[allow(dead_code)]
 mod cursor;
 mod events;
 mod footer;
@@ -82,7 +82,15 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     };
 
     let (img_width, img_height) = image.dimensions();
-    let state = Arc::new(Mutex::new(EditorState::new(image)));
+    let state = Arc::new(Mutex::new(EditorState::new(image.clone())));
+    {
+        let mut st = state.lock().unwrap();
+        let detector = st.text_detector.clone();
+        let ready_flag = st.text_detection_ready.clone();
+        st.text_detection_handle = Some(super::text_detect::spawn_text_detection(
+            image, detector, ready_flag,
+        ));
+    }
     let transform = Arc::new(Mutex::new(ViewTransform::for_image(
         img_width as f64,
         img_height as f64,
@@ -159,8 +167,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
     });
 
-    let color_picker_parts =
-        color_picker::build_color_picker(state.clone(), canvas_queue_draw_signal, drawing_area_placeholder.clone());
+    let color_picker_parts = color_picker::build_color_picker(
+        state.clone(),
+        canvas_queue_draw_signal,
+        drawing_area_placeholder.clone(),
+    );
     let color_picker_trigger_host = color_picker_parts.trigger_host;
     let color_popover = color_picker_parts.popover;
     let color_buttons = color_picker_parts.color_buttons;
@@ -192,6 +203,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         obfuscate_method_button,
         obfuscate_method_popover: _,
         obfuscate_method_list,
+        pen_weight_button,
+        pen_weight_popover: _,
+        pen_weight_list,
+        pen_weight_group,
     } = toolbar::build_toolbar_mode_controls(
         &crop_btn,
         &background_btn,
@@ -490,6 +505,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &text_size_group,
         &font_family_group,
         &obfuscate_method_group,
+        &pen_weight_group,
         &canvas_scroller,
         start_background_gradient_preview_loading.clone(),
         &window,
@@ -809,9 +825,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let font_family_label = font_family_label.clone();
         move || {
             // Extract all needed data BEFORE any GTK operations to avoid deadlock
-            let (mode, value, text_size, font_family) = {
+            let (selected_tool, mode, value, text_size, font_family) = {
                 let st = state.lock().unwrap();
                 (
+                    st.selected_tool,
                     st.active_size_control_mode(),
                     st.active_size_value().unwrap_or_default(),
                     st.text_size,
@@ -823,6 +840,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             font_family_label.set_label(&font_family);
 
             // Now perform GTK operations WITHOUT holding the lock
+            if selected_tool == Tool::Highlighter {
+                size_group.set_visible(false);
+                return;
+            }
+
             size_group.set_visible(true);
 
             let Some(mode) = mode else {
@@ -976,8 +998,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             virtual_w = image_width + padding_px * 2.0;
             virtual_h = image_height + padding_px * 2.0;
 
-            if let Some(ratio) = background_aspect_ratio
-                .aspect_ratio(virtual_w as i32, virtual_h as i32)
+            if let Some(ratio) =
+                background_aspect_ratio.aspect_ratio(virtual_w as i32, virtual_h as i32)
             {
                 let current_ratio = virtual_w / virtual_h;
                 if current_ratio < ratio {
@@ -1381,17 +1403,32 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         if selected_tool == Tool::Text && active_text_bounds.is_none() {
             if let Some(hover_idx) = hovered_text_action_index {
                 if let Some(action) = actions.get(hover_idx) {
-                    if let AnnotationAction::Text { position, text, font, max_width, .. } = action {
+                    if let AnnotationAction::Text {
+                        position,
+                        text,
+                        font,
+                        max_width,
+                        ..
+                    } = action
+                    {
                         let available_width = max_width.unwrap_or_else(|| {
                             (working_image.width() as f64 - position.x).max(font.size * 1.8)
                         });
                         let mut text_bounds = text_action_bounds(
-                            context, *position, text, font, Some(available_width),
+                            context,
+                            *position,
+                            text,
+                            font,
+                            Some(available_width),
                         );
-                        text_bounds.rect.x = text_bounds.rect.x
-                            .clamp(0, (working_image.width() as i32 - text_bounds.rect.width).max(0));
-                        text_bounds.rect.y = text_bounds.rect.y
-                            .clamp(0, (working_image.height() as i32 - text_bounds.rect.height).max(0));
+                        text_bounds.rect.x = text_bounds.rect.x.clamp(
+                            0,
+                            (working_image.width() as i32 - text_bounds.rect.width).max(0),
+                        );
+                        text_bounds.rect.y = text_bounds.rect.y.clamp(
+                            0,
+                            (working_image.height() as i32 - text_bounds.rect.height).max(0),
+                        );
                         text_bounds.sync_handles();
                         draw_text_edit_border(context, &text_bounds, t.scale);
                     }
@@ -1400,7 +1437,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
 
         if let Some(selected_action) = selected_action.as_ref() {
-            if selected_tool == Tool::Select && select_drag_anchor.is_some()
+            if selected_tool == Tool::Select
+                && select_drag_anchor.is_some()
                 && matches!(selected_action, AnnotationAction::Obfuscate { .. })
             {
                 draw_draft_action(context, selected_action);
@@ -1412,17 +1450,27 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 && active_text_bounds.is_none();
 
             if show_text_handles {
-                if let AnnotationAction::Text { position, text, font, max_width, .. } = selected_action {
+                if let AnnotationAction::Text {
+                    position,
+                    text,
+                    font,
+                    max_width,
+                    ..
+                } = selected_action
+                {
                     let available_width = max_width.unwrap_or_else(|| {
                         (working_image.width() as f64 - position.x).max(font.size * 1.8)
                     });
-                    let mut text_bounds = text_action_bounds(
-                        context, *position, text, font, Some(available_width),
+                    let mut text_bounds =
+                        text_action_bounds(context, *position, text, font, Some(available_width));
+                    text_bounds.rect.x = text_bounds.rect.x.clamp(
+                        0,
+                        (working_image.width() as i32 - text_bounds.rect.width).max(0),
                     );
-                    text_bounds.rect.x = text_bounds.rect.x
-                        .clamp(0, (working_image.width() as i32 - text_bounds.rect.width).max(0));
-                    text_bounds.rect.y = text_bounds.rect.y
-                        .clamp(0, (working_image.height() as i32 - text_bounds.rect.height).max(0));
+                    text_bounds.rect.y = text_bounds.rect.y.clamp(
+                        0,
+                        (working_image.height() as i32 - text_bounds.rect.height).max(0),
+                    );
                     text_bounds.sync_handles();
                     draw_text_edit_border(context, &text_bounds, t.scale);
                     draw_text_edit_handles(context, &text_bounds, None, t.scale);
@@ -1434,7 +1482,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     // Already handled above.
                 } else {
                     let selection_padding = selection_hit_padding_for_scale(t.scale);
-                    if let Some(bounds) = action_bounds_with_padding(selected_action, selection_padding) {
+                    if let Some(bounds) =
+                        action_bounds_with_padding(selected_action, selection_padding)
+                    {
                         draw_selection_outline(context, bounds, t.scale);
                     }
 
@@ -1457,10 +1507,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 .rect
                 .x
                 .clamp(0, (working_image.width() as i32 - bounds.rect.width).max(0));
-            bounds.rect.y = bounds
-                .rect
-                .y
-                .clamp(0, (working_image.height() as i32 - bounds.rect.height).max(0));
+            bounds.rect.y = bounds.rect.y.clamp(
+                0,
+                (working_image.height() as i32 - bounds.rect.height).max(0),
+            );
             bounds.sync_handles();
             if let Some(input) = active_text_input.as_ref() {
                 let font = super::types::FontSettings {
@@ -1558,6 +1608,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         rebuild_effects_async: rebuild_effects_async.clone(),
         obfuscate_method_button: obfuscate_method_button.clone(),
         obfuscate_method_list: obfuscate_method_list.clone(),
+        pen_weight_button: pen_weight_button.clone(),
+        pen_weight_list: pen_weight_list.clone(),
     });
 
     window.present();

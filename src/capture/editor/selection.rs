@@ -55,7 +55,8 @@ pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Op
             max_width,
             ..
         } => {
-            let surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1).ok()?;
+            let surface =
+                gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1).ok()?;
             let context = gtk4::cairo::Context::new(&surface).ok()?;
             let available_width = max_width.unwrap_or(4096.0);
             let bounds = text_action_bounds(&context, *position, text, font, Some(available_width));
