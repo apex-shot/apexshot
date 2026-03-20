@@ -1,6 +1,8 @@
 mod color;
 mod io_ops;
 #[allow(dead_code)]
+mod numbering_style;
+#[allow(dead_code)]
 mod pen_weight;
 mod render;
 mod selection;
@@ -786,6 +788,20 @@ mod tests {
 
         assert_eq!(numbers, vec![1, 2]);
         assert_eq!(state.next_number, 3);
+    }
+
+    #[test]
+    fn add_number_marker_clamps_center_inside_image_bounds() {
+        let mut state = EditorState::new(RgbaImage::new(40, 40));
+
+        state.add_number_marker(Point { x: 39.0, y: 39.0 });
+
+        match &state.actions[0] {
+            AnnotationAction::Number { position, .. } => {
+                assert_eq!(*position, Point { x: 25.0, y: 25.0 });
+            }
+            other => panic!("unexpected action: {:?}", other),
+        }
     }
 
     #[test]

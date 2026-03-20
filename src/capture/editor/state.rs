@@ -4,6 +4,7 @@ use super::color::{
     selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX,
     DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
 };
+use super::numbering_style::{NumberingStyle, NumberSize};
 use super::pen_weight::{HighlighterMode, PenWeight};
 use super::render::{
     apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_blur,
@@ -91,6 +92,11 @@ pub struct EditorState {
     pub highlighter_mode: HighlighterMode,
     pub pen_weight: PenWeight,
     pub locked_highlighter_stroke_size: Option<f64>,
+
+    // Number tool options
+    pub numbering_style: NumberingStyle,
+    pub numbering_start: u32,
+    pub number_size: NumberSize,
 }
 
 #[derive(Debug, Clone)]
@@ -317,6 +323,9 @@ impl EditorState {
             highlighter_mode: HighlighterMode::default(),
             pen_weight: PenWeight::default(),
             locked_highlighter_stroke_size: None,
+            numbering_style: NumberingStyle::default(),
+            numbering_start: 1,
+            number_size: NumberSize::default(),
         }
     }
 
@@ -1361,12 +1370,24 @@ impl EditorState {
     }
 
     pub fn push_action(&mut self, action: AnnotationAction) {
+        let next_number_after_push = match &action {
+            AnnotationAction::Number { number, style, .. } if *style == self.numbering_style => {
+                Some(number.saturating_add(1))
+            }
+            _ => None,
+        };
+
         self.actions.push(action);
         self.redo_actions.clear();
         self.selected_action_index = Some(self.actions.len() - 1);
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
-        self.sync_next_number();
+
+        if let Some(next_number) = next_number_after_push {
+            self.next_number = next_number;
+        } else {
+            self.sync_next_number();
+        }
         // NOTE: Effect-requiring actions (Obfuscate, Focus) should NOT rebuild here
         // synchronously as it blocks the UI. The caller should use the async pipeline
         // via rebuild_effects_async callback after calling this method.
@@ -1398,11 +1419,23 @@ impl EditorState {
 
     pub fn undo_without_rebuild(&mut self) -> bool {
         if let Some(action) = self.actions.pop() {
+            let next_number_after_undo = match &action {
+                AnnotationAction::Number { number, style, .. } if *style == self.numbering_style => {
+                    Some(*number)
+                }
+                _ => None,
+            };
+
             self.redo_actions.push(action);
             self.selected_action_index = None;
             self.select_drag_anchor = None;
             self.select_resize_handle = None;
-            self.sync_next_number();
+
+            if let Some(next_number) = next_number_after_undo {
+                self.next_number = next_number;
+            } else {
+                self.sync_next_number();
+            }
             return true;
         }
         false
@@ -1424,11 +1457,23 @@ impl EditorState {
 
     pub fn redo_without_rebuild(&mut self) -> bool {
         if let Some(action) = self.redo_actions.pop() {
+            let next_number_after_redo = match &action {
+                AnnotationAction::Number { number, style, .. } if *style == self.numbering_style => {
+                    Some(number.saturating_add(1))
+                }
+                _ => None,
+            };
+
             self.actions.push(action);
             self.selected_action_index = None;
             self.select_drag_anchor = None;
             self.select_resize_handle = None;
-            self.sync_next_number();
+
+            if let Some(next_number) = next_number_after_redo {
+                self.next_number = next_number;
+            } else {
+                self.sync_next_number();
+            }
             return true;
         }
         false
@@ -1439,20 +1484,52 @@ impl EditorState {
             .actions
             .iter()
             .filter_map(|action| match action {
-                AnnotationAction::Number { number, .. } => Some(*number),
+                AnnotationAction::Number { number, style, .. } => {
+                    // Only consider numbers with the same style
+                    if *style == self.numbering_style {
+                        Some(*number)
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             })
             .max()
             .unwrap_or(0);
-        self.next_number = max_number.saturating_add(1);
+        // Use the user-specified starting number if no numbers exist yet
+        self.next_number = if max_number == 0 {
+            self.numbering_start
+        } else {
+            max_number.saturating_add(1)
+        };
     }
 
     pub fn add_number_marker(&mut self, position: Point) {
         let number = self.next_number;
+        let radius = self.number_size.radius();
+        let image_width = self.working_image.width() as f64;
+        let image_height = self.working_image.height() as f64;
+
+        let clamped_x = if image_width <= radius * 2.0 {
+            image_width / 2.0
+        } else {
+            position.x.clamp(radius, image_width - radius)
+        };
+        let clamped_y = if image_height <= radius * 2.0 {
+            image_height / 2.0
+        } else {
+            position.y.clamp(radius, image_height - radius)
+        };
+
         self.push_action(AnnotationAction::Number {
-            position,
+            position: Point {
+                x: clamped_x,
+                y: clamped_y,
+            },
             number,
             color: self.selected_color,
+            style: self.numbering_style,
+            size: self.number_size,
         });
     }
 
@@ -1854,11 +1931,21 @@ impl EditorState {
             return false;
         }
 
-        let _removed = self.actions.remove(index);
+        let removed = self.actions.remove(index);
+        let next_number_after_remove = match &removed {
+            AnnotationAction::Number { number, style, .. } if *style == self.numbering_style => {
+                Some(*number)
+            }
+            _ => None,
+        };
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
         self.redo_actions.clear();
-        self.sync_next_number();
+        if let Some(next_number) = next_number_after_remove {
+            self.next_number = next_number;
+        } else {
+            self.sync_next_number();
+        }
         true
     }
 
@@ -2326,7 +2413,7 @@ impl EditorState {
         self.selected_action_index = None;
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
-        self.next_number = 1;
+        self.next_number = self.numbering_start;
         self.crop_selection = None;
         self.clear_drag();
         self.mark_working_image_dirty();

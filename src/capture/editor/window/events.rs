@@ -15,6 +15,7 @@ use std::sync::{
 use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
+    numbering_style::{NumberSize, NumberingStyle},
     render::cursor_position_for_text_point,
     state::EditorState,
     types::{
@@ -95,6 +96,12 @@ pub(super) struct EventContext {
     pub obfuscate_method_list: gtk4::Box,
     pub pen_weight_button: Button,
     pub pen_weight_list: gtk4::Box,
+    pub number_options_list: gtk4::Box,
+    pub number_start_entry: gtk4::Entry,
+    pub number_inc_btn: Button,
+    pub number_dec_btn: Button,
+    pub number_size_button: Button,
+    pub number_size_list: gtk4::Box,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -156,6 +163,12 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         obfuscate_method_list,
         pen_weight_button,
         pen_weight_list,
+        number_options_list,
+        number_start_entry,
+        number_inc_btn,
+        number_dec_btn,
+        number_size_button,
+        number_size_list,
     } = ctx;
 
     let state_select = state.clone();
@@ -555,15 +568,27 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_number = sync_size_control.clone();
     let rebuild_effects_async_number = rebuild_effects_async.clone();
     number_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_number, 10);
-        if state_number
-            .lock()
-            .unwrap()
-            .set_tool_without_rebuild(Tool::Number)
-        {
+        let next_tool = {
+            let mut st = state_number.lock().unwrap();
+            if st.selected_tool == Tool::Number {
+                let r = st.set_tool_without_rebuild(Tool::Arrow);
+                (Tool::Arrow, r)
+            } else {
+                let r = st.set_tool_without_rebuild(Tool::Number);
+                (Tool::Number, r)
+            }
+        };
+        if next_tool.1 {
             rebuild_effects_async_number();
         }
-        update_toolbar_for_tool_number(Tool::Number);
+
+        if matches!(next_tool.0, Tool::Number) {
+            set_active_tool_button(&buttons_number, 10);
+        } else {
+            set_active_tool_button(&buttons_number, 6);
+        }
+
+        update_toolbar_for_tool_number(next_tool.0);
         sync_size_control_number();
         set_crop_apply_button_state(&apply_crop_btn_number, false, false);
         if let Some(area) = drawing_area_number.upgrade() {
@@ -734,6 +759,159 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 popover.downcast::<Popover>().unwrap().popdown();
             }
             if let Some(area) = drawing_area_obfuscate_method.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+
+    let refresh_number_start_display: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let number_start_entry = number_start_entry.clone();
+        move || {
+            let st = state.lock().unwrap();
+            number_start_entry.set_text(&st.numbering_style.format(st.numbering_start));
+        }
+    });
+
+    // Wire up number style options
+    let styles = NumberingStyle::ALL;
+    let state_number_style = state.clone();
+    let drawing_area_number_style = drawing_area.downgrade();
+    let refresh_number_start_display_style = refresh_number_start_display.clone();
+
+    let mut style_idx = 0usize;
+    let mut child_opt = number_options_list.first_child();
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        if !button
+            .css_classes()
+            .iter()
+            .any(|c| c == "editor-number-style-option")
+        {
+            continue;
+        }
+
+        let Some(&style) = styles.get(style_idx) else {
+            break;
+        };
+        style_idx += 1;
+
+        let state_style = state_number_style.clone();
+        let drawing_area_style = drawing_area_number_style.clone();
+        let refresh_display = refresh_number_start_display_style.clone();
+
+        button.connect_clicked(move |b| {
+            {
+                let mut st = state_style.lock().unwrap();
+                st.numbering_style = style;
+                st.next_number = st.numbering_start;
+            }
+
+            if let Some(list) = b.parent() {
+                let mut child = list.first_child();
+                while let Some(c) = child {
+                    child = c.next_sibling();
+                    if let Ok(btn) = c.downcast::<Button>() {
+                        if let Some(box_child) = btn.child() {
+                            if let Ok(hbox) = box_child.downcast::<GtkBox>() {
+                                if let Some(icon) = hbox.first_child() {
+                                    if let Ok(img) = icon.downcast::<Image>() {
+                                        img.set_visible(btn == *b);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            refresh_display();
+
+            if let Some(area) = drawing_area_style.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+
+    // Wire up start +/- controls
+    let refresh_number_start_display_inc = refresh_number_start_display.clone();
+    number_inc_btn.connect_clicked({
+        let state = state.clone();
+        move |_| {
+            {
+                let mut st = state.lock().unwrap();
+                st.numbering_start = st.numbering_start.saturating_add(1);
+                st.next_number = st.numbering_start;
+            }
+            refresh_number_start_display_inc();
+        }
+    });
+
+    let refresh_number_start_display_dec = refresh_number_start_display.clone();
+    number_dec_btn.connect_clicked({
+        let state = state.clone();
+        move |_| {
+            {
+                let mut st = state.lock().unwrap();
+                if st.numbering_start > 1 {
+                    st.numbering_start -= 1;
+                    st.next_number = st.numbering_start;
+                }
+            }
+            refresh_number_start_display_dec();
+        }
+    });
+
+    refresh_number_start_display();
+
+    // Wire up number size options
+    let sizes = NumberSize::ALL;
+
+    let state_number_size = state.clone();
+    let drawing_area_number_size = drawing_area.downgrade();
+
+    let mut size_idx = 0usize;
+    let mut child_opt = number_size_list.first_child();
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&size) = sizes.get(size_idx) else {
+            break;
+        };
+        size_idx += 1;
+
+        let state_size = state_number_size.clone();
+        let drawing_area_size = drawing_area_number_size.clone();
+        let number_size_btn = number_size_button.clone();
+
+        button.connect_clicked(move |b| {
+            {
+                let mut st = state_size.lock().unwrap();
+                st.number_size = size;
+            }
+
+            // Close the size popover
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+
+            // Also close the main number options popover
+            if let Some(parent) = number_size_btn.parent() {
+                if let Some(popover) = parent.ancestor(Popover::static_type()) {
+                    popover.downcast::<Popover>().unwrap().popdown();
+                }
+            }
+
+            if let Some(area) = drawing_area_size.upgrade() {
                 area.queue_draw();
             }
         });
