@@ -106,6 +106,7 @@ fn main() {
             "pin",
             "copy-regular",
             "cloud-arrow-up-regular",
+            "number-circle-1-regular",
         ],
     );
 }
