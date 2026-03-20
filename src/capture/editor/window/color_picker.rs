@@ -49,7 +49,6 @@ pub fn build_color_picker(
     canvas_queue_draw_signal: Rc<dyn Fn()>,
     drawing_area: Rc<RefCell<Option<glib::object::WeakRef<DrawingArea>>>>,
 ) -> ColorPickerParts {
-
     // Color specs
     let color_specs = [
         ("Black", "editor-color-black"),
@@ -641,10 +640,7 @@ pub fn build_color_picker(
                     st.selected_color = color;
                     let _ = st.set_selected_action_color(color);
                 } else {
-                    let changed_selected = st.set_selected_action_color(color);
-                    if !changed_selected {
-                        st.selected_color = color;
-                    }
+                    st.selected_color = color;
                 }
                 has_active_text
             };

@@ -2,7 +2,6 @@ use super::types::{DrawColor, PersistedCustomColor, PersistedCustomColorSlots};
 use std::path::PathBuf;
 
 pub const STROKE_WIDTH: f64 = 12.0;
-pub const HIGHLIGHTER_STROKE_WIDTH: f64 = 11.0;
 pub const HIGHLIGHTER_ALPHA_SCALE: f64 = 0.42;
 pub const MIN_STROKE_SIZE: f64 = 1.0;
 pub const MAX_STROKE_SIZE: f64 = 24.0;
@@ -84,8 +83,7 @@ pub fn clamp_blur_smooth_amount(amount: f64) -> f64 {
 }
 
 pub fn highlighter_stroke_width(stroke_size: f64) -> f64 {
-    let base = clamp_stroke_size(stroke_size);
-    base * (HIGHLIGHTER_STROKE_WIDTH / STROKE_WIDTH)
+    stroke_size.max(1.0)
 }
 
 pub fn draw_color_to_rgba_u8(color: DrawColor) -> (u8, u8, u8, u8) {

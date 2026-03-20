@@ -488,10 +488,7 @@ impl TextEditBounds {
                 width: width.round().max(1.0) as i32,
                 height: height.round().max(1.0) as i32,
             },
-            move_handles: vec![
-                (MoveHandle::Left, position),
-                (MoveHandle::Right, position),
-            ],
+            move_handles: vec![(MoveHandle::Left, position), (MoveHandle::Right, position)],
             resize_handle: Some((ResizeHandle::BottomRight, position)),
         };
         bounds.sync_handles();
