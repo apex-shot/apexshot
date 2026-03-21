@@ -1631,6 +1631,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         number_dec_btn: number_dec_btn.clone(),
         number_size_button: number_size_button.clone(),
         number_size_list: number_size_list.clone(),
+        arrow_style_button: arrow_style_button.clone(),
+        arrow_style_list: arrow_style_list.clone(),
     });
 
     window.present();
