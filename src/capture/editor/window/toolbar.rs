@@ -234,7 +234,7 @@ fn build_pen_weight_dropdown() -> (GtkBox, Button, Popover, GtkBox) {
     pen_weight_button.set_focusable(false);
     pen_weight_button.add_css_class("editor-tool-button");
     pen_weight_button.add_css_class("flat");
-    pen_weight_button.set_tooltip_text(Some("Highlighter Thickness"));
+    pen_weight_button.set_tooltip_text(Some("Stroke Thickness"));
 
     let pen_weight_icon = Image::from_icon_name(PenWeight::Medium.icon_name());
     pen_weight_icon.set_pixel_size(PenWeight::Medium.icon_pixel_size());
@@ -277,7 +277,7 @@ fn build_number_options_dropdown() -> (
     Popover,
     GtkBox,
 ) {
-    use super::super::numbering_style::{NumberingStyle, NumberSize};
+    use super::super::numbering_style::{NumberSize, NumberingStyle};
 
     let number_options_group = GtkBox::new(Orientation::Horizontal, 4);
     number_options_group.add_css_class("editor-number-options-group");
@@ -335,7 +335,11 @@ fn build_number_options_dropdown() -> (
 
         let btn = Button::builder()
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat", "editor-number-style-option"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-number-style-option",
+            ])
             .child(&btn_box)
             .build();
         number_options_list.append(&btn);
@@ -416,7 +420,11 @@ fn build_number_options_dropdown() -> (
         let btn = Button::builder()
             .label(size.label())
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat", "editor-number-size-option"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-number-size-option",
+            ])
             .build();
         number_size_list.append(&btn);
     }
@@ -950,7 +958,8 @@ pub(super) fn build_toolbar_tool_updater(
         obfuscate_method_group.set_visible(is_obfuscate_tool);
 
         let is_highlighter_tool = matches!(tool, Tool::Highlighter);
-        pen_weight_group.set_visible(is_highlighter_tool);
+        let is_pen_tool = matches!(tool, Tool::Pen);
+        pen_weight_group.set_visible(is_highlighter_tool || is_pen_tool);
 
         let is_number_tool = matches!(tool, Tool::Number);
         number_options_group.set_visible(is_number_tool);

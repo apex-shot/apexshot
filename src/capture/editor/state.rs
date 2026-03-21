@@ -4,7 +4,7 @@ use super::color::{
     selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX,
     DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
 };
-use super::numbering_style::{NumberingStyle, NumberSize};
+use super::numbering_style::{NumberSize, NumberingStyle};
 use super::pen_weight::{HighlighterMode, PenWeight};
 use super::render::{
     apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_blur,
@@ -1420,7 +1420,9 @@ impl EditorState {
     pub fn undo_without_rebuild(&mut self) -> bool {
         if let Some(action) = self.actions.pop() {
             let next_number_after_undo = match &action {
-                AnnotationAction::Number { number, style, .. } if *style == self.numbering_style => {
+                AnnotationAction::Number { number, style, .. }
+                    if *style == self.numbering_style =>
+                {
                     Some(*number)
                 }
                 _ => None,
@@ -1458,7 +1460,9 @@ impl EditorState {
     pub fn redo_without_rebuild(&mut self) -> bool {
         if let Some(action) = self.redo_actions.pop() {
             let next_number_after_redo = match &action {
-                AnnotationAction::Number { number, style, .. } if *style == self.numbering_style => {
+                AnnotationAction::Number { number, style, .. }
+                    if *style == self.numbering_style =>
+                {
                     Some(number.saturating_add(1))
                 }
                 _ => None,
@@ -2180,7 +2184,7 @@ impl EditorState {
                     Some(AnnotationAction::Pen {
                         points: self.drag_path.clone(),
                         color,
-                        stroke_size,
+                        stroke_size: self.pen_weight.stroke_width(),
                     })
                 } else {
                     None
@@ -2290,9 +2294,9 @@ impl EditorState {
         if matches!(self.selected_tool, Tool::Pen | Tool::Highlighter) {
             let mut points = std::mem::take(&mut self.drag_path);
             let color = self.selected_color;
-            let stroke_size = self.stroke_size;
             let tool = self.selected_tool;
             let shift_active = self.drag_shift_active;
+            let pen_stroke_size = self.pen_weight.stroke_width();
             let highlighter_stroke_size = if tool == Tool::Highlighter {
                 Some(self.current_highlighter_stroke_size())
             } else {
@@ -2304,7 +2308,7 @@ impl EditorState {
                     Tool::Pen => Some(AnnotationAction::Pen {
                         points,
                         color,
-                        stroke_size,
+                        stroke_size: pen_stroke_size,
                     }),
                     Tool::Highlighter => {
                         if shift_active {
@@ -2319,8 +2323,8 @@ impl EditorState {
                             points = vec![first, constrained_last];
                         }
 
-                        let stroke_size =
-                            highlighter_stroke_size.unwrap_or_else(|| self.pen_weight.stroke_width());
+                        let stroke_size = highlighter_stroke_size
+                            .unwrap_or_else(|| self.pen_weight.stroke_width());
 
                         if points.len() >= 2
                             && ((points[0].x - points[1].x).abs() > 0.1
