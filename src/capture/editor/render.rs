@@ -427,6 +427,117 @@ pub fn draw_crop_overlay(
     let _ = context.restore();
 }
 
+fn selection_outline_stroke_width(view_scale: f64) -> f64 {
+    TEXT_EDIT_BORDER_WIDTH / view_scale.max(0.01)
+}
+
+fn arrow_head_geometry(
+    start: Point,
+    end: Point,
+    stroke_size: f64,
+    style: ArrowStyle,
+    control_points: Option<[Point; 3]>,
+) -> Option<(f64, f64, f64)> {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    if dx.abs() < 0.1 && dy.abs() < 0.1 {
+        return None;
+    }
+
+    let angle = dy.atan2(dx);
+    let line_length = (dx * dx + dy * dy).sqrt().max(1.0);
+    let head_length = (stroke_size.max(0.5) * 4.8)
+        .clamp(12.0, 120.0)
+        .min((line_length * 0.75).max(8.0));
+    let spread = match style {
+        ArrowStyle::Fancy => 0.3,
+        _ => 0.55,
+    };
+    let end_angle = match (style, control_points) {
+        (ArrowStyle::Curved | ArrowStyle::Double, Some([_s, mid, _e])) => {
+            (end.y - mid.y).atan2(end.x - mid.x)
+        }
+        _ => angle,
+    };
+
+    Some((end_angle, head_length, spread))
+}
+
+pub fn draw_arrow_selection_outline(
+    context: &gtk4::cairo::Context,
+    start: Point,
+    end: Point,
+    stroke_size: f64,
+    style: ArrowStyle,
+    control_points: Option<[Point; 3]>,
+    view_scale: f64,
+) {
+    let Some((end_angle, head_length, spread)) =
+        arrow_head_geometry(start, end, stroke_size, style, control_points)
+    else {
+        return;
+    };
+
+    let _ = context.save();
+    context.set_source_rgba(
+        TEXT_EDIT_BORDER_COLOR.0,
+        TEXT_EDIT_BORDER_COLOR.1,
+        TEXT_EDIT_BORDER_COLOR.2,
+        1.0,
+    );
+    context.set_line_width(selection_outline_stroke_width(view_scale));
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    context.set_dash(&[], 0.0);
+
+    match style {
+        ArrowStyle::Curved | ArrowStyle::Double => {
+            if let Some([_s, mid, _e]) = control_points {
+                context.move_to(start.x, start.y);
+                context.curve_to(mid.x, mid.y, mid.x, mid.y, end.x, end.y);
+            } else {
+                context.move_to(start.x, start.y);
+                context.line_to(end.x, end.y);
+            }
+        }
+        _ => {
+            context.move_to(start.x, start.y);
+            context.line_to(end.x, end.y);
+        }
+    }
+    let _ = context.stroke();
+
+    let left_x = end.x - head_length * (end_angle - spread).cos();
+    let left_y = end.y - head_length * (end_angle - spread).sin();
+    let right_x = end.x - head_length * (end_angle + spread).cos();
+    let right_y = end.y - head_length * (end_angle + spread).sin();
+    context.new_path();
+    context.move_to(end.x, end.y);
+    context.line_to(left_x, left_y);
+    context.move_to(end.x, end.y);
+    context.line_to(right_x, right_y);
+    let _ = context.stroke();
+
+    if matches!(style, ArrowStyle::Double) {
+        let start_angle = match control_points {
+            Some([_s, mid, _e]) => (start.y - mid.y).atan2(start.x - mid.x) + std::f64::consts::PI,
+            None => (start.y - end.y).atan2(start.x - end.x),
+        };
+        let left_x = start.x - head_length * (start_angle - spread).cos();
+        let left_y = start.y - head_length * (start_angle - spread).sin();
+        let right_x = start.x - head_length * (start_angle + spread).cos();
+        let right_y = start.y - head_length * (start_angle + spread).sin();
+        context.new_path();
+        context.move_to(start.x, start.y);
+        context.line_to(left_x, left_y);
+        context.move_to(start.x, start.y);
+        context.line_to(right_x, right_y);
+        let _ = context.stroke();
+    }
+
+    let _ = context.restore();
+}
+
 pub fn draw_selection_outline(context: &gtk4::cairo::Context, rect: Rect, view_scale: f64) {
     let scale = view_scale.max(0.01);
     let width = rect.width.max(1) as f64;
@@ -444,7 +555,7 @@ pub fn draw_selection_outline(context: &gtk4::cairo::Context, rect: Rect, view_s
         TEXT_EDIT_BORDER_COLOR.2,
         1.0,
     );
-    context.set_line_width(2.0 / scale);
+    context.set_line_width(selection_outline_stroke_width(scale));
     context.set_dash(&[], 0.0);
 
     context.new_path();
@@ -819,6 +930,485 @@ fn draw_arrow_head(
     let _ = context.fill();
 }
 
+fn bezier_point(p0: Point, p1: Point, p2: Point, t: f64) -> Point {
+    let u = 1.0 - t;
+    Point {
+        x: u * u * p0.x + 2.0 * u * t * p1.x + t * t * p2.x,
+        y: u * u * p0.y + 2.0 * u * t * p1.y + t * t * p2.y,
+    }
+}
+
+fn bezier_tangent(p0: Point, p1: Point, p2: Point, t: f64) -> (f64, f64) {
+    let u = 1.0 - t;
+    let dx = 2.0 * u * (p1.x - p0.x) + 2.0 * t * (p2.x - p1.x);
+    let dy = 2.0 * u * (p1.y - p0.y) + 2.0 * t * (p2.y - p1.y);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.0001 {
+        (0.0, 0.0)
+    } else {
+        (dx / len, dy / len)
+    }
+}
+
+fn draw_thorn_arrow(
+    context: &gtk4::cairo::Context,
+    start: Point,
+    end: Point,
+    color: DrawColor,
+    stroke_size: f64,
+    is_smooth: bool,
+    control_points: Option<[Point; 3]>,
+) {
+    // Handle both straight and curved logic
+    let is_curved = control_points.is_some();
+    let p0 = start;
+    let p2 = end;
+    let p1 = control_points.map(|c| c[1]).unwrap_or_else(|| Point {
+        x: (start.x + end.x) / 2.0,
+        y: (start.y + end.y) / 2.0,
+    });
+
+    let mut line_length = 0.0;
+    if is_curved {
+        let mut prev = p0;
+        for i in 1..=20 {
+            let t = i as f64 / 20.0;
+            let pt = bezier_point(p0, p1, p2, t);
+            let dx = pt.x - prev.x;
+            let dy = pt.y - prev.y;
+            line_length += (dx * dx + dy * dy).sqrt();
+            prev = pt;
+        }
+    } else {
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+        line_length = (dx * dx + dy * dy).sqrt();
+    }
+
+    if line_length < 0.1 {
+        return;
+    }
+
+    let stroke = stroke_size.max(0.5);
+    let w = stroke * 3.0 + 3.0;
+    let h = (stroke * 6.0 + 10.0)
+        .clamp(12.0, 120.0)
+        .min((line_length * 0.75).max(8.0));
+    let w_h = h * 1.15;
+    let s = h * 0.35;
+
+    let t_neck = if is_curved {
+        let mut best_t = 0.0;
+        for i in (0..=100).rev() {
+            let t = i as f64 / 100.0;
+            let pt = bezier_point(p0, p1, p2, t);
+            let dist = ((p2.x - pt.x) * (p2.x - pt.x) + (p2.y - pt.y) * (p2.y - pt.y)).sqrt();
+            if dist >= h {
+                best_t = t;
+                break;
+            }
+        }
+        best_t
+    } else {
+        1.0 - (h / line_length).min(1.0)
+    };
+
+    let (vx, vy) = if is_curved {
+        bezier_tangent(p0, p1, p2, 1.0)
+    } else {
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+        (dx / line_length, dy / line_length)
+    };
+    let nx = -vy;
+    let ny = vx;
+
+    let neck_pt = if is_curved {
+        bezier_point(p0, p1, p2, t_neck)
+    } else {
+        Point {
+            x: end.x - vx * h,
+            y: end.y - vy * h,
+        }
+    };
+
+    let wing_center_x = neck_pt.x - vx * s;
+    let wing_center_y = neck_pt.y - vy * s;
+
+    let right_wing_x = wing_center_x + nx * (w_h / 2.0);
+    let right_wing_y = wing_center_y + ny * (w_h / 2.0);
+
+    let left_wing_x = wing_center_x - nx * (w_h / 2.0);
+    let left_wing_y = wing_center_y - ny * (w_h / 2.0);
+
+    let (tail_vx, tail_vy) = if is_curved {
+        bezier_tangent(p0, p1, p2, 0.0)
+    } else {
+        (vx, vy)
+    };
+    let tail_angle = tail_vy.atan2(tail_vx);
+
+    context.new_path();
+
+    if is_curved {
+        let steps = 20;
+        let mut left_body = Vec::new();
+        let mut right_body = Vec::new();
+
+        for i in 0..=steps {
+            let t = (i as f64 / steps as f64) * t_neck;
+            let pt = bezier_point(p0, p1, p2, t);
+            let (tvx, tvy) = bezier_tangent(p0, p1, p2, t);
+            let tnx = -tvy;
+            let tny = tvx;
+
+            let current_w = w * (t / t_neck);
+
+            left_body.push(Point {
+                x: pt.x - tnx * current_w / 2.0,
+                y: pt.y - tny * current_w / 2.0,
+            });
+            right_body.push(Point {
+                x: pt.x + tnx * current_w / 2.0,
+                y: pt.y + tny * current_w / 2.0,
+            });
+        }
+
+        if let Some(last_right) = right_body.last() {
+            context.move_to(last_right.x, last_right.y);
+        }
+
+        for pt in right_body.iter().rev().skip(1) {
+            context.line_to(pt.x, pt.y);
+        }
+
+        if is_smooth {
+            let tail_r = (stroke * 0.5).max(1.0);
+            let tail_cx = p0.x + tail_vx * tail_r;
+            let tail_cy = p0.y + tail_vy * tail_r;
+            context.arc(
+                tail_cx,
+                tail_cy,
+                tail_r,
+                tail_angle + std::f64::consts::FRAC_PI_2,
+                tail_angle + 3.0 * std::f64::consts::FRAC_PI_2,
+            );
+        } else {
+            context.line_to(p0.x, p0.y);
+        }
+
+        for pt in left_body.iter().skip(1) {
+            context.line_to(pt.x, pt.y);
+        }
+    } else {
+        let right_neck_x = neck_pt.x + nx * (w / 2.0);
+        let right_neck_y = neck_pt.y + ny * (w / 2.0);
+
+        let left_neck_x = neck_pt.x - nx * (w / 2.0);
+        let left_neck_y = neck_pt.y - ny * (w / 2.0);
+
+        context.move_to(right_neck_x, right_neck_y);
+
+        if is_smooth {
+            let tail_r = (stroke * 0.5).max(1.0);
+            let tail_cx = p0.x + tail_vx * tail_r;
+            let tail_cy = p0.y + tail_vy * tail_r;
+            context.arc(
+                tail_cx,
+                tail_cy,
+                tail_r,
+                tail_angle + std::f64::consts::FRAC_PI_2,
+                tail_angle + 3.0 * std::f64::consts::FRAC_PI_2,
+            );
+        } else {
+            context.line_to(p0.x, p0.y);
+        }
+
+        context.line_to(left_neck_x, left_neck_y);
+    }
+
+    context.line_to(left_wing_x, left_wing_y);
+
+    if is_smooth {
+        let head_r = (stroke * 0.4).max(1.0);
+        let head_cx = end.x - vx * head_r;
+        let head_cy = end.y - vy * head_r;
+
+        let left_dx = head_cx - left_wing_x;
+        let left_dy = head_cy - left_wing_y;
+        let left_angle = left_dy.atan2(left_dx) - std::f64::consts::FRAC_PI_2;
+
+        let right_dx = head_cx - right_wing_x;
+        let right_dy = head_cy - right_wing_y;
+        let right_angle = right_dy.atan2(right_dx) + std::f64::consts::FRAC_PI_2;
+
+        context.arc(head_cx, head_cy, head_r, left_angle, right_angle);
+    } else {
+        context.line_to(end.x, end.y);
+    }
+
+    context.line_to(right_wing_x, right_wing_y);
+    context.close_path();
+
+    // Drop shadow
+    let shadow_offset = (stroke * 0.4).clamp(1.5, 4.0);
+    let _ = context.save();
+    context.translate(shadow_offset, shadow_offset + 1.0);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.35 * color.a);
+    let _ = context.fill_preserve();
+    let _ = context.restore();
+
+    // Fill
+    context.set_source_rgba(color.r, color.g, color.b, color.a);
+    let _ = context.fill_preserve();
+
+    // Outline
+    context.set_source_rgba(0.1, 0.1, 0.1, color.a); // Dark outline
+    context.set_line_width(stroke * 0.2 + 1.0);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    let _ = context.stroke();
+}
+
+fn draw_double_arrow(
+    context: &gtk4::cairo::Context,
+    start: Point,
+    end: Point,
+    color: DrawColor,
+    stroke_size: f64,
+    control_points: Option<[Point; 3]>,
+) {
+    let is_curved = control_points.is_some();
+    let p0 = start;
+    let p2 = end;
+    let p1 = control_points.map(|c| c[1]).unwrap_or_else(|| Point {
+        x: (start.x + end.x) / 2.0,
+        y: (start.y + end.y) / 2.0,
+    });
+
+    let mut line_length = 0.0;
+    if is_curved {
+        let mut prev = p0;
+        for i in 1..=20 {
+            let t = i as f64 / 20.0;
+            let pt = bezier_point(p0, p1, p2, t);
+            let dx = pt.x - prev.x;
+            let dy = pt.y - prev.y;
+            line_length += (dx * dx + dy * dy).sqrt();
+            prev = pt;
+        }
+    } else {
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+        line_length = (dx * dx + dy * dy).sqrt();
+    }
+
+    if line_length < 0.1 {
+        return;
+    }
+
+    let stroke = stroke_size.max(0.5);
+    let w = stroke * 3.0 + 3.0;
+    // Cap h at 40% of line length so both heads fit comfortably
+    let h = (stroke * 6.0 + 10.0)
+        .clamp(12.0, 120.0)
+        .min((line_length * 0.4).max(8.0));
+    let w_h = h * 1.15;
+    let s = h * 0.35;
+
+    let (t_neck_start, t_neck_end) = if is_curved {
+        let mut t_end = 0.0;
+        for i in (0..=100).rev() {
+            let t = i as f64 / 100.0;
+            let pt = bezier_point(p0, p1, p2, t);
+            let dist = ((p2.x - pt.x) * (p2.x - pt.x) + (p2.y - pt.y) * (p2.y - pt.y)).sqrt();
+            if dist >= h {
+                t_end = t;
+                break;
+            }
+        }
+        let mut t_start = 0.0;
+        for i in 0..=100 {
+            let t = i as f64 / 100.0;
+            let pt = bezier_point(p0, p1, p2, t);
+            let dist = ((p0.x - pt.x) * (p0.x - pt.x) + (p0.y - pt.y) * (p0.y - pt.y)).sqrt();
+            if dist >= h {
+                t_start = t;
+                break;
+            }
+        }
+        (t_start, t_end)
+    } else {
+        ((h / line_length).min(0.5), (1.0 - h / line_length).max(0.5))
+    };
+
+    // --- END HEAD ---
+    let (vx_e, vy_e) = if is_curved {
+        bezier_tangent(p0, p1, p2, 1.0)
+    } else {
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+        (dx / line_length, dy / line_length)
+    };
+    let nx_e = -vy_e;
+    let ny_e = vx_e;
+
+    let neck_pt_e = if is_curved {
+        bezier_point(p0, p1, p2, t_neck_end)
+    } else {
+        Point {
+            x: end.x - vx_e * h,
+            y: end.y - vy_e * h,
+        }
+    };
+
+    let wing_ce_x = neck_pt_e.x - vx_e * s;
+    let wing_ce_y = neck_pt_e.y - vy_e * s;
+
+    let right_wing_e = Point {
+        x: wing_ce_x + nx_e * (w_h / 2.0),
+        y: wing_ce_y + ny_e * (w_h / 2.0),
+    };
+    let left_wing_e = Point {
+        x: wing_ce_x - nx_e * (w_h / 2.0),
+        y: wing_ce_y - ny_e * (w_h / 2.0),
+    };
+
+    // --- START HEAD ---
+    let (vx_s, vy_s) = if is_curved {
+        bezier_tangent(p0, p1, p2, 0.0)
+    } else {
+        (vx_e, vy_e)
+    };
+    let nx_s = -vy_s;
+    let ny_s = vx_s;
+
+    let neck_pt_s = if is_curved {
+        bezier_point(p0, p1, p2, t_neck_start)
+    } else {
+        Point {
+            x: start.x + vx_s * h,
+            y: start.y + vy_s * h,
+        }
+    };
+
+    let wing_cs_x = neck_pt_s.x + vx_s * s;
+    let wing_cs_y = neck_pt_s.y + vy_s * s;
+
+    let left_wing_s = Point {
+        x: wing_cs_x - nx_s * (w_h / 2.0),
+        y: wing_cs_y - ny_s * (w_h / 2.0),
+    };
+    let right_wing_s = Point {
+        x: wing_cs_x + nx_s * (w_h / 2.0),
+        y: wing_cs_y + ny_s * (w_h / 2.0),
+    };
+
+    context.new_path();
+
+    let mut left_body = Vec::new();
+    let mut right_body = Vec::new();
+
+    let steps = 20;
+    for i in 0..=steps {
+        let t = t_neck_start + (i as f64 / steps as f64) * (t_neck_end - t_neck_start);
+
+        let (pt, tvx, tvy) = if is_curved {
+            (
+                bezier_point(p0, p1, p2, t),
+                bezier_tangent(p0, p1, p2, t).0,
+                bezier_tangent(p0, p1, p2, t).1,
+            )
+        } else {
+            (
+                Point {
+                    x: p0.x + vx_s * (h + (line_length - 2.0 * h) * (i as f64 / steps as f64)),
+                    y: p0.y + vy_s * (h + (line_length - 2.0 * h) * (i as f64 / steps as f64)),
+                },
+                vx_s,
+                vy_s,
+            )
+        };
+
+        let tnx = -tvy;
+        let tny = tvx;
+
+        left_body.push(Point {
+            x: pt.x - tnx * (w / 2.0),
+            y: pt.y - tny * (w / 2.0),
+        });
+        right_body.push(Point {
+            x: pt.x + tnx * (w / 2.0),
+            y: pt.y + tny * (w / 2.0),
+        });
+    }
+
+    if let Some(first_right) = right_body.first() {
+        context.move_to(first_right.x, first_right.y);
+    }
+    for pt in right_body.iter().skip(1) {
+        context.line_to(pt.x, pt.y);
+    }
+
+    context.line_to(right_wing_e.x, right_wing_e.y);
+
+    let head_r = (stroke * 0.4).max(1.0);
+
+    // End head arc
+    let head_cx_e = p2.x - vx_e * head_r;
+    let head_cy_e = p2.y - vy_e * head_r;
+    let left_dx_e = head_cx_e - left_wing_e.x;
+    let left_dy_e = head_cy_e - left_wing_e.y;
+    let left_angle_e = left_dy_e.atan2(left_dx_e) - std::f64::consts::FRAC_PI_2;
+    let right_dx_e = head_cx_e - right_wing_e.x;
+    let right_dy_e = head_cy_e - right_wing_e.y;
+    let right_angle_e = right_dy_e.atan2(right_dx_e) + std::f64::consts::FRAC_PI_2;
+
+    context.arc(head_cx_e, head_cy_e, head_r, left_angle_e, right_angle_e);
+
+    context.line_to(left_wing_e.x, left_wing_e.y);
+
+    for pt in left_body.iter().rev() {
+        context.line_to(pt.x, pt.y);
+    }
+
+    context.line_to(left_wing_s.x, left_wing_s.y);
+
+    // Start head arc
+    let head_cx_s = p0.x + vx_s * head_r;
+    let head_cy_s = p0.y + vy_s * head_r;
+
+    let left_dx_s = head_cx_s - left_wing_s.x;
+    let left_dy_s = head_cy_s - left_wing_s.y;
+    let left_angle_s = left_dy_s.atan2(left_dx_s) + std::f64::consts::FRAC_PI_2;
+
+    let right_dx_s = head_cx_s - right_wing_s.x;
+    let right_dy_s = head_cy_s - right_wing_s.y;
+    let right_angle_s = right_dy_s.atan2(right_dx_s) - std::f64::consts::FRAC_PI_2;
+
+    context.arc(head_cx_s, head_cy_s, head_r, left_angle_s, right_angle_s);
+
+    context.line_to(right_wing_s.x, right_wing_s.y);
+    context.close_path();
+
+    // Drop shadow
+    let shadow_offset = (stroke * 0.4).clamp(1.5, 4.0);
+    let _ = context.save();
+    context.translate(shadow_offset, shadow_offset + 1.0);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.35 * color.a);
+    let _ = context.fill_preserve();
+    let _ = context.restore();
+
+    // Fill
+    context.set_source_rgba(color.r, color.g, color.b, color.a);
+    let _ = context.fill_preserve();
+
+    // Outline
+    context.set_source_rgba(0.1, 0.1, 0.1, color.a); // Dark outline
+    context.set_line_width(stroke * 0.2 + 1.0);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    let _ = context.stroke();
+}
+
 pub fn draw_arrow(
     context: &gtk4::cairo::Context,
     start: Point,
@@ -828,6 +1418,27 @@ pub fn draw_arrow(
     style: ArrowStyle,
     control_points: Option<[Point; 3]>,
 ) {
+    if matches!(
+        style,
+        ArrowStyle::Fancy | ArrowStyle::Standard | ArrowStyle::Curved | ArrowStyle::Double
+    ) {
+        if matches!(style, ArrowStyle::Double) {
+            draw_double_arrow(context, start, end, color, stroke_size, control_points);
+        } else {
+            let is_smooth = matches!(style, ArrowStyle::Standard | ArrowStyle::Curved);
+            draw_thorn_arrow(
+                context,
+                start,
+                end,
+                color,
+                stroke_size,
+                is_smooth,
+                control_points,
+            );
+        }
+        return;
+    }
+
     let stroke = stroke_size.max(0.5);
     context.set_source_rgba(color.r, color.g, color.b, color.a);
     context.set_line_width(stroke + 0.6);
