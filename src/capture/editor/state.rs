@@ -356,6 +356,9 @@ impl EditorState {
             self.cancel_text_input();
             self.hovered_text_action_index = None;
         }
+        if tool != Tool::Arrow {
+            self.finalize_arrow_control_editing();
+        }
         self.selected_tool = tool;
         self.clear_drag_without_rebuild_and_check_effect()
     }
