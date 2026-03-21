@@ -19,8 +19,8 @@ use super::super::{
     render::cursor_position_for_text_point,
     state::EditorState,
     types::{
-        tool_shortcut_target, BackgroundStyle, DrawColor, FontSettings, FontStyle, MoveHandle,
-        ObfuscateMethod, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
+        tool_shortcut_target, ArrowStyle, BackgroundStyle, DrawColor, FontSettings, FontStyle,
+        MoveHandle, ObfuscateMethod, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
     },
     ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
@@ -102,6 +102,8 @@ pub(super) struct EventContext {
     pub number_dec_btn: Button,
     pub number_size_button: Button,
     pub number_size_list: gtk4::Box,
+    pub arrow_style_button: Button,
+    pub arrow_style_list: gtk4::Box,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -169,6 +171,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         number_dec_btn,
         number_size_button,
         number_size_list,
+        arrow_style_button,
+        arrow_style_list,
     } = ctx;
 
     let state_select = state.clone();
@@ -776,6 +780,51 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 popover.downcast::<Popover>().unwrap().popdown();
             }
             if let Some(area) = drawing_area_obfuscate_method.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+
+    // Wire up arrow style list items
+    let styles = ArrowStyle::ALL;
+
+    let arrow_style_button = arrow_style_button.clone();
+
+    let mut style_idx = 0usize;
+    let mut child_opt = arrow_style_list.first_child();
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&style) = styles.get(style_idx) else {
+            break;
+        };
+        style_idx += 1;
+
+        let state_arrow_style = state.clone();
+        let drawing_area_arrow_style = drawing_area.downgrade();
+        let arrow_style_button = arrow_style_button.clone();
+
+        button.connect_clicked(move |b| {
+            {
+                let mut st = state_arrow_style.lock().unwrap();
+                st.set_arrow_style(style);
+            }
+
+            // Update the trigger button icon
+            if let Some(child) = arrow_style_button.child() {
+                if let Ok(img) = child.downcast::<Image>() {
+                    img.set_icon_name(Some(style.icon_name()));
+                }
+            }
+
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+            if let Some(area) = drawing_area_arrow_style.upgrade() {
                 area.queue_draw();
             }
         });
