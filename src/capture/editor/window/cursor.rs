@@ -14,6 +14,9 @@ use super::super::types::{
 /// Default highlighter cursor size (when no text detected)
 pub const DEFAULT_HIGHLIGHTER_CURSOR_SIZE: f64 = 16.0;
 
+/// Default pen cursor size
+pub const DEFAULT_PEN_CURSOR_SIZE: f64 = 8.0;
+
 /// Cursor width ratio relative to height
 const CURSOR_WIDTH_RATIO: f64 = 1.5;
 
@@ -206,6 +209,66 @@ pub fn create_highlighter_cursor_surface(
     let _ = context.stroke();
 
     Some(surface)
+}
+
+/// Create a circular pen cursor surface
+pub fn create_pen_cursor_surface(
+    size: f64,
+    _color: (f64, f64, f64, f64),
+) -> Option<gtk4::cairo::ImageSurface> {
+    let size = clamp_cursor_size(size);
+
+    let pad = 6.0;
+    let surface_size = (size + pad * 2.0).ceil() as i32;
+
+    let surface =
+        gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, surface_size, surface_size)
+            .ok()?;
+
+    let context = gtk4::cairo::Context::new(&surface).ok()?;
+
+    let center = pad + size / 2.0;
+    let radius = size / 2.0;
+
+    // White outline (wider stroke behind)
+    context.arc(center, center, radius, 0.0, std::f64::consts::TAU);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    context.set_line_width(3.5);
+    context.stroke().ok()?;
+
+    // Black circle on top
+    context.arc(center, center, radius, 0.0, std::f64::consts::TAU);
+    context.set_source_rgba(0.0, 0.0, 0.0, 1.0);
+    context.set_line_width(1.5);
+    context.stroke().ok()?;
+
+    Some(surface)
+}
+
+/// Set custom pen cursor on window
+pub fn set_pen_cursor(window: &gtk4::ApplicationWindow, size: f64, color: (f64, f64, f64, f64)) {
+    if let Some(surface) = create_pen_cursor_surface(size, color) {
+        if let Some(texture) = surface_to_texture(surface) {
+            let pad = 6.0;
+            let hotspot = (pad + size / 2.0) as i32;
+            let cursor = Cursor::from_texture(&texture, hotspot, hotspot, None);
+            if let Some(surface) = window.surface() {
+                surface.set_cursor(Some(&cursor));
+            }
+        }
+    }
+}
+
+/// Update cursor for pen tool based on position and state.
+pub fn update_pen_cursor(window: &gtk4::ApplicationWindow, state: &EditorState) {
+    let color = (
+        state.selected_color.r,
+        state.selected_color.g,
+        state.selected_color.b,
+        1.0,
+    );
+
+    set_pen_cursor(window, state.pen_weight.stroke_width(), color)
 }
 
 /// Set custom highlighter cursor on window

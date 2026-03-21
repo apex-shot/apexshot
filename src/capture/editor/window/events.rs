@@ -304,6 +304,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let update_toolbar_for_tool_draw_mode = update_toolbar_for_tool.clone();
     let sync_size_control_draw = sync_size_control.clone();
     let rebuild_effects_async_draw = rebuild_effects_async.clone();
+    let window_draw = window.clone();
     draw_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_draw_mode, 3);
         if state_draw_mode
@@ -316,6 +317,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         update_toolbar_for_tool_draw_mode(Tool::Pen);
         sync_size_control_draw();
         set_crop_apply_button_state(&apply_crop_btn_draw_mode, false, false);
+        {
+            let st = state_draw_mode.lock().unwrap();
+            super::cursor::update_pen_cursor(&window_draw, &st);
+        }
         if let Some(area) = drawing_area_draw_mode.upgrade() {
             area.queue_draw();
         }
@@ -654,6 +659,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
     let pen_weight_button_for_closure = pen_weight_button.clone();
     let drawing_area_for_weight = drawing_area.downgrade();
+    let window_pen_weight = window.clone();
 
     let mut weight_idx = 0usize;
     let mut child_opt = pen_weight_list.first_child();
@@ -673,12 +679,23 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let state_for_weight = state.clone();
         let drawing_area_weight = drawing_area_for_weight.clone();
         let pen_weight_button_clone = pen_weight_button_for_closure.clone();
+        let window_for_weight = window_pen_weight.clone();
 
         button.connect_clicked(move |b| {
             {
                 let mut st = state_for_weight.lock().unwrap();
                 st.set_pen_weight(weight);
-                st.set_highlighter_mode(HighlighterMode::Freehand);
+                let is_highlighter = st.selected_tool == Tool::Highlighter;
+                let is_pen = st.selected_tool == Tool::Pen;
+                if is_highlighter {
+                    st.set_highlighter_mode(HighlighterMode::Freehand);
+                }
+                drop(st);
+
+                if is_pen || is_highlighter {
+                    let st = state_for_weight.lock().unwrap();
+                    super::cursor::update_pen_cursor(&window_for_weight, &st);
+                }
             }
 
             let icon = gtk4::Image::from_icon_name(weight.icon_name());
@@ -1987,6 +2004,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             st.selected_tool == Tool::Highlighter
         };
 
+        let is_pen = {
+            let st = state_motion.lock().unwrap();
+            st.selected_tool == Tool::Pen
+        };
+
         if is_highlighter {
             if let Some(window) = window_motion.upgrade() {
                 if !t.contains_view(view_point) {
@@ -1995,6 +2017,15 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     let st = state_motion.lock().unwrap();
                     let image_point = t.view_to_image_clamped(view_point);
                     super::cursor::update_cursor_for_position(&window, &st, image_point, t.scale);
+                }
+            }
+        } else if is_pen {
+            if let Some(window) = window_motion.upgrade() {
+                if !t.contains_view(view_point) {
+                    set_window_cursor_name(&window, Some("pointer"));
+                } else {
+                    let st = state_motion.lock().unwrap();
+                    super::cursor::update_pen_cursor(&window, &st);
                 }
             }
         } else {
