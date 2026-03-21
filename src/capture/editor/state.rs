@@ -963,6 +963,73 @@ impl EditorState {
         self.obfuscate_method
     }
 
+    pub fn set_arrow_style(&mut self, style: ArrowStyle) {
+        self.arrow_style = style;
+    }
+
+    pub fn arrow_style(&self) -> ArrowStyle {
+        self.arrow_style
+    }
+
+    const CONTROL_HANDLE_HIT_RADIUS: f64 = 10.0;
+
+    pub fn arrow_control_handle_at(&self, point: Point) -> Option<usize> {
+        if !self.arrow_editing_controls {
+            return None;
+        }
+        let action = self.selected_action()?;
+        if let AnnotationAction::Arrow {
+            control_points: Some(handles),
+            ..
+        } = action
+        {
+            for (i, handle) in handles.iter().enumerate() {
+                let dx = point.x - handle.x;
+                let dy = point.y - handle.y;
+                if (dx * dx + dy * dy).sqrt() < Self::CONTROL_HANDLE_HIT_RADIUS {
+                    return Some(i);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn move_arrow_control_handle(&mut self, index: usize, new_pos: Point) {
+        let Some(action_index) = self.selected_action_index else {
+            return;
+        };
+        let Some(action) = self.actions.get_mut(action_index) else {
+            return;
+        };
+        if let AnnotationAction::Arrow {
+            control_points: Some(handles),
+            start,
+            end,
+            ..
+        } = action
+        {
+            match index {
+                0 => {
+                    *start = new_pos;
+                    handles[0] = new_pos;
+                }
+                1 => {
+                    handles[1] = new_pos;
+                }
+                2 => {
+                    *end = new_pos;
+                    handles[2] = new_pos;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn finalize_arrow_control_editing(&mut self) {
+        self.arrow_editing_controls = false;
+        self.arrow_control_dragging = None;
+    }
+
     pub fn current_obfuscate_amount(&self) -> f64 {
         match self.obfuscate_method {
             ObfuscateMethod::Pixelate => self.obfuscate_pixelate_amount,
