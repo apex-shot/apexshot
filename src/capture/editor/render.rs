@@ -888,6 +888,33 @@ pub fn draw_arrow(
     }
 }
 
+pub fn draw_arrow_control_handles(
+    context: &gtk4::cairo::Context,
+    handles: [Point; 3],
+    color: DrawColor,
+) {
+    // Draw dashed control polygon
+    context.set_source_rgba(color.r, color.g, color.b, 0.4);
+    context.set_line_width(1.0);
+    context.set_dash(&[4.0, 4.0], 0.0);
+    context.move_to(handles[0].x, handles[0].y);
+    context.line_to(handles[1].x, handles[1].y);
+    context.line_to(handles[2].x, handles[2].y);
+    let _ = context.stroke();
+    context.set_dash(&[], 0.0);
+
+    // Draw handle circles
+    for (i, handle) in handles.iter().enumerate() {
+        let radius = if i == 1 { 6.0 } else { 4.0 };
+        context.arc(handle.x, handle.y, radius, 0.0, 2.0 * std::f64::consts::PI);
+        context.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+        let _ = context.fill_preserve();
+        context.set_source_rgba(color.r, color.g, color.b, color.a);
+        context.set_line_width(1.5);
+        let _ = context.stroke();
+    }
+}
+
 pub fn draw_box(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor, stroke_size: f64) {
     context.set_source_rgba(color.r, color.g, color.b, color.a);
     context.set_line_width(stroke_size.max(0.5));

@@ -9,10 +9,10 @@ use std::sync::{Arc, Mutex};
 
 use super::color::selection_hit_padding_for_scale;
 use super::render::{
-    draw_active_text_input, draw_annotation_action, draw_canvas_checkerboard_background,
-    draw_crop_overlay, draw_draft_action, draw_focus_overlay, draw_rgba_to_context,
-    draw_selection_handles, draw_selection_outline, draw_text_edit_border, draw_text_edit_handles,
-    rgba_image_to_surface, text_action_bounds,
+    draw_active_text_input, draw_annotation_action, draw_arrow_control_handles,
+    draw_canvas_checkerboard_background, draw_crop_overlay, draw_draft_action, draw_focus_overlay,
+    draw_rgba_to_context, draw_selection_handles, draw_selection_outline, draw_text_edit_border,
+    draw_text_edit_handles, rgba_image_to_surface, text_action_bounds,
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
@@ -956,6 +956,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             text_font_family,
             text_size,
             hovered_text_action_index,
+            arrow_editing_controls,
         ) = {
             let st = state_draw.lock().unwrap();
             let (can_undo, can_redo) = st.history_availability();
@@ -988,6 +989,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 st.text_font_family.clone(),
                 st.text_size,
                 st.hovered_text_action_index,
+                st.arrow_editing_controls,
             )
         };
 
@@ -1513,6 +1515,20 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             // The active text edit overlay (border + handles) is drawn by the
             // unconditional block below, which also handles clamping and cursor
             // rendering. Do NOT draw it here a second time.
+        }
+
+        // Draw arrow control handles for Curved/Double editing
+        if arrow_editing_controls {
+            if let Some(action) = selected_action.as_ref() {
+                if let AnnotationAction::Arrow {
+                    control_points: Some(handles),
+                    color,
+                    ..
+                } = action
+                {
+                    draw_arrow_control_handles(context, *handles, *color);
+                }
+            }
         }
 
         // Draw active text edit overlay (border + handles)

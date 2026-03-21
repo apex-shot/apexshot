@@ -1206,6 +1206,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             return;
         }
 
+        // Arrow tool with control handles: check if clicking a control point
+        if st.arrow_editing_controls && st.selected_tool == Tool::Arrow {
+            let image_point = t.view_to_image_clamped(view_point);
+            if let Some(handle_idx) = st.arrow_control_handle_at(image_point) {
+                st.arrow_control_dragging = Some(handle_idx);
+                drop(st);
+                if let Some(area) = drawing_area_begin.upgrade() {
+                    area.queue_draw();
+                }
+                return;
+            }
+        }
+
         // Text tool with a selected action: check handles first, then fall back to move.
         if st.selected_tool == Tool::Text
             && st.selected_action_index.is_some()
@@ -1361,6 +1374,22 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let t = *transform_drag_update.lock().unwrap();
         let mut st = state_drag_update.lock().unwrap();
 
+        // Arrow control point dragging
+        if let Some(handle_idx) = st.arrow_control_dragging {
+            let start_view = st.drag_start_view.unwrap_or(Point { x: 0.0, y: 0.0 });
+            let current_view = Point {
+                x: start_view.x + offset_x,
+                y: start_view.y + offset_y,
+            };
+            let image_point = t.view_to_image_clamped(current_view);
+            st.move_arrow_control_handle(handle_idx, image_point);
+            drop(st);
+            if let Some(area) = drawing_area_update.upgrade() {
+                area.queue_draw();
+            }
+            return;
+        }
+
         let shift_pressed = gesture
             .current_event_state()
             .contains(gdk::ModifierType::SHIFT_MASK);
@@ -1478,6 +1507,16 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         let t = *transform_drag_end.lock().unwrap();
         let mut st = state_drag_end.lock().unwrap();
+
+        // Arrow control point dragging: clear and return
+        if st.arrow_control_dragging.is_some() {
+            st.arrow_control_dragging = None;
+            drop(st);
+            if let Some(area) = drawing_area_end.upgrade() {
+                area.queue_draw();
+            }
+            return;
+        }
 
         let shift_pressed = gesture
             .current_event_state()
