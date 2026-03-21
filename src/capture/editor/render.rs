@@ -1,8 +1,8 @@
 use super::color::{highlighter_stroke_width, CENSOR_BLOCK_SIZE, HIGHLIGHTER_ALPHA_SCALE};
 use super::numbering_style::{NumberSize, NumberingStyle};
 use super::types::{
-    AnnotationAction, DrawColor, FontSettings, FontStyle, MoveHandle, Point, Rect, SelectHandle,
-    TextAlignment, TextDecoration, TextEditBounds,
+    AnnotationAction, ArrowStyle, DrawColor, FontSettings, FontStyle, MoveHandle, Point, Rect,
+    SelectHandle, TextAlignment, TextDecoration, TextEditBounds,
 };
 use image::{ImageBuffer, RgbaImage};
 
@@ -81,8 +81,18 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             end,
             color,
             stroke_size,
+            style,
+            control_points,
             ..
-        } => draw_arrow(context, *start, *end, *color, *stroke_size),
+        } => draw_arrow(
+            context,
+            *start,
+            *end,
+            *color,
+            *stroke_size,
+            *style,
+            *control_points,
+        ),
         AnnotationAction::Box {
             rect,
             color,
@@ -166,9 +176,19 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             end,
             color,
             stroke_size,
+            style,
+            control_points,
             ..
         } => {
-            draw_arrow(context, *start, *end, color.with_alpha(0.82), *stroke_size);
+            draw_arrow(
+                context,
+                *start,
+                *end,
+                color.with_alpha(0.82),
+                *stroke_size,
+                *style,
+                *control_points,
+            );
         }
         AnnotationAction::Box {
             rect,
@@ -778,20 +798,40 @@ pub fn draw_line(
     let _ = context.stroke();
 }
 
+fn draw_arrow_head(
+    context: &gtk4::cairo::Context,
+    tip: Point,
+    angle: f64,
+    head_length: f64,
+    spread: f64,
+    color: DrawColor,
+) {
+    let left_x = tip.x - head_length * (angle - spread).cos();
+    let left_y = tip.y - head_length * (angle - spread).sin();
+    let right_x = tip.x - head_length * (angle + spread).cos();
+    let right_y = tip.y - head_length * (angle + spread).sin();
+
+    context.move_to(tip.x, tip.y);
+    context.line_to(left_x, left_y);
+    context.line_to(right_x, right_y);
+    context.close_path();
+    context.set_source_rgba(color.r, color.g, color.b, color.a);
+    let _ = context.fill();
+}
+
 pub fn draw_arrow(
     context: &gtk4::cairo::Context,
     start: Point,
     end: Point,
     color: DrawColor,
     stroke_size: f64,
+    style: ArrowStyle,
+    control_points: Option<[Point; 3]>,
 ) {
     let stroke = stroke_size.max(0.5);
     context.set_source_rgba(color.r, color.g, color.b, color.a);
     context.set_line_width(stroke + 0.6);
     context.set_line_cap(gtk4::cairo::LineCap::Round);
-    context.move_to(start.x, start.y);
-    context.line_to(end.x, end.y);
-    let _ = context.stroke();
 
     let dx = end.x - start.x;
     let dy = end.y - start.y;
@@ -799,23 +839,53 @@ pub fn draw_arrow(
         return;
     }
 
+    // Draw the line/curve
+    match style {
+        ArrowStyle::Curved | ArrowStyle::Double => {
+            if let Some([_s, mid, _e]) = control_points {
+                context.move_to(start.x, start.y);
+                context.curve_to(mid.x, mid.y, mid.x, mid.y, end.x, end.y);
+            } else {
+                context.move_to(start.x, start.y);
+                context.line_to(end.x, end.y);
+            }
+        }
+        _ => {
+            context.move_to(start.x, start.y);
+            context.line_to(end.x, end.y);
+        }
+    }
+    let _ = context.stroke();
+
+    // Compute arrowhead dimensions
     let angle = dy.atan2(dx);
     let line_length = (dx * dx + dy * dy).sqrt().max(1.0);
     let head_length = (stroke * 4.8)
         .clamp(12.0, 120.0)
         .min((line_length * 0.75).max(8.0));
-    let spread = 0.55;
-    let left_x = end.x - head_length * (angle - spread).cos();
-    let left_y = end.y - head_length * (angle - spread).sin();
-    let right_x = end.x - head_length * (angle + spread).cos();
-    let right_y = end.y - head_length * (angle + spread).sin();
 
-    context.move_to(end.x, end.y);
-    context.line_to(left_x, left_y);
-    context.line_to(right_x, right_y);
-    context.close_path();
-    context.set_source_rgba(color.r, color.g, color.b, color.a);
-    let _ = context.fill();
+    let spread = match style {
+        ArrowStyle::Fancy => 0.3,
+        _ => 0.55,
+    };
+
+    // End arrowhead (all styles)
+    let end_angle = match (style, control_points) {
+        (ArrowStyle::Curved | ArrowStyle::Double, Some([_s, mid, _e])) => {
+            (end.y - mid.y).atan2(end.x - mid.x)
+        }
+        _ => angle,
+    };
+    draw_arrow_head(context, end, end_angle, head_length, spread, color);
+
+    // Start arrowhead (Double only)
+    if matches!(style, ArrowStyle::Double) {
+        let start_angle = match control_points {
+            Some([_s, mid, _e]) => (start.y - mid.y).atan2(start.x - mid.x) + std::f64::consts::PI,
+            None => angle + std::f64::consts::PI,
+        };
+        draw_arrow_head(context, start, start_angle, head_length, spread, color);
+    }
 }
 
 pub fn draw_box(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor, stroke_size: f64) {
