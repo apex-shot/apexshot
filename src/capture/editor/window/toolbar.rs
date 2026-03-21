@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use super::super::{
     pen_weight::PenWeight,
-    types::{ObfuscateMethod, Tool},
+    types::{ArrowStyle, ObfuscateMethod, Tool},
     ui_support::{
         icon_tool_button, recommended_window_size, recommended_window_size_with_extra_width,
         traffic_light_button,
@@ -113,6 +113,13 @@ pub(super) struct ToolbarModeParts {
     pub number_size_list: gtk4::Box,
     /// Group containing number options button (for visibility toggle)
     pub number_options_group: GtkBox,
+    /// Arrow style selector group
+    pub arrow_style_group: GtkBox,
+    #[allow(dead_code)]
+    pub arrow_style_button: Button,
+    #[allow(dead_code)]
+    pub arrow_style_popover: Popover,
+    pub arrow_style_list: GtkBox,
 }
 
 pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> ToolbarBaseParts {
@@ -262,6 +269,47 @@ fn build_pen_weight_dropdown() -> (GtkBox, Button, Popover, GtkBox) {
         pen_weight_button,
         pen_weight_popover,
         pen_weight_list,
+    )
+}
+
+fn build_arrow_style_controls() -> (GtkBox, Button, Popover, GtkBox) {
+    let arrow_style_group = GtkBox::new(Orientation::Horizontal, 4);
+    arrow_style_group.add_css_class("editor-arrow-style-group");
+    arrow_style_group.add_css_class("editor-tools-group");
+    arrow_style_group.set_visible(false);
+
+    let arrow_style_button = Button::new();
+    arrow_style_button.set_has_frame(false);
+    arrow_style_button.set_focusable(false);
+    arrow_style_button.add_css_class("editor-tool-button");
+    arrow_style_button.add_css_class("flat");
+    arrow_style_button.set_tooltip_text(Some("Arrow style"));
+
+    let arrow_style_icon = Image::from_icon_name(ArrowStyle::Standard.icon_name());
+    arrow_style_button.set_child(Some(&arrow_style_icon));
+
+    let arrow_style_popover = Popover::new();
+    arrow_style_popover.set_has_arrow(false);
+    arrow_style_popover.set_autohide(true);
+    arrow_style_popover.add_css_class("editor-popover");
+    arrow_style_popover.set_parent(&arrow_style_button);
+
+    let arrow_style_list = GtkBox::new(Orientation::Vertical, 0);
+    arrow_style_list.add_css_class("editor-popover-list");
+    arrow_style_popover.set_child(Some(&arrow_style_list));
+
+    let p_popover = arrow_style_popover.clone();
+    arrow_style_button.connect_clicked(move |_| {
+        p_popover.popup();
+    });
+
+    arrow_style_group.append(&arrow_style_button);
+
+    (
+        arrow_style_group,
+        arrow_style_button,
+        arrow_style_popover,
+        arrow_style_list,
     )
 }
 
@@ -759,6 +807,32 @@ pub(super) fn build_toolbar_mode_controls(
         pen_weight_list.append(&btn);
     }
 
+    // Build arrow style selector
+    let (arrow_style_group, arrow_style_button, arrow_style_popover, arrow_style_list) =
+        build_arrow_style_controls();
+
+    for style in ArrowStyle::ALL {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let icon = Image::from_icon_name(style.icon_name());
+        let label_widget = Label::new(Some(style.display_name()));
+
+        btn_box.append(&icon);
+        btn_box.append(&label_widget);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .child(&btn_box)
+            .build();
+
+        arrow_style_list.append(&btn);
+    }
+
     // Build number options selector for number tool
     let (
         number_options_group,
@@ -807,6 +881,7 @@ pub(super) fn build_toolbar_mode_controls(
     standard_mode_group.append(&primary_tools_group);
     standard_mode_group.append(&obfuscate_method_group);
     standard_mode_group.append(&pen_weight_group);
+    standard_mode_group.append(&arrow_style_group);
     standard_mode_group.append(&number_options_group);
     standard_mode_group.append(&size_group);
 
@@ -860,6 +935,10 @@ pub(super) fn build_toolbar_mode_controls(
         number_size_popover,
         number_size_list,
         number_options_group,
+        arrow_style_group,
+        arrow_style_button,
+        arrow_style_popover,
+        arrow_style_list,
     }
 }
 
@@ -927,6 +1006,7 @@ pub(super) fn build_toolbar_tool_updater(
     obfuscate_method_group: &GtkBox,
     pen_weight_group: &GtkBox,
     number_options_group: &GtkBox,
+    arrow_style_group: &GtkBox,
     canvas_scroller: &gtk4::ScrolledWindow,
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
     window: &ApplicationWindow,
@@ -940,6 +1020,7 @@ pub(super) fn build_toolbar_tool_updater(
     let obfuscate_method_group = obfuscate_method_group.clone();
     let pen_weight_group = pen_weight_group.clone();
     let number_options_group = number_options_group.clone();
+    let arrow_style_group = arrow_style_group.clone();
     let canvas_scroller = canvas_scroller.clone();
     let window = window.downgrade();
 
@@ -963,6 +1044,9 @@ pub(super) fn build_toolbar_tool_updater(
 
         let is_number_tool = matches!(tool, Tool::Number);
         number_options_group.set_visible(is_number_tool);
+
+        let is_arrow_tool = matches!(tool, Tool::Arrow);
+        arrow_style_group.set_visible(is_arrow_tool);
 
         // Only allow vertical scrolling in Crop mode
         if matches!(tool, Tool::Crop) {

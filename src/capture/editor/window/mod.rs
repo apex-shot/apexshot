@@ -216,6 +216,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         number_size_popover: _,
         number_size_list,
         number_options_group,
+        arrow_style_group,
+        arrow_style_button,
+        arrow_style_popover: _,
+        arrow_style_list,
     } = toolbar::build_toolbar_mode_controls(
         &crop_btn,
         &background_btn,
@@ -516,6 +520,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &obfuscate_method_group,
         &pen_weight_group,
         &number_options_group,
+        &arrow_style_group,
         &canvas_scroller,
         start_background_gradient_preview_loading.clone(),
         &window,
