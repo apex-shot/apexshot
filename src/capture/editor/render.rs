@@ -1,5 +1,5 @@
 use super::color::{highlighter_stroke_width, CENSOR_BLOCK_SIZE, HIGHLIGHTER_ALPHA_SCALE};
-use super::numbering_style::{NumberingStyle, NumberSize};
+use super::numbering_style::{NumberSize, NumberingStyle};
 use super::types::{
     AnnotationAction, DrawColor, FontSettings, FontStyle, MoveHandle, Point, Rect, SelectHandle,
     TextAlignment, TextDecoration, TextEditBounds,
@@ -81,6 +81,7 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             end,
             color,
             stroke_size,
+            ..
         } => draw_arrow(context, *start, *end, *color, *stroke_size),
         AnnotationAction::Box {
             rect,
@@ -165,6 +166,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             end,
             color,
             stroke_size,
+            ..
         } => {
             draw_arrow(context, *start, *end, color.with_alpha(0.82), *stroke_size);
         }
@@ -212,7 +214,14 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             style,
             size,
         } => {
-            draw_number(context, *position, *number, color.with_alpha(0.88), *style, *size);
+            draw_number(
+                context,
+                *position,
+                *number,
+                color.with_alpha(0.88),
+                *style,
+                *size,
+            );
         }
         AnnotationAction::Obfuscate { rect, .. } => {
             context.set_source_rgba(0.18, 0.48, 0.94, 0.18);

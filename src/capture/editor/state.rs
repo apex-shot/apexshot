@@ -17,7 +17,7 @@ use super::selection::{
 };
 use super::text_detect::{BackgroundTextDetection, TextDetector};
 use super::types::{
-    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
+    AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
     EditorError, FontSettings, FontStyle, MoveHandle, ObfuscateMethod, Point, Rect, SelectHandle,
     SizeControlMode, TextAlignment, TextDecoration, TextEditBounds, Tool,
 };
@@ -47,6 +47,9 @@ pub struct EditorState {
     pub obfuscate_pixelate_amount: f64,
     pub obfuscate_blur_secure_amount: f64,
     pub obfuscate_blur_smooth_amount: f64,
+    pub arrow_style: ArrowStyle,
+    pub arrow_editing_controls: bool,
+    pub arrow_control_dragging: Option<usize>,
     pub next_number: u32,
     pub select_drag_anchor: Option<Point>,
     pub select_resize_handle: Option<super::types::SelectHandle>,
@@ -284,6 +287,9 @@ impl EditorState {
             obfuscate_pixelate_amount: DEFAULT_OBFUSCATE_AMOUNT,
             obfuscate_blur_secure_amount: DEFAULT_OBFUSCATE_AMOUNT,
             obfuscate_blur_smooth_amount: DEFAULT_OBFUSCATE_AMOUNT,
+            arrow_style: ArrowStyle::Standard,
+            arrow_editing_controls: false,
+            arrow_control_dragging: None,
             next_number: 1,
             select_drag_anchor: None,
             select_resize_handle: None,
@@ -2175,7 +2181,7 @@ impl EditorState {
         let color = self.selected_color;
         let stroke_size = self.stroke_size;
 
-        match self.selected_tool {
+        let mut result = match self.selected_tool {
             Tool::Select => None,
             Tool::Crop => None,
             Tool::Background => None,
@@ -2233,6 +2239,8 @@ impl EditorState {
                 end,
                 color,
                 stroke_size,
+                style: self.arrow_style,
+                control_points: None,
             }),
             Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
                 rect,
@@ -2251,43 +2259,31 @@ impl EditorState {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
             }
             Tool::Text => None,
-        }
-    }
+        };
 
-    fn current_highlighter_stroke_size(&self) -> f64 {
-        if let Some(locked) = self.locked_highlighter_stroke_size {
-            return locked;
-        }
-
-        if self.highlighter_mode == HighlighterMode::TextAware {
-            let point = self
-                .drag_current
-                .or(self.drag_start)
-                .or_else(|| self.drag_path.last().copied());
-
-            if let Some(point) = point {
-                if let Ok(detector) = self.text_detector.lock() {
-                    if let Some(height) = detector.best_text_height_at_point(point) {
-                        return height;
-                    }
+        // For Curved/Double arrows, initialize control points after drag
+        if let Some(AnnotationAction::Arrow {
+            style,
+            control_points,
+            start,
+            end,
+            ..
+        }) = result.as_mut()
+        {
+            match style {
+                ArrowStyle::Curved | ArrowStyle::Double => {
+                    let mid = Point {
+                        x: (start.x + end.x) / 2.0,
+                        y: (start.y + end.y) / 2.0,
+                    };
+                    *control_points = Some([*start, mid, *end]);
+                    self.arrow_editing_controls = true;
                 }
+                _ => {}
             }
         }
 
-        self.pen_weight.stroke_width()
-    }
-
-    pub fn draft_crop_rect(&self) -> Option<Rect> {
-        if self.selected_tool != Tool::Crop {
-            return None;
-        }
-
-        let start = self.drag_start?;
-        let end = match self.crop_aspect_ratio_value() {
-            Some(aspect_ratio) => constrained_crop_point(start, self.drag_current?, aspect_ratio),
-            None => self.drag_current?,
-        };
-        Rect::from_points(start, end)
+        result
     }
 
     pub fn finalize_drag_action(&mut self) -> Option<AnnotationAction> {
@@ -2357,7 +2353,7 @@ impl EditorState {
         let stroke_size = self.stroke_size;
         self.clear_drag();
 
-        match self.selected_tool {
+        let mut result = match self.selected_tool {
             Tool::Select => None,
             Tool::Crop => None,
             Tool::Background => None,
@@ -2379,6 +2375,8 @@ impl EditorState {
                 end,
                 color,
                 stroke_size,
+                style: self.arrow_style,
+                control_points: None,
             }),
             Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
                 rect,
@@ -2397,7 +2395,31 @@ impl EditorState {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
             }
             Tool::Text => None,
+        };
+
+        // For Curved/Double arrows, initialize control points after finalize
+        if let Some(AnnotationAction::Arrow {
+            style,
+            control_points,
+            start,
+            end,
+            ..
+        }) = result.as_mut()
+        {
+            match style {
+                ArrowStyle::Curved | ArrowStyle::Double => {
+                    let mid = Point {
+                        x: (start.x + end.x) / 2.0,
+                        y: (start.y + end.y) / 2.0,
+                    };
+                    *control_points = Some([*start, mid, *end]);
+                    self.arrow_editing_controls = true;
+                }
+                _ => {}
+            }
         }
+
+        result
     }
 
     pub fn apply_crop_selection(&mut self) -> Result<bool, EditorError> {

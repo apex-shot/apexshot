@@ -1,4 +1,4 @@
-use super::numbering_style::{NumberingStyle, NumberSize};
+use super::numbering_style::{NumberSize, NumberingStyle};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -67,6 +67,36 @@ impl ObfuscateMethod {
 
     pub fn has_slider(&self) -> bool {
         !matches!(self, ObfuscateMethod::Blackout)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArrowStyle {
+    Standard,
+    Fancy,
+    Curved,
+    Double,
+}
+
+impl ArrowStyle {
+    pub const ALL: [Self; 4] = [Self::Standard, Self::Fancy, Self::Curved, Self::Double];
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Standard => "Standard",
+            Self::Fancy => "Fancy",
+            Self::Curved => "Curved",
+            Self::Double => "Double",
+        }
+    }
+
+    pub fn icon_name(self) -> &'static str {
+        match self {
+            Self::Standard => "go-next-symbolic",
+            Self::Fancy => "go-next-symbolic",
+            Self::Curved => "path-bezier-symbolic",
+            Self::Double => "object-flip-horizontal-symbolic",
+        }
     }
 }
 
@@ -433,6 +463,8 @@ pub enum AnnotationAction {
         end: Point,
         color: DrawColor,
         stroke_size: f64,
+        style: ArrowStyle,
+        control_points: Option<[Point; 3]>,
     },
     Box {
         rect: Rect,
