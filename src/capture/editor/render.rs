@@ -91,7 +91,7 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             *color,
             *stroke_size,
             *style,
-            *control_points,
+            control_points.clone(),
         ),
         AnnotationAction::Box {
             rect,
@@ -187,7 +187,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
                 color.with_alpha(0.82),
                 *stroke_size,
                 *style,
-                *control_points,
+                control_points.clone(),
             );
         }
         AnnotationAction::Box {
@@ -436,7 +436,7 @@ fn arrow_head_geometry(
     end: Point,
     stroke_size: f64,
     style: ArrowStyle,
-    control_points: Option<[Point; 3]>,
+    control_points: &Option<Vec<Point>>,
 ) -> Option<(f64, f64, f64)> {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
@@ -453,9 +453,17 @@ fn arrow_head_geometry(
         ArrowStyle::Fancy => 0.3,
         _ => 0.55,
     };
-    let end_angle = match (style, control_points) {
-        (ArrowStyle::Curved | ArrowStyle::Double, Some([_s, mid, _e])) => {
-            (end.y - mid.y).atan2(end.x - mid.x)
+    let end_angle = match style {
+        ArrowStyle::Curved | ArrowStyle::Double => {
+            if let Some(ref v) = control_points {
+                if let Some(mid) = v.get(1) {
+                    (end.y - mid.y).atan2(end.x - mid.x)
+                } else {
+                    angle
+                }
+            } else {
+                angle
+            }
         }
         _ => angle,
     };
@@ -469,11 +477,11 @@ pub fn draw_arrow_selection_outline(
     end: Point,
     stroke_size: f64,
     style: ArrowStyle,
-    control_points: Option<[Point; 3]>,
+    control_points: Option<Vec<Point>>,
     view_scale: f64,
 ) {
     let Some((end_angle, head_length, spread)) =
-        arrow_head_geometry(start, end, stroke_size, style, control_points)
+        arrow_head_geometry(start, end, stroke_size, style, &control_points)
     else {
         return;
     };
@@ -492,9 +500,14 @@ pub fn draw_arrow_selection_outline(
 
     match style {
         ArrowStyle::Curved | ArrowStyle::Double => {
-            if let Some([_s, mid, _e]) = control_points {
-                context.move_to(start.x, start.y);
-                context.curve_to(mid.x, mid.y, mid.x, mid.y, end.x, end.y);
+            if let Some(ref v) = control_points {
+                if let Some(mid) = v.get(1) {
+                    context.move_to(start.x, start.y);
+                    context.curve_to(mid.x, mid.y, mid.x, mid.y, end.x, end.y);
+                } else {
+                    context.move_to(start.x, start.y);
+                    context.line_to(end.x, end.y);
+                }
             } else {
                 context.move_to(start.x, start.y);
                 context.line_to(end.x, end.y);
@@ -519,9 +532,14 @@ pub fn draw_arrow_selection_outline(
     let _ = context.stroke();
 
     if matches!(style, ArrowStyle::Double) {
-        let start_angle = match control_points {
-            Some([_s, mid, _e]) => (start.y - mid.y).atan2(start.x - mid.x) + std::f64::consts::PI,
-            None => (start.y - end.y).atan2(start.x - end.x),
+        let start_angle = if let Some(ref v) = control_points {
+            if let Some(mid) = v.get(1) {
+                (start.y - mid.y).atan2(start.x - mid.x) + std::f64::consts::PI
+            } else {
+                (start.y - end.y).atan2(start.x - end.x)
+            }
+        } else {
+            (start.y - end.y).atan2(start.x - end.x)
         };
         let left_x = start.x - head_length * (start_angle - spread).cos();
         let left_y = start.y - head_length * (start_angle - spread).sin();
@@ -957,7 +975,7 @@ fn draw_thorn_arrow(
     color: DrawColor,
     stroke_size: f64,
     is_smooth: bool,
-    control_points: Option<[Point; 3]>,
+    control_points: Option<Vec<Point>>,
 ) {
     // Handle both straight and curved logic
     let is_curved = control_points.is_some();
@@ -1175,7 +1193,7 @@ fn draw_double_arrow(
     end: Point,
     color: DrawColor,
     stroke_size: f64,
-    control_points: Option<[Point; 3]>,
+    control_points: Option<Vec<Point>>,
 ) {
     let is_curved = control_points.is_some();
     let p0 = start;
@@ -1416,7 +1434,7 @@ pub fn draw_arrow(
     color: DrawColor,
     stroke_size: f64,
     style: ArrowStyle,
-    control_points: Option<[Point; 3]>,
+    control_points: Option<Vec<Point>>,
 ) {
     if matches!(
         style,
@@ -1453,9 +1471,14 @@ pub fn draw_arrow(
     // Draw the line/curve
     match style {
         ArrowStyle::Curved | ArrowStyle::Double => {
-            if let Some([_s, mid, _e]) = control_points {
-                context.move_to(start.x, start.y);
-                context.curve_to(mid.x, mid.y, mid.x, mid.y, end.x, end.y);
+            if let Some(ref v) = control_points {
+                if let Some(mid) = v.get(1) {
+                    context.move_to(start.x, start.y);
+                    context.curve_to(mid.x, mid.y, mid.x, mid.y, end.x, end.y);
+                } else {
+                    context.move_to(start.x, start.y);
+                    context.line_to(end.x, end.y);
+                }
             } else {
                 context.move_to(start.x, start.y);
                 context.line_to(end.x, end.y);
@@ -1481,9 +1504,17 @@ pub fn draw_arrow(
     };
 
     // End arrowhead (all styles)
-    let end_angle = match (style, control_points) {
-        (ArrowStyle::Curved | ArrowStyle::Double, Some([_s, mid, _e])) => {
-            (end.y - mid.y).atan2(end.x - mid.x)
+    let end_angle = match style {
+        ArrowStyle::Curved | ArrowStyle::Double => {
+            if let Some(ref v) = control_points {
+                if let Some(mid) = v.get(1) {
+                    (end.y - mid.y).atan2(end.x - mid.x)
+                } else {
+                    angle
+                }
+            } else {
+                angle
+            }
         }
         _ => angle,
     };
@@ -1491,9 +1522,14 @@ pub fn draw_arrow(
 
     // Start arrowhead (Double only)
     if matches!(style, ArrowStyle::Double) {
-        let start_angle = match control_points {
-            Some([_s, mid, _e]) => (start.y - mid.y).atan2(start.x - mid.x) + std::f64::consts::PI,
-            None => angle + std::f64::consts::PI,
+        let start_angle = if let Some(ref v) = control_points {
+            if let Some(mid) = v.get(1) {
+                (start.y - mid.y).atan2(start.x - mid.x) + std::f64::consts::PI
+            } else {
+                angle + std::f64::consts::PI
+            }
+        } else {
+            angle + std::f64::consts::PI
         };
         draw_arrow_head(context, start, start_angle, head_length, spread, color);
     }
@@ -1501,28 +1537,97 @@ pub fn draw_arrow(
 
 pub fn draw_arrow_control_handles(
     context: &gtk4::cairo::Context,
-    handles: [Point; 3],
+    handles: Vec<Point>,
     color: DrawColor,
+    view_scale: f64,
 ) {
-    // Draw dashed control polygon
-    context.set_source_rgba(color.r, color.g, color.b, 0.4);
-    context.set_line_width(1.0);
-    context.set_dash(&[4.0, 4.0], 0.0);
-    context.move_to(handles[0].x, handles[0].y);
-    context.line_to(handles[1].x, handles[1].y);
-    context.line_to(handles[2].x, handles[2].y);
-    let _ = context.stroke();
-    context.set_dash(&[], 0.0);
+    let scale = view_scale.max(0.01);
 
-    // Draw handle circles
-    for (i, handle) in handles.iter().enumerate() {
-        let radius = if i == 1 { 6.0 } else { 4.0 };
-        context.arc(handle.x, handle.y, radius, 0.0, 2.0 * std::f64::consts::PI);
-        context.set_source_rgba(1.0, 1.0, 1.0, 0.9);
-        let _ = context.fill_preserve();
-        context.set_source_rgba(color.r, color.g, color.b, color.a);
-        context.set_line_width(1.5);
+    if handles.len() >= 3 {
+        // Curved/Double: Bezier with 3 handles
+        let p0 = handles[0];
+        let p1 = handles[1];
+        let p2 = handles[2];
+
+        // On-curve midpoint B(0.5) = 0.25*P0 + 0.5*P1 + 0.25*P2
+        let mid_on_curve = Point {
+            x: 0.25 * p0.x + 0.5 * p1.x + 0.25 * p2.x,
+            y: 0.25 * p0.y + 0.5 * p1.y + 0.25 * p2.y,
+        };
+
+        // Draw dashed curve from start → mid → end (following the Bezier)
+        context.set_source_rgba(color.r, color.g, color.b, 0.4);
+        context.set_line_width(1.0 / scale);
+        context.set_dash(&[4.0 / scale, 4.0 / scale], 0.0);
+        context.move_to(p0.x, p0.y);
+        context.curve_to(p1.x, p1.y, p1.x, p1.y, p2.x, p2.y);
         let _ = context.stroke();
+        context.set_dash(&[], 0.0);
+
+        // Draw handle circles: start, on-curve mid, end
+        let display_handles = [p0, mid_on_curve, p2];
+        let _ = context.save();
+        for (i, handle) in display_handles.iter().enumerate() {
+            let radius = (MOVE_HANDLE_RADIUS + if i == 1 { 1.0 } else { 0.0 }) / scale;
+            context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+            context.set_line_width(MOVE_HANDLE_OUTLINE_WIDTH / scale);
+            context.arc(handle.x, handle.y, radius, 0.0, std::f64::consts::TAU);
+            let _ = context.stroke();
+            context.set_source_rgba(
+                TEXT_EDIT_BORDER_COLOR.0,
+                TEXT_EDIT_BORDER_COLOR.1,
+                TEXT_EDIT_BORDER_COLOR.2,
+                1.0,
+            );
+            context.arc(
+                handle.x,
+                handle.y,
+                (radius - MOVE_HANDLE_OUTLINE_WIDTH / scale).max(1.0 / scale),
+                0.0,
+                std::f64::consts::TAU,
+            );
+            let _ = context.fill();
+        }
+        let _ = context.restore();
+    } else if handles.len() == 2 {
+        // Standard/Fancy: 2 handles at head and tail
+        let p0 = handles[0];
+        let p1 = handles[1];
+
+        // Draw dashed line from start to end
+        context.set_source_rgba(color.r, color.g, color.b, 0.4);
+        context.set_line_width(1.0 / scale);
+        context.set_dash(&[4.0 / scale, 4.0 / scale], 0.0);
+        context.move_to(p0.x, p0.y);
+        context.line_to(p1.x, p1.y);
+        let _ = context.stroke();
+        context.set_dash(&[], 0.0);
+
+        // Draw handle circles at start and end
+        let display_handles = [p0, p1];
+        let _ = context.save();
+        for handle in &display_handles {
+            let radius = MOVE_HANDLE_RADIUS / scale;
+            context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+            context.set_line_width(MOVE_HANDLE_OUTLINE_WIDTH / scale);
+            context.arc(handle.x, handle.y, radius, 0.0, std::f64::consts::TAU);
+            let _ = context.stroke();
+            context.set_source_rgba(
+                TEXT_EDIT_BORDER_COLOR.0,
+                TEXT_EDIT_BORDER_COLOR.1,
+                TEXT_EDIT_BORDER_COLOR.2,
+                1.0,
+            );
+            context.arc(
+                handle.x,
+                handle.y,
+                (radius - MOVE_HANDLE_OUTLINE_WIDTH / scale).max(1.0 / scale),
+                0.0,
+                std::f64::consts::TAU,
+            );
+            let _ = context.fill();
+        }
+        let _ = context.restore();
     }
 }
 

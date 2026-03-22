@@ -10,9 +10,10 @@ use std::sync::{Arc, Mutex};
 use super::color::selection_hit_padding_for_scale;
 use super::render::{
     draw_active_text_input, draw_annotation_action, draw_arrow_control_handles,
-    draw_canvas_checkerboard_background, draw_crop_overlay, draw_draft_action, draw_focus_overlay,
-    draw_rgba_to_context, draw_selection_handles, draw_selection_outline, draw_text_edit_border,
-    draw_text_edit_handles, rgba_image_to_surface, text_action_bounds,
+    draw_arrow_selection_outline, draw_canvas_checkerboard_background, draw_crop_overlay,
+    draw_draft_action, draw_focus_overlay, draw_rgba_to_context, draw_selection_handles,
+    draw_selection_outline, draw_text_edit_border, draw_text_edit_handles, rgba_image_to_surface,
+    text_action_bounds,
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
@@ -220,6 +221,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         arrow_style_button,
         arrow_style_popover: _,
         arrow_style_list,
+        stroke_size_group,
+        stroke_size_button,
+        stroke_size_popover: _,
+        stroke_size_list,
     } = toolbar::build_toolbar_mode_controls(
         &crop_btn,
         &background_btn,
@@ -521,6 +526,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &pen_weight_group,
         &number_options_group,
         &arrow_style_group,
+        &stroke_size_group,
         &canvas_scroller,
         start_background_gradient_preview_loading.clone(),
         &window,
@@ -968,7 +974,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 st.working_image_revision,
                 st.actions.clone(),
                 st.draft_action(),
-                st.draft_crop_rect().or(st.crop_selection),
+                if st.selected_tool == Tool::Crop {
+                    st.draft_crop_rect().or(st.crop_selection)
+                } else {
+                    None
+                },
                 st.selected_tool == Tool::Crop,
                 st.crop_background_color_explicit,
                 st.crop_background_color,
@@ -1497,6 +1507,26 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             if selected_tool == Tool::Select {
                 if let AnnotationAction::Text { .. } = selected_action {
                     // Already handled above.
+                } else if let AnnotationAction::Arrow {
+                    start,
+                    end,
+                    stroke_size,
+                    style,
+                    control_points,
+                    ..
+                } = selected_action
+                {
+                    draw_arrow_selection_outline(
+                        context,
+                        *start,
+                        *end,
+                        *stroke_size,
+                        *style,
+                        control_points.clone(),
+                        t.scale,
+                    );
+                } else if matches!(selected_action, AnnotationAction::Line { .. }) {
+                    // Intentionally show no crop-like selection outline or handles for lines.
                 } else {
                     let selection_padding = selection_hit_padding_for_scale(t.scale);
                     if let Some(bounds) =
@@ -1526,7 +1556,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     ..
                 } = action
                 {
-                    draw_arrow_control_handles(context, *handles, *color);
+                    draw_arrow_control_handles(context, handles.clone(), *color, t.scale);
                 }
             }
         }
@@ -1649,6 +1679,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         number_size_list: number_size_list.clone(),
         arrow_style_button: arrow_style_button.clone(),
         arrow_style_list: arrow_style_list.clone(),
+        stroke_size_button: stroke_size_button.clone(),
+        stroke_size_list: stroke_size_list.clone(),
     });
 
     window.present();

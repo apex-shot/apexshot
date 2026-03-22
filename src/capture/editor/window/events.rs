@@ -104,6 +104,8 @@ pub(super) struct EventContext {
     pub number_size_list: gtk4::Box,
     pub arrow_style_button: Button,
     pub arrow_style_list: gtk4::Box,
+    pub stroke_size_button: Button,
+    pub stroke_size_list: gtk4::Box,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -173,6 +175,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         number_size_list,
         arrow_style_button,
         arrow_style_list,
+        stroke_size_button,
+        stroke_size_list,
     } = ctx;
 
     let state_select = state.clone();
@@ -830,6 +834,55 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         });
     }
 
+    // Wire up stroke size list items for arrow/line tools
+    let stroke_sizes: [(f64, PenWeight); 4] = [
+        (2.0, PenWeight::Small),
+        (4.0, PenWeight::Medium),
+        (7.0, PenWeight::Large),
+        (12.0, PenWeight::ExtraLarge),
+    ];
+
+    let stroke_size_button_for_closure = stroke_size_button.clone();
+    let drawing_area_for_stroke = drawing_area.downgrade();
+
+    let mut stroke_idx = 0usize;
+    let mut child_opt = stroke_size_list.first_child();
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&(size, weight)) = stroke_sizes.get(stroke_idx) else {
+            break;
+        };
+        stroke_idx += 1;
+
+        let state_stroke = state.clone();
+        let drawing_area_stroke = drawing_area_for_stroke.clone();
+        let stroke_size_button_clone = stroke_size_button_for_closure.clone();
+
+        button.connect_clicked(move |b| {
+            {
+                let mut st = state_stroke.lock().unwrap();
+                st.set_stroke_size(size);
+            }
+
+            // Update the trigger button icon to reflect selected size
+            let icon = gtk4::Image::from_icon_name(weight.icon_name());
+            icon.set_pixel_size(weight.icon_pixel_size());
+            stroke_size_button_clone.set_child(Some(&icon));
+
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+            if let Some(area) = drawing_area_stroke.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+
     let refresh_number_start_display: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
         let number_start_entry = number_start_entry.clone();
@@ -1211,6 +1264,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let image_point = t.view_to_image_clamped(view_point);
             if let Some(handle_idx) = st.arrow_control_handle_at(image_point) {
                 st.arrow_control_dragging = Some(handle_idx);
+                st.drag_start_view = Some(view_point);
                 drop(st);
                 if let Some(area) = drawing_area_begin.upgrade() {
                     area.queue_draw();

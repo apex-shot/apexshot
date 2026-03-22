@@ -986,11 +986,28 @@ impl EditorState {
             ..
         } = action
         {
-            for (i, handle) in handles.iter().enumerate() {
-                let dx = point.x - handle.x;
-                let dy = point.y - handle.y;
-                if (dx * dx + dy * dy).sqrt() < Self::CONTROL_HANDLE_HIT_RADIUS {
-                    return Some(i);
+            if handles.len() >= 3 {
+                // Curved/Double: hit-test against on-curve midpoint B(0.5)
+                let mid_on_curve = Point {
+                    x: 0.25 * handles[0].x + 0.5 * handles[1].x + 0.25 * handles[2].x,
+                    y: 0.25 * handles[0].y + 0.5 * handles[1].y + 0.25 * handles[2].y,
+                };
+                let test_points = [handles[0], mid_on_curve, handles[2]];
+                for (i, handle) in test_points.iter().enumerate() {
+                    let dx = point.x - handle.x;
+                    let dy = point.y - handle.y;
+                    if (dx * dx + dy * dy).sqrt() < Self::CONTROL_HANDLE_HIT_RADIUS {
+                        return Some(i);
+                    }
+                }
+            } else {
+                // Standard/Fancy: hit-test against start and end
+                for (i, handle) in handles.iter().enumerate() {
+                    let dx = point.x - handle.x;
+                    let dy = point.y - handle.y;
+                    if (dx * dx + dy * dy).sqrt() < Self::CONTROL_HANDLE_HIT_RADIUS {
+                        return Some(i);
+                    }
                 }
             }
         }
@@ -1011,19 +1028,38 @@ impl EditorState {
             ..
         } = action
         {
-            match index {
-                0 => {
-                    *start = new_pos;
-                    handles[0] = new_pos;
+            if handles.len() >= 3 {
+                match index {
+                    0 => {
+                        *start = new_pos;
+                        handles[0] = new_pos;
+                    }
+                    1 => {
+                        // new_pos is the desired on-curve midpoint B(0.5).
+                        // Invert: P1 = 2*B(0.5) - 0.5*P0 - 0.5*P2
+                        handles[1] = Point {
+                            x: 2.0 * new_pos.x - 0.5 * handles[0].x - 0.5 * handles[2].x,
+                            y: 2.0 * new_pos.y - 0.5 * handles[0].y - 0.5 * handles[2].y,
+                        };
+                    }
+                    2 => {
+                        *end = new_pos;
+                        handles[2] = new_pos;
+                    }
+                    _ => {}
                 }
-                1 => {
-                    handles[1] = new_pos;
+            } else {
+                match index {
+                    0 => {
+                        *start = new_pos;
+                        handles[0] = new_pos;
+                    }
+                    1 => {
+                        *end = new_pos;
+                        handles[1] = new_pos;
+                    }
+                    _ => {}
                 }
-                2 => {
-                    *end = new_pos;
-                    handles[2] = new_pos;
-                }
-                _ => {}
             }
         }
     }
@@ -2187,6 +2223,56 @@ pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction])
 }
 
 impl EditorState {
+    fn current_highlighter_stroke_size(&self) -> f64 {
+        self.locked_highlighter_stroke_size
+            .unwrap_or_else(|| match self.highlighter_mode {
+                HighlighterMode::TextAware => self.stroke_size,
+                HighlighterMode::Freehand => self.pen_weight.stroke_width(),
+            })
+    }
+
+    pub fn draft_crop_rect(&self) -> Option<Rect> {
+        let start = self.drag_start?;
+        let current = self.drag_current?;
+        let image_width = self.working_image.width() as i32;
+        let image_height = self.working_image.height() as i32;
+        let end = if let Some(aspect_ratio) = self.crop_aspect_ratio_value() {
+            let dx = current.x - start.x;
+            let dy = current.y - start.y;
+            if dx.abs() < 0.0001 || dy.abs() < 0.0001 {
+                current
+            } else {
+                let dx_abs = dx.abs();
+                let dy_abs = dy.abs();
+                let width_from_height = dy_abs * aspect_ratio;
+                let height_from_width = dx_abs / aspect_ratio;
+                if width_from_height <= dx_abs {
+                    Point {
+                        x: start.x + dx.signum() * width_from_height,
+                        y: current.y,
+                    }
+                } else {
+                    Point {
+                        x: current.x,
+                        y: start.y + dy.signum() * height_from_width,
+                    }
+                }
+            }
+        } else {
+            current
+        };
+
+        Rect::from_points(start, end).map(|mut rect| {
+            rect.x = rect.x.clamp(0, image_width.saturating_sub(1));
+            rect.y = rect.y.clamp(0, image_height.saturating_sub(1));
+            let max_width = image_width.saturating_sub(rect.x);
+            let max_height = image_height.saturating_sub(rect.y);
+            rect.width = rect.width.clamp(0, max_width);
+            rect.height = rect.height.clamp(0, max_height);
+            rect
+        })
+    }
+
     pub fn begin_drag(&mut self, point: Point) {
         self.selected_action_index = None;
         self.drag_start = Some(point);
@@ -2251,7 +2337,7 @@ impl EditorState {
         let color = self.selected_color;
         let stroke_size = self.stroke_size;
 
-        let mut result = match self.selected_tool {
+        let result = match self.selected_tool {
             Tool::Select => None,
             Tool::Crop => None,
             Tool::Background => None,
@@ -2330,28 +2416,6 @@ impl EditorState {
             }
             Tool::Text => None,
         };
-
-        // For Curved/Double arrows, initialize control points after drag
-        if let Some(AnnotationAction::Arrow {
-            style,
-            control_points,
-            start,
-            end,
-            ..
-        }) = result.as_mut()
-        {
-            match style {
-                ArrowStyle::Curved | ArrowStyle::Double => {
-                    let mid = Point {
-                        x: (start.x + end.x) / 2.0,
-                        y: (start.y + end.y) / 2.0,
-                    };
-                    *control_points = Some([*start, mid, *end]);
-                    self.arrow_editing_controls = true;
-                }
-                _ => {}
-            }
-        }
 
         result
     }
@@ -2467,7 +2531,7 @@ impl EditorState {
             Tool::Text => None,
         };
 
-        // For Curved/Double arrows, initialize control points after finalize
+        // For all arrows, initialize control handles after finalize
         if let Some(AnnotationAction::Arrow {
             style,
             control_points,
@@ -2482,11 +2546,13 @@ impl EditorState {
                         x: (start.x + end.x) / 2.0,
                         y: (start.y + end.y) / 2.0,
                     };
-                    *control_points = Some([*start, mid, *end]);
-                    self.arrow_editing_controls = true;
+                    *control_points = Some(vec![*start, mid, *end]);
                 }
-                _ => {}
+                _ => {
+                    *control_points = Some(vec![*start, *end]);
+                }
             }
+            self.arrow_editing_controls = true;
         }
 
         result
