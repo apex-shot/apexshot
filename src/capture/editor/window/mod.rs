@@ -1504,7 +1504,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 }
             }
 
-            if selected_tool == Tool::Select {
+            if selected_tool == Tool::Select || selected_tool == Tool::Arrow {
                 if let AnnotationAction::Text { .. } = selected_action {
                     // Already handled above.
                 } else if let AnnotationAction::Arrow {
@@ -1547,8 +1547,16 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             // rendering. Do NOT draw it here a second time.
         }
 
-        // Draw arrow control handles for Curved/Double editing
-        if arrow_editing_controls {
+        // Draw arrow control handles when: (a) editing controls are active, OR
+        // (b) Arrow tool is selected and an existing arrow is selected.
+        let show_handles = arrow_editing_controls
+            || (selected_tool == Tool::Arrow
+                && selected_action
+                    .as_ref()
+                    .map(|a| matches!(a, AnnotationAction::Arrow { .. }))
+                    .unwrap_or(false));
+
+        if show_handles {
             if let Some(action) = selected_action.as_ref() {
                 if let AnnotationAction::Arrow {
                     control_points: Some(handles),

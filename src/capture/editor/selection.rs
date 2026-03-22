@@ -33,12 +33,6 @@ pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Op
             end,
             stroke_size,
             ..
-        }
-        | AnnotationAction::Arrow {
-            start,
-            end,
-            stroke_size,
-            ..
         } => {
             let padding = *stroke_size + padding;
             Rect::from_bounds(
@@ -47,6 +41,47 @@ pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Op
                 start.x.max(end.x) + padding,
                 start.y.max(end.y) + padding,
             )
+        }
+        AnnotationAction::Arrow {
+            start,
+            end,
+            stroke_size,
+            control_points,
+            ..
+        } => {
+            let pad = *stroke_size + padding;
+            // Sample the Bezier curve to get a tight bounding box for curved arrows
+            let mid = control_points.as_ref().and_then(|v| {
+                if v.len() >= 3 {
+                    v.get(1).copied()
+                } else {
+                    None
+                }
+            });
+            if let Some(ctrl) = mid {
+                let mut min_x = start.x.min(end.x).min(ctrl.x);
+                let mut min_y = start.y.min(end.y).min(ctrl.y);
+                let mut max_x = start.x.max(end.x).max(ctrl.x);
+                let mut max_y = start.y.max(end.y).max(ctrl.y);
+                for i in 0..=16u32 {
+                    let t = i as f64 / 16.0;
+                    let u = 1.0 - t;
+                    let px = u * u * start.x + 2.0 * u * t * ctrl.x + t * t * end.x;
+                    let py = u * u * start.y + 2.0 * u * t * ctrl.y + t * t * end.y;
+                    min_x = min_x.min(px);
+                    min_y = min_y.min(py);
+                    max_x = max_x.max(px);
+                    max_y = max_y.max(py);
+                }
+                Rect::from_bounds(min_x - pad, min_y - pad, max_x + pad, max_y + pad)
+            } else {
+                Rect::from_bounds(
+                    start.x.min(end.x) - pad,
+                    start.y.min(end.y) - pad,
+                    start.x.max(end.x) + pad,
+                    start.y.max(end.y) + pad,
+                )
+            }
         }
         AnnotationAction::Text {
             position,
@@ -104,13 +139,43 @@ pub fn action_contains_point_with_padding(
             end,
             stroke_size,
             ..
-        }
-        | AnnotationAction::Arrow {
+        } => distance_to_segment(point, *start, *end) <= *stroke_size + padding + 2.0,
+        AnnotationAction::Arrow {
             start,
             end,
             stroke_size,
+            control_points,
             ..
-        } => distance_to_segment(point, *start, *end) <= *stroke_size + padding + 2.0,
+        } => {
+            let threshold = *stroke_size + padding + 8.0;
+            let mid = control_points.as_ref().and_then(|v| {
+                if v.len() >= 3 {
+                    v.get(1).copied()
+                } else {
+                    None
+                }
+            });
+            if let Some(ctrl) = mid {
+                // Sample the quadratic Bezier and check distance to each segment
+                let steps = 20u32;
+                let mut prev = *start;
+                for i in 1..=steps {
+                    let t = i as f64 / steps as f64;
+                    let u = 1.0 - t;
+                    let cur = Point {
+                        x: u * u * start.x + 2.0 * u * t * ctrl.x + t * t * end.x,
+                        y: u * u * start.y + 2.0 * u * t * ctrl.y + t * t * end.y,
+                    };
+                    if distance_to_segment(point, prev, cur) <= threshold {
+                        return true;
+                    }
+                    prev = cur;
+                }
+                false
+            } else {
+                distance_to_segment(point, *start, *end) <= threshold
+            }
+        }
         _ => action_bounds_with_padding(action, padding)
             .map(|rect| rect_contains_point(rect, point, 0.0))
             .unwrap_or(false),
@@ -328,11 +393,30 @@ pub fn translate_action(action: &mut AnnotationAction, dx: f64, dy: f64) -> bool
             }
             true
         }
-        AnnotationAction::Line { start, end, .. } | AnnotationAction::Arrow { start, end, .. } => {
+        AnnotationAction::Line { start, end, .. } => {
             start.x += dx;
             start.y += dy;
             end.x += dx;
             end.y += dy;
+            true
+        }
+        AnnotationAction::Arrow {
+            start,
+            end,
+            control_points,
+            ..
+        } => {
+            start.x += dx;
+            start.y += dy;
+            end.x += dx;
+            end.y += dy;
+            // Keep control_points in sync so the handle circles move with the arrow
+            if let Some(pts) = control_points {
+                for pt in pts.iter_mut() {
+                    pt.x += dx;
+                    pt.y += dy;
+                }
+            }
             true
         }
         AnnotationAction::Text { position, .. } | AnnotationAction::Number { position, .. } => {
