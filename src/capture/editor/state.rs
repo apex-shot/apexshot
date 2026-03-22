@@ -198,24 +198,6 @@ fn crop_rect_with_aspect_fit(
     Rect::from_bounds(x, y, x + width, y + height)
 }
 
-fn constrained_crop_point(start: Point, end: Point, aspect_ratio: f64) -> Point {
-    if aspect_ratio <= 0.0 {
-        return end;
-    }
-
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-    let sign_x = if dx < 0.0 { -1.0 } else { 1.0 };
-    let sign_y = if dy < 0.0 { -1.0 } else { 1.0 };
-    let width = dx.abs().max(dy.abs() * aspect_ratio);
-    let height = width / aspect_ratio;
-
-    Point {
-        x: start.x + sign_x * width,
-        y: start.y + sign_y * height,
-    }
-}
-
 fn resize_crop_rect_with_fixed_aspect(
     rect: &mut Rect,
     handle: SelectHandle,
@@ -970,16 +952,9 @@ impl EditorState {
         self.arrow_style = style;
     }
 
-    pub fn arrow_style(&self) -> ArrowStyle {
-        self.arrow_style
-    }
-
     const CONTROL_HANDLE_HIT_RADIUS: f64 = 10.0;
 
     pub fn arrow_control_handle_at(&self, point: Point) -> Option<usize> {
-        if !self.arrow_editing_controls {
-            return None;
-        }
         let action = self.selected_action()?;
         if let AnnotationAction::Arrow {
             control_points: Some(handles),
@@ -1037,9 +1012,13 @@ impl EditorState {
                     1 => {
                         // new_pos is the desired on-curve midpoint B(0.5).
                         // Invert: P1 = 2*B(0.5) - 0.5*P0 - 0.5*P2
+                        let iw = self.working_image.width() as f64;
+                        let ih = self.working_image.height() as f64;
                         handles[1] = Point {
-                            x: 2.0 * new_pos.x - 0.5 * handles[0].x - 0.5 * handles[2].x,
-                            y: 2.0 * new_pos.y - 0.5 * handles[0].y - 0.5 * handles[2].y,
+                            x: (2.0 * new_pos.x - 0.5 * handles[0].x - 0.5 * handles[2].x)
+                                .clamp(0.0, iw),
+                            y: (2.0 * new_pos.y - 0.5 * handles[0].y - 0.5 * handles[2].y)
+                                .clamp(0.0, ih),
                         };
                     }
                     2 => {
@@ -2187,11 +2166,61 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
                 p.y = p.y.max(0.0).min(img_h as f64);
             }
         }
-        AnnotationAction::Line { start, end, .. } | AnnotationAction::Arrow { start, end, .. } => {
+        AnnotationAction::Line { start, end, .. } => {
             start.x = start.x.max(0.0).min(img_w as f64);
             start.y = start.y.max(0.0).min(img_h as f64);
             end.x = end.x.max(0.0).min(img_w as f64);
             end.y = end.y.max(0.0).min(img_h as f64);
+        }
+        AnnotationAction::Arrow {
+            start,
+            end,
+            control_points,
+            ..
+        } => {
+            let iw = img_w as f64;
+            let ih = img_h as f64;
+            // Collect all defining points so we can shift the whole shape as a unit
+            let mut all_pts: Vec<&mut crate::capture::editor::types::Point> = Vec::new();
+            all_pts.push(start);
+            all_pts.push(end);
+            if let Some(cps) = control_points.as_mut() {
+                for cp in cps.iter_mut() {
+                    all_pts.push(cp);
+                }
+            }
+            // Find current extents
+            let min_x = all_pts.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+            let max_x = all_pts
+                .iter()
+                .map(|p| p.x)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let min_y = all_pts.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+            let max_y = all_pts
+                .iter()
+                .map(|p| p.y)
+                .fold(f64::NEG_INFINITY, f64::max);
+            // Compute the shift needed to bring the whole arrow inside
+            let shift_x = if min_x < 0.0 {
+                -min_x
+            } else if max_x > iw {
+                iw - max_x
+            } else {
+                0.0
+            };
+            let shift_y = if min_y < 0.0 {
+                -min_y
+            } else if max_y > ih {
+                ih - max_y
+            } else {
+                0.0
+            };
+            if shift_x != 0.0 || shift_y != 0.0 {
+                for p in all_pts {
+                    p.x += shift_x;
+                    p.y += shift_y;
+                }
+            }
         }
     }
 }

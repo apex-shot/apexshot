@@ -1259,17 +1259,106 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             return;
         }
 
-        // Arrow tool with control handles: check if clicking a control point
-        if st.arrow_editing_controls && st.selected_tool == Tool::Arrow {
+        // Arrow tool: unified interaction — handle drag, body drag, or new draw.
+        if st.selected_tool == Tool::Arrow {
             let image_point = t.view_to_image_clamped(view_point);
-            if let Some(handle_idx) = st.arrow_control_handle_at(image_point) {
-                st.arrow_control_dragging = Some(handle_idx);
-                st.drag_start_view = Some(view_point);
-                drop(st);
-                if let Some(area) = drawing_area_begin.upgrade() {
-                    area.queue_draw();
+
+            // --- Case 1: an arrow is already selected ---
+            let selected_is_arrow = st
+                .selected_action_index
+                .and_then(|i| st.actions.get(i))
+                .map(|a| matches!(a, super::super::types::AnnotationAction::Arrow { .. }))
+                .unwrap_or(false);
+
+            if selected_is_arrow {
+                // 1a. Handle hit — always check this first regardless of arrow_editing_controls.
+                if let Some(handle_idx) = st.arrow_control_handle_at(image_point) {
+                    st.arrow_control_dragging = Some(handle_idx);
+                    st.arrow_editing_controls = true;
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    return;
                 }
-                return;
+
+                // 1b. Body hit — drag the whole arrow; keep handles visible.
+                let idx = st.selected_action_index.unwrap();
+                let hit_body = super::super::selection::action_contains_point_with_padding(
+                    &st.actions[idx],
+                    image_point,
+                    8.0,
+                );
+                if hit_body {
+                    st.select_drag_anchor = Some(image_point);
+                    st.select_resize_handle = None;
+                    st.arrow_editing_controls = true; // keep handles visible during move
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    drag_last_redraw_begin.set(glib::monotonic_time());
+                    return;
+                }
+
+                // 1c. Clicked outside the selected arrow — deselect, fall through to new draw.
+                st.selected_action_index = None;
+                st.select_drag_anchor = None;
+                st.arrow_editing_controls = false;
+            }
+
+            // --- Case 2: no arrow selected — check if click lands on an existing arrow ---
+            if st.selected_action_index.is_none()
+                && st.select_action_at_point_with_scale(image_point, t.scale)
+            {
+                let is_arrow = st
+                    .selected_action()
+                    .map(|a| matches!(a, super::super::types::AnnotationAction::Arrow { .. }))
+                    .unwrap_or(false);
+                if is_arrow {
+                    // Ensure control_points are initialised
+                    if let Some(idx) = st.selected_action_index {
+                        if let Some(super::super::types::AnnotationAction::Arrow {
+                            style,
+                            control_points,
+                            start,
+                            end,
+                            ..
+                        }) = st.actions.get_mut(idx)
+                        {
+                            if control_points.is_none() {
+                                match style {
+                                    ArrowStyle::Curved | ArrowStyle::Double => {
+                                        let mid = Point {
+                                            x: (start.x + end.x) / 2.0,
+                                            y: (start.y + end.y) / 2.0,
+                                        };
+                                        *control_points = Some(vec![*start, mid, *end]);
+                                    }
+                                    _ => {
+                                        *control_points = Some(vec![*start, *end]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    st.arrow_editing_controls = true;
+                    st.select_drag_anchor = Some(image_point);
+                    st.select_resize_handle = None;
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    drag_last_redraw_begin.set(glib::monotonic_time());
+                    return;
+                } else {
+                    // Hit something that isn't an arrow — deselect, fall through to new draw.
+                    st.selected_action_index = None;
+                    st.select_drag_anchor = None;
+                }
             }
         }
 
@@ -1464,6 +1553,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             };
 
             if st.selected_tool == Tool::Select
+                || (st.selected_tool == Tool::Arrow
+                    && st.selected_action_index.is_some()
+                    && st.select_drag_anchor.is_some()
+                    && st.arrow_control_dragging.is_none())
                 || (st.selected_tool == Tool::Text
                     && st.selected_action_index.is_some()
                     && st.active_text_input.is_none()
@@ -1583,6 +1676,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             };
 
             if st.selected_tool == Tool::Select
+                || (st.selected_tool == Tool::Arrow
+                    && st.selected_action_index.is_some()
+                    && st.select_drag_anchor.is_some()
+                    && st.arrow_control_dragging.is_none())
                 || (st.selected_tool == Tool::Text
                     && st.active_text_input.is_none()
                     && !st.active_text_is_dragging)

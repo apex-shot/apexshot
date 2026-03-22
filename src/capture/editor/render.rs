@@ -431,46 +431,6 @@ fn selection_outline_stroke_width(view_scale: f64) -> f64 {
     TEXT_EDIT_BORDER_WIDTH / view_scale.max(0.01)
 }
 
-fn arrow_head_geometry(
-    start: Point,
-    end: Point,
-    stroke_size: f64,
-    style: ArrowStyle,
-    control_points: &Option<Vec<Point>>,
-) -> Option<(f64, f64, f64)> {
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-    if dx.abs() < 0.1 && dy.abs() < 0.1 {
-        return None;
-    }
-
-    let angle = dy.atan2(dx);
-    let line_length = (dx * dx + dy * dy).sqrt().max(1.0);
-    let head_length = (stroke_size.max(0.5) * 4.8)
-        .clamp(12.0, 120.0)
-        .min((line_length * 0.75).max(8.0));
-    let spread = match style {
-        ArrowStyle::Fancy => 0.3,
-        _ => 0.55,
-    };
-    let end_angle = match style {
-        ArrowStyle::Curved | ArrowStyle::Double => {
-            if let Some(ref v) = control_points {
-                if let Some(mid) = v.get(1) {
-                    (end.y - mid.y).atan2(end.x - mid.x)
-                } else {
-                    angle
-                }
-            } else {
-                angle
-            }
-        }
-        _ => angle,
-    };
-
-    Some((end_angle, head_length, spread))
-}
-
 pub fn draw_arrow_selection_outline(
     context: &gtk4::cairo::Context,
     start: Point,
@@ -480,76 +440,36 @@ pub fn draw_arrow_selection_outline(
     control_points: Option<Vec<Point>>,
     view_scale: f64,
 ) {
-    let Some((end_angle, head_length, spread)) =
-        arrow_head_geometry(start, end, stroke_size, style, &control_points)
-    else {
-        return;
-    };
-
     let _ = context.save();
-    context.set_source_rgba(
-        TEXT_EDIT_BORDER_COLOR.0,
-        TEXT_EDIT_BORDER_COLOR.1,
-        TEXT_EDIT_BORDER_COLOR.2,
-        1.0,
-    );
-    context.set_line_width(selection_outline_stroke_width(view_scale));
-    context.set_line_cap(gtk4::cairo::LineCap::Round);
-    context.set_line_join(gtk4::cairo::LineJoin::Round);
-    context.set_dash(&[], 0.0);
 
-    match style {
-        ArrowStyle::Curved | ArrowStyle::Double => {
-            if let Some(ref v) = control_points {
-                if let Some(mid) = v.get(1) {
-                    context.move_to(start.x, start.y);
-                    context.curve_to(mid.x, mid.y, mid.x, mid.y, end.x, end.y);
-                } else {
-                    context.move_to(start.x, start.y);
-                    context.line_to(end.x, end.y);
-                }
-            } else {
-                context.move_to(start.x, start.y);
-                context.line_to(end.x, end.y);
-            }
+    let path_built = match style {
+        ArrowStyle::Double => {
+            build_double_arrow_path(context, start, end, stroke_size, &control_points)
+        }
+        ArrowStyle::Fancy => {
+            build_thorn_arrow_path(context, start, end, stroke_size, false, &control_points)
         }
         _ => {
-            context.move_to(start.x, start.y);
-            context.line_to(end.x, end.y);
+            // Standard and Curved both use is_smooth = true
+            build_thorn_arrow_path(context, start, end, stroke_size, true, &control_points)
         }
-    }
-    let _ = context.stroke();
+    };
 
-    let left_x = end.x - head_length * (end_angle - spread).cos();
-    let left_y = end.y - head_length * (end_angle - spread).sin();
-    let right_x = end.x - head_length * (end_angle + spread).cos();
-    let right_y = end.y - head_length * (end_angle + spread).sin();
-    context.new_path();
-    context.move_to(end.x, end.y);
-    context.line_to(left_x, left_y);
-    context.move_to(end.x, end.y);
-    context.line_to(right_x, right_y);
-    let _ = context.stroke();
-
-    if matches!(style, ArrowStyle::Double) {
-        let start_angle = if let Some(ref v) = control_points {
-            if let Some(mid) = v.get(1) {
-                (start.y - mid.y).atan2(start.x - mid.x) + std::f64::consts::PI
-            } else {
-                (start.y - end.y).atan2(start.x - end.x)
-            }
-        } else {
-            (start.y - end.y).atan2(start.x - end.x)
-        };
-        let left_x = start.x - head_length * (start_angle - spread).cos();
-        let left_y = start.y - head_length * (start_angle - spread).sin();
-        let right_x = start.x - head_length * (start_angle + spread).cos();
-        let right_y = start.y - head_length * (start_angle + spread).sin();
-        context.new_path();
-        context.move_to(start.x, start.y);
-        context.line_to(left_x, left_y);
-        context.move_to(start.x, start.y);
-        context.line_to(right_x, right_y);
+    if path_built {
+        let scale = view_scale.max(0.01);
+        // Slightly expand the stroke so it sits just outside the fill
+        context.set_line_width(
+            (stroke_size.max(0.5) * 0.2 + 1.0) + selection_outline_stroke_width(scale) * 2.0,
+        );
+        context.set_line_join(gtk4::cairo::LineJoin::Round);
+        context.set_line_cap(gtk4::cairo::LineCap::Round);
+        context.set_dash(&[], 0.0);
+        context.set_source_rgba(
+            TEXT_EDIT_BORDER_COLOR.0,
+            TEXT_EDIT_BORDER_COLOR.1,
+            TEXT_EDIT_BORDER_COLOR.2,
+            0.9,
+        );
         let _ = context.stroke();
     }
 
@@ -968,23 +888,27 @@ fn bezier_tangent(p0: Point, p1: Point, p2: Point, t: f64) -> (f64, f64) {
     }
 }
 
-fn draw_thorn_arrow(
+fn build_thorn_arrow_path(
     context: &gtk4::cairo::Context,
     start: Point,
     end: Point,
-    color: DrawColor,
     stroke_size: f64,
     is_smooth: bool,
-    control_points: Option<Vec<Point>>,
-) {
-    // Handle both straight and curved logic
-    let is_curved = control_points.is_some();
+    control_points: &Option<Vec<Point>>,
+) -> bool {
+    let is_curved = control_points
+        .as_ref()
+        .map(|v| v.len() >= 3)
+        .unwrap_or(false);
     let p0 = start;
     let p2 = end;
-    let p1 = control_points.map(|c| c[1]).unwrap_or_else(|| Point {
-        x: (start.x + end.x) / 2.0,
-        y: (start.y + end.y) / 2.0,
-    });
+    let p1 = control_points
+        .as_ref()
+        .and_then(|c| c.get(1).copied())
+        .unwrap_or_else(|| Point {
+            x: (start.x + end.x) / 2.0,
+            y: (start.y + end.y) / 2.0,
+        });
 
     let mut line_length = 0.0;
     if is_curved {
@@ -1004,7 +928,7 @@ fn draw_thorn_arrow(
     }
 
     if line_length < 0.1 {
-        return;
+        return false;
     }
 
     let stroke = stroke_size.max(0.5);
@@ -1167,6 +1091,22 @@ fn draw_thorn_arrow(
 
     context.line_to(right_wing_x, right_wing_y);
     context.close_path();
+    true
+}
+
+fn draw_thorn_arrow(
+    context: &gtk4::cairo::Context,
+    start: Point,
+    end: Point,
+    color: DrawColor,
+    stroke_size: f64,
+    is_smooth: bool,
+    control_points: Option<Vec<Point>>,
+) {
+    if !build_thorn_arrow_path(context, start, end, stroke_size, is_smooth, &control_points) {
+        return;
+    }
+    let stroke = stroke_size.max(0.5);
 
     // Drop shadow
     let shadow_offset = (stroke * 0.4).clamp(1.5, 4.0);
@@ -1181,7 +1121,7 @@ fn draw_thorn_arrow(
     let _ = context.fill_preserve();
 
     // Outline
-    context.set_source_rgba(0.1, 0.1, 0.1, color.a); // Dark outline
+    context.set_source_rgba(0.1, 0.1, 0.1, color.a);
     context.set_line_width(stroke * 0.2 + 1.0);
     context.set_line_join(gtk4::cairo::LineJoin::Round);
     let _ = context.stroke();
@@ -1195,13 +1135,46 @@ fn draw_double_arrow(
     stroke_size: f64,
     control_points: Option<Vec<Point>>,
 ) {
+    if !build_double_arrow_path(context, start, end, stroke_size, &control_points) {
+        return;
+    }
+    let stroke = stroke_size.max(0.5);
+
+    // Drop shadow
+    let shadow_offset = (stroke * 0.4).clamp(1.5, 4.0);
+    let _ = context.save();
+    context.translate(shadow_offset, shadow_offset + 1.0);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.35 * color.a);
+    let _ = context.fill_preserve();
+    let _ = context.restore();
+
+    // Fill
+    context.set_source_rgba(color.r, color.g, color.b, color.a);
+    let _ = context.fill_preserve();
+
+    // Outline
+    context.set_source_rgba(0.1, 0.1, 0.1, color.a);
+    context.set_line_width(stroke * 0.2 + 1.0);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    let _ = context.stroke();
+}
+fn build_double_arrow_path(
+    context: &gtk4::cairo::Context,
+    start: Point,
+    end: Point,
+    stroke_size: f64,
+    control_points: &Option<Vec<Point>>,
+) -> bool {
     let is_curved = control_points.is_some();
     let p0 = start;
     let p2 = end;
-    let p1 = control_points.map(|c| c[1]).unwrap_or_else(|| Point {
-        x: (start.x + end.x) / 2.0,
-        y: (start.y + end.y) / 2.0,
-    });
+    let p1 = control_points
+        .as_ref()
+        .and_then(|c| c.get(1).copied())
+        .unwrap_or_else(|| Point {
+            x: (start.x + end.x) / 2.0,
+            y: (start.y + end.y) / 2.0,
+        });
 
     let mut line_length = 0.0;
     if is_curved {
@@ -1221,7 +1194,7 @@ fn draw_double_arrow(
     }
 
     if line_length < 0.1 {
-        return;
+        return false;
     }
 
     let stroke = stroke_size.max(0.5);
@@ -1407,24 +1380,7 @@ fn draw_double_arrow(
 
     context.line_to(right_wing_s.x, right_wing_s.y);
     context.close_path();
-
-    // Drop shadow
-    let shadow_offset = (stroke * 0.4).clamp(1.5, 4.0);
-    let _ = context.save();
-    context.translate(shadow_offset, shadow_offset + 1.0);
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.35 * color.a);
-    let _ = context.fill_preserve();
-    let _ = context.restore();
-
-    // Fill
-    context.set_source_rgba(color.r, color.g, color.b, color.a);
-    let _ = context.fill_preserve();
-
-    // Outline
-    context.set_source_rgba(0.1, 0.1, 0.1, color.a); // Dark outline
-    context.set_line_width(stroke * 0.2 + 1.0);
-    context.set_line_join(gtk4::cairo::LineJoin::Round);
-    let _ = context.stroke();
+    true
 }
 
 pub fn draw_arrow(
