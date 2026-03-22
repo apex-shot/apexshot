@@ -79,9 +79,8 @@ fn preprocess_for_ui_text_detection(image: &RgbaImage) -> RgbaImage {
         let b = pixel[2] as f32;
 
         let luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-        let boosted = |channel: f32| {
-            ((channel - luminance) * OCR_UI_CONTRAST + luminance).clamp(0.0, 255.0)
-        };
+        let boosted =
+            |channel: f32| ((channel - luminance) * OCR_UI_CONTRAST + luminance).clamp(0.0, 255.0);
 
         pixel[0] = boosted(r).round() as u8;
         pixel[1] = boosted(g).round() as u8;
@@ -333,7 +332,9 @@ impl TextDetector {
     /// Find the text region containing the given point, allowing a small guide margin
     /// around the detected text bounds to make pointer placement less fragile.
     pub fn guided_hit_test_point(&self, point: Point) -> Option<&TextRegion> {
-        self.hit_test_point_with(point, |region, point| region.contains_point_with_guide(point))
+        self.hit_test_point_with(point, |region, point| {
+            region.contains_point_with_guide(point)
+        })
     }
 
     /// Find the text height using a small guided zone around detected text bounds.
@@ -546,8 +547,14 @@ fn detect_text_regions_ocrs(image: &RgbaImage) -> Result<Vec<TextRegion>, String
 
     let scaled = if (OCR_INPUT_SCALE - 1.0).abs() > f32::EPSILON {
         let scaled_width = ((preprocessed.width() as f32 * OCR_INPUT_SCALE).round() as u32).max(1);
-        let scaled_height = ((preprocessed.height() as f32 * OCR_INPUT_SCALE).round() as u32).max(1);
-        resize(&preprocessed, scaled_width, scaled_height, FilterType::CatmullRom)
+        let scaled_height =
+            ((preprocessed.height() as f32 * OCR_INPUT_SCALE).round() as u32).max(1);
+        resize(
+            &preprocessed,
+            scaled_width,
+            scaled_height,
+            FilterType::CatmullRom,
+        )
     } else {
         preprocessed
     };

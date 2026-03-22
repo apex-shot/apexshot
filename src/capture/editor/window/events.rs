@@ -19,8 +19,8 @@ use super::super::{
     render::cursor_position_for_text_point,
     state::EditorState,
     types::{
-        tool_shortcut_target, BackgroundStyle, DrawColor, FontSettings, FontStyle, MoveHandle,
-        ObfuscateMethod, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
+        tool_shortcut_target, ArrowStyle, BackgroundStyle, DrawColor, FontSettings, FontStyle,
+        MoveHandle, ObfuscateMethod, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
     },
     ui_support::{set_active_tool_button, set_crop_apply_button_state},
 };
@@ -102,6 +102,10 @@ pub(super) struct EventContext {
     pub number_dec_btn: Button,
     pub number_size_button: Button,
     pub number_size_list: gtk4::Box,
+    pub arrow_style_button: Button,
+    pub arrow_style_list: gtk4::Box,
+    pub stroke_size_button: Button,
+    pub stroke_size_list: gtk4::Box,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -169,6 +173,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         number_dec_btn,
         number_size_button,
         number_size_list,
+        arrow_style_button,
+        arrow_style_list,
+        stroke_size_button,
+        stroke_size_list,
     } = ctx;
 
     let state_select = state.clone();
@@ -781,6 +789,100 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         });
     }
 
+    // Wire up arrow style list items
+    let styles = ArrowStyle::ALL;
+
+    let arrow_style_button = arrow_style_button.clone();
+
+    let mut style_idx = 0usize;
+    let mut child_opt = arrow_style_list.first_child();
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&style) = styles.get(style_idx) else {
+            break;
+        };
+        style_idx += 1;
+
+        let state_arrow_style = state.clone();
+        let drawing_area_arrow_style = drawing_area.downgrade();
+        let arrow_style_button = arrow_style_button.clone();
+
+        button.connect_clicked(move |b| {
+            {
+                let mut st = state_arrow_style.lock().unwrap();
+                st.set_arrow_style(style);
+            }
+
+            // Update the trigger button icon
+            if let Some(child) = arrow_style_button.child() {
+                if let Ok(img) = child.downcast::<Image>() {
+                    img.set_icon_name(Some(style.icon_name()));
+                }
+            }
+
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+            if let Some(area) = drawing_area_arrow_style.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+
+    // Wire up stroke size list items for arrow/line tools
+    let stroke_sizes: [(f64, PenWeight); 4] = [
+        (2.0, PenWeight::Small),
+        (4.0, PenWeight::Medium),
+        (7.0, PenWeight::Large),
+        (12.0, PenWeight::ExtraLarge),
+    ];
+
+    let stroke_size_button_for_closure = stroke_size_button.clone();
+    let drawing_area_for_stroke = drawing_area.downgrade();
+
+    let mut stroke_idx = 0usize;
+    let mut child_opt = stroke_size_list.first_child();
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&(size, weight)) = stroke_sizes.get(stroke_idx) else {
+            break;
+        };
+        stroke_idx += 1;
+
+        let state_stroke = state.clone();
+        let drawing_area_stroke = drawing_area_for_stroke.clone();
+        let stroke_size_button_clone = stroke_size_button_for_closure.clone();
+
+        button.connect_clicked(move |b| {
+            {
+                let mut st = state_stroke.lock().unwrap();
+                st.set_stroke_size(size);
+            }
+
+            // Update the trigger button icon to reflect selected size
+            let icon = gtk4::Image::from_icon_name(weight.icon_name());
+            icon.set_pixel_size(weight.icon_pixel_size());
+            stroke_size_button_clone.set_child(Some(&icon));
+
+            if let Some(popover) = b.ancestor(Popover::static_type()) {
+                popover.downcast::<Popover>().unwrap().popdown();
+            }
+            if let Some(area) = drawing_area_stroke.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+
     let refresh_number_start_display: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
         let number_start_entry = number_start_entry.clone();
@@ -1157,6 +1259,109 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             return;
         }
 
+        // Arrow tool: unified interaction — handle drag, body drag, or new draw.
+        if st.selected_tool == Tool::Arrow {
+            let image_point = t.view_to_image_clamped(view_point);
+
+            // --- Case 1: an arrow is already selected ---
+            let selected_is_arrow = st
+                .selected_action_index
+                .and_then(|i| st.actions.get(i))
+                .map(|a| matches!(a, super::super::types::AnnotationAction::Arrow { .. }))
+                .unwrap_or(false);
+
+            if selected_is_arrow {
+                // 1a. Handle hit — always check this first regardless of arrow_editing_controls.
+                if let Some(handle_idx) = st.arrow_control_handle_at(image_point) {
+                    st.arrow_control_dragging = Some(handle_idx);
+                    st.arrow_editing_controls = true;
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    return;
+                }
+
+                // 1b. Body hit — drag the whole arrow; keep handles visible.
+                let idx = st.selected_action_index.unwrap();
+                let hit_body = super::super::selection::action_contains_point_with_padding(
+                    &st.actions[idx],
+                    image_point,
+                    8.0,
+                );
+                if hit_body {
+                    st.select_drag_anchor = Some(image_point);
+                    st.select_resize_handle = None;
+                    st.arrow_editing_controls = true; // keep handles visible during move
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    drag_last_redraw_begin.set(glib::monotonic_time());
+                    return;
+                }
+
+                // 1c. Clicked outside the selected arrow — deselect, fall through to new draw.
+                st.selected_action_index = None;
+                st.select_drag_anchor = None;
+                st.arrow_editing_controls = false;
+            }
+
+            // --- Case 2: no arrow selected — check if click lands on an existing arrow ---
+            if st.selected_action_index.is_none()
+                && st.select_action_at_point_with_scale(image_point, t.scale)
+            {
+                let is_arrow = st
+                    .selected_action()
+                    .map(|a| matches!(a, super::super::types::AnnotationAction::Arrow { .. }))
+                    .unwrap_or(false);
+                if is_arrow {
+                    // Ensure control_points are initialised
+                    if let Some(idx) = st.selected_action_index {
+                        if let Some(super::super::types::AnnotationAction::Arrow {
+                            style,
+                            control_points,
+                            start,
+                            end,
+                            ..
+                        }) = st.actions.get_mut(idx)
+                        {
+                            if control_points.is_none() {
+                                match style {
+                                    ArrowStyle::Curved | ArrowStyle::Double => {
+                                        let mid = Point {
+                                            x: (start.x + end.x) / 2.0,
+                                            y: (start.y + end.y) / 2.0,
+                                        };
+                                        *control_points = Some(vec![*start, mid, *end]);
+                                    }
+                                    _ => {
+                                        *control_points = Some(vec![*start, *end]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    st.arrow_editing_controls = true;
+                    st.select_drag_anchor = Some(image_point);
+                    st.select_resize_handle = None;
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    drag_last_redraw_begin.set(glib::monotonic_time());
+                    return;
+                } else {
+                    // Hit something that isn't an arrow — deselect, fall through to new draw.
+                    st.selected_action_index = None;
+                    st.select_drag_anchor = None;
+                }
+            }
+        }
+
         // Text tool with a selected action: check handles first, then fall back to move.
         if st.selected_tool == Tool::Text
             && st.selected_action_index.is_some()
@@ -1312,6 +1517,22 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let t = *transform_drag_update.lock().unwrap();
         let mut st = state_drag_update.lock().unwrap();
 
+        // Arrow control point dragging
+        if let Some(handle_idx) = st.arrow_control_dragging {
+            let start_view = st.drag_start_view.unwrap_or(Point { x: 0.0, y: 0.0 });
+            let current_view = Point {
+                x: start_view.x + offset_x,
+                y: start_view.y + offset_y,
+            };
+            let image_point = t.view_to_image_clamped(current_view);
+            st.move_arrow_control_handle(handle_idx, image_point);
+            drop(st);
+            if let Some(area) = drawing_area_update.upgrade() {
+                area.queue_draw();
+            }
+            return;
+        }
+
         let shift_pressed = gesture
             .current_event_state()
             .contains(gdk::ModifierType::SHIFT_MASK);
@@ -1332,6 +1553,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             };
 
             if st.selected_tool == Tool::Select
+                || (st.selected_tool == Tool::Arrow
+                    && st.selected_action_index.is_some()
+                    && st.select_drag_anchor.is_some()
+                    && st.arrow_control_dragging.is_none())
                 || (st.selected_tool == Tool::Text
                     && st.selected_action_index.is_some()
                     && st.active_text_input.is_none()
@@ -1430,6 +1655,16 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let t = *transform_drag_end.lock().unwrap();
         let mut st = state_drag_end.lock().unwrap();
 
+        // Arrow control point dragging: clear and return
+        if st.arrow_control_dragging.is_some() {
+            st.arrow_control_dragging = None;
+            drop(st);
+            if let Some(area) = drawing_area_end.upgrade() {
+                area.queue_draw();
+            }
+            return;
+        }
+
         let shift_pressed = gesture
             .current_event_state()
             .contains(gdk::ModifierType::SHIFT_MASK);
@@ -1441,6 +1676,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             };
 
             if st.selected_tool == Tool::Select
+                || (st.selected_tool == Tool::Arrow
+                    && st.selected_action_index.is_some()
+                    && st.select_drag_anchor.is_some()
+                    && st.arrow_control_dragging.is_none())
                 || (st.selected_tool == Tool::Text
                     && st.active_text_input.is_none()
                     && !st.active_text_is_dragging)

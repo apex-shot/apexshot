@@ -63,7 +63,11 @@ impl NumberingStyle {
     /// 1=A, 2=B, ..., 26=Z, 27=AA, 28=AB...
     fn to_alpha(n: u32, uppercase: bool) -> String {
         if n == 0 {
-            return if uppercase { "A".to_string() } else { "a".to_string() };
+            return if uppercase {
+                "A".to_string()
+            } else {
+                "a".to_string()
+            };
         }
 
         let mut result = String::new();
@@ -93,9 +97,18 @@ impl NumberingStyle {
 
         // Support up to 3999 (MMMCMXCIX)
         let numerals = [
-            (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
-            (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
-            (10, "x"), (9, "ix"), (5, "v"), (4, "iv"),
+            (1000, "m"),
+            (900, "cm"),
+            (500, "d"),
+            (400, "cd"),
+            (100, "c"),
+            (90, "xc"),
+            (50, "l"),
+            (40, "xl"),
+            (10, "x"),
+            (9, "ix"),
+            (5, "v"),
+            (4, "iv"),
             (1, "i"),
         ];
 
