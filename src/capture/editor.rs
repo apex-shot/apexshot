@@ -433,6 +433,8 @@ mod tests {
             end: Point { x: 10.0, y: 10.0 },
             color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
             stroke_size: STROKE_WIDTH,
+            style: ArrowStyle::Standard,
+            control_points: None,
         });
         state.push_action(AnnotationAction::Box {
             rect: Rect {

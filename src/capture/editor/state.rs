@@ -17,7 +17,7 @@ use super::selection::{
 };
 use super::text_detect::{BackgroundTextDetection, TextDetector};
 use super::types::{
-    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
+    AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
     EditorError, FontSettings, FontStyle, MoveHandle, ObfuscateMethod, Point, Rect, SelectHandle,
     SizeControlMode, TextAlignment, TextDecoration, TextEditBounds, Tool,
 };
@@ -47,6 +47,9 @@ pub struct EditorState {
     pub obfuscate_pixelate_amount: f64,
     pub obfuscate_blur_secure_amount: f64,
     pub obfuscate_blur_smooth_amount: f64,
+    pub arrow_style: ArrowStyle,
+    pub arrow_editing_controls: bool,
+    pub arrow_control_dragging: Option<usize>,
     pub next_number: u32,
     pub select_drag_anchor: Option<Point>,
     pub select_resize_handle: Option<super::types::SelectHandle>,
@@ -195,24 +198,6 @@ fn crop_rect_with_aspect_fit(
     Rect::from_bounds(x, y, x + width, y + height)
 }
 
-fn constrained_crop_point(start: Point, end: Point, aspect_ratio: f64) -> Point {
-    if aspect_ratio <= 0.0 {
-        return end;
-    }
-
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-    let sign_x = if dx < 0.0 { -1.0 } else { 1.0 };
-    let sign_y = if dy < 0.0 { -1.0 } else { 1.0 };
-    let width = dx.abs().max(dy.abs() * aspect_ratio);
-    let height = width / aspect_ratio;
-
-    Point {
-        x: start.x + sign_x * width,
-        y: start.y + sign_y * height,
-    }
-}
-
 fn resize_crop_rect_with_fixed_aspect(
     rect: &mut Rect,
     handle: SelectHandle,
@@ -284,6 +269,9 @@ impl EditorState {
             obfuscate_pixelate_amount: DEFAULT_OBFUSCATE_AMOUNT,
             obfuscate_blur_secure_amount: DEFAULT_OBFUSCATE_AMOUNT,
             obfuscate_blur_smooth_amount: DEFAULT_OBFUSCATE_AMOUNT,
+            arrow_style: ArrowStyle::Standard,
+            arrow_editing_controls: false,
+            arrow_control_dragging: None,
             next_number: 1,
             select_drag_anchor: None,
             select_resize_handle: None,
@@ -349,6 +337,9 @@ impl EditorState {
         if tool != Tool::Text {
             self.cancel_text_input();
             self.hovered_text_action_index = None;
+        }
+        if tool != Tool::Arrow {
+            self.finalize_arrow_control_editing();
         }
         self.selected_tool = tool;
         self.clear_drag_without_rebuild_and_check_effect()
@@ -955,6 +946,106 @@ impl EditorState {
     #[allow(dead_code)]
     pub fn obfuscate_method(&self) -> ObfuscateMethod {
         self.obfuscate_method
+    }
+
+    pub fn set_arrow_style(&mut self, style: ArrowStyle) {
+        self.arrow_style = style;
+    }
+
+    const CONTROL_HANDLE_HIT_RADIUS: f64 = 10.0;
+
+    pub fn arrow_control_handle_at(&self, point: Point) -> Option<usize> {
+        let action = self.selected_action()?;
+        if let AnnotationAction::Arrow {
+            control_points: Some(handles),
+            ..
+        } = action
+        {
+            if handles.len() >= 3 {
+                // Curved/Double: hit-test against on-curve midpoint B(0.5)
+                let mid_on_curve = Point {
+                    x: 0.25 * handles[0].x + 0.5 * handles[1].x + 0.25 * handles[2].x,
+                    y: 0.25 * handles[0].y + 0.5 * handles[1].y + 0.25 * handles[2].y,
+                };
+                let test_points = [handles[0], mid_on_curve, handles[2]];
+                for (i, handle) in test_points.iter().enumerate() {
+                    let dx = point.x - handle.x;
+                    let dy = point.y - handle.y;
+                    if (dx * dx + dy * dy).sqrt() < Self::CONTROL_HANDLE_HIT_RADIUS {
+                        return Some(i);
+                    }
+                }
+            } else {
+                // Standard/Fancy: hit-test against start and end
+                for (i, handle) in handles.iter().enumerate() {
+                    let dx = point.x - handle.x;
+                    let dy = point.y - handle.y;
+                    if (dx * dx + dy * dy).sqrt() < Self::CONTROL_HANDLE_HIT_RADIUS {
+                        return Some(i);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn move_arrow_control_handle(&mut self, index: usize, new_pos: Point) {
+        let Some(action_index) = self.selected_action_index else {
+            return;
+        };
+        let Some(action) = self.actions.get_mut(action_index) else {
+            return;
+        };
+        if let AnnotationAction::Arrow {
+            control_points: Some(handles),
+            start,
+            end,
+            ..
+        } = action
+        {
+            if handles.len() >= 3 {
+                match index {
+                    0 => {
+                        *start = new_pos;
+                        handles[0] = new_pos;
+                    }
+                    1 => {
+                        // new_pos is the desired on-curve midpoint B(0.5).
+                        // Invert: P1 = 2*B(0.5) - 0.5*P0 - 0.5*P2
+                        let iw = self.working_image.width() as f64;
+                        let ih = self.working_image.height() as f64;
+                        handles[1] = Point {
+                            x: (2.0 * new_pos.x - 0.5 * handles[0].x - 0.5 * handles[2].x)
+                                .clamp(0.0, iw),
+                            y: (2.0 * new_pos.y - 0.5 * handles[0].y - 0.5 * handles[2].y)
+                                .clamp(0.0, ih),
+                        };
+                    }
+                    2 => {
+                        *end = new_pos;
+                        handles[2] = new_pos;
+                    }
+                    _ => {}
+                }
+            } else {
+                match index {
+                    0 => {
+                        *start = new_pos;
+                        handles[0] = new_pos;
+                    }
+                    1 => {
+                        *end = new_pos;
+                        handles[1] = new_pos;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn finalize_arrow_control_editing(&mut self) {
+        self.arrow_editing_controls = false;
+        self.arrow_control_dragging = None;
     }
 
     pub fn current_obfuscate_amount(&self) -> f64 {
@@ -2075,11 +2166,61 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
                 p.y = p.y.max(0.0).min(img_h as f64);
             }
         }
-        AnnotationAction::Line { start, end, .. } | AnnotationAction::Arrow { start, end, .. } => {
+        AnnotationAction::Line { start, end, .. } => {
             start.x = start.x.max(0.0).min(img_w as f64);
             start.y = start.y.max(0.0).min(img_h as f64);
             end.x = end.x.max(0.0).min(img_w as f64);
             end.y = end.y.max(0.0).min(img_h as f64);
+        }
+        AnnotationAction::Arrow {
+            start,
+            end,
+            control_points,
+            ..
+        } => {
+            let iw = img_w as f64;
+            let ih = img_h as f64;
+            // Collect all defining points so we can shift the whole shape as a unit
+            let mut all_pts: Vec<&mut crate::capture::editor::types::Point> = Vec::new();
+            all_pts.push(start);
+            all_pts.push(end);
+            if let Some(cps) = control_points.as_mut() {
+                for cp in cps.iter_mut() {
+                    all_pts.push(cp);
+                }
+            }
+            // Find current extents
+            let min_x = all_pts.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+            let max_x = all_pts
+                .iter()
+                .map(|p| p.x)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let min_y = all_pts.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+            let max_y = all_pts
+                .iter()
+                .map(|p| p.y)
+                .fold(f64::NEG_INFINITY, f64::max);
+            // Compute the shift needed to bring the whole arrow inside
+            let shift_x = if min_x < 0.0 {
+                -min_x
+            } else if max_x > iw {
+                iw - max_x
+            } else {
+                0.0
+            };
+            let shift_y = if min_y < 0.0 {
+                -min_y
+            } else if max_y > ih {
+                ih - max_y
+            } else {
+                0.0
+            };
+            if shift_x != 0.0 || shift_y != 0.0 {
+                for p in all_pts {
+                    p.x += shift_x;
+                    p.y += shift_y;
+                }
+            }
         }
     }
 }
@@ -2111,6 +2252,56 @@ pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction])
 }
 
 impl EditorState {
+    fn current_highlighter_stroke_size(&self) -> f64 {
+        self.locked_highlighter_stroke_size
+            .unwrap_or_else(|| match self.highlighter_mode {
+                HighlighterMode::TextAware => self.stroke_size,
+                HighlighterMode::Freehand => self.pen_weight.stroke_width(),
+            })
+    }
+
+    pub fn draft_crop_rect(&self) -> Option<Rect> {
+        let start = self.drag_start?;
+        let current = self.drag_current?;
+        let image_width = self.working_image.width() as i32;
+        let image_height = self.working_image.height() as i32;
+        let end = if let Some(aspect_ratio) = self.crop_aspect_ratio_value() {
+            let dx = current.x - start.x;
+            let dy = current.y - start.y;
+            if dx.abs() < 0.0001 || dy.abs() < 0.0001 {
+                current
+            } else {
+                let dx_abs = dx.abs();
+                let dy_abs = dy.abs();
+                let width_from_height = dy_abs * aspect_ratio;
+                let height_from_width = dx_abs / aspect_ratio;
+                if width_from_height <= dx_abs {
+                    Point {
+                        x: start.x + dx.signum() * width_from_height,
+                        y: current.y,
+                    }
+                } else {
+                    Point {
+                        x: current.x,
+                        y: start.y + dy.signum() * height_from_width,
+                    }
+                }
+            }
+        } else {
+            current
+        };
+
+        Rect::from_points(start, end).map(|mut rect| {
+            rect.x = rect.x.clamp(0, image_width.saturating_sub(1));
+            rect.y = rect.y.clamp(0, image_height.saturating_sub(1));
+            let max_width = image_width.saturating_sub(rect.x);
+            let max_height = image_height.saturating_sub(rect.y);
+            rect.width = rect.width.clamp(0, max_width);
+            rect.height = rect.height.clamp(0, max_height);
+            rect
+        })
+    }
+
     pub fn begin_drag(&mut self, point: Point) {
         self.selected_action_index = None;
         self.drag_start = Some(point);
@@ -2175,7 +2366,7 @@ impl EditorState {
         let color = self.selected_color;
         let stroke_size = self.stroke_size;
 
-        match self.selected_tool {
+        let result = match self.selected_tool {
             Tool::Select => None,
             Tool::Crop => None,
             Tool::Background => None,
@@ -2233,6 +2424,8 @@ impl EditorState {
                 end,
                 color,
                 stroke_size,
+                style: self.arrow_style,
+                control_points: None,
             }),
             Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
                 rect,
@@ -2251,43 +2444,9 @@ impl EditorState {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
             }
             Tool::Text => None,
-        }
-    }
-
-    fn current_highlighter_stroke_size(&self) -> f64 {
-        if let Some(locked) = self.locked_highlighter_stroke_size {
-            return locked;
-        }
-
-        if self.highlighter_mode == HighlighterMode::TextAware {
-            let point = self
-                .drag_current
-                .or(self.drag_start)
-                .or_else(|| self.drag_path.last().copied());
-
-            if let Some(point) = point {
-                if let Ok(detector) = self.text_detector.lock() {
-                    if let Some(height) = detector.best_text_height_at_point(point) {
-                        return height;
-                    }
-                }
-            }
-        }
-
-        self.pen_weight.stroke_width()
-    }
-
-    pub fn draft_crop_rect(&self) -> Option<Rect> {
-        if self.selected_tool != Tool::Crop {
-            return None;
-        }
-
-        let start = self.drag_start?;
-        let end = match self.crop_aspect_ratio_value() {
-            Some(aspect_ratio) => constrained_crop_point(start, self.drag_current?, aspect_ratio),
-            None => self.drag_current?,
         };
-        Rect::from_points(start, end)
+
+        result
     }
 
     pub fn finalize_drag_action(&mut self) -> Option<AnnotationAction> {
@@ -2357,7 +2516,7 @@ impl EditorState {
         let stroke_size = self.stroke_size;
         self.clear_drag();
 
-        match self.selected_tool {
+        let mut result = match self.selected_tool {
             Tool::Select => None,
             Tool::Crop => None,
             Tool::Background => None,
@@ -2379,6 +2538,8 @@ impl EditorState {
                 end,
                 color,
                 stroke_size,
+                style: self.arrow_style,
+                control_points: None,
             }),
             Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
                 rect,
@@ -2397,7 +2558,33 @@ impl EditorState {
                 Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
             }
             Tool::Text => None,
+        };
+
+        // For all arrows, initialize control handles after finalize
+        if let Some(AnnotationAction::Arrow {
+            style,
+            control_points,
+            start,
+            end,
+            ..
+        }) = result.as_mut()
+        {
+            match style {
+                ArrowStyle::Curved | ArrowStyle::Double => {
+                    let mid = Point {
+                        x: (start.x + end.x) / 2.0,
+                        y: (start.y + end.y) / 2.0,
+                    };
+                    *control_points = Some(vec![*start, mid, *end]);
+                }
+                _ => {
+                    *control_points = Some(vec![*start, *end]);
+                }
+            }
+            self.arrow_editing_controls = true;
         }
+
+        result
     }
 
     pub fn apply_crop_selection(&mut self) -> Result<bool, EditorError> {
