@@ -464,7 +464,7 @@ pub enum AnnotationAction {
         color: DrawColor,
         stroke_size: f64,
         style: ArrowStyle,
-        control_points: Option<[Point; 3]>,
+        control_points: Option<Vec<Point>>,
     },
     Box {
         rect: Rect,
