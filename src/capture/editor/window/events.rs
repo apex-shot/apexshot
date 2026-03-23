@@ -1248,6 +1248,77 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let mut st = state_drag_begin.lock().unwrap();
 
         if st.selected_tool == Tool::Select {
+            let image_point = t.view_to_image_clamped(view_point);
+
+            // Check if selected action is an arrow — allow control handle editing.
+            let selected_is_arrow = st
+                .selected_action_index
+                .and_then(|i| st.actions.get(i))
+                .map(|a| matches!(a, super::super::types::AnnotationAction::Arrow { .. }))
+                .unwrap_or(false);
+
+            if selected_is_arrow {
+                // Ensure control_points are initialised for curved/double arrows.
+                if let Some(idx) = st.selected_action_index {
+                    if let Some(super::super::types::AnnotationAction::Arrow {
+                        style,
+                        control_points,
+                        start,
+                        end,
+                        ..
+                    }) = st.actions.get_mut(idx)
+                    {
+                        if control_points.is_none() {
+                            match style {
+                                ArrowStyle::Curved | ArrowStyle::Double => {
+                                    let mid = Point {
+                                        x: (start.x + end.x) / 2.0,
+                                        y: (start.y + end.y) / 2.0,
+                                    };
+                                    *control_points = Some(vec![*start, mid, *end]);
+                                }
+                                _ => {
+                                    *control_points = Some(vec![*start, *end]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 1a. Handle hit — check control handles first.
+                if let Some(handle_idx) = st.arrow_control_handle_at(image_point) {
+                    st.arrow_control_dragging = Some(handle_idx);
+                    st.arrow_editing_controls = true;
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    return;
+                }
+
+                // 1b. Body hit — drag the whole arrow; keep handles visible.
+                let idx = st.selected_action_index.unwrap();
+                let hit_body = super::super::selection::action_contains_point_with_padding(
+                    &st.actions[idx],
+                    image_point,
+                    8.0,
+                );
+                if hit_body {
+                    st.select_drag_anchor = Some(image_point);
+                    st.select_resize_handle = None;
+                    st.arrow_editing_controls = true;
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    drag_last_redraw_begin.set(glib::monotonic_time());
+                    return;
+                }
+            }
+
+            // Generic select drag (non-arrow or click outside arrow).
             st.drag_start_view = Some(view_point);
             st.begin_select_drag_with_scale(t.view_to_image_clamped(view_point), t.scale);
             drop(st);
@@ -1959,6 +2030,37 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                         st.commit_active_text_input();
                     }
                     st.select_action_at_point_with_scale(image_point, t.scale);
+
+                    // Ensure control_points are initialised for selected arrows.
+                    if let Some(idx) = st.selected_action_index {
+                        if let Some(super::super::types::AnnotationAction::Arrow {
+                            style,
+                            control_points,
+                            start,
+                            end,
+                            ..
+                        }) = st.actions.get_mut(idx)
+                        {
+                            if control_points.is_none() {
+                                match style {
+                                    ArrowStyle::Curved | ArrowStyle::Double => {
+                                        let mid = Point {
+                                            x: (start.x + end.x) / 2.0,
+                                            y: (start.y + end.y) / 2.0,
+                                        };
+                                        *control_points = Some(vec![*start, mid, *end]);
+                                    }
+                                    _ => {
+                                        *control_points = Some(vec![*start, *end]);
+                                    }
+                                }
+                            }
+                            st.arrow_editing_controls = true;
+                        } else {
+                            st.arrow_editing_controls = false;
+                        }
+                    }
+
                     let mut began_reedit = false;
                     if n_press >= 2 {
                         began_reedit = st.begin_editing_selected_text();

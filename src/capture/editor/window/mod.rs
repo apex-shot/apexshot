@@ -1548,9 +1548,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
 
         // Draw arrow control handles when: (a) editing controls are active, OR
-        // (b) Arrow tool is selected and an existing arrow is selected.
+        // (b) Arrow or Select tool is selected and an existing arrow is selected.
         let show_handles = arrow_editing_controls
-            || (selected_tool == Tool::Arrow
+            || ((selected_tool == Tool::Arrow || selected_tool == Tool::Select)
                 && selected_action
                     .as_ref()
                     .map(|a| matches!(a, AnnotationAction::Arrow { .. }))

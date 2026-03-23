@@ -1,8 +1,8 @@
 #[cfg(test)]
 use super::color::SELECT_HANDLE_HIT_RADIUS;
 use super::color::{highlighter_stroke_width, SELECT_MIN_RESIZE_SIZE};
-use super::render::text_action_bounds;
-use super::types::{AnnotationAction, Point, Rect, SelectHandle};
+use super::render::{double_arrow_outline_points, text_action_bounds, thorn_arrow_outline_points};
+use super::types::{AnnotationAction, ArrowStyle, Point, Rect, SelectHandle};
 
 pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Option<Rect> {
     match action {
@@ -46,40 +46,35 @@ pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Op
             start,
             end,
             stroke_size,
+            style,
             control_points,
             ..
         } => {
-            let pad = *stroke_size + padding;
-            // Sample the Bezier curve to get a tight bounding box for curved arrows
-            let mid = control_points.as_ref().and_then(|v| {
-                if v.len() >= 3 {
-                    v.get(1).copied()
-                } else {
-                    None
+            let pad = padding;
+            let outline = match style {
+                ArrowStyle::Double => {
+                    double_arrow_outline_points(*start, *end, *stroke_size, control_points)
                 }
-            });
-            if let Some(ctrl) = mid {
-                let mut min_x = start.x.min(end.x).min(ctrl.x);
-                let mut min_y = start.y.min(end.y).min(ctrl.y);
-                let mut max_x = start.x.max(end.x).max(ctrl.x);
-                let mut max_y = start.y.max(end.y).max(ctrl.y);
-                for i in 0..=16u32 {
-                    let t = i as f64 / 16.0;
-                    let u = 1.0 - t;
-                    let px = u * u * start.x + 2.0 * u * t * ctrl.x + t * t * end.x;
-                    let py = u * u * start.y + 2.0 * u * t * ctrl.y + t * t * end.y;
-                    min_x = min_x.min(px);
-                    min_y = min_y.min(py);
-                    max_x = max_x.max(px);
-                    max_y = max_y.max(py);
+                ArrowStyle::Fancy => {
+                    thorn_arrow_outline_points(*start, *end, *stroke_size, false, control_points)
                 }
-                Rect::from_bounds(min_x - pad, min_y - pad, max_x + pad, max_y + pad)
-            } else {
+                _ => thorn_arrow_outline_points(*start, *end, *stroke_size, true, control_points),
+            };
+            if let Some(bounds) = polygon_bounds(&outline) {
                 Rect::from_bounds(
-                    start.x.min(end.x) - pad,
-                    start.y.min(end.y) - pad,
-                    start.x.max(end.x) + pad,
-                    start.y.max(end.y) + pad,
+                    bounds.x as f64 - pad,
+                    bounds.y as f64 - pad,
+                    (bounds.x + bounds.width) as f64 + pad,
+                    (bounds.y + bounds.height) as f64 + pad,
+                )
+            } else {
+                // Fallback to centerline bounds
+                let p = *stroke_size + padding;
+                Rect::from_bounds(
+                    start.x.min(end.x) - p,
+                    start.y.min(end.y) - p,
+                    start.x.max(end.x) + p,
+                    start.y.max(end.y) + p,
                 )
             }
         }
@@ -144,37 +139,28 @@ pub fn action_contains_point_with_padding(
             start,
             end,
             stroke_size,
+            style,
             control_points,
             ..
         } => {
-            let threshold = *stroke_size + padding + 8.0;
-            let mid = control_points.as_ref().and_then(|v| {
-                if v.len() >= 3 {
-                    v.get(1).copied()
-                } else {
-                    None
+            let outline = match style {
+                ArrowStyle::Double => {
+                    double_arrow_outline_points(*start, *end, *stroke_size, control_points)
                 }
-            });
-            if let Some(ctrl) = mid {
-                // Sample the quadratic Bezier and check distance to each segment
-                let steps = 20u32;
-                let mut prev = *start;
-                for i in 1..=steps {
-                    let t = i as f64 / steps as f64;
-                    let u = 1.0 - t;
-                    let cur = Point {
-                        x: u * u * start.x + 2.0 * u * t * ctrl.x + t * t * end.x,
-                        y: u * u * start.y + 2.0 * u * t * ctrl.y + t * t * end.y,
-                    };
-                    if distance_to_segment(point, prev, cur) <= threshold {
-                        return true;
-                    }
-                    prev = cur;
+                ArrowStyle::Fancy => {
+                    thorn_arrow_outline_points(*start, *end, *stroke_size, false, control_points)
                 }
-                false
-            } else {
-                distance_to_segment(point, *start, *end) <= threshold
+                _ => thorn_arrow_outline_points(*start, *end, *stroke_size, true, control_points),
+            };
+            if outline.is_empty() {
+                return false;
             }
+            // Check if point is inside the rendered outline polygon
+            if point_in_polygon(point, &outline) {
+                return true;
+            }
+            // Also allow clicking within padding distance of the outline edges
+            distance_to_polygon(point, &outline) <= padding + 4.0
         }
         _ => action_bounds_with_padding(action, padding)
             .map(|rect| rect_contains_point(rect, point, 0.0))
@@ -503,4 +489,60 @@ fn stroke_contains_point(points: &[Point], point: Point, threshold: f64) -> bool
     points
         .windows(2)
         .any(|pair| distance_to_segment(point, pair[0], pair[1]) <= threshold)
+}
+
+/// Ray-casting point-in-polygon test.
+fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
+    if polygon.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let n = polygon.len();
+    let mut j = n - 1;
+    for i in 0..n {
+        let pi = &polygon[i];
+        let pj = &polygon[j];
+        if ((pi.y > point.y) != (pj.y > point.y))
+            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Minimum distance from a point to any edge of a polygon.
+fn distance_to_polygon(point: Point, polygon: &[Point]) -> f64 {
+    if polygon.len() < 2 {
+        return f64::INFINITY;
+    }
+    let mut min_dist = f64::INFINITY;
+    let n = polygon.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let d = distance_to_segment(point, polygon[i], polygon[j]);
+        if d < min_dist {
+            min_dist = d;
+        }
+    }
+    min_dist
+}
+
+/// Bounding box of a polygon.
+fn polygon_bounds(polygon: &[Point]) -> Option<Rect> {
+    if polygon.is_empty() {
+        return None;
+    }
+    let mut min_x = polygon[0].x;
+    let mut min_y = polygon[0].y;
+    let mut max_x = polygon[0].x;
+    let mut max_y = polygon[0].y;
+    for p in &polygon[1..] {
+        min_x = min_x.min(p.x);
+        min_y = min_y.min(p.y);
+        max_x = max_x.max(p.x);
+        max_y = max_y.max(p.y);
+    }
+    Rect::from_bounds(min_x, min_y, max_x, max_y)
 }
