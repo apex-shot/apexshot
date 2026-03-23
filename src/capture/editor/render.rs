@@ -896,6 +896,26 @@ fn build_thorn_arrow_path(
     is_smooth: bool,
     control_points: &Option<Vec<Point>>,
 ) -> bool {
+    let outline = thorn_arrow_outline_points(start, end, stroke_size, is_smooth, control_points);
+    if outline.is_empty() {
+        return false;
+    }
+    context.new_path();
+    context.move_to(outline[0].x, outline[0].y);
+    for pt in &outline[1..] {
+        context.line_to(pt.x, pt.y);
+    }
+    context.close_path();
+    true
+}
+
+pub fn thorn_arrow_outline_points(
+    start: Point,
+    end: Point,
+    stroke_size: f64,
+    is_smooth: bool,
+    control_points: &Option<Vec<Point>>,
+) -> Vec<Point> {
     let is_curved = control_points
         .as_ref()
         .map(|v| v.len() >= 3)
@@ -928,7 +948,7 @@ fn build_thorn_arrow_path(
     }
 
     if line_length < 0.1 {
-        return false;
+        return Vec::new();
     }
 
     let stroke = stroke_size.max(0.5);
@@ -976,10 +996,8 @@ fn build_thorn_arrow_path(
 
     let wing_center_x = neck_pt.x - vx * s;
     let wing_center_y = neck_pt.y - vy * s;
-
     let right_wing_x = wing_center_x + nx * (w_h / 2.0);
     let right_wing_y = wing_center_y + ny * (w_h / 2.0);
-
     let left_wing_x = wing_center_x - nx * (w_h / 2.0);
     let left_wing_y = wing_center_y - ny * (w_h / 2.0);
 
@@ -990,7 +1008,7 @@ fn build_thorn_arrow_path(
     };
     let tail_angle = tail_vy.atan2(tail_vx);
 
-    context.new_path();
+    let mut outline = Vec::new();
 
     if is_curved {
         let steps = 20;
@@ -1003,9 +1021,7 @@ fn build_thorn_arrow_path(
             let (tvx, tvy) = bezier_tangent(p0, p1, p2, t);
             let tnx = -tvy;
             let tny = tvx;
-
             let current_w = w * (t / t_neck);
-
             left_body.push(Point {
                 x: pt.x - tnx * current_w / 2.0,
                 y: pt.y - tny * current_w / 2.0,
@@ -1016,82 +1032,99 @@ fn build_thorn_arrow_path(
             });
         }
 
-        if let Some(last_right) = right_body.last() {
-            context.move_to(last_right.x, last_right.y);
-        }
-
-        for pt in right_body.iter().rev().skip(1) {
-            context.line_to(pt.x, pt.y);
+        for pt in right_body.iter().rev() {
+            outline.push(*pt);
         }
 
         if is_smooth {
             let tail_r = (stroke * 0.5).max(1.0);
             let tail_cx = p0.x + tail_vx * tail_r;
             let tail_cy = p0.y + tail_vy * tail_r;
-            context.arc(
-                tail_cx,
-                tail_cy,
-                tail_r,
-                tail_angle + std::f64::consts::FRAC_PI_2,
-                tail_angle + 3.0 * std::f64::consts::FRAC_PI_2,
-            );
+            let arc_start = tail_angle + std::f64::consts::FRAC_PI_2;
+            let arc_end = tail_angle + 3.0 * std::f64::consts::FRAC_PI_2;
+            let arc_steps = 12;
+            for i in 0..=arc_steps {
+                let a = arc_start + (i as f64 / arc_steps as f64) * (arc_end - arc_start);
+                outline.push(Point {
+                    x: tail_cx + tail_r * a.cos(),
+                    y: tail_cy + tail_r * a.sin(),
+                });
+            }
         } else {
-            context.line_to(p0.x, p0.y);
+            outline.push(p0);
         }
 
         for pt in left_body.iter().skip(1) {
-            context.line_to(pt.x, pt.y);
+            outline.push(*pt);
         }
     } else {
         let right_neck_x = neck_pt.x + nx * (w / 2.0);
         let right_neck_y = neck_pt.y + ny * (w / 2.0);
-
         let left_neck_x = neck_pt.x - nx * (w / 2.0);
         let left_neck_y = neck_pt.y - ny * (w / 2.0);
 
-        context.move_to(right_neck_x, right_neck_y);
+        outline.push(Point {
+            x: right_neck_x,
+            y: right_neck_y,
+        });
 
         if is_smooth {
             let tail_r = (stroke * 0.5).max(1.0);
             let tail_cx = p0.x + tail_vx * tail_r;
             let tail_cy = p0.y + tail_vy * tail_r;
-            context.arc(
-                tail_cx,
-                tail_cy,
-                tail_r,
-                tail_angle + std::f64::consts::FRAC_PI_2,
-                tail_angle + 3.0 * std::f64::consts::FRAC_PI_2,
-            );
+            let arc_start = tail_angle + std::f64::consts::FRAC_PI_2;
+            let arc_end = tail_angle + 3.0 * std::f64::consts::FRAC_PI_2;
+            let arc_steps = 12;
+            for i in 0..=arc_steps {
+                let a = arc_start + (i as f64 / arc_steps as f64) * (arc_end - arc_start);
+                outline.push(Point {
+                    x: tail_cx + tail_r * a.cos(),
+                    y: tail_cy + tail_r * a.sin(),
+                });
+            }
         } else {
-            context.line_to(p0.x, p0.y);
+            outline.push(p0);
         }
 
-        context.line_to(left_neck_x, left_neck_y);
+        outline.push(Point {
+            x: left_neck_x,
+            y: left_neck_y,
+        });
     }
 
-    context.line_to(left_wing_x, left_wing_y);
+    outline.push(Point {
+        x: left_wing_x,
+        y: left_wing_y,
+    });
 
     if is_smooth {
         let head_r = (stroke * 0.4).max(1.0);
         let head_cx = end.x - vx * head_r;
         let head_cy = end.y - vy * head_r;
-
         let left_dx = head_cx - left_wing_x;
         let left_dy = head_cy - left_wing_y;
         let left_angle = left_dy.atan2(left_dx) - std::f64::consts::FRAC_PI_2;
-
         let right_dx = head_cx - right_wing_x;
         let right_dy = head_cy - right_wing_y;
         let right_angle = right_dy.atan2(right_dx) + std::f64::consts::FRAC_PI_2;
-
-        context.arc(head_cx, head_cy, head_r, left_angle, right_angle);
+        let arc_steps = 12;
+        for i in 0..=arc_steps {
+            let a = left_angle + (i as f64 / arc_steps as f64) * (right_angle - left_angle);
+            outline.push(Point {
+                x: head_cx + head_r * a.cos(),
+                y: head_cy + head_r * a.sin(),
+            });
+        }
     } else {
-        context.line_to(end.x, end.y);
+        outline.push(end);
     }
 
-    context.line_to(right_wing_x, right_wing_y);
-    context.close_path();
-    true
+    outline.push(Point {
+        x: right_wing_x,
+        y: right_wing_y,
+    });
+
+    outline
 }
 
 fn draw_thorn_arrow(
@@ -1125,6 +1158,238 @@ fn draw_thorn_arrow(
     context.set_line_width(stroke * 0.2 + 1.0);
     context.set_line_join(gtk4::cairo::LineJoin::Round);
     let _ = context.stroke();
+}
+
+pub fn double_arrow_outline_points(
+    start: Point,
+    end: Point,
+    stroke_size: f64,
+    control_points: &Option<Vec<Point>>,
+) -> Vec<Point> {
+    let is_curved = control_points.is_some();
+    let p0 = start;
+    let p2 = end;
+    let p1 = control_points
+        .as_ref()
+        .and_then(|c| c.get(1).copied())
+        .unwrap_or_else(|| Point {
+            x: (start.x + end.x) / 2.0,
+            y: (start.y + end.y) / 2.0,
+        });
+
+    let mut line_length = 0.0;
+    if is_curved {
+        let mut prev = p0;
+        for i in 1..=20 {
+            let t = i as f64 / 20.0;
+            let pt = bezier_point(p0, p1, p2, t);
+            let dx = pt.x - prev.x;
+            let dy = pt.y - prev.y;
+            line_length += (dx * dx + dy * dy).sqrt();
+            prev = pt;
+        }
+    } else {
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+        line_length = (dx * dx + dy * dy).sqrt();
+    }
+
+    if line_length < 0.1 {
+        return Vec::new();
+    }
+
+    let stroke = stroke_size.max(0.5);
+    let w = stroke * 3.0 + 3.0;
+    let h = (stroke * 6.0 + 10.0)
+        .clamp(12.0, 120.0)
+        .min((line_length * 0.4).max(8.0));
+    let w_h = h * 1.15;
+    let s = h * 0.35;
+
+    let (t_neck_start, t_neck_end) = if is_curved {
+        let mut t_end = 0.0;
+        for i in (0..=100).rev() {
+            let t = i as f64 / 100.0;
+            let pt = bezier_point(p0, p1, p2, t);
+            let dist = ((p2.x - pt.x) * (p2.x - pt.x) + (p2.y - pt.y) * (p2.y - pt.y)).sqrt();
+            if dist >= h {
+                t_end = t;
+                break;
+            }
+        }
+        let mut t_start = 0.0;
+        for i in 0..=100 {
+            let t = i as f64 / 100.0;
+            let pt = bezier_point(p0, p1, p2, t);
+            let dist = ((p0.x - pt.x) * (p0.x - pt.x) + (p0.y - pt.y) * (p0.y - pt.y)).sqrt();
+            if dist >= h {
+                t_start = t;
+                break;
+            }
+        }
+        (t_start, t_end)
+    } else {
+        ((h / line_length).min(0.5), (1.0 - h / line_length).max(0.5))
+    };
+
+    let (vx_e, vy_e) = if is_curved {
+        bezier_tangent(p0, p1, p2, 1.0)
+    } else {
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+        (dx / line_length, dy / line_length)
+    };
+    let nx_e = -vy_e;
+    let ny_e = vx_e;
+
+    let neck_pt_e = if is_curved {
+        bezier_point(p0, p1, p2, t_neck_end)
+    } else {
+        Point {
+            x: end.x - vx_e * h,
+            y: end.y - vy_e * h,
+        }
+    };
+
+    let wing_ce_x = neck_pt_e.x - vx_e * s;
+    let wing_ce_y = neck_pt_e.y - vy_e * s;
+
+    let right_wing_e = Point {
+        x: wing_ce_x + nx_e * (w_h / 2.0),
+        y: wing_ce_y + ny_e * (w_h / 2.0),
+    };
+    let left_wing_e = Point {
+        x: wing_ce_x - nx_e * (w_h / 2.0),
+        y: wing_ce_y - ny_e * (w_h / 2.0),
+    };
+
+    let (vx_s, vy_s) = if is_curved {
+        bezier_tangent(p0, p1, p2, 0.0)
+    } else {
+        (vx_e, vy_e)
+    };
+    let nx_s = -vy_s;
+    let ny_s = vx_s;
+
+    let neck_pt_s = if is_curved {
+        bezier_point(p0, p1, p2, t_neck_start)
+    } else {
+        Point {
+            x: start.x + vx_s * h,
+            y: start.y + vy_s * h,
+        }
+    };
+
+    let wing_cs_x = neck_pt_s.x + vx_s * s;
+    let wing_cs_y = neck_pt_s.y + vy_s * s;
+
+    let left_wing_s = Point {
+        x: wing_cs_x - nx_s * (w_h / 2.0),
+        y: wing_cs_y - ny_s * (w_h / 2.0),
+    };
+    let right_wing_s = Point {
+        x: wing_cs_x + nx_s * (w_h / 2.0),
+        y: wing_cs_y + ny_s * (w_h / 2.0),
+    };
+
+    let mut outline = Vec::new();
+    let steps = 20;
+
+    for i in 0..=steps {
+        let t = t_neck_start + (i as f64 / steps as f64) * (t_neck_end - t_neck_start);
+        let (pt, tvx, tvy) = if is_curved {
+            (
+                bezier_point(p0, p1, p2, t),
+                bezier_tangent(p0, p1, p2, t).0,
+                bezier_tangent(p0, p1, p2, t).1,
+            )
+        } else {
+            (
+                Point {
+                    x: p0.x + vx_s * (h + (line_length - 2.0 * h) * (i as f64 / steps as f64)),
+                    y: p0.y + vy_s * (h + (line_length - 2.0 * h) * (i as f64 / steps as f64)),
+                },
+                vx_s,
+                vy_s,
+            )
+        };
+        let tnx = -tvy;
+        let tny = tvx;
+        outline.push(Point {
+            x: pt.x + tnx * (w / 2.0),
+            y: pt.y + tny * (w / 2.0),
+        });
+    }
+
+    outline.push(right_wing_e);
+
+    let head_r = (stroke * 0.4).max(1.0);
+    let head_cx_e = p2.x - vx_e * head_r;
+    let head_cy_e = p2.y - vy_e * head_r;
+    let left_dx_e = head_cx_e - left_wing_e.x;
+    let left_dy_e = head_cy_e - left_wing_e.y;
+    let left_angle_e = left_dy_e.atan2(left_dx_e) - std::f64::consts::FRAC_PI_2;
+    let right_dx_e = head_cx_e - right_wing_e.x;
+    let right_dy_e = head_cy_e - right_wing_e.y;
+    let right_angle_e = right_dy_e.atan2(right_dx_e) + std::f64::consts::FRAC_PI_2;
+    let arc_steps = 12;
+    for i in 0..=arc_steps {
+        let a = left_angle_e + (i as f64 / arc_steps as f64) * (right_angle_e - left_angle_e);
+        outline.push(Point {
+            x: head_cx_e + head_r * a.cos(),
+            y: head_cy_e + head_r * a.sin(),
+        });
+    }
+
+    outline.push(left_wing_e);
+
+    for i in (0..=steps).rev() {
+        let t = t_neck_start + (i as f64 / steps as f64) * (t_neck_end - t_neck_start);
+        let (pt, tvx, tvy) = if is_curved {
+            (
+                bezier_point(p0, p1, p2, t),
+                bezier_tangent(p0, p1, p2, t).0,
+                bezier_tangent(p0, p1, p2, t).1,
+            )
+        } else {
+            (
+                Point {
+                    x: p0.x + vx_s * (h + (line_length - 2.0 * h) * (i as f64 / steps as f64)),
+                    y: p0.y + vy_s * (h + (line_length - 2.0 * h) * (i as f64 / steps as f64)),
+                },
+                vx_s,
+                vy_s,
+            )
+        };
+        let tnx = -tvy;
+        let tny = tvx;
+        outline.push(Point {
+            x: pt.x - tnx * (w / 2.0),
+            y: pt.y - tny * (w / 2.0),
+        });
+    }
+
+    outline.push(left_wing_s);
+
+    let head_cx_s = p0.x + vx_s * head_r;
+    let head_cy_s = p0.y + vy_s * head_r;
+    let left_dx_s = head_cx_s - left_wing_s.x;
+    let left_dy_s = head_cy_s - left_wing_s.y;
+    let left_angle_s = left_dy_s.atan2(left_dx_s) + std::f64::consts::FRAC_PI_2;
+    let right_dx_s = head_cx_s - right_wing_s.x;
+    let right_dy_s = head_cy_s - right_wing_s.y;
+    let right_angle_s = right_dy_s.atan2(right_dx_s) - std::f64::consts::FRAC_PI_2;
+    for i in 0..=arc_steps {
+        let a = left_angle_s + (i as f64 / arc_steps as f64) * (right_angle_s - left_angle_s);
+        outline.push(Point {
+            x: head_cx_s + head_r * a.cos(),
+            y: head_cy_s + head_r * a.sin(),
+        });
+    }
+
+    outline.push(right_wing_s);
+
+    outline
 }
 
 fn draw_double_arrow(
@@ -1165,220 +1430,15 @@ fn build_double_arrow_path(
     stroke_size: f64,
     control_points: &Option<Vec<Point>>,
 ) -> bool {
-    let is_curved = control_points.is_some();
-    let p0 = start;
-    let p2 = end;
-    let p1 = control_points
-        .as_ref()
-        .and_then(|c| c.get(1).copied())
-        .unwrap_or_else(|| Point {
-            x: (start.x + end.x) / 2.0,
-            y: (start.y + end.y) / 2.0,
-        });
-
-    let mut line_length = 0.0;
-    if is_curved {
-        let mut prev = p0;
-        for i in 1..=20 {
-            let t = i as f64 / 20.0;
-            let pt = bezier_point(p0, p1, p2, t);
-            let dx = pt.x - prev.x;
-            let dy = pt.y - prev.y;
-            line_length += (dx * dx + dy * dy).sqrt();
-            prev = pt;
-        }
-    } else {
-        let dx = end.x - start.x;
-        let dy = end.y - start.y;
-        line_length = (dx * dx + dy * dy).sqrt();
-    }
-
-    if line_length < 0.1 {
+    let outline = double_arrow_outline_points(start, end, stroke_size, control_points);
+    if outline.is_empty() {
         return false;
     }
-
-    let stroke = stroke_size.max(0.5);
-    let w = stroke * 3.0 + 3.0;
-    // Cap h at 40% of line length so both heads fit comfortably
-    let h = (stroke * 6.0 + 10.0)
-        .clamp(12.0, 120.0)
-        .min((line_length * 0.4).max(8.0));
-    let w_h = h * 1.15;
-    let s = h * 0.35;
-
-    let (t_neck_start, t_neck_end) = if is_curved {
-        let mut t_end = 0.0;
-        for i in (0..=100).rev() {
-            let t = i as f64 / 100.0;
-            let pt = bezier_point(p0, p1, p2, t);
-            let dist = ((p2.x - pt.x) * (p2.x - pt.x) + (p2.y - pt.y) * (p2.y - pt.y)).sqrt();
-            if dist >= h {
-                t_end = t;
-                break;
-            }
-        }
-        let mut t_start = 0.0;
-        for i in 0..=100 {
-            let t = i as f64 / 100.0;
-            let pt = bezier_point(p0, p1, p2, t);
-            let dist = ((p0.x - pt.x) * (p0.x - pt.x) + (p0.y - pt.y) * (p0.y - pt.y)).sqrt();
-            if dist >= h {
-                t_start = t;
-                break;
-            }
-        }
-        (t_start, t_end)
-    } else {
-        ((h / line_length).min(0.5), (1.0 - h / line_length).max(0.5))
-    };
-
-    // --- END HEAD ---
-    let (vx_e, vy_e) = if is_curved {
-        bezier_tangent(p0, p1, p2, 1.0)
-    } else {
-        let dx = end.x - start.x;
-        let dy = end.y - start.y;
-        (dx / line_length, dy / line_length)
-    };
-    let nx_e = -vy_e;
-    let ny_e = vx_e;
-
-    let neck_pt_e = if is_curved {
-        bezier_point(p0, p1, p2, t_neck_end)
-    } else {
-        Point {
-            x: end.x - vx_e * h,
-            y: end.y - vy_e * h,
-        }
-    };
-
-    let wing_ce_x = neck_pt_e.x - vx_e * s;
-    let wing_ce_y = neck_pt_e.y - vy_e * s;
-
-    let right_wing_e = Point {
-        x: wing_ce_x + nx_e * (w_h / 2.0),
-        y: wing_ce_y + ny_e * (w_h / 2.0),
-    };
-    let left_wing_e = Point {
-        x: wing_ce_x - nx_e * (w_h / 2.0),
-        y: wing_ce_y - ny_e * (w_h / 2.0),
-    };
-
-    // --- START HEAD ---
-    let (vx_s, vy_s) = if is_curved {
-        bezier_tangent(p0, p1, p2, 0.0)
-    } else {
-        (vx_e, vy_e)
-    };
-    let nx_s = -vy_s;
-    let ny_s = vx_s;
-
-    let neck_pt_s = if is_curved {
-        bezier_point(p0, p1, p2, t_neck_start)
-    } else {
-        Point {
-            x: start.x + vx_s * h,
-            y: start.y + vy_s * h,
-        }
-    };
-
-    let wing_cs_x = neck_pt_s.x + vx_s * s;
-    let wing_cs_y = neck_pt_s.y + vy_s * s;
-
-    let left_wing_s = Point {
-        x: wing_cs_x - nx_s * (w_h / 2.0),
-        y: wing_cs_y - ny_s * (w_h / 2.0),
-    };
-    let right_wing_s = Point {
-        x: wing_cs_x + nx_s * (w_h / 2.0),
-        y: wing_cs_y + ny_s * (w_h / 2.0),
-    };
-
     context.new_path();
-
-    let mut left_body = Vec::new();
-    let mut right_body = Vec::new();
-
-    let steps = 20;
-    for i in 0..=steps {
-        let t = t_neck_start + (i as f64 / steps as f64) * (t_neck_end - t_neck_start);
-
-        let (pt, tvx, tvy) = if is_curved {
-            (
-                bezier_point(p0, p1, p2, t),
-                bezier_tangent(p0, p1, p2, t).0,
-                bezier_tangent(p0, p1, p2, t).1,
-            )
-        } else {
-            (
-                Point {
-                    x: p0.x + vx_s * (h + (line_length - 2.0 * h) * (i as f64 / steps as f64)),
-                    y: p0.y + vy_s * (h + (line_length - 2.0 * h) * (i as f64 / steps as f64)),
-                },
-                vx_s,
-                vy_s,
-            )
-        };
-
-        let tnx = -tvy;
-        let tny = tvx;
-
-        left_body.push(Point {
-            x: pt.x - tnx * (w / 2.0),
-            y: pt.y - tny * (w / 2.0),
-        });
-        right_body.push(Point {
-            x: pt.x + tnx * (w / 2.0),
-            y: pt.y + tny * (w / 2.0),
-        });
-    }
-
-    if let Some(first_right) = right_body.first() {
-        context.move_to(first_right.x, first_right.y);
-    }
-    for pt in right_body.iter().skip(1) {
+    context.move_to(outline[0].x, outline[0].y);
+    for pt in &outline[1..] {
         context.line_to(pt.x, pt.y);
     }
-
-    context.line_to(right_wing_e.x, right_wing_e.y);
-
-    let head_r = (stroke * 0.4).max(1.0);
-
-    // End head arc
-    let head_cx_e = p2.x - vx_e * head_r;
-    let head_cy_e = p2.y - vy_e * head_r;
-    let left_dx_e = head_cx_e - left_wing_e.x;
-    let left_dy_e = head_cy_e - left_wing_e.y;
-    let left_angle_e = left_dy_e.atan2(left_dx_e) - std::f64::consts::FRAC_PI_2;
-    let right_dx_e = head_cx_e - right_wing_e.x;
-    let right_dy_e = head_cy_e - right_wing_e.y;
-    let right_angle_e = right_dy_e.atan2(right_dx_e) + std::f64::consts::FRAC_PI_2;
-
-    context.arc(head_cx_e, head_cy_e, head_r, left_angle_e, right_angle_e);
-
-    context.line_to(left_wing_e.x, left_wing_e.y);
-
-    for pt in left_body.iter().rev() {
-        context.line_to(pt.x, pt.y);
-    }
-
-    context.line_to(left_wing_s.x, left_wing_s.y);
-
-    // Start head arc
-    let head_cx_s = p0.x + vx_s * head_r;
-    let head_cy_s = p0.y + vy_s * head_r;
-
-    let left_dx_s = head_cx_s - left_wing_s.x;
-    let left_dy_s = head_cy_s - left_wing_s.y;
-    let left_angle_s = left_dy_s.atan2(left_dx_s) + std::f64::consts::FRAC_PI_2;
-
-    let right_dx_s = head_cx_s - right_wing_s.x;
-    let right_dy_s = head_cy_s - right_wing_s.y;
-    let right_angle_s = right_dy_s.atan2(right_dx_s) - std::f64::consts::FRAC_PI_2;
-
-    context.arc(head_cx_s, head_cy_s, head_r, left_angle_s, right_angle_s);
-
-    context.line_to(right_wing_s.x, right_wing_s.y);
     context.close_path();
     true
 }
