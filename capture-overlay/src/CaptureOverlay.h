@@ -280,7 +280,11 @@ private:
     int    m_clickColor;       // index
     int    m_clickStyle;       // index
     bool   m_clickAnimate;
-    QList<QPointF> m_clickPreviews; // for preview animation state if needed
+    struct ClickPreview {
+        QPointF pos;
+        qint64  birthMs;       // QDateTime::currentMSecsSinceEpoch() at creation
+    };
+    QList<ClickPreview> m_clickPreviews;
     bool   m_sliderDragging;   // true while dragging size slider
     QRectF m_sliderTrackRect;  // cached slider track rect for drag calc
     QTimer* m_clickAnimTimer;  // timer for preview animation ticks

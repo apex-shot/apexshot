@@ -1038,29 +1038,45 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         p.restore();
     }
 
-    // ── Visible countdown overlay ─────────────────────────────────────────────
+    // ── Visible countdown overlay (Top Center Pill) ──────────────────────────
     if (m_countdownActive && m_countdownValue > 0) {
-        const double bubbleSize = std::min(sw, sh) * 0.24;
-        const double bubbleDiameter = std::clamp(bubbleSize, 120.0, 220.0);
-        const QRectF bubbleRect((sw - bubbleDiameter) / 2.0,
-                                (sh - bubbleDiameter) / 2.0,
-                                bubbleDiameter,
-                                bubbleDiameter);
+        const double pillW = 108.0;
+        const double pillH = 48.0;
+        const double pillX = (sw - pillW) / 2.0;
+        const double pillY = 40.0;
+        const QRectF pillRect(pillX, pillY, pillW, pillH);
 
         p.save();
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0, 0, 0, 176));
-        p.drawEllipse(bubbleRect);
-        p.setPen(QPen(QColor(255, 255, 255, 72), 2.0));
-        p.setBrush(Qt::NoBrush);
-        p.drawEllipse(bubbleRect.adjusted(1.5, 1.5, -1.5, -1.5));
+        p.setRenderHint(QPainter::Antialiasing);
 
+        // Draw pill background
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(253, 76, 70)); // Vibrant Red/Orange matching screenshot
+        p.drawRoundedRect(pillRect, pillH / 2.0, pillH / 2.0);
+
+        // Draw timer icon
+        const double iconCX = pillX + 36.0;
+        const double iconCY = pillY + pillH / 2.0;
+
+        p.save();
+        p.setPen(QPen(QColor(255, 255, 255, 180), 2.2, Qt::SolidLine, Qt::RoundCap));
+        p.setBrush(Qt::NoBrush);
+        p.drawArc(QRectF(iconCX - 8.5, iconCY - 8.5, 17, 17), 50 * 16, 260 * 16);
+        p.drawLine(QPointF(iconCX, iconCY - 8.5), QPointF(iconCX, iconCY - 5.5));
+        p.drawLine(QPointF(iconCX, iconCY), QPointF(iconCX + 4.5, iconCY - 4.5)); // diagonal hand
+        p.restore();
+
+        // Draw countdown number
         QFont countdownFont(QStringLiteral("Sans"));
         countdownFont.setBold(true);
-        countdownFont.setPointSizeF(bubbleDiameter * 0.34);
+        countdownFont.setPointSizeF(20);
         p.setFont(countdownFont);
-        p.setPen(QColor(255, 255, 255, 252));
-        p.drawText(bubbleRect, Qt::AlignCenter, QString::number(m_countdownValue));
+        p.setPen(Qt::white);
+
+        p.drawText(QRectF(pillX + 58, pillY, 40, pillH),
+                   Qt::AlignLeft | Qt::AlignVCenter,
+                   QString::number(m_countdownValue));
+
         p.restore();
     }
 }
@@ -1945,43 +1961,56 @@ void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
     p.setBrush(QColor(0, 0, 0, 40));
     p.drawRoundedRect(previewArea, 10, 10);
     
-    // Draw click previews
+    // Draw click previews (each lives for 1.5 seconds then fades out)
+    const qint64 CLICK_LIFETIME_MS = 1500;
     if (m_clickPreviews.isEmpty()) {
         p.setPen(QColor(255, 255, 255, 120));
         p.drawText(previewArea, Qt::AlignCenter, "Click here to preview");
     } else {
         p.save();
-        p.setClipRect(previewArea.adjusted(1, 1, -1, -1)); // clip to preview bounds
+        p.setClipRect(previewArea.adjusted(1, 1, -1, -1));
 
         const double baseRadius = 6.0 + m_clickSize * 28.0; // 6 to 34
         const QColor clickColor = clickColorValue(m_clickColor);
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
         for (int i = 0; i < m_clickPreviews.size(); ++i) {
-            QPointF pt = m_clickPreviews[i];
+            const auto& cp = m_clickPreviews[i];
+            QPointF pt = cp.pos;
             if (!previewArea.contains(pt)) continue;
+
+            qint64 age = now - cp.birthMs;
+            double progress = std::min(1.0, (double)age / CLICK_LIFETIME_MS); // 0→1 over lifetime
+            double fadeAlpha = 1.0 - progress; // full opacity → zero
+
+            if (fadeAlpha <= 0.01) continue; // expired, skip (will be removed by timer)
 
             double radius = baseRadius;
 
             // Animation: pulsing ring that expands outward
             if (m_clickAnimate) {
-                double phase = std::fmod(m_clickAnimPhase + i * 0.15, 1.0);
-                double pulseRadius = radius + phase * 20.0;
-                double pulseAlpha = (1.0 - phase) * 180.0;
+                double phase = std::fmod((double)age / 500.0, 1.0); // cycle every 500ms
+                double pulseRadius = radius + phase * 25.0;
+                double pulseAlpha = (1.0 - phase) * 200.0 * fadeAlpha;
 
-                QColor pulseColor = clickColor;
-                pulseColor.setAlphaF(pulseAlpha / 255.0);
-                p.setPen(QPen(pulseColor, 2));
-                p.setBrush(Qt::NoBrush);
-                p.drawEllipse(pt, pulseRadius, pulseRadius);
+                if (pulseAlpha > 1.0) {
+                    QColor pulseColor = clickColor;
+                    pulseColor.setAlpha((int)pulseAlpha);
+                    p.setPen(QPen(pulseColor, 2));
+                    p.setBrush(Qt::NoBrush);
+                    p.drawEllipse(pt, pulseRadius, pulseRadius);
+                }
             }
 
-            // Main click circle
+            // Main click circle — fade out based on age
+            QColor c = clickColor;
+            c.setAlpha((int)(255 * fadeAlpha));
             if (m_clickStyle == 1) { // Filled
                 p.setPen(Qt::NoPen);
-                p.setBrush(clickColor);
+                p.setBrush(c);
                 p.drawEllipse(pt, radius, radius);
             } else { // Outline
-                p.setPen(QPen(clickColor, 3));
+                p.setPen(QPen(c, 3));
                 p.setBrush(Qt::NoBrush);
                 p.drawEllipse(pt, radius, radius);
             }
@@ -2752,9 +2781,10 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     break;
                 }
                 case 4: { // Preview — add click point
-                    m_clickPreviews.append(pos);
+                    qint64 now = QDateTime::currentMSecsSinceEpoch();
+                    m_clickPreviews.append({pos, now});
                     if (m_clickPreviews.size() > 10) m_clickPreviews.removeFirst();
-                    if (m_clickAnimate) startClickAnimTimer();
+                    startClickAnimTimer();
                     break;
                 }
                 case 5: { // OK — close panel
@@ -4659,7 +4689,19 @@ void CaptureOverlay::startClickAnimTimer()
         m_clickAnimTimer = new QTimer(this);
         m_clickAnimTimer->setInterval(16); // ~60fps
         connect(m_clickAnimTimer, &QTimer::timeout, this, [this]() {
-            m_clickAnimPhase = std::fmod(m_clickAnimPhase + 0.03, 1.0);
+            const qint64 CLICK_LIFETIME_MS = 1500;
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+            // Remove expired previews
+            m_clickPreviews.erase(
+                std::remove_if(m_clickPreviews.begin(), m_clickPreviews.end(),
+                    [&](const ClickPreview& cp) { return (now - cp.birthMs) >= CLICK_LIFETIME_MS; }),
+                m_clickPreviews.end());
+
+            if (m_clickPreviews.isEmpty()) {
+                stopClickAnimTimer();
+                return;
+            }
             update();
         });
     }
