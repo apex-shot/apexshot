@@ -611,6 +611,54 @@ void ScrollControlPanel::positionNear(const QRect& captureArea, const QSize& scr
     setGeometry(x, y, panelW, panelH);
 }
 
+// ── Helper: convert key event to preview display text ──────────────────────────
+
+static QString keyEventToPreviewText(QKeyEvent* event)
+{
+    int key = event->key();
+    Qt::KeyboardModifiers mods = event->modifiers();
+
+    // Modifier keys alone — skip
+    if (key == Qt::Key_Shift || key == Qt::Key_Control || key == Qt::Key_Alt ||
+        key == Qt::Key_Meta || key == Qt::Key_CapsLock || key == Qt::Key_unknown) {
+        return {};
+    }
+
+    // Special keys
+    switch (key) {
+    case Qt::Key_Return:
+    case Qt::Key_Enter:  return "\u21A9";  // ↩
+    case Qt::Key_Backspace: return "\u232B"; // ⌫
+    case Qt::Key_Delete:    return "\u2326"; // ⌦
+    case Qt::Key_Tab:       return "\u21E5"; // ⇥
+    case Qt::Key_Space:     return " ";
+    case Qt::Key_Escape:    return "Esc";
+    case Qt::Key_Up:        return "\u2191"; // ↑
+    case Qt::Key_Down:      return "\u2193"; // ↓
+    case Qt::Key_Left:      return "\u2190"; // ←
+    case Qt::Key_Right:     return "\u2192"; // →
+    default: break;
+    }
+
+    // Build string with modifier prefixes
+    QString result;
+    if (mods & Qt::ControlModifier) result += "\u2318 ";  // ⌘
+    if (mods & Qt::AltModifier)     result += "\u2325 ";  // ⌥
+    if (mods & Qt::ShiftModifier)   result += "\u21E7 ";  // ⇧
+
+    // Key text
+    QString text = event->text();
+    if (!text.isEmpty() && text.at(0).isPrint()) {
+        result += text.toUpper();
+    } else {
+        // Named key
+        QString name = QKeySequence(key).toString();
+        if (!name.isEmpty()) result += name;
+    }
+
+    return result.trimmed();
+}
+
 // ── Constructor ───────────────────────────────────────────────────────────────
 
 CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool timerCaptureEnabled)
@@ -665,7 +713,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     , m_clickAnimTimer(nullptr)
     , m_clickAnimPhase(0.0)
     , m_keystrokeOptionsOpen(false)
-    , m_keySize(0.4)
+    , m_showKeystrokePreview(false)
+    , m_keySize(0.32) // Matches screenshot better as default
     , m_keyPosition(0) // Bottom-Center
     , m_keyAppearance(0) // Dark
     , m_keyBlurBg(true)
@@ -1036,6 +1085,11 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         p.drawText(QRectF(px + 8, py + previewH - 22, previewW - 16, 18),
                    Qt::AlignLeft | Qt::AlignVCenter, label);
         p.restore();
+    }
+
+    // ── Keystroke preview — drawn AFTER sub-panels so it's always on top ─────
+    if (m_showKeystrokePreview) {
+        drawKeystrokePreview(p, sx, sy, selW, selH);
     }
 
     // ── Visible countdown overlay (Top Center Pill) ──────────────────────────
@@ -2088,7 +2142,9 @@ void CaptureOverlay::drawKeystrokeOptions(QPainter& p, const QRectF& parentRect)
     p.drawRoundedRect(posBtn, 6, 6);
     p.setPen(Qt::white);
     p.setFont(QFont("Sans", 10));
-    p.drawText(posBtn.adjusted(10, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, "Bottom-Center");
+    const QStringList posNames = {"Bottom-Center", "Bottom-Left", "Bottom-Right", "Top-Center", "Top-Left", "Top-Right"};
+    p.drawText(posBtn.adjusted(10, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, 
+               (m_keyPosition >= 0 && m_keyPosition < posNames.size()) ? posNames[m_keyPosition] : "Bottom-Center");
     // Chevron
     p.setPen(QPen(Qt::white, 1.5));
     p.drawLine(QPointF(posBtn.right() - 15, posBtn.center().y() - 3), QPointF(posBtn.right() - 11, posBtn.center().y() + 1));
@@ -2104,7 +2160,9 @@ void CaptureOverlay::drawKeystrokeOptions(QPainter& p, const QRectF& parentRect)
     p.setBrush(QColor(0, 0, 0, 60));
     p.drawRoundedRect(appBtn, 6, 6);
     p.setPen(Qt::white);
-    p.drawText(appBtn.adjusted(10, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, "Dark");
+    const QStringList appNames = {"Dark", "Light"};
+    p.drawText(appBtn.adjusted(10, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, 
+               (m_keyAppearance >= 0 && m_keyAppearance < appNames.size()) ? appNames[m_keyAppearance] : "Dark");
     // Chevron
     p.setPen(QPen(Qt::white, 1.5));
     p.drawLine(QPointF(appBtn.right() - 15, appBtn.center().y() - 3), QPointF(appBtn.right() - 11, appBtn.center().y() + 1));
@@ -2160,8 +2218,11 @@ void CaptureOverlay::drawKeystrokeOptions(QPainter& p, const QRectF& parentRect)
 
     // OK / Preview buttons
     QRectF prevBtn(menuX + 15, menuY + menuH - 45, 90, 30);
-    p.setPen(Qt::NoPen); p.setBrush(QColor(255, 255, 255, 30)); p.drawRoundedRect(prevBtn, 6, 6);
-    p.setPen(Qt::white); p.setFont(QFont("Sans", 10)); p.drawText(prevBtn, Qt::AlignCenter, "Preview");
+    p.setPen(Qt::NoPen); 
+    p.setBrush(m_showKeystrokePreview ? accentColor.lighter(120) : QColor(255, 255, 255, 30)); 
+    p.drawRoundedRect(prevBtn, 6, 6);
+    p.setPen(Qt::white); p.setFont(QFont("Sans", 10, m_showKeystrokePreview ? QFont::Bold : QFont::Normal)); 
+    p.drawText(prevBtn, Qt::AlignCenter, "Preview");
     m_keystrokeOptionsClickableRects.append(prevBtn); // index 6
 
     QRectF okBtn(menuX + menuW - 90, menuY + menuH - 45, 75, 30);
@@ -2720,7 +2781,8 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 case 1: // Position dropdown
                     m_dropdownOpen = i;
                     m_dropdownAnchor = m_keystrokeOptionsClickableRects[i];
-                    m_dropdownOptions = QStringList() << "Bottom-Center" << "Bottom-Left" << "Bottom-Right" << "Top-Center";
+                    m_dropdownOptions = QStringList() << "Bottom-Center" << "Bottom-Left" << "Bottom-Right" 
+                                                    << "Top-Center" << "Top-Left" << "Top-Right";
                     m_dropdownValuePtr = &m_keyPosition;
                     break;
                 case 2: // Appearance dropdown
@@ -2732,8 +2794,12 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 case 3: m_keyBlurBg = !m_keyBlurBg; break;
                 case 4: m_keyFilter = 0; break;
                 case 5: m_keyFilter = 1; break;
-                case 6: /* Preview logic */ break;
-                case 7: m_keystrokeOptionsOpen = false; break; // OK
+                case 6: m_showKeystrokePreview = !m_showKeystrokePreview; break;
+                case 7: 
+                    m_keystrokeOptionsOpen = false; 
+                    m_showKeystrokePreview = false;
+                    m_keyPreviews.clear();
+                    break; // OK
                 }
                 update();
                 return;
@@ -3465,6 +3531,18 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
             return;
         }
         // Let arrow keys through for resize/move
+    }
+
+    // Capture key presses for keystroke preview
+    if (m_showKeystrokePreview) {
+        QString keyText = keyEventToPreviewText(event);
+        if (!keyText.isEmpty()) {
+            qint64 now = QDateTime::currentMSecsSinceEpoch();
+            m_keyPreviews.append({keyText, now});
+            if (m_keyPreviews.size() > 8) m_keyPreviews.removeFirst();
+            startClickAnimTimer(); // reuse timer to expire key previews
+            update();
+        }
     }
 
     if (m_captureIntent == CaptureIntent::Scroll) {
@@ -4692,13 +4770,20 @@ void CaptureOverlay::startClickAnimTimer()
             const qint64 CLICK_LIFETIME_MS = 1500;
             const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
-            // Remove expired previews
+            // Remove expired click previews
             m_clickPreviews.erase(
                 std::remove_if(m_clickPreviews.begin(), m_clickPreviews.end(),
                     [&](const ClickPreview& cp) { return (now - cp.birthMs) >= CLICK_LIFETIME_MS; }),
                 m_clickPreviews.end());
 
-            if (m_clickPreviews.isEmpty()) {
+            // Remove expired key previews
+            const qint64 KEY_LIFETIME_MS = 2000;
+            m_keyPreviews.erase(
+                std::remove_if(m_keyPreviews.begin(), m_keyPreviews.end(),
+                    [&](const KeyPreview& kp) { return (now - kp.birthMs) >= KEY_LIFETIME_MS; }),
+                m_keyPreviews.end());
+
+            if (m_clickPreviews.isEmpty() && m_keyPreviews.isEmpty()) {
                 stopClickAnimTimer();
                 return;
             }
@@ -4716,4 +4801,172 @@ void CaptureOverlay::stopClickAnimTimer()
         m_clickAnimTimer->stop();
     }
     m_clickAnimPhase = 0.0;
+}
+
+void CaptureOverlay::drawKeystrokePreview(QPainter& p, double sx, double sy, double selW, double selH)
+{
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+
+    const double baseW = 120.0;
+    const double baseH = 60.0;
+    const double scale = 0.6 + m_keySize;
+    double previewW = baseW * scale;
+    double previewH = baseH * scale;
+    const double margin = 16.0 * scale;
+
+    // Gather display strings: live key presses or static demo
+    const qint64 KEY_LIFETIME_MS = 2000;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // Remove expired keys
+    m_keyPreviews.erase(
+        std::remove_if(m_keyPreviews.begin(), m_keyPreviews.end(),
+            [&](const KeyPreview& kp) { return (now - kp.birthMs) >= KEY_LIFETIME_MS; }),
+        m_keyPreviews.end());
+
+    QStringList displayKeys;
+    QList<double> keyAlphas; // per-key fade alpha
+    if (!m_keyPreviews.isEmpty()) {
+        // Show live key presses (most recent up to 5)
+        int start = std::max(0, m_keyPreviews.size() - 5);
+        for (int i = start; i < m_keyPreviews.size(); ++i) {
+            displayKeys.append(m_keyPreviews[i].text);
+            double age = (double)(now - m_keyPreviews[i].birthMs) / KEY_LIFETIME_MS;
+            keyAlphas.append(1.0 - age); // fade out
+        }
+    } else {
+        // Static demo: ⌘ ⇧ F
+        displayKeys = QStringList() << "\u2318" << "\u21E7" << "F";
+        keyAlphas = {1.0, 1.0, 1.0};
+    }
+
+    // Widen box for more keys
+    if (displayKeys.size() > 3) {
+        previewW = std::max(previewW, (displayKeys.size() * 30.0 + 40.0) * scale);
+    }
+
+    // Position
+    double kx, ky;
+    switch (m_keyPosition) {
+        case 0: kx = sx + (selW - previewW) / 2.0; ky = sy + selH - previewH - margin; break;
+        case 1: kx = sx + margin; ky = sy + selH - previewH - margin; break;
+        case 2: kx = sx + selW - previewW - margin; ky = sy + selH - previewH - margin; break;
+        case 3: kx = sx + (selW - previewW) / 2.0; ky = sy + margin; break;
+        case 4: kx = sx + margin; ky = sy + margin; break;
+        case 5: kx = sx + selW - previewW - margin; ky = sy + margin; break;
+        default: kx = sx + (selW - previewW) / 2.0; ky = sy + selH - previewH - margin; break;
+    }
+
+    QRectF boxRect(kx, ky, previewW, previewH);
+
+    // Appearance colors
+    QColor bgColor = (m_keyAppearance == 0) ? QColor(20, 20, 24, 215) : QColor(245, 245, 250, 215);
+    QColor iconColor = (m_keyAppearance == 0) ? Qt::white : Qt::black;
+
+    // Blur background
+    if (m_keyBlurBg && !m_blurredBg.isNull()) {
+        p.save();
+        QPainterPath clip; clip.addRoundedRect(boxRect, 10 * scale, 10 * scale);
+        p.setClipPath(clip);
+        double bgScaleX = (double)width() / m_blurredBg.width();
+        double bgScaleY = (double)height() / m_blurredBg.height();
+        p.scale(bgScaleX, bgScaleY);
+        p.drawImage(QPointF(0, 0), m_blurredBg);
+        p.restore();
+        bgColor.setAlpha(180);
+    }
+
+    p.setPen(QPen(QColor(iconColor.red(), iconColor.green(), iconColor.blue(), 50), 1.2));
+    p.setBrush(bgColor);
+    p.drawRoundedRect(boxRect, 12 * scale, 12 * scale);
+
+    // Draw keys
+    const double iconSize = 22.0 * scale;
+    const double spacing = 10.0 * scale;
+    const double totalGroupW = displayKeys.size() * iconSize + (displayKeys.size() - 1) * spacing;
+    double startX = kx + (previewW - totalGroupW) / 2.0;
+    double cy = ky + previewH / 2.0;
+
+    QFont keyFont;
+    keyFont.setFamily("Sans");
+    keyFont.setBold(true);
+    keyFont.setPointSizeF(16 * scale);
+
+    for (int i = 0; i < displayKeys.size(); ++i) {
+        double cx = startX + i * (iconSize + spacing) + iconSize / 2.0;
+        double alpha = keyAlphas.value(i, 1.0);
+
+        QColor c = iconColor;
+        c.setAlphaF(alpha);
+
+        p.setPen(QPen(c, 2.0 * scale, Qt::SolidLine, Qt::RoundCap));
+        p.setBrush(Qt::NoBrush);
+
+        const QString& key = displayKeys[i];
+        if (key == "\u2318") {
+            // Command key ⌘
+            double r = 2.8 * scale;
+            p.drawEllipse(QPointF(cx - r, cy - r), r, r);
+            p.drawEllipse(QPointF(cx + r, cy - r), r, r);
+            p.drawEllipse(QPointF(cx - r, cy + r), r, r);
+            p.drawEllipse(QPointF(cx + r, cy + r), r, r);
+            p.drawLine(QPointF(cx - r, cy - r + 0.5), QPointF(cx - r, cy + r - 0.5));
+            p.drawLine(QPointF(cx + r, cy - r + 0.5), QPointF(cx + r, cy + r - 0.5));
+            p.drawLine(QPointF(cx - r + 0.5, cy - r), QPointF(cx + r - 0.5, cy - r));
+            p.drawLine(QPointF(cx - r + 0.5, cy + r), QPointF(cx + r - 0.5, cy + r));
+        } else if (key == "\u21E7") {
+            // Shift key ⇧
+            QPainterPath shift;
+            shift.moveTo(cx, cy - 8 * scale);
+            shift.lineTo(cx - 7 * scale, cy + 1 * scale);
+            shift.lineTo(cx - 3.5 * scale, cy + 1 * scale);
+            shift.lineTo(cx - 3.5 * scale, cy + 8 * scale);
+            shift.lineTo(cx + 3.5 * scale, cy + 8 * scale);
+            shift.lineTo(cx + 3.5 * scale, cy + 1 * scale);
+            shift.lineTo(cx + 7 * scale, cy + 1 * scale);
+            shift.closeSubpath();
+            p.drawPath(shift);
+        } else if (key == "\u232B") {
+            // Backspace ⌫
+            double s = 6 * scale;
+            QPainterPath bp;
+            bp.moveTo(cx + s, cy - s);
+            bp.lineTo(cx - s, cy - s);
+            bp.lineTo(cx - s * 1.5, cy);
+            bp.lineTo(cx - s, cy + s);
+            bp.lineTo(cx + s, cy + s);
+            bp.lineTo(cx + s * 0.5, cy);
+            bp.closeSubpath();
+            p.drawPath(bp);
+            p.drawLine(QPointF(cx - s * 0.2, cy - s * 0.4), QPointF(cx + s * 0.2, cy + s * 0.4));
+            p.drawLine(QPointF(cx + s * 0.2, cy - s * 0.4), QPointF(cx - s * 0.2, cy + s * 0.4));
+        } else if (key == "\u21A9") {
+            // Enter ↩
+            double s = 6 * scale;
+            QPainterPath ep;
+            ep.moveTo(cx - s, cy - s);
+            ep.lineTo(cx + s, cy - s);
+            ep.lineTo(cx + s, cy + s * 0.3);
+            ep.lineTo(cx + s * 0.3, cy + s * 0.3);
+            ep.lineTo(cx + s * 0.3, cy + s);
+            ep.lineTo(cx - s * 1.3, cy + s * 0.3);
+            ep.lineTo(cx - s * 1.3, cy - s * 0.3);
+            ep.lineTo(cx - s, cy - s * 0.3);
+            ep.closeSubpath();
+            p.drawPath(ep);
+        } else if (key == " ") {
+            // Space bar
+            double w = iconSize * 0.6;
+            double h = 3 * scale;
+            p.drawRoundedRect(QRectF(cx - w/2, cy - h, w, h * 2), h, h);
+        } else {
+            // Regular key — draw text
+            p.setFont(keyFont);
+            p.setPen(c);
+            p.drawText(QRectF(cx - iconSize/2.0, ky, iconSize, previewH), Qt::AlignCenter, key);
+        }
+    }
+
+    p.restore();
 }
