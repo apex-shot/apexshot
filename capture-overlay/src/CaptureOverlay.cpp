@@ -662,6 +662,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     , m_clickStyle(0)
     , m_clickAnimate(true)
     , m_sliderDragging(false)
+    , m_clickAnimTimer(nullptr)
+    , m_clickAnimPhase(0.0)
     , m_keystrokeOptionsOpen(false)
     , m_keySize(0.4)
     , m_keyPosition(0) // Bottom-Center
@@ -1943,8 +1945,49 @@ void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
     p.setBrush(QColor(0, 0, 0, 40));
     p.drawRoundedRect(previewArea, 10, 10);
     
-    p.setPen(QColor(255, 255, 255, 120));
-    p.drawText(previewArea, Qt::AlignCenter, "Click here to preview");
+    // Draw click previews
+    if (m_clickPreviews.isEmpty()) {
+        p.setPen(QColor(255, 255, 255, 120));
+        p.drawText(previewArea, Qt::AlignCenter, "Click here to preview");
+    } else {
+        p.save();
+        p.setClipRect(previewArea.adjusted(1, 1, -1, -1)); // clip to preview bounds
+
+        const double baseRadius = 6.0 + m_clickSize * 28.0; // 6 to 34
+        const QColor clickColor = clickColorValue(m_clickColor);
+
+        for (int i = 0; i < m_clickPreviews.size(); ++i) {
+            QPointF pt = m_clickPreviews[i];
+            if (!previewArea.contains(pt)) continue;
+
+            double radius = baseRadius;
+
+            // Animation: pulsing ring that expands outward
+            if (m_clickAnimate) {
+                double phase = std::fmod(m_clickAnimPhase + i * 0.15, 1.0);
+                double pulseRadius = radius + phase * 20.0;
+                double pulseAlpha = (1.0 - phase) * 180.0;
+
+                QColor pulseColor = clickColor;
+                pulseColor.setAlphaF(pulseAlpha / 255.0);
+                p.setPen(QPen(pulseColor, 2));
+                p.setBrush(Qt::NoBrush);
+                p.drawEllipse(pt, pulseRadius, pulseRadius);
+            }
+
+            // Main click circle
+            if (m_clickStyle == 1) { // Filled
+                p.setPen(Qt::NoPen);
+                p.setBrush(clickColor);
+                p.drawEllipse(pt, radius, radius);
+            } else { // Outline
+                p.setPen(QPen(clickColor, 3));
+                p.setBrush(Qt::NoBrush);
+                p.drawEllipse(pt, radius, radius);
+            }
+        }
+        p.restore();
+    }
     
     m_clickOptionsClickableRects.append(previewArea); // index 4: preview
 
@@ -2699,13 +2742,27 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     m_dropdownOptions = QStringList() << "Outline" << "Filled";
                     m_dropdownValuePtr = &m_clickStyle;
                     break;
-                case 3: m_clickAnimate = !m_clickAnimate; break;
-                case 4: { // Preview
-                    m_clickPreviews.append(pos);
-                    if (m_clickPreviews.size() > 10) m_clickPreviews.removeFirst();
+                case 3: { // Animate toggle
+                    m_clickAnimate = !m_clickAnimate;
+                    if (m_clickAnimate && !m_clickPreviews.isEmpty()) {
+                        startClickAnimTimer();
+                    } else {
+                        stopClickAnimTimer();
+                    }
                     break;
                 }
-                case 5: m_clickOptionsOpen = false; break; // OK
+                case 4: { // Preview — add click point
+                    m_clickPreviews.append(pos);
+                    if (m_clickPreviews.size() > 10) m_clickPreviews.removeFirst();
+                    if (m_clickAnimate) startClickAnimTimer();
+                    break;
+                }
+                case 5: { // OK — close panel
+                    m_clickOptionsOpen = false;
+                    stopClickAnimTimer();
+                    m_clickPreviews.clear();
+                    break;
+                }
                 }
                 update();
                 return;
@@ -2797,6 +2854,8 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             if (tile != RecordPanelTile::Controls) {
                 m_settingsOpen = false;
                 m_clickOptionsOpen = false;
+                stopClickAnimTimer();
+                m_clickPreviews.clear();
                 update();
                 // continue to handle the click normally
             }
@@ -4592,4 +4651,27 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
     case HandlePos::Inside:      setCursor(Qt::SizeAllCursor);   break;
     default:                     setCursor(Qt::CrossCursor);     break;
     }
+}
+
+void CaptureOverlay::startClickAnimTimer()
+{
+    if (!m_clickAnimTimer) {
+        m_clickAnimTimer = new QTimer(this);
+        m_clickAnimTimer->setInterval(16); // ~60fps
+        connect(m_clickAnimTimer, &QTimer::timeout, this, [this]() {
+            m_clickAnimPhase = std::fmod(m_clickAnimPhase + 0.03, 1.0);
+            update();
+        });
+    }
+    if (!m_clickAnimTimer->isActive()) {
+        m_clickAnimTimer->start();
+    }
+}
+
+void CaptureOverlay::stopClickAnimTimer()
+{
+    if (m_clickAnimTimer && m_clickAnimTimer->isActive()) {
+        m_clickAnimTimer->stop();
+    }
+    m_clickAnimPhase = 0.0;
 }

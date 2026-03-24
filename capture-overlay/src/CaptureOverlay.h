@@ -152,6 +152,8 @@ private:
     void drawKeystrokeOptions(QPainter& p, const QRectF& parentRect);
     void drawDropdownPopup(QPainter& p, const QRectF& anchorRect,
                            const QStringList& options, int selectedIndex);
+    void startClickAnimTimer();
+    void stopClickAnimTimer();
     QRectF scrollPrimaryButtonRect() const;
 
     // Webcam
@@ -281,6 +283,8 @@ private:
     QList<QPointF> m_clickPreviews; // for preview animation state if needed
     bool   m_sliderDragging;   // true while dragging size slider
     QRectF m_sliderTrackRect;  // cached slider track rect for drag calc
+    QTimer* m_clickAnimTimer;  // timer for preview animation ticks
+    double m_clickAnimPhase;   // 0.0 to 1.0 cycling phase for animation
 
     // Keystroke options
     bool   m_keystrokeOptionsOpen;
