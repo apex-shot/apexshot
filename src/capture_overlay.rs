@@ -178,6 +178,14 @@ pub struct RecordingRequest {
     pub speaker: bool,
     pub clicks: bool,
     pub keystrokes: bool,
+    // General tab settings
+    pub display_rec_time: bool,
+    pub hidpi: bool,
+    pub notifications: bool,
+    pub cursor: bool,
+    pub remember_selection: bool,
+    pub dim_screen: bool,
+    pub countdown: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -485,6 +493,15 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let clicks = extract_bool(json, "clicks").unwrap_or(false);
     let keystrokes = extract_bool(json, "keystrokes").unwrap_or(false);
 
+    // General tab settings
+    let display_rec_time = extract_bool(json, "display_rec_time").unwrap_or(false);
+    let hidpi = extract_bool(json, "hidpi").unwrap_or(false);
+    let notifications = extract_bool(json, "notifications").unwrap_or(true);
+    let cursor = extract_bool(json, "cursor").unwrap_or(true);
+    let remember_selection = extract_bool(json, "remember_selection").unwrap_or(false);
+    let dim_screen = extract_bool(json, "dim_screen").unwrap_or(true);
+    let countdown = extract_bool(json, "countdown").unwrap_or(true);
+
     Ok(RecordingRequest {
         x,
         y,
@@ -496,6 +513,13 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         speaker,
         clicks,
         keystrokes,
+        display_rec_time,
+        hidpi,
+        notifications,
+        cursor,
+        remember_selection,
+        dim_screen,
+        countdown,
     })
 }
 
