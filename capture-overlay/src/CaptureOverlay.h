@@ -154,6 +154,7 @@ private:
                            const QStringList& options, int selectedIndex);
     void startClickAnimTimer();
     void stopClickAnimTimer();
+    void drawKeystrokePreview(QPainter& p, double sx, double sy, double selW, double selH);
     QRectF scrollPrimaryButtonRect() const;
 
     // Webcam
@@ -292,11 +293,17 @@ private:
 
     // Keystroke options
     bool   m_keystrokeOptionsOpen;
+    bool   m_showKeystrokePreview; // toggle for previewing position/style
     double m_keySize;        // 0.0 to 1.0
     int    m_keyPosition;    // index
     int    m_keyAppearance;  // index
     bool   m_keyBlurBg;
     int    m_keyFilter;      // 0=All, 1=Command
+    struct KeyPreview {
+        QString text;
+        qint64  birthMs;
+    };
+    QList<KeyPreview> m_keyPreviews; // recent key presses for live preview
     
     // Video settings
     int  m_videoMaxRes;      // index
