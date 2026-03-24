@@ -361,8 +361,27 @@ pub fn capture_screen_via_cpp() -> Result<CaptureData, SelectionError> {
 }
 
 pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
-    eprintln!("[capture_overlay] capture_area_via_cpp: launching --area-init");
-    let output = run_capture_binary(&["--area-init"], None)?;
+    // Check config for remember selection
+    let config = crate::config::load_config();
+    let mut extra_args: Vec<String> = vec!["--area-init".into()];
+
+    if config.rec_remember_selection {
+        if let (Some(x), Some(y), Some(w), Some(h)) = (
+            config.last_selection_x,
+            config.last_selection_y,
+            config.last_selection_w,
+            config.last_selection_h,
+        ) {
+            extra_args.push(format!("--restore-selection={x},{y},{w},{h}"));
+        }
+    }
+
+    let arg_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+    eprintln!(
+        "[capture_overlay] capture_area_via_cpp: launching {:?}",
+        arg_refs
+    );
+    let output = run_capture_binary(&arg_refs, None)?;
     let exit_code = output.status.code();
     eprintln!(
         "[capture_overlay] capture_area_via_cpp: --area-init exited with code {:?}",

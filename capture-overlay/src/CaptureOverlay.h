@@ -81,6 +81,7 @@ public:
     /// Returns the selected rectangle in screen (logical pixel) coordinates.
     /// Only valid when QApplication exits with code 0.
     QRect selection() const { return m_selection.normalized(); }
+    void setInitialSelection(const QRect& rect) { m_selection = rect; }
     bool ocrRequested() const { return m_captureIntent == CaptureIntent::Ocr; }
     bool scrollCaptureCompleted() const { return m_scrollCaptureReady; }
     QString scrollCapturePath() const { return m_scrollCapturePath; }
