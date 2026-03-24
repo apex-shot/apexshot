@@ -252,6 +252,7 @@ private:
     int m_dropdownOpen;      // -1 = none, else index in m_settingsClickableRects
     QRectF m_dropdownAnchor; // rect of the button that opened the dropdown
     QStringList m_dropdownOptions;
+    QList<QColor> m_dropdownColors; // optional: if non-empty, draw color circles
     int* m_dropdownValuePtr; // pointer to the int being edited
     int  m_hoveredDropdownItem; // index into current dropdown options
     QList<QRectF> m_dropdownItemRects;
@@ -278,6 +279,8 @@ private:
     int    m_clickStyle;       // index
     bool   m_clickAnimate;
     QList<QPointF> m_clickPreviews; // for preview animation state if needed
+    bool   m_sliderDragging;   // true while dragging size slider
+    QRectF m_sliderTrackRect;  // cached slider track rect for drag calc
 
     // Keystroke options
     bool   m_keystrokeOptionsOpen;

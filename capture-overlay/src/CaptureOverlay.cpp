@@ -661,6 +661,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     , m_clickColor(0)
     , m_clickStyle(0)
     , m_clickAnimate(true)
+    , m_sliderDragging(false)
     , m_keystrokeOptionsOpen(false)
     , m_keySize(0.4)
     , m_keyPosition(0) // Bottom-Center
@@ -1769,6 +1770,7 @@ void CaptureOverlay::drawDropdownPopup(QPainter& p, const QRectF& anchorRect,
     p.drawRoundedRect(menuRect, 8, 8);
 
     m_dropdownItemRects.clear();
+    const bool hasColors = !m_dropdownColors.isEmpty();
     for (int i = 0; i < options.size(); ++i) {
         QRectF itemRect(menuX + 5, menuY + 5 + i * itemH, menuW - 10, itemH);
         m_dropdownItemRects.append(itemRect);
@@ -1780,9 +1782,21 @@ void CaptureOverlay::drawDropdownPopup(QPainter& p, const QRectF& anchorRect,
             p.drawRoundedRect(itemRect, 6, 6);
         }
 
+        // Left-aligned content
+        double textX = itemRect.x() + 10;
+
+        // Color circle (left side)
+        if (hasColors && i < m_dropdownColors.size()) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(m_dropdownColors[i]);
+            p.drawEllipse(QPointF(itemRect.x() + 18, itemRect.center().y()), 7, 7);
+            textX = itemRect.x() + 34;
+        }
+
         p.setPen(Qt::white);
         p.setFont(QFont("Sans", 10, selectedIndex == i ? QFont::Bold : QFont::Normal));
-        p.drawText(itemRect.adjusted(10, 0, -10, 0), Qt::AlignLeft | Qt::AlignVCenter, options[i]);
+        p.drawText(QRectF(textX, itemRect.y(), itemRect.right() - textX - 10, itemRect.height()),
+                   Qt::AlignLeft | Qt::AlignVCenter, options[i]);
         
         if (selectedIndex == i) {
             p.setBrush(Qt::white);
@@ -1806,6 +1820,25 @@ void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
     const QColor accentColor(122, 100, 255);
     const QImage* blurPtr = m_blurredBg.isNull() ? nullptr : &m_blurredBg;
 
+    // Color palette
+    static const QStringList colorNames = {
+        "Gray", "Indigo", "Red", "Blue", "Green", "Yellow", "Orange", "Purple", "White"
+    };
+    static const QList<QColor> colorValues = {
+        QColor(180, 180, 180),  // Gray
+        QColor(122, 100, 255),  // Indigo
+        QColor(255, 60, 60),    // Red
+        QColor(60, 120, 255),   // Blue
+        QColor(60, 200, 80),    // Green
+        QColor(255, 210, 50),   // Yellow
+        QColor(255, 150, 30),   // Orange
+        QColor(180, 60, 220),   // Purple
+        QColor(255, 255, 255),  // White
+    };
+    auto clickColorValue = [&](int idx) -> QColor {
+        return (idx >= 0 && idx < colorValues.size()) ? colorValues[idx] : colorValues[0];
+    };
+
     // Redraw base panel to "overlay" the settings menu (or we could just draw over it)
     // Actually, drawing over it is fine.
     drawFrostedPanel(p, menuX, menuY, menuW, menuH, 12.0, blurPtr, width(), height());
@@ -1825,6 +1858,7 @@ void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
     // 1. Size Slider
     drawLabel("Size:");
     QRectF sliderTrack(valueX, currY + (rowH - 4) / 2.0, controlW, 4);
+    m_sliderTrackRect = sliderTrack;
     p.setPen(Qt::NoPen);
     p.setBrush(QColor(255, 255, 255, 30));
     p.drawRoundedRect(sliderTrack, 2, 2);
@@ -1846,13 +1880,12 @@ void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
     
     // Color circle
     p.setPen(Qt::NoPen);
-    p.setBrush(m_clickColor == 0 ? Qt::gray : (m_clickColor == 1 ? accentColor : Qt::red));
+    p.setBrush(clickColorValue(m_clickColor));
     p.drawEllipse(QPointF(colorBtn.x() + 15, colorBtn.center().y()), 7, 7);
     
     p.setPen(Qt::white);
     p.setFont(QFont("Sans", 10));
-    const QStringList colorOptions = QStringList() << "Gray" << "Indigo" << "Red";
-    p.drawText(colorBtn.adjusted(30, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, colorOptions[m_clickColor]);
+    p.drawText(colorBtn.adjusted(30, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, colorNames[m_clickColor]);
     
     // Chevron
     p.setPen(QPen(Qt::white, 1.5));
@@ -2588,6 +2621,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             if (m_dropdownItemRects[i].contains(pos)) {
                 if (m_dropdownValuePtr) *m_dropdownValuePtr = i;
                 m_dropdownOpen = -1;
+                m_dropdownColors.clear();
                 m_hoveredDropdownItem = -1;
                 update();
                 return;
@@ -2595,6 +2629,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         }
         // Click outside dropdown — close it
         m_dropdownOpen = -1;
+        m_dropdownColors.clear();
         m_hoveredDropdownItem = -1;
         update();
         return;
@@ -2640,15 +2675,22 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         for (int i = 0; i < m_clickOptionsClickableRects.size(); ++i) {
             if (m_clickOptionsClickableRects[i].contains(pos)) {
                 switch (i) {
-                case 0: { // Slider
+                case 0: { // Slider — start drag
                     double relX = pos.x() - m_clickOptionsClickableRects[i].x();
                     m_clickSize = std::max(0.0, std::min(1.0, relX / m_clickOptionsClickableRects[i].width()));
+                    m_sliderDragging = true;
                     break;
                 }
                 case 1: // Color dropdown
                     m_dropdownOpen = i;
                     m_dropdownAnchor = m_clickOptionsClickableRects[i];
-                    m_dropdownOptions = QStringList() << "Gray" << "Indigo" << "Red";
+                    m_dropdownOptions = QStringList()
+                        << "Gray" << "Indigo" << "Red" << "Blue" << "Green"
+                        << "Yellow" << "Orange" << "Purple" << "White";
+                    m_dropdownColors = QList<QColor>()
+                        << QColor(180, 180, 180) << QColor(122, 100, 255) << QColor(255, 60, 60)
+                        << QColor(60, 120, 255) << QColor(60, 200, 80) << QColor(255, 210, 50)
+                        << QColor(255, 150, 30) << QColor(180, 60, 220) << QColor(255, 255, 255);
                     m_dropdownValuePtr = &m_clickColor;
                     break;
                 case 2: // Style dropdown
@@ -2681,6 +2723,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     if (i < 3) { // Tab clicks (indices 0, 1, 2)
                         m_settingsTab = i;
                         m_dropdownOpen = -1;
+                        m_dropdownColors.clear();
                         update();
                         return;
                     }
@@ -3014,6 +3057,14 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 {
     const QPoint pos = event->pos();
 
+    // ── Slider Drag ─────────────────────────────────────────────────────────
+    if (m_sliderDragging) {
+        double relX = pos.x() - m_sliderTrackRect.x();
+        m_clickSize = std::max(0.0, std::min(1.0, relX / m_sliderTrackRect.width()));
+        update();
+        return;
+    }
+
     // ── Global Dropdown Hover ───────────────────────────────────────────────
     if (m_dropdownOpen != -1) {
         int newHover = -1;
@@ -3172,6 +3223,12 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) return;
+
+    // Stop slider drag
+    if (m_sliderDragging) {
+        m_sliderDragging = false;
+        update();
+    }
 
     // Reset recording panel hover state
     if (m_recordingPanelOpen) {
