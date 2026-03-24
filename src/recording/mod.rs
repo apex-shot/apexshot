@@ -10,6 +10,10 @@ use zbus::zvariant::OwnedValue;
 mod stop_overlay;
 pub use stop_overlay::{run_recording_stop_overlay, StopOverlayError};
 
+pub mod countdown_overlay;
+pub mod dim_overlay;
+pub mod dnd;
+
 #[derive(Debug, Error)]
 pub enum RecordError {
     #[error("GStreamer initialization failed: {0}")]
