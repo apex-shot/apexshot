@@ -26,6 +26,22 @@ pub struct AppConfig {
     pub after_capture_copy_file_to_clipboard: bool,
     pub after_capture_save: bool,
     pub after_capture_open_annotate: bool,
+    // Recording General tab settings
+    pub rec_controls: bool,
+    pub rec_display_time: bool,
+    pub rec_hidpi: bool,
+    pub rec_notifications: bool,
+    pub rec_cursor: bool,
+    pub rec_clicks: bool,
+    pub rec_keystrokes: bool,
+    pub rec_remember_selection: bool,
+    pub rec_dim_screen: bool,
+    pub rec_countdown: bool,
+    // Remember selection: last selection area
+    pub last_selection_x: Option<i32>,
+    pub last_selection_y: Option<i32>,
+    pub last_selection_w: Option<i32>,
+    pub last_selection_h: Option<i32>,
 }
 
 impl Default for AppConfig {
@@ -42,6 +58,20 @@ impl Default for AppConfig {
             after_capture_copy_file_to_clipboard: DEFAULT_AFTER_CAPTURE_COPY_FILE_TO_CLIPBOARD,
             after_capture_save: DEFAULT_AFTER_CAPTURE_SAVE,
             after_capture_open_annotate: DEFAULT_AFTER_CAPTURE_OPEN_ANNOTATE,
+            rec_controls: true,
+            rec_display_time: false,
+            rec_hidpi: false,
+            rec_notifications: true,
+            rec_cursor: true,
+            rec_clicks: false,
+            rec_keystrokes: false,
+            rec_remember_selection: false,
+            rec_dim_screen: true,
+            rec_countdown: true,
+            last_selection_x: None,
+            last_selection_y: None,
+            last_selection_w: None,
+            last_selection_h: None,
         }
     }
 }
@@ -188,5 +218,30 @@ mod tests {
 
         assert!(cfg.after_capture_open_annotate);
         assert!(!cfg.after_capture_show_quick_access);
+    }
+
+    #[test]
+    fn recording_settings_have_correct_defaults() {
+        let cfg = AppConfig::default();
+        assert!(cfg.rec_controls);
+        assert!(!cfg.rec_display_time);
+        assert!(!cfg.rec_hidpi);
+        assert!(cfg.rec_notifications);
+        assert!(cfg.rec_cursor);
+        assert!(!cfg.rec_clicks);
+        assert!(!cfg.rec_keystrokes);
+        assert!(!cfg.rec_remember_selection);
+        assert!(cfg.rec_dim_screen);
+        assert!(cfg.rec_countdown);
+        assert!(cfg.last_selection_x.is_none());
+    }
+
+    #[test]
+    fn config_without_recording_settings_uses_defaults() {
+        let yaml = "preview_auto_close_seconds: 12\nstart_at_login: false\n";
+        let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
+        assert!(cfg.rec_controls);
+        assert!(cfg.rec_cursor);
+        assert!(!cfg.rec_hidpi);
     }
 }
