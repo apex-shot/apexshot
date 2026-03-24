@@ -286,8 +286,10 @@ private:
         qint64  birthMs;       // QDateTime::currentMSecsSinceEpoch() at creation
     };
     QList<ClickPreview> m_clickPreviews;
-    bool   m_sliderDragging;   // true while dragging size slider
-    QRectF m_sliderTrackRect;  // cached slider track rect for drag calc
+    bool   m_sliderDragging;   // true while dragging click size slider
+    QRectF m_sliderTrackRect;  // cached click slider track rect for drag calc
+    bool   m_keySliderDragging; // true while dragging keystroke size slider
+    QRectF m_keySliderTrackRect; // cached keystroke slider track rect
     QTimer* m_clickAnimTimer;  // timer for preview animation ticks
     double m_clickAnimPhase;   // 0.0 to 1.0 cycling phase for animation
 
