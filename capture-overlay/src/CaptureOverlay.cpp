@@ -1811,8 +1811,12 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 
     // Right-click on webcam tile shows context menu
     if (event->button() == Qt::RightButton && m_recordingPanelOpen) {
+        std::fprintf(stderr, "[mousePressEvent] Right-click detected, m_recordingPanelOpen=true\n");
         RecordPanelTile tile = hitTestRecordingPanel(pos);
+        std::fprintf(stderr, "[mousePressEvent] hitTest returned tile=%d (Webcam=%d)\n", 
+                     (int)tile, (int)RecordPanelTile::Webcam);
         if (tile == RecordPanelTile::Webcam) {
+            std::fprintf(stderr, "[mousePressEvent] Showing webcam context menu\n");
             showWebcamContextMenu(event->globalPos());
             return;
         }
@@ -3441,6 +3445,7 @@ CaptureOverlay::HandlePos CaptureOverlay::hitTest(const QPoint& pos) const
 CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoint& pos) const
 {
     if (!m_recordingPanelOpen) {
+        std::fprintf(stderr, "[hitTestRecordingPanel] Panel not open\n");
         return RecordPanelTile::None;
     }
 
@@ -3452,12 +3457,20 @@ CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoi
         RecordPanelTile::RecordGif, RecordPanelTile::RecordVideo
     };
 
+    std::fprintf(stderr, "[hitTestRecordingPanel] pos=(%d, %d), m_recTileRects.size()=%zu\n", 
+                 pos.x(), pos.y(), m_recTileRects.size());
+
     for (int i = 0; i < (int)m_recTileRects.size() && i < 10; ++i) {
+        const QRectF& r = m_recTileRects[i];
+        std::fprintf(stderr, "  tile[%d]: rect=(%.1f, %.1f, %.1f, %.1f) contains=%d\n", 
+                     i, r.x(), r.y(), r.width(), r.height(), r.contains(pos));
         if (m_recTileRects[i].contains(pos)) {
+            std::fprintf(stderr, "  -> HIT tile %d (Webcam=%d)\n", i, (int)RecordPanelTile::Webcam);
             return tileOrder[i];
         }
     }
 
+    std::fprintf(stderr, "  -> No tile hit\n");
     return RecordPanelTile::None;
 }
 
