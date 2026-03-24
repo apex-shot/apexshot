@@ -21,7 +21,13 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QMenu>
+#include <QRegularExpression>
+#include <QFile>
 #include <QFileInfo>
+#include <QMutexLocker>
+#include <gst/gst.h>
+#include <gst/app/gstappsink.h>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QThread>
@@ -45,6 +51,7 @@
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
+#include <QDBusReply>
 
 // ── Constants (mirrors overlay.rs) ──────────────────────────────────────────
 static const double HANDLE_MARKER_LENGTH    = 20.0;
@@ -245,14 +252,21 @@ static void drawFrostedPanel(QPainter& p, double x, double y,
         p.scale(scaleX, scaleY);
         p.drawImage(QPointF(0, 0), *blurredBg);
         p.restore();
+        
+        // Dark glass tint matching editor root background (#141414 at ~90% opacity)
+        p.fillRect(QRectF(x, y, w, h), QColor(20, 20, 20, 230));
     } else {
-        p.fillRect(QRectF(x, y, w, h), QColor(20, 20, 20, 255));
+        // Solid background matching editor root background (#141414)
+        p.fillRect(QRectF(x, y, w, h), QColor(20, 20, 20));
     }
 
-    // Dark tint (0.52 alpha)
-    p.fillRect(QRectF(x, y, w, h), QColor(0, 0, 0, 133));
-    // White sheen (0.10 alpha)
-    p.fillRect(QRectF(x, y, w, h), QColor(255, 255, 255, 26));
+    // Subtle white sheen (0.04 alpha) for a premium feel
+    p.fillRect(QRectF(x, y, w, h), QColor(255, 255, 255, 10));
+
+    // Panel border (matching editor's .editor-root border: 1px solid rgba(255, 255, 255, 0.10))
+    p.setPen(QPen(QColor(255, 255, 255, 26), 1.0));
+    p.setBrush(Qt::NoBrush);
+    p.drawPath(clip);
 
     p.restore();
 }
@@ -338,6 +352,137 @@ static void drawToolbarIcon(QPainter& p, int iconIndex,
         QPainterPath bump;
         roundedRectPath(bump, cx + 3.8, cy - 2.2, 3.6, 4.4, 0.8);
         p.fillPath(bump, color);
+        break;
+    }
+    // Recording panel icons (8-12)
+    case 8: { // Settings/Sliders
+        // Three vertical lines with sliders
+        for (int i = 0; i < 3; ++i) {
+            double x = cx - 4.5 + i * 4.5;
+            p.drawLine(QPointF(x, cy - 6.0), QPointF(x, cy + 6.0));
+            double sliderY = (i == 0) ? cy - 2.0 : (i == 1 ? cy + 2.0 : cy - 1.0);
+            p.drawEllipse(QPointF(x, sliderY), 1.8, 1.8);
+        }
+        break;
+    }
+    case 9: { // Size - matches screenshot (just layout box)
+        break; 
+    }
+    case 10: { // Crop (matching editor toolbar icon)
+        p.setPen(QPen(color, 1.6, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
+        double s = 10.5; // main square side
+        double t = 2.8;  // tail length
+        double o = 1.2;  // overlap offset
+        
+        // Top-left part
+        p.drawLine(QPointF(cx - s/2 - t, cy - s/2 + o), QPointF(cx + s/2 - o, cy - s/2 + o));
+        p.drawLine(QPointF(cx - s/2 + o, cy - s/2 - t), QPointF(cx - s/2 + o, cy + s/2 - o));
+        
+        // Bottom-right part
+        p.drawLine(QPointF(cx + s/2 + t, cy + s/2 - o), QPointF(cx - s/2 + o, cy + s/2 - o));
+        p.drawLine(QPointF(cx + s/2 - o, cy + s/2 + t), QPointF(cx + s/2 - o, cy - s/2 + o));
+        break;
+    }
+    case 11: { // Mic
+        QPainterPath body;
+        roundedRectPath(body, cx - 2.2, cy - 6.5, 4.4, 8.5, 2.2);
+        p.drawPath(body);
+        p.drawArc(QRectF(cx - 5.0, cy - 1.5, 10.0, 9.0), 0, -180 * 16);
+        p.drawLine(QPointF(cx, cy + 3.0), QPointF(cx, cy + 6.5));
+        break;
+    }
+    case 12: { // Window/Screen selection
+        QPainterPath path;
+        roundedRectPath(path, cx - 7.0, cy - 5.0, 14.0, 10.0, 2.0);
+        p.drawPath(path);
+        // Small person/window inside
+        p.drawEllipse(QPointF(cx - 2.5, cy - 1.0), 2.0, 2.0);
+        p.drawArc(QRectF(cx - 5.5, cy + 1.0, 6.0, 6.0), 0, 180 * 16);
+        // Sound/Window waves
+        p.drawArc(QRectF(cx + 1.0, cy - 3.0, 4.0, 6.0), -45 * 16, 90 * 16);
+        p.drawArc(QRectF(cx + 3.5, cy - 2.0, 2.5, 4.0), -45 * 16, 90 * 16);
+        break;
+    }
+    case 13: { // Video Camera Icon
+        QPainterPath body;
+        roundedRectPath(body, cx - 7.5, cy - 4.5, 10.0, 9.0, 2.0);
+        p.drawPath(body);
+        QPainterPath lens;
+        lens.moveTo(cx + 2.5, cy - 3.0);
+        lens.lineTo(cx + 7.5, cy - 5.5);
+        lens.lineTo(cx + 7.5, cy + 5.5);
+        lens.lineTo(cx + 2.5, cy + 3.0);
+        lens.closeSubpath();
+        p.drawPath(lens);
+        break;
+    }
+    case 14: { // Mouse cursor with sunburst
+        p.save();
+        p.setPen(QPen(color, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        // Pointer cursor
+        QPainterPath path;
+        path.moveTo(cx - 0.5, cy - 6.5);
+        path.lineTo(cx - 0.5, cy + 5.0);
+        path.lineTo(cx + 2.5, cy + 1.5);
+        path.lineTo(cx + 7.0, cy + 2.0);
+        path.closeSubpath();
+        p.drawPath(path);
+        p.drawLine(QPointF(cx + 2.5, cy + 1.5), QPointF(cx + 5.5, cy + 6.0));
+        
+        // Starburst at tip
+        double tx = cx - 0.5, ty = cy - 6.5;
+        p.setPen(QPen(color, 1.2));
+        for (int i = 0; i < 6; ++i) {
+            double ang = i * M_PI / 3.0;
+            p.drawLine(QPointF(tx + cos(ang)*3.5, ty + sin(ang)*3.5),
+                       QPointF(tx + cos(ang)*6.0, ty + sin(ang)*6.0));
+        }
+        p.restore();
+        break;
+    }
+    case 15: { // Command Key (⌘) in rounded square
+        QPainterPath box;
+        roundedRectPath(box, cx - 8.5, cy - 8.5, 17.0, 17.0, 3.5);
+        p.drawPath(box);
+        
+        // Command symbol
+        p.save();
+        p.setPen(QPen(color, 1.8));
+        double r = 2.4;
+        p.drawEllipse(QPointF(cx - r, cy - r), r, r);
+        p.drawEllipse(QPointF(cx + r, cy - r), r, r);
+        p.drawEllipse(QPointF(cx - r, cy + r), r, r);
+        p.drawEllipse(QPointF(cx + r, cy + r), r, r);
+        // Connectors
+        p.drawLine(QPointF(cx - r, cy - r + 0.5), QPointF(cx - r, cy + r - 0.5));
+        p.drawLine(QPointF(cx + r, cy - r + 0.5), QPointF(cx + r, cy + r - 0.5));
+        p.drawLine(QPointF(cx - r + 0.5, cy - r), QPointF(cx + r - 0.5, cy - r));
+        p.drawLine(QPointF(cx - r + 0.5, cy + r), QPointF(cx + r - 0.5, cy + r));
+        p.restore();
+        break;
+    }
+    case 16: { // Video Logo (Large)
+        QPainterPath body;
+        roundedRectPath(body, cx - 7.5, cy - 5.0, 10.0, 10.0, 2.5);
+        p.fillPath(body, color);
+        QPainterPath lens;
+        lens.moveTo(cx + 2.5, cy - 3.0);
+        lens.lineTo(cx + 7.5, cy - 5.5);
+        lens.lineTo(cx + 7.5, cy + 5.5);
+        lens.lineTo(cx + 2.5, cy + 3.0);
+        lens.closeSubpath();
+        p.fillPath(lens, color);
+        break;
+    }
+    case 17: { // GIF Logo (Large)
+        p.setPen(Qt::NoPen);
+        p.setBrush(color);
+        QPainterPath box;
+        roundedRectPath(box, cx - 9, cy - 6, 18, 12, 3);
+        p.drawPath(box);
+        p.setPen(QColor(0,0,0,180));
+        QFont f = p.font(); f.setPointSizeF(6.5); f.setBold(true); p.setFont(f);
+        p.drawText(QRectF(cx - 9, cy - 6, 18, 12), Qt::AlignCenter, "GIF");
         break;
     }
     }
@@ -429,7 +574,7 @@ void ScrollControlPanel::paintEvent(QPaintEvent*)
     p.setPen(QPen(QColor(255, 255, 255, 40), 1));
     p.drawPath(path);
 }
-
+void CaptureOverlay::onMicLevelUpdated(double) { /* unused — using polling */ }
 void ScrollControlPanel::setFrameCount(int count)
 {
     m_frameLabel->setText(
@@ -492,9 +637,31 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     , m_scrollFrameCount(0)
     , m_manualScrollAssistMode(false)
     , m_hoveredWindow(-1)
+    , m_recordingPanelOpen(false)
+    , m_recordingToolsHidden(false)
+    , m_recordType(RecordType::None)
+    , m_hoveredRecordTile(RecordPanelTile::None)
+    , m_recControls(true)
+    , m_recMic(false)
+    , m_recSpeaker(false)
+    , m_recWebcam(false)
+    , m_recClicks(false)
+    , m_recKeystrokes(false)
+    , m_micLevel(0.0)
+    , m_speakerLevel(0.0)
+    , m_micTimer(new QTimer(this))
     , m_hoveredTool(-1)
     , m_hoveredSizePanel(false)
 {
+    // Init GStreamer for webcam capture
+    static bool gstInited = false;
+    if (!gstInited) {
+        int argc = 0;
+        char* argv[] = {nullptr};
+        gst_init(&argc, nullptr);
+        gstInited = true;
+    }
+
     // Cover entire virtual desktop
     QRect desktop;
     for (QScreen* screen : QGuiApplication::screens())
@@ -542,6 +709,49 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     connect(m_scrollControlPanel, &ScrollControlPanel::doneClicked, this, [this]() {
         stopAutoScrollCapture(true); // stop and finalize
     });
+
+    // ── Audio level timer — polls daemon for mic + speaker levels ──────────
+    m_micTimer->setInterval(33);
+    connect(m_micTimer, &QTimer::timeout, this, [this]() {
+        QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
+                             QStringLiteral("/org/apexshot/Daemon"),
+                             QStringLiteral("org.apexshot.Daemon"),
+                             QDBusConnection::sessionBus());
+        if (iface.isValid()) {
+            // Poll mic level
+            if (m_recordingPanelOpen && m_recMic) {
+                QDBusReply<double> reply = iface.call(QStringLiteral("GetMicLevel"));
+                if (reply.isValid()) {
+                    double level = reply.value();
+                    if (level > m_micLevel) {
+                        m_micLevel = level;
+                    } else {
+                        m_micLevel = m_micLevel * 0.6 + level * 0.4;
+                    }
+                }
+            } else {
+                m_micLevel = 0.0;
+            }
+
+            // Poll speaker level
+            if (m_recordingPanelOpen && m_recSpeaker) {
+                QDBusReply<double> reply = iface.call(QStringLiteral("GetSpeakerLevel"));
+                if (reply.isValid()) {
+                    double level = reply.value();
+                    if (level > m_speakerLevel) {
+                        m_speakerLevel = level;
+                    } else {
+                        m_speakerLevel = m_speakerLevel * 0.6 + level * 0.4;
+                    }
+                }
+            } else {
+                m_speakerLevel = 0.0;
+            }
+
+            update(); // repaint for animation
+        }
+    });
+    m_micTimer->start();
 }
 
 // ── Paint ─────────────────────────────────────────────────────────────────────
@@ -702,8 +912,96 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         }
     }
 
-    // ── Toolbar ───────────────────────────────────────────────────────────────
-    drawToolbar(p, sx, sy, selW, selH, sw, sh);
+    // ── Toolbar (hide when recording panel is open) ────────────────────────────
+    if (!m_recordingPanelOpen) {
+        drawToolbar(p, sx, sy, selW, selH, sw, sh);
+    } else {
+        // Draw recording panel inside selection
+        drawRecordingPanel(p, sx, sy, selW, selH);
+    }
+
+    // ── Webcam preview ──────────────────────────────────────────────────────
+    if (m_recWebcam) {
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing);
+
+        // Size presets
+        double previewW, previewH;
+        switch (m_webcamSize) {
+            case WebcamSize::Small:      previewW = 120; previewH = 160; break;
+            case WebcamSize::Medium:     previewW = 200; previewH = 260; break;
+            case WebcamSize::Large:      previewW = 280; previewH = 370; break;
+            case WebcamSize::Huge:       previewW = 360; previewH = 480; break;
+            case WebcamSize::Fullscreen: previewW = selW - 20; previewH = selH - 20; break;
+        }
+
+        // Shape adjustments
+        switch (m_webcamShape) {
+            case WebcamShape::Circle:
+            case WebcamShape::Square:
+                previewH = previewW;
+                break;
+            case WebcamShape::Rectangle:
+                previewH = previewW * 0.75;
+                break;
+            case WebcamShape::Vertical:
+                break;
+        }
+
+        const double margin = 10.0;
+        double px = sx + margin;
+        double py = sy + selH - previewH - margin;
+
+        // Flip
+        if (m_webcamFlip) {
+            p.translate(px + previewW / 2.0, 0);
+            p.scale(-1, 1);
+            p.translate(-(px + previewW / 2.0), 0);
+        }
+
+        QRectF previewRect(px, py, previewW, previewH);
+
+        // Create clipping path for the shape
+        QPainterPath clipPath;
+        if (m_webcamShape == WebcamShape::Circle) {
+            clipPath.addEllipse(previewRect);
+        } else {
+            double radius = (m_webcamShape == WebcamShape::Square) ? 8 : 12;
+            clipPath.addRoundedRect(previewRect, radius, radius);
+        }
+
+        // Draw frame if available
+        QPixmap frame;
+        { QMutexLocker lock(&m_webcamMutex); frame = m_webcamFrame; }
+
+        if (!frame.isNull()) {
+            p.setClipPath(clipPath);
+            p.drawPixmap(previewRect.toRect(), frame);
+            p.setClipping(false);
+        } else {
+            // Dark placeholder
+            p.setBrush(QColor(0, 0, 0, 180));
+            p.setPen(Qt::NoPen);
+            p.drawPath(clipPath);
+        }
+
+        // Shape border
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1.5));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(clipPath);
+
+        // Device label
+        QString label = "Webcam";
+        if (m_webcamDevice >= 0) {
+            label = QStringLiteral("Camera %1").arg(m_webcamDevice);
+        }
+        QFont wf; wf.setFamily("Sans"); wf.setPointSizeF(10.0); wf.setBold(true);
+        p.setFont(wf);
+        p.setPen(QColor(255, 255, 255, 120));
+        p.drawText(QRectF(px + 8, py + previewH - 22, previewW - 16, 18),
+                   Qt::AlignLeft | Qt::AlignVCenter, label);
+        p.restore();
+    }
 
     // ── Visible countdown overlay ─────────────────────────────────────────────
     if (m_countdownActive && m_countdownValue > 0) {
@@ -730,6 +1028,283 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         p.drawText(bubbleRect, Qt::AlignCenter, QString::number(m_countdownValue));
         p.restore();
     }
+}
+
+// ── Draw recording panel (two sections inside selection) ──────────────────────
+
+void CaptureOverlay::drawRecordingPanel(QPainter& p,
+                                          double selX, double selY,
+                                          double selW, double selH)
+{
+    const double screenW = width();
+    const double screenH = height();
+    const QImage* blurPtr = m_blurredBg.isNull() ? nullptr : &m_blurredBg;
+
+    // Brand Colors
+    const QColor accentColor(122, 100, 255); // ApexShot Indigo
+    const QColor secondaryAccent(255, 60, 160); // ApexShot Pinkish for some accents
+
+    // Dimensions
+    const double tileW = 60.0;
+    const double tileH = 50.0;
+    const double panelRadius = 10.0; // Matching editor's border-radius: 10px
+    const double padding = 8.0;
+    const double panelGap = 12.0;
+
+    const double topPanelW = tileW * 5;
+    const double topPanelH = tileH * 2;
+    
+    const double bottomPanelW = topPanelW;
+    const double bottomRowH = 52.0;
+    const double bottomPanelH = bottomRowH * 2;
+
+    const double totalH = topPanelH + panelGap + bottomPanelH;
+
+    // Center inside selection
+    double panelX = selX + (selW - topPanelW) / 2.0;
+    double startY = selY + (selH - totalH) / 2.0;
+    const double margin = 20.0;
+    panelX = std::max(selX + margin, std::min(panelX, selX + selW - topPanelW - margin));
+    startY = std::max(selY + margin, std::min(startY, selY + selH - totalH - margin));
+
+    double topY = startY;
+    double bottomY = topY + topPanelH + panelGap;
+
+    m_recPanelRect = QRectF(panelX, startY, topPanelW, totalH);
+    m_recTileRects.clear();
+
+    auto drawActiveIndicator = [&](QRectF cell, bool active) {
+        if (!active) return;
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing);
+        double cx = cell.center().x();
+        double cy = cell.bottom() - 8.0;
+
+        // Draw a clean, modern, and smaller tick (checkmark)
+        p.setPen(QPen(Qt::white, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.drawLine(QPointF(cx - 3.5, cy + 1), QPointF(cx - 0.5, cy + 4));
+        p.drawLine(QPointF(cx - 0.5, cy + 4), QPointF(cx + 4.5, cy - 2.5));
+        
+        p.restore();
+    };
+
+    // ── Helper: draw brand outer glow ─────────────────────────────────────
+    auto drawPanelGlow = [&](double x, double y, double w, double h, double r) {
+        p.save();
+        QRadialGradient glow(x + w/2.0, y + h/2.0, std::max(w, h));
+        glow.setColorAt(0, QColor(accentColor.red(), accentColor.green(), accentColor.blue(), 25));
+        glow.setColorAt(0.5, QColor(0, 0, 0, 0));
+        p.fillRect(QRectF(x - 40, y - 40, w + 80, h + 80), glow);
+        p.restore();
+    };
+
+    // ── Section 1: Top Panel ──────────────────────────────────────────────
+    drawPanelGlow(panelX, topY, topPanelW, topPanelH, panelRadius);
+    drawFrostedPanel(p, panelX, topY, topPanelW, topPanelH, panelRadius, blurPtr, screenW, screenH);
+    
+    // Draw internal separators (faint)
+    p.setPen(QPen(QColor(255, 255, 255, 18), 1.0));
+    p.drawLine(QPointF(panelX, topY + tileH), QPointF(panelX + topPanelW, topY + tileH));
+    for (int i = 1; i < 5; ++i) {
+        if (i == 1 || i == 4)
+            p.drawLine(QPointF(panelX + i * tileW, topY), QPointF(panelX + i * tileW, topY + tileH));
+        p.drawLine(QPointF(panelX + i * tileW, topY + tileH), QPointF(panelX + i * tileW, topY + topPanelH));
+    }
+
+    // ── Helper: draw brand rounded hover ─────────────────────────────────
+    auto drawTileHover = [&](QRectF r, double radius = 10.0, bool topLeft = false, bool topRight = false, bool bottomLeft = false, bool bottomRight = false) {
+        QPainterPath path;
+        if (topLeft || topRight || bottomLeft || bottomRight) {
+            // Match panel corners if specified
+            double tr = topLeft ? panelRadius : radius;
+            double trr = topRight ? panelRadius : radius;
+            double blr = bottomLeft ? panelRadius : radius;
+            double brr = bottomRight ? panelRadius : radius;
+            
+            path.moveTo(r.x() + tr, r.y());
+            path.lineTo(r.right() - trr, r.y());
+            path.quadTo(r.right(), r.y(), r.right(), r.y() + trr);
+            path.lineTo(r.right(), r.bottom() - brr);
+            path.quadTo(r.right(), r.bottom(), r.right() - brr, r.bottom());
+            path.lineTo(r.x() + blr, r.bottom());
+            path.quadTo(r.x(), r.bottom(), r.x(), r.bottom() - blr);
+            path.lineTo(r.x(), r.y() + tr);
+            path.quadTo(r.x(), r.y(), r.x() + tr, r.y());
+        } else {
+            path.addRoundedRect(r, radius, radius);
+        }
+        p.fillPath(path, QColor(255, 255, 255, 22));
+    };
+
+    // Row 1: Settings, Size, Expand
+    {
+        QRectF r1(panelX, topY, tileW, tileH);
+        m_recTileRects.append(r1);
+        if (m_hoveredRecordTile == RecordPanelTile::Controls) drawTileHover(r1, 10, true, false, false, false);
+        drawToolbarIcon(p, 8, r1.center().x(), r1.center().y(), Qt::white);
+
+        QRectF rSize(panelX + tileW, topY, tileW * 3, tileH);
+        m_recTileRects.append(rSize);
+        if (m_hoveredRecordTile == RecordPanelTile::Size) drawTileHover(rSize);
+        double cx = rSize.center().x();
+        double cy = rSize.center().y();
+        QString wStr = QString::number((int)selW), hStr = QString::number((int)selH);
+        
+        QFont f; f.setFamily("Sans"); f.setPointSizeF(11.0); f.setBold(true); p.setFont(f);
+        QFontMetricsF fm(f);
+        auto drawNumBox = [&](double nx, const QString& txt) {
+            // Match .editor-tools-group and entry.editor-crop-size-entry styles:
+            // background: #000000, border: 1px solid rgba(255, 255, 255, 0.11), radius: 6px
+            QRectF box(nx - 24, cy - 13, 48, 26);
+            p.setPen(QPen(QColor(255, 255, 255, 28), 1.0)); // 0.11 * 255 ≈ 28
+            p.setBrush(QColor(0, 0, 0));
+            p.drawRect(box);
+            
+            p.setFont(f);
+            p.setPen(QColor(241, 241, 243)); // Match editor color: #F1F1F3
+            p.drawText(box, Qt::AlignCenter, txt);
+        };
+        drawNumBox(cx - 36, wStr);
+        p.setFont(f);
+        p.setPen(QColor(accentColor.lighter(130)));
+        p.drawText(QRectF(cx - 10, cy - 13, 20, 26), Qt::AlignCenter, "×");
+        drawNumBox(cx + 36, hStr);
+
+        QRectF rExpand(panelX + tileW * 4, topY, tileW, tileH);
+        m_recTileRects.append(rExpand);
+        if (m_hoveredRecordTile == RecordPanelTile::Crop) drawTileHover(rExpand, 10, false, true, false, false);
+        drawToolbarIcon(p, 10, rExpand.center().x(), rExpand.center().y(), Qt::white);
+    }
+
+    // Row 2: Mic, Window, Video, Pointer, Keys
+    {
+        for (int i = 0; i < 5; ++i) {
+            QRectF r(panelX + i * tileW, topY + tileH, tileW, tileH);
+            m_recTileRects.append(r);
+            bool hovered = (m_hoveredRecordTile == (RecordPanelTile)((int)RecordPanelTile::Mic + i));
+            bool active = false;
+            if (i == 0)      active = m_recMic;
+            else if (i == 1) active = m_recSpeaker;
+            else if (i == 2) active = m_recWebcam;
+            else if (i == 3) active = m_recClicks;
+            else if (i == 4) active = m_recKeystrokes;
+
+            if (hovered) {
+                // Fainter hover for certain active tiles to see animations better
+                int alpha = active ? 12 : 22;
+                drawTileHover(r, 10, false, false, (i == 0), (i == 4));
+            }
+
+            // Enhanced Mic animation (Multi-bar VU meter)
+            if (i == 0 && active) {
+                p.save();
+                p.setRenderHint(QPainter::Antialiasing);
+                const int numBars = 5;
+                const double barW = 3.5;
+                const double spacing = 1.5;
+                const double totalW = numBars * barW + (numBars - 1) * spacing;
+                const double maxH = 18.0;
+                double baseX = r.center().x() - totalW / 2.0;
+                double baseY = r.center().y() + 10.0;
+
+                for (int b = 0; b < numBars; ++b) {
+                    // Each bar has a slightly varied response based on m_micLevel
+                    double offset = (double)b / (double)numBars;
+                    double barLevel = std::max(0.05, m_micLevel - std::abs(offset - 0.5) * 0.3);
+                    double levelH = barLevel * maxH;
+                    
+                    QRectF bar(baseX + b * (barW + spacing), baseY - levelH, barW, levelH);
+                    
+                    QLinearGradient grad(bar.topLeft(), bar.bottomLeft());
+                    if (barLevel > 0.85) {
+                        grad.setColorAt(0, QColor(255, 60, 60)); // Peak Red
+                        grad.setColorAt(1, QColor(255, 140, 0)); // Warning Orange
+                    } else if (barLevel > 0.6) {
+                        grad.setColorAt(0, QColor(255, 190, 0)); // High Yellow/Gold
+                        grad.setColorAt(1, QColor(255, 140, 0)); // Normal Orange
+                    } else {
+                        grad.setColorAt(0, QColor(255, 150, 50)); // Normal Orange
+                        grad.setColorAt(1, QColor(255, 100, 0)); // Deep Orange
+                    }
+                    
+                    p.setBrush(grad);
+                    p.setPen(Qt::NoPen);
+                    p.drawRoundedRect(bar, 1.5, 1.5);
+                }
+                p.restore();
+            }
+
+            // Speaker animation (Multi-bar VU meter — cool blue/teal)
+            if (i == 1 && active) {
+                p.save();
+                p.setRenderHint(QPainter::Antialiasing);
+                const int numBars = 5;
+                const double barW = 3.5;
+                const double spacing = 1.5;
+                const double totalW = numBars * barW + (numBars - 1) * spacing;
+                const double maxH = 18.0;
+                double baseX = r.center().x() - totalW / 2.0;
+                double baseY = r.center().y() + 10.0;
+
+                for (int b = 0; b < numBars; ++b) {
+                    double offset = (double)b / (double)numBars;
+                    double barLevel = std::max(0.05, m_speakerLevel - std::abs(offset - 0.5) * 0.3);
+                    double levelH = barLevel * maxH;
+
+                    QRectF bar(baseX + b * (barW + spacing), baseY - levelH, barW, levelH);
+
+                    QLinearGradient grad(bar.topLeft(), bar.bottomLeft());
+                    if (barLevel > 0.85) {
+                        grad.setColorAt(0, QColor(255, 80, 80));   // Peak Red
+                        grad.setColorAt(1, QColor(60, 160, 255));  // Bright Blue
+                    } else if (barLevel > 0.6) {
+                        grad.setColorAt(0, QColor(60, 200, 255));  // Cyan
+                        grad.setColorAt(1, QColor(40, 140, 255));  // Blue
+                    } else {
+                        grad.setColorAt(0, QColor(50, 180, 255));  // Light Blue
+                        grad.setColorAt(1, QColor(0, 120, 255));   // Deep Blue
+                    }
+
+                    p.setBrush(grad);
+                    p.setPen(Qt::NoPen);
+                    p.drawRoundedRect(bar, 1.5, 1.5);
+                }
+                p.restore();
+            }
+
+            drawActiveIndicator(r, active);
+            drawToolbarIcon(p, 11 + i, r.center().x(), r.center().y() - (active ? 3 : 0), Qt::white);
+        }
+    }
+
+    // ── Section 2: Bottom Panel ───────────────────────────────────────────
+    drawPanelGlow(panelX, bottomY, bottomPanelW, bottomPanelH, panelRadius);
+    drawFrostedPanel(p, panelX, bottomY, bottomPanelW, bottomPanelH, panelRadius, blurPtr, screenW, screenH);
+    
+    p.setPen(QPen(QColor(255, 255, 255, 18), 1.0));
+    p.drawLine(QPointF(panelX + 12, bottomY + bottomRowH), QPointF(panelX + bottomPanelW - 12, bottomY + bottomRowH));
+
+    auto drawActionRow = [&](int rowIdx, int iconIdx, const QString& title, const QString& shortcut, RecordPanelTile tile) {
+        QRectF row(panelX, bottomY + rowIdx * bottomRowH, bottomPanelW, bottomRowH);
+        m_recTileRects.append(row);
+        bool hovered = (m_hoveredRecordTile == tile);
+        if (hovered) {
+             drawTileHover(row, 10, (rowIdx == 0), (rowIdx == 0), (rowIdx == 1), (rowIdx == 1));
+        }
+
+        drawToolbarIcon(p, iconIdx, panelX + 30, row.center().y(), Qt::white);
+        
+        QFont f; f.setFamily("Sans"); f.setPointSizeF(12.5); f.setBold(true); p.setFont(f);
+        p.setPen(Qt::white);
+        p.drawText(QRectF(panelX + 60, row.y(), 200, row.height()), Qt::AlignVCenter, title);
+
+        QFont sf; sf.setPointSizeF(11.0); p.setFont(sf);
+        p.setPen(QColor(255, 255, 255, 160));
+        p.drawText(QRectF(panelX + bottomPanelW - 100, row.y(), 90, row.height()), Qt::AlignVCenter | Qt::AlignRight, shortcut);
+    };
+
+    drawActionRow(0, 17, "Record GIF", "⌥ ↵", RecordPanelTile::RecordGif);
+    drawActionRow(1, 16, "Record Video", "↵", RecordPanelTile::RecordVideo);
 }
 
 // ── Draw toolbar (mirrors draw_feature_toolbar in overlay.rs) ─────────────────
@@ -970,12 +1545,280 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     }
 }
 
+// ── Webcam context menu ──────────────────────────────────────────────────────
+
+void CaptureOverlay::enumerateWebcamDevices()
+{
+    m_webcamDevices.clear();
+    // Track names we've already added to deduplicate (same camera can have subdev nodes)
+    QSet<QString> seenNames;
+
+    for (int i = 0; i < 32; ++i) {
+        QString devPath = QStringLiteral("/dev/video%1").arg(i);
+        if (!QFile::exists(devPath)) continue;
+
+        QString name;
+        QFile nameFile(QStringLiteral("/sys/class/video4linux/video%1/name").arg(i));
+        if (nameFile.open(QIODevice::ReadOnly)) {
+            name = QString::fromUtf8(nameFile.readLine()).trimmed();
+        } else {
+            name = devPath;
+        }
+
+        // Skip metadata-only nodes
+        if (name.contains("Metadata", Qt::CaseInsensitive)) continue;
+
+        // Skip duplicate sub-devices from same physical camera (same name already seen)
+        if (seenNames.contains(name)) continue;
+        seenNames.insert(name);
+
+        m_webcamDevices.append(QStringLiteral("%1 (%2)").arg(name, devPath));
+    }
+}
+
+void CaptureOverlay::startWebcamCapture()
+{
+    stopWebcamCapture(); // stop any existing pipeline
+
+    if (m_webcamDevice < 0) return;
+
+    QString device = QStringLiteral("/dev/video%1").arg(m_webcamDevice);
+    std::string pipelineStr = QStringLiteral(
+        "v4l2src device=%1 ! video/x-raw,width=640,height=480,framerate=30/1 ! "
+        "videoconvert ! video/x-raw,format=BGRA ! appsink name=sink emit-signals=true sync=false"
+    ).arg(device).toStdString();
+
+    GError* err = nullptr;
+    GstElement* pipeline = gst_parse_launch(pipelineStr.c_str(), &err);
+    if (err) {
+        std::fprintf(stderr, "[CaptureOverlay] Webcam pipeline error: %s\n", err->message);
+        g_error_free(err);
+        return;
+    }
+    if (!pipeline) return;
+
+    GstElement* sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
+    if (sink) {
+        gst_app_sink_set_emit_signals(GST_APP_SINK(sink), TRUE);
+        gst_app_sink_set_max_buffers(GST_APP_SINK(sink), 1);
+        gst_object_unref(sink);
+    }
+
+    GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        std::fprintf(stderr, "[CaptureOverlay] Failed to start webcam pipeline\n");
+        gst_object_unref(pipeline);
+        return;
+    }
+
+    m_webcamPipeline = pipeline;
+    std::fprintf(stderr, "[CaptureOverlay] Webcam capture started on %s\n", device.toLocal8Bit().constData());
+
+    // Frame pull thread
+    std::thread([this]() {
+        GstElement* pipeline = static_cast<GstElement*>(m_webcamPipeline);
+        if (!pipeline) return;
+        GstElement* sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
+        if (!sink) return;
+
+        while (m_webcamPipeline) {
+            GstSample* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(sink), 100 * GST_MSECOND);
+            if (!sample) continue;
+
+            GstBuffer* buffer = gst_sample_get_buffer(sample);
+            GstCaps* caps = gst_sample_get_caps(sample);
+            if (!buffer || !caps) {
+                gst_sample_unref(sample);
+                continue;
+            }
+
+            GstStructure* s = gst_caps_get_structure(caps, 0);
+            int w = 0, h = 0;
+            gst_structure_get_int(s, "width", &w);
+            gst_structure_get_int(s, "height", &h);
+
+            GstMapInfo map;
+            if (gst_buffer_map(buffer, &map, GST_MAP_READ) && w > 0 && h > 0) {
+                QImage img(map.data, w, h, QImage::Format_ARGB32);
+                QPixmap frame = QPixmap::fromImage(img.copy());
+                {
+                    QMutexLocker lock(&m_webcamMutex);
+                    m_webcamFrame = frame;
+                }
+                gst_buffer_unmap(buffer, &map);
+            }
+            gst_sample_unref(sample);
+
+            // Trigger repaint from main thread
+            QMetaObject::invokeMethod(this, "update", Qt::QueuedConnection);
+        }
+        gst_object_unref(sink);
+    }).detach();
+}
+
+void CaptureOverlay::stopWebcamCapture()
+{
+    if (m_webcamPipeline) {
+        GstElement* pipeline = static_cast<GstElement*>(m_webcamPipeline);
+        m_webcamPipeline = nullptr; // signal thread to stop
+        gst_element_set_state(pipeline, GST_STATE_NULL);
+        gst_object_unref(pipeline);
+        QMutexLocker lock(&m_webcamMutex);
+        m_webcamFrame = QPixmap();
+    }
+}
+
+void CaptureOverlay::showWebcamContextMenu(const QPoint& globalPos)
+{
+    // Always refresh device list to pick up newly connected cameras
+    enumerateWebcamDevices();
+
+    QMenu menu(this);
+    
+    // Apply macOS-inspired styling: dark translucent with blue focus and rounded items
+    menu.setStyleSheet(
+        "QMenu {"
+        "    background-color: rgba(30, 30, 30, 235);"
+        "    border: 1px solid rgba(255, 255, 255, 40);"
+        "    border-radius: 12px;"
+        "    padding: 8px 4px;"
+        "    color: #F1F1F3;" // Off-white
+        "    font-family: 'Sans';"
+        "    font-size: 13px;"
+        "}"
+        "QMenu::item {"
+        "    padding: 6px 32px 6px 28px;"
+        "    border-radius: 6px;"
+        "    margin: 1px 4px;"
+        "}"
+        "QMenu::item:selected {"
+        "    background-color: #007AFF;" // macOS Blue highlight
+        "    color: white;"
+        "}"
+        "QMenu::separator {"
+        "    height: 1px;"
+        "    background: rgba(255, 255, 255, 25);"
+        "    margin: 6px 14px;"
+        "}"
+        "QMenu::item:disabled {"
+        "    color: rgba(255, 255, 255, 110);"
+        "    font-size: 11px;"
+        "    font-weight: bold;"
+        "    padding: 10px 14px 4px 14px;"
+        "    background: transparent;"
+        "}"
+        "QMenu::indicator {"
+        "    left: 8px;"
+        "    width: 14px;"
+        "    height: 14px;"
+        "}"
+    );
+
+    // Helper: add a non-clickable section header
+    auto addHeader = [&](const QString& title) {
+        QAction* h = menu.addAction(title);
+        h->setEnabled(false);
+        h->setProperty("is_header", true);
+    };
+
+    // ── Camera Section ──
+    addHeader("Camera");
+    QAction* noneAct = menu.addAction("None");
+    noneAct->setCheckable(true);
+    noneAct->setChecked(m_webcamDevice == -1);
+    noneAct->setData(-1);
+
+    for (int i = 0; i < m_webcamDevices.size(); ++i) {
+        QRegularExpression re(QStringLiteral("video(\\d+)"));
+        QRegularExpressionMatch m = re.match(m_webcamDevices[i]);
+        int devIdx = m.hasMatch() ? m.captured(1).toInt() : i;
+        
+        QAction* act = menu.addAction(m_webcamDevices[i]);
+        act->setCheckable(true);
+        act->setChecked(m_webcamDevice == devIdx);
+        act->setData(devIdx);
+    }
+
+    // ── Size Section ──
+    addHeader("Size");
+    struct { const char* label; WebcamSize val; } sizes[] = {
+        {"Small", WebcamSize::Small}, {"Medium", WebcamSize::Medium},
+        {"Large", WebcamSize::Large}, {"Huge", WebcamSize::Huge}
+    };
+    for (auto& s : sizes) {
+        QAction* a = menu.addAction(s.label);
+        a->setCheckable(true);
+        a->setChecked(m_webcamSize == s.val);
+        a->setData((int)s.val);
+        a->setProperty("is_size", true);
+    }
+
+    // ── Full Screen Section ──
+    addHeader("Click on camera to toggle Full Screen");
+    QAction* fullScreenAct = menu.addAction("Full Screen");
+    fullScreenAct->setCheckable(true);
+    fullScreenAct->setChecked(m_webcamSize == WebcamSize::Fullscreen);
+    fullScreenAct->setData((int)WebcamSize::Fullscreen);
+    fullScreenAct->setProperty("is_size", true);
+
+    // ── Shape Section ──
+    addHeader("Shape");
+    struct { const char* label; WebcamShape val; } shapes[] = {
+        {"Circle", WebcamShape::Circle}, {"Square", WebcamShape::Square},
+        {"Rectangle", WebcamShape::Rectangle}, {"Vertical", WebcamShape::Vertical}
+    };
+    for (auto& s : shapes) {
+        QAction* a = menu.addAction(s.label);
+        a->setCheckable(true);
+        a->setChecked(m_webcamShape == s.val);
+        a->setData((int)s.val);
+        a->setProperty("is_shape", true);
+    }
+
+    // ── Options Section ──
+    addHeader("Options");
+    QAction* flipAct = menu.addAction("Flip Camera");
+    flipAct->setCheckable(true);
+    flipAct->setChecked(m_webcamFlip);
+
+    // ── Display and Handle Selection ──
+    QAction* chosen = menu.exec(globalPos);
+    if (!chosen) return;
+
+    if (chosen == noneAct) {
+        m_webcamDevice = -1;
+        stopWebcamCapture();
+    } else if (chosen == flipAct) {
+        m_webcamFlip = !m_webcamFlip;
+    } else if (chosen->property("is_size").toBool()) {
+        m_webcamSize = (WebcamSize)chosen->data().toInt();
+    } else if (chosen->property("is_shape").toBool()) {
+        m_webcamShape = (WebcamShape)chosen->data().toInt();
+    } else {
+        // Camera device selection
+        m_webcamDevice = chosen->data().toInt();
+        if (!m_recWebcam) m_recWebcam = true;
+        startWebcamCapture();
+    }
+    update();
+}
+
 // ── Mouse events ──────────────────────────────────────────────────────────────
 
 void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 {
-    if (event->button() != Qt::LeftButton) return;
     const QPoint pos = event->pos();
+
+    // Right-click on webcam tile shows context menu
+    if (event->button() == Qt::RightButton && m_recordingPanelOpen) {
+        RecordPanelTile tile = hitTestRecordingPanel(pos);
+        if (tile == RecordPanelTile::Webcam) {
+            showWebcamContextMenu(event->globalPos());
+            return;
+        }
+    }
+
+    if (event->button() != Qt::LeftButton) return;
 
     // Window mode — click selects the hovered window
     if (m_windowMode) {
@@ -986,6 +1829,60 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             confirmSelection();
         }
         return;
+    }
+
+    // Recording panel tile clicks
+    if (m_recordingPanelOpen) {
+        RecordPanelTile tile = hitTestRecordingPanel(pos);
+        switch (tile) {
+        case RecordPanelTile::Controls:
+            m_recControls = !m_recControls;
+            update();
+            return;
+        case RecordPanelTile::Mic:
+            m_recMic = !m_recMic;
+            update();
+            return;
+        case RecordPanelTile::Speaker:
+            m_recSpeaker = !m_recSpeaker;
+            update();
+            return;
+        case RecordPanelTile::Click:
+            m_recClicks = !m_recClicks;
+            update();
+            return;
+        case RecordPanelTile::Keystrokes:
+            m_recKeystrokes = !m_recKeystrokes;
+            update();
+            return;
+        case RecordPanelTile::Webcam:
+            m_recWebcam = !m_recWebcam;
+            update();
+            return;
+        case RecordPanelTile::RecordVideo:
+            m_recordType = RecordType::Video;
+            m_captureIntent = CaptureIntent::Record;
+            releaseKeyboard();
+            hide();
+            QApplication::exit(0); // Success - main.cpp will check recordRequested()
+            return;
+        case RecordPanelTile::RecordGif:
+            m_recordType = RecordType::Gif;
+            m_captureIntent = CaptureIntent::Record;
+            releaseKeyboard();
+            hide();
+            QApplication::exit(0);
+            return;
+        default:
+            break;
+        }
+        // If click is on resize handle, allow it
+        HandlePos h = hitTest(pos);
+        if (h != HandlePos::None && h != HandlePos::Inside) {
+            // Pass through to resize handling below
+        } else {
+            return; // Click was on panel background, don't start drag
+        }
     }
 
     if (m_captureIntent == CaptureIntent::Scroll && handleScrollButtonClick(pos)) {
@@ -1074,6 +1971,14 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             } else if (toolIndex == 6) {
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Ocr;
+                update();
+                return true;
+            } else if (toolIndex == 7) {
+                // Recording: open recording panel
+                exitScrollMode();
+                m_captureIntent = CaptureIntent::Record;
+                m_recordingPanelOpen = true;
+                m_recordingToolsHidden = false;
                 update();
                 return true;
             } else {
@@ -1185,6 +2090,17 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
+    // Recording panel hover
+    if (m_recordingPanelOpen && !m_dragging && m_resizing == HandlePos::None && !m_moving) {
+        RecordPanelTile newTile = hitTestRecordingPanel(pos);
+        if (newTile != m_hoveredRecordTile) {
+            m_hoveredRecordTile = newTile;
+            update();
+        }
+        updateCursor(pos);
+        return;
+    }
+
     if (m_dragging) {
         m_selection = QRect(m_dragStart, pos);
         m_hasSelection = true;
@@ -1256,6 +2172,11 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) return;
+
+    // Reset recording panel hover state
+    if (m_recordingPanelOpen) {
+        m_hoveredRecordTile = RecordPanelTile::None;
+    }
 
     if (m_dragging) {
         m_dragging = false;
@@ -1370,6 +2291,33 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
 
 void CaptureOverlay::keyPressEvent(QKeyEvent* event)
 {
+    // Recording panel: ESC closes panel, restores normal mode
+    if (m_recordingPanelOpen) {
+        switch (event->key()) {
+        case Qt::Key_Escape:
+            if (m_recordingToolsHidden) {
+                // Back to full recording panel
+                m_recordingToolsHidden = false;
+            } else {
+                // Close recording panel, restore normal capture mode
+                m_recordingPanelOpen = false;
+                m_captureIntent = CaptureIntent::Area;
+            }
+            update();
+            return;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            // Start video recording on Enter
+            m_recordType = RecordType::Video;
+            m_captureIntent = CaptureIntent::Record;
+            releaseKeyboard();
+            hide();
+            QApplication::exit(0);
+            return;
+        }
+        // Let arrow keys through for resize/move
+    }
+
     if (m_captureIntent == CaptureIntent::Scroll) {
         switch (event->key()) {
         case Qt::Key_Escape:
@@ -2488,12 +3436,59 @@ CaptureOverlay::HandlePos CaptureOverlay::hitTest(const QPoint& pos) const
     return HandlePos::None;
 }
 
+// ── Recording panel hit testing ──────────────────────────────────────────────
+
+CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoint& pos) const
+{
+    if (!m_recordingPanelOpen) {
+        return RecordPanelTile::None;
+    }
+
+    // Full panel: Controls, Size, Crop, Mic, Speaker, Record, Click, Keystrokes, RecordGif, RecordVideo
+    static const RecordPanelTile tileOrder[] = {
+        RecordPanelTile::Controls, RecordPanelTile::Size, RecordPanelTile::Crop,
+        RecordPanelTile::Mic, RecordPanelTile::Speaker, RecordPanelTile::Webcam,
+        RecordPanelTile::Click, RecordPanelTile::Keystrokes,
+        RecordPanelTile::RecordGif, RecordPanelTile::RecordVideo
+    };
+
+    for (int i = 0; i < (int)m_recTileRects.size() && i < 10; ++i) {
+        if (m_recTileRects[i].contains(pos)) {
+            return tileOrder[i];
+        }
+    }
+
+    return RecordPanelTile::None;
+}
+
 void CaptureOverlay::updateCursor(const QPoint& pos)
 {
     if (!m_hasSelection) { setCursor(Qt::CrossCursor); return; }
 
     if (m_captureIntent == CaptureIntent::Scroll && m_scrollStage == ScrollStage::Capturing) {
         setCursor(Qt::ArrowCursor);
+        return;
+    }
+
+    // Check recording panel tiles first
+    if (m_recordingPanelOpen) {
+        RecordPanelTile tile = hitTestRecordingPanel(pos);
+        if (tile != RecordPanelTile::None) {
+            setCursor(Qt::PointingHandCursor);
+            return;
+        }
+        // Still allow resize handles when panel is open
+        switch (hitTest(pos)) {
+        case HandlePos::TopLeft:     setCursor(Qt::SizeFDiagCursor); break;
+        case HandlePos::TopRight:    setCursor(Qt::SizeBDiagCursor); break;
+        case HandlePos::BottomLeft:  setCursor(Qt::SizeBDiagCursor); break;
+        case HandlePos::BottomRight: setCursor(Qt::SizeFDiagCursor); break;
+        case HandlePos::Top:
+        case HandlePos::Bottom:      setCursor(Qt::SizeVerCursor);   break;
+        case HandlePos::Left:
+        case HandlePos::Right:       setCursor(Qt::SizeHorCursor);   break;
+        default:                     setCursor(Qt::ArrowCursor);     break;
+        }
         return;
     }
 

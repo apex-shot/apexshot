@@ -43,6 +43,7 @@ arboard = { version = "3.6", features = ["wayland-data-control"] }
 gstreamer = "0.24.4"
 gstreamer-app = "0.24.4"
 gstreamer-video = "0.24.4"
+pipewire = "0.9"
 relm4-icons = "0.10.1"
 wayland-client = "0.31.12"
 wayland-protocols = "0.32.10"

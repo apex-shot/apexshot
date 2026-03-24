@@ -90,6 +90,24 @@ void printCaptureScreenJson(const QString& path, const QSize& size, const char* 
     std::fflush(stdout);
 }
 
+void printRecordingJson(const QRect& sel, const char* recordType,
+                         bool controls, bool mic, bool speaker,
+                         bool clicks, bool keystrokes)
+{
+    std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
+                "\"mode\":\"record\",\"record_type\":\"%s\","
+                "\"controls\":%s,\"mic\":%s,\"speaker\":%s,"
+                "\"clicks\":%s,\"keystrokes\":%s}\n",
+                sel.x(), sel.y(), sel.width(), sel.height(),
+                recordType,
+                controls ? "true" : "false",
+                mic ? "true" : "false",
+                speaker ? "true" : "false",
+                clicks ? "true" : "false",
+                keystrokes ? "true" : "false");
+    std::fflush(stdout);
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -99,6 +117,11 @@ int main(int argc, char* argv[])
 
     QApplication app(argc, argv);
     app.setApplicationName("ApexShot Capture");
+
+    if (!QDBusConnection::sessionBus().isConnected()) {
+        std::fprintf(stderr, "apexshot-capture: session bus not connected: %s\n", 
+            QDBusConnection::sessionBus().lastError().message().toLocal8Bit().constData());
+    }
 
     bool captureScreenMode = false;
     bool areaInitMode = false;
@@ -247,6 +270,7 @@ int main(int argc, char* argv[])
         return 3;
     }
     if (ret != 0) {
+        std::fprintf(stderr, "apexshot-capture: event loop exited with code %d\n", ret);
         return 1;
     }
 
@@ -266,6 +290,26 @@ int main(int argc, char* argv[])
     if (sel.isEmpty()) {
         std::fprintf(stderr, "apexshot-capture: empty selection\n");
         return 2;
+    }
+
+    // Handle recording request
+    if (overlay.recordRequested()) {
+        const char* recordType = "video";
+        if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
+            recordType = "gif";
+        }
+        // Translate from local overlay coords to global screen coords (same as the
+        // areaInitMode path above — the overlay covers the full screen but its
+        // geometry().topLeft() may be non-zero on multi-monitor setups).
+        const QRect selGlobal =
+            sel.translated(overlay.geometry().x(), overlay.geometry().y());
+        printRecordingJson(selGlobal, recordType,
+                           overlay.recordControlsEnabled(),
+                           overlay.recordMicEnabled(),
+                           overlay.recordSpeakerEnabled(),
+                           overlay.recordClicksEnabled(),
+                           overlay.recordKeystrokesEnabled());
+        return 0;
     }
 
     if (areaInitMode) {

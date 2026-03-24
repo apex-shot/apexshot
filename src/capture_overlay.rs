@@ -156,17 +156,41 @@ pub enum OverlayResult {
 }
 
 /// Result of area capture initiation through the C++ overlay.
+#[derive(Debug)]
 pub enum AreaCaptureResult {
     Captured(CaptureData),
     ScrollCaptured(CaptureData),
     OcrRequested(CaptureData),
+    RecordingRequested(RecordingRequest),
     Cancelled,
+}
+
+/// Recording request from the capture overlay.
+#[derive(Debug, Clone)]
+pub struct RecordingRequest {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub record_type: RecordingType,
+    pub controls: bool,
+    pub mic: bool,
+    pub speaker: bool,
+    pub clicks: bool,
+    pub keystrokes: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordingType {
+    Video,
+    Gif,
 }
 
 pub enum AreaCapturePathResult {
     Captured(PathBuf),
     ScrollCaptured(PathBuf),
     OcrRequested(CaptureData),
+    RecordingRequested(RecordingRequest),
     Cancelled,
 }
 
@@ -344,22 +368,28 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
 
     match exit_code {
         Some(0) => {
-            let (path, mode) = parse_capture_screen_json_with_mode(stdout.trim())?;
-            if matches!(mode.as_deref(), Some("ocr")) {
-                match load_capture_data_from_path(&path) {
-                    Ok(capture) => {
-                        let _ = std::fs::remove_file(&path);
-                        Ok(AreaCapturePathResult::OcrRequested(capture))
-                    }
-                    Err(e) => {
-                        let _ = std::fs::remove_file(&path);
-                        Err(e)
-                    }
-                }
-            } else if matches!(mode.as_deref(), Some("scroll")) {
-                Ok(AreaCapturePathResult::ScrollCaptured(path))
+            let mode = extract_string(stdout.trim(), "mode");
+            if matches!(mode.as_deref(), Some("record")) {
+                let request = parse_recording_json(stdout.trim())?;
+                Ok(AreaCapturePathResult::RecordingRequested(request))
             } else {
-                Ok(AreaCapturePathResult::Captured(path))
+                let (path, mode) = parse_capture_screen_json_with_mode(stdout.trim())?;
+                if matches!(mode.as_deref(), Some("ocr")) {
+                    match load_capture_data_from_path(&path) {
+                        Ok(capture) => {
+                            let _ = std::fs::remove_file(&path);
+                            Ok(AreaCapturePathResult::OcrRequested(capture))
+                        }
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&path);
+                            Err(e)
+                        }
+                    }
+                } else if matches!(mode.as_deref(), Some("scroll")) {
+                    Ok(AreaCapturePathResult::ScrollCaptured(path))
+                } else {
+                    Ok(AreaCapturePathResult::Captured(path))
+                }
             }
         }
         Some(1) | None => {
@@ -392,6 +422,9 @@ pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
         }
         AreaCapturePathResult::OcrRequested(capture) => {
             Ok(AreaCaptureResult::OcrRequested(capture))
+        }
+        AreaCapturePathResult::RecordingRequested(request) => {
+            Ok(AreaCaptureResult::RecordingRequested(request))
         }
         AreaCapturePathResult::Cancelled => Ok(AreaCaptureResult::Cancelled),
     }
@@ -430,6 +463,53 @@ fn parse_capture_screen_json_with_mode(
     let path = parse_capture_screen_json(json)?;
     let mode = extract_string(json, "mode");
     Ok((path, mode))
+}
+
+fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> {
+    let x = extract_int(json, "x").ok_or_else(|| SelectionError::InitError("Missing x".into()))?;
+    let y = extract_int(json, "y").ok_or_else(|| SelectionError::InitError("Missing y".into()))?;
+    let width = extract_int(json, "width")
+        .ok_or_else(|| SelectionError::InitError("Missing width".into()))?;
+    let height = extract_int(json, "height")
+        .ok_or_else(|| SelectionError::InitError("Missing height".into()))?;
+
+    let record_type_str = extract_string(json, "record_type").unwrap_or_else(|| "video".into());
+    let record_type = match record_type_str.as_str() {
+        "gif" => RecordingType::Gif,
+        _ => RecordingType::Video,
+    };
+
+    let controls = extract_bool(json, "controls").unwrap_or(false);
+    let mic = extract_bool(json, "mic").unwrap_or(false);
+    let speaker = extract_bool(json, "speaker").unwrap_or(false);
+    let clicks = extract_bool(json, "clicks").unwrap_or(false);
+    let keystrokes = extract_bool(json, "keystrokes").unwrap_or(false);
+
+    Ok(RecordingRequest {
+        x,
+        y,
+        width,
+        height,
+        record_type,
+        controls,
+        mic,
+        speaker,
+        clicks,
+        keystrokes,
+    })
+}
+
+fn extract_bool(json: &str, key: &str) -> Option<bool> {
+    let needle = format!("\"{}\":", key);
+    let start = json.find(&needle)? + needle.len();
+    let rest = json[start..].trim_start();
+    if rest.starts_with("true") {
+        Some(true)
+    } else if rest.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// Parse `{"x":N,"y":N,"width":N,"height":N}` produced by the C++ binary.
