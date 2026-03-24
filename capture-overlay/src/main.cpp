@@ -142,6 +142,7 @@ int main(int argc, char* argv[])
     bool areaInitMode = false;
     bool windowCaptureMode = false;
     QString backgroundPath;
+    QRect restoreSel;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--background") == 0 && i + 1 < argc) {
@@ -153,6 +154,14 @@ int main(int argc, char* argv[])
             areaInitMode = true;
         } else if (std::strcmp(argv[i], "--window-capture") == 0) {
             windowCaptureMode = true;
+        } else if (QString(argv[i]).startsWith("--restore-selection=")) {
+            // Format: --restore-selection=x,y,w,h
+            QString val = QString(argv[i]).mid(20);
+            QStringList parts = val.split(',');
+            if (parts.size() == 4) {
+                restoreSel = QRect(parts[0].toInt(), parts[1].toInt(),
+                                   parts[2].toInt(), parts[3].toInt());
+            }
         }
     }
 
@@ -276,6 +285,9 @@ int main(int argc, char* argv[])
     }
 
     CaptureOverlay overlay(background, nullptr, areaInitMode);
+    if (!restoreSel.isNull() && restoreSel.isValid()) {
+        overlay.setInitialSelection(restoreSel);
+    }
     overlay.show();
 
     const int ret = app.exec();
