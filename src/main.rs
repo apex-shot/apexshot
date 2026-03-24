@@ -1001,6 +1001,10 @@ fn run_capture(args: &[String]) {
                 run_ocr = true;
                 Some(capture)
             }
+            Ok(AreaCaptureResult::RecordingRequested(_)) => {
+                eprintln!("Recording requested but recording is not yet implemented.");
+                std::process::exit(0);
+            }
             Ok(AreaCaptureResult::Cancelled) => {
                 eprintln!("Selection cancelled");
                 std::process::exit(0);

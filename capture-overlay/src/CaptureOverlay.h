@@ -17,6 +17,8 @@
 #include <QSize>
 #include <QList>
 #include <QString>
+#include <QMutex>
+#include <QPixmap>
 #include <QPushButton>
 #include <QLabel>
 #include <QHBoxLayout>
@@ -66,6 +68,12 @@ public:
         Inside
     };
 
+    enum class RecordType {
+        None,
+        Video,
+        Gif
+    };
+
     explicit CaptureOverlay(const QPixmap& background = QPixmap(),
                              QWidget* parent = nullptr,
                              bool timerCaptureEnabled = false);
@@ -80,6 +88,15 @@ public:
     int captureDelaySeconds() const { return m_captureDelaySeconds; }
     bool countdownHandledInOverlay() const { return true; }
 
+    // Recording accessors
+    bool recordRequested() const { return m_captureIntent == CaptureIntent::Record; }
+    RecordType recordType() const { return m_recordType; }
+    bool recordControlsEnabled() const { return m_recControls; }
+    bool recordMicEnabled() const { return m_recMic; }
+    bool recordSpeakerEnabled() const { return m_recSpeaker; }
+    bool recordClicksEnabled() const { return m_recClicks; }
+    bool recordKeystrokesEnabled() const { return m_recKeystrokes; }
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -93,6 +110,7 @@ private:
         Area,
         Ocr,
         Scroll,
+        Record,
     };
 
     enum class ScrollStage {
@@ -101,16 +119,40 @@ private:
         Capturing,
     };
 
+    enum class RecordPanelTile {
+        None,
+        Controls, Size, Crop,
+        Mic, Speaker, Webcam, Click, Keystrokes,
+        RecordVideo, RecordGif
+    };
+
+private slots:
+    void onMicLevelUpdated(double level);
+
+private:
     // Drawing
     void drawToolbar(QPainter& p,
                      double selX, double selY,
                      double selW, double selH,
                      double screenW, double screenH);
+    void drawRecordingPanel(QPainter& p,
+                            double selX, double selY,
+                            double selW, double selH);
     QRectF scrollPrimaryButtonRect() const;
+
+    // Webcam
+    void showWebcamContextMenu(const QPoint& globalPos);
+    void enumerateWebcamDevices();
+    void startWebcamCapture();
+    void stopWebcamCapture();
+    void* m_webcamPipeline = nullptr; // GstElement*
+    QPixmap m_webcamFrame;
+    QMutex m_webcamMutex;
 
     // Hit testing / cursor
     void updateCursor(const QPoint& pos);
     HandlePos hitTest(const QPoint& pos) const;
+    RecordPanelTile hitTestRecordingPanel(const QPoint& pos) const;
     QRect handleRect(const QPoint& center) const;
     QList<QPoint> handleCenters() const;
 
@@ -187,6 +229,32 @@ private:
     // Window mode state
     QList<WindowInfo> m_windows;
     int               m_hoveredWindow; // index into m_windows, -1 = none
+
+    // Recording panel state
+    bool m_recordingPanelOpen;
+    bool m_recordingToolsHidden; // true when user clicks Record tile
+    RecordType m_recordType;
+    RecordPanelTile m_hoveredRecordTile;
+    bool m_recControls;
+    bool m_recMic;
+    bool m_recSpeaker;
+    bool m_recWebcam;
+    enum class WebcamSize { Small, Medium, Large, Huge, Fullscreen };
+    enum class WebcamShape { Circle, Square, Rectangle, Vertical };
+    WebcamSize m_webcamSize = WebcamSize::Medium;
+    WebcamShape m_webcamShape = WebcamShape::Vertical;
+    bool m_webcamFlip = false;
+    int m_webcamDevice = -1; // -1 = None, 0+ = /dev/videoN
+    QStringList m_webcamDevices; // cached device names
+    bool m_recClicks;
+    bool m_recKeystrokes;
+    double m_micLevel; // Normalized level for animation
+    double m_speakerLevel; // Normalized level for speaker animation
+    QTimer* m_micTimer;
+    
+    // Recording panel layout caches (for hit testing)
+    QRectF m_recPanelRect;
+    QList<QRectF> m_recTileRects; // Matches RecordPanelTile order (skip None)
 
     // Toolbar hover state
     int  m_hoveredTool;             // -1 = none

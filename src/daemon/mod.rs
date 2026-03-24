@@ -106,6 +106,13 @@ pub const DAEMON_OBJECT_PATH: &str = "/org/apexshot/Daemon";
 /// D-Bus interface.
 pub const DAEMON_INTERFACE: &str = "org.apexshot.Daemon";
 
+/// Current mic level (f64 bits stored as u64), updated by mic monitoring thread.
+static MIC_LEVEL: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0); // 0.0f64.to_bits()
+/// Current system audio level (f64 bits stored as u64), updated by speaker monitoring thread.
+static SPEAKER_LEVEL: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// Try to trigger an action on an already-running daemon via D-Bus.
 /// Returns `true` if the daemon was found and the call succeeded.
 pub async fn trigger_daemon_action(action: &str) -> bool {
@@ -766,6 +773,16 @@ impl DaemonIpc {
         Ok(())
     }
 
+    /// Returns the current mic level as a normalized f64 (0.0 to 1.0).
+    fn get_mic_level(&self) -> f64 {
+        f64::from_bits(MIC_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    /// Returns the current system audio level as a normalized f64 (0.0 to 1.0).
+    fn get_speaker_level(&self) -> f64 {
+        f64::from_bits(SPEAKER_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
     /// Allows the untrusted C++ overlay process to request an area screenshot
     /// via the trusted daemon on GNOME Wayland.
     async fn capture_area_gnome(
@@ -885,6 +902,212 @@ impl DaemonIpc {
     }
 }
 
+
+fn start_audio_level_stream(
+    label: &'static str,
+    stream_name: &'static str,
+    target: Option<&str>,
+    capture_sink: bool,
+    level: &'static std::sync::atomic::AtomicU64,
+) {
+    let target_owned = target.map(String::from);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        use pipewire as pw;
+        use pw::{properties::properties, spa};
+        use spa::param::format::{MediaSubtype, MediaType};
+        use spa::param::format_utils;
+
+        struct UserData {
+            format: spa::param::audio::AudioInfoRaw,
+        }
+
+        pw::init();
+
+        let mainloop = match pw::main_loop::MainLoopRc::new(None) {
+            Ok(ml) => ml,
+            Err(e) => {
+                eprintln!("[daemon] PipeWire ({label}): failed to create main loop: {e}");
+                return;
+            }
+        };
+
+        let context = match pw::context::ContextRc::new(&mainloop, None) {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                eprintln!("[daemon] PipeWire ({label}): failed to create context: {e}");
+                return;
+            }
+        };
+
+        let core = match context.connect_rc(None) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[daemon] PipeWire ({label}): failed to connect core: {e}");
+                return;
+            }
+        };
+
+        let data = UserData {
+            format: Default::default(),
+        };
+
+        let mut props = properties! {
+            *pw::keys::MEDIA_TYPE => "Audio",
+            *pw::keys::MEDIA_CATEGORY => "Capture",
+            *pw::keys::MEDIA_ROLE => "Production",
+        };
+        if let Some(ref target_name) = target_owned {
+            props.insert("target.object", target_name.as_str());
+        }
+        if capture_sink {
+            props.insert("stream.capture.sink", "true");
+        }
+
+        let stream = match pw::stream::StreamBox::new(&core, stream_name, props) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[daemon] PipeWire ({label}): failed to create stream: {e}");
+                return;
+            }
+        };
+
+        let _listener = stream
+            .add_local_listener_with_user_data(data)
+            .param_changed(move |_, user_data, id, param| {
+                let Some(param) = param else { return };
+                if id != spa::param::ParamType::Format.as_raw() {
+                    return;
+                }
+                let (media_type, media_subtype) = match format_utils::parse_format(param) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+                if media_type != MediaType::Audio || media_subtype != MediaSubtype::Raw {
+                    return;
+                }
+                user_data.format.parse(param).ok();
+                eprintln!(
+                    "[daemon] PipeWire ({label}): capturing rate={} channels={}",
+                    user_data.format.rate(),
+                    user_data.format.channels(),
+                );
+            })
+            .process(move |stream, _user_data| {
+                let mut buf = match stream.dequeue_buffer() {
+                    Some(b) => b,
+                    None => return,
+                };
+                let datas = buf.datas_mut();
+                if datas.is_empty() { return; }
+
+                let mut peak: f32 = 0.0;
+                for data in datas.iter_mut() {
+                    let n_bytes = data.chunk().size() as usize;
+                    if let Some(slice) = data.data() {
+                        let ptr = slice.as_ptr() as *const f32;
+                        if n_bytes >= std::mem::size_of::<f32>() {
+                            let n_samples = n_bytes / std::mem::size_of::<f32>();
+                            for j in 0..n_samples {
+                                let s = unsafe { *ptr.add(j) }.abs();
+                                if s > peak { peak = s; }
+                            }
+                        }
+                    }
+                }
+
+                let raw_level = if capture_sink {
+                    // RMS averaging for system audio — gives natural, varied levels
+                    let mut sum_sq: f64 = 0.0;
+                    let mut count: u64 = 0;
+                    for data in datas.iter_mut() {
+                        let n_bytes = data.chunk().size() as usize;
+                        if let Some(slice) = data.data() {
+                            let ptr = slice.as_ptr() as *const f32;
+                            if n_bytes >= std::mem::size_of::<f32>() {
+                                let n_samples = n_bytes / std::mem::size_of::<f32>();
+                                for j in 0..n_samples {
+                                    let s = unsafe { *ptr.add(j) };
+                                    sum_sq += (s * s) as f64;
+                                    count += 1;
+                                }
+                            }
+                        }
+                    }
+                    if count > 0 {
+                        (sum_sq / count as f64).sqrt().clamp(0.0, 1.0) * 3.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    // Peak detection for mic — responsive to voice
+                    (peak * 2.0).clamp(0.0, 1.0) as f64
+                };
+
+                // Noise gate: ignore quiet audio to avoid picking up speaker bleed
+                // Only applies to mic stream (not speaker/sink monitor)
+                let gated = if !capture_sink {
+                    if raw_level < 0.15 { 0.0 } else { raw_level }
+                } else {
+                    raw_level
+                };
+
+                level.store(gated.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            })
+            .register();
+
+        // Build audio format pod: F32LE, 44100Hz, mono
+        let mut params: Vec<Vec<u8>> = Vec::new();
+        {
+            let mut audio_info = spa::param::audio::AudioInfoRaw::new();
+            audio_info.set_format(spa::param::audio::AudioFormat::F32LE);
+            audio_info.set_rate(44100);
+            audio_info.set_channels(1);
+
+            let obj = spa::pod::Object {
+                type_: spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
+                id: spa::param::ParamType::EnumFormat.as_raw(),
+                properties: audio_info.into(),
+            };
+
+            let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
+                std::io::Cursor::new(Vec::new()),
+                &spa::pod::Value::Object(obj),
+            )
+            .unwrap()
+            .0
+            .into_inner();
+
+            if spa::pod::Pod::from_bytes(&values).is_some() {
+                params.push(values);
+            }
+        }
+
+        let mut param_refs: Vec<&spa::pod::Pod> = params
+            .iter()
+            .filter_map(|bytes| spa::pod::Pod::from_bytes(bytes))
+            .collect();
+
+        match stream.connect(
+            spa::utils::Direction::Input,
+            None,
+            pw::stream::StreamFlags::AUTOCONNECT
+                | pw::stream::StreamFlags::MAP_BUFFERS
+                | pw::stream::StreamFlags::RT_PROCESS,
+            &mut param_refs,
+        ) {
+            Ok(_) => eprintln!("[daemon] PipeWire ({label}) monitoring started."),
+            Err(e) => {
+                eprintln!("[daemon] PipeWire ({label}): failed to connect stream: {e}");
+                return;
+            }
+        }
+
+        mainloop.run();
+    });
+}
+
 async fn run_dbus_server(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyhow::Result<()> {
     use zbus::connection::Builder;
 
@@ -903,9 +1126,14 @@ async fn run_dbus_server(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyhow::R
         .await
         .context("Failed to build D-Bus connection")?;
 
-    eprintln!("[daemon] D-Bus IPC ready on {DAEMON_BUS_NAME}");
+    // Mic: explicitly target physical input device to avoid picking up system audio
+    // Falls back to default input if specific device not found
+    start_audio_level_stream("mic", "apexshot-mic-monitor",
+        Some("alsa_input.pci-0000_00_1f.3.analog-stereo"), false, &MIC_LEVEL);
+    // Speaker: capture from sink monitor (digital tap of system audio output)
+    start_audio_level_stream("speaker", "apexshot-speaker-monitor", None, true, &SPEAKER_LEVEL);
 
-    // Keep the connection alive forever (until daemon exits).
+    eprintln!("[daemon] D-Bus IPC ready on {DAEMON_BUS_NAME}");
     std::future::pending::<()>().await;
     Ok(())
 }
@@ -1847,6 +2075,10 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
             eprintln!("[daemon] Area selection cancelled.");
             return;
         }
+        Ok(AreaCapturePathResult::RecordingRequested(_)) => {
+            eprintln!("[daemon] Recording requested but recording is not supported via daemon.");
+            return;
+        }
         Err(err) => {
             eprintln!(
                 "[daemon] C++ area-init capture path failed ({err}); falling back to Rust backend."
@@ -1906,6 +2138,9 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
                             }
                             Ok(AreaCapturePathResult::Cancelled) => {
                                 eprintln!("[daemon] Area capture cancelled")
+                            }
+                            Ok(AreaCapturePathResult::RecordingRequested(_)) => {
+                                eprintln!("[daemon] Recording not supported via daemon")
                             }
                             Err(e) => eprintln!("[daemon] Area capture failed: {e}"),
                         }
