@@ -710,6 +710,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     , m_clickStyle(0)
     , m_clickAnimate(true)
     , m_sliderDragging(false)
+    , m_keySliderDragging(false)
     , m_clickAnimTimer(nullptr)
     , m_clickAnimPhase(0.0)
     , m_keystrokeOptionsOpen(false)
@@ -2116,6 +2117,7 @@ void CaptureOverlay::drawKeystrokeOptions(QPainter& p, const QRectF& parentRect)
     // 1. Size
     drawLabel("Size:");
     QRectF sliderTrack(valueX, currY + (rowH - 4) / 2.0, controlW, 4);
+    m_keySliderTrackRect = sliderTrack;
     p.setPen(Qt::NoPen);
     p.setBrush(QColor(255, 255, 255, 30));
     p.drawRoundedRect(sliderTrack, 2, 2);
@@ -2773,9 +2775,10 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         for (int i = 0; i < m_keystrokeOptionsClickableRects.size(); ++i) {
             if (m_keystrokeOptionsClickableRects[i].contains(pos)) {
                 switch (i) {
-                case 0: { // Slider
+                case 0: { // Slider — start drag
                     double relX = pos.x() - m_keystrokeOptionsClickableRects[i].x();
                     m_keySize = std::max(0.0, std::min(1.0, relX / m_keystrokeOptionsClickableRects[i].width()));
+                    m_keySliderDragging = true;
                     break;
                 }
                 case 1: // Position dropdown
@@ -3219,6 +3222,12 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
+    if (m_keySliderDragging) {
+        double relX = pos.x() - m_keySliderTrackRect.x();
+        m_keySize = std::max(0.0, std::min(1.0, relX / m_keySliderTrackRect.width()));
+        update();
+        return;
+    }
 
     // ── Global Dropdown Hover ───────────────────────────────────────────────
     if (m_dropdownOpen != -1) {
@@ -3384,6 +3393,10 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
         m_sliderDragging = false;
         update();
     }
+    if (m_keySliderDragging) {
+        m_keySliderDragging = false;
+        update();
+    }
 
     // Reset recording panel hover state
     if (m_recordingPanelOpen) {
@@ -3533,16 +3546,24 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
         // Let arrow keys through for resize/move
     }
 
-    // Capture key presses for keystroke preview
+    // Capture key presses for keystroke preview — block all actions except ESC
     if (m_showKeystrokePreview) {
+        if (event->key() == Qt::Key_Escape) {
+            // Allow ESC to still work
+            m_showKeystrokePreview = false;
+            m_keyPreviews.clear();
+            update();
+            return;
+        }
         QString keyText = keyEventToPreviewText(event);
         if (!keyText.isEmpty()) {
             qint64 now = QDateTime::currentMSecsSinceEpoch();
             m_keyPreviews.append({keyText, now});
             if (m_keyPreviews.size() > 8) m_keyPreviews.removeFirst();
-            startClickAnimTimer(); // reuse timer to expire key previews
+            startClickAnimTimer();
             update();
         }
+        return; // consume the key — don't trigger any other actions
     }
 
     if (m_captureIntent == CaptureIntent::Scroll) {
@@ -4861,20 +4882,28 @@ void CaptureOverlay::drawKeystrokePreview(QPainter& p, double sx, double sy, dou
     QRectF boxRect(kx, ky, previewW, previewH);
 
     // Appearance colors
-    QColor bgColor = (m_keyAppearance == 0) ? QColor(20, 20, 24, 215) : QColor(245, 245, 250, 215);
+    QColor bgColor = (m_keyAppearance == 0) ? QColor(20, 20, 24, 230) : QColor(245, 245, 250, 230);
     QColor iconColor = (m_keyAppearance == 0) ? Qt::white : Qt::black;
 
-    // Blur background
+    // Blur background — draw the blurred image clipped to the preview rect
+    // so the area behind the box shows through as a frosted glass effect
     if (m_keyBlurBg && !m_blurredBg.isNull()) {
         p.save();
-        QPainterPath clip; clip.addRoundedRect(boxRect, 10 * scale, 10 * scale);
+        QPainterPath clip;
+        clip.addRoundedRect(boxRect, 12 * scale, 12 * scale);
         p.setClipPath(clip);
+
+        // Scale the 1/4-res blur image back up to full screen
         double bgScaleX = (double)width() / m_blurredBg.width();
         double bgScaleY = (double)height() / m_blurredBg.height();
         p.scale(bgScaleX, bgScaleY);
         p.drawImage(QPointF(0, 0), m_blurredBg);
         p.restore();
-        bgColor.setAlpha(180);
+
+        // Semi-transparent tint so text is readable
+        bgColor = (m_keyAppearance == 0)
+            ? QColor(20, 20, 24, 120)   // much more transparent with blur
+            : QColor(245, 245, 250, 120);
     }
 
     p.setPen(QPen(QColor(iconColor.red(), iconColor.green(), iconColor.blue(), 50), 1.2));
