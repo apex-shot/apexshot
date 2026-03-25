@@ -901,8 +901,10 @@ bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
         return false;
     }
 
-    const QRect selectedGlobal = selected.translated(overlayGeometry.topLeft());
-    const QRect bounded = selectedGlobal.intersected(overlayGeometry).intersected(desktopBounds);
+    const int topInset = qMax(0, desktopBounds.height() - overlayGeometry.height());
+    const QPoint overlayOrigin(overlayGeometry.x(), overlayGeometry.y() + topInset);
+    const QRect selectedGlobal = selected.translated(overlayOrigin);
+    const QRect bounded = selectedGlobal.intersected(desktopBounds);
     if (bounded.width() <= 0 || bounded.height() <= 0) {
         outError = QStringLiteral("Selection is outside desktop bounds");
         return false;
