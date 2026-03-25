@@ -451,6 +451,25 @@ async fn build_pipeline(
         String::new()
     };
 
+    // TODO: Audio pipeline support
+    // When audio is implemented, the pipeline should include audio sources:
+    //
+    // Video: {video_source} ! videoconvert ! videorate ! ... -> muxer
+    // Audio: pulsesrc(speaker) ! audioconvert ! audioresample
+    //        pulsesrc(mic) ! audioconvert ! audioresample
+    //        -> audiomixer -> encoder -> muxer
+    //
+    // Mono audio (config.mono_audio):
+    //   Add caps filter after audioconvert to force mono output:
+    //   let mono_filter = if config.mono_audio {
+    //       " ! audio/x-raw,channels=1"
+    //   } else {
+    //       ""
+    //   };
+    //   Example: pulsesrc ! audioconvert{} ! audioresample ! ...
+    //
+    // The muxer (mp4mux/webmmux) will then combine video and audio streams.
+
     Ok(format!(
         "{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! {} ! filesink location=\"{}\"",
         video_source, hidpi_filter, resolution_filter, config.fps,
