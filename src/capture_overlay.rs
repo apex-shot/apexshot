@@ -191,6 +191,11 @@ pub struct RecordingRequest {
     pub video_fps: u8,
     pub record_mono: bool,
     pub open_editor: bool,
+    // GIF tab settings
+    pub gif_fps: u8,
+    pub gif_quality: f64,
+    pub gif_size_idx: u8,
+    pub optimize_gif: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -387,6 +392,14 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
     if config.rec_speaker {
         extra_args.push("--rec-speaker".into());
     }
+    extra_args.push(format!("--gif-fps={}", config.rec_gif_fps));
+    extra_args.push(format!("--gif-quality={:.4}", config.rec_gif_quality));
+    extra_args.push(format!("--gif-size={}", config.rec_gif_size_idx));
+    if config.rec_gif_optimize {
+        extra_args.push("--gif-optimize".into());
+    } else {
+        extra_args.push("--no-gif-optimize".into());
+    }
 
     let arg_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
     eprintln!(
@@ -538,6 +551,12 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let video_fps = extract_int(json, "video_fps").unwrap_or(1) as u8; // Default to 30fps (index 1)
     let record_mono = extract_bool(json, "record_mono").unwrap_or(false);
     let open_editor = extract_bool(json, "open_editor").unwrap_or(false);
+    let gif_fps = extract_int(json, "gif_fps").unwrap_or(50).clamp(5, 60) as u8;
+    let gif_quality = extract_float(json, "gif_quality")
+        .unwrap_or(0.75)
+        .clamp(0.0, 1.0);
+    let gif_size_idx = extract_int(json, "gif_size_idx").unwrap_or(0).clamp(0, 3) as u8;
+    let optimize_gif = extract_bool(json, "optimize_gif").unwrap_or(true);
 
     Ok(RecordingRequest {
         x,
@@ -561,6 +580,10 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         video_fps,
         record_mono,
         open_editor,
+        gif_fps,
+        gif_quality,
+        gif_size_idx,
+        optimize_gif,
     })
 }
 
@@ -605,6 +628,18 @@ fn extract_int(json: &str, key: &str) -> Option<i32> {
     let rest = json[start..].trim_start();
     let end = rest
         .find(|c: char| !c.is_ascii_digit() && c != '-')
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+fn extract_float(json: &str, key: &str) -> Option<f64> {
+    let needle = format!("\"{}\":", key);
+    let start = json.find(&needle)? + needle.len();
+    let rest = json[start..].trim_start();
+    let end = rest
+        .find(|c: char| {
+            !c.is_ascii_digit() && c != '-' && c != '.' && c != 'e' && c != 'E' && c != '+'
+        })
         .unwrap_or(rest.len());
     rest[..end].parse().ok()
 }

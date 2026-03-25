@@ -97,7 +97,8 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                          bool displayRecTime, bool hidpi, bool doNotDisturb,
                          bool showCursor, bool rememberSelection,
                          bool dimScreen, bool countdown,
-                         int videoMaxRes, int videoFps, bool recordMono, bool openEditor)
+                         int videoMaxRes, int videoFps, bool recordMono, bool openEditor,
+                         int gifFps, double gifQuality, int gifSizeIdx, bool optimizeGif)
 {
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
                 "\"mode\":\"record\",\"record_type\":\"%s\","
@@ -108,7 +109,9 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 "\"remember_selection\":%s,\"dim_screen\":%s,"
                 "\"countdown\":%s,"
                 "\"video_max_res\":%d,\"video_fps\":%d,"
-                "\"record_mono\":%s,\"open_editor\":%s}\n",
+                "\"record_mono\":%s,\"open_editor\":%s,"
+                "\"gif_fps\":%d,\"gif_quality\":%.4f,"
+                "\"gif_size_idx\":%d,\"optimize_gif\":%s}\n",
                 sel.x(), sel.y(), sel.width(), sel.height(),
                 recordType,
                 controls ? "true" : "false",
@@ -126,7 +129,11 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 videoMaxRes,
                 videoFps,
                 recordMono ? "true" : "false",
-                openEditor ? "true" : "false");
+                openEditor ? "true" : "false",
+                gifFps,
+                gifQuality,
+                gifSizeIdx,
+                optimizeGif ? "true" : "false");
     std::fflush(stdout);
 }
 
@@ -152,6 +159,10 @@ int main(int argc, char* argv[])
     QRect restoreSel;
     bool initialMic = false;
     bool initialSpeaker = false;
+    int initialGifFps = 50;
+    double initialGifQuality = 0.75;
+    int initialGifSizeIdx = 0;
+    bool initialGifOptimize = true;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--background") == 0 && i + 1 < argc) {
@@ -175,6 +186,22 @@ int main(int argc, char* argv[])
             initialMic = true;
         } else if (std::strcmp(argv[i], "--rec-speaker") == 0) {
             initialSpeaker = true;
+        } else if (QString(argv[i]).startsWith("--gif-fps=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(10).toInt(&ok);
+            if (ok && v >= 5 && v <= 60) initialGifFps = v;
+        } else if (QString(argv[i]).startsWith("--gif-quality=")) {
+            bool ok = false;
+            double v = QString(argv[i]).mid(14).toDouble(&ok);
+            if (ok && v >= 0.0 && v <= 1.0) initialGifQuality = v;
+        } else if (QString(argv[i]).startsWith("--gif-size=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(11).toInt(&ok);
+            if (ok && v >= 0 && v <= 3) initialGifSizeIdx = v;
+        } else if (std::strcmp(argv[i], "--gif-optimize") == 0) {
+            initialGifOptimize = true;
+        } else if (std::strcmp(argv[i], "--no-gif-optimize") == 0) {
+            initialGifOptimize = false;
         }
     }
 
@@ -301,6 +328,10 @@ int main(int argc, char* argv[])
     if (!restoreSel.isNull() && restoreSel.isValid()) {
         overlay.setInitialSelection(restoreSel);
     }
+    overlay.setInitialGifFps(initialGifFps);
+    overlay.setInitialGifQuality(initialGifQuality);
+    overlay.setInitialGifSizeIdx(initialGifSizeIdx);
+    overlay.setInitialGifOptimize(initialGifOptimize);
     overlay.show();
 
     const int ret = app.exec();
@@ -365,7 +396,11 @@ int main(int argc, char* argv[])
                            overlay.recordVideoMaxRes(),
                            overlay.recordVideoFps(),
                            overlay.recordMono(),
-                           overlay.recordOpenEditor());
+                           overlay.recordOpenEditor(),
+                           overlay.recordGifFps(),
+                           overlay.recordGifQuality(),
+                           overlay.recordGifSizeIdx(),
+                           overlay.recordOptimizeGif());
         return 0;
     }
 

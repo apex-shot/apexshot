@@ -86,6 +86,18 @@ public:
     bool recordMono() const { return m_recordMono; }
     bool recordOpenEditor() const { return m_openEditor; }
 
+    // GIF tab settings — accessors
+    int recordGifFps() const { return m_gifFps; }
+    double recordGifQuality() const { return m_gifQuality; }
+    int recordGifSizeIdx() const { return m_gifSizeIdx; }
+    bool recordOptimizeGif() const { return m_optimizeGif; }
+
+    // GIF tab settings — setters for initial config load
+    void setInitialGifFps(int v) { m_gifFps = v; }
+    void setInitialGifQuality(double v) { m_gifQuality = v; }
+    void setInitialGifSizeIdx(int v) { m_gifSizeIdx = v; }
+    void setInitialGifOptimize(bool v) { m_optimizeGif = v; }
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -271,6 +283,10 @@ private:
     QRectF m_sliderTrackRect;  // cached click slider track rect for drag calc
     bool   m_keySliderDragging; // true while dragging keystroke size slider
     QRectF m_keySliderTrackRect; // cached keystroke slider track rect
+    bool   m_gifFpsDragging;       // true while dragging GIF FPS slider
+    bool   m_gifQualityDragging;   // true while dragging GIF quality slider
+    QRectF m_gifFpsTrackRect;      // cached GIF FPS slider track rect for drag calc
+    QRectF m_gifQualityTrackRect;  // cached GIF quality slider track rect for drag calc
     QTimer* m_clickAnimTimer;  // timer for preview animation ticks
     double m_clickAnimPhase;   // 0.0 to 1.0 cycling phase for animation
 

@@ -60,6 +60,10 @@ pub struct RecordingConfig {
     pub speaker_enabled: bool,
     pub mic_source: Option<String>,
     pub speaker_source: Option<String>,
+    // GIF-specific settings
+    pub gif_quality: f64,
+    pub gif_optimize: bool,
+    pub gif_max_width: Option<u32>,
 }
 
 impl Default for RecordingConfig {
@@ -81,6 +85,9 @@ impl Default for RecordingConfig {
             speaker_enabled: false,
             mic_source: None,
             speaker_source: None,
+            gif_quality: 0.75,
+            gif_optimize: true,
+            gif_max_width: Some(800),
         }
     }
 }
@@ -832,6 +839,22 @@ async fn record_gif_rust_with_optional_stop(
 
                             println!("Detected stream: {}x{}", width, height);
 
+                            let max_colors = ((32.0 + 224.0 * config.gif_quality) as u32).clamp(32, 256);
+                            let dither = if config.gif_quality >= 0.5 {
+                                "floyd_steinberg"
+                            } else {
+                                "bayer:bayer_scale=5"
+                            };
+                            let stats_mode = if config.gif_optimize { "diff" } else { "full" };
+                            let scale_prefix = match config.gif_max_width {
+                                Some(max_w) if width > max_w => format!("scale={}:-1,", max_w),
+                                _ => String::new(),
+                            };
+                            let vf_filter = format!(
+                                "{}split[s0][s1];[s0]palettegen=max_colors={}:stats_mode={}[p];[s1][p]paletteuse=dither={}",
+                                scale_prefix, max_colors, stats_mode, dither
+                            );
+
                             let child = Command::new("ffmpeg")
                                 .arg("-y") // Overwrite
                                 .arg("-loglevel").arg("warning")
@@ -841,8 +864,7 @@ async fn record_gif_rust_with_optional_stop(
                                 .arg("-s").arg(format!("{}x{}", width, height))
                                 .arg("-r").arg(gif_fps.to_string())
                                 .arg("-i").arg("pipe:0")
-                                // High quality GIF palette generation
-                                .arg("-vf").arg("split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse")
+                                .arg("-vf").arg(&vf_filter)
                                 .arg(&config.output_path)
                                 .stdin(Stdio::piped())
                                 .stdout(Stdio::null())

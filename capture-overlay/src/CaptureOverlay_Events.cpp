@@ -261,11 +261,13 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                         case 3: { // FPS Slider
                             double relX = pos.x() - m_settingsClickableRects[i].x();
                             m_gifFps = 5 + (int)(55.0 * std::max(0.0, std::min(1.0, relX / m_settingsClickableRects[i].width())));
+                            m_gifFpsDragging = true;
                             break;
                         }
                         case 4: { // Quality Slider
                             double relX = pos.x() - m_settingsClickableRects[i].x();
                             m_gifQuality = std::max(0.0, std::min(1.0, relX / m_settingsClickableRects[i].width()));
+                            m_gifQualityDragging = true;
                             break;
                         }
                         case 5: m_optimizeGif = !m_optimizeGif; break;
@@ -563,6 +565,18 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
+    if (m_gifFpsDragging) {
+        double relX = pos.x() - m_gifFpsTrackRect.x();
+        m_gifFps = 5 + (int)(55.0 * std::max(0.0, std::min(1.0, relX / m_gifFpsTrackRect.width())));
+        update();
+        return;
+    }
+    if (m_gifQualityDragging) {
+        double relX = pos.x() - m_gifQualityTrackRect.x();
+        m_gifQuality = std::max(0.0, std::min(1.0, relX / m_gifQualityTrackRect.width()));
+        update();
+        return;
+    }
 
     // ── Global Dropdown Hover ───────────────────────────────────────────────
     if (m_dropdownOpen != -1) {
@@ -731,6 +745,12 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
     if (m_keySliderDragging) {
         m_keySliderDragging = false;
         update();
+    }
+    if (m_gifFpsDragging) {
+        m_gifFpsDragging = false;
+    }
+    if (m_gifQualityDragging) {
+        m_gifQualityDragging = false;
     }
 
     // Reset recording panel hover state
@@ -963,4 +983,3 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
     default: QWidget::keyPressEvent(event);
     }
 }
-
