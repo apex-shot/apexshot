@@ -637,9 +637,35 @@ async fn record_gif_rust_with_optional_stop(
         get_x11_source(&config)?
     };
 
+    // HiDPI: downscale to logical resolution (2x)
+    let hidpi_filter = if config.hidpi {
+        " ! videoscale"
+    } else {
+        ""
+    };
+
+    // Max resolution: downscale if needed
+    let resolution_filter = if let Some((max_w, max_h)) = config.max_resolution {
+        if let (Some(w), Some(h)) = (config.width, config.height) {
+            if w > max_w || h > max_h {
+                // Only downscale, never upscale
+                format!(" ! videoscale ! video/x-raw,width={},height={}", max_w, max_h)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // Use configured FPS for GIF recording
+    let gif_fps = config.fps;
+
     let pipeline_str = format!(
-        "{} ! videoconvert ! videorate ! video/x-raw,format=RGBA,framerate=25/1 ! appsink name=sink emit-signals=true sync=false drop=false max-buffers=200",
-        source_str
+        "{} ! videoconvert{}{} ! videorate ! video/x-raw,format=RGBA,framerate={}/1 ! appsink name=sink emit-signals=true sync=false drop=false max-buffers=200",
+        source_str, hidpi_filter, resolution_filter, gif_fps
     );
 
     let pipeline = gst::parse::launch(&pipeline_str)
@@ -709,7 +735,7 @@ async fn record_gif_rust_with_optional_stop(
                                 .arg("-f").arg("rawvideo")
                                 .arg("-pix_fmt").arg("rgba")
                                 .arg("-s").arg(format!("{}x{}", width, height))
-                                .arg("-r").arg("25")
+                                .arg("-r").arg(gif_fps.to_string())
                                 .arg("-i").arg("pipe:0")
                                 // High quality GIF palette generation
                                 .arg("-vf").arg("split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse")
