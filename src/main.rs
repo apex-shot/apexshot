@@ -1016,6 +1016,12 @@ fn run_capture(args: &[String]) {
                 cfg.rec_dim_screen = request.dim_screen;
                 cfg.rec_countdown = request.countdown;
 
+                // Update config from overlay settings (Video tab)
+                cfg.rec_video_max_res = request.video_max_res;
+                cfg.rec_video_fps = request.video_fps;
+                cfg.rec_video_mono = request.record_mono;
+                cfg.rec_video_open_editor = request.open_editor;
+
                 // Remember selection area
                 if request.remember_selection {
                     cfg.last_selection_x = Some(request.x);
@@ -1068,6 +1074,22 @@ fn run_capture(args: &[String]) {
                     ext
                 ));
 
+                // Map Video tab settings
+                let max_resolution = match request.video_max_res {
+                    0 => None,                      // Original
+                    1 => Some((1920, 1080)),        // 1080p
+                    2 => Some((1280, 720)),         // 720p
+                    _ => None,
+                };
+
+                let fps = match request.video_fps {
+                    0 => 24,
+                    1 => 30,
+                    2 => 50,
+                    3 => 60,
+                    _ => 30,
+                };
+
                 // Build recording config
                 let rec_config = RecordingConfig {
                     output_path: output_path.clone(),
@@ -1077,10 +1099,9 @@ fn run_capture(args: &[String]) {
                     y: Some(request.y),
                     cursor: request.cursor,
                     hidpi: request.hidpi,
-                    // Video tab settings (defaults for now - will be populated from RecordingRequest later)
-                    max_resolution: None,
-                    fps: 30,
-                    mono_audio: false,
+                    max_resolution,
+                    fps,
+                    mono_audio: request.record_mono,
                 };
 
                 eprintln!("Starting recording to {:?}...", output_path);
