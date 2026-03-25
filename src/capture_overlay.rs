@@ -381,6 +381,13 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
         }
     }
 
+    if config.rec_mic {
+        extra_args.push("--rec-mic".into());
+    }
+    if config.rec_speaker {
+        extra_args.push("--rec-speaker".into());
+    }
+
     let arg_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
     eprintln!(
         "[capture_overlay] capture_area_via_cpp: launching {:?}",

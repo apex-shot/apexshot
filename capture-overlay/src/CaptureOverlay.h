@@ -49,7 +49,9 @@ public:
 
     explicit CaptureOverlay(const QPixmap& background = QPixmap(),
                              QWidget* parent = nullptr,
-                             bool timerCaptureEnabled = false);
+                             bool timerCaptureEnabled = false,
+                             bool initialMic = false,
+                             bool initialSpeaker = false);
 
     /// Returns the selected rectangle in screen (logical pixel) coordinates.
     /// Only valid when QApplication exits with code 0.

@@ -150,6 +150,8 @@ int main(int argc, char* argv[])
     bool windowCaptureMode = false;
     QString backgroundPath;
     QRect restoreSel;
+    bool initialMic = false;
+    bool initialSpeaker = false;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--background") == 0 && i + 1 < argc) {
@@ -169,6 +171,10 @@ int main(int argc, char* argv[])
                 restoreSel = QRect(parts[0].toInt(), parts[1].toInt(),
                                    parts[2].toInt(), parts[3].toInt());
             }
+        } else if (std::strcmp(argv[i], "--rec-mic") == 0) {
+            initialMic = true;
+        } else if (std::strcmp(argv[i], "--rec-speaker") == 0) {
+            initialSpeaker = true;
         }
     }
 
@@ -291,7 +297,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    CaptureOverlay overlay(background, nullptr, areaInitMode);
+    CaptureOverlay overlay(background, nullptr, areaInitMode, initialMic, initialSpeaker);
     if (!restoreSel.isNull() && restoreSel.isValid()) {
         overlay.setInitialSelection(restoreSel);
     }

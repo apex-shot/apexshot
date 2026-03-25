@@ -47,6 +47,8 @@ pub struct AppConfig {
     pub rec_video_fps: u8,
     pub rec_video_mono: bool,
     pub rec_video_open_editor: bool,
+    pub rec_mic: bool,
+    pub rec_speaker: bool,
 }
 
 impl Default for AppConfig {
@@ -82,6 +84,8 @@ impl Default for AppConfig {
             rec_video_fps: 1,     // 1 = 30fps
             rec_video_mono: false,
             rec_video_open_editor: false,
+            rec_mic: false,
+            rec_speaker: false,
         }
     }
 }

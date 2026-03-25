@@ -56,6 +56,10 @@ pub struct RecordingConfig {
     pub max_resolution: Option<(u32, u32)>,
     pub fps: u32,
     pub mono_audio: bool,
+    pub mic_enabled: bool,
+    pub speaker_enabled: bool,
+    pub mic_source: Option<String>,
+    pub speaker_source: Option<String>,
 }
 
 impl Default for RecordingConfig {
@@ -73,6 +77,10 @@ impl Default for RecordingConfig {
             max_resolution: None,
             fps: 30,
             mono_audio: false,
+            mic_enabled: false,
+            speaker_enabled: false,
+            mic_source: None,
+            speaker_source: None,
         }
     }
 }
@@ -414,6 +422,41 @@ fn select_encoder(
     Err(RecordError::NoEncoderFound)
 }
 
+fn get_pulse_default_source() -> String {
+    std::process::Command::new("pactl")
+        .arg("get-default-source")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "default".to_string())
+}
+
+fn get_pulse_speaker_monitor() -> String {
+    std::process::Command::new("pactl")
+        .arg("get-default-sink")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| format!("{}.monitor", s.trim()))
+        .filter(|s| s != ".monitor")
+        .unwrap_or_else(|| "default.monitor".to_string())
+}
+
+fn select_audio_encoder(muxer: &str) -> Option<&'static str> {
+    let candidates: &[&str] = match muxer {
+        "webmmux" => &["opusenc", "vorbisenc"],
+        "mp4mux" => &["fdkaacenc", "avenc_aac", "lamemp3enc"],
+        "oggmux" => &["vorbisenc"],
+        _ => &[],
+    };
+    candidates
+        .iter()
+        .find(|&&enc| gst::ElementFactory::find(enc).is_some())
+        .copied()
+}
+
 async fn build_pipeline(
     config: &RecordingConfig,
     profile: &EncoderProfile,
@@ -429,18 +472,17 @@ async fn build_pipeline(
     };
 
     // HiDPI: downscale to logical resolution (2x)
-    let hidpi_filter = if config.hidpi {
-        " ! videoscale"
-    } else {
-        ""
-    };
+    let hidpi_filter = if config.hidpi { " ! videoscale" } else { "" };
 
     // Max resolution: downscale if needed
     let resolution_filter = if let Some((max_w, max_h)) = config.max_resolution {
         if let (Some(w), Some(h)) = (config.width, config.height) {
             if w > max_w || h > max_h {
                 // Only downscale, never upscale
-                format!(" ! videoscale ! video/x-raw,width={},height={}", max_w, max_h)
+                format!(
+                    " ! videoscale ! video/x-raw,width={},height={}",
+                    max_w, max_h
+                )
             } else {
                 String::new()
             }
@@ -451,30 +493,93 @@ async fn build_pipeline(
         String::new()
     };
 
-    // TODO: Audio pipeline support
-    // When audio is implemented, the pipeline should include audio sources:
-    //
-    // Video: {video_source} ! videoconvert ! videorate ! ... -> muxer
-    // Audio: pulsesrc(speaker) ! audioconvert ! audioresample
-    //        pulsesrc(mic) ! audioconvert ! audioresample
-    //        -> audiomixer -> encoder -> muxer
-    //
-    // Mono audio (config.mono_audio):
-    //   Add caps filter after audioconvert to force mono output:
-    //   let mono_filter = if config.mono_audio {
-    //       " ! audio/x-raw,channels=1"
-    //   } else {
-    //       ""
-    //   };
-    //   Example: pulsesrc ! audioconvert{} ! audioresample ! ...
-    //
-    // The muxer (mp4mux/webmmux) will then combine video and audio streams.
+    let want_audio = config.mic_enabled || config.speaker_enabled;
 
-    Ok(format!(
-        "{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! {} ! filesink location=\"{}\"",
-        video_source, hidpi_filter, resolution_filter, config.fps,
-        profile.encoder, profile.props, profile.muxer, output_str
-    ))
+    let audio_encoder = if want_audio {
+        if gst::ElementFactory::find("pulsesrc").is_none() {
+            eprintln!(
+                "[recording] pulsesrc not found (gst-plugins-good missing?); recording without audio."
+            );
+            None
+        } else {
+            let enc = select_audio_encoder(profile.muxer);
+            if enc.is_none() {
+                eprintln!(
+                    "[recording] No audio encoder found for muxer {}; recording without audio.",
+                    profile.muxer
+                );
+            }
+            enc
+        }
+    } else {
+        None
+    };
+
+    let mono_caps = if config.mono_audio {
+        " ! audio/x-raw,channels=1"
+    } else {
+        ""
+    };
+
+    let mic_dev = config
+        .mic_source
+        .clone()
+        .unwrap_or_else(get_pulse_default_source);
+    let spk_dev = config
+        .speaker_source
+        .clone()
+        .unwrap_or_else(get_pulse_speaker_monitor);
+
+    if let Some(aenc) = audio_encoder {
+        let muxer_named = format!("{} name=mux", profile.muxer);
+
+        let video_leg =
+            format!(
+            "{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! mux.",
+            video_source, hidpi_filter, resolution_filter, config.fps,
+            profile.encoder, profile.props
+        );
+
+        let filesink_leg = format!("{} ! filesink location=\"{}\"", muxer_named, output_str);
+
+        let audio_legs = if config.mic_enabled && config.speaker_enabled {
+            vec![
+                format!("audiomixer name=amix ! {} ! mux.", aenc),
+                format!(
+                    "pulsesrc device=\"{}\" ! audioconvert ! audioresample{} ! queue ! amix.",
+                    mic_dev, mono_caps
+                ),
+                format!(
+                    "pulsesrc device=\"{}\" ! audioconvert ! audioresample{} ! queue ! amix.",
+                    spk_dev, mono_caps
+                ),
+            ]
+        } else {
+            let dev = if config.mic_enabled {
+                &mic_dev
+            } else {
+                &spk_dev
+            };
+            vec![format!(
+                "pulsesrc device=\"{}\" ! audioconvert ! audioresample{} ! queue ! {} ! mux.",
+                dev, mono_caps, aenc
+            )]
+        };
+
+        let full = std::iter::once(video_leg)
+            .chain(std::iter::once(filesink_leg))
+            .chain(audio_legs)
+            .collect::<Vec<_>>()
+            .join("  ");
+
+        Ok(full)
+    } else {
+        Ok(format!(
+            "{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! {} ! filesink location=\"{}\"",
+            video_source, hidpi_filter, resolution_filter, config.fps,
+            profile.encoder, profile.props, profile.muxer, output_str
+        ))
+    }
 }
 
 async fn get_wayland_source(cursor: bool) -> RecordResult<String> {
@@ -638,18 +743,17 @@ async fn record_gif_rust_with_optional_stop(
     };
 
     // HiDPI: downscale to logical resolution (2x)
-    let hidpi_filter = if config.hidpi {
-        " ! videoscale"
-    } else {
-        ""
-    };
+    let hidpi_filter = if config.hidpi { " ! videoscale" } else { "" };
 
     // Max resolution: downscale if needed
     let resolution_filter = if let Some((max_w, max_h)) = config.max_resolution {
         if let (Some(w), Some(h)) = (config.width, config.height) {
             if w > max_w || h > max_h {
                 // Only downscale, never upscale
-                format!(" ! videoscale ! video/x-raw,width={},height={}", max_w, max_h)
+                format!(
+                    " ! videoscale ! video/x-raw,width={},height={}",
+                    max_w, max_h
+                )
             } else {
                 String::new()
             }
