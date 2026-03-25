@@ -26,34 +26,7 @@
 
 class QTimer;
 
-// ── Small floating control panel shown during scroll capture ──────────────────
-// Stays visible while the main overlay is hidden, giving the user Cancel/Done
-// buttons and a frame counter.
-class ScrollControlPanel : public QWidget
-{
-    Q_OBJECT
-
-public:
-    explicit ScrollControlPanel(QWidget* parent = nullptr);
-
-    void setFrameCount(int count);
-    void setStatus(const QString& text);
-    void setCapturingDone();   // switch from "Capturing…" to "Capture complete"
-    void positionNear(const QRect& captureArea, const QSize& screenSize);
-
-protected:
-    void paintEvent(QPaintEvent* event) override;
-
-signals:
-    void cancelClicked();
-    void doneClicked();
-
-private:
-    QLabel*      m_statusLabel;
-    QLabel*      m_frameLabel;
-    QPushButton* m_cancelBtn;
-    QPushButton* m_doneBtn;
-};
+#include "ScrollControlPanel.h"
 
 class CaptureOverlay : public QWidget
 {
