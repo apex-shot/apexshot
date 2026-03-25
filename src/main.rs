@@ -1077,6 +1077,10 @@ fn run_capture(args: &[String]) {
                     y: Some(request.y),
                     cursor: request.cursor,
                     hidpi: request.hidpi,
+                    // Video tab settings (defaults for now - will be populated from RecordingRequest later)
+                    max_resolution: None,
+                    fps: 30,
+                    mono_audio: false,
                 };
 
                 eprintln!("Starting recording to {:?}...", output_path);
