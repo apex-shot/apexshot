@@ -1231,6 +1231,7 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
         double sliderX = valueX + 55;
         double sliderW = 220.0; // Fixed slider width for GIF FPS
         QRectF sliderTrack(sliderX, currY + (30 - 4) / 2.0, sliderW, 4);
+        m_gifFpsTrackRect = QRectF(sliderX, currY, sliderW, 30);
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(255, 255, 255, 30));
         p.drawRoundedRect(sliderTrack, 2, 2);
@@ -1253,6 +1254,7 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
         drawLabel("GIF quality:", currY);
         double qSliderW = 160.0;
         QRectF qSliderTrack(valueX, currY + (30 - 4) / 2.0, qSliderW, 4);
+        m_gifQualityTrackRect = QRectF(valueX, currY, qSliderW, 30);
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(255, 255, 255, 30));
         p.drawRoundedRect(qSliderTrack, 2, 2);

@@ -66,6 +66,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_clickAnimate(true)
     , m_sliderDragging(false)
     , m_keySliderDragging(false)
+    , m_gifFpsDragging(false)
+    , m_gifQualityDragging(false)
     , m_clickAnimTimer(nullptr)
     , m_clickAnimPhase(0.0)
     , m_keystrokeOptionsOpen(false)
