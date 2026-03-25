@@ -526,6 +526,12 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let dim_screen = extract_bool(json, "dim_screen").unwrap_or(true);
     let countdown = extract_bool(json, "countdown").unwrap_or(true);
 
+    // Video tab settings
+    let video_max_res = extract_int(json, "video_max_res").unwrap_or(0) as u8;
+    let video_fps = extract_int(json, "video_fps").unwrap_or(1) as u8; // Default to 30fps (index 1)
+    let record_mono = extract_bool(json, "record_mono").unwrap_or(false);
+    let open_editor = extract_bool(json, "open_editor").unwrap_or(false);
+
     Ok(RecordingRequest {
         x,
         y,
@@ -544,6 +550,10 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         remember_selection,
         dim_screen,
         countdown,
+        video_max_res,
+        video_fps,
+        record_mono,
+        open_editor,
     })
 }
 
