@@ -105,6 +105,12 @@ public:
     bool recordDimScreen() const { return m_dimScreen; }
     bool recordShowCountdown() const { return m_showCountdown; }
 
+    // Video tab settings
+    int recordVideoMaxRes() const { return m_videoMaxRes; }
+    int recordVideoFps() const { return m_videoFps; }
+    bool recordMono() const { return m_recordMono; }
+    bool recordOpenEditor() const { return m_openEditor; }
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
