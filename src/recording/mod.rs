@@ -429,15 +429,32 @@ async fn build_pipeline(
     };
 
     // HiDPI: downscale to logical resolution (2x)
-    let scale_filter = if config.hidpi {
+    let hidpi_filter = if config.hidpi {
         " ! videoscale"
     } else {
         ""
     };
 
+    // Max resolution: downscale if needed
+    let resolution_filter = if let Some((max_w, max_h)) = config.max_resolution {
+        if let (Some(w), Some(h)) = (config.width, config.height) {
+            if w > max_w || h > max_h {
+                // Only downscale, never upscale
+                format!(" ! videoscale ! video/x-raw,width={},height={}", max_w, max_h)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
     Ok(format!(
-        "{} ! videoconvert{} ! videorate ! queue ! {} {} ! {} ! filesink location=\"{}\"",
-        video_source, scale_filter, profile.encoder, profile.props, profile.muxer, output_str
+        "{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! {} ! filesink location=\"{}\"",
+        video_source, hidpi_filter, resolution_filter, config.fps,
+        profile.encoder, profile.props, profile.muxer, output_str
     ))
 }
 
