@@ -1015,6 +1015,8 @@ fn run_capture(args: &[String]) {
                 cfg.rec_remember_selection = request.remember_selection;
                 cfg.rec_dim_screen = request.dim_screen;
                 cfg.rec_countdown = request.countdown;
+                cfg.rec_mic = request.mic;
+                cfg.rec_speaker = request.speaker;
 
                 // Update config from overlay settings (Video tab)
                 cfg.rec_video_max_res = request.video_max_res;
@@ -1076,9 +1078,9 @@ fn run_capture(args: &[String]) {
 
                 // Map Video tab settings
                 let max_resolution = match request.video_max_res {
-                    0 => None,                      // Original
-                    1 => Some((1920, 1080)),        // 1080p
-                    2 => Some((1280, 720)),         // 720p
+                    0 => None,               // Original
+                    1 => Some((1920, 1080)), // 1080p
+                    2 => Some((1280, 720)),  // 720p
                     _ => None,
                 };
 
@@ -1102,6 +1104,10 @@ fn run_capture(args: &[String]) {
                     max_resolution,
                     fps,
                     mono_audio: request.record_mono,
+                    mic_enabled: request.mic,
+                    speaker_enabled: request.speaker,
+                    mic_source: None,
+                    speaker_source: None,
                 };
 
                 eprintln!("Starting recording to {:?}...", output_path);
