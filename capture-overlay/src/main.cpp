@@ -96,7 +96,8 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                          bool clicks, bool keystrokes,
                          bool displayRecTime, bool hidpi, bool doNotDisturb,
                          bool showCursor, bool rememberSelection,
-                         bool dimScreen, bool countdown)
+                         bool dimScreen, bool countdown,
+                         int videoMaxRes, int videoFps, bool recordMono, bool openEditor)
 {
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
                 "\"mode\":\"record\",\"record_type\":\"%s\","
