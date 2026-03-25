@@ -186,6 +186,11 @@ pub struct RecordingRequest {
     pub remember_selection: bool,
     pub dim_screen: bool,
     pub countdown: bool,
+    // Video tab settings
+    pub video_max_res: u8,
+    pub video_fps: u8,
+    pub record_mono: bool,
+    pub open_editor: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
