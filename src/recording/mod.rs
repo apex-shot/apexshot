@@ -52,6 +52,10 @@ pub struct RecordingConfig {
     pub y: Option<i32>,
     pub cursor: bool,
     pub hidpi: bool,
+    // Video tab settings
+    pub max_resolution: Option<(u32, u32)>,
+    pub fps: u32,
+    pub mono_audio: bool,
 }
 
 impl Default for RecordingConfig {
@@ -66,6 +70,9 @@ impl Default for RecordingConfig {
             y: None,
             cursor: true,
             hidpi: false,
+            max_resolution: None,
+            fps: 30,
+            mono_audio: false,
         }
     }
 }
