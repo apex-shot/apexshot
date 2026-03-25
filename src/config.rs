@@ -47,6 +47,11 @@ pub struct AppConfig {
     pub rec_video_fps: u8,
     pub rec_video_mono: bool,
     pub rec_video_open_editor: bool,
+    // Recording GIF tab settings
+    pub rec_gif_fps: u8,
+    pub rec_gif_quality: f64,
+    pub rec_gif_size_idx: u8,
+    pub rec_gif_optimize: bool,
     pub rec_mic: bool,
     pub rec_speaker: bool,
 }
@@ -84,6 +89,10 @@ impl Default for AppConfig {
             rec_video_fps: 1,     // 1 = 30fps
             rec_video_mono: false,
             rec_video_open_editor: false,
+            rec_gif_fps: 50,
+            rec_gif_quality: 0.75,
+            rec_gif_size_idx: 0,
+            rec_gif_optimize: true,
             rec_mic: false,
             rec_speaker: false,
         }
@@ -108,6 +117,9 @@ impl AppConfig {
         {
             self.after_capture_show_quick_access = DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS;
         }
+        self.rec_gif_fps = self.rec_gif_fps.clamp(5, 60);
+        self.rec_gif_quality = self.rec_gif_quality.clamp(0.0, 1.0);
+        self.rec_gif_size_idx = self.rec_gif_size_idx.min(3);
         self
     }
 }
