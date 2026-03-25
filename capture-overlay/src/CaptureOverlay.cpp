@@ -14,7 +14,9 @@
 void CaptureOverlay::onMicLevelUpdated(double) { /* unused — using polling */ }
 // ── Constructor ───────────────────────────────────────────────────────────────
 
-CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool timerCaptureEnabled)
+CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
+                               bool timerCaptureEnabled,
+                               bool initialMic, bool initialSpeaker)
     : QWidget(parent)
     , m_background(background)
     , m_hasSelection(false)
@@ -81,8 +83,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     , m_gifQuality(0.75)
     , m_optimizeGif(true)
     , m_gifSizeIdx(0) // 800 x auto (default)
-    , m_recMic(false)
-    , m_recSpeaker(false)
+    , m_recMic(initialMic)
+    , m_recSpeaker(initialSpeaker)
     , m_recWebcam(false)
     , m_micLevel(0.0)
     , m_speakerLevel(0.0)
@@ -191,4 +193,3 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     });
     m_micTimer->start();
 }
-
