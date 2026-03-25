@@ -81,6 +81,7 @@ public:
     /// Returns the selected rectangle in screen (logical pixel) coordinates.
     /// Only valid when QApplication exits with code 0.
     QRect selection() const { return m_selection.normalized(); }
+    void setInitialSelection(const QRect& rect) { m_selection = rect; }
     bool ocrRequested() const { return m_captureIntent == CaptureIntent::Ocr; }
     bool scrollCaptureCompleted() const { return m_scrollCaptureReady; }
     QString scrollCapturePath() const { return m_scrollCapturePath; }
@@ -96,6 +97,13 @@ public:
     bool recordSpeakerEnabled() const { return m_recSpeaker; }
     bool recordClicksEnabled() const { return m_recClicks; }
     bool recordKeystrokesEnabled() const { return m_recKeystrokes; }
+    bool recordDisplayRecTime() const { return m_displayRecTime; }
+    bool recordHidpiEnabled() const { return m_hidpi; }
+    bool recordDoNotDisturb() const { return m_doNotDisturb; }
+    bool recordShowCursor() const { return m_showCursor; }
+    bool recordRememberSelection() const { return m_rememberSelection; }
+    bool recordDimScreen() const { return m_dimScreen; }
+    bool recordShowCountdown() const { return m_showCountdown; }
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -138,6 +146,15 @@ private:
     void drawRecordingPanel(QPainter& p,
                             double selX, double selY,
                             double selW, double selH);
+    void drawSettingsMenu(QPainter& p,
+                          double panelX, double startY);
+    void drawClickOptions(QPainter& p, const QRectF& parentRect);
+    void drawKeystrokeOptions(QPainter& p, const QRectF& parentRect);
+    void drawDropdownPopup(QPainter& p, const QRectF& anchorRect,
+                           const QStringList& options, int selectedIndex);
+    void startClickAnimTimer();
+    void stopClickAnimTimer();
+    void drawKeystrokePreview(QPainter& p, double sx, double sy, double selW, double selH);
     QRectF scrollPrimaryButtonRect() const;
 
     // Webcam
@@ -232,10 +249,76 @@ private:
 
     // Recording panel state
     bool m_recordingPanelOpen;
+    bool m_settingsOpen; // new: true when Settings/Sliders icon clicked
+    int  m_settingsTab;  // new: 0=General, 1=Video, 2=GIF
+    // Dropdown popup state
+    int m_dropdownOpen;      // -1 = none, else index in m_settingsClickableRects
+    QRectF m_dropdownAnchor; // rect of the button that opened the dropdown
+    QStringList m_dropdownOptions;
+    QList<QColor> m_dropdownColors; // optional: if non-empty, draw color circles
+    int* m_dropdownValuePtr; // pointer to the int being edited
+    int  m_hoveredDropdownItem; // index into current dropdown options
+    QList<QRectF> m_dropdownItemRects;
     bool m_recordingToolsHidden; // true when user clicks Record tile
     RecordType m_recordType;
     RecordPanelTile m_hoveredRecordTile;
-    bool m_recControls;
+    
+    // Recording & Settings state (matching screenshot)
+    bool m_recControls;        // "Show controls while recording"
+    bool m_displayRecTime;     // "Display recording time"
+    bool m_hidpi;              // "HiDPI Scaling — record at display scale resolution"
+    bool m_doNotDisturb;       // ""Do Not Disturb" while recording"
+    bool m_showCursor;         // "Show cursor"
+    bool m_recClicks;          // "Highlight clicks"
+    bool m_recKeystrokes;      // "Show keystrokes"
+    bool m_rememberSelection;  // "Remember last selection"
+    bool m_dimScreen;          // "Dim screen while recording"
+    bool m_showCountdown;      // "Show countdown"
+
+    // Click highlight options
+    bool   m_clickOptionsOpen;
+    double m_clickSize;        // 0.0 to 1.0
+    int    m_clickColor;       // index
+    int    m_clickStyle;       // index
+    bool   m_clickAnimate;
+    struct ClickPreview {
+        QPointF pos;
+        qint64  birthMs;       // QDateTime::currentMSecsSinceEpoch() at creation
+    };
+    QList<ClickPreview> m_clickPreviews;
+    bool   m_sliderDragging;   // true while dragging click size slider
+    QRectF m_sliderTrackRect;  // cached click slider track rect for drag calc
+    bool   m_keySliderDragging; // true while dragging keystroke size slider
+    QRectF m_keySliderTrackRect; // cached keystroke slider track rect
+    QTimer* m_clickAnimTimer;  // timer for preview animation ticks
+    double m_clickAnimPhase;   // 0.0 to 1.0 cycling phase for animation
+
+    // Keystroke options
+    bool   m_keystrokeOptionsOpen;
+    bool   m_showKeystrokePreview; // toggle for previewing position/style
+    double m_keySize;        // 0.0 to 1.0
+    int    m_keyPosition;    // index
+    int    m_keyAppearance;  // index
+    bool   m_keyBlurBg;
+    int    m_keyFilter;      // 0=All, 1=Command
+    struct KeyPreview {
+        QString text;
+        qint64  birthMs;
+    };
+    QList<KeyPreview> m_keyPreviews; // recent key presses for live preview
+    
+    // Video settings
+    int  m_videoMaxRes;      // index
+    int  m_videoFps;         // index
+    bool m_recordMono;
+    bool m_openEditor;
+
+    // GIF settings
+    int    m_gifFps;         // value (typically 5-60)
+    double m_gifQuality;     // 0.0 to 1.0
+    bool   m_optimizeGif;
+    int    m_gifSizeIdx;     // index
+
     bool m_recMic;
     bool m_recSpeaker;
     bool m_recWebcam;
@@ -246,19 +329,24 @@ private:
     bool m_webcamFlip = false;
     int m_webcamDevice = -1; // -1 = None, 0+ = /dev/videoN
     QStringList m_webcamDevices; // cached device names
-    bool m_recClicks;
-    bool m_recKeystrokes;
     double m_micLevel; // Normalized level for animation
     double m_speakerLevel; // Normalized level for speaker animation
     QTimer* m_micTimer;
     
     // Recording panel layout caches (for hit testing)
     QRectF m_recPanelRect;
+    QRectF m_settingsPanelRect; // for hit testing settings menu
+    QRectF m_clickOptionsPanelRect;
+    QRectF m_keystrokeOptionsPanelRect;
     QList<QRectF> m_recTileRects; // Matches RecordPanelTile order (skip None)
+    QList<QRectF> m_settingsClickableRects; // checkbox & tab rects for hit testing
+    QList<QRectF> m_clickOptionsClickableRects;
+    QList<QRectF> m_keystrokeOptionsClickableRects;
 
     // Toolbar hover state
     int  m_hoveredTool;             // -1 = none
     bool m_hoveredSizePanel;
+    int  m_hoveredSettingsItem;     // new: index into m_settingsClickableRects, -1 = none
 
     static constexpr int kHandleHitSize = 20;
     static constexpr int kMinSize       = 4;

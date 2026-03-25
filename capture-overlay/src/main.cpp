@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QPixmap>
 #include <QSize>
+#include <QScreen>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
@@ -92,19 +93,33 @@ void printCaptureScreenJson(const QString& path, const QSize& size, const char* 
 
 void printRecordingJson(const QRect& sel, const char* recordType,
                          bool controls, bool mic, bool speaker,
-                         bool clicks, bool keystrokes)
+                         bool clicks, bool keystrokes,
+                         bool displayRecTime, bool hidpi, bool doNotDisturb,
+                         bool showCursor, bool rememberSelection,
+                         bool dimScreen, bool countdown)
 {
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
                 "\"mode\":\"record\",\"record_type\":\"%s\","
                 "\"controls\":%s,\"mic\":%s,\"speaker\":%s,"
-                "\"clicks\":%s,\"keystrokes\":%s}\n",
+                "\"clicks\":%s,\"keystrokes\":%s,"
+                "\"display_rec_time\":%s,\"hidpi\":%s,"
+                "\"notifications\":%s,\"cursor\":%s,"
+                "\"remember_selection\":%s,\"dim_screen\":%s,"
+                "\"countdown\":%s}\n",
                 sel.x(), sel.y(), sel.width(), sel.height(),
                 recordType,
                 controls ? "true" : "false",
                 mic ? "true" : "false",
                 speaker ? "true" : "false",
                 clicks ? "true" : "false",
-                keystrokes ? "true" : "false");
+                keystrokes ? "true" : "false",
+                displayRecTime ? "true" : "false",
+                hidpi ? "true" : "false",
+                doNotDisturb ? "true" : "false",
+                showCursor ? "true" : "false",
+                rememberSelection ? "true" : "false",
+                dimScreen ? "true" : "false",
+                countdown ? "true" : "false");
     std::fflush(stdout);
 }
 
@@ -127,6 +142,7 @@ int main(int argc, char* argv[])
     bool areaInitMode = false;
     bool windowCaptureMode = false;
     QString backgroundPath;
+    QRect restoreSel;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--background") == 0 && i + 1 < argc) {
@@ -138,6 +154,14 @@ int main(int argc, char* argv[])
             areaInitMode = true;
         } else if (std::strcmp(argv[i], "--window-capture") == 0) {
             windowCaptureMode = true;
+        } else if (QString(argv[i]).startsWith("--restore-selection=")) {
+            // Format: --restore-selection=x,y,w,h
+            QString val = QString(argv[i]).mid(20);
+            QStringList parts = val.split(',');
+            if (parts.size() == 4) {
+                restoreSel = QRect(parts[0].toInt(), parts[1].toInt(),
+                                   parts[2].toInt(), parts[3].toInt());
+            }
         }
     }
 
@@ -261,6 +285,9 @@ int main(int argc, char* argv[])
     }
 
     CaptureOverlay overlay(background, nullptr, areaInitMode);
+    if (!restoreSel.isNull() && restoreSel.isValid()) {
+        overlay.setInitialSelection(restoreSel);
+    }
     overlay.show();
 
     const int ret = app.exec();
@@ -292,30 +319,44 @@ int main(int argc, char* argv[])
         return 2;
     }
 
+    // Calculate Y offset: the overlay may not cover the full screen height
+    // (e.g., GNOME top bar is not covered on Wayland without Layer Shell)
+    int screenHeight = 0;
+    for (QScreen* screen : QGuiApplication::screens()) {
+        screenHeight = std::max(screenHeight, screen->geometry().height());
+    }
+    const int yOffset = screenHeight - overlay.height();
+
     // Handle recording request
     if (overlay.recordRequested()) {
         const char* recordType = "video";
         if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
             recordType = "gif";
         }
-        // Translate from local overlay coords to global screen coords (same as the
-        // areaInitMode path above — the overlay covers the full screen but its
-        // geometry().topLeft() may be non-zero on multi-monitor setups).
-        const QRect selGlobal =
-            sel.translated(overlay.geometry().x(), overlay.geometry().y());
+        // Translate from local overlay coords to global screen coords
+        // Include yOffset because overlay doesn't cover the top bar
+        const QRect selGlobal = sel.translated(overlay.geometry().x(), yOffset);
         printRecordingJson(selGlobal, recordType,
                            overlay.recordControlsEnabled(),
                            overlay.recordMicEnabled(),
                            overlay.recordSpeakerEnabled(),
                            overlay.recordClicksEnabled(),
-                           overlay.recordKeystrokesEnabled());
+                           overlay.recordKeystrokesEnabled(),
+                           overlay.recordDisplayRecTime(),
+                           overlay.recordHidpiEnabled(),
+                           overlay.recordDoNotDisturb(),
+                           overlay.recordShowCursor(),
+                           overlay.recordRememberSelection(),
+                           overlay.recordDimScreen(),
+                           overlay.recordShowCountdown());
         return 0;
     }
 
     if (areaInitMode) {
         const bool ocrRequested = overlay.ocrRequested();
-        const QRect selGlobal =
-          sel.translated(overlay.geometry().x(), overlay.geometry().y());
+        // Translate from local overlay coords to global screen coords
+        // Include yOffset because overlay doesn't cover the top bar
+        const QRect selGlobal = sel.translated(overlay.geometry().x(), yOffset);
         const bool isWayland = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
         const QString desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
         const bool isGnomeWayland =

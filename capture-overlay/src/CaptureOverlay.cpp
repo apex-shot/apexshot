@@ -611,6 +611,54 @@ void ScrollControlPanel::positionNear(const QRect& captureArea, const QSize& scr
     setGeometry(x, y, panelW, panelH);
 }
 
+// ── Helper: convert key event to preview display text ──────────────────────────
+
+static QString keyEventToPreviewText(QKeyEvent* event)
+{
+    int key = event->key();
+    Qt::KeyboardModifiers mods = event->modifiers();
+
+    // Modifier keys alone — skip
+    if (key == Qt::Key_Shift || key == Qt::Key_Control || key == Qt::Key_Alt ||
+        key == Qt::Key_Meta || key == Qt::Key_CapsLock || key == Qt::Key_unknown) {
+        return {};
+    }
+
+    // Special keys
+    switch (key) {
+    case Qt::Key_Return:
+    case Qt::Key_Enter:  return "\u21A9";  // ↩
+    case Qt::Key_Backspace: return "\u232B"; // ⌫
+    case Qt::Key_Delete:    return "\u2326"; // ⌦
+    case Qt::Key_Tab:       return "\u21E5"; // ⇥
+    case Qt::Key_Space:     return " ";
+    case Qt::Key_Escape:    return "Esc";
+    case Qt::Key_Up:        return "\u2191"; // ↑
+    case Qt::Key_Down:      return "\u2193"; // ↓
+    case Qt::Key_Left:      return "\u2190"; // ←
+    case Qt::Key_Right:     return "\u2192"; // →
+    default: break;
+    }
+
+    // Build string with modifier prefixes
+    QString result;
+    if (mods & Qt::ControlModifier) result += "\u2318 ";  // ⌘
+    if (mods & Qt::AltModifier)     result += "\u2325 ";  // ⌥
+    if (mods & Qt::ShiftModifier)   result += "\u21E7 ";  // ⇧
+
+    // Key text
+    QString text = event->text();
+    if (!text.isEmpty() && text.at(0).isPrint()) {
+        result += text.toUpper();
+    } else {
+        // Named key
+        QString name = QKeySequence(key).toString();
+        if (!name.isEmpty()) result += name;
+    }
+
+    return result.trimmed();
+}
+
 // ── Constructor ───────────────────────────────────────────────────────────────
 
 CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool timerCaptureEnabled)
@@ -641,17 +689,54 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent, bool 
     , m_recordingToolsHidden(false)
     , m_recordType(RecordType::None)
     , m_hoveredRecordTile(RecordPanelTile::None)
+    , m_settingsOpen(false)
+    , m_settingsTab(0)
+    , m_dropdownOpen(-1)
+    , m_dropdownValuePtr(nullptr)
+    , m_hoveredDropdownItem(-1)
     , m_recControls(true)
+    , m_displayRecTime(false)
+    , m_hidpi(false)
+    , m_doNotDisturb(true)
+    , m_showCursor(true)
+    , m_recClicks(false)
+    , m_recKeystrokes(false)
+    , m_rememberSelection(false)
+    , m_dimScreen(true)
+    , m_showCountdown(true)
+    , m_clickOptionsOpen(false)
+    , m_clickSize(0.3)
+    , m_clickColor(0)
+    , m_clickStyle(0)
+    , m_clickAnimate(true)
+    , m_sliderDragging(false)
+    , m_keySliderDragging(false)
+    , m_clickAnimTimer(nullptr)
+    , m_clickAnimPhase(0.0)
+    , m_keystrokeOptionsOpen(false)
+    , m_showKeystrokePreview(false)
+    , m_keySize(0.32) // Matches screenshot better as default
+    , m_keyPosition(0) // Bottom-Center
+    , m_keyAppearance(0) // Dark
+    , m_keyBlurBg(true)
+    , m_keyFilter(0) // Show all keys
+    , m_videoMaxRes(0) // Original
+    , m_videoFps(2) // 50 (index 2: 24, 30, 50, 60)
+    , m_recordMono(false)
+    , m_openEditor(true)
+    , m_gifFps(50)
+    , m_gifQuality(0.75)
+    , m_optimizeGif(true)
+    , m_gifSizeIdx(0) // 800 x auto (default)
     , m_recMic(false)
     , m_recSpeaker(false)
     , m_recWebcam(false)
-    , m_recClicks(false)
-    , m_recKeystrokes(false)
     , m_micLevel(0.0)
     , m_speakerLevel(0.0)
     , m_micTimer(new QTimer(this))
     , m_hoveredTool(-1)
     , m_hoveredSizePanel(false)
+    , m_hoveredSettingsItem(-1)
 {
     // Init GStreamer for webcam capture
     static bool gstInited = false;
@@ -1003,29 +1088,50 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         p.restore();
     }
 
-    // ── Visible countdown overlay ─────────────────────────────────────────────
+    // ── Keystroke preview — drawn AFTER sub-panels so it's always on top ─────
+    if (m_showKeystrokePreview) {
+        drawKeystrokePreview(p, sx, sy, selW, selH);
+    }
+
+    // ── Visible countdown overlay (Top Center Pill) ──────────────────────────
     if (m_countdownActive && m_countdownValue > 0) {
-        const double bubbleSize = std::min(sw, sh) * 0.24;
-        const double bubbleDiameter = std::clamp(bubbleSize, 120.0, 220.0);
-        const QRectF bubbleRect((sw - bubbleDiameter) / 2.0,
-                                (sh - bubbleDiameter) / 2.0,
-                                bubbleDiameter,
-                                bubbleDiameter);
+        const double pillW = 108.0;
+        const double pillH = 48.0;
+        const double pillX = (sw - pillW) / 2.0;
+        const double pillY = 40.0;
+        const QRectF pillRect(pillX, pillY, pillW, pillH);
 
         p.save();
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0, 0, 0, 176));
-        p.drawEllipse(bubbleRect);
-        p.setPen(QPen(QColor(255, 255, 255, 72), 2.0));
-        p.setBrush(Qt::NoBrush);
-        p.drawEllipse(bubbleRect.adjusted(1.5, 1.5, -1.5, -1.5));
+        p.setRenderHint(QPainter::Antialiasing);
 
+        // Draw pill background
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(253, 76, 70)); // Vibrant Red/Orange matching screenshot
+        p.drawRoundedRect(pillRect, pillH / 2.0, pillH / 2.0);
+
+        // Draw timer icon
+        const double iconCX = pillX + 36.0;
+        const double iconCY = pillY + pillH / 2.0;
+
+        p.save();
+        p.setPen(QPen(QColor(255, 255, 255, 180), 2.2, Qt::SolidLine, Qt::RoundCap));
+        p.setBrush(Qt::NoBrush);
+        p.drawArc(QRectF(iconCX - 8.5, iconCY - 8.5, 17, 17), 50 * 16, 260 * 16);
+        p.drawLine(QPointF(iconCX, iconCY - 8.5), QPointF(iconCX, iconCY - 5.5));
+        p.drawLine(QPointF(iconCX, iconCY), QPointF(iconCX + 4.5, iconCY - 4.5)); // diagonal hand
+        p.restore();
+
+        // Draw countdown number
         QFont countdownFont(QStringLiteral("Sans"));
         countdownFont.setBold(true);
-        countdownFont.setPointSizeF(bubbleDiameter * 0.34);
+        countdownFont.setPointSizeF(20);
         p.setFont(countdownFont);
-        p.setPen(QColor(255, 255, 255, 252));
-        p.drawText(bubbleRect, Qt::AlignCenter, QString::number(m_countdownValue));
+        p.setPen(Qt::white);
+
+        p.drawText(QRectF(pillX + 58, pillY, 40, pillH),
+                   Qt::AlignLeft | Qt::AlignVCenter,
+                   QString::number(m_countdownValue));
+
         p.restore();
     }
 }
@@ -1305,6 +1411,826 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
 
     drawActionRow(0, 17, "Record GIF", "⌥ ↵", RecordPanelTile::RecordGif);
     drawActionRow(1, 16, "Record Video", "↵", RecordPanelTile::RecordVideo);
+
+    if (m_settingsOpen) {
+        drawSettingsMenu(p, panelX, startY);
+    }
+}
+
+void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
+{
+    const double menuW = 440.0;
+    const double menuH = 500.0;
+    const double menuX = std::max(10.0, std::min(panelX + (300.0 - menuW) / 2.0, (double)width() - menuW - 10.0));
+    
+    // Check space above. Recording panel height is ~216px.
+    double menuY = startY - menuH - 12.0; 
+    if (menuY < 10.0) {
+        // Not enough space above, show below the recording panel
+        double panelBottom = startY + 216.0;
+        if (panelBottom + menuH + 12.0 < height()) {
+            menuY = panelBottom + 12.0;
+        } else {
+            menuY = 10.0;
+        }
+    }
+    
+    m_settingsPanelRect = QRectF(menuX, menuY, menuW, menuH);
+    m_settingsClickableRects.clear();
+
+    const QColor accentColor(122, 100, 255);
+    const QImage* blurPtr = m_blurredBg.isNull() ? nullptr : &m_blurredBg;
+
+    // Outer glow
+    p.save();
+    QRadialGradient glow(menuX + menuW/2.0, menuY + menuH/2.0, menuW);
+    glow.setColorAt(0, QColor(accentColor.red(), accentColor.green(), accentColor.blue(), 35));
+    glow.setColorAt(0.6, QColor(0, 0, 0, 0));
+    p.fillRect(QRectF(menuX - 40, menuY - 40, menuW + 80, menuH + 80), glow);
+    p.restore();
+
+    drawFrostedPanel(p, menuX, menuY, menuW, menuH, 12.0, blurPtr, width(), height());
+
+    // Tabs
+    const QStringList tabs = {"General", "Video", "GIF"};
+    const double tabW = 70.0;
+    const double tabH = 30.0;
+    double tabStartX = menuX + (menuW - tabs.size() * tabW) / 2.0;
+    double tabY = menuY + 15.0;
+
+    for (int i = 0; i < tabs.size(); ++i) {
+        QRectF tr(tabStartX + i * tabW, tabY, tabW, tabH);
+        m_settingsClickableRects.append(tr); // tab rects
+        
+        bool hovered = (m_hoveredSettingsItem == i);
+        if (m_settingsTab == i || hovered) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 255, 255, m_settingsTab == i ? 45 : 22));
+            p.drawRoundedRect(tr, 8.0, 8.0);
+            p.setPen(Qt::white);
+        } else {
+            p.setPen(QColor(255, 255, 255, 180));
+        }
+        
+        QFont tf; tf.setFamily("Sans"); tf.setPointSizeF(11.0); tf.setBold(m_settingsTab == i);
+        p.setFont(tf);
+        p.drawText(tr, Qt::AlignCenter, tabs[i]);
+    }
+
+    if (m_settingsTab == 0) { // General
+        double currY = tabY + 50.0;
+        const double labelX = menuX + 25.0;
+        const double valueX = menuX + 140.0;
+        const double rowH = 32.0;
+
+        auto drawSetting = [&](const QString& label, const QString& desc, bool checked, bool* target) {
+            QRectF labelRect(labelX, currY, 110, rowH);
+            p.setFont(QFont("Sans", 10, QFont::Bold));
+            p.setPen(QColor(255, 255, 255, 200));
+            p.drawText(labelRect, Qt::AlignRight | Qt::AlignVCenter, label);
+
+            QRectF checkArea(valueX, currY, menuW - (valueX - menuX) - 20, rowH);
+            int itemIdx = m_settingsClickableRects.size();
+            m_settingsClickableRects.append(checkArea); // settings row rect
+            
+            bool hovered = (m_hoveredSettingsItem == itemIdx);
+            if (hovered) {
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(255, 255, 255, 12));
+                p.drawRoundedRect(checkArea.adjusted(-5, 0, 5, 0), 6, 6);
+            }
+
+            // Checkbox
+            QRectF cb(valueX, currY + (rowH - 18) / 2.0, 18, 18);
+            p.setRenderHint(QPainter::Antialiasing);
+            if (checked) {
+                p.setPen(Qt::NoPen);
+                p.setBrush(accentColor);
+                p.drawRoundedRect(cb, 4, 4);
+                p.setPen(QPen(Qt::white, 2));
+                p.drawLine(QPointF(cb.x() + 4, cb.y() + 9), QPointF(cb.x() + 8, cb.y() + 13));
+                p.drawLine(QPointF(cb.x() + 8, cb.y() + 13), QPointF(cb.x() + 14, cb.y() + 5));
+            } else {
+                p.setPen(QPen(QColor(255, 255, 255, 60), 1.5));
+                p.setBrush(QColor(0, 0, 0, 40));
+                p.drawRoundedRect(cb, 4, 4);
+            }
+
+            p.setFont(QFont("Sans", 10, QFont::Normal));
+            p.setPen(Qt::white);
+            p.drawText(QRectF(valueX + 28, currY, checkArea.width() - 28, rowH), Qt::AlignLeft | Qt::AlignVCenter, desc);
+            
+            // Draw "Options..." button for certain settings
+            if (desc == "Highlight clicks") {
+                QRectF btn(menuX + menuW - 100, currY + (rowH - 24) / 2.0, 75, 24);
+                m_settingsClickableRects.append(btn); // button rect
+                
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(255, 255, 255, 35));
+                p.drawRoundedRect(btn, 6, 6);
+                p.setPen(Qt::white);
+                p.setFont(QFont("Sans", 9));
+                p.drawText(btn, Qt::AlignCenter, "Options...");
+            } else if (desc == "Show keystrokes") {
+                QRectF btn(menuX + menuW - 100, currY + (rowH - 24) / 2.0, 75, 24);
+                m_settingsClickableRects.append(btn); // button rect
+                
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(255, 255, 255, 35));
+                p.drawRoundedRect(btn, 6, 6);
+                p.setPen(Qt::white);
+                p.setFont(QFont("Sans", 9));
+                p.drawText(btn, Qt::AlignCenter, "Options...");
+            }
+            
+            currY += rowH;
+        };
+
+        drawSetting("Controls:", "Show controls while recording", m_recControls, &m_recControls);
+        drawSetting("Menu bar:", "Display recording time", m_displayRecTime, &m_displayRecTime);
+        drawSetting("HiDPI:", "Record at display scale resolution", m_hidpi, &m_hidpi);
+        drawSetting("Notifications:", "\"Do Not Disturb\" while recording", m_doNotDisturb, &m_doNotDisturb);
+        
+        currY += 10.0; // Gap
+        drawSetting("Cursor:", "Show cursor", m_showCursor, &m_showCursor);
+        drawSetting("", "Highlight clicks", m_recClicks, &m_recClicks);
+        
+        currY += 10.0; // Gap
+        drawSetting("Keyboard:", "Show keystrokes", m_recKeystrokes, &m_recKeystrokes);
+        
+        currY += 10.0; // Gap
+        drawSetting("Recording area:", "Remember last selection", m_rememberSelection, &m_rememberSelection);
+        drawSetting("", "Dim screen while recording", m_dimScreen, &m_dimScreen);
+        drawSetting("", "Show countdown", m_showCountdown, &m_showCountdown);
+    } else if (m_settingsTab == 1) { // Video
+        double currY = tabY + 50.0;
+        const double labelX = menuX + 20.0;
+        const double valueX = menuX + 130.0;
+        const double rowH = 45.0;
+
+        auto drawLabel = [&](const QString& txt, double y) {
+            p.setFont(QFont("Sans", 10, QFont::Bold));
+            p.setPen(QColor(255, 255, 255, 200));
+            p.drawText(QRectF(labelX, y, 100, 30), Qt::AlignRight | Qt::AlignVCenter, txt);
+        };
+
+        auto drawSubtext = [&](const QString& txt, double y) {
+            p.setFont(QFont("Sans", 9));
+            p.setPen(QColor(255, 255, 255, 120));
+            p.drawText(QRectF(valueX, y, menuW - (valueX - menuX) - 25, 80), Qt::AlignLeft | Qt::TextWordWrap, txt);
+        };
+
+        // 1. Max resolution
+        drawLabel("Max resolution:", currY);
+        QRectF resBtn(valueX, currY, 140, 30);
+        int resIdx = m_settingsClickableRects.size();
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+        p.setBrush(QColor(0, 0, 0, 60));
+        if (m_hoveredSettingsItem == resIdx) p.setBrush(QColor(255, 255, 255, 20));
+        p.drawRoundedRect(resBtn, 6, 6);
+        p.setPen(Qt::white);
+        p.setFont(QFont("Sans", 10));
+        const QStringList resOptions = {"Original", "1080p", "720p"};
+        p.drawText(resBtn.adjusted(10, 0, -25, 0), Qt::AlignLeft | Qt::AlignVCenter, resOptions[m_videoMaxRes]);
+        // Chevron
+        p.setPen(QPen(Qt::white, 1.5));
+        p.drawLine(QPointF(resBtn.right() - 15, resBtn.center().y() - 3), QPointF(resBtn.right() - 11, resBtn.center().y() + 1));
+        p.drawLine(QPointF(resBtn.right() - 11, resBtn.center().y() + 1), QPointF(resBtn.right() - 7, resBtn.center().y() - 3));
+        m_settingsClickableRects.append(resBtn); 
+        currY += 35;
+        drawSubtext("Set maximum resolution to reduce file size and upload time.", currY);
+        currY += 55;
+
+        // 2. Video FPS
+        drawLabel("Video FPS:", currY);
+        QRectF fpsBtn(valueX, currY, 80, 30);
+        int fpsIdx = m_settingsClickableRects.size();
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+        p.setBrush(QColor(0, 0, 0, 60));
+        if (m_hoveredSettingsItem == fpsIdx) p.setBrush(QColor(255, 255, 255, 20));
+        p.drawRoundedRect(fpsBtn, 6, 6);
+        p.setPen(Qt::white);
+        const QStringList fpsOptions = {"24", "30", "50", "60"};
+        p.drawText(fpsBtn.adjusted(10, 0, -25, 0), Qt::AlignLeft | Qt::AlignVCenter, fpsOptions[m_videoFps]);
+        // Chevron
+        p.setPen(QPen(Qt::white, 1.5));
+        p.drawLine(QPointF(fpsBtn.right() - 15, fpsBtn.center().y() - 3), QPointF(fpsBtn.right() - 11, fpsBtn.center().y() + 1));
+        p.drawLine(QPointF(fpsBtn.right() - 11, fpsBtn.center().y() + 1), QPointF(fpsBtn.right() - 7, fpsBtn.center().y() - 3));
+        m_settingsClickableRects.append(fpsBtn);
+        currY += 50;
+
+        // 3. Audio
+        drawLabel("Audio:", currY);
+        QRectF audioBtn(valueX, currY, 200, 30);
+        int audioIdx = m_settingsClickableRects.size();
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+        p.setBrush(QColor(255, 255, 255, 30));
+        if (m_hoveredSettingsItem == audioIdx) p.setBrush(QColor(255, 255, 255, 50));
+        p.drawRoundedRect(audioBtn, 6, 6);
+        p.setPen(Qt::white);
+        p.drawText(audioBtn, Qt::AlignCenter, "Computer Audio Settings...");
+        m_settingsClickableRects.append(audioBtn);
+        currY += 45;
+
+        // 4. Record mono
+        QRectF monoRow(valueX, currY, 200, 30);
+        QRectF cb1(valueX, currY + (30 - 18) / 2.0, 18, 18);
+        int monoIdx = m_settingsClickableRects.size();
+        if (m_recordMono) {
+            p.setPen(Qt::NoPen); p.setBrush(accentColor); p.drawRoundedRect(cb1, 4, 4);
+            p.setPen(QPen(Qt::white, 2));
+            p.drawLine(QPointF(cb1.x() + 4, cb1.y() + 9), QPointF(cb1.x() + 8, cb1.y() + 13));
+            p.drawLine(QPointF(cb1.x() + 8, cb1.y() + 13), QPointF(cb1.x() + 14, cb1.y() + 5));
+        } else {
+            p.setPen(QPen(QColor(255, 255, 255, 60), 1.5)); p.setBrush(QColor(0, 0, 0, 40)); p.drawRoundedRect(cb1, 4, 4);
+        }
+        
+        bool hoveredMono = (m_hoveredSettingsItem == monoIdx);
+        if (hoveredMono) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 255, 255, 12));
+            p.drawRoundedRect(monoRow.adjusted(-5, 0, 5, 0), 6, 6);
+        }
+
+        p.setPen(Qt::white);
+        p.drawText(QRectF(valueX + 28, currY, 172, 30), Qt::AlignLeft | Qt::AlignVCenter, "Record audio in mono");
+        m_settingsClickableRects.append(monoRow);
+        currY += 50;
+
+        // 5. Video Encoder
+        drawLabel("Video Encoder:", currY);
+        QRectF encoderRow(valueX, currY, 250, 30);
+        QRectF cb2(valueX, currY + (30 - 18) / 2.0, 18, 18);
+        int encoderIdx = m_settingsClickableRects.size();
+        if (m_openEditor) {
+            p.setPen(Qt::NoPen); p.setBrush(accentColor); p.drawRoundedRect(cb2, 4, 4);
+            p.setPen(QPen(Qt::white, 2));
+            p.drawLine(QPointF(cb2.x() + 4, cb2.y() + 9), QPointF(cb2.x() + 8, cb2.y() + 13));
+            p.drawLine(QPointF(cb2.x() + 8, cb2.y() + 13), QPointF(cb2.x() + 14, cb2.y() + 5));
+        } else {
+            p.setPen(QPen(QColor(255, 255, 255, 60), 1.5)); p.setBrush(QColor(0, 0, 0, 40)); p.drawRoundedRect(cb2, 4, 4);
+        }
+        
+        bool hovered = (m_hoveredSettingsItem == encoderIdx);
+        if (hovered) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 255, 255, 12));
+            p.drawRoundedRect(encoderRow.adjusted(-5, 0, 5, 0), 6, 6);
+        }
+
+        p.setPen(Qt::white);
+        p.drawText(QRectF(valueX + 28, currY, 222, 30), Qt::AlignLeft | Qt::AlignVCenter, "Open Video Editor after recording");
+        m_settingsClickableRects.append(encoderRow);
+        currY += 35;
+        drawSubtext("Use Video Editor to change the recording quality, resolution and adjust audio settings.", currY);
+
+    } else if (m_settingsTab == 2) { // GIF
+        double currY = tabY + 50.0;
+        const double labelX = menuX + 20.0;
+        const double valueX = menuX + 130.0;
+        const double controlW = 220.0;
+        const double rowH = 45.0;
+
+        auto drawLabel = [&](const QString& txt, double y) {
+            p.setFont(QFont("Sans", 10, QFont::Bold));
+            p.setPen(QColor(255, 255, 255, 200));
+            p.drawText(QRectF(labelX, y, 100, 30), Qt::AlignRight | Qt::AlignVCenter, txt);
+        };
+
+        auto drawSubtext = [&](const QString& txt, double y) {
+            p.setFont(QFont("Sans", 9));
+            p.setPen(QColor(255, 255, 255, 120));
+            p.drawText(QRectF(valueX, y, menuW - (valueX - menuX) - 25, 80), Qt::AlignLeft | Qt::TextWordWrap, txt);
+        };
+
+        // 1. GIF FPS
+        drawLabel("GIF FPS:", currY);
+        QRectF fpsBox(valueX, currY, 45, 30);
+        p.setPen(QPen(QColor(255, 255, 255, 28), 1.0));
+        p.setBrush(QColor(0, 0, 0, 80));
+        p.drawRoundedRect(fpsBox, 6, 6);
+        p.setPen(Qt::white);
+        p.setFont(QFont("Sans", 10));
+        p.drawText(fpsBox, Qt::AlignCenter, QString::number(m_gifFps));
+
+        double sliderX = valueX + 55;
+        double sliderW = 220.0; // Fixed slider width for GIF FPS
+        QRectF sliderTrack(sliderX, currY + (30 - 4) / 2.0, sliderW, 4);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255, 30));
+        p.drawRoundedRect(sliderTrack, 2, 2);
+        
+        // Progress fill
+        double progress = (m_gifFps - 5) / 55.0; // range 5 to 60
+        QRectF progressRect(sliderX, currY + (30 - 4) / 2.0, sliderW * progress, 4);
+        p.setBrush(accentColor);
+        p.drawRoundedRect(progressRect, 2, 2);
+
+        double handleX = sliderX + progress * sliderW;
+        QRectF handle(handleX - 10, currY + (30 - 20) / 2.0, 20, 20);
+        p.setBrush(Qt::white);
+        p.drawEllipse(handle);
+        m_settingsClickableRects.append(QRectF(sliderX, currY, sliderW, 30)); // index 3 in GIF tab
+        
+        currY += 50;
+
+        // 2. GIF Quality
+        drawLabel("GIF quality:", currY);
+        double qSliderW = 160.0;
+        QRectF qSliderTrack(valueX, currY + (30 - 4) / 2.0, qSliderW, 4);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255, 30));
+        p.drawRoundedRect(qSliderTrack, 2, 2);
+        
+        // Ticks
+        p.setPen(QPen(QColor(255, 255, 255, 60), 1));
+        for (int i = 0; i <= 8; ++i) {
+            double tx = valueX + (qSliderW / 8.0) * i;
+            p.drawLine(QPointF(tx, currY + 15 - 5), QPointF(tx, currY + 15 + 5));
+        }
+
+        double qHandleX = valueX + m_gifQuality * qSliderW;
+        QRectF qHandle(qHandleX - 5, currY + (30 - 18) / 2.0, 10, 18);
+        p.setPen(Qt::NoPen);
+        p.setBrush(Qt::white);
+        p.drawRoundedRect(qHandle, 3, 3);
+        
+        p.setFont(QFont("Sans", 8));
+        p.setPen(QColor(255, 255, 255, 120));
+        p.drawText(QRectF(valueX, currY + 28, 40, 20), Qt::AlignLeft, "Low");
+        p.drawText(QRectF(valueX + qSliderW - 40, currY + 28, 40, 20), Qt::AlignRight, "High");
+        
+        m_settingsClickableRects.append(QRectF(valueX, currY, qSliderW, 30)); // index 4 in GIF tab
+
+        // Optimize Checkbox
+        QRectF optCheck(valueX + qSliderW + 10, currY, 120, 30);
+        QRectF cb(optCheck.x(), currY + (30 - 18) / 2.0, 18, 18);
+        if (m_optimizeGif) {
+            p.setPen(Qt::NoPen); p.setBrush(accentColor); p.drawRoundedRect(cb, 4, 4);
+            p.setPen(QPen(Qt::white, 2));
+            p.drawLine(QPointF(cb.x() + 4, cb.y() + 9), QPointF(cb.x() + 8, cb.y() + 13));
+            p.drawLine(QPointF(cb.x() + 8, cb.y() + 13), QPointF(cb.x() + 14, cb.y() + 5));
+        } else {
+            p.setPen(QPen(QColor(255, 255, 255, 60), 1.5)); p.setBrush(QColor(0, 0, 0, 40)); p.drawRoundedRect(cb, 4, 4);
+        }
+        p.setPen(Qt::white); p.setFont(QFont("Sans", 10));
+        p.drawText(optCheck.adjusted(25, 0, 0, 0), Qt::AlignLeft | Qt::AlignVCenter, "Optimize GIFs");
+        m_settingsClickableRects.append(optCheck); // index 5 in GIF tab
+
+        currY += 55;
+        drawSubtext("Setting the quality to maximum can speed up the processing time, but it will increase file size.", currY);
+        
+        currY += 60;
+
+        // 3. GIF size
+        drawLabel("GIF size:", currY);
+        QRectF sizeBtn(valueX, currY, 180, 30);
+        int sizeIdx = m_settingsClickableRects.size();
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+        p.setBrush(QColor(0, 0, 0, 60));
+        if (m_hoveredSettingsItem == sizeIdx) p.setBrush(QColor(255, 255, 255, 20));
+        p.drawRoundedRect(sizeBtn, 6, 6);
+        p.setPen(Qt::white);
+        const QStringList sizeOptions = {"800 x auto (default)", "640 x auto", "480 x auto", "Original"};
+        p.drawText(sizeBtn.adjusted(10, 0, -25, 0), Qt::AlignLeft | Qt::AlignVCenter, sizeOptions[m_gifSizeIdx]);
+        // Chevron
+        p.setPen(QPen(Qt::white, 1.5));
+        p.drawLine(QPointF(sizeBtn.right() - 15, sizeBtn.center().y() - 3), QPointF(sizeBtn.right() - 11, sizeBtn.center().y() + 1));
+        p.drawLine(QPointF(sizeBtn.right() - 11, sizeBtn.center().y() + 1), QPointF(sizeBtn.right() - 7, sizeBtn.center().y() - 3));
+        m_settingsClickableRects.append(sizeBtn); // index 6 in GIF tab
+        
+        currY += 35;
+        drawSubtext("Set maximum resolution of your GIFs. Changing it will affect file size and quality. ApexShot will only downscale the GIF if needed.", currY);
+    }
+
+    if (m_clickOptionsOpen) {
+        drawClickOptions(p, m_settingsPanelRect);
+    }
+    if (m_keystrokeOptionsOpen) {
+        drawKeystrokeOptions(p, m_settingsPanelRect);
+    }
+
+    if (m_dropdownOpen != -1) {
+        drawDropdownPopup(p, m_dropdownAnchor, m_dropdownOptions, 
+                          m_dropdownValuePtr ? *m_dropdownValuePtr : -1);
+    }
+}
+
+void CaptureOverlay::drawDropdownPopup(QPainter& p, const QRectF& anchorRect,
+                                        const QStringList& options, int selectedIndex)
+{
+    if (options.isEmpty()) return;
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+
+    const double itemH = 34.0;
+    const double menuW = std::max(anchorRect.width(), 160.0);
+    const double menuH = options.size() * itemH + 10.0;
+    
+    double menuX = anchorRect.x();
+    double menuY = anchorRect.bottom() + 4.0;
+    
+    // Check screen bounds
+    if (menuX + menuW > width() - 10) menuX = width() - menuW - 10;
+    if (menuY + menuH > height() - 10) menuY = anchorRect.top() - menuH - 4.0;
+
+    QRectF menuRect(menuX, menuY, menuW, menuH);
+    
+    // Background
+    p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+    p.setBrush(QColor(35, 35, 35, 245));
+    p.drawRoundedRect(menuRect, 8, 8);
+
+    m_dropdownItemRects.clear();
+    const bool hasColors = !m_dropdownColors.isEmpty();
+    for (int i = 0; i < options.size(); ++i) {
+        QRectF itemRect(menuX + 5, menuY + 5 + i * itemH, menuW - 10, itemH);
+        m_dropdownItemRects.append(itemRect);
+
+        bool hovered = (m_hoveredDropdownItem == i);
+        if (hovered) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(122, 100, 255, 180)); // ApexShot Indigo
+            p.drawRoundedRect(itemRect, 6, 6);
+        }
+
+        // Left-aligned content
+        double textX = itemRect.x() + 10;
+
+        // Color circle (left side)
+        if (hasColors && i < m_dropdownColors.size()) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(m_dropdownColors[i]);
+            p.drawEllipse(QPointF(itemRect.x() + 18, itemRect.center().y()), 7, 7);
+            textX = itemRect.x() + 34;
+        }
+
+        p.setPen(Qt::white);
+        p.setFont(QFont("Sans", 10, selectedIndex == i ? QFont::Bold : QFont::Normal));
+        p.drawText(QRectF(textX, itemRect.y(), itemRect.right() - textX - 10, itemRect.height()),
+                   Qt::AlignLeft | Qt::AlignVCenter, options[i]);
+        
+        if (selectedIndex == i) {
+            p.setBrush(Qt::white);
+            p.setPen(Qt::NoPen);
+            p.drawEllipse(QPointF(itemRect.right() - 15, itemRect.center().y()), 2.5, 2.5);
+        }
+    }
+    p.restore();
+}
+
+void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
+{
+    const double menuW = 440.0;
+    const double menuH = 500.0;
+    const double menuX = parentRect.x();
+    const double menuY = parentRect.y();
+    
+    m_clickOptionsPanelRect = parentRect;
+    m_clickOptionsClickableRects.clear();
+
+    const QColor accentColor(122, 100, 255);
+    const QImage* blurPtr = m_blurredBg.isNull() ? nullptr : &m_blurredBg;
+
+    // Color palette
+    static const QStringList colorNames = {
+        "Gray", "Indigo", "Red", "Blue", "Green", "Yellow", "Orange", "Purple", "White"
+    };
+    static const QList<QColor> colorValues = {
+        QColor(180, 180, 180),  // Gray
+        QColor(122, 100, 255),  // Indigo
+        QColor(255, 60, 60),    // Red
+        QColor(60, 120, 255),   // Blue
+        QColor(60, 200, 80),    // Green
+        QColor(255, 210, 50),   // Yellow
+        QColor(255, 150, 30),   // Orange
+        QColor(180, 60, 220),   // Purple
+        QColor(255, 255, 255),  // White
+    };
+    auto clickColorValue = [&](int idx) -> QColor {
+        return (idx >= 0 && idx < colorValues.size()) ? colorValues[idx] : colorValues[0];
+    };
+
+    // Redraw base panel to "overlay" the settings menu (or we could just draw over it)
+    // Actually, drawing over it is fine.
+    drawFrostedPanel(p, menuX, menuY, menuW, menuH, 12.0, blurPtr, width(), height());
+
+    const double labelX = menuX + 25.0;
+    const double valueX = menuX + 130.0;
+    const double controlW = 280.0;
+    const double rowH = 45.0;
+    double currY = menuY + 40.0;
+
+    auto drawLabel = [&](const QString& txt) {
+        p.setFont(QFont("Sans", 10, QFont::Bold));
+        p.setPen(QColor(255, 255, 255, 200));
+        p.drawText(QRectF(labelX, currY, 90, rowH), Qt::AlignRight | Qt::AlignVCenter, txt);
+    };
+
+    // 1. Size Slider
+    drawLabel("Size:");
+    QRectF sliderTrack(valueX, currY + (rowH - 4) / 2.0, controlW, 4);
+    m_sliderTrackRect = sliderTrack;
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(255, 255, 255, 30));
+    p.drawRoundedRect(sliderTrack, 2, 2);
+    
+    double handleX = valueX + m_clickSize * controlW;
+    QRectF handle(handleX - 8, currY + (rowH - 24) / 2.0, 16, 24);
+    p.setBrush(Qt::white);
+    p.drawRoundedRect(handle, 4, 4);
+    m_clickOptionsClickableRects.append(QRectF(valueX, currY, controlW, rowH)); // index 0: slider
+
+    currY += rowH;
+
+    // 2. Color Dropdown
+    drawLabel("Color:");
+    QRectF colorBtn(valueX, currY + (rowH - 30) / 2.0, 160, 30);
+    p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+    p.setBrush(QColor(0, 0, 0, 60));
+    p.drawRoundedRect(colorBtn, 6, 6);
+    
+    // Color circle
+    p.setPen(Qt::NoPen);
+    p.setBrush(clickColorValue(m_clickColor));
+    p.drawEllipse(QPointF(colorBtn.x() + 15, colorBtn.center().y()), 7, 7);
+    
+    p.setPen(Qt::white);
+    p.setFont(QFont("Sans", 10));
+    p.drawText(colorBtn.adjusted(30, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, colorNames[m_clickColor]);
+    
+    // Chevron
+    p.setPen(QPen(Qt::white, 1.5));
+    p.drawLine(QPointF(colorBtn.right() - 15, colorBtn.center().y() - 3), QPointF(colorBtn.right() - 11, colorBtn.center().y() + 1));
+    p.drawLine(QPointF(colorBtn.right() - 11, colorBtn.center().y() + 1), QPointF(colorBtn.right() - 7, colorBtn.center().y() - 3));
+    
+    m_clickOptionsClickableRects.append(colorBtn); // index 1: color
+
+    currY += rowH;
+
+    // 3. Style Dropdown
+    drawLabel("Style:");
+    QRectF styleBtn(valueX, currY + (rowH - 30) / 2.0, 80, 30);
+    p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+    p.setBrush(QColor(0, 0, 0, 60));
+    p.drawRoundedRect(styleBtn, 6, 6);
+    
+    p.setPen(Qt::white);
+    p.drawText(styleBtn.adjusted(10, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, "Outline");
+    
+    p.setPen(QPen(Qt::white, 1.5));
+    p.drawLine(QPointF(styleBtn.right() - 15, styleBtn.center().y() - 3), QPointF(styleBtn.right() - 11, styleBtn.center().y() + 1));
+    p.drawLine(QPointF(styleBtn.right() - 11, styleBtn.center().y() + 1), QPointF(styleBtn.right() - 7, styleBtn.center().y() - 3));
+
+    m_clickOptionsClickableRects.append(styleBtn); // index 2: style
+
+    currY += rowH;
+
+    // 4. Animation Checkbox
+    drawLabel("Animation:");
+    QRectF animRow(valueX, currY, controlW, rowH);
+    QRectF cb(valueX, currY + (rowH - 18) / 2.0, 18, 18);
+    if (m_clickAnimate) {
+        p.setPen(Qt::NoPen);
+        p.setBrush(accentColor);
+        p.drawRoundedRect(cb, 4, 4);
+        p.setPen(QPen(Qt::white, 2));
+        p.drawLine(QPointF(cb.x() + 4, cb.y() + 9), QPointF(cb.x() + 8, cb.y() + 13));
+        p.drawLine(QPointF(cb.x() + 8, cb.y() + 13), QPointF(cb.x() + 14, cb.y() + 5));
+    } else {
+        p.setPen(QPen(QColor(255, 255, 255, 60), 1.5));
+        p.setBrush(QColor(0, 0, 0, 40));
+        p.drawRoundedRect(cb, 4, 4);
+    }
+    p.setPen(Qt::white);
+    p.drawText(QRectF(valueX + 28, currY, controlW - 28, rowH), Qt::AlignLeft | Qt::AlignVCenter, "Animate clicks");
+    
+    m_clickOptionsClickableRects.append(animRow); // index 3: animate
+
+    currY += rowH + 10;
+
+    // 5. Preview Area
+    QRectF previewArea(menuX + 20, currY, menuW - 40, 130);
+    p.setPen(QPen(QColor(255, 255, 255, 20), 1));
+    p.setBrush(QColor(0, 0, 0, 40));
+    p.drawRoundedRect(previewArea, 10, 10);
+    
+    // Draw click previews (each lives for 1.5 seconds then fades out)
+    const qint64 CLICK_LIFETIME_MS = 1500;
+    if (m_clickPreviews.isEmpty()) {
+        p.setPen(QColor(255, 255, 255, 120));
+        p.drawText(previewArea, Qt::AlignCenter, "Click here to preview");
+    } else {
+        p.save();
+        p.setClipRect(previewArea.adjusted(1, 1, -1, -1));
+
+        const double baseRadius = 6.0 + m_clickSize * 28.0; // 6 to 34
+        const QColor clickColor = clickColorValue(m_clickColor);
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+        for (int i = 0; i < m_clickPreviews.size(); ++i) {
+            const auto& cp = m_clickPreviews[i];
+            QPointF pt = cp.pos;
+            if (!previewArea.contains(pt)) continue;
+
+            qint64 age = now - cp.birthMs;
+            double progress = std::min(1.0, (double)age / CLICK_LIFETIME_MS); // 0→1 over lifetime
+            double fadeAlpha = 1.0 - progress; // full opacity → zero
+
+            if (fadeAlpha <= 0.01) continue; // expired, skip (will be removed by timer)
+
+            double radius = baseRadius;
+
+            // Animation: pulsing ring that expands outward
+            if (m_clickAnimate) {
+                double phase = std::fmod((double)age / 500.0, 1.0); // cycle every 500ms
+                double pulseRadius = radius + phase * 25.0;
+                double pulseAlpha = (1.0 - phase) * 200.0 * fadeAlpha;
+
+                if (pulseAlpha > 1.0) {
+                    QColor pulseColor = clickColor;
+                    pulseColor.setAlpha((int)pulseAlpha);
+                    p.setPen(QPen(pulseColor, 2));
+                    p.setBrush(Qt::NoBrush);
+                    p.drawEllipse(pt, pulseRadius, pulseRadius);
+                }
+            }
+
+            // Main click circle — fade out based on age
+            QColor c = clickColor;
+            c.setAlpha((int)(255 * fadeAlpha));
+            if (m_clickStyle == 1) { // Filled
+                p.setPen(Qt::NoPen);
+                p.setBrush(c);
+                p.drawEllipse(pt, radius, radius);
+            } else { // Outline
+                p.setPen(QPen(c, 3));
+                p.setBrush(Qt::NoBrush);
+                p.drawEllipse(pt, radius, radius);
+            }
+        }
+        p.restore();
+    }
+    
+    m_clickOptionsClickableRects.append(previewArea); // index 4: preview
+
+    // 6. OK Button
+    QRectF okBtn(menuX + menuW - 90, menuY + menuH - 45, 70, 30);
+    p.setPen(Qt::NoPen);
+    p.setBrush(accentColor);
+    p.drawRoundedRect(okBtn, 6, 6);
+    p.setPen(Qt::white);
+    p.setFont(QFont("Sans", 10, QFont::Bold));
+    p.drawText(okBtn, Qt::AlignCenter, "OK");
+    
+    m_clickOptionsClickableRects.append(okBtn); // index 5: OK
+}
+
+void CaptureOverlay::drawKeystrokeOptions(QPainter& p, const QRectF& parentRect)
+{
+    const double menuW = 440.0;
+    const double menuH = 500.0;
+    const double menuX = parentRect.x();
+    const double menuY = parentRect.y();
+    
+    m_keystrokeOptionsPanelRect = parentRect;
+    m_keystrokeOptionsClickableRects.clear();
+
+    const QColor accentColor(122, 100, 255);
+    const QImage* blurPtr = m_blurredBg.isNull() ? nullptr : &m_blurredBg;
+
+    drawFrostedPanel(p, menuX, menuY, menuW, menuH, 12.0, blurPtr, width(), height());
+
+    const double labelX = menuX + 20.0;
+    const double valueX = menuX + 130.0;
+    const double controlW = 280.0;
+    const double rowH = 45.0;
+    double currY = menuY + 40.0;
+
+    auto drawLabel = [&](const QString& txt) {
+        p.setFont(QFont("Sans", 10, QFont::Bold));
+        p.setPen(QColor(255, 255, 255, 200));
+        p.drawText(QRectF(labelX, currY, 100, rowH), Qt::AlignRight | Qt::AlignVCenter, txt);
+    };
+
+    // 1. Size
+    drawLabel("Size:");
+    QRectF sliderTrack(valueX, currY + (rowH - 4) / 2.0, controlW, 4);
+    m_keySliderTrackRect = sliderTrack;
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(255, 255, 255, 30));
+    p.drawRoundedRect(sliderTrack, 2, 2);
+    // Draw tick marks
+    p.setPen(QPen(QColor(255, 255, 255, 60), 1));
+    for (int i = 0; i <= 4; ++i) {
+        double tx = valueX + (controlW / 4.0) * i;
+        p.drawLine(QPointF(tx, currY + rowH/2.0 - 6), QPointF(tx, currY + rowH/2.0 + 6));
+    }
+    double handleX = valueX + m_keySize * controlW;
+    QRectF handle(handleX - 8, currY + (rowH - 24) / 2.0, 16, 24);
+    p.setPen(Qt::NoPen);
+    p.setBrush(Qt::white);
+    p.drawRoundedRect(handle, 4, 4);
+    m_keystrokeOptionsClickableRects.append(QRectF(valueX, currY, controlW, rowH)); // index 0
+
+    currY += rowH;
+
+    // 2. Position
+    drawLabel("Position:");
+    QRectF posBtn(valueX, currY + (rowH - 30) / 2.0, 160, 30);
+    p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+    p.setBrush(QColor(0, 0, 0, 60));
+    p.drawRoundedRect(posBtn, 6, 6);
+    p.setPen(Qt::white);
+    p.setFont(QFont("Sans", 10));
+    const QStringList posNames = {"Bottom-Center", "Bottom-Left", "Bottom-Right", "Top-Center", "Top-Left", "Top-Right"};
+    p.drawText(posBtn.adjusted(10, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, 
+               (m_keyPosition >= 0 && m_keyPosition < posNames.size()) ? posNames[m_keyPosition] : "Bottom-Center");
+    // Chevron
+    p.setPen(QPen(Qt::white, 1.5));
+    p.drawLine(QPointF(posBtn.right() - 15, posBtn.center().y() - 3), QPointF(posBtn.right() - 11, posBtn.center().y() + 1));
+    p.drawLine(QPointF(posBtn.right() - 11, posBtn.center().y() + 1), QPointF(posBtn.right() - 7, posBtn.center().y() - 3));
+    m_keystrokeOptionsClickableRects.append(posBtn); // index 1
+
+    currY += rowH;
+
+    // 3. Appearance
+    drawLabel("Appearance:");
+    QRectF appBtn(valueX, currY + (rowH - 30) / 2.0, 100, 30);
+    p.setPen(QPen(QColor(255, 255, 255, 40), 1));
+    p.setBrush(QColor(0, 0, 0, 60));
+    p.drawRoundedRect(appBtn, 6, 6);
+    p.setPen(Qt::white);
+    const QStringList appNames = {"Dark", "Light"};
+    p.drawText(appBtn.adjusted(10, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, 
+               (m_keyAppearance >= 0 && m_keyAppearance < appNames.size()) ? appNames[m_keyAppearance] : "Dark");
+    // Chevron
+    p.setPen(QPen(Qt::white, 1.5));
+    p.drawLine(QPointF(appBtn.right() - 15, appBtn.center().y() - 3), QPointF(appBtn.right() - 11, appBtn.center().y() + 1));
+    p.drawLine(QPointF(appBtn.right() - 11, appBtn.center().y() + 1), QPointF(appBtn.right() - 7, appBtn.center().y() - 3));
+    m_keystrokeOptionsClickableRects.append(appBtn); // index 2
+
+    currY += rowH;
+
+    // 4. Blur background
+    QRectF blurRow(valueX, currY, controlW, 30);
+    QRectF cb(valueX, currY + (30 - 18) / 2.0, 18, 18);
+    p.setRenderHint(QPainter::Antialiasing);
+    if (m_keyBlurBg) {
+        p.setPen(Qt::NoPen); p.setBrush(accentColor); p.drawRoundedRect(cb, 4, 4);
+        p.setPen(QPen(Qt::white, 2));
+        p.drawLine(QPointF(cb.x() + 4, cb.y() + 9), QPointF(cb.x() + 8, cb.y() + 13));
+        p.drawLine(QPointF(cb.x() + 8, cb.y() + 13), QPointF(cb.x() + 14, cb.y() + 5));
+    } else {
+        p.setPen(QPen(QColor(255, 255, 255, 60), 1.5)); p.setBrush(QColor(0, 0, 0, 40)); p.drawRoundedRect(cb, 4, 4);
+    }
+    p.setPen(Qt::white); p.setFont(QFont("Sans", 10));
+    p.drawText(QRectF(valueX + 28, currY, controlW - 28, 30), Qt::AlignLeft | Qt::AlignVCenter, "Blur background");
+    m_keystrokeOptionsClickableRects.append(blurRow); // index 3
+
+    currY += rowH;
+
+    // 5. Keystrokes
+    drawLabel("Keystrokes:");
+    auto drawRadio = [&](const QString& txt, bool active, double y) {
+        QRectF row(valueX, y, controlW, 30);
+        QRectF rb(valueX, y + (30 - 18) / 2.0, 18, 18);
+        p.setPen(QPen(QColor(255, 255, 255, 60), 1.5));
+        p.setBrush(QColor(0, 0, 0, 40));
+        p.drawEllipse(rb);
+        if (active) {
+            p.setPen(Qt::NoPen); p.setBrush(accentColor); p.drawEllipse(rb.adjusted(3, 3, -3, -3));
+            // Inner white dot for "modern radio" look matching screenshot
+            p.setBrush(Qt::white); p.drawEllipse(rb.center(), 2.5, 2.5);
+        }
+        p.setPen(Qt::white);
+        p.drawText(QRectF(valueX + 28, y, controlW - 28, 30), Qt::AlignLeft | Qt::AlignVCenter, txt);
+        return row;
+    };
+    m_keystrokeOptionsClickableRects.append(drawRadio("Show all keys", m_keyFilter == 0, currY)); // index 4
+    currY += 32;
+    m_keystrokeOptionsClickableRects.append(drawRadio("Show only command keys", m_keyFilter == 1, currY)); // index 5
+
+    currY += 40;
+    p.setFont(QFont("Sans", 9));
+    p.setPen(QColor(255, 255, 255, 120));
+    p.drawText(QRectF(valueX, currY, 220, 50), Qt::AlignLeft | Qt::TextWordWrap, 
+               "ApexShot can't display any keystrokes you make within password fields.");
+
+    // OK / Preview buttons
+    QRectF prevBtn(menuX + 15, menuY + menuH - 45, 90, 30);
+    p.setPen(Qt::NoPen); 
+    p.setBrush(m_showKeystrokePreview ? accentColor.lighter(120) : QColor(255, 255, 255, 30)); 
+    p.drawRoundedRect(prevBtn, 6, 6);
+    p.setPen(Qt::white); p.setFont(QFont("Sans", 10, m_showKeystrokePreview ? QFont::Bold : QFont::Normal)); 
+    p.drawText(prevBtn, Qt::AlignCenter, "Preview");
+    m_keystrokeOptionsClickableRects.append(prevBtn); // index 6
+
+    QRectF okBtn(menuX + menuW - 90, menuY + menuH - 45, 75, 30);
+    p.setPen(Qt::NoPen); p.setBrush(accentColor); p.drawRoundedRect(okBtn, 6, 6);
+    p.setPen(Qt::white); p.setFont(QFont("Sans", 10, QFont::Bold)); p.drawText(okBtn, Qt::AlignCenter, "OK");
+    m_keystrokeOptionsClickableRects.append(okBtn); // index 7
 }
 
 // ── Draw toolbar (mirrors draw_feature_toolbar in overlay.rs) ─────────────────
@@ -1824,6 +2750,217 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 
     if (event->button() != Qt::LeftButton) return;
 
+    // ── Global Dropdown Logic ───────────────────────────────────────────────
+    if (m_dropdownOpen != -1) {
+        for (int i = 0; i < m_dropdownItemRects.size(); ++i) {
+            if (m_dropdownItemRects[i].contains(pos)) {
+                if (m_dropdownValuePtr) *m_dropdownValuePtr = i;
+                m_dropdownOpen = -1;
+                m_dropdownColors.clear();
+                m_hoveredDropdownItem = -1;
+                update();
+                return;
+            }
+        }
+        // Click outside dropdown — close it
+        m_dropdownOpen = -1;
+        m_dropdownColors.clear();
+        m_hoveredDropdownItem = -1;
+        update();
+        return;
+    }
+
+    // Keystroke Options sub-panel clicks
+    if (m_keystrokeOptionsOpen && m_keystrokeOptionsPanelRect.contains(pos)) {
+        for (int i = 0; i < m_keystrokeOptionsClickableRects.size(); ++i) {
+            if (m_keystrokeOptionsClickableRects[i].contains(pos)) {
+                switch (i) {
+                case 0: { // Slider — start drag
+                    double relX = pos.x() - m_keystrokeOptionsClickableRects[i].x();
+                    m_keySize = std::max(0.0, std::min(1.0, relX / m_keystrokeOptionsClickableRects[i].width()));
+                    m_keySliderDragging = true;
+                    break;
+                }
+                case 1: // Position dropdown
+                    m_dropdownOpen = i;
+                    m_dropdownAnchor = m_keystrokeOptionsClickableRects[i];
+                    m_dropdownOptions = QStringList() << "Bottom-Center" << "Bottom-Left" << "Bottom-Right" 
+                                                    << "Top-Center" << "Top-Left" << "Top-Right";
+                    m_dropdownValuePtr = &m_keyPosition;
+                    break;
+                case 2: // Appearance dropdown
+                    m_dropdownOpen = i;
+                    m_dropdownAnchor = m_keystrokeOptionsClickableRects[i];
+                    m_dropdownOptions = QStringList() << "Dark" << "Light";
+                    m_dropdownValuePtr = &m_keyAppearance;
+                    break;
+                case 3: m_keyBlurBg = !m_keyBlurBg; break;
+                case 4: m_keyFilter = 0; break;
+                case 5: m_keyFilter = 1; break;
+                case 6: m_showKeystrokePreview = !m_showKeystrokePreview; break;
+                case 7: 
+                    m_keystrokeOptionsOpen = false; 
+                    m_showKeystrokePreview = false;
+                    m_keyPreviews.clear();
+                    break; // OK
+                }
+                update();
+                return;
+            }
+        }
+        return;
+    }
+
+    // Click Options sub-panel clicks
+    if (m_clickOptionsOpen && m_clickOptionsPanelRect.contains(pos)) {
+        for (int i = 0; i < m_clickOptionsClickableRects.size(); ++i) {
+            if (m_clickOptionsClickableRects[i].contains(pos)) {
+                switch (i) {
+                case 0: { // Slider — start drag
+                    double relX = pos.x() - m_clickOptionsClickableRects[i].x();
+                    m_clickSize = std::max(0.0, std::min(1.0, relX / m_clickOptionsClickableRects[i].width()));
+                    m_sliderDragging = true;
+                    break;
+                }
+                case 1: // Color dropdown
+                    m_dropdownOpen = i;
+                    m_dropdownAnchor = m_clickOptionsClickableRects[i];
+                    m_dropdownOptions = QStringList()
+                        << "Gray" << "Indigo" << "Red" << "Blue" << "Green"
+                        << "Yellow" << "Orange" << "Purple" << "White";
+                    m_dropdownColors = QList<QColor>()
+                        << QColor(180, 180, 180) << QColor(122, 100, 255) << QColor(255, 60, 60)
+                        << QColor(60, 120, 255) << QColor(60, 200, 80) << QColor(255, 210, 50)
+                        << QColor(255, 150, 30) << QColor(180, 60, 220) << QColor(255, 255, 255);
+                    m_dropdownValuePtr = &m_clickColor;
+                    break;
+                case 2: // Style dropdown
+                    m_dropdownOpen = i;
+                    m_dropdownAnchor = m_clickOptionsClickableRects[i];
+                    m_dropdownOptions = QStringList() << "Outline" << "Filled";
+                    m_dropdownValuePtr = &m_clickStyle;
+                    break;
+                case 3: { // Animate toggle
+                    m_clickAnimate = !m_clickAnimate;
+                    if (m_clickAnimate && !m_clickPreviews.isEmpty()) {
+                        startClickAnimTimer();
+                    } else {
+                        stopClickAnimTimer();
+                    }
+                    break;
+                }
+                case 4: { // Preview — add click point
+                    qint64 now = QDateTime::currentMSecsSinceEpoch();
+                    m_clickPreviews.append({pos, now});
+                    if (m_clickPreviews.size() > 10) m_clickPreviews.removeFirst();
+                    startClickAnimTimer();
+                    break;
+                }
+                case 5: { // OK — close panel
+                    m_clickOptionsOpen = false;
+                    stopClickAnimTimer();
+                    m_clickPreviews.clear();
+                    break;
+                }
+                }
+                update();
+                return;
+            }
+        }
+        return;
+    }
+
+    // Settings menu clicks
+    if (m_settingsOpen) {
+        if (m_settingsPanelRect.contains(pos)) {
+            // Check in reverse order so buttons (added last) are hit before the rows they are in
+            for (int i = m_settingsClickableRects.size() - 1; i >= 0; --i) {
+                if (m_settingsClickableRects[i].contains(pos)) {
+                    if (i < 3) { // Tab clicks (indices 0, 1, 2)
+                        m_settingsTab = i;
+                        m_dropdownOpen = -1;
+                        m_dropdownColors.clear();
+                        update();
+                        return;
+                    }
+                    
+                    if (m_settingsTab == 0) { // General tab logic
+                        switch (i) {
+                        case 3: m_recControls = !m_recControls; break;
+                        case 4: m_displayRecTime = !m_displayRecTime; break;
+                        case 5: m_hidpi = !m_hidpi; break;
+                        case 6: m_doNotDisturb = !m_doNotDisturb; break;
+                        case 7: m_showCursor = !m_showCursor; break;
+                        case 8: m_recClicks = !m_recClicks; break;
+                        case 9: m_clickOptionsOpen = true; break;
+                        case 10: m_recKeystrokes = !m_recKeystrokes; break;
+                        case 11: m_keystrokeOptionsOpen = true; break;
+                        case 12: m_rememberSelection = !m_rememberSelection; break;
+                        case 13: m_dimScreen = !m_dimScreen; break;
+                        case 14: m_showCountdown = !m_showCountdown; break;
+                        }
+                        update();
+                        return;
+                    } else if (m_settingsTab == 1) { // Video tab logic
+                        switch (i) {
+                        case 3: // Max Resolution
+                            m_dropdownOpen = i;
+                            m_dropdownAnchor = m_settingsClickableRects[i];
+                            m_dropdownOptions = QStringList() << "Original" << "1080p" << "720p";
+                            m_dropdownValuePtr = &m_videoMaxRes;
+                            break;
+                        case 4: // Video FPS
+                            m_dropdownOpen = i;
+                            m_dropdownAnchor = m_settingsClickableRects[i];
+                            m_dropdownOptions = QStringList() << "24" << "30" << "50" << "60";
+                            m_dropdownValuePtr = &m_videoFps;
+                            break;
+                        case 5: /* Open Audio Settings */ break;
+                        case 6: m_recordMono = !m_recordMono; break;
+                        case 7: m_openEditor = !m_openEditor; break;
+                        }
+                        update();
+                        return;
+                    } else if (m_settingsTab == 2) { // GIF tab logic
+                        switch (i) {
+                        case 3: { // FPS Slider
+                            double relX = pos.x() - m_settingsClickableRects[i].x();
+                            m_gifFps = 5 + (int)(55.0 * std::max(0.0, std::min(1.0, relX / m_settingsClickableRects[i].width())));
+                            break;
+                        }
+                        case 4: { // Quality Slider
+                            double relX = pos.x() - m_settingsClickableRects[i].x();
+                            m_gifQuality = std::max(0.0, std::min(1.0, relX / m_settingsClickableRects[i].width()));
+                            break;
+                        }
+                        case 5: m_optimizeGif = !m_optimizeGif; break;
+                        case 6: // GIF Size dropdown
+                            m_dropdownOpen = i;
+                            m_dropdownAnchor = m_settingsClickableRects[i];
+                            m_dropdownOptions = QStringList() << "800 x auto (default)" << "640 x auto" << "480 x auto" << "Original";
+                            m_dropdownValuePtr = &m_gifSizeIdx;
+                            break;
+                        }
+                        update();
+                        return;
+                    }
+                }
+            }
+            return; // Click inside panel but no hit
+        } else {
+            // Clicked outside settings panel - check if it's the Controls tile
+            RecordPanelTile tile = hitTestRecordingPanel(pos);
+            if (tile != RecordPanelTile::Controls) {
+                m_settingsOpen = false;
+                m_clickOptionsOpen = false;
+                stopClickAnimTimer();
+                m_clickPreviews.clear();
+                update();
+                // continue to handle the click normally
+            }
+        }
+    }
+
     // Window mode — click selects the hovered window
     if (m_windowMode) {
         if (m_hoveredWindow >= 0 && m_hoveredWindow < m_windows.size()) {
@@ -1840,7 +2977,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         RecordPanelTile tile = hitTestRecordingPanel(pos);
         switch (tile) {
         case RecordPanelTile::Controls:
-            m_recControls = !m_recControls;
+            m_settingsOpen = !m_settingsOpen;
             update();
             return;
         case RecordPanelTile::Mic:
@@ -2078,6 +3215,37 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 {
     const QPoint pos = event->pos();
 
+    // ── Slider Drag ─────────────────────────────────────────────────────────
+    if (m_sliderDragging) {
+        double relX = pos.x() - m_sliderTrackRect.x();
+        m_clickSize = std::max(0.0, std::min(1.0, relX / m_sliderTrackRect.width()));
+        update();
+        return;
+    }
+    if (m_keySliderDragging) {
+        double relX = pos.x() - m_keySliderTrackRect.x();
+        m_keySize = std::max(0.0, std::min(1.0, relX / m_keySliderTrackRect.width()));
+        update();
+        return;
+    }
+
+    // ── Global Dropdown Hover ───────────────────────────────────────────────
+    if (m_dropdownOpen != -1) {
+        int newHover = -1;
+        for (int i = 0; i < m_dropdownItemRects.size(); ++i) {
+            if (m_dropdownItemRects[i].contains(pos)) {
+                newHover = i;
+                break;
+            }
+        }
+        if (newHover != m_hoveredDropdownItem) {
+            m_hoveredDropdownItem = newHover;
+            update();
+        }
+        setCursor(Qt::PointingHandCursor);
+        return;
+    }
+
     // Window mode — highlight the window under the cursor
     if (m_windowMode) {
         int newHover = -1;
@@ -2096,6 +3264,49 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 
     // Recording panel hover
     if (m_recordingPanelOpen && !m_dragging && m_resizing == HandlePos::None && !m_moving) {
+        // Click Options sub-panel hover
+        if (m_clickOptionsOpen && m_clickOptionsPanelRect.contains(pos)) {
+            int newHover = -1;
+            for (int i = m_clickOptionsClickableRects.size() - 1; i >= 0; --i) {
+                if (m_clickOptionsClickableRects[i].contains(pos)) {
+                    newHover = i;
+                    break;
+                }
+            }
+            setCursor(Qt::PointingHandCursor);
+            return;
+        }
+
+        // Keystroke Options sub-panel hover
+        if (m_keystrokeOptionsOpen && m_keystrokeOptionsPanelRect.contains(pos)) {
+            int newHover = -1;
+            for (int i = m_keystrokeOptionsClickableRects.size() - 1; i >= 0; --i) {
+                if (m_keystrokeOptionsClickableRects[i].contains(pos)) {
+                    newHover = i;
+                    break;
+                }
+            }
+            setCursor(Qt::PointingHandCursor);
+            return;
+        }
+
+        // Settings menu hover
+        if (m_settingsOpen && m_settingsPanelRect.contains(pos)) {
+            int newHover = -1;
+            for (int i = m_settingsClickableRects.size() - 1; i >= 0; --i) {
+                if (m_settingsClickableRects[i].contains(pos)) {
+                    newHover = i;
+                    break;
+                }
+            }
+            if (newHover != m_hoveredSettingsItem) {
+                m_hoveredSettingsItem = newHover;
+                update();
+            }
+            setCursor(Qt::PointingHandCursor);
+            return;
+        }
+
         RecordPanelTile newTile = hitTestRecordingPanel(pos);
         if (newTile != m_hoveredRecordTile) {
             m_hoveredRecordTile = newTile;
@@ -2177,6 +3388,16 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) return;
 
+    // Stop slider drag
+    if (m_sliderDragging) {
+        m_sliderDragging = false;
+        update();
+    }
+    if (m_keySliderDragging) {
+        m_keySliderDragging = false;
+        update();
+    }
+
     // Reset recording panel hover state
     if (m_recordingPanelOpen) {
         m_hoveredRecordTile = RecordPanelTile::None;
@@ -2199,6 +3420,9 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) return;
     if (!m_hasSelection) return;
+
+    // Ignore double-click when recording panel is open to prevent accidental triggers
+    if (m_recordingPanelOpen) return;
 
     const QPoint pos = event->pos();
     // Only confirm if the double-click is actually inside the selection rect.
@@ -2320,6 +3544,26 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
             return;
         }
         // Let arrow keys through for resize/move
+    }
+
+    // Capture key presses for keystroke preview — block all actions except ESC
+    if (m_showKeystrokePreview) {
+        if (event->key() == Qt::Key_Escape) {
+            // Allow ESC to still work
+            m_showKeystrokePreview = false;
+            m_keyPreviews.clear();
+            update();
+            return;
+        }
+        QString keyText = keyEventToPreviewText(event);
+        if (!keyText.isEmpty()) {
+            qint64 now = QDateTime::currentMSecsSinceEpoch();
+            m_keyPreviews.append({keyText, now});
+            if (m_keyPreviews.size() > 8) m_keyPreviews.removeFirst();
+            startClickAnimTimer();
+            update();
+        }
+        return; // consume the key — don't trigger any other actions
     }
 
     if (m_captureIntent == CaptureIntent::Scroll) {
@@ -3445,7 +4689,6 @@ CaptureOverlay::HandlePos CaptureOverlay::hitTest(const QPoint& pos) const
 CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoint& pos) const
 {
     if (!m_recordingPanelOpen) {
-        std::fprintf(stderr, "[hitTestRecordingPanel] Panel not open\n");
         return RecordPanelTile::None;
     }
 
@@ -3457,20 +4700,12 @@ CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoi
         RecordPanelTile::RecordGif, RecordPanelTile::RecordVideo
     };
 
-    std::fprintf(stderr, "[hitTestRecordingPanel] pos=(%d, %d), m_recTileRects.size()=%zu\n", 
-                 pos.x(), pos.y(), m_recTileRects.size());
-
     for (int i = 0; i < (int)m_recTileRects.size() && i < 10; ++i) {
-        const QRectF& r = m_recTileRects[i];
-        std::fprintf(stderr, "  tile[%d]: rect=(%.1f, %.1f, %.1f, %.1f) contains=%d\n", 
-                     i, r.x(), r.y(), r.width(), r.height(), r.contains(pos));
         if (m_recTileRects[i].contains(pos)) {
-            std::fprintf(stderr, "  -> HIT tile %d (Webcam=%d)\n", i, (int)RecordPanelTile::Webcam);
             return tileOrder[i];
         }
     }
 
-    std::fprintf(stderr, "  -> No tile hit\n");
     return RecordPanelTile::None;
 }
 
@@ -3545,4 +4780,222 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
     case HandlePos::Inside:      setCursor(Qt::SizeAllCursor);   break;
     default:                     setCursor(Qt::CrossCursor);     break;
     }
+}
+
+void CaptureOverlay::startClickAnimTimer()
+{
+    if (!m_clickAnimTimer) {
+        m_clickAnimTimer = new QTimer(this);
+        m_clickAnimTimer->setInterval(16); // ~60fps
+        connect(m_clickAnimTimer, &QTimer::timeout, this, [this]() {
+            const qint64 CLICK_LIFETIME_MS = 1500;
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+            // Remove expired click previews
+            m_clickPreviews.erase(
+                std::remove_if(m_clickPreviews.begin(), m_clickPreviews.end(),
+                    [&](const ClickPreview& cp) { return (now - cp.birthMs) >= CLICK_LIFETIME_MS; }),
+                m_clickPreviews.end());
+
+            // Remove expired key previews
+            const qint64 KEY_LIFETIME_MS = 2000;
+            m_keyPreviews.erase(
+                std::remove_if(m_keyPreviews.begin(), m_keyPreviews.end(),
+                    [&](const KeyPreview& kp) { return (now - kp.birthMs) >= KEY_LIFETIME_MS; }),
+                m_keyPreviews.end());
+
+            if (m_clickPreviews.isEmpty() && m_keyPreviews.isEmpty()) {
+                stopClickAnimTimer();
+                return;
+            }
+            update();
+        });
+    }
+    if (!m_clickAnimTimer->isActive()) {
+        m_clickAnimTimer->start();
+    }
+}
+
+void CaptureOverlay::stopClickAnimTimer()
+{
+    if (m_clickAnimTimer && m_clickAnimTimer->isActive()) {
+        m_clickAnimTimer->stop();
+    }
+    m_clickAnimPhase = 0.0;
+}
+
+void CaptureOverlay::drawKeystrokePreview(QPainter& p, double sx, double sy, double selW, double selH)
+{
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+
+    const double baseW = 120.0;
+    const double baseH = 60.0;
+    const double scale = 0.6 + m_keySize;
+    double previewW = baseW * scale;
+    double previewH = baseH * scale;
+    const double margin = 16.0 * scale;
+
+    // Gather display strings: live key presses or static demo
+    const qint64 KEY_LIFETIME_MS = 2000;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // Remove expired keys
+    m_keyPreviews.erase(
+        std::remove_if(m_keyPreviews.begin(), m_keyPreviews.end(),
+            [&](const KeyPreview& kp) { return (now - kp.birthMs) >= KEY_LIFETIME_MS; }),
+        m_keyPreviews.end());
+
+    QStringList displayKeys;
+    QList<double> keyAlphas; // per-key fade alpha
+    if (!m_keyPreviews.isEmpty()) {
+        // Show live key presses (most recent up to 5)
+        int start = std::max(0, m_keyPreviews.size() - 5);
+        for (int i = start; i < m_keyPreviews.size(); ++i) {
+            displayKeys.append(m_keyPreviews[i].text);
+            double age = (double)(now - m_keyPreviews[i].birthMs) / KEY_LIFETIME_MS;
+            keyAlphas.append(1.0 - age); // fade out
+        }
+    } else {
+        // Static demo: ⌘ ⇧ F
+        displayKeys = QStringList() << "\u2318" << "\u21E7" << "F";
+        keyAlphas = {1.0, 1.0, 1.0};
+    }
+
+    // Widen box for more keys
+    if (displayKeys.size() > 3) {
+        previewW = std::max(previewW, (displayKeys.size() * 30.0 + 40.0) * scale);
+    }
+
+    // Position
+    double kx, ky;
+    switch (m_keyPosition) {
+        case 0: kx = sx + (selW - previewW) / 2.0; ky = sy + selH - previewH - margin; break;
+        case 1: kx = sx + margin; ky = sy + selH - previewH - margin; break;
+        case 2: kx = sx + selW - previewW - margin; ky = sy + selH - previewH - margin; break;
+        case 3: kx = sx + (selW - previewW) / 2.0; ky = sy + margin; break;
+        case 4: kx = sx + margin; ky = sy + margin; break;
+        case 5: kx = sx + selW - previewW - margin; ky = sy + margin; break;
+        default: kx = sx + (selW - previewW) / 2.0; ky = sy + selH - previewH - margin; break;
+    }
+
+    QRectF boxRect(kx, ky, previewW, previewH);
+
+    // Appearance colors
+    QColor bgColor = (m_keyAppearance == 0) ? QColor(20, 20, 24, 230) : QColor(245, 245, 250, 230);
+    QColor iconColor = (m_keyAppearance == 0) ? Qt::white : Qt::black;
+
+    // Blur background — draw the blurred image clipped to the preview rect
+    // so the area behind the box shows through as a frosted glass effect
+    if (m_keyBlurBg && !m_blurredBg.isNull()) {
+        p.save();
+        QPainterPath clip;
+        clip.addRoundedRect(boxRect, 12 * scale, 12 * scale);
+        p.setClipPath(clip);
+
+        // Scale the 1/4-res blur image back up to full screen
+        double bgScaleX = (double)width() / m_blurredBg.width();
+        double bgScaleY = (double)height() / m_blurredBg.height();
+        p.scale(bgScaleX, bgScaleY);
+        p.drawImage(QPointF(0, 0), m_blurredBg);
+        p.restore();
+
+        // Semi-transparent tint so text is readable
+        bgColor = (m_keyAppearance == 0)
+            ? QColor(20, 20, 24, 120)   // much more transparent with blur
+            : QColor(245, 245, 250, 120);
+    }
+
+    p.setPen(QPen(QColor(iconColor.red(), iconColor.green(), iconColor.blue(), 50), 1.2));
+    p.setBrush(bgColor);
+    p.drawRoundedRect(boxRect, 12 * scale, 12 * scale);
+
+    // Draw keys
+    const double iconSize = 22.0 * scale;
+    const double spacing = 10.0 * scale;
+    const double totalGroupW = displayKeys.size() * iconSize + (displayKeys.size() - 1) * spacing;
+    double startX = kx + (previewW - totalGroupW) / 2.0;
+    double cy = ky + previewH / 2.0;
+
+    QFont keyFont;
+    keyFont.setFamily("Sans");
+    keyFont.setBold(true);
+    keyFont.setPointSizeF(16 * scale);
+
+    for (int i = 0; i < displayKeys.size(); ++i) {
+        double cx = startX + i * (iconSize + spacing) + iconSize / 2.0;
+        double alpha = keyAlphas.value(i, 1.0);
+
+        QColor c = iconColor;
+        c.setAlphaF(alpha);
+
+        p.setPen(QPen(c, 2.0 * scale, Qt::SolidLine, Qt::RoundCap));
+        p.setBrush(Qt::NoBrush);
+
+        const QString& key = displayKeys[i];
+        if (key == "\u2318") {
+            // Command key ⌘
+            double r = 2.8 * scale;
+            p.drawEllipse(QPointF(cx - r, cy - r), r, r);
+            p.drawEllipse(QPointF(cx + r, cy - r), r, r);
+            p.drawEllipse(QPointF(cx - r, cy + r), r, r);
+            p.drawEllipse(QPointF(cx + r, cy + r), r, r);
+            p.drawLine(QPointF(cx - r, cy - r + 0.5), QPointF(cx - r, cy + r - 0.5));
+            p.drawLine(QPointF(cx + r, cy - r + 0.5), QPointF(cx + r, cy + r - 0.5));
+            p.drawLine(QPointF(cx - r + 0.5, cy - r), QPointF(cx + r - 0.5, cy - r));
+            p.drawLine(QPointF(cx - r + 0.5, cy + r), QPointF(cx + r - 0.5, cy + r));
+        } else if (key == "\u21E7") {
+            // Shift key ⇧
+            QPainterPath shift;
+            shift.moveTo(cx, cy - 8 * scale);
+            shift.lineTo(cx - 7 * scale, cy + 1 * scale);
+            shift.lineTo(cx - 3.5 * scale, cy + 1 * scale);
+            shift.lineTo(cx - 3.5 * scale, cy + 8 * scale);
+            shift.lineTo(cx + 3.5 * scale, cy + 8 * scale);
+            shift.lineTo(cx + 3.5 * scale, cy + 1 * scale);
+            shift.lineTo(cx + 7 * scale, cy + 1 * scale);
+            shift.closeSubpath();
+            p.drawPath(shift);
+        } else if (key == "\u232B") {
+            // Backspace ⌫
+            double s = 6 * scale;
+            QPainterPath bp;
+            bp.moveTo(cx + s, cy - s);
+            bp.lineTo(cx - s, cy - s);
+            bp.lineTo(cx - s * 1.5, cy);
+            bp.lineTo(cx - s, cy + s);
+            bp.lineTo(cx + s, cy + s);
+            bp.lineTo(cx + s * 0.5, cy);
+            bp.closeSubpath();
+            p.drawPath(bp);
+            p.drawLine(QPointF(cx - s * 0.2, cy - s * 0.4), QPointF(cx + s * 0.2, cy + s * 0.4));
+            p.drawLine(QPointF(cx + s * 0.2, cy - s * 0.4), QPointF(cx - s * 0.2, cy + s * 0.4));
+        } else if (key == "\u21A9") {
+            // Enter ↩
+            double s = 6 * scale;
+            QPainterPath ep;
+            ep.moveTo(cx - s, cy - s);
+            ep.lineTo(cx + s, cy - s);
+            ep.lineTo(cx + s, cy + s * 0.3);
+            ep.lineTo(cx + s * 0.3, cy + s * 0.3);
+            ep.lineTo(cx + s * 0.3, cy + s);
+            ep.lineTo(cx - s * 1.3, cy + s * 0.3);
+            ep.lineTo(cx - s * 1.3, cy - s * 0.3);
+            ep.lineTo(cx - s, cy - s * 0.3);
+            ep.closeSubpath();
+            p.drawPath(ep);
+        } else if (key == " ") {
+            // Space bar
+            double w = iconSize * 0.6;
+            double h = 3 * scale;
+            p.drawRoundedRect(QRectF(cx - w/2, cy - h, w, h * 2), h, h);
+        } else {
+            // Regular key — draw text
+            p.setFont(keyFont);
+            p.setPen(c);
+            p.drawText(QRectF(cx - iconSize/2.0, ky, iconSize, previewH), Qt::AlignCenter, key);
+        }
+    }
+
+    p.restore();
 }

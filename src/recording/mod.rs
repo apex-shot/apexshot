@@ -10,6 +10,10 @@ use zbus::zvariant::OwnedValue;
 mod stop_overlay;
 pub use stop_overlay::{run_recording_stop_overlay, StopOverlayError};
 
+pub mod countdown_overlay;
+pub mod dim_overlay;
+pub mod dnd;
+
 #[derive(Debug, Error)]
 pub enum RecordError {
     #[error("GStreamer initialization failed: {0}")]
@@ -46,6 +50,8 @@ pub struct RecordingConfig {
     pub height: Option<u32>,
     pub x: Option<i32>,
     pub y: Option<i32>,
+    pub cursor: bool,
+    pub hidpi: bool,
 }
 
 impl Default for RecordingConfig {
@@ -58,6 +64,8 @@ impl Default for RecordingConfig {
             height: None,
             x: None,
             y: None,
+            cursor: true,
+            hidpi: false,
         }
     }
 }
@@ -408,18 +416,25 @@ async fn build_pipeline(
 
     // Get video source
     let video_source = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        get_wayland_source().await?
+        get_wayland_source(config.cursor).await?
     } else {
         get_x11_source(config)?
     };
 
+    // HiDPI: downscale to logical resolution (2x)
+    let scale_filter = if config.hidpi {
+        " ! videoscale"
+    } else {
+        ""
+    };
+
     Ok(format!(
-        "{} ! videoconvert ! videorate ! queue ! {} {} ! {} ! filesink location=\"{}\"",
-        video_source, profile.encoder, profile.props, profile.muxer, output_str
+        "{} ! videoconvert{} ! videorate ! queue ! {} {} ! {} ! filesink location=\"{}\"",
+        video_source, scale_filter, profile.encoder, profile.props, profile.muxer, output_str
     ))
 }
 
-async fn get_wayland_source() -> RecordResult<String> {
+async fn get_wayland_source(cursor: bool) -> RecordResult<String> {
     use ashpd::desktop::screencast::Screencast;
     use zbus::zvariant::Value;
 
@@ -436,11 +451,17 @@ async fn get_wayland_source() -> RecordResult<String> {
 
     let connection = proxy.connection();
 
+    let cursor_mode = if cursor {
+        ashpd::desktop::screencast::CursorMode::Embedded
+    } else {
+        ashpd::desktop::screencast::CursorMode::Hidden
+    };
+
     // 1. Select Sources
     proxy
         .select_sources(
             &session,
-            ashpd::desktop::screencast::CursorMode::Embedded,
+            cursor_mode,
             ashpd::desktop::screencast::SourceType::Monitor
                 | ashpd::desktop::screencast::SourceType::Window,
             false, // multiple
@@ -531,7 +552,8 @@ async fn wait_for_response(
 }
 
 fn get_x11_source(config: &RecordingConfig) -> RecordResult<String> {
-    let mut source = String::from("ximagesrc show-pointer=true use-damage=false");
+    let show_pointer = if config.cursor { "true" } else { "false" };
+    let mut source = format!("ximagesrc show-pointer={} use-damage=false", show_pointer);
 
     if let (Some(x), Some(y), Some(w), Some(h)) = (config.x, config.y, config.width, config.height)
     {
@@ -567,7 +589,7 @@ async fn record_gif_rust_with_optional_stop(
 
     // Build pipeline: Source -> videoconvert -> rgba -> appsink
     let source_str = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        get_wayland_source().await?
+        get_wayland_source(config.cursor).await?
     } else {
         get_x11_source(&config)?
     };
