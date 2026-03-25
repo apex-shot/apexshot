@@ -98,7 +98,8 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                          bool showCursor, bool rememberSelection,
                          bool dimScreen, bool countdown,
                          int videoMaxRes, int videoFps, bool recordMono, bool openEditor,
-                         int gifFps, double gifQuality, int gifSizeIdx, bool optimizeGif)
+                         int gifFps, double gifQuality, int gifSizeIdx, bool optimizeGif,
+                         bool fullscreen)
 {
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
                 "\"mode\":\"record\",\"record_type\":\"%s\","
@@ -111,7 +112,7 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 "\"video_max_res\":%d,\"video_fps\":%d,"
                 "\"record_mono\":%s,\"open_editor\":%s,"
                 "\"gif_fps\":%d,\"gif_quality\":%.4f,"
-                "\"gif_size_idx\":%d,\"optimize_gif\":%s}\n",
+                "\"gif_size_idx\":%d,\"optimize_gif\":%s,\"fullscreen\":%s}\n",
                 sel.x(), sel.y(), sel.width(), sel.height(),
                 recordType,
                 controls ? "true" : "false",
@@ -133,7 +134,8 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 gifFps,
                 gifQuality,
                 gifSizeIdx,
-                optimizeGif ? "true" : "false");
+                optimizeGif ? "true" : "false",
+                fullscreen ? "true" : "false");
     std::fflush(stdout);
 }
 
@@ -400,7 +402,8 @@ int main(int argc, char* argv[])
                            overlay.recordGifFps(),
                            overlay.recordGifQuality(),
                            overlay.recordGifSizeIdx(),
-                           overlay.recordOptimizeGif());
+                           overlay.recordOptimizeGif(),
+                           overlay.recordFullscreen());
         return 0;
     }
 

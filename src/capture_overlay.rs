@@ -196,6 +196,7 @@ pub struct RecordingRequest {
     pub gif_quality: f64,
     pub gif_size_idx: u8,
     pub optimize_gif: bool,
+    pub fullscreen: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -557,6 +558,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         .clamp(0.0, 1.0);
     let gif_size_idx = extract_int(json, "gif_size_idx").unwrap_or(0).clamp(0, 3) as u8;
     let optimize_gif = extract_bool(json, "optimize_gif").unwrap_or(true);
+    let fullscreen = extract_bool(json, "fullscreen").unwrap_or(false);
 
     Ok(RecordingRequest {
         x,
@@ -584,6 +586,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         gif_quality,
         gif_size_idx,
         optimize_gif,
+        fullscreen,
     })
 }
 

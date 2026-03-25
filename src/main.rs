@@ -27,8 +27,8 @@ use apexshot::{
     },
     ocr::{extract_text_from_path, OcrConfig},
     recording::{
-        copy_to_clipboard as copy_recording_to_clipboard, run_recording_stop_overlay,
-        start_recording, start_recording_with_stop, RecordingConfig,
+        copy_to_clipboard as copy_recording_to_clipboard, run_recording_controls, start_recording,
+        start_recording_with_stop, RecordingConfig, RecordingControlsParams, StopAction,
     },
     show_settings_window,
 };
@@ -1139,21 +1139,32 @@ fn run_capture(args: &[String]) {
                 eprintln!("Starting recording to {:?}...", output_path);
 
                 // Start recording with stop overlay
-                let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+                let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<StopAction>();
 
-                // Launch stop overlay in background thread
                 let overlay_handle = if request.controls {
+                    let params = RecordingControlsParams {
+                        capture_x: request.x,
+                        capture_y: request.y,
+                        capture_w: request.width,
+                        capture_h: request.height,
+                        is_fullscreen: request.fullscreen,
+                        show_timer: request.display_rec_time,
+                    };
                     Some(std::thread::spawn(move || {
-                        let _ = run_recording_stop_overlay(stop_tx);
+                        let _ = run_recording_controls(params, stop_tx);
                     }))
                 } else {
-                    // No controls shown — user must use Ctrl+C to stop
+                    drop(stop_tx);
                     None
                 };
 
                 let handle = tokio::runtime::Handle::current();
                 match handle.block_on(start_recording_with_stop(rec_config, stop_rx)) {
-                    Ok(path) => {
+                    Ok((path, StopAction::Discard)) => {
+                        eprintln!("Recording discarded — deleting {:?}", path);
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    Ok((path, StopAction::Save)) => {
                         eprintln!("Recording saved to {:?}", path);
                     }
                     Err(err) => {
@@ -1678,15 +1689,35 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let final_path = if overlay_stop {
-        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<StopAction>();
         let join = tokio::spawn(async move { start_recording_with_stop(config, stop_rx).await });
 
-        // Blocks until user hits Esc or clicks Stop.
-        run_recording_stop_overlay(stop_tx)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        run_recording_controls(
+            RecordingControlsParams {
+                capture_x: 0,
+                capture_y: 0,
+                capture_w: 0,
+                capture_h: 0,
+                is_fullscreen: true,
+                show_timer: false,
+            },
+            stop_tx,
+        )
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-        join.await
+        match join
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)??
+        {
+            (path, StopAction::Discard) => {
+                let _ = std::fs::remove_file(&path);
+                return Ok(());
+            }
+            (path, StopAction::Save) => {
+                eprintln!("Recording saved: {:?}", path);
+                path
+            }
+        }
     } else {
         start_recording(config)
             .await
