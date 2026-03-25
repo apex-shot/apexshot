@@ -1023,6 +1023,10 @@ fn run_capture(args: &[String]) {
                 cfg.rec_video_fps = request.video_fps;
                 cfg.rec_video_mono = request.record_mono;
                 cfg.rec_video_open_editor = request.open_editor;
+                cfg.rec_gif_fps = request.gif_fps;
+                cfg.rec_gif_quality = request.gif_quality;
+                cfg.rec_gif_size_idx = request.gif_size_idx;
+                cfg.rec_gif_optimize = request.optimize_gif;
 
                 // Remember selection area
                 if request.remember_selection {
@@ -1091,6 +1095,25 @@ fn run_capture(args: &[String]) {
                     3 => 60,
                     _ => 30,
                 };
+                let (fps, gif_quality, gif_optimize, gif_max_width) = if matches!(
+                    request.record_type,
+                    apexshot::capture_overlay::RecordingType::Gif
+                ) {
+                    let gw = match request.gif_size_idx {
+                        0 => Some(800u32),
+                        1 => Some(640u32),
+                        2 => Some(480u32),
+                        _ => None,
+                    };
+                    (
+                        request.gif_fps as u32,
+                        request.gif_quality,
+                        request.optimize_gif,
+                        gw,
+                    )
+                } else {
+                    (fps, 0.75_f64, true, Some(800u32))
+                };
 
                 // Build recording config
                 let rec_config = RecordingConfig {
@@ -1108,6 +1131,9 @@ fn run_capture(args: &[String]) {
                     speaker_enabled: request.speaker,
                     mic_source: None,
                     speaker_source: None,
+                    gif_quality,
+                    gif_optimize,
+                    gif_max_width,
                 };
 
                 eprintln!("Starting recording to {:?}...", output_path);
