@@ -19,6 +19,7 @@ use apexshot::{
     capture_overlay::{
         capture_area_via_cpp, capture_screen_via_cpp, run_capture_overlay, AreaCaptureResult,
     },
+    config::{load_config, save_config},
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
         ensure_desktop_entry_pub, install_hotkeys_for_current_desktop, reset_hotkey_config,
@@ -1001,8 +1002,113 @@ fn run_capture(args: &[String]) {
                 run_ocr = true;
                 Some(capture)
             }
-            Ok(AreaCaptureResult::RecordingRequested(_)) => {
-                eprintln!("Recording requested but recording is not yet implemented.");
+            Ok(AreaCaptureResult::RecordingRequested(request)) => {
+                // Load config and update from overlay settings
+                let mut cfg = load_config();
+                cfg.rec_controls = request.controls;
+                cfg.rec_display_time = request.display_rec_time;
+                cfg.rec_hidpi = request.hidpi;
+                cfg.rec_notifications = request.notifications;
+                cfg.rec_cursor = request.cursor;
+                cfg.rec_clicks = request.clicks;
+                cfg.rec_keystrokes = request.keystrokes;
+                cfg.rec_remember_selection = request.remember_selection;
+                cfg.rec_dim_screen = request.dim_screen;
+                cfg.rec_countdown = request.countdown;
+
+                // Remember selection area
+                if request.remember_selection {
+                    cfg.last_selection_x = Some(request.x);
+                    cfg.last_selection_y = Some(request.y);
+                    cfg.last_selection_w = Some(request.width);
+                    cfg.last_selection_h = Some(request.height);
+                }
+
+                // Save config
+                let _ = save_config(&cfg);
+
+                // Pre-recording: DND
+                let _dnd_guard = if request.notifications {
+                    apexshot::recording::dnd::DndGuard::enable()
+                } else {
+                    None
+                };
+
+                // Pre-recording: Dim screen + Countdown
+                // Run dim overlay in a background thread if enabled
+                let dim_close = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let dim_handle = if request.dim_screen && request.countdown {
+                    let flag = dim_close.clone();
+                    Some(std::thread::spawn(move || {
+                        apexshot::recording::dim_overlay::run_dim_overlay(flag);
+                    }))
+                } else {
+                    None
+                };
+
+                // Countdown blocks until done
+                if request.countdown {
+                    apexshot::recording::countdown_overlay::run_countdown_overlay(3);
+                }
+
+                // Close dim overlay after countdown
+                dim_close.store(true, std::sync::atomic::Ordering::Relaxed);
+                if let Some(handle) = dim_handle {
+                    let _ = handle.join();
+                }
+
+                // Build output path
+                let ext = match request.record_type {
+                    apexshot::capture_overlay::RecordingType::Video => "mp4",
+                    apexshot::capture_overlay::RecordingType::Gif => "gif",
+                };
+                let output_path = std::env::temp_dir().join(format!(
+                    "apexshot_recording_{}.{}",
+                    chrono::Utc::now().format("%Y%m%d_%H%M%S"),
+                    ext
+                ));
+
+                // Build recording config
+                let rec_config = RecordingConfig {
+                    output_path: output_path.clone(),
+                    width: Some(request.width as u32),
+                    height: Some(request.height as u32),
+                    x: Some(request.x),
+                    y: Some(request.y),
+                    cursor: request.cursor,
+                    hidpi: request.hidpi,
+                };
+
+                eprintln!("Starting recording to {:?}...", output_path);
+
+                // Start recording with stop overlay
+                let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+
+                // Launch stop overlay in background thread
+                let overlay_handle = if request.controls {
+                    Some(std::thread::spawn(move || {
+                        let _ = run_recording_stop_overlay(stop_tx);
+                    }))
+                } else {
+                    // No controls shown — user must use Ctrl+C to stop
+                    None
+                };
+
+                let handle = tokio::runtime::Handle::current();
+                match handle.block_on(start_recording_with_stop(rec_config, stop_rx)) {
+                    Ok(path) => {
+                        eprintln!("Recording saved to {:?}", path);
+                    }
+                    Err(err) => {
+                        eprintln!("Recording failed: {}", err);
+                        std::process::exit(1);
+                    }
+                }
+
+                if let Some(handle) = overlay_handle {
+                    let _ = handle.join();
+                }
+
                 std::process::exit(0);
             }
             Ok(AreaCaptureResult::Cancelled) => {

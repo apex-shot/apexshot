@@ -178,6 +178,14 @@ pub struct RecordingRequest {
     pub speaker: bool,
     pub clicks: bool,
     pub keystrokes: bool,
+    // General tab settings
+    pub display_rec_time: bool,
+    pub hidpi: bool,
+    pub notifications: bool,
+    pub cursor: bool,
+    pub remember_selection: bool,
+    pub dim_screen: bool,
+    pub countdown: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -353,8 +361,27 @@ pub fn capture_screen_via_cpp() -> Result<CaptureData, SelectionError> {
 }
 
 pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
-    eprintln!("[capture_overlay] capture_area_via_cpp: launching --area-init");
-    let output = run_capture_binary(&["--area-init"], None)?;
+    // Check config for remember selection
+    let config = crate::config::load_config();
+    let mut extra_args: Vec<String> = vec!["--area-init".into()];
+
+    if config.rec_remember_selection {
+        if let (Some(x), Some(y), Some(w), Some(h)) = (
+            config.last_selection_x,
+            config.last_selection_y,
+            config.last_selection_w,
+            config.last_selection_h,
+        ) {
+            extra_args.push(format!("--restore-selection={x},{y},{w},{h}"));
+        }
+    }
+
+    let arg_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+    eprintln!(
+        "[capture_overlay] capture_area_via_cpp: launching {:?}",
+        arg_refs
+    );
+    let output = run_capture_binary(&arg_refs, None)?;
     let exit_code = output.status.code();
     eprintln!(
         "[capture_overlay] capture_area_via_cpp: --area-init exited with code {:?}",
@@ -485,6 +512,15 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let clicks = extract_bool(json, "clicks").unwrap_or(false);
     let keystrokes = extract_bool(json, "keystrokes").unwrap_or(false);
 
+    // General tab settings
+    let display_rec_time = extract_bool(json, "display_rec_time").unwrap_or(false);
+    let hidpi = extract_bool(json, "hidpi").unwrap_or(false);
+    let notifications = extract_bool(json, "notifications").unwrap_or(true);
+    let cursor = extract_bool(json, "cursor").unwrap_or(true);
+    let remember_selection = extract_bool(json, "remember_selection").unwrap_or(false);
+    let dim_screen = extract_bool(json, "dim_screen").unwrap_or(true);
+    let countdown = extract_bool(json, "countdown").unwrap_or(true);
+
     Ok(RecordingRequest {
         x,
         y,
@@ -496,6 +532,13 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         speaker,
         clicks,
         keystrokes,
+        display_rec_time,
+        hidpi,
+        notifications,
+        cursor,
+        remember_selection,
+        dim_screen,
+        countdown,
     })
 }
 
