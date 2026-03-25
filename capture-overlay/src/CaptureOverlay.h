@@ -68,6 +68,7 @@ public:
     bool recordRequested() const { return m_captureIntent == CaptureIntent::Record; }
     RecordType recordType() const { return m_recordType; }
     bool recordControlsEnabled() const { return m_recControls; }
+    bool recordFullscreen() const { return m_fullscreenMode; }
     bool recordMicEnabled() const { return m_recMic; }
     bool recordSpeakerEnabled() const { return m_recSpeaker; }
     bool recordClicksEnabled() const { return m_recClicks; }

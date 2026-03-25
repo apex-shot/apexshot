@@ -107,11 +107,9 @@ pub const DAEMON_OBJECT_PATH: &str = "/org/apexshot/Daemon";
 pub const DAEMON_INTERFACE: &str = "org.apexshot.Daemon";
 
 /// Current mic level (f64 bits stored as u64), updated by mic monitoring thread.
-static MIC_LEVEL: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0); // 0.0f64.to_bits()
+static MIC_LEVEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); // 0.0f64.to_bits()
 /// Current system audio level (f64 bits stored as u64), updated by speaker monitoring thread.
-static SPEAKER_LEVEL: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
+static SPEAKER_LEVEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Try to trigger an action on an already-running daemon via D-Bus.
 /// Returns `true` if the daemon was found and the call succeeded.
@@ -902,7 +900,6 @@ impl DaemonIpc {
     }
 }
 
-
 fn start_audio_level_stream(
     label: &'static str,
     stream_name: &'static str,
@@ -1000,7 +997,9 @@ fn start_audio_level_stream(
                     None => return,
                 };
                 let datas = buf.datas_mut();
-                if datas.is_empty() { return; }
+                if datas.is_empty() {
+                    return;
+                }
 
                 let mut peak: f32 = 0.0;
                 for data in datas.iter_mut() {
@@ -1011,7 +1010,9 @@ fn start_audio_level_stream(
                             let n_samples = n_bytes / std::mem::size_of::<f32>();
                             for j in 0..n_samples {
                                 let s = unsafe { *ptr.add(j) }.abs();
-                                if s > peak { peak = s; }
+                                if s > peak {
+                                    peak = s;
+                                }
                             }
                         }
                     }
@@ -1048,7 +1049,11 @@ fn start_audio_level_stream(
                 // Noise gate: ignore quiet audio to avoid picking up speaker bleed
                 // Only applies to mic stream (not speaker/sink monitor)
                 let gated = if !capture_sink {
-                    if raw_level < 0.15 { 0.0 } else { raw_level }
+                    if raw_level < 0.15 {
+                        0.0
+                    } else {
+                        raw_level
+                    }
                 } else {
                     raw_level
                 };
@@ -1128,10 +1133,21 @@ async fn run_dbus_server(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyhow::R
 
     // Mic: explicitly target physical input device to avoid picking up system audio
     // Falls back to default input if specific device not found
-    start_audio_level_stream("mic", "apexshot-mic-monitor",
-        Some("alsa_input.pci-0000_00_1f.3.analog-stereo"), false, &MIC_LEVEL);
+    start_audio_level_stream(
+        "mic",
+        "apexshot-mic-monitor",
+        Some("alsa_input.pci-0000_00_1f.3.analog-stereo"),
+        false,
+        &MIC_LEVEL,
+    );
     // Speaker: capture from sink monitor (digital tap of system audio output)
-    start_audio_level_stream("speaker", "apexshot-speaker-monitor", None, true, &SPEAKER_LEVEL);
+    start_audio_level_stream(
+        "speaker",
+        "apexshot-speaker-monitor",
+        None,
+        true,
+        &SPEAKER_LEVEL,
+    );
 
     eprintln!("[daemon] D-Bus IPC ready on {DAEMON_BUS_NAME}");
     std::future::pending::<()>().await;
@@ -2356,13 +2372,13 @@ fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
 
 async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::recording::{
-        run_recording_stop_overlay, start_recording_with_stop, RecordingConfig,
+        run_recording_stop_overlay, start_recording_with_stop, RecordingConfig, StopAction,
     };
 
     eprintln!("[daemon] Starting screen recording…");
 
     let config = RecordingConfig::default();
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<StopAction>();
 
     let record_join = tokio::spawn(async move { start_recording_with_stop(config, stop_rx).await });
 
@@ -2377,7 +2393,13 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     }
 
     match record_join.await {
-        Ok(Ok(path)) => eprintln!("[daemon] Recording saved: {}", path.display()),
+        Ok(Ok((path, StopAction::Discard))) => {
+            let _ = std::fs::remove_file(&path);
+            eprintln!("[daemon] Recording discarded.");
+        }
+        Ok(Ok((path, StopAction::Save))) => {
+            eprintln!("[daemon] Recording saved: {}", path.display())
+        }
         Ok(Err(e)) => eprintln!("[daemon] Recording error: {e}"),
         Err(e) => eprintln!("[daemon] Recording task panicked: {e}"),
     }
@@ -2386,7 +2408,8 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
 async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::capture_overlay::run_capture_overlay;
     use crate::recording::{
-        run_recording_stop_overlay, start_recording_with_stop, RecordingConfig,
+        run_recording_controls, start_recording_with_stop, RecordingConfig,
+        RecordingControlsParams, StopAction,
     };
 
     eprintln!("[daemon] Selecting area for recording…");
@@ -2427,12 +2450,20 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         area.x, area.y, area.width, area.height
     );
 
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<StopAction>();
 
     let record_join = tokio::spawn(async move { start_recording_with_stop(config, stop_rx).await });
 
+    let params = RecordingControlsParams {
+        capture_x: area.x,
+        capture_y: area.y,
+        capture_w: area.width,
+        capture_h: area.height,
+        is_fullscreen: false,
+        show_timer: false,
+    };
     let overlay_result =
-        tokio::task::spawn_blocking(move || run_recording_stop_overlay(stop_tx)).await;
+        tokio::task::spawn_blocking(move || run_recording_controls(params, stop_tx)).await;
 
     match overlay_result {
         Ok(Ok(())) => {}
@@ -2441,7 +2472,13 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     }
 
     match record_join.await {
-        Ok(Ok(path)) => eprintln!("[daemon] Recording saved: {}", path.display()),
+        Ok(Ok((path, StopAction::Discard))) => {
+            let _ = std::fs::remove_file(&path);
+            eprintln!("[daemon] Recording discarded.");
+        }
+        Ok(Ok((path, StopAction::Save))) => {
+            eprintln!("[daemon] Recording saved: {}", path.display())
+        }
         Ok(Err(e)) => eprintln!("[daemon] Recording error: {e}"),
         Err(e) => eprintln!("[daemon] Recording task panicked: {e}"),
     }

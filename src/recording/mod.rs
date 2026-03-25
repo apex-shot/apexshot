@@ -8,7 +8,10 @@ use tokio::sync::oneshot;
 use zbus::zvariant::OwnedValue;
 
 mod stop_overlay;
-pub use stop_overlay::{run_recording_stop_overlay, StopOverlayError};
+pub use stop_overlay::{
+    run_recording_controls, run_recording_stop_overlay, RecordingControlsParams, StopAction,
+    StopOverlayError,
+};
 
 pub mod countdown_overlay;
 pub mod dim_overlay;
@@ -146,21 +149,23 @@ const PROFILES: &[EncoderProfile] = &[
 
 /// Start a recording session
 pub async fn start_recording(config: RecordingConfig) -> RecordResult<PathBuf> {
-    start_recording_with_optional_stop(config, None).await
+    start_recording_with_optional_stop(config, None)
+        .await
+        .map(|(path, _)| path)
 }
 
 /// Start a recording session and stop when `stop_rx` resolves (in addition to Ctrl+C).
 pub async fn start_recording_with_stop(
     config: RecordingConfig,
-    stop_rx: oneshot::Receiver<()>,
-) -> RecordResult<PathBuf> {
+    stop_rx: oneshot::Receiver<StopAction>,
+) -> RecordResult<(PathBuf, StopAction)> {
     start_recording_with_optional_stop(config, Some(stop_rx)).await
 }
 
 async fn start_recording_with_optional_stop(
     config: RecordingConfig,
-    stop_rx: Option<oneshot::Receiver<()>>,
-) -> RecordResult<PathBuf> {
+    stop_rx: Option<oneshot::Receiver<StopAction>>,
+) -> RecordResult<(PathBuf, StopAction)> {
     // 1. Initialize GStreamer
     gst::init().map_err(|e| RecordError::InitError(e.to_string()))?;
 
@@ -227,15 +232,19 @@ async fn start_recording_with_optional_stop(
 
     let stop_fut = async {
         if let Some(rx) = stop_rx {
-            let _ = rx.await;
+            match rx.await {
+                Ok(action) => action,
+                Err(_) => futures_util::future::pending::<StopAction>().await,
+            }
         } else {
-            futures_util::future::pending::<()>().await;
+            futures_util::future::pending::<StopAction>().await
         }
     };
     tokio::pin!(stop_fut);
 
     // Phase 1: Recording until Ctrl+C or Error
     let mut stopping = false;
+    let mut stop_action = StopAction::Save;
     loop {
         tokio::select! {
             _ = &mut ctrl_c => {
@@ -244,7 +253,8 @@ async fn start_recording_with_optional_stop(
                 stopping = true;
                 break;
             }
-            _ = &mut stop_fut => {
+            action = &mut stop_fut => {
+                stop_action = action;
                 println!("\nStopping recording... Finalizing file...");
                 pipeline.send_event(gst::event::Eos::new());
                 stopping = true;
@@ -313,15 +323,17 @@ async fn start_recording_with_optional_stop(
         .set_state(gst::State::Null)
         .map_err(|e| RecordError::GStreamerError(format!("Failed to set state to Null: {}", e)))?;
 
-    println!("Recording saved to {:?}", final_path);
-    if let Ok(metadata) = std::fs::metadata(&final_path) {
-        println!(
-            "File size: {:.2} MB",
-            metadata.len() as f64 / 1024.0 / 1024.0
-        );
+    if stop_action == StopAction::Save {
+        println!("Recording saved to {:?}", final_path);
+        if let Ok(metadata) = std::fs::metadata(&final_path) {
+            println!(
+                "File size: {:.2} MB",
+                metadata.len() as f64 / 1024.0 / 1024.0
+            );
+        }
     }
 
-    Ok(final_path)
+    Ok((final_path, stop_action))
 }
 
 pub fn copy_to_clipboard(path: &PathBuf) -> RecordResult<()> {
@@ -726,8 +738,8 @@ fn get_x11_source(config: &RecordingConfig) -> RecordResult<String> {
 
 async fn record_gif_rust_with_optional_stop(
     config: RecordingConfig,
-    stop_rx: Option<oneshot::Receiver<()>>,
-) -> RecordResult<PathBuf> {
+    stop_rx: Option<oneshot::Receiver<StopAction>>,
+) -> RecordResult<(PathBuf, StopAction)> {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
@@ -803,14 +815,18 @@ async fn record_gif_rust_with_optional_stop(
 
     let stop_fut = async {
         if let Some(rx) = stop_rx {
-            let _ = rx.await;
+            match rx.await {
+                Ok(action) => action,
+                Err(_) => futures_util::future::pending::<StopAction>().await,
+            }
         } else {
-            futures_util::future::pending::<()>().await;
+            futures_util::future::pending::<StopAction>().await
         }
     };
     tokio::pin!(stop_fut);
 
     let mut stopping = false;
+    let mut stop_action = StopAction::Save;
     let mut ffmpeg_child: Option<std::process::Child> = None;
 
     loop {
@@ -819,7 +835,8 @@ async fn record_gif_rust_with_optional_stop(
                 println!("\nStopping recording...");
                 stopping = true;
             }
-            _ = &mut stop_fut => {
+            action = &mut stop_fut => {
+                stop_action = action;
                 println!("\nStopping recording...");
                 stopping = true;
             }
@@ -936,6 +953,8 @@ async fn record_gif_rust_with_optional_stop(
         return Err(RecordError::GifError("No frames captured".into()));
     }
 
-    println!("GIF saved to {:?}", config.output_path);
-    Ok(config.output_path)
+    if stop_action == StopAction::Save {
+        println!("GIF saved to {:?}", config.output_path);
+    }
+    Ok((config.output_path, stop_action))
 }
