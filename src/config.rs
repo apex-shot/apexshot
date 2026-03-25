@@ -42,6 +42,11 @@ pub struct AppConfig {
     pub last_selection_y: Option<i32>,
     pub last_selection_w: Option<i32>,
     pub last_selection_h: Option<i32>,
+    // Recording Video tab settings
+    pub rec_video_max_res: u8,
+    pub rec_video_fps: u8,
+    pub rec_video_mono: bool,
+    pub rec_video_open_editor: bool,
 }
 
 impl Default for AppConfig {
@@ -72,6 +77,11 @@ impl Default for AppConfig {
             last_selection_y: None,
             last_selection_w: None,
             last_selection_h: None,
+            // Video tab defaults
+            rec_video_max_res: 0, // 0 = Original
+            rec_video_fps: 1,     // 1 = 30fps
+            rec_video_mono: false,
+            rec_video_open_editor: false,
         }
     }
 }

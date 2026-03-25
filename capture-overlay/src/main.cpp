@@ -96,7 +96,8 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                          bool clicks, bool keystrokes,
                          bool displayRecTime, bool hidpi, bool doNotDisturb,
                          bool showCursor, bool rememberSelection,
-                         bool dimScreen, bool countdown)
+                         bool dimScreen, bool countdown,
+                         int videoMaxRes, int videoFps, bool recordMono, bool openEditor)
 {
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
                 "\"mode\":\"record\",\"record_type\":\"%s\","
@@ -105,7 +106,9 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 "\"display_rec_time\":%s,\"hidpi\":%s,"
                 "\"notifications\":%s,\"cursor\":%s,"
                 "\"remember_selection\":%s,\"dim_screen\":%s,"
-                "\"countdown\":%s}\n",
+                "\"countdown\":%s,"
+                "\"video_max_res\":%d,\"video_fps\":%d,"
+                "\"record_mono\":%s,\"open_editor\":%s}\n",
                 sel.x(), sel.y(), sel.width(), sel.height(),
                 recordType,
                 controls ? "true" : "false",
@@ -119,7 +122,11 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 showCursor ? "true" : "false",
                 rememberSelection ? "true" : "false",
                 dimScreen ? "true" : "false",
-                countdown ? "true" : "false");
+                countdown ? "true" : "false",
+                videoMaxRes,
+                videoFps,
+                recordMono ? "true" : "false",
+                openEditor ? "true" : "false");
     std::fflush(stdout);
 }
 
@@ -348,7 +355,11 @@ int main(int argc, char* argv[])
                            overlay.recordShowCursor(),
                            overlay.recordRememberSelection(),
                            overlay.recordDimScreen(),
-                           overlay.recordShowCountdown());
+                           overlay.recordShowCountdown(),
+                           overlay.recordVideoMaxRes(),
+                           overlay.recordVideoFps(),
+                           overlay.recordMono(),
+                           overlay.recordOpenEditor());
         return 0;
     }
 
