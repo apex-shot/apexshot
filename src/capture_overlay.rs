@@ -220,6 +220,23 @@ pub struct RecordingRequest {
     pub speaker: bool,
     pub clicks: bool,
     pub keystrokes: bool,
+    // Runtime overlay settings
+    pub webcam: bool,
+    pub click_size: f64,
+    pub click_color: u8,
+    pub click_style: u8,
+    pub click_animate: bool,
+    pub key_size: f64,
+    pub key_position: u8,
+    pub key_appearance: u8,
+    pub key_blur_bg: bool,
+    pub key_filter: u8,
+    pub webcam_size: u8,
+    pub webcam_shape: u8,
+    pub webcam_flip: bool,
+    pub webcam_device: i32,
+    pub webcam_rel_x: f64,
+    pub webcam_rel_y: f64,
     // General tab settings
     pub display_rec_time: bool,
     pub hidpi: bool,
@@ -239,6 +256,55 @@ pub struct RecordingRequest {
     pub gif_size_idx: u8,
     pub optimize_gif: bool,
     pub fullscreen: bool,
+}
+
+impl Default for RecordingRequest {
+    fn default() -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            record_type: RecordingType::Video,
+            controls: false,
+            mic: false,
+            speaker: false,
+            clicks: false,
+            keystrokes: false,
+            webcam: false,
+            click_size: 0.3,
+            click_color: 0,
+            click_style: 0,
+            click_animate: true,
+            key_size: 0.32,
+            key_position: 0,
+            key_appearance: 0,
+            key_blur_bg: true,
+            key_filter: 0,
+            webcam_size: 1,
+            webcam_shape: 3,
+            webcam_flip: false,
+            webcam_device: -1,
+            webcam_rel_x: 0.0,
+            webcam_rel_y: 0.0,
+            display_rec_time: false,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: true,
+            countdown: true,
+            video_max_res: 0,
+            video_fps: 2,
+            record_mono: false,
+            open_editor: true,
+            gif_fps: 50,
+            gif_quality: 0.75,
+            gif_size_idx: 0,
+            optimize_gif: true,
+            fullscreen: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -470,6 +536,41 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
     } else {
         "--no-rec-keystrokes".into()
     });
+    extra_args.push(format!("--rec-click-size={:.4}", config.rec_click_size));
+    extra_args.push(format!("--rec-click-color={}", config.rec_click_color));
+    extra_args.push(format!("--rec-click-style={}", config.rec_click_style));
+    if config.rec_click_animate {
+        extra_args.push("--rec-click-animate".into());
+    } else {
+        extra_args.push("--no-rec-click-animate".into());
+    }
+    extra_args.push(format!("--rec-key-size={:.4}", config.rec_key_size));
+    extra_args.push(format!("--rec-key-position={}", config.rec_key_position));
+    extra_args.push(format!(
+        "--rec-key-appearance={}",
+        config.rec_key_appearance
+    ));
+    if config.rec_key_blur_bg {
+        extra_args.push("--rec-key-blur-bg".into());
+    } else {
+        extra_args.push("--no-rec-key-blur-bg".into());
+    }
+    extra_args.push(format!("--rec-key-filter={}", config.rec_key_filter));
+    if config.rec_webcam_enabled {
+        extra_args.push("--rec-webcam".into());
+    } else {
+        extra_args.push("--no-rec-webcam".into());
+    }
+    extra_args.push(format!("--rec-webcam-size={}", config.rec_webcam_size));
+    extra_args.push(format!("--rec-webcam-shape={}", config.rec_webcam_shape));
+    if config.rec_webcam_flip {
+        extra_args.push("--rec-webcam-flip".into());
+    } else {
+        extra_args.push("--no-rec-webcam-flip".into());
+    }
+    extra_args.push(format!("--rec-webcam-device={}", config.rec_webcam_device));
+    extra_args.push(format!("--rec-webcam-rel-x={:.4}", config.rec_webcam_rel_x));
+    extra_args.push(format!("--rec-webcam-rel-y={:.4}", config.rec_webcam_rel_y));
     extra_args.push(if config.rec_remember_selection {
         "--remember-selection".into()
     } else {
@@ -641,6 +742,22 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let speaker = extract_bool(json, "speaker").unwrap_or(false);
     let clicks = extract_bool(json, "clicks").unwrap_or(false);
     let keystrokes = extract_bool(json, "keystrokes").unwrap_or(false);
+    let webcam = extract_bool(json, "webcam").unwrap_or(false);
+    let click_size = extract_float(json, "click_size").unwrap_or(0.3);
+    let click_color = extract_int(json, "click_color").unwrap_or(0) as u8;
+    let click_style = extract_int(json, "click_style").unwrap_or(0) as u8;
+    let click_animate = extract_bool(json, "click_animate").unwrap_or(true);
+    let key_size = extract_float(json, "key_size").unwrap_or(0.32);
+    let key_position = extract_int(json, "key_position").unwrap_or(0) as u8;
+    let key_appearance = extract_int(json, "key_appearance").unwrap_or(0) as u8;
+    let key_blur_bg = extract_bool(json, "key_blur_bg").unwrap_or(true);
+    let key_filter = extract_int(json, "key_filter").unwrap_or(0) as u8;
+    let webcam_size = extract_int(json, "webcam_size").unwrap_or(1) as u8;
+    let webcam_shape = extract_int(json, "webcam_shape").unwrap_or(3) as u8;
+    let webcam_flip = extract_bool(json, "webcam_flip").unwrap_or(false);
+    let webcam_device = extract_int(json, "webcam_device").unwrap_or(-1);
+    let webcam_rel_x = extract_float(json, "webcam_rel_x").unwrap_or(0.0);
+    let webcam_rel_y = extract_float(json, "webcam_rel_y").unwrap_or(0.0);
 
     // General tab settings
     let display_rec_time = extract_bool(json, "display_rec_time").unwrap_or(false);
@@ -653,7 +770,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
 
     // Video tab settings
     let video_max_res = extract_int(json, "video_max_res").unwrap_or(0) as u8;
-    let video_fps = extract_int(json, "video_fps").unwrap_or(1) as u8; // Default to 30fps (index 1)
+    let video_fps = extract_int(json, "video_fps").unwrap_or(2) as u8; // Default matches the overlay constructor
     let record_mono = extract_bool(json, "record_mono").unwrap_or(false);
     let open_editor = extract_bool(json, "open_editor").unwrap_or(false);
     let gif_fps = extract_int(json, "gif_fps").unwrap_or(50).clamp(5, 60) as u8;
@@ -675,6 +792,22 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         speaker,
         clicks,
         keystrokes,
+        webcam,
+        click_size,
+        click_color,
+        click_style,
+        click_animate,
+        key_size,
+        key_position,
+        key_appearance,
+        key_blur_bg,
+        key_filter,
+        webcam_size,
+        webcam_shape,
+        webcam_flip,
+        webcam_device,
+        webcam_rel_x,
+        webcam_rel_y,
         display_rec_time,
         hidpi,
         notifications,
@@ -789,7 +922,8 @@ fn extract_string(json: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_selection_json,
+        parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
+        parse_selection_json, RecordingType,
     };
 
     #[test]
@@ -833,5 +967,74 @@ mod tests {
         assert_eq!(area.y, 2);
         assert_eq!(area.width, 3);
         assert_eq!(area.height, 4);
+    }
+
+    #[test]
+    fn parse_recording_json_reads_runtime_overlay_fields() {
+        let request = parse_recording_json(
+            r#"{
+                "x":12,"y":34,"width":567,"height":890,
+                "mode":"record","record_type":"video",
+                "controls":true,"mic":true,"speaker":false,
+                "clicks":true,"keystrokes":false,
+                "display_rec_time":true,"hidpi":false,
+                "notifications":true,"cursor":false,
+                "remember_selection":true,"dim_screen":false,
+                "countdown":true,
+                "video_max_res":2,"video_fps":1,
+                "record_mono":true,"open_editor":false,
+                "gif_fps":33,"gif_quality":0.8125,
+                "gif_size_idx":2,"optimize_gif":false,"fullscreen":true,
+                "webcam":true,"click_size":18.5,"click_color":4,"click_style":2,
+                "click_animate":true,"key_size":15.25,"key_position":3,
+                "key_appearance":1,"key_blur_bg":true,"key_filter":6,
+                "webcam_size":2,"webcam_shape":1,"webcam_flip":true,
+                "webcam_device":7,"webcam_rel_x":0.125,"webcam_rel_y":0.875
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.x, 12);
+        assert_eq!(request.y, 34);
+        assert_eq!(request.width, 567);
+        assert_eq!(request.height, 890);
+        assert_eq!(request.record_type, RecordingType::Video);
+        assert!(request.controls);
+        assert!(request.mic);
+        assert!(!request.speaker);
+        assert!(request.clicks);
+        assert!(!request.keystrokes);
+        assert!(request.display_rec_time);
+        assert!(!request.hidpi);
+        assert!(request.notifications);
+        assert!(!request.cursor);
+        assert!(request.remember_selection);
+        assert!(!request.dim_screen);
+        assert!(request.countdown);
+        assert_eq!(request.video_max_res, 2);
+        assert_eq!(request.video_fps, 1);
+        assert!(request.record_mono);
+        assert!(!request.open_editor);
+        assert_eq!(request.gif_fps, 33);
+        assert_eq!(request.gif_quality, 0.8125);
+        assert_eq!(request.gif_size_idx, 2);
+        assert!(!request.optimize_gif);
+        assert!(request.fullscreen);
+        assert!(request.webcam);
+        assert_eq!(request.click_size, 18.5);
+        assert_eq!(request.click_color, 4);
+        assert_eq!(request.click_style, 2);
+        assert!(request.click_animate);
+        assert_eq!(request.key_size, 15.25);
+        assert_eq!(request.key_position, 3);
+        assert_eq!(request.key_appearance, 1);
+        assert!(request.key_blur_bg);
+        assert_eq!(request.key_filter, 6);
+        assert_eq!(request.webcam_size, 2);
+        assert_eq!(request.webcam_shape, 1);
+        assert!(request.webcam_flip);
+        assert_eq!(request.webcam_device, 7);
+        assert_eq!(request.webcam_rel_x, 0.125);
+        assert_eq!(request.webcam_rel_y, 0.875);
     }
 }

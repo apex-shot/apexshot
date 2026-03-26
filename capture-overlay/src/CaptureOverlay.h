@@ -73,6 +73,22 @@ public:
     bool recordSpeakerEnabled() const { return m_recSpeaker; }
     bool recordClicksEnabled() const { return m_recClicks; }
     bool recordKeystrokesEnabled() const { return m_recKeystrokes; }
+    bool recordWebcamEnabled() const { return m_recWebcam; }
+    double recordClickSize() const { return m_clickSize; }
+    int recordClickColor() const { return m_clickColor; }
+    int recordClickStyle() const { return m_clickStyle; }
+    bool recordClickAnimate() const { return m_clickAnimate; }
+    double recordKeySize() const { return m_keySize; }
+    int recordKeyPosition() const { return m_keyPosition; }
+    int recordKeyAppearance() const { return m_keyAppearance; }
+    bool recordKeyBlurBg() const { return m_keyBlurBg; }
+    int recordKeyFilter() const { return m_keyFilter; }
+    int recordWebcamSize() const { return static_cast<int>(m_webcamSize); }
+    int recordWebcamShape() const { return static_cast<int>(m_webcamShape); }
+    bool recordWebcamFlip() const { return m_webcamFlip; }
+    int recordWebcamDevice() const { return m_webcamDevice; }
+    double recordWebcamRelX() const { return m_webcamRelX; }
+    double recordWebcamRelY() const { return m_webcamRelY; }
     bool recordDisplayRecTime() const { return m_displayRecTime; }
     bool recordHidpiEnabled() const { return m_hidpi; }
     bool recordDoNotDisturb() const { return m_doNotDisturb; }
@@ -341,6 +357,8 @@ private:
     WebcamShape m_webcamShape = WebcamShape::Vertical;
     bool m_webcamFlip = false;
     int m_webcamDevice = -1; // -1 = None, 0+ = /dev/videoN
+    double m_webcamRelX = 0.0;
+    double m_webcamRelY = 0.0;
     QStringList m_webcamDevices; // cached device names
     double m_micLevel; // Normalized level for animation
     double m_speakerLevel; // Normalized level for speaker animation
