@@ -38,6 +38,7 @@ use crate::{
         sync_gnome_hotkeys_for_current_desktop, HotkeyBinding,
     },
     ocr::{extract_text, OcrConfig},
+    recording::run_overlay_recording_request_with_gtk,
     tray::{spawn_tray, ApexShotTray, TrayAction},
 };
 
@@ -205,6 +206,15 @@ pub enum GtkWork {
     },
     CaptureAreaInit {
         reply: std::sync::mpsc::SyncSender<Result<AreaCapturePathResult, String>>,
+    },
+    RunRecordingControls {
+        params: crate::recording::RecordingControlsParams,
+        stop_tx: tokio::sync::oneshot::Sender<crate::recording::StopAction>,
+    },
+    RunCountdown {
+        seconds: u32,
+        params: Option<crate::recording::RecordingControlsParams>,
+        reply: std::sync::mpsc::SyncSender<()>,
     },
     SelectArea {
         capture: crate::backend::CaptureData,
@@ -2091,8 +2101,10 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
             eprintln!("[daemon] Area selection cancelled.");
             return;
         }
-        Ok(AreaCapturePathResult::RecordingRequested(_)) => {
-            eprintln!("[daemon] Recording requested but recording is not supported via daemon.");
+        Ok(AreaCapturePathResult::RecordingRequested(request)) => {
+            if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
+                eprintln!("[daemon] Recording failed: {err}");
+            }
             return;
         }
         Err(err) => {
@@ -2155,8 +2167,12 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
                             Ok(AreaCapturePathResult::Cancelled) => {
                                 eprintln!("[daemon] Area capture cancelled")
                             }
-                            Ok(AreaCapturePathResult::RecordingRequested(_)) => {
-                                eprintln!("[daemon] Recording not supported via daemon")
+                            Ok(AreaCapturePathResult::RecordingRequested(request)) => {
+                                if let Err(err) =
+                                    run_overlay_recording_request_with_gtk(request, gtk_tx.clone())
+                                {
+                                    eprintln!("[daemon] Recording failed: {err}");
+                                }
                             }
                             Err(e) => eprintln!("[daemon] Area capture failed: {e}"),
                         }
@@ -2372,43 +2388,38 @@ fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
 
 async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::recording::{
-        run_recording_stop_overlay, start_recording_with_stop, RecordingConfig, StopAction,
+        run_recording_with_cpp_controls, RecordingConfig, RecordingControlsParams, StopAction,
     };
 
     eprintln!("[daemon] Starting screen recording…");
 
     let config = RecordingConfig::default();
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<StopAction>();
+    let params = RecordingControlsParams {
+        capture_x: 0,
+        capture_y: 0,
+        capture_w: 0,
+        capture_h: 0,
+        is_fullscreen: true,
+        show_timer: true,
+        use_shell_mask: false,
+    };
 
-    let record_join = tokio::spawn(async move { start_recording_with_stop(config, stop_rx).await });
-
-    // Show stop overlay on a dedicated blocking thread (it runs a GTK loop).
-    let overlay_result =
-        tokio::task::spawn_blocking(move || run_recording_stop_overlay(stop_tx)).await;
-
-    match overlay_result {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => eprintln!("[daemon] Stop overlay error: {e}"),
-        Err(e) => eprintln!("[daemon] Stop overlay task panicked: {e}"),
-    }
-
-    match record_join.await {
-        Ok(Ok((path, StopAction::Discard))) => {
+    match run_recording_with_cpp_controls(config, params).await {
+        Ok((path, StopAction::Discard)) => {
             let _ = std::fs::remove_file(&path);
             eprintln!("[daemon] Recording discarded.");
         }
-        Ok(Ok((path, StopAction::Save))) => {
+        Ok((path, StopAction::Save)) => {
             eprintln!("[daemon] Recording saved: {}", path.display())
         }
-        Ok(Err(e)) => eprintln!("[daemon] Recording error: {e}"),
-        Err(e) => eprintln!("[daemon] Recording task panicked: {e}"),
+        Err(e) => eprintln!("[daemon] Recording error: {e}"),
     }
 }
 
 async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::capture_overlay::run_capture_overlay;
     use crate::recording::{
-        run_recording_controls, start_recording_with_stop, RecordingConfig,
+        run_recording_with_cpp_controls, RecordingConfig,
         RecordingControlsParams, StopAction,
     };
 
@@ -2450,36 +2461,23 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         area.x, area.y, area.width, area.height
     );
 
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<StopAction>();
-
-    let record_join = tokio::spawn(async move { start_recording_with_stop(config, stop_rx).await });
-
     let params = RecordingControlsParams {
         capture_x: area.x,
         capture_y: area.y,
         capture_w: area.width,
         capture_h: area.height,
         is_fullscreen: false,
-        show_timer: false,
+        show_timer: true,
+        use_shell_mask: false,
     };
-    let overlay_result =
-        tokio::task::spawn_blocking(move || run_recording_controls(params, stop_tx)).await;
-
-    match overlay_result {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => eprintln!("[daemon] Stop overlay error: {e}"),
-        Err(e) => eprintln!("[daemon] Stop overlay task panicked: {e}"),
-    }
-
-    match record_join.await {
-        Ok(Ok((path, StopAction::Discard))) => {
+    match run_recording_with_cpp_controls(config, params).await {
+        Ok((path, StopAction::Discard)) => {
             let _ = std::fs::remove_file(&path);
             eprintln!("[daemon] Recording discarded.");
         }
-        Ok(Ok((path, StopAction::Save))) => {
+        Ok((path, StopAction::Save)) => {
             eprintln!("[daemon] Recording saved: {}", path.display())
         }
-        Ok(Err(e)) => eprintln!("[daemon] Recording error: {e}"),
-        Err(e) => eprintln!("[daemon] Recording task panicked: {e}"),
+        Err(e) => eprintln!("[daemon] Recording error: {e}"),
     }
 }

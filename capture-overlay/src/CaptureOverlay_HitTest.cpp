@@ -59,6 +59,29 @@ void CaptureOverlay::confirmSelection()
     QApplication::exit(0);
 }
 
+void CaptureOverlay::confirmRecordingSelection()
+{
+    if (m_showCountdown && !m_countdownActive) {
+        m_countdownActive = true;
+        for (int remaining = 3; remaining > 0; --remaining) {
+            m_countdownValue = remaining;
+            update();
+            QApplication::processEvents();
+            QThread::sleep(1);
+        }
+        m_countdownActive = false;
+        m_countdownValue = 0;
+        update();
+        QApplication::processEvents();
+    }
+
+    releaseKeyboard();
+    hide();
+    QApplication::processEvents();
+    QThread::msleep(120);
+    QApplication::exit(0);
+}
+
 void CaptureOverlay::cancelSelection()
 {
     exitScrollMode();
@@ -200,4 +223,3 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
     default:                     setCursor(Qt::CrossCursor);     break;
     }
 }
-

@@ -19,7 +19,6 @@ use apexshot::{
     capture_overlay::{
         capture_area_via_cpp, capture_screen_via_cpp, run_capture_overlay, AreaCaptureResult,
     },
-    config::{load_config, save_config},
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
         ensure_desktop_entry_pub, install_hotkeys_for_current_desktop, reset_hotkey_config,
@@ -27,8 +26,9 @@ use apexshot::{
     },
     ocr::{extract_text_from_path, OcrConfig},
     recording::{
-        copy_to_clipboard as copy_recording_to_clipboard, run_recording_controls, start_recording,
-        start_recording_with_stop, RecordingConfig, RecordingControlsParams, StopAction,
+        copy_to_clipboard as copy_recording_to_clipboard, run_overlay_recording_request,
+        run_recording_countdown_bar, run_recording_with_cpp_controls, start_recording,
+        RecordingConfig, RecordingControlsParams, StopAction,
     },
     show_settings_window,
 };
@@ -47,6 +47,8 @@ async fn main() {
 
     match args[1].as_str() {
         "daemon" => {
+            apexshot::gnome_shell::hide_recording_mask_best_effort();
+
             // Parse legacy flags that still apply to the new tray daemon.
             let mut i = 2;
             while i < args.len() {
@@ -730,6 +732,28 @@ fn run_daemon_with_gtk_on_main_thread() {
                     .map_err(|e| e.to_string());
                 let _ = reply.send(result);
             }
+            GtkWork::RunRecordingControls { params, stop_tx } => {
+                eprintln!("[gtk] RunRecordingControls received — launching recording controls");
+                if let Err(err) = apexshot::recording::run_recording_controls(params, stop_tx) {
+                    eprintln!("[gtk] Recording controls failed: {err}");
+                }
+            }
+            GtkWork::RunCountdown {
+                seconds,
+                params,
+                reply,
+            } => {
+                eprintln!("[gtk] RunCountdown received — launching countdown UI");
+                if let Some(params) = params {
+                    if let Err(err) = run_recording_countdown_bar(params, seconds) {
+                        eprintln!("[gtk] Countdown bar failed: {err}");
+                        apexshot::recording::countdown_overlay::run_countdown_overlay(seconds);
+                    }
+                } else {
+                    apexshot::recording::countdown_overlay::run_countdown_overlay(seconds);
+                }
+                let _ = reply.send(());
+            }
             GtkWork::SelectArea { capture, reply } => {
                 eprintln!(
                     "[gtk] SelectArea received, launching C++ overlay ({}x{})...",
@@ -1003,178 +1027,9 @@ fn run_capture(args: &[String]) {
                 Some(capture)
             }
             Ok(AreaCaptureResult::RecordingRequested(request)) => {
-                // Load config and update from overlay settings
-                let mut cfg = load_config();
-                cfg.rec_controls = request.controls;
-                cfg.rec_display_time = request.display_rec_time;
-                cfg.rec_hidpi = request.hidpi;
-                cfg.rec_notifications = request.notifications;
-                cfg.rec_cursor = request.cursor;
-                cfg.rec_clicks = request.clicks;
-                cfg.rec_keystrokes = request.keystrokes;
-                cfg.rec_remember_selection = request.remember_selection;
-                cfg.rec_dim_screen = request.dim_screen;
-                cfg.rec_countdown = request.countdown;
-                cfg.rec_mic = request.mic;
-                cfg.rec_speaker = request.speaker;
-
-                // Update config from overlay settings (Video tab)
-                cfg.rec_video_max_res = request.video_max_res;
-                cfg.rec_video_fps = request.video_fps;
-                cfg.rec_video_mono = request.record_mono;
-                cfg.rec_video_open_editor = request.open_editor;
-                cfg.rec_gif_fps = request.gif_fps;
-                cfg.rec_gif_quality = request.gif_quality;
-                cfg.rec_gif_size_idx = request.gif_size_idx;
-                cfg.rec_gif_optimize = request.optimize_gif;
-
-                // Remember selection area
-                if request.remember_selection {
-                    cfg.last_selection_x = Some(request.x);
-                    cfg.last_selection_y = Some(request.y);
-                    cfg.last_selection_w = Some(request.width);
-                    cfg.last_selection_h = Some(request.height);
-                }
-
-                // Save config
-                let _ = save_config(&cfg);
-
-                // Pre-recording: DND
-                let _dnd_guard = if request.notifications {
-                    apexshot::recording::dnd::DndGuard::enable()
-                } else {
-                    None
-                };
-
-                // Pre-recording: Dim screen + Countdown
-                // Run dim overlay in a background thread if enabled
-                let dim_close = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                let dim_handle = if request.dim_screen && request.countdown {
-                    let flag = dim_close.clone();
-                    Some(std::thread::spawn(move || {
-                        apexshot::recording::dim_overlay::run_dim_overlay(flag);
-                    }))
-                } else {
-                    None
-                };
-
-                // Countdown blocks until done
-                if request.countdown {
-                    apexshot::recording::countdown_overlay::run_countdown_overlay(3);
-                }
-
-                // Close dim overlay after countdown
-                dim_close.store(true, std::sync::atomic::Ordering::Relaxed);
-                if let Some(handle) = dim_handle {
-                    let _ = handle.join();
-                }
-
-                // Build output path
-                let ext = match request.record_type {
-                    apexshot::capture_overlay::RecordingType::Video => "mp4",
-                    apexshot::capture_overlay::RecordingType::Gif => "gif",
-                };
-                let output_path = std::env::temp_dir().join(format!(
-                    "apexshot_recording_{}.{}",
-                    chrono::Utc::now().format("%Y%m%d_%H%M%S"),
-                    ext
-                ));
-
-                // Map Video tab settings
-                let max_resolution = match request.video_max_res {
-                    0 => None,               // Original
-                    1 => Some((1920, 1080)), // 1080p
-                    2 => Some((1280, 720)),  // 720p
-                    _ => None,
-                };
-
-                let fps = match request.video_fps {
-                    0 => 24,
-                    1 => 30,
-                    2 => 50,
-                    3 => 60,
-                    _ => 30,
-                };
-                let (fps, gif_quality, gif_optimize, gif_max_width) = if matches!(
-                    request.record_type,
-                    apexshot::capture_overlay::RecordingType::Gif
-                ) {
-                    let gw = match request.gif_size_idx {
-                        0 => Some(800u32),
-                        1 => Some(640u32),
-                        2 => Some(480u32),
-                        _ => None,
-                    };
-                    (
-                        request.gif_fps as u32,
-                        request.gif_quality,
-                        request.optimize_gif,
-                        gw,
-                    )
-                } else {
-                    (fps, 0.75_f64, true, Some(800u32))
-                };
-
-                // Build recording config
-                let rec_config = RecordingConfig {
-                    output_path: output_path.clone(),
-                    width: Some(request.width as u32),
-                    height: Some(request.height as u32),
-                    x: Some(request.x),
-                    y: Some(request.y),
-                    cursor: request.cursor,
-                    hidpi: request.hidpi,
-                    max_resolution,
-                    fps,
-                    mono_audio: request.record_mono,
-                    mic_enabled: request.mic,
-                    speaker_enabled: request.speaker,
-                    mic_source: None,
-                    speaker_source: None,
-                    gif_quality,
-                    gif_optimize,
-                    gif_max_width,
-                };
-
-                eprintln!("Starting recording to {:?}...", output_path);
-
-                // Start recording with stop overlay
-                let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<StopAction>();
-
-                let overlay_handle = if request.controls {
-                    let params = RecordingControlsParams {
-                        capture_x: request.x,
-                        capture_y: request.y,
-                        capture_w: request.width,
-                        capture_h: request.height,
-                        is_fullscreen: request.fullscreen,
-                        show_timer: request.display_rec_time,
-                    };
-                    Some(std::thread::spawn(move || {
-                        let _ = run_recording_controls(params, stop_tx);
-                    }))
-                } else {
-                    drop(stop_tx);
-                    None
-                };
-
-                let handle = tokio::runtime::Handle::current();
-                match handle.block_on(start_recording_with_stop(rec_config, stop_rx)) {
-                    Ok((path, StopAction::Discard)) => {
-                        eprintln!("Recording discarded — deleting {:?}", path);
-                        let _ = std::fs::remove_file(&path);
-                    }
-                    Ok((path, StopAction::Save)) => {
-                        eprintln!("Recording saved to {:?}", path);
-                    }
-                    Err(err) => {
-                        eprintln!("Recording failed: {}", err);
-                        std::process::exit(1);
-                    }
-                }
-
-                if let Some(handle) = overlay_handle {
-                    let _ = handle.join();
+                if let Err(err) = run_overlay_recording_request(request) {
+                    eprintln!("{err}");
+                    std::process::exit(1);
                 }
 
                 std::process::exit(0);
@@ -1689,26 +1544,25 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let final_path = if overlay_stop {
-        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<StopAction>();
-        let join = tokio::spawn(async move { start_recording_with_stop(config, stop_rx).await });
-
-        run_recording_controls(
+        let params =
             RecordingControlsParams {
                 capture_x: 0,
                 capture_y: 0,
                 capture_w: 0,
                 capture_h: 0,
                 is_fullscreen: true,
-                show_timer: false,
-            },
-            stop_tx,
-        )
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                show_timer: true,
+                use_shell_mask: false,
+            };
 
-        match join
+        let controls_outcome = run_recording_with_cpp_controls(config, params)
             .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)??
-        {
+            .map_err(|e| {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                    as Box<dyn std::error::Error>
+            })?;
+
+        match controls_outcome {
             (path, StopAction::Discard) => {
                 let _ = std::fs::remove_file(&path);
                 return Ok(());

@@ -11,7 +11,7 @@
 //!   exit 2 → error
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 
 use crate::{
     backend::{CaptureData, DisplayBackend, PixelFormat, WaylandBackend},
@@ -141,6 +141,48 @@ fn run_capture_binary(
             binary.display(),
             e
         ))
+    })
+}
+
+pub fn spawn_recording_controls_via_cpp(
+    dbus_dest: &str,
+    session_id: &str,
+    params: crate::recording::RecordingControlsParams,
+) -> anyhow::Result<Child> {
+    let binary = find_capture_binary().ok_or_else(|| {
+        anyhow::anyhow!(
+            "apexshot-capture binary not found. Re-run `cargo build --release` to compile it, or check your PATH."
+        )
+    })?;
+
+    let mut cmd = Command::new(&binary);
+    cmd.env("QT_IM_MODULE", "compose")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .arg("--record-controls")
+        .arg(format!("--dbus-dest={dbus_dest}"))
+        .arg(format!("--session-id={session_id}"))
+        .arg(format!("--capture-x={}", params.capture_x))
+        .arg(format!("--capture-y={}", params.capture_y))
+        .arg(format!("--capture-w={}", params.capture_w))
+        .arg(format!("--capture-h={}", params.capture_h));
+
+    if params.is_fullscreen {
+        cmd.arg("--fullscreen");
+    }
+    if params.show_timer {
+        cmd.arg("--show-timer");
+    } else {
+        cmd.arg("--hide-timer");
+    }
+
+    cmd.spawn().map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to launch apexshot-capture record-controls ({}): {}",
+            binary.display(),
+            e
+        )
     })
 }
 
@@ -393,6 +435,68 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
     if config.rec_speaker {
         extra_args.push("--rec-speaker".into());
     }
+    extra_args.push(if config.rec_controls {
+        "--rec-controls".into()
+    } else {
+        "--no-rec-controls".into()
+    });
+    extra_args.push(if config.rec_display_time {
+        "--display-rec-time".into()
+    } else {
+        "--no-display-rec-time".into()
+    });
+    extra_args.push(if config.rec_hidpi {
+        "--hidpi".into()
+    } else {
+        "--no-hidpi".into()
+    });
+    extra_args.push(if config.rec_notifications {
+        "--do-not-disturb".into()
+    } else {
+        "--no-do-not-disturb".into()
+    });
+    extra_args.push(if config.rec_cursor {
+        "--show-cursor".into()
+    } else {
+        "--no-show-cursor".into()
+    });
+    extra_args.push(if config.rec_clicks {
+        "--rec-clicks".into()
+    } else {
+        "--no-rec-clicks".into()
+    });
+    extra_args.push(if config.rec_keystrokes {
+        "--rec-keystrokes".into()
+    } else {
+        "--no-rec-keystrokes".into()
+    });
+    extra_args.push(if config.rec_remember_selection {
+        "--remember-selection".into()
+    } else {
+        "--no-remember-selection".into()
+    });
+    extra_args.push(if config.rec_dim_screen {
+        "--dim-screen".into()
+    } else {
+        "--no-dim-screen".into()
+    });
+    extra_args.push(if config.rec_countdown {
+        "--show-countdown".into()
+    } else {
+        "--no-show-countdown".into()
+    });
+    extra_args.push(format!("--video-max-res={}", config.rec_video_max_res));
+    extra_args.push(format!("--video-fps={}", config.rec_video_fps));
+    extra_args.push(if config.rec_video_mono {
+        "--record-mono".into()
+    } else {
+        "--no-record-mono".into()
+    });
+    extra_args.push(if config.rec_video_open_editor {
+        "--open-editor".into()
+    } else {
+        "--no-open-editor".into()
+    });
     extra_args.push(format!("--gif-fps={}", config.rec_gif_fps));
     extra_args.push(format!("--gif-quality={:.4}", config.rec_gif_quality));
     extra_args.push(format!("--gif-size={}", config.rec_gif_size_idx));

@@ -25,6 +25,8 @@ add_executable(apexshot-capture
     src/CaptureOverlay_Webcam.cpp
     src/CaptureOverlay_HitTest.cpp
     src/CaptureOverlay_Window.cpp
+    src/RecordingControlsWindow.cpp
+    src/RecordingControlsWindow.h
     src/ScrollControlPanel.cpp
     src/ScrollControlPanel.h
     src/WindowPickerOverlay.cpp

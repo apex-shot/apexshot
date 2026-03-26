@@ -340,16 +340,12 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         case RecordPanelTile::RecordVideo:
             m_recordType = RecordType::Video;
             m_captureIntent = CaptureIntent::Record;
-            releaseKeyboard();
-            hide();
-            QApplication::exit(0); // Success - main.cpp will check recordRequested()
+            confirmRecordingSelection();
             return;
         case RecordPanelTile::RecordGif:
             m_recordType = RecordType::Gif;
             m_captureIntent = CaptureIntent::Record;
-            releaseKeyboard();
-            hide();
-            QApplication::exit(0);
+            confirmRecordingSelection();
             return;
         default:
             break;
@@ -893,9 +889,7 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
             // Start video recording on Enter
             m_recordType = RecordType::Video;
             m_captureIntent = CaptureIntent::Record;
-            releaseKeyboard();
-            hide();
-            QApplication::exit(0);
+            confirmRecordingSelection();
             return;
         }
         // Let arrow keys through for resize/move

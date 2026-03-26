@@ -1,17 +1,22 @@
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::oneshot;
-use zbus::zvariant::OwnedValue;
+use tokio::sync::{mpsc, oneshot};
+
+use crate::{
+    capture_overlay::{RecordingRequest, RecordingType},
+    config::{save_config, AppConfig},
+};
 
 mod stop_overlay;
+mod control_session;
 pub use stop_overlay::{
-    run_recording_controls, run_recording_stop_overlay, RecordingControlsParams, StopAction,
-    StopOverlayError,
+    run_recording_controls, run_recording_countdown_bar, run_recording_stop_overlay,
+    RecordingControlsParams, StopAction, StopOverlayError,
 };
+use control_session::{RecordingControlCommand, RecordingControlServer};
 
 pub mod countdown_overlay;
 pub mod dim_overlay;
@@ -46,6 +51,13 @@ pub enum RecordError {
 
 pub type RecordResult<T> = Result<T, RecordError>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordingTerminalAction {
+    Save,
+    Discard,
+    Restart,
+}
+
 #[derive(Debug, Clone)]
 pub struct RecordingConfig {
     pub output_path: PathBuf,
@@ -67,6 +79,116 @@ pub struct RecordingConfig {
     pub gif_quality: f64,
     pub gif_optimize: bool,
     pub gif_max_width: Option<u32>,
+}
+
+#[derive(Debug)]
+pub struct PreparedOverlayRecordingRequest {
+    pub updated_app_config: AppConfig,
+    pub output_path: PathBuf,
+    pub recording_config: RecordingConfig,
+    pub controls_params: Option<RecordingControlsParams>,
+    pub use_shell_mask: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CropMargins {
+    left: u32,
+    right: u32,
+    top: u32,
+    bottom: u32,
+}
+
+#[derive(Debug, Clone)]
+struct WaylandSource {
+    pipeline_source: String,
+    crop: Option<CropMargins>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordingScreenCastTarget {
+    Screen,
+    Area,
+}
+
+impl RecordingScreenCastTarget {
+    fn token_file_name(self) -> &'static str {
+        match self {
+            Self::Screen => "wayland-record-screen.token",
+            Self::Area => "wayland-record-area.token",
+        }
+    }
+}
+
+fn recording_restore_token_path(target: RecordingScreenCastTarget) -> Option<PathBuf> {
+    let mut path = dirs::cache_dir()?;
+    path.push("apexshot");
+    path.push(target.token_file_name());
+    Some(path)
+}
+
+fn load_recording_restore_token(target: RecordingScreenCastTarget) -> Option<String> {
+    let path = recording_restore_token_path(target)?;
+    let raw = std::fs::read_to_string(path).ok()?;
+    let token = raw.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
+fn save_recording_restore_token(target: RecordingScreenCastTarget, token: &str) {
+    let Some(path) = recording_restore_token_path(target) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, token);
+}
+
+fn clear_recording_restore_token(target: RecordingScreenCastTarget) {
+    if let Some(path) = recording_restore_token_path(target) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn overlay_recording_output_dir(app_config: &AppConfig) -> PathBuf {
+    if !app_config.export_location.is_empty() {
+        PathBuf::from(&app_config.export_location)
+    } else {
+        dirs::video_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+}
+
+fn compute_wayland_crop(
+    stream_position: (i32, i32),
+    stream_size: (i32, i32),
+    selection: (i32, i32, u32, u32),
+) -> Result<CropMargins, String> {
+    let (stream_x, stream_y) = stream_position;
+    let (stream_w, stream_h) = stream_size;
+    let (sel_x, sel_y, sel_w, sel_h) = selection;
+
+    if stream_w <= 0 || stream_h <= 0 || sel_w == 0 || sel_h == 0 {
+        return Err("invalid stream or selection size".into());
+    }
+
+    let left = sel_x - stream_x;
+    let top = sel_y - stream_y;
+    let right = stream_w - left - sel_w as i32;
+    let bottom = stream_h - top - sel_h as i32;
+
+    if left < 0 || top < 0 || right < 0 || bottom < 0 {
+        return Err("selection falls outside the selected monitor stream".into());
+    }
+
+    Ok(CropMargins {
+        left: left as u32,
+        right: right as u32,
+        top: top as u32,
+        bottom: bottom as u32,
+    })
 }
 
 impl Default for RecordingConfig {
@@ -149,7 +271,7 @@ const PROFILES: &[EncoderProfile] = &[
 
 /// Start a recording session
 pub async fn start_recording(config: RecordingConfig) -> RecordResult<PathBuf> {
-    start_recording_with_optional_stop(config, None)
+    start_recording_with_commands(config, None)
         .await
         .map(|(path, _)| path)
 }
@@ -159,19 +281,38 @@ pub async fn start_recording_with_stop(
     config: RecordingConfig,
     stop_rx: oneshot::Receiver<StopAction>,
 ) -> RecordResult<(PathBuf, StopAction)> {
-    start_recording_with_optional_stop(config, Some(stop_rx)).await
+    let (command_tx, command_rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let command = match stop_rx.await {
+            Ok(StopAction::Save) => RecordingControlCommand::StopSave,
+            Ok(StopAction::Discard) => RecordingControlCommand::StopDiscard,
+            Err(_) => return,
+        };
+        let _ = command_tx.send(command);
+    });
+
+    start_recording_with_commands(config, Some(command_rx))
+        .await
+        .map(|(path, action)| {
+            let stop_action = match action {
+                RecordingTerminalAction::Save => StopAction::Save,
+                RecordingTerminalAction::Discard => StopAction::Discard,
+                RecordingTerminalAction::Restart => StopAction::Discard,
+            };
+            (path, stop_action)
+        })
 }
 
-async fn start_recording_with_optional_stop(
+async fn start_recording_with_commands(
     config: RecordingConfig,
-    stop_rx: Option<oneshot::Receiver<StopAction>>,
-) -> RecordResult<(PathBuf, StopAction)> {
+    command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
     // 1. Initialize GStreamer
     gst::init().map_err(|e| RecordError::InitError(e.to_string()))?;
 
     // Check if GIF requested
     if config.output_path.extension().is_some_and(|e| e == "gif") {
-        return record_gif_rust_with_optional_stop(config, stop_rx).await;
+        return record_gif_rust_with_commands(config, command_rx).await;
     }
 
     // 2. Select Encoder Profile
@@ -230,21 +371,12 @@ async fn start_recording_with_optional_stop(
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
-    let stop_fut = async {
-        if let Some(rx) = stop_rx {
-            match rx.await {
-                Ok(action) => action,
-                Err(_) => futures_util::future::pending::<StopAction>().await,
-            }
-        } else {
-            futures_util::future::pending::<StopAction>().await
-        }
-    };
-    tokio::pin!(stop_fut);
+    let mut command_rx = command_rx;
 
     // Phase 1: Recording until Ctrl+C or Error
     let mut stopping = false;
-    let mut stop_action = StopAction::Save;
+    let mut stop_action = RecordingTerminalAction::Save;
+    let mut paused = false;
     loop {
         tokio::select! {
             _ = &mut ctrl_c => {
@@ -253,12 +385,53 @@ async fn start_recording_with_optional_stop(
                 stopping = true;
                 break;
             }
-            action = &mut stop_fut => {
-                stop_action = action;
-                println!("\nStopping recording... Finalizing file...");
-                pipeline.send_event(gst::event::Eos::new());
-                stopping = true;
-                break;
+            command = async {
+                match &mut command_rx {
+                    Some(rx) => rx.recv().await,
+                    None => futures_util::future::pending::<Option<RecordingControlCommand>>().await,
+                }
+            } => {
+                let Some(command) = command else {
+                    command_rx = None;
+                    continue;
+                };
+
+                match command {
+                    RecordingControlCommand::Pause if !paused => {
+                        pipeline
+                            .set_state(gst::State::Paused)
+                            .map_err(|e| RecordError::GStreamerError(format!("Failed to pause pipeline: {e}")))?;
+                        paused = true;
+                    }
+                    RecordingControlCommand::Resume if paused => {
+                        pipeline
+                            .set_state(gst::State::Playing)
+                            .map_err(|e| RecordError::GStreamerError(format!("Failed to resume pipeline: {e}")))?;
+                        paused = false;
+                    }
+                    RecordingControlCommand::Restart => {
+                        stop_action = RecordingTerminalAction::Restart;
+                        println!("\nRestarting recording... Finalizing current file...");
+                        pipeline.send_event(gst::event::Eos::new());
+                        stopping = true;
+                        break;
+                    }
+                    RecordingControlCommand::StopSave => {
+                        stop_action = RecordingTerminalAction::Save;
+                        println!("\nStopping recording... Finalizing file...");
+                        pipeline.send_event(gst::event::Eos::new());
+                        stopping = true;
+                        break;
+                    }
+                    RecordingControlCommand::StopDiscard => {
+                        stop_action = RecordingTerminalAction::Discard;
+                        println!("\nStopping recording... Finalizing file...");
+                        pipeline.send_event(gst::event::Eos::new());
+                        stopping = true;
+                        break;
+                    }
+                    _ => {}
+                }
             }
             _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
                 // Poll bus
@@ -323,7 +496,7 @@ async fn start_recording_with_optional_stop(
         .set_state(gst::State::Null)
         .map_err(|e| RecordError::GStreamerError(format!("Failed to set state to Null: {}", e)))?;
 
-    if stop_action == StopAction::Save {
+    if stop_action == RecordingTerminalAction::Save {
         println!("Recording saved to {:?}", final_path);
         if let Ok(metadata) = std::fs::metadata(&final_path) {
             println!(
@@ -484,10 +657,17 @@ async fn build_pipeline(
     let output_str = output_path.to_string_lossy();
 
     // Get video source
-    let video_source = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        get_wayland_source(config.cursor).await?
+    let (video_source, crop_filter) = if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        let source = get_wayland_source(config).await?;
+        let crop_filter = source.crop.map_or_else(String::new, |crop| {
+            format!(
+                " ! videocrop left={} right={} top={} bottom={}",
+                crop.left, crop.right, crop.top, crop.bottom
+            )
+        });
+        (source.pipeline_source, crop_filter)
     } else {
-        get_x11_source(config)?
+        (get_x11_source(config)?, String::new())
     };
 
     // HiDPI: downscale to logical resolution (2x)
@@ -554,8 +734,8 @@ async fn build_pipeline(
 
         let video_leg =
             format!(
-            "{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! mux.",
-            video_source, hidpi_filter, resolution_filter, config.fps,
+            "{}{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! mux.",
+            video_source, crop_filter, hidpi_filter, resolution_filter, config.fps,
             profile.encoder, profile.props
         );
 
@@ -594,128 +774,177 @@ async fn build_pipeline(
         Ok(full)
     } else {
         Ok(format!(
-            "{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! {} ! filesink location=\"{}\"",
-            video_source, hidpi_filter, resolution_filter, config.fps,
+            "{}{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! {} ! filesink location=\"{}\"",
+            video_source, crop_filter, hidpi_filter, resolution_filter, config.fps,
             profile.encoder, profile.props, profile.muxer, output_str
         ))
     }
 }
 
-async fn get_wayland_source(cursor: bool) -> RecordResult<String> {
-    use ashpd::desktop::screencast::Screencast;
-    use zbus::zvariant::Value;
+async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSource> {
+    use ashpd::desktop::{
+        screencast::{CursorMode, Screencast, SourceType},
+        PersistMode,
+    };
 
     println!("Requesting Wayland ScreenCast session...");
 
-    let proxy = Screencast::new()
-        .await
-        .map_err(|e| RecordError::PortalError(e.to_string()))?;
-
-    let session = proxy
-        .create_session()
-        .await
-        .map_err(|e| RecordError::PortalError(e.to_string()))?;
-
-    let connection = proxy.connection();
-
-    let cursor_mode = if cursor {
-        ashpd::desktop::screencast::CursorMode::Embedded
+    let wants_area_crop = matches!(
+        (config.x, config.y, config.width, config.height),
+        (Some(_), Some(_), Some(_), Some(_))
+    );
+    let target = if wants_area_crop {
+        RecordingScreenCastTarget::Area
     } else {
-        ashpd::desktop::screencast::CursorMode::Hidden
+        RecordingScreenCastTarget::Screen
+    };
+    let cursor_mode = if config.cursor {
+        CursorMode::Embedded
+    } else {
+        CursorMode::Hidden
     };
 
-    // 1. Select Sources
-    proxy
-        .select_sources(
-            &session,
+    async fn request_screencast(
+        cursor_mode: CursorMode,
+        wants_area_crop: bool,
+        restore_token: Option<&str>,
+        persist_mode: PersistMode,
+    ) -> RecordResult<ashpd::desktop::screencast::Streams> {
+        let proxy = Screencast::new()
+            .await
+            .map_err(|e| RecordError::PortalError(e.to_string()))?;
+
+        let session = proxy
+            .create_session()
+            .await
+            .map_err(|e| RecordError::PortalError(e.to_string()))?;
+
+        let source_types = if wants_area_crop {
+            SourceType::Monitor.into()
+        } else {
+            (SourceType::Monitor | SourceType::Window).into()
+        };
+
+        proxy
+            .select_sources(
+                &session,
+                cursor_mode,
+                source_types,
+                false,
+                restore_token,
+                persist_mode,
+            )
+            .await
+            .map_err(|e| RecordError::PortalError(e.to_string()))?
+            .response()
+            .map_err(|e| RecordError::PortalError(e.to_string()))?;
+
+        if restore_token.is_none() {
+            if wants_area_crop {
+                println!("Please select the monitor containing the recording area...");
+            } else {
+                println!("Please select a screen or window to record...");
+            }
+        }
+
+        let response = proxy
+            .start(&session, None)
+            .await
+            .map_err(|e| RecordError::PortalError(e.to_string()))?
+            .response()
+            .map_err(|e| RecordError::PortalError(e.to_string()))?;
+
+        let _ = session.close().await;
+        Ok(response)
+    }
+
+    let response = if let Some(token) = load_recording_restore_token(target) {
+        match request_screencast(
             cursor_mode,
-            ashpd::desktop::screencast::SourceType::Monitor
-                | ashpd::desktop::screencast::SourceType::Window,
-            false, // multiple
+            wants_area_crop,
+            Some(token.as_str()),
+            PersistMode::ExplicitlyRevoked,
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                eprintln!(
+                    "[recording] ScreenCast restore token failed for {:?}: {err}; retrying interactively.",
+                    target
+                );
+                clear_recording_restore_token(target);
+                let response = request_screencast(
+                    cursor_mode,
+                    wants_area_crop,
+                    None,
+                    PersistMode::ExplicitlyRevoked,
+                )
+                .await?;
+                if let Some(token) = response.restore_token() {
+                    if !token.trim().is_empty() {
+                        save_recording_restore_token(target, token);
+                    }
+                }
+                response
+            }
+        }
+    } else {
+        let response = request_screencast(
+            cursor_mode,
+            wants_area_crop,
             None,
-            ashpd::desktop::PersistMode::DoNot,
+            PersistMode::ExplicitlyRevoked,
         )
-        .await
-        .map_err(|e| RecordError::PortalError(e.to_string()))?;
+        .await?;
+        if let Some(token) = response.restore_token() {
+            if !token.trim().is_empty() {
+                save_recording_restore_token(target, token);
+            }
+        }
+        response
+    };
 
-    println!("Please select a screen or window to record...");
-
-    // 2. Start
-    let msg = connection
-        .call_method(
-            Some("org.freedesktop.portal.Desktop"),
-            "/org/freedesktop/portal/desktop",
-            Some("org.freedesktop.portal.ScreenCast"),
-            "Start",
-            &(&session, "", HashMap::<String, Value>::new()),
-        )
-        .await
-        .map_err(|e| RecordError::PortalError(format!("Start call failed: {}", e)))?;
-
-    let request_path: zbus::zvariant::OwnedObjectPath = msg
-        .body()
-        .deserialize()
-        .map_err(|e| RecordError::PortalError(format!("Failed to parse Start response: {}", e)))?;
-
-    let results: HashMap<String, OwnedValue> = wait_for_response(connection, &request_path).await?;
-
-    let streams_value = results
-        .get("streams")
-        .ok_or_else(|| RecordError::PortalError("No streams in portal response".into()))?;
-
-    let streams: Vec<(u32, HashMap<String, OwnedValue>)> = streams_value
-        .try_clone()
-        .unwrap()
-        .try_into()
-        .map_err(|e| RecordError::PortalError(format!("Invalid streams format: {}", e)))?;
-
-    let stream = streams
+    let stream = response
+        .streams()
         .first()
         .ok_or_else(|| RecordError::PortalError("No streams returned".into()))?;
 
-    let node_id = stream.0;
+    let node_id = stream.pipe_wire_node_id();
     println!("Got PipeWire Node ID: {}", node_id);
-
-    Ok(format!("pipewiresrc path={} do-timestamp=true", node_id))
-}
-
-async fn wait_for_response(
-    connection: &zbus::Connection,
-    path: &zbus::zvariant::ObjectPath<'_>,
-) -> RecordResult<HashMap<String, OwnedValue>> {
-    use futures_util::StreamExt;
-
-    let match_rule = format!(
-        "type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
-        path
+    println!(
+        "Wayland stream metadata: position={:?} size={:?} type={:?}",
+        stream.position(),
+        stream.size(),
+        stream.source_type()
     );
 
-    let rule: zbus::MatchRule = match_rule
-        .as_str()
-        .try_into()
-        .map_err(|e| RecordError::PortalError(format!("Invalid match rule: {}", e)))?;
-
-    let mut stream = zbus::MessageStream::for_match_rule(rule, connection, Some(1))
-        .await
-        .map_err(|e| RecordError::PortalError(format!("Failed to create message stream: {}", e)))?;
-
-    let message = stream
-        .next()
-        .await
-        .ok_or_else(|| RecordError::PortalError("No response from portal".into()))?
-        .map_err(|e| RecordError::PortalError(format!("Signal error: {}", e)))?;
-
-    // Response signal signature: (ua{sv})
-    let (status, results): (u32, HashMap<String, OwnedValue>) =
-        message.body().deserialize().map_err(|e| {
-            RecordError::PortalError(format!("Failed to deserialize portal response: {}", e))
+    let crop = if wants_area_crop {
+        let position = stream.position().ok_or_else(|| {
+            RecordError::PortalError(
+                "The selected Wayland stream did not expose monitor position metadata".into(),
+            )
         })?;
+        let size = stream.size().ok_or_else(|| {
+            RecordError::PortalError(
+                "The selected Wayland stream did not expose monitor size metadata".into(),
+            )
+        })?;
+        let selection = (
+            config.x.expect("checked above"),
+            config.y.expect("checked above"),
+            config.width.expect("checked above"),
+            config.height.expect("checked above"),
+        );
+        Some(compute_wayland_crop(position, size, selection).map_err(RecordError::PortalError)?)
+    } else {
+        None
+    };
 
-    if status != 0 {
-        return Err(RecordError::Cancelled);
-    }
-
-    Ok(results)
+    Ok(WaylandSource {
+        pipeline_source: format!("pipewiresrc path={} do-timestamp=true", node_id),
+        crop,
+    })
 }
 
 fn get_x11_source(config: &RecordingConfig) -> RecordResult<String> {
@@ -736,10 +965,10 @@ fn get_x11_source(config: &RecordingConfig) -> RecordResult<String> {
     Ok(source)
 }
 
-async fn record_gif_rust_with_optional_stop(
+async fn record_gif_rust_with_commands(
     config: RecordingConfig,
-    stop_rx: Option<oneshot::Receiver<StopAction>>,
-) -> RecordResult<(PathBuf, StopAction)> {
+    command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
@@ -755,10 +984,17 @@ async fn record_gif_rust_with_optional_stop(
     }
 
     // Build pipeline: Source -> videoconvert -> rgba -> appsink
-    let source_str = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        get_wayland_source(config.cursor).await?
+    let (source_str, crop_filter) = if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        let source = get_wayland_source(&config).await?;
+        let crop_filter = source.crop.map_or_else(String::new, |crop| {
+            format!(
+                " ! videocrop left={} right={} top={} bottom={}",
+                crop.left, crop.right, crop.top, crop.bottom
+            )
+        });
+        (source.pipeline_source, crop_filter)
     } else {
-        get_x11_source(&config)?
+        (get_x11_source(&config)?, String::new())
     };
 
     // HiDPI: downscale to logical resolution (2x)
@@ -787,8 +1023,8 @@ async fn record_gif_rust_with_optional_stop(
     let gif_fps = config.fps;
 
     let pipeline_str = format!(
-        "{} ! videoconvert{}{} ! videorate ! video/x-raw,format=RGBA,framerate={}/1 ! appsink name=sink emit-signals=true sync=false drop=false max-buffers=200",
-        source_str, hidpi_filter, resolution_filter, gif_fps
+        "{}{} ! videoconvert{}{} ! videorate ! video/x-raw,format=RGBA,framerate={}/1 ! appsink name=sink emit-signals=true sync=false drop=false max-buffers=200",
+        source_str, crop_filter, hidpi_filter, resolution_filter, gif_fps
     );
 
     let pipeline = gst::parse::launch(&pipeline_str)
@@ -813,21 +1049,12 @@ async fn record_gif_rust_with_optional_stop(
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
-    let stop_fut = async {
-        if let Some(rx) = stop_rx {
-            match rx.await {
-                Ok(action) => action,
-                Err(_) => futures_util::future::pending::<StopAction>().await,
-            }
-        } else {
-            futures_util::future::pending::<StopAction>().await
-        }
-    };
-    tokio::pin!(stop_fut);
+    let mut command_rx = command_rx;
 
     let mut stopping = false;
-    let mut stop_action = StopAction::Save;
+    let mut stop_action = RecordingTerminalAction::Save;
     let mut ffmpeg_child: Option<std::process::Child> = None;
+    let mut paused = false;
 
     loop {
         tokio::select! {
@@ -835,10 +1062,47 @@ async fn record_gif_rust_with_optional_stop(
                 println!("\nStopping recording...");
                 stopping = true;
             }
-            action = &mut stop_fut => {
-                stop_action = action;
-                println!("\nStopping recording...");
-                stopping = true;
+            command = async {
+                match &mut command_rx {
+                    Some(rx) => rx.recv().await,
+                    None => futures_util::future::pending::<Option<RecordingControlCommand>>().await,
+                }
+            } => {
+                let Some(command) = command else {
+                    command_rx = None;
+                    continue;
+                };
+
+                match command {
+                    RecordingControlCommand::Pause if !paused => {
+                        pipeline
+                            .set_state(gst::State::Paused)
+                            .map_err(|e| RecordError::GStreamerError(format!("Failed to pause GIF pipeline: {e}")))?;
+                        paused = true;
+                    }
+                    RecordingControlCommand::Resume if paused => {
+                        pipeline
+                            .set_state(gst::State::Playing)
+                            .map_err(|e| RecordError::GStreamerError(format!("Failed to resume GIF pipeline: {e}")))?;
+                        paused = false;
+                    }
+                    RecordingControlCommand::Restart => {
+                        stop_action = RecordingTerminalAction::Restart;
+                        println!("\nRestarting recording...");
+                        stopping = true;
+                    }
+                    RecordingControlCommand::StopSave => {
+                        stop_action = RecordingTerminalAction::Save;
+                        println!("\nStopping recording...");
+                        stopping = true;
+                    }
+                    RecordingControlCommand::StopDiscard => {
+                        stop_action = RecordingTerminalAction::Discard;
+                        println!("\nStopping recording...");
+                        stopping = true;
+                    }
+                    _ => {}
+                }
             }
             _ = tokio::time::sleep(std::time::Duration::from_millis(1)) => {
                 // Pull sample
@@ -953,8 +1217,502 @@ async fn record_gif_rust_with_optional_stop(
         return Err(RecordError::GifError("No frames captured".into()));
     }
 
-    if stop_action == StopAction::Save {
+    if stop_action == RecordingTerminalAction::Save {
         println!("GIF saved to {:?}", config.output_path);
     }
     Ok((config.output_path, stop_action))
+}
+
+fn should_use_shell_mask_for_request(request: &RecordingRequest, shell_mask_available: bool) -> bool {
+    shell_mask_available
+        && request.dim_screen
+        && !request.fullscreen
+        && request.width > 0
+        && request.height > 0
+}
+
+pub fn prepare_overlay_recording_request(
+    mut app_config: AppConfig,
+    request: &RecordingRequest,
+    now: chrono::DateTime<chrono::Utc>,
+) -> PreparedOverlayRecordingRequest {
+    let use_shell_mask =
+        should_use_shell_mask_for_request(request, crate::gnome_shell::current_session_supports_gnome_shell_mask());
+    app_config.rec_controls = request.controls;
+    app_config.rec_display_time = request.display_rec_time;
+    app_config.rec_hidpi = request.hidpi;
+    app_config.rec_notifications = request.notifications;
+    app_config.rec_cursor = request.cursor;
+    app_config.rec_clicks = request.clicks;
+    app_config.rec_keystrokes = request.keystrokes;
+    app_config.rec_remember_selection = request.remember_selection;
+    app_config.rec_dim_screen = request.dim_screen;
+    app_config.rec_countdown = request.countdown;
+    app_config.rec_mic = request.mic;
+    app_config.rec_speaker = request.speaker;
+    app_config.rec_video_max_res = request.video_max_res;
+    app_config.rec_video_fps = request.video_fps;
+    app_config.rec_video_mono = request.record_mono;
+    app_config.rec_video_open_editor = request.open_editor;
+    app_config.rec_gif_fps = request.gif_fps;
+    app_config.rec_gif_quality = request.gif_quality;
+    app_config.rec_gif_size_idx = request.gif_size_idx;
+    app_config.rec_gif_optimize = request.optimize_gif;
+
+    if request.remember_selection {
+        app_config.last_selection_x = Some(request.x);
+        app_config.last_selection_y = Some(request.y);
+        app_config.last_selection_w = Some(request.width);
+        app_config.last_selection_h = Some(request.height);
+    }
+
+    let extension = match request.record_type {
+        RecordingType::Video => "mp4",
+        RecordingType::Gif => "gif",
+    };
+    let output_dir = overlay_recording_output_dir(&app_config);
+    let output_path = output_dir.join(format!(
+        "apexshot_recording_{}.{}",
+        now.format("%Y%m%d_%H%M%S"),
+        extension
+    ));
+
+    let max_resolution = match request.video_max_res {
+        0 => None,
+        1 => Some((1920, 1080)),
+        2 => Some((1280, 720)),
+        _ => None,
+    };
+
+    let video_fps = match request.video_fps {
+        0 => 24,
+        1 => 30,
+        2 => 50,
+        3 => 60,
+        _ => 30,
+    };
+
+    let (fps, gif_quality, gif_optimize, gif_max_width) =
+        if matches!(request.record_type, RecordingType::Gif) {
+            let max_width = match request.gif_size_idx {
+                0 => Some(800),
+                1 => Some(640),
+                2 => Some(480),
+                _ => None,
+            };
+            (
+                request.gif_fps as u32,
+                request.gif_quality,
+                request.optimize_gif,
+                max_width,
+            )
+        } else {
+            (video_fps, 0.75, true, Some(800))
+        };
+
+    let recording_config = RecordingConfig {
+        output_path: output_path.clone(),
+        width: Some(request.width as u32),
+        height: Some(request.height as u32),
+        x: Some(request.x),
+        y: Some(request.y),
+        cursor: request.cursor,
+        hidpi: request.hidpi,
+        max_resolution,
+        fps,
+        mono_audio: request.record_mono,
+        mic_enabled: request.mic,
+        speaker_enabled: request.speaker,
+        mic_source: None,
+        speaker_source: None,
+        gif_quality,
+        gif_optimize,
+        gif_max_width,
+    };
+
+    let controls_params = request.controls.then_some(RecordingControlsParams {
+        capture_x: request.x,
+        capture_y: request.y,
+        capture_w: request.width,
+        capture_h: request.height,
+        is_fullscreen: request.fullscreen,
+        show_timer: true,
+        use_shell_mask,
+    });
+
+    PreparedOverlayRecordingRequest {
+        updated_app_config: app_config,
+        output_path,
+        recording_config,
+        controls_params,
+        use_shell_mask,
+    }
+}
+
+pub async fn run_recording_with_cpp_controls(
+    config: RecordingConfig,
+    params: RecordingControlsParams,
+) -> anyhow::Result<(PathBuf, StopAction)> {
+    let session_id = format!(
+        "recording-{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    );
+    let control_server = RecordingControlServer::start(session_id).await?;
+
+    let mut controls_child = crate::capture_overlay::spawn_recording_controls_via_cpp(
+        control_server.bus_name(),
+        control_server.session_id(),
+        params,
+    )?;
+
+    let final_outcome = loop {
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        control_server.set_command_sender(command_tx);
+        let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
+        control_server.clear_command_sender();
+
+        match outcome? {
+            (path, RecordingTerminalAction::Restart) => {
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+            (path, RecordingTerminalAction::Save) => {
+                break (path, StopAction::Save);
+            }
+            (path, RecordingTerminalAction::Discard) => {
+                break (path, StopAction::Discard);
+            }
+        }
+    };
+
+    let _ = controls_child.kill();
+    let _ = controls_child.wait();
+    drop(control_server);
+
+    Ok(final_outcome)
+}
+
+pub fn run_overlay_recording_request(request: RecordingRequest) -> anyhow::Result<PathBuf> {
+    run_overlay_recording_request_with_gtk(request, None)
+}
+
+pub fn run_overlay_recording_request_with_gtk(
+    request: RecordingRequest,
+    _gtk_tx: Option<std::sync::mpsc::Sender<crate::daemon::GtkWork>>,
+) -> anyhow::Result<PathBuf> {
+    let prepared = prepare_overlay_recording_request(
+        crate::config::load_config(),
+        &request,
+        chrono::Utc::now(),
+    );
+
+    if let Some(parent) = prepared.output_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    save_config(&prepared.updated_app_config)?;
+
+    let _dnd_guard = if request.notifications {
+        crate::recording::dnd::DndGuard::enable()
+    } else {
+        None
+    };
+
+    let use_legacy_pre_record_dim = request.dim_screen && request.countdown;
+    let dim_close = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let dim_handle = if use_legacy_pre_record_dim {
+        let flag = dim_close.clone();
+        Some(std::thread::spawn(move || {
+            crate::recording::dim_overlay::run_dim_overlay(flag);
+        }))
+    } else {
+        None
+    };
+
+    let shell_mask = if prepared.use_shell_mask {
+        match crate::gnome_shell::show_recording_mask(crate::gnome_shell::geometry_from_request(&request)) {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                eprintln!("[recording] Failed to show GNOME shell recording mask ({err}); continuing without shell mask.");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    dim_close.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Some(handle) = dim_handle {
+        let _ = handle.join();
+    }
+
+    eprintln!("Starting recording to {:?}...", prepared.output_path);
+
+    let handle = tokio::runtime::Handle::current();
+    let outcome = if let Some(params) = prepared.controls_params {
+        handle.block_on(run_recording_with_cpp_controls(
+            prepared.recording_config.clone(),
+            params,
+        ))
+        .map_err(|err| anyhow::anyhow!("failed to run C++ recording controls: {err}"))
+    } else {
+        handle
+            .block_on(start_recording(prepared.recording_config.clone()))
+            .map(|path| (path, StopAction::Save))
+            .map_err(|err| anyhow::anyhow!("Recording failed: {err}"))
+    };
+
+    drop(shell_mask);
+
+    match outcome {
+        Ok((path, StopAction::Discard)) => {
+            eprintln!("Recording discarded — deleting {:?}", path);
+            let _ = std::fs::remove_file(&path);
+            Ok(path)
+        }
+        Ok((path, StopAction::Save)) => {
+            eprintln!("Recording saved to {:?}", path);
+            Ok(path)
+        }
+        Err(err) => Err(anyhow::anyhow!("Recording failed: {err}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture_overlay::{RecordingRequest, RecordingType};
+    use crate::config::AppConfig;
+    use chrono::TimeZone;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn prepare_overlay_recording_request_maps_video_settings() {
+        let request = RecordingRequest {
+            x: 10,
+            y: 20,
+            width: 640,
+            height: 480,
+            record_type: RecordingType::Video,
+            controls: true,
+            mic: true,
+            speaker: false,
+            clicks: true,
+            keystrokes: false,
+            display_rec_time: true,
+            hidpi: true,
+            notifications: false,
+            cursor: false,
+            remember_selection: true,
+            dim_screen: false,
+            countdown: false,
+            video_max_res: 2,
+            video_fps: 3,
+            record_mono: true,
+            open_editor: true,
+            gif_fps: 12,
+            gif_quality: 0.4,
+            gif_size_idx: 2,
+            optimize_gif: false,
+            fullscreen: false,
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig {
+                export_location: "/tmp/apexshot-recordings".into(),
+                ..AppConfig::default()
+            },
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 3, 25, 12, 0, 0).unwrap(),
+        );
+
+        assert_eq!(
+            prepared.output_path,
+            PathBuf::from("/tmp/apexshot-recordings/apexshot_recording_20260325_120000.mp4")
+        );
+        assert_eq!(prepared.updated_app_config.rec_controls, true);
+        assert_eq!(prepared.updated_app_config.rec_display_time, true);
+        assert_eq!(prepared.updated_app_config.rec_hidpi, true);
+        assert_eq!(prepared.updated_app_config.rec_notifications, false);
+        assert_eq!(prepared.updated_app_config.rec_cursor, false);
+        assert_eq!(prepared.updated_app_config.rec_clicks, true);
+        assert_eq!(prepared.updated_app_config.rec_keystrokes, false);
+        assert_eq!(prepared.updated_app_config.rec_remember_selection, true);
+        assert_eq!(prepared.updated_app_config.last_selection_x, Some(10));
+        assert_eq!(prepared.updated_app_config.last_selection_y, Some(20));
+        assert_eq!(prepared.updated_app_config.last_selection_w, Some(640));
+        assert_eq!(prepared.updated_app_config.last_selection_h, Some(480));
+        assert_eq!(prepared.updated_app_config.rec_video_max_res, 2);
+        assert_eq!(prepared.updated_app_config.rec_video_fps, 3);
+        assert_eq!(prepared.updated_app_config.rec_video_mono, true);
+        assert_eq!(prepared.updated_app_config.rec_video_open_editor, true);
+        assert_eq!(prepared.recording_config.output_path, prepared.output_path);
+        assert_eq!(prepared.recording_config.width, Some(640));
+        assert_eq!(prepared.recording_config.height, Some(480));
+        assert_eq!(prepared.recording_config.x, Some(10));
+        assert_eq!(prepared.recording_config.y, Some(20));
+        assert_eq!(prepared.recording_config.cursor, false);
+        assert_eq!(prepared.recording_config.hidpi, true);
+        assert_eq!(prepared.recording_config.max_resolution, Some((1280, 720)));
+        assert_eq!(prepared.recording_config.fps, 60);
+        assert_eq!(prepared.recording_config.mono_audio, true);
+        assert_eq!(prepared.recording_config.mic_enabled, true);
+        assert_eq!(prepared.recording_config.speaker_enabled, false);
+        assert_eq!(prepared.recording_config.gif_quality, 0.75);
+        assert_eq!(prepared.recording_config.gif_optimize, true);
+        assert_eq!(prepared.recording_config.gif_max_width, Some(800));
+        assert_eq!(
+            prepared.controls_params,
+            Some(RecordingControlsParams {
+                capture_x: 10,
+                capture_y: 20,
+                capture_w: 640,
+                capture_h: 480,
+                is_fullscreen: false,
+                show_timer: true,
+                use_shell_mask: false,
+            })
+        );
+        assert_eq!(prepared.use_shell_mask, false);
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_maps_gif_settings_without_controls() {
+        let request = RecordingRequest {
+            x: 1,
+            y: 2,
+            width: 300,
+            height: 200,
+            record_type: RecordingType::Gif,
+            controls: false,
+            mic: false,
+            speaker: true,
+            clicks: false,
+            keystrokes: true,
+            display_rec_time: false,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: true,
+            countdown: true,
+            video_max_res: 1,
+            video_fps: 2,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 18,
+            gif_quality: 0.6,
+            gif_size_idx: 1,
+            optimize_gif: false,
+            fullscreen: true,
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig {
+                export_location: "/var/tmp/apexshot-gifs".into(),
+                ..AppConfig::default()
+            },
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 3, 25, 12, 0, 1).unwrap(),
+        );
+
+        assert_eq!(
+            prepared.output_path,
+            PathBuf::from("/var/tmp/apexshot-gifs/apexshot_recording_20260325_120001.gif")
+        );
+        assert_eq!(prepared.updated_app_config.rec_remember_selection, false);
+        assert_eq!(prepared.updated_app_config.last_selection_x, None);
+        assert_eq!(prepared.updated_app_config.last_selection_y, None);
+        assert_eq!(prepared.updated_app_config.last_selection_w, None);
+        assert_eq!(prepared.updated_app_config.last_selection_h, None);
+        assert_eq!(prepared.recording_config.max_resolution, Some((1920, 1080)));
+        assert_eq!(prepared.recording_config.fps, 18);
+        assert_eq!(prepared.recording_config.gif_quality, 0.6);
+        assert_eq!(prepared.recording_config.gif_optimize, false);
+        assert_eq!(prepared.recording_config.gif_max_width, Some(640));
+        assert_eq!(prepared.recording_config.speaker_enabled, true);
+        assert_eq!(prepared.controls_params, None);
+        assert_eq!(prepared.use_shell_mask, false);
+    }
+
+    #[test]
+    fn compute_wayland_crop_within_selected_monitor() {
+        let crop = compute_wayland_crop(
+            (1920, 0),
+            (2560, 1440),
+            (2100, 200, 600, 744),
+        )
+        .expect("crop should be valid");
+
+        assert_eq!(
+            crop,
+            CropMargins {
+                left: 180,
+                right: 1780,
+                top: 200,
+                bottom: 496,
+            }
+        );
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_sets_shell_mask_for_gnome_wayland_area_recording() {
+        let request = RecordingRequest {
+            x: 10,
+            y: 20,
+            width: 640,
+            height: 480,
+            record_type: RecordingType::Video,
+            controls: true,
+            mic: false,
+            speaker: false,
+            clicks: false,
+            keystrokes: false,
+            display_rec_time: false,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: true,
+            countdown: false,
+            video_max_res: 0,
+            video_fps: 1,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 12,
+            gif_quality: 0.75,
+            gif_size_idx: 0,
+            optimize_gif: true,
+            fullscreen: false,
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 3, 26, 1, 30, 0).unwrap(),
+        );
+
+        assert_eq!(
+            prepared.controls_params,
+            Some(RecordingControlsParams {
+                capture_x: 10,
+                capture_y: 20,
+                capture_w: 640,
+                capture_h: 480,
+                is_fullscreen: false,
+                show_timer: false,
+                use_shell_mask: true,
+            })
+        );
+        assert_eq!(prepared.use_shell_mask, true);
+    }
+
+    #[test]
+    fn compute_wayland_crop_rejects_selection_outside_monitor() {
+        let err = compute_wayland_crop((1920, 0), (2560, 1440), (1800, 100, 400, 300))
+            .expect_err("selection should be rejected");
+
+        assert!(err.contains("outside the selected monitor"));
+    }
 }
