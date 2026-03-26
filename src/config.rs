@@ -342,7 +342,7 @@ mod tests {
             rec_key_position: 2,
             rec_key_appearance: 1,
             rec_key_blur_bg: true,
-            rec_key_filter: 3,
+            rec_key_filter: 1,
             rec_webcam_enabled: true,
             rec_webcam_size: 2,
             rec_webcam_shape: 1,
@@ -411,6 +411,24 @@ mod tests {
     fn config_without_recording_settings_uses_defaults() {
         let yaml = "preview_auto_close_seconds: 12\nstart_at_login: false\n";
         let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
+        assert!(!cfg.rec_mic);
+        assert!(!cfg.rec_speaker);
+        assert_eq!(cfg.rec_click_size, 0.3);
+        assert_eq!(cfg.rec_click_color, 0);
+        assert_eq!(cfg.rec_click_style, 0);
+        assert!(cfg.rec_click_animate);
+        assert_eq!(cfg.rec_key_size, 0.32);
+        assert_eq!(cfg.rec_key_position, 0);
+        assert_eq!(cfg.rec_key_appearance, 0);
+        assert!(cfg.rec_key_blur_bg);
+        assert_eq!(cfg.rec_key_filter, 0);
+        assert!(!cfg.rec_webcam_enabled);
+        assert_eq!(cfg.rec_webcam_size, 1);
+        assert_eq!(cfg.rec_webcam_shape, 3);
+        assert!(!cfg.rec_webcam_flip);
+        assert_eq!(cfg.rec_webcam_device, -1);
+        assert_eq!(cfg.rec_webcam_rel_x, 0.0);
+        assert_eq!(cfg.rec_webcam_rel_y, 0.0);
         assert!(cfg.rec_controls);
         assert!(cfg.rec_cursor);
         assert!(!cfg.rec_hidpi);
