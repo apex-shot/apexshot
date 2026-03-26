@@ -1278,7 +1278,8 @@ pub fn prepare_overlay_recording_request(
     request: &RecordingRequest,
     now: chrono::DateTime<chrono::Utc>,
 ) -> PreparedOverlayRecordingRequest {
-    let shell_overlay_available = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
+    let shell_overlay_available =
+        crate::gnome_shell::current_session_supports_gnome_shell_overlay();
     let use_shell_mask = should_use_shell_mask_for_request(request, shell_overlay_available);
     let use_shell_controls =
         should_use_shell_controls_for_request(request, shell_overlay_available);
@@ -1590,7 +1591,10 @@ pub fn run_overlay_recording_request_with_gtk(
     let handle = tokio::runtime::Handle::current();
     let outcome = if let Some(params) = prepared.controls_params {
         handle
-            .block_on(run_recording_with_controls(prepared.recording_config.clone(), params))
+            .block_on(run_recording_with_controls(
+                prepared.recording_config.clone(),
+                params,
+            ))
             .map_err(|err| anyhow::anyhow!("failed to run recording controls: {err}"))
     } else {
         handle
@@ -1652,6 +1656,7 @@ mod tests {
             gif_size_idx: 2,
             optimize_gif: false,
             fullscreen: false,
+            ..RecordingRequest::default()
         };
 
         let prepared = prepare_overlay_recording_request(
@@ -1743,6 +1748,7 @@ mod tests {
             gif_size_idx: 1,
             optimize_gif: false,
             fullscreen: true,
+            ..RecordingRequest::default()
         };
 
         let prepared = prepare_overlay_recording_request(
@@ -1819,6 +1825,7 @@ mod tests {
             gif_size_idx: 0,
             optimize_gif: true,
             fullscreen: false,
+            ..RecordingRequest::default()
         };
 
         let prepared = prepare_overlay_recording_request(
@@ -1873,6 +1880,7 @@ mod tests {
             gif_size_idx: 0,
             optimize_gif: true,
             fullscreen: true,
+            ..RecordingRequest::default()
         };
 
         let prepared = prepare_overlay_recording_request(
@@ -1926,6 +1934,7 @@ mod tests {
             gif_size_idx: 0,
             optimize_gif: true,
             fullscreen: false,
+            ..RecordingRequest::default()
         };
 
         assert!(!should_use_legacy_pre_record_dim(&request, true));
@@ -1960,6 +1969,7 @@ mod tests {
             gif_size_idx: 0,
             optimize_gif: true,
             fullscreen: false,
+            ..RecordingRequest::default()
         };
 
         assert!(should_use_legacy_pre_record_dim(&request, false));
@@ -1994,6 +2004,7 @@ mod tests {
             gif_size_idx: 0,
             optimize_gif: true,
             fullscreen: false,
+            ..RecordingRequest::default()
         };
 
         assert!(should_use_shell_controls_for_request(&request, true));

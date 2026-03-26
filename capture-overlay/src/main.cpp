@@ -95,6 +95,11 @@ void printCaptureScreenJson(const QString& path, const QSize& size, const char* 
 void printRecordingJson(const QRect& sel, const char* recordType,
                          bool controls, bool mic, bool speaker,
                          bool clicks, bool keystrokes,
+                         bool webcam, double clickSize, int clickColor, int clickStyle,
+                         bool clickAnimate, double keySize, int keyPosition,
+                         int keyAppearance, bool keyBlurBg, int keyFilter,
+                         int webcamSize, int webcamShape, bool webcamFlip,
+                         int webcamDevice, double webcamRelX, double webcamRelY,
                          bool displayRecTime, bool hidpi, bool doNotDisturb,
                          bool showCursor, bool rememberSelection,
                          bool dimScreen, bool countdown,
@@ -106,6 +111,12 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 "\"mode\":\"record\",\"record_type\":\"%s\","
                 "\"controls\":%s,\"mic\":%s,\"speaker\":%s,"
                 "\"clicks\":%s,\"keystrokes\":%s,"
+                "\"webcam\":%s,\"click_size\":%.4f,\"click_color\":%d,"
+                "\"click_style\":%d,\"click_animate\":%s,"
+                "\"key_size\":%.4f,\"key_position\":%d,\"key_appearance\":%d,"
+                "\"key_blur_bg\":%s,\"key_filter\":%d,"
+                "\"webcam_size\":%d,\"webcam_shape\":%d,\"webcam_flip\":%s,"
+                "\"webcam_device\":%d,\"webcam_rel_x\":%.4f,\"webcam_rel_y\":%.4f,"
                 "\"display_rec_time\":%s,\"hidpi\":%s,"
                 "\"notifications\":%s,\"cursor\":%s,"
                 "\"remember_selection\":%s,\"dim_screen\":%s,"
@@ -121,6 +132,22 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 speaker ? "true" : "false",
                 clicks ? "true" : "false",
                 keystrokes ? "true" : "false",
+                webcam ? "true" : "false",
+                clickSize,
+                clickColor,
+                clickStyle,
+                clickAnimate ? "true" : "false",
+                keySize,
+                keyPosition,
+                keyAppearance,
+                keyBlurBg ? "true" : "false",
+                keyFilter,
+                webcamSize,
+                webcamShape,
+                webcamFlip ? "true" : "false",
+                webcamDevice,
+                webcamRelX,
+                webcamRelY,
                 displayRecTime ? "true" : "false",
                 hidpi ? "true" : "false",
                 doNotDisturb ? "true" : "false",
@@ -518,6 +545,22 @@ int main(int argc, char* argv[])
                            overlay.recordSpeakerEnabled(),
                            overlay.recordClicksEnabled(),
                            overlay.recordKeystrokesEnabled(),
+                           overlay.recordWebcamEnabled(),
+                           overlay.recordClickSize(),
+                           overlay.recordClickColor(),
+                           overlay.recordClickStyle(),
+                           overlay.recordClickAnimate(),
+                           overlay.recordKeySize(),
+                           overlay.recordKeyPosition(),
+                           overlay.recordKeyAppearance(),
+                           overlay.recordKeyBlurBg(),
+                           overlay.recordKeyFilter(),
+                           overlay.recordWebcamSize(),
+                           overlay.recordWebcamShape(),
+                           overlay.recordWebcamFlip(),
+                           overlay.recordWebcamDevice(),
+                           overlay.recordWebcamRelX(),
+                           overlay.recordWebcamRelY(),
                            overlay.recordDisplayRecTime(),
                            overlay.recordHidpiEnabled(),
                            overlay.recordDoNotDisturb(),

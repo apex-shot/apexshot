@@ -88,6 +88,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_recMic(initialMic)
     , m_recSpeaker(initialSpeaker)
     , m_recWebcam(false)
+    , m_webcamRelX(0.0)
+    , m_webcamRelY(0.0)
     , m_micLevel(0.0)
     , m_speakerLevel(0.0)
     , m_micTimer(new QTimer(this))
