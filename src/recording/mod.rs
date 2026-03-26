@@ -88,8 +88,33 @@ pub struct PreparedOverlayRecordingRequest {
     pub output_path: PathBuf,
     pub recording_config: RecordingConfig,
     pub controls_params: Option<RecordingControlsParams>,
+    pub runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     pub use_shell_mask: bool,
     pub use_shell_controls: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RuntimeOverlaySnapshot {
+    pub mic_visible: bool,
+    pub speaker_visible: bool,
+    pub webcam_enabled: bool,
+    pub webcam_rel_x: f64,
+    pub webcam_rel_y: f64,
+    pub webcam_size: u8,
+    pub webcam_shape: u8,
+    pub webcam_flip: bool,
+    pub webcam_device: i32,
+    pub clicks_enabled: bool,
+    pub click_size: f64,
+    pub click_color: u8,
+    pub click_style: u8,
+    pub click_animate: bool,
+    pub keystrokes_enabled: bool,
+    pub key_size: f64,
+    pub key_position: u8,
+    pub key_appearance: u8,
+    pub key_blur_bg: bool,
+    pub key_filter: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1293,6 +1318,22 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_remember_selection = request.remember_selection;
     app_config.rec_dim_screen = request.dim_screen;
     app_config.rec_countdown = request.countdown;
+    app_config.rec_click_size = request.click_size;
+    app_config.rec_click_color = request.click_color;
+    app_config.rec_click_style = request.click_style;
+    app_config.rec_click_animate = request.click_animate;
+    app_config.rec_key_size = request.key_size;
+    app_config.rec_key_position = request.key_position;
+    app_config.rec_key_appearance = request.key_appearance;
+    app_config.rec_key_blur_bg = request.key_blur_bg;
+    app_config.rec_key_filter = request.key_filter;
+    app_config.rec_webcam_enabled = request.webcam;
+    app_config.rec_webcam_size = request.webcam_size;
+    app_config.rec_webcam_shape = request.webcam_shape;
+    app_config.rec_webcam_flip = request.webcam_flip;
+    app_config.rec_webcam_device = request.webcam_device;
+    app_config.rec_webcam_rel_x = request.webcam_rel_x;
+    app_config.rec_webcam_rel_y = request.webcam_rel_y;
     app_config.rec_mic = request.mic;
     app_config.rec_speaker = request.speaker;
     app_config.rec_video_max_res = request.video_max_res;
@@ -1375,6 +1416,29 @@ pub fn prepare_overlay_recording_request(
         gif_max_width,
     };
 
+    let runtime_overlay_snapshot = RuntimeOverlaySnapshot {
+        mic_visible: request.mic,
+        speaker_visible: request.speaker,
+        webcam_enabled: request.webcam,
+        webcam_rel_x: request.webcam_rel_x,
+        webcam_rel_y: request.webcam_rel_y,
+        webcam_size: request.webcam_size,
+        webcam_shape: request.webcam_shape,
+        webcam_flip: request.webcam_flip,
+        webcam_device: request.webcam_device,
+        clicks_enabled: request.clicks,
+        click_size: request.click_size,
+        click_color: request.click_color,
+        click_style: request.click_style,
+        click_animate: request.click_animate,
+        keystrokes_enabled: request.keystrokes,
+        key_size: request.key_size,
+        key_position: request.key_position,
+        key_appearance: request.key_appearance,
+        key_blur_bg: request.key_blur_bg,
+        key_filter: request.key_filter,
+    };
+
     let controls_params = request.controls.then_some(RecordingControlsParams {
         capture_x: request.x,
         capture_y: request.y,
@@ -1390,6 +1454,7 @@ pub fn prepare_overlay_recording_request(
         output_path,
         recording_config,
         controls_params,
+        runtime_overlay_snapshot: Some(runtime_overlay_snapshot),
         use_shell_mask,
         use_shell_controls,
     }
@@ -1399,8 +1464,18 @@ pub async fn run_recording_with_controls(
     config: RecordingConfig,
     params: RecordingControlsParams,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
+    run_recording_with_controls_with_runtime_overlay(config, params, None).await
+}
+
+async fn run_recording_with_controls_with_runtime_overlay(
+    config: RecordingConfig,
+    params: RecordingControlsParams,
+    runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
+) -> anyhow::Result<(PathBuf, StopAction)> {
     if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
-        match run_recording_with_shell_controls(config.clone(), params).await {
+        match run_recording_with_shell_controls(config.clone(), params, runtime_overlay_snapshot)
+            .await
+        {
             Ok(outcome) => return Ok(outcome),
             Err(err) => {
                 eprintln!(
@@ -1482,7 +1557,9 @@ pub async fn run_recording_with_cpp_controls(
 async fn run_recording_with_shell_controls(
     config: RecordingConfig,
     params: RecordingControlsParams,
+    runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
+    let _runtime_overlay_snapshot = runtime_overlay_snapshot;
     let session_id = format!(
         "recording-{}-{}",
         std::process::id(),
@@ -1591,9 +1668,10 @@ pub fn run_overlay_recording_request_with_gtk(
     let handle = tokio::runtime::Handle::current();
     let outcome = if let Some(params) = prepared.controls_params {
         handle
-            .block_on(run_recording_with_controls(
+            .block_on(run_recording_with_controls_with_runtime_overlay(
                 prepared.recording_config.clone(),
                 params,
+                prepared.runtime_overlay_snapshot,
             ))
             .map_err(|err| anyhow::anyhow!("failed to run recording controls: {err}"))
     } else {
@@ -1778,6 +1856,104 @@ mod tests {
         assert_eq!(prepared.controls_params, None);
         assert_eq!(prepared.use_shell_mask, false);
         assert_eq!(prepared.use_shell_controls, false);
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_maps_runtime_overlay_snapshot() {
+        let request = RecordingRequest {
+            x: 42,
+            y: 24,
+            width: 1280,
+            height: 720,
+            record_type: RecordingType::Video,
+            controls: true,
+            mic: true,
+            speaker: true,
+            clicks: true,
+            keystrokes: true,
+            webcam: true,
+            webcam_rel_x: 0.61,
+            webcam_rel_y: 0.17,
+            webcam_size: 2,
+            webcam_shape: 1,
+            webcam_flip: true,
+            webcam_device: 7,
+            click_size: 0.45,
+            click_color: 3,
+            click_style: 2,
+            click_animate: false,
+            key_size: 0.5,
+            key_position: 2,
+            key_appearance: 1,
+            key_blur_bg: false,
+            key_filter: 4,
+            display_rec_time: true,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: true,
+            countdown: true,
+            video_max_res: 1,
+            video_fps: 1,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 30,
+            gif_quality: 0.8,
+            gif_size_idx: 0,
+            optimize_gif: true,
+            fullscreen: true,
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 3, 26, 9, 15, 0).unwrap(),
+        );
+
+        assert_eq!(prepared.updated_app_config.rec_mic, true);
+        assert_eq!(prepared.updated_app_config.rec_speaker, true);
+        assert_eq!(prepared.updated_app_config.rec_webcam_enabled, true);
+        assert_eq!(prepared.updated_app_config.rec_webcam_rel_x, 0.61);
+        assert_eq!(prepared.updated_app_config.rec_webcam_rel_y, 0.17);
+        assert_eq!(prepared.updated_app_config.rec_webcam_size, 2);
+        assert_eq!(prepared.updated_app_config.rec_webcam_shape, 1);
+        assert_eq!(prepared.updated_app_config.rec_webcam_flip, true);
+        assert_eq!(prepared.updated_app_config.rec_webcam_device, 7);
+        assert_eq!(prepared.updated_app_config.rec_click_size, 0.45);
+        assert_eq!(prepared.updated_app_config.rec_click_color, 3);
+        assert_eq!(prepared.updated_app_config.rec_click_style, 2);
+        assert_eq!(prepared.updated_app_config.rec_click_animate, false);
+        assert_eq!(prepared.updated_app_config.rec_key_size, 0.5);
+        assert_eq!(prepared.updated_app_config.rec_key_position, 2);
+        assert_eq!(prepared.updated_app_config.rec_key_appearance, 1);
+        assert_eq!(prepared.updated_app_config.rec_key_blur_bg, false);
+        assert_eq!(prepared.updated_app_config.rec_key_filter, 4);
+        assert_eq!(
+            prepared.runtime_overlay_snapshot,
+            Some(RuntimeOverlaySnapshot {
+                mic_visible: true,
+                speaker_visible: true,
+                webcam_enabled: true,
+                webcam_rel_x: 0.61,
+                webcam_rel_y: 0.17,
+                webcam_size: 2,
+                webcam_shape: 1,
+                webcam_flip: true,
+                webcam_device: 7,
+                clicks_enabled: true,
+                click_size: 0.45,
+                click_color: 3,
+                click_style: 2,
+                click_animate: false,
+                keystrokes_enabled: true,
+                key_size: 0.5,
+                key_position: 2,
+                key_appearance: 1,
+                key_blur_bg: false,
+                key_filter: 4,
+            })
+        );
     }
 
     #[test]
