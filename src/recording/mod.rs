@@ -1416,7 +1416,7 @@ pub fn prepare_overlay_recording_request(
         gif_max_width,
     };
 
-    let runtime_overlay_snapshot = RuntimeOverlaySnapshot {
+    let runtime_overlay_snapshot = use_shell_controls.then_some(RuntimeOverlaySnapshot {
         mic_visible: request.mic,
         speaker_visible: request.speaker,
         webcam_enabled: request.webcam,
@@ -1437,7 +1437,7 @@ pub fn prepare_overlay_recording_request(
         key_appearance: request.key_appearance,
         key_blur_bg: request.key_blur_bg,
         key_filter: request.key_filter,
-    };
+    });
 
     let controls_params = request.controls.then_some(RecordingControlsParams {
         capture_x: request.x,
@@ -1454,7 +1454,7 @@ pub fn prepare_overlay_recording_request(
         output_path,
         recording_config,
         controls_params,
-        runtime_overlay_snapshot: Some(runtime_overlay_snapshot),
+        runtime_overlay_snapshot,
         use_shell_mask,
         use_shell_controls,
     }
@@ -1954,6 +1954,64 @@ mod tests {
                 key_filter: 4,
             })
         );
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_does_not_carry_runtime_snapshot_without_shell_controls() {
+        let request = RecordingRequest {
+            x: 42,
+            y: 24,
+            width: 1280,
+            height: 720,
+            record_type: RecordingType::Video,
+            controls: false,
+            mic: true,
+            speaker: true,
+            clicks: true,
+            keystrokes: true,
+            webcam: true,
+            webcam_rel_x: 0.61,
+            webcam_rel_y: 0.17,
+            webcam_size: 2,
+            webcam_shape: 1,
+            webcam_flip: true,
+            webcam_device: 7,
+            click_size: 0.45,
+            click_color: 3,
+            click_style: 2,
+            click_animate: false,
+            key_size: 0.5,
+            key_position: 2,
+            key_appearance: 1,
+            key_blur_bg: false,
+            key_filter: 4,
+            display_rec_time: true,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: true,
+            countdown: true,
+            video_max_res: 1,
+            video_fps: 1,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 30,
+            gif_quality: 0.8,
+            gif_size_idx: 0,
+            optimize_gif: true,
+            fullscreen: true,
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 3, 27, 9, 15, 0).unwrap(),
+        );
+
+        assert_eq!(prepared.use_shell_controls, false);
+        assert_eq!(prepared.controls_params, None);
+        assert_eq!(prepared.runtime_overlay_snapshot, None);
     }
 
     #[test]
