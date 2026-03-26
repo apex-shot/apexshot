@@ -23,6 +23,7 @@
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <algorithm>
 
 class QTimer;
 
@@ -117,7 +118,15 @@ public:
     void setInitialShowCursor(bool v) { m_showCursor = v; }
     void setInitialRecClicks(bool v) { m_recClicks = v; }
     void setInitialRecKeystrokes(bool v) { m_recKeystrokes = v; }
-    void setInitialRecWebcam(bool v) { m_recWebcam = v; }
+    void setInitialRecWebcam(bool v)
+    {
+        m_recWebcam = v;
+        if (!m_recWebcam) {
+            stopWebcamCapture();
+        } else if (m_webcamDevice >= 0) {
+            startWebcamCapture();
+        }
+    }
     void setInitialClickSize(double v) { m_clickSize = v; }
     void setInitialClickColor(int v) { m_clickColor = v; }
     void setInitialClickStyle(int v) { m_clickStyle = v; }
@@ -130,9 +139,17 @@ public:
     void setInitialWebcamSize(int v) { m_webcamSize = static_cast<WebcamSize>(v); }
     void setInitialWebcamShape(int v) { m_webcamShape = static_cast<WebcamShape>(v); }
     void setInitialWebcamFlip(bool v) { m_webcamFlip = v; }
-    void setInitialWebcamDevice(int v) { m_webcamDevice = v; }
-    void setInitialWebcamRelX(double v) { m_webcamRelX = v; }
-    void setInitialWebcamRelY(double v) { m_webcamRelY = v; }
+    void setInitialWebcamDevice(int v)
+    {
+        m_webcamDevice = v;
+        if (m_recWebcam && m_webcamDevice >= 0) {
+            startWebcamCapture();
+        } else if (m_webcamDevice < 0) {
+            stopWebcamCapture();
+        }
+    }
+    void setInitialWebcamRelX(double v) { m_webcamRelX = std::clamp(v, 0.0, 1.0); }
+    void setInitialWebcamRelY(double v) { m_webcamRelY = std::clamp(v, 0.0, 1.0); }
     void setInitialRememberSelection(bool v) { m_rememberSelection = v; }
     void setInitialDimScreen(bool v) { m_dimScreen = v; }
     void setInitialShowCountdown(bool v) { m_showCountdown = v; }
@@ -196,6 +213,11 @@ private:
     void stopClickAnimTimer();
     void drawKeystrokePreview(QPainter& p, double sx, double sy, double selW, double selH);
     QRectF scrollPrimaryButtonRect() const;
+    QSizeF webcamPreviewSize(double selW, double selH) const;
+    QRectF webcamPreviewRect(double selX, double selY, double selW, double selH) const;
+    void setWebcamPreviewTopLeft(const QPointF& topLeft,
+                                 double selX, double selY,
+                                 double selW, double selH);
 
     // Webcam
     void showWebcamContextMenu(const QPoint& globalPos);
@@ -375,6 +397,9 @@ private:
     int m_webcamDevice = -1; // -1 = None, 0+ = /dev/videoN
     double m_webcamRelX = 0.0;
     double m_webcamRelY = 0.0;
+    bool m_draggingWebcam = false;
+    QPointF m_webcamDragOffset;
+    QRectF m_webcamPreviewRect;
     QStringList m_webcamDevices; // cached device names
     double m_micLevel; // Normalized level for animation
     double m_speakerLevel; // Normalized level for speaker animation
