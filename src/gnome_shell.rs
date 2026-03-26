@@ -214,6 +214,19 @@ fn hide_recording_controls() -> anyhow::Result<()> {
     run_shell_overlay_method("HideControls", Vec::new())
 }
 
+fn show_toggle_overlay_args(key: &str, visible: bool) -> Vec<String> {
+    vec![format!("string:{key}"), format!("boolean:{visible}")]
+}
+
+pub fn toggle_overlay_visibility(key: &str, visible: bool) -> anyhow::Result<()> {
+    if !current_session_supports_gnome_shell_overlay() {
+        return Ok(());
+    }
+
+    run_shell_overlay_method("ToggleOverlay", show_toggle_overlay_args(key, visible))
+        .context("failed to launch dbus-send for ToggleOverlay")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,6 +328,48 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn controls_toggle_commands_do_not_mutate_snapshot_style() {
+        let snapshot = crate::recording::RuntimeOverlaySnapshot {
+            mic_visible: true,
+            speaker_visible: false,
+            webcam_enabled: true,
+            webcam_rel_x: 0.61,
+            webcam_rel_y: 0.17,
+            webcam_size: 2,
+            webcam_shape: 1,
+            webcam_flip: true,
+            webcam_device: 7,
+            clicks_enabled: true,
+            click_size: 0.45,
+            click_color: 3,
+            click_style: 2,
+            click_animate: false,
+            keystrokes_enabled: true,
+            key_size: 0.5,
+            key_position: 2,
+            key_appearance: 1,
+            key_blur_bg: false,
+            key_filter: 4,
+        };
+
+        let toggle_args = show_toggle_overlay_args("webcam", false);
+        assert_eq!(
+            toggle_args,
+            vec!["string:webcam".to_string(), "boolean:false".to_string()]
+        );
+
+        let toggle_on = show_toggle_overlay_args("clicks", true);
+        assert_eq!(
+            toggle_on,
+            vec!["string:clicks".to_string(), "boolean:true".to_string()]
+        );
+
+        let snapshot_json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
+        assert!(snapshot_json.contains("\"click_style\":2"));
+        assert!(snapshot_json.contains("\"webcam_rel_x\":0.61"));
     }
 
     #[test]

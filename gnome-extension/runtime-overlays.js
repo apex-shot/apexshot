@@ -3,6 +3,11 @@
 import St from "gi://St";
 import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
+import {
+    createRuntimeOverlayVisibility,
+    isSelfOwnedActor,
+    registerSelfOwnedActor,
+} from "./session-state.js";
 
 const OVERLAY_MARGIN = 10;
 const AUDIO_INDICATORS_MARGIN = 14;
@@ -26,16 +31,6 @@ const CLICK_COLOR_MAP = Object.freeze({
     8: "rgb(255, 255, 255)",
 });
 
-function createVisibilityState() {
-    return {
-        mic: false,
-        speaker: false,
-        webcam: false,
-        clicks: false,
-        keystrokes: false,
-    };
-}
-
 function ensureRuntimeOverlayState(sessionState) {
     if (!sessionState.runtimeOverlayState) {
         sessionState.runtimeOverlayState = {
@@ -53,17 +48,21 @@ function ensureRuntimeOverlayState(sessionState) {
             audioIndicatorsActor: null,
             micIndicatorActor: null,
             speakerIndicatorActor: null,
-            visibility: createVisibilityState(),
+            visibility: createRuntimeOverlayVisibility(),
+            selfOwnedActors: new WeakSet(),
+            selfOwnedActorOwners: new WeakMap(),
         };
     }
 
     const state = sessionState.runtimeOverlayState;
-    state.visibility ??= createVisibilityState();
+    state.visibility ??= createRuntimeOverlayVisibility();
+    state.selfOwnedActors ??= new WeakSet();
+    state.selfOwnedActorOwners ??= new WeakMap();
     return state;
 }
 
 function hasVisibleRuntimeOverlays(overlayState) {
-    const visibility = overlayState.visibility ?? createVisibilityState();
+    const visibility = overlayState.visibility ?? createRuntimeOverlayVisibility();
     return visibility.mic ||
         visibility.speaker ||
         visibility.webcam ||
@@ -497,6 +496,12 @@ export function attachRuntimeOverlays(sessionState) {
     overlayState.chrome.add_child(overlayState.keystrokesActor);
     overlayState.chrome.add_child(overlayState.audioIndicatorsActor);
 
+    registerSelfOwnedActor(sessionState, overlayState.chrome, "runtime-overlay.chrome");
+    registerSelfOwnedActor(sessionState, overlayState.webcamActor, "runtime-overlay.webcam");
+    registerSelfOwnedActor(sessionState, overlayState.clicksActor, "runtime-overlay.clicks");
+    registerSelfOwnedActor(sessionState, overlayState.keystrokesActor, "runtime-overlay.keystrokes");
+    registerSelfOwnedActor(sessionState, overlayState.audioIndicatorsActor, "runtime-overlay.audio");
+
     Main.layoutManager.addChrome(overlayState.chrome, {
         affectsInputRegion: false,
         trackFullscreen: false,
@@ -555,5 +560,8 @@ export function destroyRuntimeOverlays(sessionState) {
     overlayState.audioIndicatorsActor = null;
     overlayState.micIndicatorActor = null;
     overlayState.speakerIndicatorActor = null;
-    overlayState.visibility = createVisibilityState();
+}
+
+export function shouldExcludeOverlayEvent(sessionState, target) {
+    return isSelfOwnedActor(sessionState, target);
 }

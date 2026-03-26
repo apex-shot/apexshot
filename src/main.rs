@@ -27,8 +27,8 @@ use apexshot::{
     ocr::{extract_text_from_path, OcrConfig},
     recording::{
         copy_to_clipboard as copy_recording_to_clipboard, run_overlay_recording_request,
-        run_recording_countdown_bar, run_recording_with_controls, start_recording,
-        RecordingConfig, RecordingControlsParams, StopAction,
+        run_recording_countdown_bar, run_recording_with_controls, start_recording, RecordingConfig,
+        RecordingControlsParams, StopAction,
     },
     show_settings_window,
 };

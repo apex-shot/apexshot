@@ -35,6 +35,14 @@ const DEFAULT_RUNTIME_OVERLAY_SNAPSHOT = Object.freeze({
     key_filter: 0,
 });
 
+const RUNTIME_OVERLAY_VISIBILITY_KEYS = Object.freeze([
+    "mic",
+    "speaker",
+    "webcam",
+    "clicks",
+    "keystrokes",
+]);
+
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
@@ -61,7 +69,11 @@ function normalizeNonNegativeInteger(value, fallback) {
     return Math.max(0, Math.trunc(value));
 }
 
-function createRuntimeOverlayVisibility(snapshot = null) {
+function normalizeRuntimeOverlayVisibilityKey(key) {
+    return RUNTIME_OVERLAY_VISIBILITY_KEYS.includes(key) ? key : null;
+}
+
+export function createRuntimeOverlayVisibility(snapshot = null) {
     return {
         mic: snapshot?.mic_visible ?? false,
         speaker: snapshot?.speaker_visible ?? false,
@@ -81,11 +93,74 @@ function createRuntimeOverlayState() {
         micIndicatorActor: null,
         speakerIndicatorActor: null,
         visibility: createRuntimeOverlayVisibility(),
+        selfOwnedActors: new WeakSet(),
+        selfOwnedActorOwners: new WeakMap(),
     };
 }
 
+function ensureRuntimeOverlayState(sessionState) {
+    sessionState.runtimeOverlayState ??= createRuntimeOverlayState();
+    sessionState.runtimeOverlayState.visibility ??= createRuntimeOverlayVisibility();
+    sessionState.runtimeOverlayState.selfOwnedActors ??= new WeakSet();
+    sessionState.runtimeOverlayState.selfOwnedActorOwners ??= new WeakMap();
+    return sessionState.runtimeOverlayState;
+}
+
 function applyRuntimeOverlayVisibility(sessionState, snapshot) {
-    sessionState.runtimeOverlayState.visibility = createRuntimeOverlayVisibility(snapshot);
+    ensureRuntimeOverlayState(sessionState).visibility = createRuntimeOverlayVisibility(snapshot);
+}
+
+export function getRuntimeOverlayVisibility(sessionState, key) {
+    const visibilityKey = normalizeRuntimeOverlayVisibilityKey(key);
+    if (!visibilityKey || !sessionState)
+        return false;
+
+    return ensureRuntimeOverlayState(sessionState).visibility[visibilityKey];
+}
+
+export function setRuntimeOverlayVisibility(sessionState, key, visible) {
+    const visibilityKey = normalizeRuntimeOverlayVisibilityKey(key);
+    if (!visibilityKey || !sessionState?.runtimeOverlaySnapshot)
+        return false;
+
+    ensureRuntimeOverlayState(sessionState).visibility[visibilityKey] = Boolean(visible);
+    return true;
+}
+
+export function toggleRuntimeOverlayVisibility(sessionState, key) {
+    const visibilityKey = normalizeRuntimeOverlayVisibilityKey(key);
+    if (!visibilityKey)
+        return false;
+
+    const nextVisible = !getRuntimeOverlayVisibility(sessionState, visibilityKey);
+    return setRuntimeOverlayVisibility(sessionState, visibilityKey, nextVisible)
+        ? nextVisible
+        : false;
+}
+
+export function registerSelfOwnedActor(sessionState, actor, owner = "extension-ui") {
+    if (!sessionState || !actor)
+        return actor;
+
+    const overlayState = ensureRuntimeOverlayState(sessionState);
+    overlayState.selfOwnedActors.add(actor);
+    overlayState.selfOwnedActorOwners.set(actor, owner);
+    actor._apexshotSelfOwned = true;
+    actor._apexshotSelfOwnedOwner = owner;
+    return actor;
+}
+
+export function isSelfOwnedActor(sessionState, actor) {
+    const ownedActors = sessionState?.runtimeOverlayState?.selfOwnedActors ?? null;
+    let current = actor ?? null;
+    while (current) {
+        if (current._apexshotSelfOwned || ownedActors?.has(current))
+            return true;
+        current = typeof current.get_parent === "function"
+            ? current.get_parent()
+            : null;
+    }
+    return false;
 }
 
 export function parseRuntimeOverlaySnapshot(payload) {
@@ -182,6 +257,6 @@ export function setControlsState(sessionState, spec, runningStartMs) {
 export function clearControlsState(sessionState) {
     sessionState.controlsState = null;
     sessionState.runtimeOverlaySnapshot = null;
-    applyRuntimeOverlayVisibility(sessionState, null);
+    sessionState.runtimeOverlayState = createRuntimeOverlayState();
     sessionState.shortcutEditActive = false;
 }

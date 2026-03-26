@@ -6,6 +6,9 @@ import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {
     clearControlsState,
+    getRuntimeOverlayVisibility,
+    registerSelfOwnedActor,
+    setRuntimeOverlayVisibility,
     setControlsState,
 } from "./session-state.js";
 import {
@@ -19,6 +22,16 @@ const CONTROLS_BAR_HEIGHT = 56;
 const CONTROLS_MARGIN = 32;
 const CONTROLS_DOCK_SAFE = 72;
 const CONTROLS_GAP = 8;
+const RUNTIME_OVERLAY_MENU_WIDTH = 224;
+const RUNTIME_OVERLAY_MENU_GAP = 10;
+const RUNTIME_OVERLAY_MENU_MARGIN = 24;
+const RUNTIME_OVERLAY_TOGGLE_SPECS = Object.freeze([
+    {key: "webcam", icon: "camera-web-symbolic", label: "Webcam"},
+    {key: "clicks", icon: "input-mouse-symbolic", label: "Clicks"},
+    {key: "keystrokes", icon: "input-keyboard-symbolic", label: "Keystrokes"},
+    {key: "mic", icon: "audio-input-microphone-symbolic", label: "Mic"},
+    {key: "speaker", icon: "audio-volume-high-symbolic", label: "Speaker"},
+]);
 
 export class ControlsUi {
     constructor(sessionState, {sendRecordingCommand}) {
@@ -28,6 +41,9 @@ export class ControlsUi {
         this._controlsTimerSource = null;
         this._timerLabel = null;
         this._pauseIcon = null;
+        this._runtimeOverlayMenu = null;
+        this._runtimeOverlayMenuButton = null;
+        this._runtimeOverlayToggleRows = new Map();
     }
 
     showControls(spec) {
@@ -53,10 +69,13 @@ export class ControlsUi {
 
     hideControls() {
         this._stopControlsTimer();
+        this._hideRuntimeOverlayMenu();
         destroyRuntimeOverlays(this._sessionState);
         clearControlsState(this._sessionState);
         this._timerLabel = null;
         this._pauseIcon = null;
+        this._runtimeOverlayMenuButton = null;
+        this._runtimeOverlayToggleRows.clear();
 
         if (!this._controlsChrome)
             return;
@@ -79,12 +98,13 @@ export class ControlsUi {
             monitor
         );
         this._controlsChrome.set_position(x, y);
+        this._positionRuntimeOverlayMenu();
         updateRuntimeOverlaySnapshot(this._sessionState);
     }
 
     _buildControlsChrome() {
         const controlsState = this._sessionState.controlsState;
-        const chrome = new St.BoxLayout({
+        const chrome = registerSelfOwnedActor(this._sessionState, new St.BoxLayout({
             reactive: true,
             can_focus: true,
             track_hover: true,
@@ -97,7 +117,7 @@ export class ControlsUi {
                 `width: ${CONTROLS_BAR_WIDTH}px;`,
                 `height: ${CONTROLS_BAR_HEIGHT}px;`,
             ].join(" "),
-        });
+        }), "controls.chrome");
 
         const stopSegment = new St.BoxLayout({
             reactive: true,
@@ -168,12 +188,8 @@ export class ControlsUi {
                 this.hideControls();
         }, {width: 40, height: 40, borderRadius: 20, iconSize: 18}));
 
-        buttonLayout.add_child(this._createIconButton("view-list-symbolic", () => {}, {
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            iconSize: 18,
-        }));
+        if (controlsState.runtimeOverlaySnapshot)
+            buttonLayout.add_child(this._createRuntimeOverlayMenuButton());
 
         chrome.add_child(buttonLayout);
 
@@ -193,12 +209,12 @@ export class ControlsUi {
         const h = options.height ?? 40;
         const r = options.borderRadius ?? 20;
 
-        const button = new St.Button({
+        const button = registerSelfOwnedActor(this._sessionState, new St.Button({
             reactive: true,
             can_focus: true,
             track_hover: true,
             style: `background-color: transparent; width: ${w}px; height: ${h}px; border-radius: ${r}px; padding: 0;`,
-        });
+        }), options.owner ?? "controls.button");
 
         const iconContainer = new St.BoxLayout({
             x_align: Clutter.ActorAlign.CENTER,
@@ -243,6 +259,179 @@ export class ControlsUi {
 
         button.connect("clicked", () => onClick());
         return button;
+    }
+
+    _createRuntimeOverlayMenuButton() {
+        this._runtimeOverlayMenuButton = this._createIconButton("view-list-symbolic", () => {
+            if (this._runtimeOverlayMenu)
+                this._hideRuntimeOverlayMenu();
+            else
+                this._showRuntimeOverlayMenu();
+        }, {
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            iconSize: 18,
+            owner: "controls.overlay-menu-button",
+        });
+        return this._runtimeOverlayMenuButton;
+    }
+
+    _showRuntimeOverlayMenu() {
+        if (this._runtimeOverlayMenu || !this._sessionState.runtimeOverlaySnapshot)
+            return;
+
+        const menu = registerSelfOwnedActor(this._sessionState, new St.BoxLayout({
+            vertical: true,
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            style: [
+                `width: ${RUNTIME_OVERLAY_MENU_WIDTH}px;`,
+                "padding: 10px;",
+                "spacing: 6px;",
+                "background-color: rgba(18, 20, 28, 0.94);",
+                "border-radius: 22px;",
+                "border: 1px solid rgba(255, 255, 255, 0.12);",
+                "box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);",
+            ].join(" "),
+        }), "controls.overlay-menu");
+
+        menu.add_child(new St.Label({
+            text: "Live overlays",
+            style: "padding: 4px 8px 6px 8px; font-size: 12px; font-weight: 800; color: rgba(255, 255, 255, 0.72); text-transform: uppercase;",
+        }));
+
+        this._runtimeOverlayToggleRows.clear();
+        for (const spec of RUNTIME_OVERLAY_TOGGLE_SPECS)
+            menu.add_child(this._createRuntimeOverlayToggleRow(spec));
+
+        this._runtimeOverlayMenu = menu;
+        Main.layoutManager.addChrome(this._runtimeOverlayMenu, {
+            affectsInputRegion: true,
+            trackFullscreen: false,
+        });
+        this._runtimeOverlayMenu.show();
+        this._refreshRuntimeOverlayToggleRows();
+        this._positionRuntimeOverlayMenu();
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._positionRuntimeOverlayMenu();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _hideRuntimeOverlayMenu() {
+        if (!this._runtimeOverlayMenu)
+            return;
+
+        if (this._runtimeOverlayMenu.get_parent())
+            Main.layoutManager.removeChrome(this._runtimeOverlayMenu);
+        this._runtimeOverlayMenu.destroy();
+        this._runtimeOverlayMenu = null;
+        this._runtimeOverlayToggleRows.clear();
+    }
+
+    _createRuntimeOverlayToggleRow(spec) {
+        const button = registerSelfOwnedActor(this._sessionState, new St.Button({
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            style: [
+                "padding: 0;",
+                "background-color: transparent;",
+                "border-radius: 16px;",
+            ].join(" "),
+        }), `controls.overlay-toggle.${spec.key}`);
+        const row = new St.BoxLayout({
+            reactive: false,
+            style: [
+                "padding: 10px 12px;",
+                "spacing: 10px;",
+                "border-radius: 16px;",
+            ].join(" "),
+        });
+
+        row.add_child(new St.Icon({
+            icon_name: spec.icon,
+            style: "icon-size: 16px; color: rgba(255, 255, 255, 0.92);",
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+        row.add_child(new St.Label({
+            text: spec.label,
+            y_align: Clutter.ActorAlign.CENTER,
+            x_expand: true,
+            style: "font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.9);",
+        }));
+
+        const stateLabel = new St.Label({
+            text: "Off",
+            y_align: Clutter.ActorAlign.CENTER,
+            style: "font-size: 12px; font-weight: 800;",
+        });
+        row.add_child(stateLabel);
+        button.set_child(row);
+        button.connect("clicked", () => this._toggleRuntimeOverlay(spec.key));
+        this._runtimeOverlayToggleRows.set(spec.key, {button, row, stateLabel});
+        return button;
+    }
+
+    _toggleRuntimeOverlay(key) {
+        const nextVisible = !getRuntimeOverlayVisibility(this._sessionState, key);
+        if (!setRuntimeOverlayVisibility(this._sessionState, key, nextVisible))
+            return;
+
+        this._refreshRuntimeOverlayToggleRows();
+        updateRuntimeOverlaySnapshot(this._sessionState);
+    }
+
+    _refreshRuntimeOverlayToggleRows() {
+        for (const [key, row] of this._runtimeOverlayToggleRows.entries()) {
+            const visible = getRuntimeOverlayVisibility(this._sessionState, key);
+            row.stateLabel.text = visible ? "On" : "Off";
+            row.stateLabel.set_style([
+                "font-size: 12px;",
+                "font-weight: 800;",
+                `color: ${visible ? "rgb(115, 227, 163)" : "rgba(255, 255, 255, 0.56)"};`,
+            ].join(" "));
+            row.row.set_style([
+                "padding: 10px 12px;",
+                "spacing: 10px;",
+                "border-radius: 16px;",
+                `background-color: ${visible ? "rgba(80, 180, 120, 0.16)" : "rgba(255, 255, 255, 0.05)"};`,
+                `border: 1px solid ${visible ? "rgba(115, 227, 163, 0.24)" : "rgba(255, 255, 255, 0.06)"};`,
+            ].join(" "));
+        }
+    }
+
+    _positionRuntimeOverlayMenu() {
+        if (!this._runtimeOverlayMenu || !this._controlsChrome)
+            return;
+
+        const controlsState = this._sessionState.controlsState;
+        if (!controlsState)
+            return;
+
+        const monitor = this._monitorForRect(controlsState.rect);
+        const [controlsX, controlsY] = this._controlsChrome.get_position();
+        const [, menuWidth] = this._runtimeOverlayMenu.get_preferred_width(-1);
+        const [, menuHeight] = this._runtimeOverlayMenu.get_preferred_height(menuWidth);
+        const minX = monitor.x + RUNTIME_OVERLAY_MENU_MARGIN;
+        const maxX = Math.max(minX, monitor.x + monitor.width - menuWidth - RUNTIME_OVERLAY_MENU_MARGIN);
+        const x = Math.max(minX, Math.min(controlsX + CONTROLS_BAR_WIDTH - menuWidth, maxX));
+
+        const topY = controlsY - menuHeight - RUNTIME_OVERLAY_MENU_GAP;
+        const bottomY = controlsY + CONTROLS_BAR_HEIGHT + RUNTIME_OVERLAY_MENU_GAP;
+        const unclampedY = topY >= monitor.y + RUNTIME_OVERLAY_MENU_MARGIN
+            ? topY
+            : Math.min(
+                bottomY,
+                monitor.y + monitor.height - menuHeight - RUNTIME_OVERLAY_MENU_MARGIN
+            );
+        const minY = monitor.y + RUNTIME_OVERLAY_MENU_MARGIN;
+        const maxY = Math.max(minY, monitor.y + monitor.height - menuHeight - RUNTIME_OVERLAY_MENU_MARGIN);
+        const y = Math.max(minY, Math.min(unclampedY, maxY));
+
+        this._runtimeOverlayMenu.set_position(x, y);
     }
 
     _computeControlsPosition(rect, isFullscreen, monitor) {
