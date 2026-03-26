@@ -479,9 +479,7 @@ pub fn capture_screen_via_cpp() -> Result<CaptureData, SelectionError> {
     capture
 }
 
-pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
-    // Check config for remember selection
-    let config = crate::config::load_config();
+fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut extra_args: Vec<String> = vec!["--area-init".into()];
 
     if config.rec_remember_selection {
@@ -606,6 +604,14 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
     } else {
         extra_args.push("--no-gif-optimize".into());
     }
+
+    extra_args
+}
+
+pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
+    // Check config for remember selection
+    let config = crate::config::load_config();
+    let extra_args = build_area_init_args(&config);
 
     let arg_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
     eprintln!(
@@ -922,9 +928,10 @@ fn extract_string(json: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
-        parse_selection_json, RecordingType,
+        build_area_init_args, parse_capture_screen_json, parse_capture_screen_json_with_mode,
+        parse_recording_json, parse_selection_json, RecordingType,
     };
+    use crate::config::AppConfig;
 
     #[test]
     fn test_parse_normal() {
@@ -985,11 +992,11 @@ mod tests {
                 "record_mono":true,"open_editor":false,
                 "gif_fps":33,"gif_quality":0.8125,
                 "gif_size_idx":2,"optimize_gif":false,"fullscreen":true,
-                "webcam":true,"click_size":18.5,"click_color":4,"click_style":2,
-                "click_animate":true,"key_size":15.25,"key_position":3,
-                "key_appearance":1,"key_blur_bg":true,"key_filter":6,
+                "webcam":true,"click_size":0.42,"click_color":4,"click_style":1,
+                "click_animate":true,"key_size":0.33,"key_position":3,
+                "key_appearance":1,"key_blur_bg":true,"key_filter":1,
                 "webcam_size":2,"webcam_shape":1,"webcam_flip":true,
-                "webcam_device":7,"webcam_rel_x":0.125,"webcam_rel_y":0.875
+                "webcam_device":2,"webcam_rel_x":0.125,"webcam_rel_y":0.875
             }"#,
         )
         .unwrap();
@@ -1021,20 +1028,62 @@ mod tests {
         assert!(!request.optimize_gif);
         assert!(request.fullscreen);
         assert!(request.webcam);
-        assert_eq!(request.click_size, 18.5);
+        assert_eq!(request.click_size, 0.42);
         assert_eq!(request.click_color, 4);
-        assert_eq!(request.click_style, 2);
+        assert_eq!(request.click_style, 1);
         assert!(request.click_animate);
-        assert_eq!(request.key_size, 15.25);
+        assert_eq!(request.key_size, 0.33);
         assert_eq!(request.key_position, 3);
         assert_eq!(request.key_appearance, 1);
         assert!(request.key_blur_bg);
-        assert_eq!(request.key_filter, 6);
+        assert_eq!(request.key_filter, 1);
         assert_eq!(request.webcam_size, 2);
         assert_eq!(request.webcam_shape, 1);
         assert!(request.webcam_flip);
-        assert_eq!(request.webcam_device, 7);
+        assert_eq!(request.webcam_device, 2);
         assert_eq!(request.webcam_rel_x, 0.125);
         assert_eq!(request.webcam_rel_y, 0.875);
+    }
+
+    #[test]
+    fn build_area_init_args_includes_runtime_overlay_defaults() {
+        let config = AppConfig {
+            rec_click_size: 0.42,
+            rec_click_color: 4,
+            rec_click_style: 1,
+            rec_click_animate: true,
+            rec_key_size: 0.33,
+            rec_key_position: 3,
+            rec_key_appearance: 1,
+            rec_key_blur_bg: true,
+            rec_key_filter: 1,
+            rec_webcam_enabled: true,
+            rec_webcam_size: 2,
+            rec_webcam_shape: 1,
+            rec_webcam_flip: true,
+            rec_webcam_device: 2,
+            rec_webcam_rel_x: 0.125,
+            rec_webcam_rel_y: 0.875,
+            ..AppConfig::default()
+        };
+
+        let args = build_area_init_args(&config);
+
+        assert!(args.contains(&"--rec-click-size=0.4200".to_string()));
+        assert!(args.contains(&"--rec-click-color=4".to_string()));
+        assert!(args.contains(&"--rec-click-style=1".to_string()));
+        assert!(args.contains(&"--rec-click-animate".to_string()));
+        assert!(args.contains(&"--rec-key-size=0.3300".to_string()));
+        assert!(args.contains(&"--rec-key-position=3".to_string()));
+        assert!(args.contains(&"--rec-key-appearance=1".to_string()));
+        assert!(args.contains(&"--rec-key-blur-bg".to_string()));
+        assert!(args.contains(&"--rec-key-filter=1".to_string()));
+        assert!(args.contains(&"--rec-webcam".to_string()));
+        assert!(args.contains(&"--rec-webcam-size=2".to_string()));
+        assert!(args.contains(&"--rec-webcam-shape=1".to_string()));
+        assert!(args.contains(&"--rec-webcam-flip".to_string()));
+        assert!(args.contains(&"--rec-webcam-device=2".to_string()));
+        assert!(args.contains(&"--rec-webcam-rel-x=0.1250".to_string()));
+        assert!(args.contains(&"--rec-webcam-rel-y=0.8750".to_string()));
     }
 }
