@@ -309,6 +309,19 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         return;
     }
 
+    if (m_recordingPanelOpen && m_recWebcam && m_hasSelection) {
+        const QRect sel = m_selection.normalized();
+        const QRectF previewRect = webcamPreviewRect(
+            sel.x(), sel.y(), sel.width(), sel.height());
+        if (previewRect.contains(pos)) {
+            m_draggingWebcam = true;
+            m_webcamPreviewRect = previewRect;
+            m_webcamDragOffset = QPointF(pos) - previewRect.topLeft();
+            setCursor(Qt::SizeAllCursor);
+            return;
+        }
+    }
+
     // Recording panel tile clicks
     if (m_recordingPanelOpen) {
         RecordPanelTile tile = hitTestRecordingPanel(pos);
@@ -573,6 +586,13 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
+    if (m_draggingWebcam && m_hasSelection) {
+        const QRect sel = m_selection.normalized();
+        setWebcamPreviewTopLeft(QPointF(pos) - m_webcamDragOffset,
+                                sel.x(), sel.y(), sel.width(), sel.height());
+        update();
+        return;
+    }
 
     // ── Global Dropdown Hover ───────────────────────────────────────────────
     if (m_dropdownOpen != -1) {
@@ -650,6 +670,17 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
             }
             setCursor(Qt::PointingHandCursor);
             return;
+        }
+
+        if (m_recWebcam && m_hasSelection) {
+            const QRect sel = m_selection.normalized();
+            const QRectF previewRect = webcamPreviewRect(
+                sel.x(), sel.y(), sel.width(), sel.height());
+            if (previewRect.contains(pos)) {
+                m_webcamPreviewRect = previewRect;
+                setCursor(Qt::SizeAllCursor);
+                return;
+            }
         }
 
         RecordPanelTile newTile = hitTestRecordingPanel(pos);
@@ -747,6 +778,10 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
     }
     if (m_gifQualityDragging) {
         m_gifQualityDragging = false;
+    }
+    if (m_draggingWebcam) {
+        m_draggingWebcam = false;
+        update();
     }
 
     // Reset recording panel hover state

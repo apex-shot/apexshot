@@ -524,33 +524,11 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
     if (m_recWebcam) {
         p.save();
         p.setRenderHint(QPainter::Antialiasing);
-
-        // Size presets
-        double previewW, previewH;
-        switch (m_webcamSize) {
-            case WebcamSize::Small:      previewW = 120; previewH = 160; break;
-            case WebcamSize::Medium:     previewW = 200; previewH = 260; break;
-            case WebcamSize::Large:      previewW = 280; previewH = 370; break;
-            case WebcamSize::Huge:       previewW = 360; previewH = 480; break;
-            case WebcamSize::Fullscreen: previewW = selW - 20; previewH = selH - 20; break;
-        }
-
-        // Shape adjustments
-        switch (m_webcamShape) {
-            case WebcamShape::Circle:
-            case WebcamShape::Square:
-                previewH = previewW;
-                break;
-            case WebcamShape::Rectangle:
-                previewH = previewW * 0.75;
-                break;
-            case WebcamShape::Vertical:
-                break;
-        }
-
-        const double margin = 10.0;
-        double px = sx + margin;
-        double py = sy + selH - previewH - margin;
+        m_webcamPreviewRect = webcamPreviewRect(sx, sy, selW, selH);
+        const double previewW = m_webcamPreviewRect.width();
+        const double previewH = m_webcamPreviewRect.height();
+        const double px = m_webcamPreviewRect.x();
+        const double py = m_webcamPreviewRect.y();
 
         // Flip
         if (m_webcamFlip) {
@@ -559,7 +537,7 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
             p.translate(-(px + previewW / 2.0), 0);
         }
 
-        QRectF previewRect(px, py, previewW, previewH);
+        const QRectF previewRect = m_webcamPreviewRect;
 
         // Create clipping path for the shape
         QPainterPath clipPath;
