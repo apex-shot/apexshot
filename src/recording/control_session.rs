@@ -13,6 +13,12 @@ pub enum RecordingControlCommand {
     StopDiscard,
 }
 
+impl RecordingControlCommand {
+    pub fn ends_session(self) -> bool {
+        matches!(self, Self::StopSave | Self::StopDiscard)
+    }
+}
+
 #[derive(Clone)]
 struct RecordingControlIface {
     session_id: String,
@@ -20,11 +26,7 @@ struct RecordingControlIface {
 }
 
 impl RecordingControlIface {
-    fn send(
-        &self,
-        session_id: &str,
-        command: RecordingControlCommand,
-    ) -> zbus::fdo::Result<bool> {
+    fn send(&self, session_id: &str, command: RecordingControlCommand) -> zbus::fdo::Result<bool> {
         if session_id != self.session_id {
             return Ok(false);
         }
@@ -72,10 +74,7 @@ pub struct RecordingControlServer {
 
 impl RecordingControlServer {
     pub async fn start(session_id: String) -> anyhow::Result<Self> {
-        let bus_name = format!(
-            "org.apexshot.RecordingControl.p{}",
-            std::process::id()
-        );
+        let bus_name = format!("org.apexshot.RecordingControl.p{}", std::process::id());
         let command_tx = Arc::new(Mutex::new(None));
         let iface = RecordingControlIface {
             session_id: session_id.clone(),
@@ -135,5 +134,19 @@ impl RecordingControlServer {
 impl Drop for RecordingControlServer {
     fn drop(&mut self) {
         self.task.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RecordingControlCommand;
+
+    #[test]
+    fn session_ending_commands_are_limited_to_stop_and_discard() {
+        assert!(RecordingControlCommand::StopSave.ends_session());
+        assert!(RecordingControlCommand::StopDiscard.ends_session());
+        assert!(!RecordingControlCommand::Pause.ends_session());
+        assert!(!RecordingControlCommand::Resume.ends_session());
+        assert!(!RecordingControlCommand::Restart.ends_session());
     }
 }

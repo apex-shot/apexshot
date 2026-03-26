@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QElapsedTimer>
+#include <QCloseEvent>
 #include <QLabel>
 #include <QPushButton>
 #include <QTimer>
@@ -17,6 +18,7 @@ public:
                             QWidget* parent = nullptr);
 
 protected:
+    void closeEvent(QCloseEvent* event) override;
     void showEvent(QShowEvent* event) override;
 
 private:

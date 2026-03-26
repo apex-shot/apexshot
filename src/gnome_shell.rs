@@ -16,8 +16,22 @@ pub struct RecordingMaskGeometry {
     pub height: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordingControlsSpec {
+    pub dbus_dest: String,
+    pub session_id: String,
+    pub geometry: RecordingMaskGeometry,
+    pub is_fullscreen: bool,
+    pub show_timer: bool,
+}
+
 #[derive(Debug)]
 pub struct MaskHandle {
+    shown: bool,
+}
+
+#[derive(Debug)]
+pub struct RecordingControlsHandle {
     shown: bool,
 }
 
@@ -34,6 +48,19 @@ impl MaskHandle {
     }
 }
 
+impl RecordingControlsHandle {
+    pub fn inactive() -> Self {
+        Self { shown: false }
+    }
+
+    pub fn hide(mut self) {
+        if self.shown {
+            let _ = hide_recording_controls();
+            self.shown = false;
+        }
+    }
+}
+
 impl Drop for MaskHandle {
     fn drop(&mut self) {
         if self.shown {
@@ -43,10 +70,16 @@ impl Drop for MaskHandle {
     }
 }
 
-pub fn should_use_gnome_shell_mask(
-    wayland_display: Option<&str>,
-    desktop: Option<&str>,
-) -> bool {
+impl Drop for RecordingControlsHandle {
+    fn drop(&mut self) {
+        if self.shown {
+            let _ = hide_recording_controls();
+            self.shown = false;
+        }
+    }
+}
+
+pub fn should_use_gnome_shell_mask(wayland_display: Option<&str>, desktop: Option<&str>) -> bool {
     let is_wayland = wayland_display.is_some_and(|value| !value.trim().is_empty());
     let is_gnome = desktop.is_some_and(|value| {
         value
@@ -54,6 +87,10 @@ pub fn should_use_gnome_shell_mask(
             .any(|part| part.trim().eq_ignore_ascii_case("gnome"))
     });
     is_wayland && is_gnome
+}
+
+pub fn current_session_supports_gnome_shell_overlay() -> bool {
+    current_session_supports_gnome_shell_mask()
 }
 
 pub fn current_session_supports_gnome_shell_mask() -> bool {
@@ -79,51 +116,88 @@ pub fn show_recording_mask(geometry: RecordingMaskGeometry) -> anyhow::Result<Ma
 
     let _ = hide_recording_mask();
 
-    let status = Command::new("dbus-send")
-        .args([
-            "--session",
-            &format!("--dest={MASK_DBUS_DEST}"),
-            "--type=method_call",
-            "--print-reply=literal",
-            MASK_DBUS_PATH,
-            &format!("{MASK_DBUS_IFACE}.ShowMask"),
-            &format!("int32:{}", geometry.x),
-            &format!("int32:{}", geometry.y),
-            &format!("int32:{}", geometry.width),
-            &format!("int32:{}", geometry.height),
-        ])
-        .status()
-        .context("failed to launch dbus-send for ShowMask")?;
-
-    if !status.success() {
-        return Err(anyhow!("dbus-send ShowMask exited with status {status}"));
-    }
+    run_shell_overlay_method(
+        "ShowMask",
+        vec![
+            format!("int32:{}", geometry.x),
+            format!("int32:{}", geometry.y),
+            format!("int32:{}", geometry.width),
+            format!("int32:{}", geometry.height),
+        ],
+    )
+    .context("failed to launch dbus-send for ShowMask")?;
 
     Ok(MaskHandle { shown: true })
+}
+
+pub fn show_recording_controls(
+    spec: &RecordingControlsSpec,
+) -> anyhow::Result<RecordingControlsHandle> {
+    let invalid_geometry =
+        spec.geometry.width <= 0 || spec.geometry.height <= 0;
+    if (!spec.is_fullscreen && invalid_geometry) || !current_session_supports_gnome_shell_overlay() {
+        return Ok(RecordingControlsHandle::inactive());
+    }
+
+    let _ = hide_recording_controls();
+    run_shell_overlay_method(
+        "ShowControls",
+        vec![
+            format!("string:{}", spec.dbus_dest),
+            format!("string:{}", spec.session_id),
+            format!("int32:{}", spec.geometry.x),
+            format!("int32:{}", spec.geometry.y),
+            format!("int32:{}", spec.geometry.width),
+            format!("int32:{}", spec.geometry.height),
+            format!("boolean:{}", spec.is_fullscreen),
+            format!("boolean:{}", spec.show_timer),
+        ],
+    )
+    .context("failed to launch dbus-send for ShowControls")?;
+
+    Ok(RecordingControlsHandle { shown: true })
 }
 
 pub fn hide_recording_mask_best_effort() {
     let _ = hide_recording_mask();
 }
 
-fn hide_recording_mask() -> anyhow::Result<()> {
-    let status = Command::new("dbus-send")
-        .args([
-            "--session",
-            &format!("--dest={MASK_DBUS_DEST}"),
-            "--type=method_call",
-            "--print-reply=literal",
-            MASK_DBUS_PATH,
-            &format!("{MASK_DBUS_IFACE}.HideMask"),
-        ])
+pub fn hide_recording_controls_best_effort() {
+    let _ = hide_recording_controls();
+}
+
+fn run_shell_overlay_method(method: &str, args: Vec<String>) -> anyhow::Result<()> {
+    let mut command = Command::new("dbus-send");
+    command.args([
+        "--session",
+        &format!("--dest={MASK_DBUS_DEST}"),
+        "--type=method_call",
+        "--print-reply=literal",
+        MASK_DBUS_PATH,
+        &format!("{MASK_DBUS_IFACE}.{method}"),
+    ]);
+
+    for arg in &args {
+        command.arg(arg);
+    }
+
+    let status = command
         .status()
-        .context("failed to launch dbus-send for HideMask")?;
+        .with_context(|| format!("failed to launch dbus-send for {method}"))?;
 
     if !status.success() {
-        return Err(anyhow!("dbus-send HideMask exited with status {status}"));
+        return Err(anyhow!("dbus-send {method} exited with status {status}"));
     }
 
     Ok(())
+}
+
+fn hide_recording_mask() -> anyhow::Result<()> {
+    run_shell_overlay_method("HideMask", Vec::new())
+}
+
+fn hide_recording_controls() -> anyhow::Result<()> {
+    run_shell_overlay_method("HideControls", Vec::new())
 }
 
 #[cfg(test)]
