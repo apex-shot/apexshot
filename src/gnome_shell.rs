@@ -166,14 +166,15 @@ fn show_controls_args(spec: &RecordingControlsSpec) -> anyhow::Result<Vec<String
         format!("int32:{}", spec.geometry.height),
         format!("boolean:{}", spec.is_fullscreen),
         format!("boolean:{}", spec.show_timer),
+        "string:".to_string(),
     ];
 
     if let Some(snapshot) = spec.runtime_overlay_snapshot {
-        args.push(format!(
+        args[8] = format!(
             "string:{}",
             serde_json::to_string(&snapshot)
                 .context("failed to serialize runtime overlay snapshot")?
-        ));
+        );
     }
 
     Ok(args)
@@ -345,6 +346,7 @@ mod tests {
                 "int32:1080".to_string(),
                 "boolean:true".to_string(),
                 "boolean:false".to_string(),
+                "string:".to_string(),
             ]
         );
     }
