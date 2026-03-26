@@ -6,6 +6,8 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {createSessionState} from "./session-state.js";
+import {setRuntimeOverlayVisibility} from "./session-state.js";
+import {updateRuntimeOverlaySnapshot} from "./runtime-overlays.js";
 import {MaskUi} from "./mask-ui.js";
 import {ControlsUi} from "./controls-ui.js";
 
@@ -57,6 +59,10 @@ const MASK_DBUS_IFACE_XML = `
       <arg type="s" name="runtime_overlay_snapshot" direction="in"/>
     </method>
     <method name="HideControls"/>
+    <method name="ToggleOverlay">
+      <arg type="s" name="key" direction="in"/>
+      <arg type="b" name="visible" direction="in"/>
+    </method>
   </interface>
 </node>`;
 
@@ -471,6 +477,16 @@ class RecordingMaskService {
         }
     }
 
+    ToggleOverlayAsync(params, invocation) {
+        try {
+            const [key, visible] = params;
+            this._toggleOverlay(key, visible);
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
     _showMask(x, y, width, height) {
         this._maskUi.showMask(x, y, width, height);
     }
@@ -493,6 +509,12 @@ class RecordingMaskService {
 
     _repositionControls() {
         this._controlsUi.reposition();
+    }
+
+    _toggleOverlay(key, visible) {
+        if (!setRuntimeOverlayVisibility(this._sessionState, key, visible))
+            return;
+        updateRuntimeOverlaySnapshot(this._sessionState);
     }
 
     _sendRecordingCommand(method) {
