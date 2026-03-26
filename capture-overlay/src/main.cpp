@@ -205,6 +205,22 @@ int main(int argc, char* argv[])
     bool initialShowCursor = true;
     bool initialRecClicks = false;
     bool initialRecKeystrokes = false;
+    bool initialRecWebcam = false;
+    double initialClickSize = 0.3;
+    int initialClickColor = 0;
+    int initialClickStyle = 0;
+    bool initialClickAnimate = true;
+    double initialKeySize = 0.32;
+    int initialKeyPosition = 0;
+    int initialKeyAppearance = 0;
+    bool initialKeyBlurBg = true;
+    int initialKeyFilter = 0;
+    int initialWebcamSize = 1;
+    int initialWebcamShape = 3;
+    bool initialWebcamFlip = false;
+    int initialWebcamDevice = -1;
+    double initialWebcamRelX = 0.0;
+    double initialWebcamRelY = 0.0;
     bool initialRememberSelection = false;
     bool initialDimScreen = true;
     bool initialShowCountdown = true;
@@ -287,6 +303,70 @@ int main(int argc, char* argv[])
             initialRecKeystrokes = true;
         } else if (std::strcmp(argv[i], "--no-rec-keystrokes") == 0) {
             initialRecKeystrokes = false;
+        } else if (QString(argv[i]).startsWith("--rec-click-size=")) {
+            bool ok = false;
+            double v = QString(argv[i]).mid(17).toDouble(&ok);
+            if (ok) initialClickSize = std::clamp(v, 0.0, 1.0);
+        } else if (QString(argv[i]).startsWith("--rec-click-color=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(18).toInt(&ok);
+            if (ok) initialClickColor = std::clamp(v, 0, 8);
+        } else if (QString(argv[i]).startsWith("--rec-click-style=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(18).toInt(&ok);
+            if (ok) initialClickStyle = std::clamp(v, 0, 1);
+        } else if (std::strcmp(argv[i], "--rec-click-animate") == 0) {
+            initialClickAnimate = true;
+        } else if (std::strcmp(argv[i], "--no-rec-click-animate") == 0) {
+            initialClickAnimate = false;
+        } else if (QString(argv[i]).startsWith("--rec-key-size=")) {
+            bool ok = false;
+            double v = QString(argv[i]).mid(15).toDouble(&ok);
+            if (ok) initialKeySize = std::clamp(v, 0.0, 1.0);
+        } else if (QString(argv[i]).startsWith("--rec-key-position=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(19).toInt(&ok);
+            if (ok) initialKeyPosition = std::clamp(v, 0, 5);
+        } else if (QString(argv[i]).startsWith("--rec-key-appearance=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(21).toInt(&ok);
+            if (ok) initialKeyAppearance = std::clamp(v, 0, 1);
+        } else if (std::strcmp(argv[i], "--rec-key-blur-bg") == 0) {
+            initialKeyBlurBg = true;
+        } else if (std::strcmp(argv[i], "--no-rec-key-blur-bg") == 0) {
+            initialKeyBlurBg = false;
+        } else if (QString(argv[i]).startsWith("--rec-key-filter=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(17).toInt(&ok);
+            if (ok) initialKeyFilter = std::clamp(v, 0, 1);
+        } else if (std::strcmp(argv[i], "--rec-webcam") == 0) {
+            initialRecWebcam = true;
+        } else if (std::strcmp(argv[i], "--no-rec-webcam") == 0) {
+            initialRecWebcam = false;
+        } else if (QString(argv[i]).startsWith("--rec-webcam-size=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(18).toInt(&ok);
+            if (ok) initialWebcamSize = std::clamp(v, 0, 4);
+        } else if (QString(argv[i]).startsWith("--rec-webcam-shape=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(19).toInt(&ok);
+            if (ok) initialWebcamShape = std::clamp(v, 0, 3);
+        } else if (std::strcmp(argv[i], "--rec-webcam-flip") == 0) {
+            initialWebcamFlip = true;
+        } else if (std::strcmp(argv[i], "--no-rec-webcam-flip") == 0) {
+            initialWebcamFlip = false;
+        } else if (QString(argv[i]).startsWith("--rec-webcam-device=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(20).toInt(&ok);
+            if (ok) initialWebcamDevice = v;
+        } else if (QString(argv[i]).startsWith("--rec-webcam-rel-x=")) {
+            bool ok = false;
+            double v = QString(argv[i]).mid(19).toDouble(&ok);
+            if (ok) initialWebcamRelX = std::clamp(v, 0.0, 1.0);
+        } else if (QString(argv[i]).startsWith("--rec-webcam-rel-y=")) {
+            bool ok = false;
+            double v = QString(argv[i]).mid(19).toDouble(&ok);
+            if (ok) initialWebcamRelY = std::clamp(v, 0.0, 1.0);
         } else if (std::strcmp(argv[i], "--remember-selection") == 0) {
             initialRememberSelection = true;
         } else if (std::strcmp(argv[i], "--no-remember-selection") == 0) {
@@ -484,6 +564,22 @@ int main(int argc, char* argv[])
     overlay.setInitialShowCursor(initialShowCursor);
     overlay.setInitialRecClicks(initialRecClicks);
     overlay.setInitialRecKeystrokes(initialRecKeystrokes);
+    overlay.setInitialRecWebcam(initialRecWebcam);
+    overlay.setInitialClickSize(initialClickSize);
+    overlay.setInitialClickColor(initialClickColor);
+    overlay.setInitialClickStyle(initialClickStyle);
+    overlay.setInitialClickAnimate(initialClickAnimate);
+    overlay.setInitialKeySize(initialKeySize);
+    overlay.setInitialKeyPosition(initialKeyPosition);
+    overlay.setInitialKeyAppearance(initialKeyAppearance);
+    overlay.setInitialKeyBlurBg(initialKeyBlurBg);
+    overlay.setInitialKeyFilter(initialKeyFilter);
+    overlay.setInitialWebcamSize(initialWebcamSize);
+    overlay.setInitialWebcamShape(initialWebcamShape);
+    overlay.setInitialWebcamFlip(initialWebcamFlip);
+    overlay.setInitialWebcamDevice(initialWebcamDevice);
+    overlay.setInitialWebcamRelX(initialWebcamRelX);
+    overlay.setInitialWebcamRelY(initialWebcamRelY);
     overlay.setInitialRememberSelection(initialRememberSelection);
     overlay.setInitialDimScreen(initialDimScreen);
     overlay.setInitialShowCountdown(initialShowCountdown);
