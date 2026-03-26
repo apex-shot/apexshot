@@ -524,11 +524,11 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
     if (m_recWebcam) {
         p.save();
         p.setRenderHint(QPainter::Antialiasing);
-        m_webcamPreviewRect = webcamPreviewRect(sx, sy, selW, selH);
-        const double previewW = m_webcamPreviewRect.width();
-        const double previewH = m_webcamPreviewRect.height();
-        const double px = m_webcamPreviewRect.x();
-        const double py = m_webcamPreviewRect.y();
+        const QRectF previewRect = webcamPreviewRect(sx, sy, selW, selH);
+        const double previewW = previewRect.width();
+        const double previewH = previewRect.height();
+        const double px = previewRect.x();
+        const double py = previewRect.y();
 
         // Flip
         if (m_webcamFlip) {
@@ -536,8 +536,6 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
             p.scale(-1, 1);
             p.translate(-(px + previewW / 2.0), 0);
         }
-
-        const QRectF previewRect = m_webcamPreviewRect;
 
         // Create clipping path for the shape
         QPainterPath clipPath;
