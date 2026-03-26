@@ -1,6 +1,7 @@
 #include "RecordingControlsWindow.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDBusInterface>
 #include <QDBusReply>
 #include <QFrame>
@@ -21,6 +22,7 @@ constexpr int kBarWidth = 380;
 constexpr int kBarHeight = 62;
 constexpr int kMargin = 24;
 constexpr int kDockSafe = 64;
+constexpr int kGap = 2;
 
 class IconButton : public QPushButton
 {
@@ -154,32 +156,74 @@ static QFrame* separator()
     return container;
 }
 
+static QRect fallbackScreenRect()
+{
+    return QRect(0, 0, 1920, 1080);
+}
+
+static QScreen* screenForCaptureRect(const QRect& captureRect)
+{
+    if (!captureRect.isEmpty()) {
+        if (QScreen* exact = QGuiApplication::screenAt(captureRect.center())) {
+            return exact;
+        }
+
+        int bestArea = 0;
+        QScreen* bestScreen = nullptr;
+        for (QScreen* screen : QGuiApplication::screens()) {
+            const QRect overlap = screen->availableGeometry().intersected(captureRect);
+            const int area = overlap.width() * overlap.height();
+            if (area > bestArea) {
+                bestArea = area;
+                bestScreen = screen;
+            }
+        }
+        if (bestScreen) {
+            return bestScreen;
+        }
+    }
+
+    return QGuiApplication::primaryScreen();
+}
+
+static QRect availableScreenRect(const QRect& captureRect)
+{
+    if (QScreen* screen = screenForCaptureRect(captureRect)) {
+        return screen->availableGeometry();
+    }
+    return fallbackScreenRect();
+}
+
 static QPoint computeBarPosition(const QRect& captureRect, bool isFullscreen)
 {
-    const QSize screenSize = QGuiApplication::primaryScreen()
-                                 ? QGuiApplication::primaryScreen()->geometry().size()
-                                 : QSize(1920, 1080);
+    const QRect screenRect = availableScreenRect(captureRect);
+    const int minX = screenRect.x() + kMargin;
+    const int maxX = std::max(minX, screenRect.x() + screenRect.width() - kBarWidth - kMargin);
+    const int topY = screenRect.y() + kMargin;
 
-    if (isFullscreen) {
-        return QPoint((screenSize.width() - kBarWidth) / 2, kMargin);
+    if (isFullscreen || captureRect.isEmpty()) {
+        return QPoint(
+          screenRect.x() + (screenRect.width() - kBarWidth) / 2,
+          topY);
     }
 
     const int x = std::clamp(
       captureRect.x() + (captureRect.width() - kBarWidth) / 2,
-      kMargin,
-      std::max(kMargin, screenSize.width() - kBarWidth - kMargin));
+      minX,
+      maxX);
 
-    const int belowY = captureRect.y() + captureRect.height() + 12;
-    if (belowY + kBarHeight + kDockSafe <= screenSize.height()) {
+    const int belowY = captureRect.y() + captureRect.height() + kGap;
+    const int maxY = screenRect.y() + screenRect.height() - kBarHeight - kMargin;
+    if (belowY + kBarHeight + kDockSafe <= screenRect.y() + screenRect.height()) {
         return QPoint(x, belowY);
     }
 
-    const int aboveY = captureRect.y() - kBarHeight - 12;
-    if (aboveY >= kMargin) {
+    const int aboveY = captureRect.y() - kBarHeight - kGap;
+    if (aboveY >= topY) {
         return QPoint(x, aboveY);
     }
 
-    return QPoint((screenSize.width() - kBarWidth) / 2, kMargin);
+    return QPoint(x, std::clamp(aboveY, topY, maxY));
 }
 
 } // namespace
@@ -207,10 +251,20 @@ RecordingControlsWindow::RecordingControlsWindow(const QString& dbusDest,
 void RecordingControlsWindow::showEvent(QShowEvent* event)
 {
     QWidget::showEvent(event);
+    positionWindow();
     if (!m_positioned) {
-        positionWindow();
+        QTimer::singleShot(0, this, [this]() { positionWindow(); });
         m_positioned = true;
     }
+}
+
+void RecordingControlsWindow::closeEvent(QCloseEvent* event)
+{
+    if (m_uiTimer) {
+        m_uiTimer->stop();
+    }
+    QWidget::closeEvent(event);
+    QCoreApplication::quit();
 }
 
 void RecordingControlsWindow::setupUi()
@@ -315,6 +369,7 @@ void RecordingControlsWindow::setupUi()
 void RecordingControlsWindow::positionWindow()
 {
     move(computeBarPosition(m_captureRect, m_isFullscreen));
+    raise();
 }
 
 bool RecordingControlsWindow::sendCommand(const QString& methodName)

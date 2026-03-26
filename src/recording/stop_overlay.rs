@@ -24,6 +24,7 @@ const BAR_W: i32 = 420;
 const BAR_H: i32 = 60;
 const MARGIN: i32 = 24;
 const DOCK_SAFE: i32 = 64;
+const BAR_GAP: i32 = 2;
 
 #[derive(Debug, Error)]
 pub enum StopOverlayError {
@@ -117,12 +118,12 @@ fn compute_bar_position(
     let x = (params.capture_x + (params.capture_w - BAR_W) / 2)
         .clamp(MARGIN, (screen_w - BAR_W - MARGIN).max(MARGIN));
 
-    let y_below = params.capture_y + params.capture_h + 12;
+    let y_below = params.capture_y + params.capture_h + BAR_GAP;
     if y_below + BAR_H + DOCK_SAFE <= screen_h {
         return (x, y_below);
     }
 
-    let y_above = params.capture_y - BAR_H - 12;
+    let y_above = params.capture_y - BAR_H - BAR_GAP;
     if y_above >= MARGIN {
         return (x, y_above);
     }
@@ -218,7 +219,7 @@ fn setup_window(
     if params.show_timer {
         stop_container.append(&timer_label);
     }
-    
+
     let bar = GtkBox::new(Orientation::Horizontal, 0);
     bar.add_css_class("recording-controls-bar");
     bar.set_valign(gtk4::Align::Center);
@@ -255,7 +256,10 @@ fn setup_window(
 
     let stop_tx_stop = stop_tx.clone();
     let window_weak = window.downgrade();
-    let dim_window_weaks: Vec<_> = dim_windows.iter().map(|window| window.downgrade()).collect();
+    let dim_window_weaks: Vec<_> = dim_windows
+        .iter()
+        .map(|window| window.downgrade())
+        .collect();
     stop_btn.connect_clicked(move |_| {
         send_stop_action(&stop_tx_stop, StopAction::Save);
         for dim_window in &dim_window_weaks {
@@ -274,8 +278,10 @@ fn setup_window(
 
     let stop_tx_discard = stop_tx.clone();
     let window_weak_discard = window.downgrade();
-    let dim_window_weaks_discard: Vec<_> =
-        dim_windows.iter().map(|window| window.downgrade()).collect();
+    let dim_window_weaks_discard: Vec<_> = dim_windows
+        .iter()
+        .map(|window| window.downgrade())
+        .collect();
     discard_btn.connect_clicked(move |_| {
         send_stop_action(&stop_tx_discard, StopAction::Discard);
         for dim_window in &dim_window_weaks_discard {
@@ -294,7 +300,10 @@ fn setup_window(
 
     let stop_tx_esc = stop_tx.clone();
     let window_weak_esc = window.downgrade();
-    let dim_window_weaks_esc: Vec<_> = dim_windows.iter().map(|window| window.downgrade()).collect();
+    let dim_window_weaks_esc: Vec<_> = dim_windows
+        .iter()
+        .map(|window| window.downgrade())
+        .collect();
     let key_ctrl = EventControllerKey::builder()
         .propagation_phase(gtk4::PropagationPhase::Capture)
         .build();
@@ -433,7 +442,10 @@ fn setup_countdown_window(
     let label_weak = label.downgrade();
     let window_weak = window.downgrade();
     let app_weak = app.downgrade();
-    let dim_window_weaks: Vec<_> = dim_windows.iter().map(|window| window.downgrade()).collect();
+    let dim_window_weaks: Vec<_> = dim_windows
+        .iter()
+        .map(|window| window.downgrade())
+        .collect();
 
     glib::timeout_add_local(Duration::from_secs(1), move || {
         let current = remaining_tick.get();
@@ -469,7 +481,11 @@ fn setup_countdown_window(
 }
 
 fn setup_dim_windows(app: &Application, params: RecordingControlsParams) -> Vec<ApplicationWindow> {
-    if params.use_shell_mask || params.is_fullscreen || params.capture_w <= 0 || params.capture_h <= 0 {
+    if params.use_shell_mask
+        || params.is_fullscreen
+        || params.capture_w <= 0
+        || params.capture_h <= 0
+    {
         return Vec::new();
     }
 
@@ -493,7 +509,8 @@ fn setup_dim_windows(app: &Application, params: RecordingControlsParams) -> Vec<
     let geometry = monitor.geometry();
     let local_x = (params.capture_x - geometry.x()).clamp(0, geometry.width());
     let local_y = (params.capture_y - geometry.y()).clamp(0, geometry.height());
-    let local_right = (params.capture_x + params.capture_w - geometry.x()).clamp(0, geometry.width());
+    let local_right =
+        (params.capture_x + params.capture_w - geometry.x()).clamp(0, geometry.width());
     let local_bottom =
         (params.capture_y + params.capture_h - geometry.y()).clamp(0, geometry.height());
 
@@ -506,7 +523,12 @@ fn setup_dim_windows(app: &Application, params: RecordingControlsParams) -> Vec<
             (geometry.width() - local_right).max(0),
             (local_bottom - local_y).max(0),
         ),
-        (0, local_bottom, geometry.width(), (geometry.height() - local_bottom).max(0)),
+        (
+            0,
+            local_bottom,
+            geometry.width(),
+            (geometry.height() - local_bottom).max(0),
+        ),
     ];
 
     let mut windows = Vec::new();
@@ -707,8 +729,8 @@ fn icon_button_with_pause() -> Button {
         let bar_w = 2.2;
         let bar_h = 11.0;
         let gap = 3.5;
-        cr.rectangle(cx - gap - bar_w/2.0, cy - bar_h / 2.0, bar_w, bar_h);
-        cr.rectangle(cx + gap - bar_w/2.0, cy - bar_h / 2.0, bar_w, bar_h);
+        cr.rectangle(cx - gap - bar_w / 2.0, cy - bar_h / 2.0, bar_w, bar_h);
+        cr.rectangle(cx + gap - bar_w / 2.0, cy - bar_h / 2.0, bar_w, bar_h);
         let _ = cr.fill();
     });
 
@@ -730,7 +752,7 @@ fn icon_button_with_restart() -> Button {
 
         cr.set_source_rgb(1.0, 1.0, 1.0);
         cr.set_line_width(1.8);
-        
+
         // Incomplete circle arc
         let start_angle = 60.0 * std::f64::consts::PI / 180.0;
         let end_angle = 340.0 * std::f64::consts::PI / 180.0;
@@ -743,8 +765,14 @@ fn icon_button_with_restart() -> Button {
         let base_angle1 = start_angle - 25.0 * std::f64::consts::PI / 180.0;
 
         cr.move_to(cx + head_r * tip_angle.cos(), cy - head_r * tip_angle.sin());
-        cr.line_to(cx + (head_r + 4.0) * base_angle1.cos(), cy - (head_r + 4.0) * base_angle1.sin());
-        cr.line_to(cx + (head_r - 4.0) * base_angle1.cos(), cy - (head_r - 4.0) * base_angle1.sin());
+        cr.line_to(
+            cx + (head_r + 4.0) * base_angle1.cos(),
+            cy - (head_r + 4.0) * base_angle1.sin(),
+        );
+        cr.line_to(
+            cx + (head_r - 4.0) * base_angle1.cos(),
+            cy - (head_r - 4.0) * base_angle1.sin(),
+        );
         cr.close_path();
         let _ = cr.fill();
     });
@@ -764,7 +792,7 @@ fn icon_button_with_discard() -> Button {
     drawing_area.set_draw_func(|_, cr, w, h| {
         let cx = w as f64 / 2.0;
         let cy = h as f64 / 2.0;
-        
+
         cr.set_source_rgb(1.0, 1.0, 1.0);
         cr.set_line_width(1.8);
 
@@ -772,16 +800,16 @@ fn icon_button_with_discard() -> Button {
         let bw = 11.0;
         let bh = 13.0;
         let top = cy - 3.5;
-        
+
         cr.set_line_join(cairo::LineJoin::Round);
-        cr.rectangle(cx - bw/2.0, top, bw, bh);
+        cr.rectangle(cx - bw / 2.0, top, bw, bh);
         let _ = cr.stroke();
 
         // Lid
         cr.move_to(cx - 8.0, top - 1.5);
         cr.line_to(cx + 8.0, top - 1.5);
         let _ = cr.stroke();
-        
+
         // Handle
         cr.rectangle(cx - 2.5, top - 4.0, 5.0, 2.5);
         let _ = cr.stroke();
@@ -861,7 +889,10 @@ fn display_size() -> Option<(i32, i32)> {
     }
 }
 
-fn monitor_for_capture(display: &gdk::Display, params: &RecordingControlsParams) -> Option<gdk::Monitor> {
+fn monitor_for_capture(
+    display: &gdk::Display,
+    params: &RecordingControlsParams,
+) -> Option<gdk::Monitor> {
     let center_x = params.capture_x + params.capture_w / 2;
     let center_y = params.capture_y + params.capture_h / 2;
     let monitors = display.monitors();

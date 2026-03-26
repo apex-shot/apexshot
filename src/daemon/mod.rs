@@ -273,14 +273,19 @@ fn ensure_ydotoold_running() {
     }
 }
 
+fn should_autostart_ydotoold() -> bool {
+    false
+}
+
 async fn run_daemon_inner(
     gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
     layer_shell_supported: bool,
 ) -> anyhow::Result<()> {
     eprintln!("[daemon] ApexShot daemon starting…");
 
-    // Ensure ydotoold is running for scroll capture on Wayland
-    ensure_ydotoold_running();
+    if should_autostart_ydotoold() {
+        ensure_ydotoold_running();
+    }
 
     if maybe_relaunch_via_desktop() {
         return Ok(());
@@ -2388,7 +2393,7 @@ fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
 
 async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::recording::{
-        run_recording_with_cpp_controls, RecordingConfig, RecordingControlsParams, StopAction,
+        run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
     };
 
     eprintln!("[daemon] Starting screen recording…");
@@ -2404,7 +2409,7 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         use_shell_mask: false,
     };
 
-    match run_recording_with_cpp_controls(config, params).await {
+    match run_recording_with_controls(config, params).await {
         Ok((path, StopAction::Discard)) => {
             let _ = std::fs::remove_file(&path);
             eprintln!("[daemon] Recording discarded.");
@@ -2419,8 +2424,7 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
 async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::capture_overlay::run_capture_overlay;
     use crate::recording::{
-        run_recording_with_cpp_controls, RecordingConfig,
-        RecordingControlsParams, StopAction,
+        run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
     };
 
     eprintln!("[daemon] Selecting area for recording…");
@@ -2470,7 +2474,7 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         show_timer: true,
         use_shell_mask: false,
     };
-    match run_recording_with_cpp_controls(config, params).await {
+    match run_recording_with_controls(config, params).await {
         Ok((path, StopAction::Discard)) => {
             let _ = std::fs::remove_file(&path);
             eprintln!("[daemon] Recording discarded.");
@@ -2479,5 +2483,15 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
             eprintln!("[daemon] Recording saved: {}", path.display())
         }
         Err(e) => eprintln!("[daemon] Recording error: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_autostart_ydotoold;
+
+    #[test]
+    fn daemon_does_not_autostart_ydotoold_by_default() {
+        assert!(!should_autostart_ydotoold());
     }
 }

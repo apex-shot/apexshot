@@ -27,7 +27,7 @@ use apexshot::{
     ocr::{extract_text_from_path, OcrConfig},
     recording::{
         copy_to_clipboard as copy_recording_to_clipboard, run_overlay_recording_request,
-        run_recording_countdown_bar, run_recording_with_cpp_controls, start_recording,
+        run_recording_countdown_bar, run_recording_with_controls, start_recording,
         RecordingConfig, RecordingControlsParams, StopAction,
     },
     show_settings_window,
@@ -47,6 +47,7 @@ async fn main() {
 
     match args[1].as_str() {
         "daemon" => {
+            apexshot::gnome_shell::hide_recording_controls_best_effort();
             apexshot::gnome_shell::hide_recording_mask_best_effort();
 
             // Parse legacy flags that still apply to the new tray daemon.
@@ -1544,22 +1545,23 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let final_path = if overlay_stop {
-        let params =
-            RecordingControlsParams {
-                capture_x: 0,
-                capture_y: 0,
-                capture_w: 0,
-                capture_h: 0,
-                is_fullscreen: true,
-                show_timer: true,
-                use_shell_mask: false,
-            };
+        let params = RecordingControlsParams {
+            capture_x: 0,
+            capture_y: 0,
+            capture_w: 0,
+            capture_h: 0,
+            is_fullscreen: true,
+            show_timer: true,
+            use_shell_mask: false,
+        };
 
-        let controls_outcome = run_recording_with_cpp_controls(config, params)
+        let controls_outcome = run_recording_with_controls(config, params)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                    as Box<dyn std::error::Error>
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error>
             })?;
 
         match controls_outcome {

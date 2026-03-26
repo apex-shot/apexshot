@@ -2,6 +2,7 @@ use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
@@ -10,13 +11,13 @@ use crate::{
     config::{save_config, AppConfig},
 };
 
-mod stop_overlay;
 mod control_session;
+mod stop_overlay;
+use control_session::{RecordingControlCommand, RecordingControlServer};
 pub use stop_overlay::{
     run_recording_controls, run_recording_countdown_bar, run_recording_stop_overlay,
     RecordingControlsParams, StopAction, StopOverlayError,
 };
-use control_session::{RecordingControlCommand, RecordingControlServer};
 
 pub mod countdown_overlay;
 pub mod dim_overlay;
@@ -88,6 +89,7 @@ pub struct PreparedOverlayRecordingRequest {
     pub recording_config: RecordingConfig,
     pub controls_params: Option<RecordingControlsParams>,
     pub use_shell_mask: bool,
+    pub use_shell_controls: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,10 +100,20 @@ struct CropMargins {
     bottom: u32,
 }
 
-#[derive(Debug, Clone)]
+type RecordingPortalSession =
+    ashpd::desktop::Session<'static, ashpd::desktop::screencast::Screencast<'static>>;
+
+#[derive(Debug)]
 struct WaylandSource {
     pipeline_source: String,
     crop: Option<CropMargins>,
+    _session: RecordingPortalSession,
+}
+
+#[derive(Debug)]
+struct BuiltPipeline {
+    pipeline_str: String,
+    wayland_source: Option<WaylandSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,7 +339,9 @@ async fn start_recording_with_commands(
     }
 
     // 3. Build pipeline description
-    let pipeline_str = build_pipeline(&config, profile, final_path.as_path()).await?;
+    let built_pipeline = build_pipeline(&config, profile, final_path.as_path()).await?;
+    let _wayland_source = built_pipeline.wayland_source;
+    let pipeline_str = built_pipeline.pipeline_str;
     println!("Starting recording to: {:?}", final_path);
 
     // 4. Create pipeline
@@ -653,19 +667,23 @@ async fn build_pipeline(
     config: &RecordingConfig,
     profile: &EncoderProfile,
     output_path: &std::path::Path,
-) -> RecordResult<String> {
+) -> RecordResult<BuiltPipeline> {
     let output_str = output_path.to_string_lossy();
 
     // Get video source
-    let (video_source, crop_filter) = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        let source = get_wayland_source(config).await?;
+    let wayland_source = if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        Some(get_wayland_source(config).await?)
+    } else {
+        None
+    };
+    let (video_source, crop_filter) = if let Some(source) = &wayland_source {
         let crop_filter = source.crop.map_or_else(String::new, |crop| {
             format!(
                 " ! videocrop left={} right={} top={} bottom={}",
                 crop.left, crop.right, crop.top, crop.bottom
             )
         });
-        (source.pipeline_source, crop_filter)
+        (source.pipeline_source.clone(), crop_filter)
     } else {
         (get_x11_source(config)?, String::new())
     };
@@ -771,13 +789,19 @@ async fn build_pipeline(
             .collect::<Vec<_>>()
             .join("  ");
 
-        Ok(full)
+        Ok(BuiltPipeline {
+            pipeline_str: full,
+            wayland_source,
+        })
     } else {
-        Ok(format!(
+        Ok(BuiltPipeline {
+            pipeline_str: format!(
             "{}{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! {} ! filesink location=\"{}\"",
             video_source, crop_filter, hidpi_filter, resolution_filter, config.fps,
             profile.encoder, profile.props, profile.muxer, output_str
-        ))
+            ),
+            wayland_source,
+        })
     }
 }
 
@@ -809,7 +833,7 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         wants_area_crop: bool,
         restore_token: Option<&str>,
         persist_mode: PersistMode,
-    ) -> RecordResult<ashpd::desktop::screencast::Streams> {
+    ) -> RecordResult<(ashpd::desktop::screencast::Streams, RecordingPortalSession)> {
         let proxy = Screencast::new()
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
@@ -854,11 +878,10 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
             .response()
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
 
-        let _ = session.close().await;
-        Ok(response)
+        Ok((response, session))
     }
 
-    let response = if let Some(token) = load_recording_restore_token(target) {
+    let (response, session) = if let Some(token) = load_recording_restore_token(target) {
         match request_screencast(
             cursor_mode,
             wants_area_crop,
@@ -881,7 +904,7 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
                     PersistMode::ExplicitlyRevoked,
                 )
                 .await?;
-                if let Some(token) = response.restore_token() {
+                if let Some(token) = response.0.restore_token() {
                     if !token.trim().is_empty() {
                         save_recording_restore_token(target, token);
                     }
@@ -897,7 +920,7 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
             PersistMode::ExplicitlyRevoked,
         )
         .await?;
-        if let Some(token) = response.restore_token() {
+        if let Some(token) = response.0.restore_token() {
             if !token.trim().is_empty() {
                 save_recording_restore_token(target, token);
             }
@@ -944,6 +967,7 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
     Ok(WaylandSource {
         pipeline_source: format!("pipewiresrc path={} do-timestamp=true", node_id),
         crop,
+        _session: session,
     })
 }
 
@@ -984,6 +1008,7 @@ async fn record_gif_rust_with_commands(
     }
 
     // Build pipeline: Source -> videoconvert -> rgba -> appsink
+    let mut wayland_source = None;
     let (source_str, crop_filter) = if std::env::var("WAYLAND_DISPLAY").is_ok() {
         let source = get_wayland_source(&config).await?;
         let crop_filter = source.crop.map_or_else(String::new, |crop| {
@@ -992,7 +1017,9 @@ async fn record_gif_rust_with_commands(
                 crop.left, crop.right, crop.top, crop.bottom
             )
         });
-        (source.pipeline_source, crop_filter)
+        let pipeline_source = source.pipeline_source.clone();
+        wayland_source = Some(source);
+        (pipeline_source, crop_filter)
     } else {
         (get_x11_source(&config)?, String::new())
     };
@@ -1220,10 +1247,14 @@ async fn record_gif_rust_with_commands(
     if stop_action == RecordingTerminalAction::Save {
         println!("GIF saved to {:?}", config.output_path);
     }
+    drop(wayland_source);
     Ok((config.output_path, stop_action))
 }
 
-fn should_use_shell_mask_for_request(request: &RecordingRequest, shell_mask_available: bool) -> bool {
+fn should_use_shell_mask_for_request(
+    request: &RecordingRequest,
+    shell_mask_available: bool,
+) -> bool {
     shell_mask_available
         && request.dim_screen
         && !request.fullscreen
@@ -1231,13 +1262,26 @@ fn should_use_shell_mask_for_request(request: &RecordingRequest, shell_mask_avai
         && request.height > 0
 }
 
+fn should_use_shell_controls_for_request(
+    request: &RecordingRequest,
+    shell_overlay_available: bool,
+) -> bool {
+    shell_overlay_available && request.controls
+}
+
+fn should_use_legacy_pre_record_dim(request: &RecordingRequest, use_shell_mask: bool) -> bool {
+    request.dim_screen && request.countdown && !use_shell_mask
+}
+
 pub fn prepare_overlay_recording_request(
     mut app_config: AppConfig,
     request: &RecordingRequest,
     now: chrono::DateTime<chrono::Utc>,
 ) -> PreparedOverlayRecordingRequest {
-    let use_shell_mask =
-        should_use_shell_mask_for_request(request, crate::gnome_shell::current_session_supports_gnome_shell_mask());
+    let shell_overlay_available = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
+    let use_shell_mask = should_use_shell_mask_for_request(request, shell_overlay_available);
+    let use_shell_controls =
+        should_use_shell_controls_for_request(request, shell_overlay_available);
     app_config.rec_controls = request.controls;
     app_config.rec_display_time = request.display_rec_time;
     app_config.rec_hidpi = request.hidpi;
@@ -1346,7 +1390,26 @@ pub fn prepare_overlay_recording_request(
         recording_config,
         controls_params,
         use_shell_mask,
+        use_shell_controls,
     }
+}
+
+pub async fn run_recording_with_controls(
+    config: RecordingConfig,
+    params: RecordingControlsParams,
+) -> anyhow::Result<(PathBuf, StopAction)> {
+    if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
+        match run_recording_with_shell_controls(config.clone(), params).await {
+            Ok(outcome) => return Ok(outcome),
+            Err(err) => {
+                eprintln!(
+                    "[recording] Failed to show GNOME shell recording controls ({err}); falling back to Qt controls."
+                );
+            }
+        }
+    }
+
+    run_recording_with_cpp_controls(config, params).await
 }
 
 pub async fn run_recording_with_cpp_controls(
@@ -1360,11 +1423,84 @@ pub async fn run_recording_with_cpp_controls(
     );
     let control_server = RecordingControlServer::start(session_id).await?;
 
-    let mut controls_child = crate::capture_overlay::spawn_recording_controls_via_cpp(
-        control_server.bus_name(),
-        control_server.session_id(),
-        params,
-    )?;
+    let controls_child = Arc::new(Mutex::new(
+        crate::capture_overlay::spawn_recording_controls_via_cpp(
+            control_server.bus_name(),
+            control_server.session_id(),
+            params,
+        )?,
+    ));
+
+    let final_outcome = loop {
+        let (recording_command_tx, command_rx) = mpsc::unbounded_channel();
+        let (control_command_tx, mut control_command_rx) =
+            mpsc::unbounded_channel::<RecordingControlCommand>();
+        let controls_child_for_task = Arc::clone(&controls_child);
+        let forward_commands = tokio::spawn(async move {
+            while let Some(command) = control_command_rx.recv().await {
+                if command.ends_session() {
+                    if let Ok(mut child) = controls_child_for_task.lock() {
+                        let _ = child.kill();
+                    }
+                }
+
+                if recording_command_tx.send(command).is_err() {
+                    break;
+                }
+            }
+        });
+
+        control_server.set_command_sender(control_command_tx);
+        let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
+        control_server.clear_command_sender();
+        forward_commands.abort();
+
+        match outcome? {
+            (path, RecordingTerminalAction::Restart) => {
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+            (path, RecordingTerminalAction::Save) => {
+                break (path, StopAction::Save);
+            }
+            (path, RecordingTerminalAction::Discard) => {
+                break (path, StopAction::Discard);
+            }
+        }
+    };
+
+    if let Ok(mut child) = controls_child.lock() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    drop(control_server);
+
+    Ok(final_outcome)
+}
+
+async fn run_recording_with_shell_controls(
+    config: RecordingConfig,
+    params: RecordingControlsParams,
+) -> anyhow::Result<(PathBuf, StopAction)> {
+    let session_id = format!(
+        "recording-{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    );
+    let control_server = RecordingControlServer::start(session_id.clone()).await?;
+    let controls_handle =
+        crate::gnome_shell::show_recording_controls(&crate::gnome_shell::RecordingControlsSpec {
+            dbus_dest: control_server.bus_name().to_string(),
+            session_id,
+            geometry: crate::gnome_shell::RecordingMaskGeometry {
+                x: params.capture_x,
+                y: params.capture_y,
+                width: params.capture_w,
+                height: params.capture_h,
+            },
+            is_fullscreen: params.is_fullscreen,
+            show_timer: params.show_timer,
+        })?;
 
     let final_outcome = loop {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -1386,8 +1522,7 @@ pub async fn run_recording_with_cpp_controls(
         }
     };
 
-    let _ = controls_child.kill();
-    let _ = controls_child.wait();
+    drop(controls_handle);
     drop(control_server);
 
     Ok(final_outcome)
@@ -1419,7 +1554,8 @@ pub fn run_overlay_recording_request_with_gtk(
         None
     };
 
-    let use_legacy_pre_record_dim = request.dim_screen && request.countdown;
+    let use_legacy_pre_record_dim =
+        should_use_legacy_pre_record_dim(&request, prepared.use_shell_mask);
     let dim_close = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let dim_handle = if use_legacy_pre_record_dim {
         let flag = dim_close.clone();
@@ -1431,7 +1567,9 @@ pub fn run_overlay_recording_request_with_gtk(
     };
 
     let shell_mask = if prepared.use_shell_mask {
-        match crate::gnome_shell::show_recording_mask(crate::gnome_shell::geometry_from_request(&request)) {
+        match crate::gnome_shell::show_recording_mask(crate::gnome_shell::geometry_from_request(
+            &request,
+        )) {
             Ok(handle) => Some(handle),
             Err(err) => {
                 eprintln!("[recording] Failed to show GNOME shell recording mask ({err}); continuing without shell mask.");
@@ -1451,11 +1589,9 @@ pub fn run_overlay_recording_request_with_gtk(
 
     let handle = tokio::runtime::Handle::current();
     let outcome = if let Some(params) = prepared.controls_params {
-        handle.block_on(run_recording_with_cpp_controls(
-            prepared.recording_config.clone(),
-            params,
-        ))
-        .map_err(|err| anyhow::anyhow!("failed to run C++ recording controls: {err}"))
+        handle
+            .block_on(run_recording_with_controls(prepared.recording_config.clone(), params))
+            .map_err(|err| anyhow::anyhow!("failed to run recording controls: {err}"))
     } else {
         handle
             .block_on(start_recording(prepared.recording_config.clone()))
@@ -1575,6 +1711,7 @@ mod tests {
             })
         );
         assert_eq!(prepared.use_shell_mask, false);
+        assert_eq!(prepared.use_shell_controls, false);
     }
 
     #[test]
@@ -1634,16 +1771,13 @@ mod tests {
         assert_eq!(prepared.recording_config.speaker_enabled, true);
         assert_eq!(prepared.controls_params, None);
         assert_eq!(prepared.use_shell_mask, false);
+        assert_eq!(prepared.use_shell_controls, false);
     }
 
     #[test]
     fn compute_wayland_crop_within_selected_monitor() {
-        let crop = compute_wayland_crop(
-            (1920, 0),
-            (2560, 1440),
-            (2100, 200, 600, 744),
-        )
-        .expect("crop should be valid");
+        let crop = compute_wayland_crop((1920, 0), (2560, 1440), (2100, 200, 600, 744))
+            .expect("crop should be valid");
 
         assert_eq!(
             crop,
@@ -1706,6 +1840,171 @@ mod tests {
             })
         );
         assert_eq!(prepared.use_shell_mask, true);
+        assert_eq!(prepared.use_shell_controls, true);
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_uses_shell_controls_for_gnome_wayland_fullscreen_recording(
+    ) {
+        let request = RecordingRequest {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            record_type: RecordingType::Video,
+            controls: true,
+            mic: false,
+            speaker: false,
+            clicks: false,
+            keystrokes: false,
+            display_rec_time: true,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: true,
+            countdown: false,
+            video_max_res: 0,
+            video_fps: 1,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 12,
+            gif_quality: 0.75,
+            gif_size_idx: 0,
+            optimize_gif: true,
+            fullscreen: true,
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 3, 26, 1, 35, 0).unwrap(),
+        );
+
+        assert_eq!(prepared.use_shell_mask, false);
+        assert_eq!(prepared.use_shell_controls, true);
+        assert_eq!(
+            prepared.controls_params,
+            Some(RecordingControlsParams {
+                capture_x: 0,
+                capture_y: 0,
+                capture_w: 1920,
+                capture_h: 1080,
+                is_fullscreen: true,
+                show_timer: true,
+                use_shell_mask: false,
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_pre_record_dim_disabled_when_shell_mask_is_active() {
+        let request = RecordingRequest {
+            x: 10,
+            y: 20,
+            width: 640,
+            height: 480,
+            record_type: RecordingType::Video,
+            controls: true,
+            mic: false,
+            speaker: false,
+            clicks: false,
+            keystrokes: false,
+            display_rec_time: false,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: true,
+            countdown: true,
+            video_max_res: 0,
+            video_fps: 1,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 12,
+            gif_quality: 0.75,
+            gif_size_idx: 0,
+            optimize_gif: true,
+            fullscreen: false,
+        };
+
+        assert!(!should_use_legacy_pre_record_dim(&request, true));
+    }
+
+    #[test]
+    fn legacy_pre_record_dim_enabled_without_shell_mask() {
+        let request = RecordingRequest {
+            x: 10,
+            y: 20,
+            width: 640,
+            height: 480,
+            record_type: RecordingType::Video,
+            controls: true,
+            mic: false,
+            speaker: false,
+            clicks: false,
+            keystrokes: false,
+            display_rec_time: false,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: true,
+            countdown: true,
+            video_max_res: 0,
+            video_fps: 1,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 12,
+            gif_quality: 0.75,
+            gif_size_idx: 0,
+            optimize_gif: true,
+            fullscreen: false,
+        };
+
+        assert!(should_use_legacy_pre_record_dim(&request, false));
+    }
+
+    #[test]
+    fn shell_controls_follow_gnome_wayland_support_and_controls_toggle() {
+        let request = RecordingRequest {
+            x: 10,
+            y: 20,
+            width: 640,
+            height: 480,
+            record_type: RecordingType::Video,
+            controls: true,
+            mic: false,
+            speaker: false,
+            clicks: false,
+            keystrokes: false,
+            display_rec_time: false,
+            hidpi: false,
+            notifications: true,
+            cursor: true,
+            remember_selection: false,
+            dim_screen: false,
+            countdown: false,
+            video_max_res: 0,
+            video_fps: 1,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 12,
+            gif_quality: 0.75,
+            gif_size_idx: 0,
+            optimize_gif: true,
+            fullscreen: false,
+        };
+
+        assert!(should_use_shell_controls_for_request(&request, true));
+        assert!(!should_use_shell_controls_for_request(&request, false));
+        assert!(!should_use_shell_controls_for_request(
+            &RecordingRequest {
+                controls: false,
+                ..request
+            },
+            true
+        ));
     }
 
     #[test]
