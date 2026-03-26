@@ -55,6 +55,12 @@ function normalizeInteger(value, fallback, min, max) {
     return clamp(Math.trunc(value), min, max);
 }
 
+function normalizeNonNegativeInteger(value, fallback) {
+    if (!Number.isFinite(value))
+        return fallback;
+    return Math.max(0, Math.trunc(value));
+}
+
 function createRuntimeOverlayVisibility(snapshot = null) {
     return {
         mic: snapshot?.mic_visible ?? false,
@@ -113,14 +119,14 @@ export function parseRuntimeOverlaySnapshot(payload) {
         clicks_enabled: normalizeBoolean(parsed.clicks_enabled, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.clicks_enabled),
         click_size: normalizeNumber(parsed.click_size, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_size, 0, 1),
         click_color: normalizeInteger(parsed.click_color, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_color, 0, 8),
-        click_style: normalizeInteger(parsed.click_style, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_style, 0, 1),
+        click_style: normalizeNonNegativeInteger(parsed.click_style, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_style),
         click_animate: normalizeBoolean(parsed.click_animate, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_animate),
         keystrokes_enabled: normalizeBoolean(parsed.keystrokes_enabled, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.keystrokes_enabled),
         key_size: normalizeNumber(parsed.key_size, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_size, 0, 1),
         key_position: normalizeInteger(parsed.key_position, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_position, 0, 5),
         key_appearance: normalizeInteger(parsed.key_appearance, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_appearance, 0, 1),
         key_blur_bg: normalizeBoolean(parsed.key_blur_bg, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_blur_bg),
-        key_filter: normalizeInteger(parsed.key_filter, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_filter, 0, 1),
+        key_filter: normalizeNonNegativeInteger(parsed.key_filter, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_filter),
     };
 
     return Object.freeze(snapshot);
