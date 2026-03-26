@@ -250,6 +250,22 @@ function webcamBorderRadius(snapshot, width, height) {
     }
 }
 
+function clampPlacement(rect, desiredX, desiredY, width, height, margin) {
+    const clampedWidth = Math.min(width, Math.max(1, rect.width - (2 * margin)));
+    const clampedHeight = Math.min(height, Math.max(1, rect.height - (2 * margin)));
+    const minX = rect.x + margin;
+    const maxX = Math.max(minX, rect.x + rect.width - clampedWidth - margin);
+    const minY = rect.y + margin;
+    const maxY = Math.max(minY, rect.y + rect.height - clampedHeight - margin);
+
+    return {
+        x: Math.round(Math.min(maxX, Math.max(minX, desiredX))),
+        y: Math.round(Math.min(maxY, Math.max(minY, desiredY))),
+        width: Math.round(clampedWidth),
+        height: Math.round(clampedHeight),
+    };
+}
+
 function keyPositionCoords(snapshot, rect, width, height) {
     const margin = KEYSTROKE_INDICATOR_MARGIN;
     switch (snapshot.key_position) {
@@ -290,10 +306,18 @@ function updateAudioIndicators(overlayState, snapshot, rect) {
     if (!showAudio)
         return;
 
-    overlayState.audioIndicatorsActor.set_position(
+    const visibleCount = (overlayState.visibility.mic ? 1 : 0) + (overlayState.visibility.speaker ? 1 : 0);
+    const desiredWidth = visibleCount > 1 ? 180 : 86;
+    const desiredHeight = 34;
+    const bounds = clampPlacement(
+        rect,
         rect.x + AUDIO_INDICATORS_MARGIN,
-        rect.y + AUDIO_INDICATORS_MARGIN
+        rect.y + AUDIO_INDICATORS_MARGIN,
+        desiredWidth,
+        desiredHeight,
+        AUDIO_INDICATORS_MARGIN
     );
+    overlayState.audioIndicatorsActor.set_position(bounds.x, bounds.y);
 }
 
 function updateWebcamActor(overlayState, snapshot, rect) {
@@ -375,13 +399,16 @@ function updateClicksActor(overlayState, snapshot, rect) {
     ].join(" "));
     overlayState.clickPulseStackActor.set_size(haloSize, haloSize);
 
-    const chipWidth = 110;
-    const chipHeight = 44;
-    overlayState.clicksActor.set_size(chipWidth, chipHeight);
-    overlayState.clicksActor.set_position(
+    const bounds = clampPlacement(
+        rect,
         rect.x + CLICK_INDICATOR_MARGIN,
-        rect.y + rect.height - chipHeight - CLICK_INDICATOR_MARGIN
+        rect.y + rect.height - 44 - CLICK_INDICATOR_MARGIN,
+        110,
+        44,
+        CLICK_INDICATOR_MARGIN
     );
+    overlayState.clicksActor.set_size(bounds.width, bounds.height);
+    overlayState.clicksActor.set_position(bounds.x, bounds.y);
     overlayState.clicksActor.set_style([
         "background-color: rgba(12, 14, 22, 0.82);",
         "border: 1px solid rgba(255, 255, 255, 0.14);",
@@ -408,10 +435,18 @@ function updateKeystrokesActor(overlayState, snapshot, rect) {
     const scale = 0.85 + (snapshot.key_size * 0.75);
     const width = Math.round(124 * scale);
     const height = Math.round(46 * scale);
-    const [x, y] = keyPositionCoords(snapshot, rect, width, height);
+    const [rawX, rawY] = keyPositionCoords(snapshot, rect, width, height);
+    const bounds = clampPlacement(
+        rect,
+        rawX,
+        rawY,
+        width,
+        height,
+        KEYSTROKE_INDICATOR_MARGIN
+    );
 
-    overlayState.keystrokesActor.set_size(width, height);
-    overlayState.keystrokesActor.set_position(x, y);
+    overlayState.keystrokesActor.set_size(bounds.width, bounds.height);
+    overlayState.keystrokesActor.set_position(bounds.x, bounds.y);
     overlayState.keystrokesActor.set_style([
         `background-color: ${backgroundColor};`,
         `color: ${textColor};`,
