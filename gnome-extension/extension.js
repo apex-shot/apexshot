@@ -4,15 +4,17 @@
 import Meta from "gi://Meta";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
+import St from "gi://St";
+import * as Main from "resource:///org/gnome/shell/ui/main.js";
 
 // D-Bus interface exposed by the apexshot native process.
 // The extension listens for signals on this name/path/iface.
-const DBUS_NAME      = "org.apexshot.Preview";
-const DBUS_PATH      = "/org/apexshot/Preview";
-const DBUS_IFACE     = "org.apexshot.Preview";
+const PREVIEW_DBUS_NAME      = "org.apexshot.Preview";
+const PREVIEW_DBUS_PATH      = "/org/apexshot/Preview";
+const PREVIEW_DBUS_IFACE     = "org.apexshot.Preview";
 
 // Introspection XML so Gio can proxy the signal types.
-const DBUS_IFACE_XML = `
+const PREVIEW_DBUS_IFACE_XML = `
 <node>
   <interface name="org.apexshot.Preview">
     <signal name="PreviewOpened">
@@ -28,7 +30,23 @@ const DBUS_IFACE_XML = `
   </interface>
 </node>`;
 
-export default class ApexShotPreview {
+const MASK_DBUS_NAME = "org.apexshot.ShellOverlay";
+const MASK_DBUS_PATH = "/org/apexshot/ShellOverlay";
+const MASK_DBUS_IFACE = "org.apexshot.ShellOverlay";
+const MASK_DBUS_IFACE_XML = `
+<node>
+  <interface name="org.apexshot.ShellOverlay">
+    <method name="ShowMask">
+      <arg type="i" name="x" direction="in"/>
+      <arg type="i" name="y" direction="in"/>
+      <arg type="i" name="width" direction="in"/>
+      <arg type="i" name="height" direction="in"/>
+    </method>
+    <method name="HideMask"/>
+  </interface>
+</node>`;
+
+class PreviewStackingHelper {
     constructor() {
         // Map<preview_id, { pid, title, openedAtMs, window, signalIds }>
         this._trackedPreviews = new Map();
@@ -56,9 +74,9 @@ export default class ApexShotPreview {
         this._dbusConn = Gio.DBus.session;
         this._dbusSubId = this._dbusConn.signal_subscribe(
             null,          // sender — any (apexshot may not own the name)
-            DBUS_IFACE,
+            PREVIEW_DBUS_IFACE,
             null,          // member — subscribe to all signals on the iface
-            DBUS_PATH,
+            PREVIEW_DBUS_PATH,
             null,
             Gio.DBusSignalFlags.NONE,
             (conn, sender, path, iface, signal, params) => {
@@ -330,5 +348,175 @@ export default class ApexShotPreview {
         } catch (_) {
             // Compositor may have already destroyed the window.
         }
+    }
+}
+
+class RecordingMaskService {
+    constructor() {
+        this._dbusObject = null;
+        this._ownName = null;
+        this._maskGroup = null;
+        this._currentRect = null;
+        this._monitorsChangedId = null;
+    }
+
+    enable() {
+        this._dbusObject = Gio.DBusExportedObject.wrapJSObject(MASK_DBUS_IFACE_XML, this);
+        try {
+            this._dbusObject.export(Gio.DBus.session, MASK_DBUS_PATH);
+        } catch (e) {
+            logError(e, `Failed to export ${MASK_DBUS_PATH}`);
+        }
+
+        this._ownName = Gio.DBus.session.own_name(
+            MASK_DBUS_NAME,
+            Gio.BusNameOwnerFlags.NONE,
+            null,
+            () => {
+                log(`[apexshot] Lost D-Bus name ${MASK_DBUS_NAME}`);
+                this._ownName = null;
+            }
+        );
+
+        this._monitorsChangedId = Main.layoutManager.connect("monitors-changed", () => {
+            if (this._currentRect) {
+                this._showMask(
+                    this._currentRect.x,
+                    this._currentRect.y,
+                    this._currentRect.width,
+                    this._currentRect.height
+                );
+            }
+        });
+    }
+
+    disable() {
+        this._hideMask();
+
+        if (this._monitorsChangedId !== null) {
+            Main.layoutManager.disconnect(this._monitorsChangedId);
+            this._monitorsChangedId = null;
+        }
+
+        if (this._ownName !== null) {
+            Gio.DBus.session.unown_name(this._ownName);
+            this._ownName = null;
+        }
+
+        if (this._dbusObject) {
+            try {
+                this._dbusObject.unexport();
+            } catch (e) {
+                logError(e, `Failed to unexport ${MASK_DBUS_PATH}`);
+            }
+            this._dbusObject.run_dispose();
+            this._dbusObject = null;
+        }
+    }
+
+    ShowMaskAsync(params, invocation) {
+        try {
+            const [x, y, width, height] = params;
+            this._showMask(x, y, width, height);
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
+    HideMaskAsync(_params, invocation) {
+        try {
+            this._hideMask();
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
+    _showMask(x, y, width, height) {
+        this._currentRect = {x, y, width, height};
+
+        this._ensureMaskGroup();
+        this._maskGroup.remove_all_children();
+
+        const stage = global.stage;
+        const stageWidth = stage.width;
+        const stageHeight = stage.height;
+
+        const left = Math.max(0, x);
+        const top = Math.max(0, y);
+        const right = Math.min(stageWidth, x + width);
+        const bottom = Math.min(stageHeight, y + height);
+
+        const rects = [
+            [0, 0, stageWidth, top],
+            [0, top, left, Math.max(0, bottom - top)],
+            [right, top, Math.max(0, stageWidth - right), Math.max(0, bottom - top)],
+            [0, bottom, stageWidth, Math.max(0, stageHeight - bottom)],
+        ];
+
+        for (const [rectX, rectY, rectWidth, rectHeight] of rects) {
+            if (rectWidth <= 0 || rectHeight <= 0)
+                continue;
+
+            const region = new St.Widget({
+                reactive: false,
+                x: rectX,
+                y: rectY,
+                width: rectWidth,
+                height: rectHeight,
+                style: "background-color: rgba(0, 0, 0, 0.55);",
+            });
+            this._maskGroup.add_child(region);
+        }
+
+        if (!this._maskGroup.get_parent()) {
+            global.window_group.add_child(this._maskGroup);
+        } else {
+            this._maskGroup.show();
+        }
+    }
+
+    _hideMask() {
+        this._currentRect = null;
+
+        if (!this._maskGroup)
+            return;
+
+        this._maskGroup.remove_all_children();
+        this._maskGroup.hide();
+        if (this._maskGroup.get_parent()) {
+            this._maskGroup.get_parent().remove_child(this._maskGroup);
+        }
+    }
+
+    _ensureMaskGroup() {
+        if (this._maskGroup)
+            return;
+
+        this._maskGroup = new St.Widget({
+            reactive: false,
+            x: 0,
+            y: 0,
+            width: global.stage.width,
+            height: global.stage.height,
+        });
+    }
+}
+
+export default class ApexShotShellSupport {
+    constructor() {
+        this._previewHelper = new PreviewStackingHelper();
+        this._maskService = new RecordingMaskService();
+    }
+
+    enable() {
+        this._previewHelper.enable();
+        this._maskService.enable();
+    }
+
+    disable() {
+        this._maskService.disable();
+        this._previewHelper.disable();
     }
 }

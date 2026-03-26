@@ -94,6 +94,20 @@ public:
     bool recordOptimizeGif() const { return m_optimizeGif; }
 
     // GIF tab settings — setters for initial config load
+    void setInitialRecControls(bool v) { m_recControls = v; }
+    void setInitialDisplayRecTime(bool v) { m_displayRecTime = v; }
+    void setInitialHidpi(bool v) { m_hidpi = v; }
+    void setInitialDoNotDisturb(bool v) { m_doNotDisturb = v; }
+    void setInitialShowCursor(bool v) { m_showCursor = v; }
+    void setInitialRecClicks(bool v) { m_recClicks = v; }
+    void setInitialRecKeystrokes(bool v) { m_recKeystrokes = v; }
+    void setInitialRememberSelection(bool v) { m_rememberSelection = v; }
+    void setInitialDimScreen(bool v) { m_dimScreen = v; }
+    void setInitialShowCountdown(bool v) { m_showCountdown = v; }
+    void setInitialVideoMaxRes(int v) { m_videoMaxRes = v; }
+    void setInitialVideoFps(int v) { m_videoFps = v; }
+    void setInitialRecordMono(bool v) { m_recordMono = v; }
+    void setInitialOpenEditor(bool v) { m_openEditor = v; }
     void setInitialGifFps(int v) { m_gifFps = v; }
     void setInitialGifQuality(double v) { m_gifQuality = v; }
     void setInitialGifSizeIdx(int v) { m_gifSizeIdx = v; }
@@ -188,6 +202,7 @@ private:
 
     void cycleCaptureDelay();
     void confirmSelection();
+    void confirmRecordingSelection();
     void cancelSelection();
 
     struct WindowInfo {

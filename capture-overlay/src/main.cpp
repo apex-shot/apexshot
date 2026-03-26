@@ -1,4 +1,5 @@
 #include "CaptureOverlay.h"
+#include "RecordingControlsWindow.h"
 #include "WindowPickerOverlay.h"
 #include "ScreenCapture.h"
 
@@ -157,10 +158,33 @@ int main(int argc, char* argv[])
     bool captureScreenMode = false;
     bool areaInitMode = false;
     bool windowCaptureMode = false;
+    bool recordControlsMode = false;
     QString backgroundPath;
+    QString controlDbusDest;
+    QString controlSessionId;
+    int controlCaptureX = 0;
+    int controlCaptureY = 0;
+    int controlCaptureW = 0;
+    int controlCaptureH = 0;
+    bool controlFullscreen = false;
+    bool controlShowTimer = true;
     QRect restoreSel;
     bool initialMic = false;
     bool initialSpeaker = false;
+    bool initialRecControls = true;
+    bool initialDisplayRecTime = false;
+    bool initialHidpi = false;
+    bool initialDoNotDisturb = true;
+    bool initialShowCursor = true;
+    bool initialRecClicks = false;
+    bool initialRecKeystrokes = false;
+    bool initialRememberSelection = false;
+    bool initialDimScreen = true;
+    bool initialShowCountdown = true;
+    int initialVideoMaxRes = 0;
+    int initialVideoFps = 2;
+    bool initialRecordMono = false;
+    bool initialOpenEditor = true;
     int initialGifFps = 50;
     double initialGifQuality = 0.75;
     int initialGifSizeIdx = 0;
@@ -176,6 +200,26 @@ int main(int argc, char* argv[])
             areaInitMode = true;
         } else if (std::strcmp(argv[i], "--window-capture") == 0) {
             windowCaptureMode = true;
+        } else if (std::strcmp(argv[i], "--record-controls") == 0) {
+            recordControlsMode = true;
+        } else if (QString(argv[i]).startsWith("--dbus-dest=")) {
+            controlDbusDest = QString(argv[i]).mid(12);
+        } else if (QString(argv[i]).startsWith("--session-id=")) {
+            controlSessionId = QString(argv[i]).mid(13);
+        } else if (QString(argv[i]).startsWith("--capture-x=")) {
+            controlCaptureX = QString(argv[i]).mid(12).toInt();
+        } else if (QString(argv[i]).startsWith("--capture-y=")) {
+            controlCaptureY = QString(argv[i]).mid(12).toInt();
+        } else if (QString(argv[i]).startsWith("--capture-w=")) {
+            controlCaptureW = QString(argv[i]).mid(12).toInt();
+        } else if (QString(argv[i]).startsWith("--capture-h=")) {
+            controlCaptureH = QString(argv[i]).mid(12).toInt();
+        } else if (std::strcmp(argv[i], "--fullscreen") == 0) {
+            controlFullscreen = true;
+        } else if (std::strcmp(argv[i], "--show-timer") == 0) {
+            controlShowTimer = true;
+        } else if (std::strcmp(argv[i], "--hide-timer") == 0) {
+            controlShowTimer = false;
         } else if (QString(argv[i]).startsWith("--restore-selection=")) {
             // Format: --restore-selection=x,y,w,h
             QString val = QString(argv[i]).mid(20);
@@ -188,6 +232,62 @@ int main(int argc, char* argv[])
             initialMic = true;
         } else if (std::strcmp(argv[i], "--rec-speaker") == 0) {
             initialSpeaker = true;
+        } else if (std::strcmp(argv[i], "--rec-controls") == 0) {
+            initialRecControls = true;
+        } else if (std::strcmp(argv[i], "--no-rec-controls") == 0) {
+            initialRecControls = false;
+        } else if (std::strcmp(argv[i], "--display-rec-time") == 0) {
+            initialDisplayRecTime = true;
+        } else if (std::strcmp(argv[i], "--no-display-rec-time") == 0) {
+            initialDisplayRecTime = false;
+        } else if (std::strcmp(argv[i], "--hidpi") == 0) {
+            initialHidpi = true;
+        } else if (std::strcmp(argv[i], "--no-hidpi") == 0) {
+            initialHidpi = false;
+        } else if (std::strcmp(argv[i], "--do-not-disturb") == 0) {
+            initialDoNotDisturb = true;
+        } else if (std::strcmp(argv[i], "--no-do-not-disturb") == 0) {
+            initialDoNotDisturb = false;
+        } else if (std::strcmp(argv[i], "--show-cursor") == 0) {
+            initialShowCursor = true;
+        } else if (std::strcmp(argv[i], "--no-show-cursor") == 0) {
+            initialShowCursor = false;
+        } else if (std::strcmp(argv[i], "--rec-clicks") == 0) {
+            initialRecClicks = true;
+        } else if (std::strcmp(argv[i], "--no-rec-clicks") == 0) {
+            initialRecClicks = false;
+        } else if (std::strcmp(argv[i], "--rec-keystrokes") == 0) {
+            initialRecKeystrokes = true;
+        } else if (std::strcmp(argv[i], "--no-rec-keystrokes") == 0) {
+            initialRecKeystrokes = false;
+        } else if (std::strcmp(argv[i], "--remember-selection") == 0) {
+            initialRememberSelection = true;
+        } else if (std::strcmp(argv[i], "--no-remember-selection") == 0) {
+            initialRememberSelection = false;
+        } else if (std::strcmp(argv[i], "--dim-screen") == 0) {
+            initialDimScreen = true;
+        } else if (std::strcmp(argv[i], "--no-dim-screen") == 0) {
+            initialDimScreen = false;
+        } else if (std::strcmp(argv[i], "--show-countdown") == 0) {
+            initialShowCountdown = true;
+        } else if (std::strcmp(argv[i], "--no-show-countdown") == 0) {
+            initialShowCountdown = false;
+        } else if (QString(argv[i]).startsWith("--video-max-res=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(16).toInt(&ok);
+            if (ok && v >= 0 && v <= 2) initialVideoMaxRes = v;
+        } else if (QString(argv[i]).startsWith("--video-fps=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(12).toInt(&ok);
+            if (ok && v >= 0 && v <= 3) initialVideoFps = v;
+        } else if (std::strcmp(argv[i], "--record-mono") == 0) {
+            initialRecordMono = true;
+        } else if (std::strcmp(argv[i], "--no-record-mono") == 0) {
+            initialRecordMono = false;
+        } else if (std::strcmp(argv[i], "--open-editor") == 0) {
+            initialOpenEditor = true;
+        } else if (std::strcmp(argv[i], "--no-open-editor") == 0) {
+            initialOpenEditor = false;
         } else if (QString(argv[i]).startsWith("--gif-fps=")) {
             bool ok = false;
             int v = QString(argv[i]).mid(10).toInt(&ok);
@@ -211,6 +311,22 @@ int main(int argc, char* argv[])
         std::fprintf(stderr,
                      "apexshot-capture: --capture-screen and --area-init are mutually exclusive\n");
         return 2;
+    }
+
+    if (recordControlsMode) {
+        if (controlDbusDest.isEmpty() || controlSessionId.isEmpty()) {
+            std::fprintf(stderr, "apexshot-capture: --record-controls requires --dbus-dest and --session-id\n");
+            return 2;
+        }
+
+        RecordingControlsWindow controls(
+          controlDbusDest,
+          controlSessionId,
+          QRect(controlCaptureX, controlCaptureY, controlCaptureW, controlCaptureH),
+          controlFullscreen,
+          controlShowTimer);
+        controls.show();
+        return app.exec();
     }
 
     if (captureScreenMode) {
@@ -334,6 +450,20 @@ int main(int argc, char* argv[])
     overlay.setInitialGifQuality(initialGifQuality);
     overlay.setInitialGifSizeIdx(initialGifSizeIdx);
     overlay.setInitialGifOptimize(initialGifOptimize);
+    overlay.setInitialRecControls(initialRecControls);
+    overlay.setInitialDisplayRecTime(initialDisplayRecTime);
+    overlay.setInitialHidpi(initialHidpi);
+    overlay.setInitialDoNotDisturb(initialDoNotDisturb);
+    overlay.setInitialShowCursor(initialShowCursor);
+    overlay.setInitialRecClicks(initialRecClicks);
+    overlay.setInitialRecKeystrokes(initialRecKeystrokes);
+    overlay.setInitialRememberSelection(initialRememberSelection);
+    overlay.setInitialDimScreen(initialDimScreen);
+    overlay.setInitialShowCountdown(initialShowCountdown);
+    overlay.setInitialVideoMaxRes(initialVideoMaxRes);
+    overlay.setInitialVideoFps(initialVideoFps);
+    overlay.setInitialRecordMono(initialRecordMono);
+    overlay.setInitialOpenEditor(initialOpenEditor);
     overlay.show();
 
     const int ret = app.exec();
