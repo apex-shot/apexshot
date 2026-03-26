@@ -8,6 +8,11 @@ import {
     clearControlsState,
     setControlsState,
 } from "./session-state.js";
+import {
+    attachRuntimeOverlays,
+    destroyRuntimeOverlays,
+    updateRuntimeOverlaySnapshot,
+} from "./runtime-overlays.js";
 
 const CONTROLS_BAR_WIDTH = 346;
 const CONTROLS_BAR_HEIGHT = 56;
@@ -29,6 +34,7 @@ export class ControlsUi {
         this.hideControls();
 
         setControlsState(this._sessionState, spec, GLib.get_monotonic_time() / 1000);
+        attachRuntimeOverlays(this._sessionState);
 
         this._controlsChrome = this._buildControlsChrome();
         Main.layoutManager.addChrome(this._controlsChrome, {
@@ -47,6 +53,7 @@ export class ControlsUi {
 
     hideControls() {
         this._stopControlsTimer();
+        destroyRuntimeOverlays(this._sessionState);
         clearControlsState(this._sessionState);
         this._timerLabel = null;
         this._pauseIcon = null;
@@ -72,6 +79,7 @@ export class ControlsUi {
             monitor
         );
         this._controlsChrome.set_position(x, y);
+        updateRuntimeOverlaySnapshot(this._sessionState);
     }
 
     _buildControlsChrome() {
