@@ -94,7 +94,6 @@ void CaptureOverlay::setWebcamPreviewTopLeft(const QPointF& topLeft,
     m_webcamRelY = (maxY > minY) ? 1.0 - ((clampedY - minY) / (maxY - minY)) : 0.0;
     m_webcamRelX = std::clamp(m_webcamRelX, 0.0, 1.0);
     m_webcamRelY = std::clamp(m_webcamRelY, 0.0, 1.0);
-    m_webcamPreviewRect = QRectF(clampedX, clampedY, previewSize.width(), previewSize.height());
 }
 // ── Constructor ───────────────────────────────────────────────────────────────
 

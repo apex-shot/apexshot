@@ -399,7 +399,6 @@ private:
     double m_webcamRelY = 0.0;
     bool m_draggingWebcam = false;
     QPointF m_webcamDragOffset;
-    QRectF m_webcamPreviewRect;
     QStringList m_webcamDevices; // cached device names
     double m_micLevel; // Normalized level for animation
     double m_speakerLevel; // Normalized level for speaker animation

@@ -309,19 +309,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (m_recordingPanelOpen && m_recWebcam && m_hasSelection) {
-        const QRect sel = m_selection.normalized();
-        const QRectF previewRect = webcamPreviewRect(
-            sel.x(), sel.y(), sel.width(), sel.height());
-        if (previewRect.contains(pos)) {
-            m_draggingWebcam = true;
-            m_webcamPreviewRect = previewRect;
-            m_webcamDragOffset = QPointF(pos) - previewRect.topLeft();
-            setCursor(Qt::SizeAllCursor);
-            return;
-        }
-    }
-
     // Recording panel tile clicks
     if (m_recordingPanelOpen) {
         RecordPanelTile tile = hitTestRecordingPanel(pos);
@@ -362,6 +349,17 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             return;
         default:
             break;
+        }
+        if (tile == RecordPanelTile::None && m_recWebcam && m_hasSelection) {
+            const QRect sel = m_selection.normalized();
+            const QRectF previewRect = webcamPreviewRect(
+                sel.x(), sel.y(), sel.width(), sel.height());
+            if (previewRect.contains(pos)) {
+                m_draggingWebcam = true;
+                m_webcamDragOffset = QPointF(pos) - previewRect.topLeft();
+                setCursor(Qt::SizeAllCursor);
+                return;
+            }
         }
         // If click is on resize handle, allow it
         HandlePos h = hitTest(pos);
@@ -672,21 +670,23 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
             return;
         }
 
+        RecordPanelTile newTile = hitTestRecordingPanel(pos);
+        if (newTile != m_hoveredRecordTile) {
+            m_hoveredRecordTile = newTile;
+            update();
+        }
+        if (newTile != RecordPanelTile::None) {
+            updateCursor(pos);
+            return;
+        }
         if (m_recWebcam && m_hasSelection) {
             const QRect sel = m_selection.normalized();
             const QRectF previewRect = webcamPreviewRect(
                 sel.x(), sel.y(), sel.width(), sel.height());
             if (previewRect.contains(pos)) {
-                m_webcamPreviewRect = previewRect;
                 setCursor(Qt::SizeAllCursor);
                 return;
             }
-        }
-
-        RecordPanelTile newTile = hitTestRecordingPanel(pos);
-        if (newTile != m_hoveredRecordTile) {
-            m_hoveredRecordTile = newTile;
-            update();
         }
         updateCursor(pos);
         return;
