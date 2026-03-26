@@ -188,6 +188,7 @@ function createKeystrokesActor(overlayState) {
 function createAudioIndicatorsActor(overlayState) {
     const actor = new St.BoxLayout({
         reactive: false,
+        clip_to_allocation: true,
         style: "spacing: 8px;",
     });
 
@@ -317,6 +318,7 @@ function updateAudioIndicators(overlayState, snapshot, rect) {
         desiredHeight,
         AUDIO_INDICATORS_MARGIN
     );
+    overlayState.audioIndicatorsActor.set_size(bounds.width, bounds.height);
     overlayState.audioIndicatorsActor.set_position(bounds.x, bounds.y);
 }
 
