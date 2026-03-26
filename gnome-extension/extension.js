@@ -53,6 +53,7 @@ const MASK_DBUS_IFACE_XML = `
       <arg type="i" name="height" direction="in"/>
       <arg type="b" name="is_fullscreen" direction="in"/>
       <arg type="b" name="show_timer" direction="in"/>
+      <arg type="s" name="runtime_overlay_snapshot" direction="in"/>
     </method>
     <method name="HideControls"/>
   </interface>
@@ -460,13 +461,14 @@ class RecordingMaskService {
 
     ShowControlsAsync(params, invocation) {
         try {
-            const [dbusDest, sessionId, x, y, width, height, isFullscreen, showTimer] = params;
+            const [dbusDest, sessionId, x, y, width, height, isFullscreen, showTimer, runtimeOverlaySnapshot] = params;
             this._showControls({
                 dbusDest,
                 sessionId,
                 rect: {x, y, width, height},
                 isFullscreen,
                 showTimer,
+                runtimeOverlaySnapshot: runtimeOverlaySnapshot || null,
             });
             invocation.return_value(null);
         } catch (e) {
@@ -563,6 +565,7 @@ class RecordingMaskService {
             rect: {...spec.rect},
             isFullscreen: spec.isFullscreen,
             showTimer: spec.showTimer,
+            runtimeOverlaySnapshot: spec.runtimeOverlaySnapshot,
             paused: false,
             elapsedBeforePauseMs: 0,
             runningStartMs: GLib.get_monotonic_time() / 1000,

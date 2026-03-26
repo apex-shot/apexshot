@@ -1560,7 +1560,6 @@ async fn run_recording_with_shell_controls(
     params: RecordingControlsParams,
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    let _runtime_overlay_snapshot = runtime_overlay_snapshot;
     let session_id = format!(
         "recording-{}-{}",
         std::process::id(),
