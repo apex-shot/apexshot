@@ -342,8 +342,18 @@ function updateClicksActor(overlayState, snapshot, rect) {
     const clickSize = 12 + Math.round(snapshot.click_size * 28);
     const haloSize = snapshot.click_animate ? clickSize + 20 : clickSize + 8;
     const clickColor = CLICK_COLOR_MAP[snapshot.click_color] ?? CLICK_COLOR_MAP[0];
-    const borderWidth = snapshot.click_style === 1 ? 0 : 3;
-    const fillColor = snapshot.click_style === 1 ? clickColor : "transparent";
+    let borderWidth = 3;
+    let fillColor = "transparent";
+    let haloOpacity = snapshot.click_animate ? 72 : 40;
+
+    if (snapshot.click_style === 1) {
+        borderWidth = 0;
+        fillColor = clickColor;
+    } else if (snapshot.click_style >= 2) {
+        borderWidth = 4;
+        fillColor = "rgba(255, 255, 255, 0.18)";
+        haloOpacity = snapshot.click_animate ? 88 : 54;
+    }
 
     overlayState.clickHaloActor.set_size(haloSize, haloSize);
     overlayState.clickHaloActor.set_style([
@@ -352,7 +362,7 @@ function updateClicksActor(overlayState, snapshot, rect) {
         `border-radius: ${Math.floor(haloSize / 2)}px;`,
         `border: 2px solid ${clickColor};`,
         `background-color: ${snapshot.click_animate ? "rgba(255, 255, 255, 0.04)" : "transparent"};`,
-        `opacity: ${snapshot.click_animate ? 72 : 40};`,
+        `opacity: ${haloOpacity};`,
     ].join(" "));
 
     overlayState.clickPulseActor.set_size(clickSize, clickSize);
@@ -379,7 +389,9 @@ function updateClicksActor(overlayState, snapshot, rect) {
         "padding: 10px 12px;",
         "spacing: 12px;",
     ].join(" "));
-    overlayState.clickLabelActor.text = snapshot.click_animate ? "Clicks live" : "Clicks";
+    overlayState.clickLabelActor.text = snapshot.click_style >= 2
+        ? "Clicks accent"
+        : (snapshot.click_animate ? "Clicks live" : "Clicks");
 }
 
 function updateKeystrokesActor(overlayState, snapshot, rect) {
@@ -409,7 +421,9 @@ function updateKeystrokesActor(overlayState, snapshot, rect) {
         `spacing: ${Math.round(10 * scale)}px;`,
         snapshot.key_blur_bg ? "box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);" : "",
     ].join(" "));
-    overlayState.keystrokeLabelActor.text = snapshot.key_filter === 1 ? "Ctrl + K" : "Shift + A";
+    overlayState.keystrokeLabelActor.text = snapshot.key_filter === 1
+        ? "Ctrl + K"
+        : (snapshot.key_filter > 1 ? `Filter ${snapshot.key_filter}` : "Shift + A");
     overlayState.keystrokeLabelActor.set_style([
         `font-size: ${Math.round(15 * scale)}px;`,
         "font-weight: 700;",
