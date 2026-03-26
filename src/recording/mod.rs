@@ -1,6 +1,7 @@
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -93,7 +94,7 @@ pub struct PreparedOverlayRecordingRequest {
     pub use_shell_controls: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct RuntimeOverlaySnapshot {
     pub mic_visible: bool,
     pub speaker_visible: bool,
@@ -1578,6 +1579,7 @@ async fn run_recording_with_shell_controls(
             },
             is_fullscreen: params.is_fullscreen,
             show_timer: params.show_timer,
+            runtime_overlay_snapshot,
         })?;
 
     let final_outcome = loop {

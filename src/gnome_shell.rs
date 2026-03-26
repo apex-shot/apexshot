@@ -2,7 +2,7 @@ use std::process::Command;
 
 use anyhow::{anyhow, Context};
 
-use crate::capture_overlay::RecordingRequest;
+use crate::{capture_overlay::RecordingRequest, recording::RuntimeOverlaySnapshot};
 
 const MASK_DBUS_DEST: &str = "org.apexshot.ShellOverlay";
 const MASK_DBUS_PATH: &str = "/org/apexshot/ShellOverlay";
@@ -16,13 +16,14 @@ pub struct RecordingMaskGeometry {
     pub height: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecordingControlsSpec {
     pub dbus_dest: String,
     pub session_id: String,
     pub geometry: RecordingMaskGeometry,
     pub is_fullscreen: bool,
     pub show_timer: bool,
+    pub runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
 }
 
 #[derive(Debug)]
@@ -116,16 +117,8 @@ pub fn show_recording_mask(geometry: RecordingMaskGeometry) -> anyhow::Result<Ma
 
     let _ = hide_recording_mask();
 
-    run_shell_overlay_method(
-        "ShowMask",
-        vec![
-            format!("int32:{}", geometry.x),
-            format!("int32:{}", geometry.y),
-            format!("int32:{}", geometry.width),
-            format!("int32:{}", geometry.height),
-        ],
-    )
-    .context("failed to launch dbus-send for ShowMask")?;
+    run_shell_overlay_method("ShowMask", show_mask_args(geometry))
+        .context("failed to launch dbus-send for ShowMask")?;
 
     Ok(MaskHandle { shown: true })
 }
@@ -133,27 +126,15 @@ pub fn show_recording_mask(geometry: RecordingMaskGeometry) -> anyhow::Result<Ma
 pub fn show_recording_controls(
     spec: &RecordingControlsSpec,
 ) -> anyhow::Result<RecordingControlsHandle> {
-    let invalid_geometry =
-        spec.geometry.width <= 0 || spec.geometry.height <= 0;
-    if (!spec.is_fullscreen && invalid_geometry) || !current_session_supports_gnome_shell_overlay() {
+    let invalid_geometry = spec.geometry.width <= 0 || spec.geometry.height <= 0;
+    if (!spec.is_fullscreen && invalid_geometry) || !current_session_supports_gnome_shell_overlay()
+    {
         return Ok(RecordingControlsHandle::inactive());
     }
 
     let _ = hide_recording_controls();
-    run_shell_overlay_method(
-        "ShowControls",
-        vec![
-            format!("string:{}", spec.dbus_dest),
-            format!("string:{}", spec.session_id),
-            format!("int32:{}", spec.geometry.x),
-            format!("int32:{}", spec.geometry.y),
-            format!("int32:{}", spec.geometry.width),
-            format!("int32:{}", spec.geometry.height),
-            format!("boolean:{}", spec.is_fullscreen),
-            format!("boolean:{}", spec.show_timer),
-        ],
-    )
-    .context("failed to launch dbus-send for ShowControls")?;
+    run_shell_overlay_method("ShowControls", show_controls_args(spec)?)
+        .context("failed to launch dbus-send for ShowControls")?;
 
     Ok(RecordingControlsHandle { shown: true })
 }
@@ -164,6 +145,38 @@ pub fn hide_recording_mask_best_effort() {
 
 pub fn hide_recording_controls_best_effort() {
     let _ = hide_recording_controls();
+}
+
+fn show_mask_args(geometry: RecordingMaskGeometry) -> Vec<String> {
+    vec![
+        format!("int32:{}", geometry.x),
+        format!("int32:{}", geometry.y),
+        format!("int32:{}", geometry.width),
+        format!("int32:{}", geometry.height),
+    ]
+}
+
+fn show_controls_args(spec: &RecordingControlsSpec) -> anyhow::Result<Vec<String>> {
+    let mut args = vec![
+        format!("string:{}", spec.dbus_dest),
+        format!("string:{}", spec.session_id),
+        format!("int32:{}", spec.geometry.x),
+        format!("int32:{}", spec.geometry.y),
+        format!("int32:{}", spec.geometry.width),
+        format!("int32:{}", spec.geometry.height),
+        format!("boolean:{}", spec.is_fullscreen),
+        format!("boolean:{}", spec.show_timer),
+    ];
+
+    if let Some(snapshot) = spec.runtime_overlay_snapshot {
+        args.push(format!(
+            "string:{}",
+            serde_json::to_string(&snapshot)
+                .context("failed to serialize runtime overlay snapshot")?
+        ));
+    }
+
+    Ok(args)
 }
 
 fn run_shell_overlay_method(method: &str, args: Vec<String>) -> anyhow::Result<()> {
@@ -221,5 +234,118 @@ mod tests {
             Some("wayland-1"),
             Some("GNOME")
         ));
+    }
+
+    #[test]
+    fn controls_payload_includes_runtime_overlay_snapshot() {
+        let snapshot = crate::recording::RuntimeOverlaySnapshot {
+            mic_visible: true,
+            speaker_visible: false,
+            webcam_enabled: true,
+            webcam_rel_x: 0.61,
+            webcam_rel_y: 0.17,
+            webcam_size: 2,
+            webcam_shape: 1,
+            webcam_flip: true,
+            webcam_device: 7,
+            clicks_enabled: true,
+            click_size: 0.45,
+            click_color: 3,
+            click_style: 2,
+            click_animate: false,
+            keystrokes_enabled: true,
+            key_size: 0.5,
+            key_position: 2,
+            key_appearance: 1,
+            key_blur_bg: false,
+            key_filter: 4,
+        };
+        let spec = RecordingControlsSpec {
+            dbus_dest: "org.apexshot.RecordingControl".into(),
+            session_id: "recording-123".into(),
+            geometry: RecordingMaskGeometry {
+                x: 10,
+                y: 20,
+                width: 1920,
+                height: 1080,
+            },
+            is_fullscreen: true,
+            show_timer: false,
+            runtime_overlay_snapshot: Some(snapshot),
+        };
+
+        let args = show_controls_args(&spec).expect("snapshot payload should serialize");
+
+        assert_eq!(
+            args,
+            vec![
+                "string:org.apexshot.RecordingControl".to_string(),
+                "string:recording-123".to_string(),
+                "int32:10".to_string(),
+                "int32:20".to_string(),
+                "int32:1920".to_string(),
+                "int32:1080".to_string(),
+                "boolean:true".to_string(),
+                "boolean:false".to_string(),
+                format!(
+                    "string:{}",
+                    serde_json::json!({
+                        "mic_visible": true,
+                        "speaker_visible": false,
+                        "webcam_enabled": true,
+                        "webcam_rel_x": 0.61,
+                        "webcam_rel_y": 0.17,
+                        "webcam_size": 2,
+                        "webcam_shape": 1,
+                        "webcam_flip": true,
+                        "webcam_device": 7,
+                        "clicks_enabled": true,
+                        "click_size": 0.45,
+                        "click_color": 3,
+                        "click_style": 2,
+                        "click_animate": false,
+                        "keystrokes_enabled": true,
+                        "key_size": 0.5,
+                        "key_position": 2,
+                        "key_appearance": 1,
+                        "key_blur_bg": false,
+                        "key_filter": 4,
+                    })
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn controls_payload_without_snapshot_matches_existing_signature() {
+        let spec = RecordingControlsSpec {
+            dbus_dest: "org.apexshot.RecordingControl".into(),
+            session_id: "recording-123".into(),
+            geometry: RecordingMaskGeometry {
+                x: 10,
+                y: 20,
+                width: 1920,
+                height: 1080,
+            },
+            is_fullscreen: true,
+            show_timer: false,
+            runtime_overlay_snapshot: None,
+        };
+
+        let args = show_controls_args(&spec).expect("legacy payload should build");
+
+        assert_eq!(
+            args,
+            vec![
+                "string:org.apexshot.RecordingControl".to_string(),
+                "string:recording-123".to_string(),
+                "int32:10".to_string(),
+                "int32:20".to_string(),
+                "int32:1920".to_string(),
+                "int32:1080".to_string(),
+                "boolean:true".to_string(),
+                "boolean:false".to_string(),
+            ]
+        );
     }
 }
