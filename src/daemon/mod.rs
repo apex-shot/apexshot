@@ -57,6 +57,7 @@ pub enum DaemonAction {
     OpenLastCapture,
     OpenSettings,
     SetTrayVisible(bool),
+    SetHotkeySuppressed(bool),
     ImportWebScrollCapture {
         png_base64: String,
         page_url: String,
@@ -111,6 +112,33 @@ pub const DAEMON_INTERFACE: &str = "org.apexshot.Daemon";
 static MIC_LEVEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); // 0.0f64.to_bits()
 /// Current system audio level (f64 bits stored as u64), updated by speaker monitoring thread.
 static SPEAKER_LEVEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// When true, hotkey activations are suppressed (e.g. during shortcut editing).
+static HOTKEY_SUPPRESSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Returns true if hotkey activations are currently suppressed.
+pub fn is_hotkey_suppressed() -> bool {
+    HOTKEY_SUPPRESSED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Set hotkey suppression via D-Bus. Returns `true` if the daemon was found.
+pub fn set_daemon_hotkey_suppressed(suppressed: bool) -> bool {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let proxy = match zbus::blocking::Proxy::new(
+        &conn,
+        DAEMON_BUS_NAME,
+        DAEMON_OBJECT_PATH,
+        DAEMON_INTERFACE,
+    ) {
+        Ok(proxy) => proxy,
+        Err(_) => return false,
+    };
+
+    proxy
+        .call::<_, _, ()>("SetHotkeySuppressed", &(suppressed,))
+        .is_ok()
+}
 
 /// Try to trigger an action on an already-running daemon via D-Bus.
 /// Returns `true` if the daemon was found and the call succeeded.
@@ -424,6 +452,13 @@ async fn run_daemon_inner(
                     handle.shutdown();
                     eprintln!("[daemon] Tray icon disabled live.");
                 }
+            }
+            DaemonAction::SetHotkeySuppressed(suppressed) => {
+                HOTKEY_SUPPRESSED.store(suppressed, std::sync::atomic::Ordering::Relaxed);
+                eprintln!(
+                    "[daemon] Hotkey suppression {}.",
+                    if suppressed { "enabled" } else { "disabled" }
+                );
             }
             DaemonAction::ImportWebScrollCapture {
                 png_base64,
@@ -892,6 +927,16 @@ impl DaemonIpc {
         Ok(())
     }
 
+    fn set_hotkey_suppressed(&self, suppressed: bool) -> zbus::fdo::Result<()> {
+        eprintln!("[daemon] D-Bus SetHotkeySuppressed: {suppressed}");
+        self.tx
+            .send(DaemonAction::SetHotkeySuppressed(suppressed))
+            .map_err(|e| {
+                zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
+            })?;
+        Ok(())
+    }
+
     fn import_web_scroll_capture(
         &self,
         png_base64: String,
@@ -1328,6 +1373,11 @@ async fn run_hotkey_listener_gnome_shell(
             continue;
         };
 
+        if is_hotkey_suppressed() {
+            eprintln!("[daemon] Hotkey suppressed (shortcut edit active)");
+            continue;
+        }
+
         if let Some(binding) = action_map.get(&action_id) {
             if let Some(act) = binding_to_daemon_action(binding) {
                 eprintln!("[daemon] Hotkey fired: {:?}", act);
@@ -1526,6 +1576,10 @@ async fn run_hotkey_listener_portal(
             msg.body()
                 .deserialize::<(OwnedObjectPath, String, u32, HashMap<String, OwnedValue>)>()
         {
+            if is_hotkey_suppressed() {
+                eprintln!("[daemon] Hotkey suppressed (shortcut edit active)");
+                continue;
+            }
             if let Some(binding) = id_to_binding.get(&shortcut_id) {
                 if let Some(act) = binding_to_daemon_action(binding) {
                     eprintln!("[daemon] Portal hotkey fired: {:?}", act);
@@ -2493,5 +2547,22 @@ mod tests {
     #[test]
     fn daemon_does_not_autostart_ydotoold_by_default() {
         assert!(!should_autostart_ydotoold());
+    }
+
+    #[test]
+    fn daemon_ignores_hotkeys_while_shortcut_edit_is_active() {
+        use std::sync::atomic::Ordering;
+
+        // Default: not suppressed
+        assert!(!super::HOTKEY_SUPPRESSED.load(Ordering::Relaxed));
+        assert!(!super::is_hotkey_suppressed());
+
+        // Suppress
+        super::HOTKEY_SUPPRESSED.store(true, Ordering::Relaxed);
+        assert!(super::is_hotkey_suppressed());
+
+        // Unsuppress
+        super::HOTKEY_SUPPRESSED.store(false, Ordering::Relaxed);
+        assert!(!super::is_hotkey_suppressed());
     }
 }
