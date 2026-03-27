@@ -147,6 +147,15 @@ pub fn hide_recording_controls_best_effort() {
     let _ = hide_recording_controls();
 }
 
+pub fn push_recording_keystroke(session_id: &str, text: &str) -> anyhow::Result<()> {
+    if !current_session_supports_gnome_shell_overlay() {
+        return Ok(());
+    }
+
+    run_shell_overlay_method("PushKeystroke", show_push_keystroke_args(session_id, text))
+        .context("failed to launch dbus-send for PushKeystroke")
+}
+
 fn show_mask_args(geometry: RecordingMaskGeometry) -> Vec<String> {
     vec![
         format!("int32:{}", geometry.x),
@@ -169,7 +178,7 @@ fn show_controls_args(spec: &RecordingControlsSpec) -> anyhow::Result<Vec<String
         "string:".to_string(),
     ];
 
-    if let Some(snapshot) = spec.runtime_overlay_snapshot {
+    if let Some(snapshot) = &spec.runtime_overlay_snapshot {
         args[8] = format!(
             "string:{}",
             serde_json::to_string(&snapshot)
@@ -216,6 +225,10 @@ fn hide_recording_controls() -> anyhow::Result<()> {
 
 fn show_toggle_overlay_args(key: &str, visible: bool) -> Vec<String> {
     vec![format!("string:{key}"), format!("boolean:{visible}")]
+}
+
+fn show_push_keystroke_args(session_id: &str, text: &str) -> Vec<String> {
+    vec![format!("string:{session_id}"), format!("string:{text}")]
 }
 
 pub fn toggle_overlay_visibility(key: &str, visible: bool) -> anyhow::Result<()> {
@@ -268,6 +281,8 @@ mod tests {
             click_style: 2,
             click_animate: false,
             keystrokes_enabled: true,
+            keystrokes_supported: false,
+            keystrokes_support_message: "Not supported on GNOME Wayland yet".into(),
             key_size: 0.5,
             key_position: 2,
             key_appearance: 1,
@@ -319,6 +334,8 @@ mod tests {
                         "click_style": 2,
                         "click_animate": false,
                         "keystrokes_enabled": true,
+                        "keystrokes_supported": false,
+                        "keystrokes_support_message": "Not supported on GNOME Wayland yet",
                         "key_size": 0.5,
                         "key_position": 2,
                         "key_appearance": 1,
@@ -348,6 +365,8 @@ mod tests {
             click_style: 2,
             click_animate: false,
             keystrokes_enabled: true,
+            keystrokes_supported: false,
+            keystrokes_support_message: "Not supported on GNOME Wayland yet".into(),
             key_size: 0.5,
             key_position: 2,
             key_appearance: 1,
@@ -370,6 +389,18 @@ mod tests {
         let snapshot_json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
         assert!(snapshot_json.contains("\"click_style\":2"));
         assert!(snapshot_json.contains("\"webcam_rel_x\":0.61"));
+    }
+
+    #[test]
+    fn push_keystroke_payload_includes_session_and_text() {
+        let args = show_push_keystroke_args("recording-123", "Ctrl + K");
+        assert_eq!(
+            args,
+            vec![
+                "string:recording-123".to_string(),
+                "string:Ctrl + K".to_string(),
+            ]
+        );
     }
 
     #[test]

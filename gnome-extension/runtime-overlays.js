@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import GLib from "gi://GLib";
 import St from "gi://St";
 import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
+import {createKeystrokeOverlayModel} from "./keystroke-display.js";
 import {
     createRuntimeOverlayVisibility,
+    getRuntimeOverlayClickIndicator,
+    getRuntimeOverlayKeystrokeText,
+    getRuntimeOverlaySupportMessage,
     isSelfOwnedActor,
     registerSelfOwnedActor,
 } from "./session-state.js";
@@ -43,12 +48,14 @@ function ensureRuntimeOverlayState(sessionState) {
             clickPulseActor: null,
             clickHaloActor: null,
             clickLabelActor: null,
+            lastAnimatedClickTimestampMs: -1,
             keystrokesActor: null,
             keystrokeLabelActor: null,
             audioIndicatorsActor: null,
             micIndicatorActor: null,
             speakerIndicatorActor: null,
             visibility: createRuntimeOverlayVisibility(),
+            keystrokeOverlay: createKeystrokeOverlayModel(),
             selfOwnedActors: new WeakSet(),
             selfOwnedActorOwners: new WeakMap(),
         };
@@ -56,6 +63,8 @@ function ensureRuntimeOverlayState(sessionState) {
 
     const state = sessionState.runtimeOverlayState;
     state.visibility ??= createRuntimeOverlayVisibility();
+    state.keystrokeOverlay ??= createKeystrokeOverlayModel();
+    state.lastAnimatedClickTimestampMs ??= -1;
     state.selfOwnedActors ??= new WeakSet();
     state.selfOwnedActorOwners ??= new WeakMap();
     return state;
@@ -125,16 +134,12 @@ function createWebcamActor(overlayState) {
 }
 
 function createClicksActor(overlayState) {
-    const actor = new St.BoxLayout({
+    const actor = new St.Widget({
         reactive: false,
-        style: [
-            "background-color: rgba(12, 14, 22, 0.82);",
-            "border: 1px solid rgba(255, 255, 255, 0.14);",
-            "border-radius: 20px;",
-            "padding: 10px 12px;",
-            "spacing: 12px;",
-        ].join(" "),
+        layout_manager: new Clutter.BinLayout(),
     });
+    actor.opacity = 0;
+    actor.visible = false;
 
     overlayState.clickPulseStackActor = new St.Widget({
         reactive: false,
@@ -147,13 +152,6 @@ function createClicksActor(overlayState) {
 
     overlayState.clickPulseActor = new St.Widget({reactive: false});
     overlayState.clickPulseStackActor.add_child(overlayState.clickPulseActor);
-
-    overlayState.clickLabelActor = new St.Label({
-        text: "Clicks",
-        y_align: Clutter.ActorAlign.CENTER,
-        style: "font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.86);",
-    });
-    actor.add_child(overlayState.clickLabelActor);
 
     return actor;
 }
@@ -360,24 +358,44 @@ function updateWebcamActor(overlayState, snapshot, rect) {
 
 function updateClicksActor(overlayState, snapshot, rect) {
     const visible = overlayState.visibility.clicks;
-    setActorVisible(overlayState.clicksActor, visible);
-    if (!visible)
+    const click = getRuntimeOverlayClickIndicator(
+        {runtimeOverlayState: overlayState},
+        Math.floor(GLib.get_monotonic_time() / 1000)
+    );
+    if (!visible || !click) {
+        if (!visible) {
+            overlayState.clicksActor.remove_all_transitions();
+            overlayState.clickHaloActor.remove_all_transitions();
+            overlayState.clickPulseActor.remove_all_transitions();
+            overlayState.clicksActor.opacity = 0;
+            overlayState.clicksActor.hide();
+        }
+        return;
+    }
+
+    if (overlayState.lastAnimatedClickTimestampMs === click.timestampMs)
         return;
 
-    const clickSize = 12 + Math.round(snapshot.click_size * 28);
-    const haloSize = snapshot.click_animate ? clickSize + 20 : clickSize + 8;
+    overlayState.lastAnimatedClickTimestampMs = click.timestampMs;
+
+    const clickSize = 12 + Math.round(snapshot.click_size * 56);
+    const haloSize = clickSize + 18 + Math.round(snapshot.click_size * 10);
     const clickColor = CLICK_COLOR_MAP[snapshot.click_color] ?? CLICK_COLOR_MAP[0];
-    let borderWidth = 3;
-    let fillColor = "transparent";
-    let haloOpacity = snapshot.click_animate ? 72 : 40;
+    let borderWidth = 2;
+    let fillColor = "rgba(255, 255, 255, 0.06)";
+    let innerOpacity = 230;
+    let haloOpacity = 120;
 
     if (snapshot.click_style === 1) {
         borderWidth = 0;
         fillColor = clickColor;
+        innerOpacity = 210;
+        haloOpacity = 92;
     } else if (snapshot.click_style >= 2) {
-        borderWidth = 4;
-        fillColor = "rgba(255, 255, 255, 0.18)";
-        haloOpacity = snapshot.click_animate ? 88 : 54;
+        borderWidth = 3;
+        fillColor = "rgba(255, 255, 255, 0.12)";
+        innerOpacity = 240;
+        haloOpacity = 138;
     }
 
     overlayState.clickHaloActor.set_size(haloSize, haloSize);
@@ -386,8 +404,7 @@ function updateClicksActor(overlayState, snapshot, rect) {
         `height: ${haloSize}px;`,
         `border-radius: ${Math.floor(haloSize / 2)}px;`,
         `border: 2px solid ${clickColor};`,
-        `background-color: ${snapshot.click_animate ? "rgba(255, 255, 255, 0.04)" : "transparent"};`,
-        `opacity: ${haloOpacity};`,
+        "background-color: transparent;",
     ].join(" "));
 
     overlayState.clickPulseActor.set_size(clickSize, clickSize);
@@ -399,42 +416,82 @@ function updateClicksActor(overlayState, snapshot, rect) {
         `background-color: ${fillColor};`,
     ].join(" "));
     overlayState.clickPulseStackActor.set_size(haloSize, haloSize);
-
     const bounds = clampPlacement(
         rect,
-        rect.x + CLICK_INDICATOR_MARGIN,
-        rect.y + rect.height - 44 - CLICK_INDICATOR_MARGIN,
-        110,
-        44,
+        click.x - Math.floor(haloSize / 2),
+        click.y - Math.floor(haloSize / 2),
+        haloSize,
+        haloSize,
         CLICK_INDICATOR_MARGIN
     );
     overlayState.clicksActor.set_size(bounds.width, bounds.height);
     overlayState.clicksActor.set_position(bounds.x, bounds.y);
-    overlayState.clicksActor.set_style([
-        "background-color: rgba(12, 14, 22, 0.82);",
-        "border: 1px solid rgba(255, 255, 255, 0.14);",
-        "border-radius: 20px;",
-        "padding: 10px 12px;",
-        "spacing: 12px;",
-    ].join(" "));
-    overlayState.clickLabelActor.text = snapshot.click_style >= 2
-        ? "Clicks accent"
-        : (snapshot.click_animate ? "Clicks live" : "Clicks");
+    overlayState.clickPulseStackActor.set_position(0, 0);
+
+    overlayState.clicksActor.remove_all_transitions();
+    overlayState.clickHaloActor.remove_all_transitions();
+    overlayState.clickPulseActor.remove_all_transitions();
+    overlayState.clicksActor.opacity = 255;
+    overlayState.clicksActor.show();
+
+    overlayState.clickPulseStackActor.set_scale(snapshot.click_animate ? 0.82 : 1.0, snapshot.click_animate ? 0.82 : 1.0);
+    overlayState.clickPulseStackActor.opacity = 255;
+    overlayState.clickHaloActor.opacity = snapshot.click_animate ? haloOpacity : 0;
+    overlayState.clickPulseActor.opacity = innerOpacity;
+
+    const durationMs = snapshot.click_animate ? 170 : 110;
+    if (snapshot.click_animate) {
+        overlayState.clickPulseStackActor.ease({
+            scale_x: 1.18,
+            scale_y: 1.18,
+            duration: durationMs,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+        overlayState.clickHaloActor.ease({
+            opacity: 0,
+            duration: durationMs,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+    } else {
+        overlayState.clickHaloActor.opacity = 0;
+    }
+    overlayState.clickPulseActor.ease({
+        opacity: 0,
+        duration: durationMs,
+        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+    });
+    overlayState.clicksActor.ease({
+        opacity: 0,
+        duration: durationMs,
+        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        onComplete: () => {
+            overlayState.clicksActor.hide();
+        },
+    });
 }
 
-function updateKeystrokesActor(overlayState, snapshot, rect) {
+function updateKeystrokesActor(sessionState, overlayState, snapshot, rect) {
     const visible = overlayState.visibility.keystrokes;
     setActorVisible(overlayState.keystrokesActor, visible);
     if (!visible)
         return;
 
+    const liveText = getRuntimeOverlayKeystrokeText(
+        sessionState,
+        Math.floor(GLib.get_monotonic_time() / 1000)
+    );
+    const supportMessage = getRuntimeOverlaySupportMessage(sessionState, "keystrokes");
+    const displayText = liveText || supportMessage;
     const darkAppearance = snapshot.key_appearance === 0;
     const backgroundColor = darkAppearance
         ? (snapshot.key_blur_bg ? "rgba(20, 20, 24, 0.48)" : "rgba(20, 20, 24, 0.9)")
         : (snapshot.key_blur_bg ? "rgba(245, 245, 250, 0.48)" : "rgba(245, 245, 250, 0.9)");
     const textColor = darkAppearance ? "rgb(255, 255, 255)" : "rgb(20, 20, 24)";
     const scale = 0.85 + (snapshot.key_size * 0.75);
-    const width = Math.round(124 * scale);
+    const textWidth = displayText
+        ? Math.round((Math.min(displayText.length, 42) * 8.5 + 60) * scale)
+        : 0;
+    const width = Math.max(Math.round(124 * scale), textWidth);
     const height = Math.round(46 * scale);
     const [rawX, rawY] = keyPositionCoords(snapshot, rect, width, height);
     const bounds = clampPlacement(
@@ -457,9 +514,7 @@ function updateKeystrokesActor(overlayState, snapshot, rect) {
         `spacing: ${Math.round(10 * scale)}px;`,
         snapshot.key_blur_bg ? "box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);" : "",
     ].join(" "));
-    overlayState.keystrokeLabelActor.text = snapshot.key_filter === 1
-        ? "Ctrl + K"
-        : (snapshot.key_filter > 1 ? `Filter ${snapshot.key_filter}` : "Shift + A");
+    overlayState.keystrokeLabelActor.text = displayText;
     overlayState.keystrokeLabelActor.set_style([
         `font-size: ${Math.round(15 * scale)}px;`,
         "font-weight: 700;",
@@ -532,7 +587,7 @@ export function updateRuntimeOverlaySnapshot(sessionState) {
     updateAudioIndicators(overlayState, snapshot, rect);
     updateWebcamActor(overlayState, snapshot, rect);
     updateClicksActor(overlayState, snapshot, rect);
-    updateKeystrokesActor(overlayState, snapshot, rect);
+    updateKeystrokesActor(sessionState, overlayState, snapshot, rect);
 }
 
 export function destroyRuntimeOverlays(sessionState) {

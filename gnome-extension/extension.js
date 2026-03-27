@@ -4,10 +4,14 @@
 import Meta from "gi://Meta";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
+import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {createSessionState} from "./session-state.js";
+import {pushRuntimeOverlayKeystrokeText} from "./session-state.js";
+import {recordRuntimeOverlayPointerSample} from "./session-state.js";
+import {recordRuntimeOverlayKeystroke} from "./session-state.js";
 import {setRuntimeOverlayVisibility} from "./session-state.js";
-import {updateRuntimeOverlaySnapshot} from "./runtime-overlays.js";
+import {shouldExcludeOverlayEvent, updateRuntimeOverlaySnapshot} from "./runtime-overlays.js";
 import {MaskUi} from "./mask-ui.js";
 import {ControlsUi} from "./controls-ui.js";
 
@@ -62,6 +66,10 @@ const MASK_DBUS_IFACE_XML = `
     <method name="ToggleOverlay">
       <arg type="s" name="key" direction="in"/>
       <arg type="b" name="visible" direction="in"/>
+    </method>
+    <method name="PushKeystroke">
+      <arg type="s" name="session_id" direction="in"/>
+      <arg type="s" name="text" direction="in"/>
     </method>
   </interface>
 </node>`;
@@ -376,6 +384,8 @@ class RecordingMaskService {
         this._dbusObject = null;
         this._ownName = null;
         this._monitorsChangedId = null;
+        this._pointerPollSource = null;
+        this._stageKeyPressEventId = null;
         this._sessionState = createSessionState();
         this._maskUi = new MaskUi(this._sessionState);
         this._controlsUi = new ControlsUi(this._sessionState, {
@@ -405,6 +415,10 @@ class RecordingMaskService {
             this._maskUi.refresh();
             this._controlsUi.reposition();
         });
+        this._stageKeyPressEventId = global.stage.connect("key-press-event", (_actor, event) =>
+            this._onStageKeyPress(event)
+        );
+        log("[apexshot] runtime keystroke listener enabled");
     }
 
     disable() {
@@ -414,6 +428,11 @@ class RecordingMaskService {
         if (this._monitorsChangedId !== null) {
             Main.layoutManager.disconnect(this._monitorsChangedId);
             this._monitorsChangedId = null;
+        }
+        this._stopPointerPolling();
+        if (this._stageKeyPressEventId !== null) {
+            global.stage.disconnect(this._stageKeyPressEventId);
+            this._stageKeyPressEventId = null;
         }
 
         if (this._ownName !== null) {
@@ -487,6 +506,16 @@ class RecordingMaskService {
         }
     }
 
+    PushKeystrokeAsync(params, invocation) {
+        try {
+            const [sessionId, text] = params;
+            this._pushKeystroke(sessionId, text);
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
     _showMask(x, y, width, height) {
         this._maskUi.showMask(x, y, width, height);
     }
@@ -501,9 +530,11 @@ class RecordingMaskService {
 
     _showControls(spec) {
         this._controlsUi.showControls(spec);
+        this._startPointerPolling();
     }
 
     _hideControls() {
+        this._stopPointerPolling();
         this._controlsUi.hideControls();
     }
 
@@ -511,9 +542,68 @@ class RecordingMaskService {
         this._controlsUi.reposition();
     }
 
+    _startPointerPolling() {
+        if (this._pointerPollSource !== null)
+            return;
+
+        this._pointerPollSource = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
+            this._pollPointerState();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _stopPointerPolling() {
+        if (this._pointerPollSource !== null) {
+            GLib.source_remove(this._pointerPollSource);
+            this._pointerPollSource = null;
+        }
+    }
+
     _toggleOverlay(key, visible) {
         if (!setRuntimeOverlayVisibility(this._sessionState, key, visible))
             return;
+        updateRuntimeOverlaySnapshot(this._sessionState);
+    }
+
+    _pushKeystroke(sessionId, text) {
+        const controlsState = this._sessionState.controlsState;
+        if (!controlsState || controlsState.sessionId !== sessionId)
+            return;
+
+        const changed = pushRuntimeOverlayKeystrokeText(
+            this._sessionState,
+            text,
+            Math.floor(GLib.get_monotonic_time() / 1000)
+        );
+        if (changed) {
+            log(`[apexshot] pushed keystroke ${text}`);
+            updateRuntimeOverlaySnapshot(this._sessionState);
+        }
+    }
+
+    _pollPointerState() {
+        if (!this._sessionState.controlsState)
+            return;
+
+        const [x, y, modifiers] = global.get_pointer();
+        let target = null;
+        if (global.stage && typeof global.stage.get_actor_at_pos === "function") {
+            target = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
+        }
+        const exclude = shouldExcludeOverlayEvent(this._sessionState, target);
+
+        const clicks = recordRuntimeOverlayPointerSample(this._sessionState, {
+            x,
+            y,
+            left: Boolean(modifiers & Clutter.ModifierType.BUTTON1_MASK),
+            middle: Boolean(modifiers & Clutter.ModifierType.BUTTON2_MASK),
+            right: Boolean(modifiers & Clutter.ModifierType.BUTTON3_MASK),
+            capture: !exclude,
+            timestampMs: Math.floor(GLib.get_monotonic_time() / 1000),
+        });
+        if (!clicks.length)
+            return;
+
         updateRuntimeOverlaySnapshot(this._sessionState);
     }
 
@@ -540,6 +630,39 @@ class RecordingMaskService {
             logError(e, `[apexshot] Failed to send recording command ${method}`);
             return false;
         }
+    }
+
+    _onStageKeyPress(event) {
+        if (!event)
+            return Clutter.EVENT_PROPAGATE;
+
+        const target = typeof event.get_source === "function"
+            ? event.get_source()
+            : null;
+        if (shouldExcludeOverlayEvent(this._sessionState, target))
+            return Clutter.EVENT_PROPAGATE;
+
+        const state = typeof event.get_state === "function" ? event.get_state() : 0;
+        const keySymbol = typeof event.get_key_symbol === "function"
+            ? event.get_key_symbol()
+            : 0;
+        const unicodeValue = typeof event.get_key_unicode === "function"
+            ? event.get_key_unicode()
+            : 0;
+        const keyName = Clutter.keysym_to_name(keySymbol) ?? "";
+        const changed = recordRuntimeOverlayKeystroke(this._sessionState, {
+            keySymbol: keyName,
+            unicodeChar: unicodeValue > 0 ? String.fromCodePoint(unicodeValue) : "",
+            ctrl: Boolean(state & Clutter.ModifierType.CONTROL_MASK),
+            alt: Boolean(state & Clutter.ModifierType.MOD1_MASK),
+            shift: Boolean(state & Clutter.ModifierType.SHIFT_MASK),
+            meta: Boolean(state & (Clutter.ModifierType.SUPER_MASK | Clutter.ModifierType.META_MASK)),
+            timestampMs: Math.floor(GLib.get_monotonic_time() / 1000),
+        });
+        log(`[apexshot] stage key press key=${keyName || unicodeValue || "unknown"} changed=${changed}`);
+        if (changed)
+            updateRuntimeOverlaySnapshot(this._sessionState);
+        return Clutter.EVENT_PROPAGATE;
     }
 }
 

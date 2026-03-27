@@ -6,6 +6,7 @@ import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {
     clearControlsState,
+    getRuntimeOverlaySupportMessage,
     getRuntimeOverlayVisibility,
     registerSelfOwnedActor,
     setRuntimeOverlayVisibility,
@@ -17,12 +18,12 @@ import {
     updateRuntimeOverlaySnapshot,
 } from "./runtime-overlays.js";
 
-const CONTROLS_BAR_WIDTH = 346;
-const CONTROLS_BAR_HEIGHT = 56;
+const CONTROLS_BAR_WIDTH = 280;
+const CONTROLS_BAR_HEIGHT = 48;
 const CONTROLS_MARGIN = 32;
 const CONTROLS_DOCK_SAFE = 72;
 const CONTROLS_GAP = 8;
-const RUNTIME_OVERLAY_MENU_WIDTH = 224;
+const RUNTIME_OVERLAY_MENU_WIDTH = 200;
 const RUNTIME_OVERLAY_MENU_GAP = 10;
 const RUNTIME_OVERLAY_MENU_MARGIN = 24;
 const RUNTIME_OVERLAY_TOGGLE_SPECS = Object.freeze([
@@ -44,6 +45,7 @@ export class ControlsUi {
         this._runtimeOverlayMenu = null;
         this._runtimeOverlayMenuButton = null;
         this._runtimeOverlayToggleRows = new Map();
+        this._runtimeOverlayInfoExpanded = new Set();
     }
 
     showControls(spec) {
@@ -76,6 +78,7 @@ export class ControlsUi {
         this._pauseIcon = null;
         this._runtimeOverlayMenuButton = null;
         this._runtimeOverlayToggleRows.clear();
+        this._runtimeOverlayInfoExpanded.clear();
 
         if (!this._controlsChrome)
             return;
@@ -109,13 +112,12 @@ export class ControlsUi {
             can_focus: true,
             track_hover: true,
             style: [
-                "background-color: rgba(30, 30, 34, 0.85);",
-                "border: 1px solid rgba(255, 255, 255, 0.15);",
-                "border-radius: 28px;",
-                "padding: 8px 6px 8px 12px;",
-                "box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);",
-                `width: ${CONTROLS_BAR_WIDTH}px;`,
-                `height: ${CONTROLS_BAR_HEIGHT}px;`,
+                "background-color: #141414;",
+                "border: 1px solid rgba(255, 255, 255, 0.10);",
+                "border-radius: 10px;",
+                "padding: 8px 12px;",
+                "spacing: 12px;",
+                "box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);",
             ].join(" "),
         }), "controls.chrome");
 
@@ -123,12 +125,11 @@ export class ControlsUi {
             reactive: true,
             y_align: Clutter.ActorAlign.CENTER,
             style: [
-                "background-color: rgba(255, 69, 58, 0.18);",
-                "border: 1px solid rgba(255, 69, 58, 0.3);",
-                "border-radius: 20px;",
-                "padding: 0 16px 0 6px;",
-                "margin-right: 8px;",
-                "height: 40px;",
+                "background-color: #000000;",
+                "border: 1px solid rgba(255, 255, 255, 0.11);",
+                "border-radius: 6px;",
+                "padding: 3px 8px 3px 3px;",
+                "height: 36px;",
                 "spacing: 8px;",
             ].join(" "),
         });
@@ -137,35 +138,45 @@ export class ControlsUi {
             if (this._sendRecordingCommand("Stop"))
                 this.hideControls();
         }, {
-            accent: "color: rgb(255, 85, 75);",
-            width: 32,
-            height: 32,
-            iconSize: 16,
-            borderRadius: 16,
+            accent: "color: #ed6a5e;",
+            width: 30,
+            height: 30,
+            iconSize: 15,
+            borderRadius: 6,
         });
         stopSegment.add_child(stopBtn);
 
         this._timerLabel = new St.Label({
             text: "0:00",
             visible: controlsState.showTimer,
-            style: "color: rgb(255, 85, 75); font-weight: 800; font-size: 15px; font-family: monospace;",
+            style: "color: #f1f1f3; font-weight: 700; font-size: 14px; font-family: monospace; letter-spacing: 0.2px;",
             y_align: Clutter.ActorAlign.CENTER,
         });
         stopSegment.add_child(this._timerLabel);
         chrome.add_child(stopSegment);
 
-        const buttonLayout = new St.BoxLayout({
-            style: "spacing: 4px;",
+        const buttonShell = new St.BoxLayout({
+            style: [
+                "background-color: #000000;",
+                "border: 1px solid rgba(255, 255, 255, 0.11);",
+                "border-radius: 6px;",
+                "padding: 3px;",
+            ].join(" "),
             y_align: Clutter.ActorAlign.CENTER,
             x_align: Clutter.ActorAlign.CENTER,
             y_expand: true,
         });
 
-        buttonLayout.add_child(this._createSeparator());
+        const buttonLayout = new St.BoxLayout({
+            style: "spacing: 2px;",
+            y_align: Clutter.ActorAlign.CENTER,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_expand: true,
+        });
 
         this._pauseIcon = new St.Icon({
             icon_name: "media-playback-pause-symbolic",
-            style: "icon-size: 18px; color: rgb(240, 240, 240);",
+            style: "icon-size: 16px; color: rgb(236, 239, 244);",
         });
         buttonLayout.add_child(this._createIconButton(this._pauseIcon, () => {
             const state = this._sessionState.controlsState;
@@ -173,25 +184,31 @@ export class ControlsUi {
             if (!this._sendRecordingCommand(method))
                 return;
             this._setControlsPaused(!state.paused);
-        }, {width: 40, height: 40, borderRadius: 20}));
+        }));
 
         buttonLayout.add_child(this._createIconButton("system-reboot-symbolic", () => {
             if (!this._sendRecordingCommand("Restart"))
                 return;
             this._resetControlsTimer();
-        }, {width: 40, height: 40, borderRadius: 20, iconSize: 18}));
+        }, {
+            iconSize: 16,
+        }));
 
         buttonLayout.add_child(this._createSeparator());
 
         buttonLayout.add_child(this._createIconButton("user-trash-symbolic", () => {
             if (this._sendRecordingCommand("Discard"))
                 this.hideControls();
-        }, {width: 40, height: 40, borderRadius: 20, iconSize: 18}));
+        }, {
+            iconSize: 16,
+            accent: "color: rgba(236, 222, 187, 0.96);",
+        }));
 
         if (controlsState.runtimeOverlaySnapshot)
             buttonLayout.add_child(this._createRuntimeOverlayMenuButton());
 
-        chrome.add_child(buttonLayout);
+        buttonShell.add_child(buttonLayout);
+        chrome.add_child(buttonShell);
 
         return chrome;
     }
@@ -199,15 +216,15 @@ export class ControlsUi {
     _createSeparator() {
         return new St.Widget({
             reactive: false,
-            style: "width: 1px; height: 24px; margin: 0 6px; background-color: rgba(255, 255, 255, 0.12); border-radius: 1px;",
+            style: "width: 1px; height: 20px; margin: 0 4px; background-color: rgba(255, 255, 255, 0.11); border-radius: 1px;",
             y_align: Clutter.ActorAlign.CENTER,
         });
     }
 
     _createIconButton(icon, onClick, options = {}) {
-        const w = options.width ?? 40;
-        const h = options.height ?? 40;
-        const r = options.borderRadius ?? 20;
+        const w = options.width ?? 30;
+        const h = options.height ?? 30;
+        const r = options.borderRadius ?? 6;
 
         const button = registerSelfOwnedActor(this._sessionState, new St.Button({
             reactive: true,
@@ -226,31 +243,42 @@ export class ControlsUi {
         const iconActor = typeof icon === "string"
             ? new St.Icon({
                 icon_name: icon,
-                style: `icon-size: ${options.iconSize ?? 18}px; ${options.accent ?? "color: rgb(240, 240, 240);"}`,
+                style: `icon-size: ${options.iconSize ?? 16}px; ${options.accent ?? "color: #f1f1f3;"}`,
             })
             : icon;
 
         iconContainer.add_child(iconActor);
         button.set_child(iconContainer);
 
-        const baseStyle = `width: ${w}px; height: ${h}px; border-radius: ${r}px; padding: 0; transition-duration: 200ms;`;
+        const hoverBackground = options.hoverBackground ?? "#1a1a1d";
+        const pressBackground = options.pressBackground ?? "#151517";
+        const hoverBorder = options.hoverBorder ?? "rgba(255, 255, 255, 0.09)";
+        const pressBorder = options.pressBorder ?? "rgba(255, 255, 255, 0.15)";
+        const baseStyle = [
+            `width: ${w}px;`,
+            `height: ${h}px;`,
+            `border-radius: ${r}px;`,
+            "padding: 0;",
+            "transition-duration: 140ms;",
+            "border: 1px solid transparent;",
+        ].join(" ");
 
         button.connect("notify::hover", () => {
             if (button.hover) {
-                button.set_style(`${baseStyle} background-color: rgba(255, 255, 255, 0.12);`);
+                button.set_style(`${baseStyle} background-color: ${hoverBackground}; border-color: ${hoverBorder};`);
             } else {
                 button.set_style(`${baseStyle} background-color: transparent;`);
             }
         });
 
         button.connect("button-press-event", () => {
-            button.set_style(`${baseStyle} background-color: rgba(255, 255, 255, 0.18);`);
+            button.set_style(`${baseStyle} background-color: ${pressBackground}; border-color: ${pressBorder};`);
             return Clutter.EVENT_PROPAGATE;
         });
 
         button.connect("button-release-event", () => {
             if (button.hover) {
-                button.set_style(`${baseStyle} background-color: rgba(255, 255, 255, 0.12);`);
+                button.set_style(`${baseStyle} background-color: ${hoverBackground}; border-color: ${hoverBorder};`);
             } else {
                 button.set_style(`${baseStyle} background-color: transparent;`);
             }
@@ -268,10 +296,7 @@ export class ControlsUi {
             else
                 this._showRuntimeOverlayMenu();
         }, {
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            iconSize: 18,
+            iconSize: 16,
             owner: "controls.overlay-menu-button",
         });
         return this._runtimeOverlayMenuButton;
@@ -288,18 +313,18 @@ export class ControlsUi {
             track_hover: true,
             style: [
                 `width: ${RUNTIME_OVERLAY_MENU_WIDTH}px;`,
-                "padding: 10px;",
-                "spacing: 6px;",
-                "background-color: rgba(18, 20, 28, 0.94);",
-                "border-radius: 22px;",
-                "border: 1px solid rgba(255, 255, 255, 0.12);",
-                "box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);",
+                "background-color: rgba(30, 30, 30, 0.92);",
+                "border: 1px solid rgba(255, 255, 255, 0.16);",
+                "border-radius: 12px;",
+                "padding: 8px 4px;",
+                "spacing: 0;",
+                "box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);",
             ].join(" "),
         }), "controls.overlay-menu");
 
         menu.add_child(new St.Label({
-            text: "Live overlays",
-            style: "padding: 4px 8px 6px 8px; font-size: 12px; font-weight: 800; color: rgba(255, 255, 255, 0.72); text-transform: uppercase;",
+            text: "OVERLAYS",
+            style: "padding: 8px 14px 4px 14px; font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 0.43); letter-spacing: 0.2px;",
         }));
 
         this._runtimeOverlayToggleRows.clear();
@@ -329,53 +354,121 @@ export class ControlsUi {
         this._runtimeOverlayMenu.destroy();
         this._runtimeOverlayMenu = null;
         this._runtimeOverlayToggleRows.clear();
+        this._runtimeOverlayInfoExpanded.clear();
     }
 
     _createRuntimeOverlayToggleRow(spec) {
+        const visible = getRuntimeOverlayVisibility(this._sessionState, spec.key);
+        const supportMessage = getRuntimeOverlaySupportMessage(this._sessionState, spec.key);
+        const infoExpanded = this._runtimeOverlayInfoExpanded.has(spec.key);
+
         const button = registerSelfOwnedActor(this._sessionState, new St.Button({
-            reactive: true,
-            can_focus: true,
-            track_hover: true,
+            reactive: !supportMessage,
+            can_focus: !supportMessage,
+            track_hover: !supportMessage,
             style: [
                 "padding: 0;",
+                "border-radius: 6px;",
+                "margin: 1px 4px;",
                 "background-color: transparent;",
-                "border-radius: 16px;",
+                "text-align: left;",
             ].join(" "),
         }), `controls.overlay-toggle.${spec.key}`);
-        const row = new St.BoxLayout({
+
+        const layout = new St.BoxLayout({
+            vertical: true,
             reactive: false,
-            style: [
-                "padding: 10px 12px;",
-                "spacing: 10px;",
-                "border-radius: 16px;",
-            ].join(" "),
+            style: "padding: 6px 4px; spacing: 2px; border-radius: 6px;",
         });
 
-        row.add_child(new St.Icon({
-            icon_name: spec.icon,
-            style: "icon-size: 16px; color: rgba(255, 255, 255, 0.92);",
+        const mainRow = new St.BoxLayout({
+            reactive: false,
+            style: "spacing: 6px;",
+            x_align: Clutter.ActorAlign.FILL,
+            x_expand: true,
+        });
+        layout.add_child(mainRow);
+
+        const checkIcon = new St.Icon({
+            icon_name: "object-select-symbolic",
+            style: `icon-size: 14px; color: ${!supportMessage && visible ? "#007AFF" : "transparent"};`,
             y_align: Clutter.ActorAlign.CENTER,
-        }));
-        row.add_child(new St.Label({
+        });
+        mainRow.add_child(checkIcon);
+
+        const label = new St.Label({
             text: spec.label,
             y_align: Clutter.ActorAlign.CENTER,
             x_expand: true,
-            style: "font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.9);",
-        }));
-
-        const stateLabel = new St.Label({
-            text: "Off",
-            y_align: Clutter.ActorAlign.CENTER,
-            style: "font-size: 12px; font-weight: 800;",
+            style: "font-size: 13px; color: #f1f1f3;",
         });
-        row.add_child(stateLabel);
-        button.set_child(row);
+        mainRow.add_child(label);
+
+        let infoButton = null;
+        if (supportMessage) {
+            infoButton = registerSelfOwnedActor(this._sessionState, new St.Button({
+                reactive: true,
+                can_focus: true,
+                track_hover: true,
+                style: [
+                    "width: 18px;",
+                    "height: 18px;",
+                    "padding: 0;",
+                    "border-radius: 9px;",
+                    "background-color: rgba(255, 255, 255, 0.06);",
+                    "border: 1px solid rgba(255, 255, 255, 0.1);",
+                ].join(" "),
+            }), `controls.overlay-toggle-info.${spec.key}`);
+            infoButton.set_child(new St.Label({
+                text: "?",
+                y_align: Clutter.ActorAlign.CENTER,
+                x_align: Clutter.ActorAlign.CENTER,
+                style: "font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 0.82);",
+            }));
+            infoButton.connect("clicked", () => {
+                if (this._runtimeOverlayInfoExpanded.has(spec.key))
+                    this._runtimeOverlayInfoExpanded.delete(spec.key);
+                else
+                    this._runtimeOverlayInfoExpanded.add(spec.key);
+                this._refreshRuntimeOverlayToggleRows();
+            });
+            mainRow.add_child(infoButton);
+        }
+
+        const messageLabel = new St.Label({
+            text: supportMessage,
+            visible: Boolean(supportMessage) && infoExpanded,
+            style: "font-size: 11px; color: rgba(255, 255, 255, 0.52); padding-left: 20px;",
+            x_expand: true,
+        });
+        layout.add_child(messageLabel);
+
+        button.set_child(layout);
         button.connect("clicked", () => this._toggleRuntimeOverlay(spec.key));
-        this._runtimeOverlayToggleRows.set(spec.key, {button, row, stateLabel});
+
+        const baseStyle = "padding: 0; border-radius: 6px; margin: 1px 4px; text-align: left;";
+        button.connect("notify::hover", () => {
+            if (button.hover && !supportMessage) {
+                button.set_style(`${baseStyle} background-color: #007AFF;`);
+                layout.set_style("padding: 6px 4px; spacing: 2px; border-radius: 6px;");
+                label.set_style("font-size: 13px; color: white;");
+                checkIcon.set_style(`icon-size: 14px; color: ${visible ? "white" : "transparent"};`);
+            } else {
+                button.set_style(`${baseStyle} background-color: transparent;`);
+                layout.set_style("padding: 6px 4px; spacing: 2px; border-radius: 6px;");
+                label.set_style(`font-size: 13px; color: ${supportMessage ? "rgba(255,255,255,0.72)" : "#f1f1f3"};`);
+                checkIcon.set_style(`icon-size: 14px; color: ${!supportMessage && visible ? "#007AFF" : "transparent"};`);
+            }
+        });
+
+        this._runtimeOverlayToggleRows.set(spec.key, {button, layout, label, messageLabel, checkIcon, infoButton});
         return button;
     }
 
     _toggleRuntimeOverlay(key) {
+        if (getRuntimeOverlaySupportMessage(this._sessionState, key))
+            return;
+
         const nextVisible = !getRuntimeOverlayVisibility(this._sessionState, key);
         if (!setRuntimeOverlayVisibility(this._sessionState, key, nextVisible))
             return;
@@ -386,20 +479,40 @@ export class ControlsUi {
 
     _refreshRuntimeOverlayToggleRows() {
         for (const [key, row] of this._runtimeOverlayToggleRows.entries()) {
+            const supportMessage = getRuntimeOverlaySupportMessage(this._sessionState, key);
             const visible = getRuntimeOverlayVisibility(this._sessionState, key);
-            row.stateLabel.text = visible ? "On" : "Off";
-            row.stateLabel.set_style([
-                "font-size: 12px;",
-                "font-weight: 800;",
-                `color: ${visible ? "rgb(115, 227, 163)" : "rgba(255, 255, 255, 0.56)"};`,
-            ].join(" "));
-            row.row.set_style([
-                "padding: 10px 12px;",
-                "spacing: 10px;",
-                "border-radius: 16px;",
-                `background-color: ${visible ? "rgba(80, 180, 120, 0.16)" : "rgba(255, 255, 255, 0.05)"};`,
-                `border: 1px solid ${visible ? "rgba(115, 227, 163, 0.24)" : "rgba(255, 255, 255, 0.06)"};`,
-            ].join(" "));
+            const isHovered = row.button.hover;
+
+            if (isHovered && !supportMessage) {
+                row.button.set_style("padding: 0; border-radius: 6px; margin: 1px 4px; text-align: left; background-color: #007AFF;");
+                row.label.set_style("font-size: 13px; color: white;");
+                row.checkIcon.set_style(`icon-size: 14px; color: ${visible ? "white" : "transparent"};`);
+            } else {
+                row.button.set_style("padding: 0; border-radius: 6px; margin: 1px 4px; text-align: left; background-color: transparent;");
+                row.label.set_style(`font-size: 13px; color: ${supportMessage ? "rgba(255,255,255,0.72)" : "#f1f1f3"};`);
+                row.checkIcon.set_style(`icon-size: 14px; color: ${!supportMessage && visible ? "#007AFF" : "transparent"};`);
+            }
+
+            row.messageLabel.text = supportMessage;
+            row.messageLabel.visible = Boolean(supportMessage) && this._runtimeOverlayInfoExpanded.has(key);
+            row.button.reactive = !supportMessage;
+            row.button.can_focus = !supportMessage;
+
+            if (supportMessage) {
+                row.layout.set_style("padding: 6px 4px; spacing: 2px; border-radius: 6px; background-color: rgba(255,180,80,0.04); border: 1px solid rgba(255,210,120,0.08);");
+                if (row.infoButton) {
+                    row.infoButton.set_style([
+                        "width: 18px;",
+                        "height: 18px;",
+                        "padding: 0;",
+                        "border-radius: 9px;",
+                        `background-color: ${this._runtimeOverlayInfoExpanded.has(key) ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)"};`,
+                        "border: 1px solid rgba(255, 255, 255, 0.1);",
+                    ].join(" "));
+                }
+            } else {
+                row.layout.set_style("padding: 6px 4px; spacing: 2px; border-radius: 6px;");
+            }
         }
     }
 
@@ -504,6 +617,7 @@ export class ControlsUi {
         this._stopControlsTimer();
         this._controlsTimerSource = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
             this._updateTimerText();
+            updateRuntimeOverlaySnapshot(this._sessionState);
             return this._sessionState.controlsState ? GLib.SOURCE_CONTINUE : GLib.SOURCE_REMOVE;
         });
     }

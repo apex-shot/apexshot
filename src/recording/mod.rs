@@ -13,6 +13,7 @@ use crate::{
 };
 
 mod control_session;
+mod runtime_keystrokes;
 mod stop_overlay;
 use control_session::{RecordingControlCommand, RecordingControlServer};
 pub use stop_overlay::{
@@ -94,7 +95,7 @@ pub struct PreparedOverlayRecordingRequest {
     pub use_shell_controls: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RuntimeOverlaySnapshot {
     pub mic_visible: bool,
     pub speaker_visible: bool,
@@ -111,6 +112,8 @@ pub struct RuntimeOverlaySnapshot {
     pub click_style: u8,
     pub click_animate: bool,
     pub keystrokes_enabled: bool,
+    pub keystrokes_supported: bool,
+    pub keystrokes_support_message: String,
     pub key_size: f64,
     pub key_position: u8,
     pub key_appearance: u8,
@@ -1433,6 +1436,8 @@ pub fn prepare_overlay_recording_request(
         click_style: request.click_style,
         click_animate: request.click_animate,
         keystrokes_enabled: request.keystrokes,
+        keystrokes_supported: false,
+        keystrokes_support_message: "Not supported on GNOME Wayland yet".to_string(),
         key_size: request.key_size,
         key_position: request.key_position,
         key_appearance: request.key_appearance,
@@ -1569,7 +1574,7 @@ async fn run_recording_with_shell_controls(
     let controls_handle =
         crate::gnome_shell::show_recording_controls(&crate::gnome_shell::RecordingControlsSpec {
             dbus_dest: control_server.bus_name().to_string(),
-            session_id,
+            session_id: session_id.clone(),
             geometry: crate::gnome_shell::RecordingMaskGeometry {
                 x: params.capture_x,
                 y: params.capture_y,
@@ -1578,8 +1583,16 @@ async fn run_recording_with_shell_controls(
             },
             is_fullscreen: params.is_fullscreen,
             show_timer: params.show_timer,
-            runtime_overlay_snapshot,
+            runtime_overlay_snapshot: runtime_overlay_snapshot.clone(),
         })?;
+    let keystroke_forwarder = runtime_overlay_snapshot
+        .filter(|snapshot| snapshot.keystrokes_enabled && snapshot.keystrokes_supported)
+        .map(|snapshot| {
+            runtime_keystrokes::spawn_runtime_keystroke_forwarder(
+                session_id.clone(),
+                snapshot.key_filter.min(1),
+            )
+        });
 
     let final_outcome = loop {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -1603,6 +1616,9 @@ async fn run_recording_with_shell_controls(
 
     drop(controls_handle);
     drop(control_server);
+    if let Some(forwarder) = keystroke_forwarder {
+        forwarder.stop();
+    }
 
     Ok(final_outcome)
 }
@@ -1948,6 +1964,8 @@ mod tests {
                 click_style: 2,
                 click_animate: false,
                 keystrokes_enabled: true,
+                keystrokes_supported: false,
+                keystrokes_support_message: "Not supported on GNOME Wayland yet".to_string(),
                 key_size: 0.5,
                 key_position: 2,
                 key_appearance: 1,
