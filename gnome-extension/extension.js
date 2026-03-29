@@ -673,6 +673,7 @@ export default class ApexShotShellSupport {
     }
 
     enable() {
+        log("[apexshot] extension enable marker 2026-03-29T02:45Z");
         this._previewHelper.enable();
         this._maskService.enable();
     }

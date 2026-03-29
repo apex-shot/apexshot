@@ -43,3 +43,24 @@ runTest("reads the keystroke support message from the runtime snapshot", () => {
         "support message should come from the snapshot"
     );
 });
+
+runTest("parses webcam preview manifest path from the runtime snapshot", () => {
+    const session = createSessionState();
+    setControlsState(session, {
+        dbusDest: "org.apexshot.RecordingControl",
+        sessionId: "recording-webcam-preview",
+        rect: {x: 0, y: 0, width: 100, height: 100},
+        isFullscreen: false,
+        showTimer: true,
+        runtimeOverlaySnapshot: JSON.stringify({
+            webcam_enabled: true,
+            webcam_preview_manifest_path: "/tmp/apexshot-gnome-webcam-preview/recording-webcam-preview/manifest.json",
+        }),
+    }, 0);
+
+    assertEqual(
+        session.runtimeOverlaySnapshot.webcam_preview_manifest_path,
+        "/tmp/apexshot-gnome-webcam-preview/recording-webcam-preview/manifest.json",
+        "manifest path should be preserved for GNOME live webcam preview"
+    );
+});

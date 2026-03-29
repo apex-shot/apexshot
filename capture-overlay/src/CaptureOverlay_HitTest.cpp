@@ -61,6 +61,12 @@ void CaptureOverlay::confirmSelection()
 
 void CaptureOverlay::confirmRecordingSelection()
 {
+    stopWebcamCapture();
+    m_recordingToolsHidden = true;
+    m_hoveredRecordTile = RecordPanelTile::None;
+    update();
+    QApplication::processEvents();
+
     if (m_showCountdown && !m_countdownActive) {
         m_countdownActive = true;
         for (int remaining = 3; remaining > 0; --remaining) {

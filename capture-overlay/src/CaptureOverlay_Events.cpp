@@ -335,6 +335,11 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             return;
         case RecordPanelTile::Webcam:
             m_recWebcam = !m_recWebcam;
+            if (!m_recWebcam) {
+                stopWebcamCapture();
+            } else if (m_recordingPanelOpen && m_webcamDevice >= 0) {
+                startWebcamCapture();
+            }
             update();
             return;
         case RecordPanelTile::RecordVideo:
@@ -464,6 +469,8 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 m_captureIntent = CaptureIntent::Record;
                 m_recordingPanelOpen = true;
                 m_recordingToolsHidden = false;
+                if (m_recWebcam && m_webcamDevice >= 0)
+                    startWebcamCapture();
                 update();
                 return true;
             } else {
@@ -912,10 +919,13 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
             if (m_recordingToolsHidden) {
                 // Back to full recording panel
                 m_recordingToolsHidden = false;
+                if (m_recWebcam && m_webcamDevice >= 0)
+                    startWebcamCapture();
             } else {
                 // Close recording panel, restore normal capture mode
                 m_recordingPanelOpen = false;
                 m_captureIntent = CaptureIntent::Area;
+                stopWebcamCapture();
             }
             update();
             return;

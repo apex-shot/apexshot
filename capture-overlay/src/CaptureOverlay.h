@@ -123,7 +123,7 @@ public:
         m_recWebcam = v;
         if (!m_recWebcam) {
             stopWebcamCapture();
-        } else if (m_webcamDevice >= 0) {
+        } else if (m_recordingPanelOpen && m_webcamDevice >= 0) {
             startWebcamCapture();
         }
     }
@@ -142,10 +142,10 @@ public:
     void setInitialWebcamDevice(int v)
     {
         m_webcamDevice = v;
-        if (m_recWebcam && m_webcamDevice >= 0) {
-            startWebcamCapture();
-        } else if (m_webcamDevice < 0) {
+        if (m_webcamDevice < 0) {
             stopWebcamCapture();
+        } else if (m_recordingPanelOpen && m_recWebcam) {
+            startWebcamCapture();
         }
     }
     void setInitialWebcamRelX(double v) { m_webcamRelX = std::clamp(v, 0.0, 1.0); }

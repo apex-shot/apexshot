@@ -17,13 +17,20 @@ import {
     destroyRuntimeOverlays,
     updateRuntimeOverlaySnapshot,
 } from "./runtime-overlays.js";
+import {
+    createRuntimeOverlayHeaderStyle,
+    computeAdjacentPopupPosition,
+    createRuntimeOverlayMenuStyle,
+    createRuntimeOverlayRowStyles,
+    createWarningPopupStyle,
+} from "./controls-ui-layout.js";
 
 const CONTROLS_BAR_WIDTH = 280;
 const CONTROLS_BAR_HEIGHT = 48;
 const CONTROLS_MARGIN = 32;
 const CONTROLS_DOCK_SAFE = 72;
 const CONTROLS_GAP = 8;
-const RUNTIME_OVERLAY_MENU_WIDTH = 200;
+const RUNTIME_OVERLAY_MENU_WIDTH = 168;
 const RUNTIME_OVERLAY_MENU_GAP = 10;
 const RUNTIME_OVERLAY_MENU_MARGIN = 24;
 const RUNTIME_OVERLAY_TOGGLE_SPECS = Object.freeze([
@@ -45,7 +52,9 @@ export class ControlsUi {
         this._runtimeOverlayMenu = null;
         this._runtimeOverlayMenuButton = null;
         this._runtimeOverlayToggleRows = new Map();
-        this._runtimeOverlayInfoExpanded = new Set();
+        this._warningPopup = null;
+        this._warningPopupAnchor = null;
+        this._warningPopupTimeout = null;
     }
 
     showControls(spec) {
@@ -72,13 +81,13 @@ export class ControlsUi {
     hideControls() {
         this._stopControlsTimer();
         this._hideRuntimeOverlayMenu();
+        this._hideWarningPopup();
         destroyRuntimeOverlays(this._sessionState);
         clearControlsState(this._sessionState);
         this._timerLabel = null;
         this._pauseIcon = null;
         this._runtimeOverlayMenuButton = null;
         this._runtimeOverlayToggleRows.clear();
-        this._runtimeOverlayInfoExpanded.clear();
 
         if (!this._controlsChrome)
             return;
@@ -102,6 +111,7 @@ export class ControlsUi {
         );
         this._controlsChrome.set_position(x, y);
         this._positionRuntimeOverlayMenu();
+        this._positionWarningPopup();
         updateRuntimeOverlaySnapshot(this._sessionState);
     }
 
@@ -311,20 +321,12 @@ export class ControlsUi {
             reactive: true,
             can_focus: true,
             track_hover: true,
-            style: [
-                `width: ${RUNTIME_OVERLAY_MENU_WIDTH}px;`,
-                "background-color: rgba(30, 30, 30, 0.92);",
-                "border: 1px solid rgba(255, 255, 255, 0.16);",
-                "border-radius: 12px;",
-                "padding: 8px 4px;",
-                "spacing: 0;",
-                "box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);",
-            ].join(" "),
+            style: createRuntimeOverlayMenuStyle(RUNTIME_OVERLAY_MENU_WIDTH),
         }), "controls.overlay-menu");
 
         menu.add_child(new St.Label({
             text: "OVERLAYS",
-            style: "padding: 8px 14px 4px 14px; font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 0.43); letter-spacing: 0.2px;",
+            style: createRuntimeOverlayHeaderStyle(),
         }));
 
         this._runtimeOverlayToggleRows.clear();
@@ -354,55 +356,120 @@ export class ControlsUi {
         this._runtimeOverlayMenu.destroy();
         this._runtimeOverlayMenu = null;
         this._runtimeOverlayToggleRows.clear();
-        this._runtimeOverlayInfoExpanded.clear();
+    }
+
+    _showWarningPopup(message, nearButton) {
+        this._hideWarningPopup();
+
+        const popup = registerSelfOwnedActor(this._sessionState, new St.BoxLayout({
+            vertical: true,
+            reactive: false,
+            style: createWarningPopupStyle(),
+        }), "controls.warning-popup");
+
+        popup.add_child(new St.Label({
+            text: message,
+            style: "font-size: 12px; color: #F1F1F3; text-align: left;",
+        }));
+
+        this._warningPopup = popup;
+        this._warningPopupAnchor = nearButton;
+        Main.layoutManager.addChrome(this._warningPopup, {
+            affectsInputRegion: false,
+            trackFullscreen: false,
+        });
+        this._warningPopup.show();
+        this._positionWarningPopup();
+
+        // Auto-hide after 4 seconds
+        this._warningPopupTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 4000, () => {
+            this._hideWarningPopup();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _hideWarningPopup() {
+        if (this._warningPopupTimeout) {
+            GLib.source_remove(this._warningPopupTimeout);
+            this._warningPopupTimeout = null;
+        }
+        if (this._warningPopup) {
+            if (this._warningPopup.get_parent())
+                Main.layoutManager.removeChrome(this._warningPopup);
+            this._warningPopup.destroy();
+            this._warningPopup = null;
+        }
+        this._warningPopupAnchor = null;
+    }
+
+    _positionWarningPopup() {
+        if (!this._warningPopup || !this._warningPopupAnchor)
+            return;
+
+        const controlsState = this._sessionState.controlsState;
+        if (!controlsState)
+            return;
+
+        const monitor = this._monitorForRect(controlsState.rect);
+        const anchorRect = this._actorRectOnStage(this._warningPopupAnchor);
+        if (!anchorRect)
+            return;
+        const [, popupWidth] = this._warningPopup.get_preferred_width(-1);
+        const [, popupHeight] = this._warningPopup.get_preferred_height(popupWidth);
+        const {x, y} = computeAdjacentPopupPosition({
+            anchorRect,
+            popupSize: {width: popupWidth, height: popupHeight},
+            monitor,
+            gap: 10,
+            margin: 10,
+        });
+
+        this._warningPopup.set_position(x, y);
     }
 
     _createRuntimeOverlayToggleRow(spec) {
         const visible = getRuntimeOverlayVisibility(this._sessionState, spec.key);
         const supportMessage = getRuntimeOverlaySupportMessage(this._sessionState, spec.key);
-        const infoExpanded = this._runtimeOverlayInfoExpanded.has(spec.key);
+        const rowStyles = createRuntimeOverlayRowStyles(Boolean(supportMessage));
 
         const button = registerSelfOwnedActor(this._sessionState, new St.Button({
-            reactive: !supportMessage,
-            can_focus: !supportMessage,
-            track_hover: !supportMessage,
-            style: [
-                "padding: 0;",
-                "border-radius: 6px;",
-                "margin: 1px 4px;",
-                "background-color: transparent;",
-                "text-align: left;",
-            ].join(" "),
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            x_expand: true,
+            style: rowStyles.button,
         }), `controls.overlay-toggle.${spec.key}`);
 
         const layout = new St.BoxLayout({
-            vertical: true,
+            vertical: false,
             reactive: false,
-            style: "padding: 6px 4px; spacing: 2px; border-radius: 6px;",
+            x_expand: rowStyles.layout.expandHorizontally,
+            style: rowStyles.layout.style,
         });
 
-        const mainRow = new St.BoxLayout({
+        const checkSlot = new St.BoxLayout({
             reactive: false,
-            style: "spacing: 6px;",
-            x_align: Clutter.ActorAlign.FILL,
-            x_expand: true,
+            width: rowStyles.checkSlot.width,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
         });
-        layout.add_child(mainRow);
 
         const checkIcon = new St.Icon({
             icon_name: "object-select-symbolic",
-            style: `icon-size: 14px; color: ${!supportMessage && visible ? "#007AFF" : "transparent"};`,
+            style: `icon-size: 14px; color: ${visible ? "#F1F1F3" : "transparent"};`,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        mainRow.add_child(checkIcon);
+        checkSlot.add_child(checkIcon);
+        layout.add_child(checkSlot);
 
         const label = new St.Label({
             text: spec.label,
+            x_expand: rowStyles.label.expandHorizontally,
+            x_align: Clutter.ActorAlign.START,
             y_align: Clutter.ActorAlign.CENTER,
-            x_expand: true,
-            style: "font-size: 13px; color: #f1f1f3;",
+            style: rowStyles.label.style,
         });
-        mainRow.add_child(label);
+        layout.add_child(label);
 
         let infoButton = null;
         if (supportMessage) {
@@ -411,12 +478,8 @@ export class ControlsUi {
                 can_focus: true,
                 track_hover: true,
                 style: [
-                    "width: 18px;",
-                    "height: 18px;",
-                    "padding: 0;",
-                    "border-radius: 9px;",
-                    "background-color: rgba(255, 255, 255, 0.06);",
-                    "border: 1px solid rgba(255, 255, 255, 0.1);",
+                    "margin-left: 4px;",
+                    rowStyles.infoButton,
                 ].join(" "),
             }), `controls.overlay-toggle-info.${spec.key}`);
             infoButton.set_child(new St.Label({
@@ -426,49 +489,41 @@ export class ControlsUi {
                 style: "font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 0.82);",
             }));
             infoButton.connect("clicked", () => {
-                if (this._runtimeOverlayInfoExpanded.has(spec.key))
-                    this._runtimeOverlayInfoExpanded.delete(spec.key);
-                else
-                    this._runtimeOverlayInfoExpanded.add(spec.key);
-                this._refreshRuntimeOverlayToggleRows();
+                this._showWarningPopup(supportMessage, infoButton);
             });
-            mainRow.add_child(infoButton);
+            layout.add_child(infoButton);
         }
 
-        const messageLabel = new St.Label({
-            text: supportMessage,
-            visible: Boolean(supportMessage) && infoExpanded,
-            style: "font-size: 11px; color: rgba(255, 255, 255, 0.52); padding-left: 20px;",
-            x_expand: true,
-        });
-        layout.add_child(messageLabel);
-
         button.set_child(layout);
-        button.connect("clicked", () => this._toggleRuntimeOverlay(spec.key));
 
-        const baseStyle = "padding: 0; border-radius: 6px; margin: 1px 4px; text-align: left;";
-        button.connect("notify::hover", () => {
-            if (button.hover && !supportMessage) {
-                button.set_style(`${baseStyle} background-color: #007AFF;`);
-                layout.set_style("padding: 6px 4px; spacing: 2px; border-radius: 6px;");
-                label.set_style("font-size: 13px; color: white;");
-                checkIcon.set_style(`icon-size: 14px; color: ${visible ? "white" : "transparent"};`);
+        // Handle click - toggle if no support message, show popup if there is one
+        button.connect("clicked", () => {
+            if (supportMessage) {
+                this._showWarningPopup(supportMessage, infoButton ?? button);
             } else {
-                button.set_style(`${baseStyle} background-color: transparent;`);
-                layout.set_style("padding: 6px 4px; spacing: 2px; border-radius: 6px;");
-                label.set_style(`font-size: 13px; color: ${supportMessage ? "rgba(255,255,255,0.72)" : "#f1f1f3"};`);
-                checkIcon.set_style(`icon-size: 14px; color: ${!supportMessage && visible ? "#007AFF" : "transparent"};`);
+                this._toggleRuntimeOverlay(spec.key);
             }
         });
 
-        this._runtimeOverlayToggleRows.set(spec.key, {button, layout, label, messageLabel, checkIcon, infoButton});
+        const baseStyle = rowStyles.baseButton;
+        button.connect("notify::hover", () => {
+            const currentVisible = getRuntimeOverlayVisibility(this._sessionState, spec.key);
+            if (button.hover) {
+                button.set_style(`${baseStyle} background-color: #007AFF;`);
+                label.set_style(rowStyles.label.hoverStyle);
+                checkIcon.set_style(`icon-size: 14px; color: ${currentVisible ? "white" : "transparent"};`);
+            } else {
+                button.set_style(`${baseStyle} background-color: transparent;`);
+                label.set_style(rowStyles.label.style);
+                checkIcon.set_style(`icon-size: 14px; color: ${currentVisible ? "#F1F1F3" : "transparent"};`);
+            }
+        });
+
+        this._runtimeOverlayToggleRows.set(spec.key, {button, layout, checkSlot, label, checkIcon, infoButton});
         return button;
     }
 
     _toggleRuntimeOverlay(key) {
-        if (getRuntimeOverlaySupportMessage(this._sessionState, key))
-            return;
-
         const nextVisible = !getRuntimeOverlayVisibility(this._sessionState, key);
         if (!setRuntimeOverlayVisibility(this._sessionState, key, nextVisible))
             return;
@@ -482,38 +537,31 @@ export class ControlsUi {
             const supportMessage = getRuntimeOverlaySupportMessage(this._sessionState, key);
             const visible = getRuntimeOverlayVisibility(this._sessionState, key);
             const isHovered = row.button.hover;
+            const rowStyles = createRuntimeOverlayRowStyles(Boolean(supportMessage));
 
-            if (isHovered && !supportMessage) {
-                row.button.set_style("padding: 0; border-radius: 6px; margin: 1px 4px; text-align: left; background-color: #007AFF;");
-                row.label.set_style("font-size: 13px; color: white;");
+            if (isHovered) {
+                row.button.set_style(`${rowStyles.baseButton} background-color: #007AFF;`);
+                row.label.set_style(rowStyles.label.hoverStyle);
                 row.checkIcon.set_style(`icon-size: 14px; color: ${visible ? "white" : "transparent"};`);
             } else {
-                row.button.set_style("padding: 0; border-radius: 6px; margin: 1px 4px; text-align: left; background-color: transparent;");
-                row.label.set_style(`font-size: 13px; color: ${supportMessage ? "rgba(255,255,255,0.72)" : "#f1f1f3"};`);
-                row.checkIcon.set_style(`icon-size: 14px; color: ${!supportMessage && visible ? "#007AFF" : "transparent"};`);
-            }
-
-            row.messageLabel.text = supportMessage;
-            row.messageLabel.visible = Boolean(supportMessage) && this._runtimeOverlayInfoExpanded.has(key);
-            row.button.reactive = !supportMessage;
-            row.button.can_focus = !supportMessage;
-
-            if (supportMessage) {
-                row.layout.set_style("padding: 6px 4px; spacing: 2px; border-radius: 6px; background-color: rgba(255,180,80,0.04); border: 1px solid rgba(255,210,120,0.08);");
-                if (row.infoButton) {
-                    row.infoButton.set_style([
-                        "width: 18px;",
-                        "height: 18px;",
-                        "padding: 0;",
-                        "border-radius: 9px;",
-                        `background-color: ${this._runtimeOverlayInfoExpanded.has(key) ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)"};`,
-                        "border: 1px solid rgba(255, 255, 255, 0.1);",
-                    ].join(" "));
-                }
-            } else {
-                row.layout.set_style("padding: 6px 4px; spacing: 2px; border-radius: 6px;");
+                row.button.set_style(`${rowStyles.baseButton} background-color: transparent;`);
+                row.label.set_style(rowStyles.label.style);
+                row.checkIcon.set_style(`icon-size: 14px; color: ${visible ? "#F1F1F3" : "transparent"};`);
             }
         }
+    }
+
+    _actorRectOnStage(actor) {
+        if (!actor)
+            return null;
+
+        const [x, y] = actor.get_transformed_position();
+        return {
+            x,
+            y,
+            width: actor.width,
+            height: actor.height,
+        };
     }
 
     _positionRuntimeOverlayMenu() {
