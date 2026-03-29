@@ -24,10 +24,11 @@ const OVERLAY_MARGIN = 10;
 const CLICK_INDICATOR_MARGIN = 18;
 const KEYSTROKE_INDICATOR_MARGIN = 18;
 const WEBCAM_SIZE_MAP = Object.freeze({
-    1: {width: 120, height: 160},
-    2: {width: 200, height: 260},
-    3: {width: 280, height: 370},
-    4: {width: 360, height: 480},
+    0: {width: 120, height: 160},  // Small
+    1: {width: 200, height: 260},  // Medium
+    2: {width: 280, height: 370},  // Large
+    3: {width: 360, height: 480},  // Huge
+    // 4 = Fullscreen: handled specially in webcamPreviewSize()
 });
 const CLICK_COLOR_MAP = Object.freeze({
     0: "rgb(180, 180, 180)",
@@ -47,8 +48,6 @@ function ensureRuntimeOverlayState(sessionState) {
             chrome: null,
             webcamActor: null,
             webcamFrameActor: null,
-            webcamLabelActor: null,
-            webcamBaseStyle: "",
             webcamFrameLoadSerial: 0,
             webcamFrameImageUri: "",
             webcamLastFramePath: "",
@@ -97,16 +96,9 @@ function createWebcamActor(sessionState, overlayState) {
         reactive: false,
         x_expand: true,
         y_expand: true,
+        clip_to_allocation: true,
     });
     actor.add_child(overlayState.webcamFrameActor);
-
-    overlayState.webcamLabelActor = new St.Label({
-        text: "Webcam",
-        x_align: Clutter.ActorAlign.START,
-        y_align: Clutter.ActorAlign.END,
-        style: "font-family: Sans; font-size: 10px; font-weight: 700; color: rgba(255, 255, 255, 120); margin: 0 8px 6px 8px;",
-    });
-    actor.add_child(overlayState.webcamLabelActor);
 
     actor.connect("button-press-event", (_actor, event) => {
         const controlsState = sessionState.controlsState;
@@ -212,9 +204,18 @@ function createKeystrokesActor(overlayState) {
 }
 
 function webcamPreviewSize(snapshot, rect) {
-    const base = WEBCAM_SIZE_MAP[snapshot.webcam_size] ?? WEBCAM_SIZE_MAP[2];
-    let width = base.width;
-    let height = base.height;
+    // Fullscreen (size 4) uses the recording rect dimensions
+    const isFullscreen = snapshot.webcam_size === 4;
+    let width, height;
+
+    if (isFullscreen) {
+        width = Math.max(1, rect.width - (2 * OVERLAY_MARGIN));
+        height = Math.max(1, rect.height - (2 * OVERLAY_MARGIN));
+    } else {
+        const base = WEBCAM_SIZE_MAP[snapshot.webcam_size] ?? WEBCAM_SIZE_MAP[1];
+        width = base.width;
+        height = base.height;
+    }
 
     switch (snapshot.webcam_shape) {
     case 0:
@@ -337,7 +338,7 @@ function applyWebcamPreviewFrame(overlayState, framePath) {
             content,
             width,
             height,
-            contentGravity: Clutter.ContentGravity.RESIZE_ASPECT,
+            contentGravity: Clutter.ContentGravity.RESIZE_ASPECT_FILL,
         });
         overlayState.webcamLastFramePath = framePath;
         
@@ -402,18 +403,21 @@ function updateWebcamActor(overlayState, snapshot, rect) {
 
     overlayState.webcamActor.set_size(size.width, size.height);
     overlayState.webcamActor.set_position(x, y);
-    overlayState.webcamFrameStyle = `border-radius: ${radius}px;`;
-    if (overlayState.webcamFrameActor)
-        overlayState.webcamFrameActor.set_style(overlayState.webcamFrameStyle);
-    overlayState.webcamBaseStyle = [
+
+    // Apply border radius with overflow:hidden to clip the frame content
+    if (overlayState.webcamFrameActor) {
+        overlayState.webcamFrameActor.set_style([
+            `border-radius: ${radius}px;`,
+            "overflow: hidden;",
+        ].join(" "));
+    }
+
+    // Apply border outline to main actor (matches C++: 1.5px white at 40/255 alpha ~16%)
+    overlayState.webcamActor.set_style([
         "background-color: transparent;",
         `border-radius: ${radius}px;`,
-    ].join(" ");
-    overlayState.webcamActor.set_style(overlayState.webcamBaseStyle);
-    const webcamLabel = snapshot.webcam_device >= 0
-        ? `Camera ${snapshot.webcam_device}`
-        : "Webcam";
-    overlayState.webcamLabelActor.text = webcamLabel;
+        "border: 1.5px solid rgba(255, 255, 255, 0.16);",
+    ].join(" "));
 
     ensureWebcamPreviewPolling({runtimeOverlaySnapshot: snapshot}, overlayState);
 }
@@ -663,7 +667,6 @@ export function destroyRuntimeOverlays(sessionState) {
     overlayState.chrome = null;
     overlayState.webcamActor = null;
     overlayState.webcamFrameActor = null;
-    overlayState.webcamLabelActor = null;
     overlayState.webcamFrameLoadSerial = 0;
     overlayState.webcamFrameImageUri = "";
     overlayState.webcamLastFramePath = "";
