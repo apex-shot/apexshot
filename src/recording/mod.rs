@@ -100,6 +100,7 @@ pub struct RuntimeOverlaySnapshot {
     pub mic_visible: bool,
     pub speaker_visible: bool,
     pub webcam_enabled: bool,
+    pub webcam_preview_manifest_path: String,
     pub webcam_rel_x: f64,
     pub webcam_rel_y: f64,
     pub webcam_size: u8,
@@ -137,6 +138,29 @@ struct WaylandSource {
     pipeline_source: String,
     crop: Option<CropMargins>,
     _session: RecordingPortalSession,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WebcamPreviewManifest {
+    session_id: String,
+    sequence: u64,
+    frame_path: String,
+    width: u32,
+    height: u32,
+    format: String,
+}
+
+#[derive(Debug)]
+struct WebcamPreviewTransport {
+    manifest_path: PathBuf,
+    frame_dir: PathBuf,
+}
+
+#[derive(Debug)]
+struct WebcamPreviewHandle {
+    stop_tx: std::sync::mpsc::Sender<()>,
+    join: Option<std::thread::JoinHandle<()>>,
+    transport: WebcamPreviewTransport,
 }
 
 #[derive(Debug)]
@@ -199,6 +223,263 @@ fn overlay_recording_output_dir(app_config: &AppConfig) -> PathBuf {
         PathBuf::from(&app_config.export_location)
     } else {
         dirs::video_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+}
+
+fn webcam_preview_runtime_root() -> PathBuf {
+    std::env::temp_dir().join("apexshot-gnome-webcam-preview")
+}
+
+fn webcam_preview_transport(session_id: &str) -> WebcamPreviewTransport {
+    let frame_dir = webcam_preview_runtime_root().join(session_id);
+    WebcamPreviewTransport {
+        manifest_path: frame_dir.join("manifest.json"),
+        frame_dir,
+    }
+}
+
+fn webcam_preview_device_path(device: i32) -> Option<String> {
+    (device >= 0).then(|| format!("/dev/video{device}"))
+}
+
+fn webcam_preview_pipeline(snapshot: &RuntimeOverlaySnapshot) -> Option<String> {
+    let device = webcam_preview_device_path(snapshot.webcam_device)?;
+    let flip_filter = if snapshot.webcam_flip {
+        " ! videoflip method=horizontal-flip"
+    } else {
+        ""
+    };
+
+    Some(format!(
+        "v4l2src device=\"{device}\" ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert{flip_filter} ! video/x-raw,format=BGRA ! appsink name=sink emit-signals=true sync=false drop=true max-buffers=1"
+    ))
+}
+
+fn write_webcam_preview_manifest(
+    transport: &WebcamPreviewTransport,
+    manifest: &WebcamPreviewManifest,
+) -> RecordResult<()> {
+    if let Some(parent) = transport.manifest_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let tmp_manifest = transport.manifest_path.with_extension("json.tmp");
+    let payload = serde_json::to_vec(manifest)
+        .map_err(|err| RecordError::GStreamerError(format!("Failed to encode webcam preview manifest: {err}")))?;
+    std::fs::write(&tmp_manifest, payload)?;
+    std::fs::rename(tmp_manifest, &transport.manifest_path)?;
+    Ok(())
+}
+
+fn encode_webcam_preview_frame(
+    sample: &gst::Sample,
+    frame_path: &std::path::Path,
+) -> RecordResult<(u32, u32)> {
+    let buffer = sample
+        .buffer()
+        .ok_or_else(|| RecordError::GStreamerError("No buffer in webcam preview sample".into()))?;
+    let map = buffer
+        .map_readable()
+        .map_err(|_| RecordError::GStreamerError("Failed to map webcam preview buffer".into()))?;
+    let caps = sample
+        .caps()
+        .ok_or_else(|| RecordError::GStreamerError("No caps in webcam preview sample".into()))?;
+    let structure = caps
+        .structure(0)
+        .ok_or_else(|| RecordError::GStreamerError("No structure in webcam preview caps".into()))?;
+    let format = structure
+        .get::<&str>("format")
+        .map_err(|_| RecordError::GStreamerError("Missing webcam preview format".into()))?;
+    let width = structure
+        .get::<i32>("width")
+        .map_err(|_| RecordError::GStreamerError("Missing webcam preview width".into()))?
+        as u32;
+    let height = structure
+        .get::<i32>("height")
+        .map_err(|_| RecordError::GStreamerError("Missing webcam preview height".into()))?
+        as u32;
+    
+    // Convert BGRA to RGBA
+    let mut rgba = map.as_slice().to_vec();
+    if format == "BGRA" {
+        for px in rgba.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+    } else if format != "RGBA" {
+        return Err(RecordError::GStreamerError(format!(
+            "Unsupported webcam preview format: {format}"
+        )));
+    }
+
+    let image = image::RgbaImage::from_raw(width, height, rgba)
+        .ok_or_else(|| RecordError::GStreamerError("Unexpected webcam preview frame shape".into()))?;
+    
+    // Use JPEG for faster encoding (much faster than PNG)
+    let mut output = std::fs::File::create(frame_path)
+        .map_err(|err| RecordError::GStreamerError(format!("Failed to create webcam preview frame: {err}")))?;
+    image
+        .write_to(&mut std::io::BufWriter::new(&mut output), image::ImageFormat::Jpeg)
+        .map_err(|err| RecordError::GStreamerError(format!("Failed to write webcam preview frame: {err}")))?;
+    Ok((width, height))
+}
+
+fn start_webcam_preview_transport(
+    session_id: &str,
+    snapshot: &RuntimeOverlaySnapshot,
+) -> Option<WebcamPreviewHandle> {
+    if !snapshot.webcam_enabled {
+        return None;
+    }
+
+    let pipeline_str = webcam_preview_pipeline(snapshot)?;
+    let transport = webcam_preview_transport(session_id);
+    let _ = std::fs::create_dir_all(&transport.frame_dir);
+    let _ = std::fs::remove_file(&transport.manifest_path);
+    eprintln!(
+        "[recording] webcam preview transport starting: session={} manifest={} pipeline={}",
+        session_id,
+        transport.manifest_path.display(),
+        pipeline_str
+    );
+
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+    let session_id = session_id.to_string();
+    let frame_dir = transport.frame_dir.clone();
+    let manifest_path = transport.manifest_path.clone();
+
+    let join = std::thread::spawn(move || {
+        if let Err(err) = gst::init() {
+            eprintln!("[recording] webcam preview gst init failed: {err}");
+            return;
+        }
+
+        let pipeline = match gst::parse::launch(&pipeline_str)
+            .map_err(|e| RecordError::GStreamerError(format!("Failed to parse webcam preview pipeline: {e}")))
+            .and_then(|element| {
+                element
+                    .downcast::<gst::Pipeline>()
+                    .map_err(|_| RecordError::GStreamerError("Failed to cast webcam preview pipeline".into()))
+            }) {
+            Ok(pipeline) => pipeline,
+            Err(err) => {
+                eprintln!("[recording] webcam preview pipeline setup failed: {err}");
+                return;
+            }
+        };
+
+        let appsink = match pipeline
+            .by_name("sink")
+            .ok_or_else(|| RecordError::GStreamerError("Webcam preview appsink not found".into()))
+            .and_then(|element| {
+                element
+                    .downcast::<gst_app::AppSink>()
+                    .map_err(|_| RecordError::GStreamerError("Failed to cast webcam preview appsink".into()))
+            }) {
+            Ok(appsink) => appsink,
+            Err(err) => {
+                eprintln!("[recording] webcam preview sink setup failed: {err}");
+                return;
+            }
+        };
+
+        if let Err(err) = pipeline.set_state(gst::State::Playing) {
+            eprintln!("[recording] webcam preview failed to start: {err}");
+            let _ = pipeline.set_state(gst::State::Null);
+            return;
+        }
+
+        let transport = WebcamPreviewTransport {
+            manifest_path,
+            frame_dir,
+        };
+        let bus = pipeline.bus();
+        let mut sequence = 0_u64;
+        let mut logged_first_frame = false;
+        loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+
+            if let Some(sample) = appsink.try_pull_sample(gst::ClockTime::from_mseconds(100)) {
+                sequence += 1;
+                let frame_path = transport.frame_dir.join(format!("frame-{sequence}.jpg"));
+                match encode_webcam_preview_frame(&sample, &frame_path) {
+                    Ok((width, height)) => {
+                        if let Err(err) = write_webcam_preview_manifest(
+                            &transport,
+                            &WebcamPreviewManifest {
+                                session_id: session_id.clone(),
+                                sequence,
+                                frame_path: frame_path.to_string_lossy().into_owned(),
+                                width,
+                                height,
+                                format: "jpeg".to_string(),
+                            },
+                        ) {
+                            eprintln!("[recording] webcam preview manifest write failed: {err}");
+                        }
+                        if !logged_first_frame {
+                            eprintln!(
+                                "[recording] webcam preview first frame published: session={} frame={} manifest={}",
+                                session_id,
+                                frame_path.display(),
+                                transport.manifest_path.display()
+                            );
+                            logged_first_frame = true;
+                        }
+                        if sequence > 2 {
+                            let old_path = transport.frame_dir.join(format!("frame-{}.jpg", sequence - 2));
+                            let _ = std::fs::remove_file(old_path);
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("[recording] webcam preview frame publish failed: {err}");
+                    }
+                }
+            } else if let Some(bus) = &bus {
+                for msg in bus.iter_timed(gst::ClockTime::ZERO) {
+                    use gst::MessageView;
+                    if let MessageView::Error(err) = msg.view() {
+                        eprintln!(
+                            "[recording] webcam preview bus error from {:?}: {}",
+                            err.src().map(|s| s.name()),
+                            err.error()
+                        );
+                        if let Some(debug) = err.debug() {
+                            eprintln!("[recording] webcam preview debug: {debug}");
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = pipeline.set_state(gst::State::Null);
+        eprintln!(
+            "[recording] webcam preview transport stopped: session={} manifest={}",
+            session_id,
+            transport.manifest_path.display()
+        );
+    });
+
+    Some(WebcamPreviewHandle {
+        stop_tx,
+        join: Some(join),
+        transport,
+    })
+}
+
+impl WebcamPreviewHandle {
+    fn manifest_path(&self) -> &std::path::Path {
+        &self.transport.manifest_path
+    }
+}
+
+impl Drop for WebcamPreviewHandle {
+    fn drop(&mut self) {
+        let _ = self.stop_tx.send(());
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
     }
 }
 
@@ -1424,6 +1705,7 @@ pub fn prepare_overlay_recording_request(
         mic_visible: request.mic,
         speaker_visible: request.speaker,
         webcam_enabled: request.webcam,
+        webcam_preview_manifest_path: String::new(),
         webcam_rel_x: request.webcam_rel_x,
         webcam_rel_y: request.webcam_rel_y,
         webcam_size: request.webcam_size,
@@ -1571,6 +1853,14 @@ async fn run_recording_with_shell_controls(
         chrono::Utc::now().timestamp_millis()
     );
     let control_server = RecordingControlServer::start(session_id.clone()).await?;
+    let mut runtime_overlay_snapshot = runtime_overlay_snapshot;
+    let webcam_preview = runtime_overlay_snapshot
+        .as_mut()
+        .and_then(|snapshot| {
+            let handle = start_webcam_preview_transport(&session_id, snapshot)?;
+            snapshot.webcam_preview_manifest_path = handle.manifest_path().to_string_lossy().into_owned();
+            Some(handle)
+        });
     let controls_handle =
         crate::gnome_shell::show_recording_controls(&crate::gnome_shell::RecordingControlsSpec {
             dbus_dest: control_server.bus_name().to_string(),
@@ -1616,6 +1906,7 @@ async fn run_recording_with_shell_controls(
 
     drop(controls_handle);
     drop(control_server);
+    drop(webcam_preview);
     if let Some(forwarder) = keystroke_forwarder {
         forwarder.stop();
     }
@@ -1661,7 +1952,12 @@ pub fn run_overlay_recording_request_with_gtk(
         None
     };
 
-    let shell_mask = if prepared.use_shell_mask {
+    dim_close.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Some(handle) = dim_handle {
+        let _ = handle.join();
+    }
+
+    let _shell_mask = if prepared.use_shell_mask {
         match crate::gnome_shell::show_recording_mask(crate::gnome_shell::geometry_from_request(
             &request,
         )) {
@@ -1674,11 +1970,6 @@ pub fn run_overlay_recording_request_with_gtk(
     } else {
         None
     };
-
-    dim_close.store(true, std::sync::atomic::Ordering::Relaxed);
-    if let Some(handle) = dim_handle {
-        let _ = handle.join();
-    }
 
     eprintln!("Starting recording to {:?}...", prepared.output_path);
 
@@ -1697,8 +1988,6 @@ pub fn run_overlay_recording_request_with_gtk(
             .map(|path| (path, StopAction::Save))
             .map_err(|err| anyhow::anyhow!("Recording failed: {err}"))
     };
-
-    drop(shell_mask);
 
     match outcome {
         Ok((path, StopAction::Discard)) => {
@@ -1952,6 +2241,7 @@ mod tests {
                 mic_visible: true,
                 speaker_visible: true,
                 webcam_enabled: true,
+                webcam_preview_manifest_path: String::new(),
                 webcam_rel_x: 0.61,
                 webcam_rel_y: 0.17,
                 webcam_size: 2,

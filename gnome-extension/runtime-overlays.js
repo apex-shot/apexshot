@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import GLib from "gi://GLib";
+import Gio from "gi://Gio";
 import St from "gi://St";
 import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {createKeystrokeOverlayModel} from "./keystroke-display.js";
+import {
+    createRenderableRuntimeOverlayVisibility,
+    hasRenderableRuntimeOverlays,
+} from "./runtime-overlays-visibility.js";
 import {
     createRuntimeOverlayVisibility,
     getRuntimeOverlayClickIndicator,
@@ -12,10 +17,10 @@ import {
     getRuntimeOverlaySupportMessage,
     isSelfOwnedActor,
     registerSelfOwnedActor,
+    setRuntimeOverlayWebcamPosition,
 } from "./session-state.js";
 
 const OVERLAY_MARGIN = 10;
-const AUDIO_INDICATORS_MARGIN = 14;
 const CLICK_INDICATOR_MARGIN = 18;
 const KEYSTROKE_INDICATOR_MARGIN = 18;
 const WEBCAM_SIZE_MAP = Object.freeze({
@@ -41,8 +46,20 @@ function ensureRuntimeOverlayState(sessionState) {
         sessionState.runtimeOverlayState = {
             chrome: null,
             webcamActor: null,
-            webcamIconActor: null,
+            webcamFrameActor: null,
             webcamLabelActor: null,
+            webcamBaseStyle: "",
+            webcamFrameLoadSerial: 0,
+            webcamFrameImageUri: "",
+            webcamLastFramePath: "",
+            webcamLastSequence: -1,
+            webcamPollSource: null,
+            webcamDragging: false,
+            webcamDragOffsetX: 0,
+            webcamDragOffsetY: 0,
+            webcamImageContent: null,
+            webcamFrameWidth: 0,
+            webcamFrameHeight: 0,
             clicksActor: null,
             clickPulseStackActor: null,
             clickPulseActor: null,
@@ -51,9 +68,6 @@ function ensureRuntimeOverlayState(sessionState) {
             lastAnimatedClickTimestampMs: -1,
             keystrokesActor: null,
             keystrokeLabelActor: null,
-            audioIndicatorsActor: null,
-            micIndicatorActor: null,
-            speakerIndicatorActor: null,
             visibility: createRuntimeOverlayVisibility(),
             keystrokeOverlay: createKeystrokeOverlayModel(),
             selfOwnedActors: new WeakSet(),
@@ -70,65 +84,80 @@ function ensureRuntimeOverlayState(sessionState) {
     return state;
 }
 
-function hasVisibleRuntimeOverlays(overlayState) {
-    const visibility = overlayState.visibility ?? createRuntimeOverlayVisibility();
-    return visibility.mic ||
-        visibility.speaker ||
-        visibility.webcam ||
-        visibility.clicks ||
-        visibility.keystrokes;
-}
+function createWebcamActor(sessionState, overlayState) {
+    const actor = new St.Widget({
+        reactive: true,
+        can_focus: false,
+        track_hover: true,
+        clip_to_allocation: true,
+        layout_manager: new Clutter.BinLayout(),
+    });
 
-function createChip(iconName, labelText, style) {
-    const chip = new St.BoxLayout({
+    overlayState.webcamFrameActor = new St.Widget({
         reactive: false,
-        style: [
-            "padding: 8px 12px;",
-            "spacing: 8px;",
-            "border-radius: 16px;",
-            style,
-        ].join(" "),
+        x_expand: true,
+        y_expand: true,
     });
-
-    chip.add_child(new St.Icon({
-        icon_name: iconName,
-        style: "icon-size: 15px;",
-        y_align: Clutter.ActorAlign.CENTER,
-    }));
-    chip.add_child(new St.Label({
-        text: labelText,
-        y_align: Clutter.ActorAlign.CENTER,
-        style: "font-size: 13px; font-weight: 700;",
-    }));
-    return chip;
-}
-
-function createWebcamActor(overlayState) {
-    const actor = new St.BoxLayout({
-        vertical: true,
-        reactive: false,
-        style: [
-            "background-color: rgba(8, 10, 18, 0.88);",
-            "border: 1px solid rgba(255, 255, 255, 0.18);",
-            "padding: 16px;",
-            "spacing: 10px;",
-            "box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);",
-        ].join(" "),
-    });
-
-    overlayState.webcamIconActor = new St.Icon({
-        icon_name: "camera-web-symbolic",
-        style: "icon-size: 42px; color: rgba(255, 255, 255, 0.9);",
-        x_align: Clutter.ActorAlign.CENTER,
-    });
-    actor.add_child(overlayState.webcamIconActor);
+    actor.add_child(overlayState.webcamFrameActor);
 
     overlayState.webcamLabelActor = new St.Label({
         text: "Webcam",
-        x_align: Clutter.ActorAlign.CENTER,
-        style: "font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.78);",
+        x_align: Clutter.ActorAlign.START,
+        y_align: Clutter.ActorAlign.END,
+        style: "font-family: Sans; font-size: 10px; font-weight: 700; color: rgba(255, 255, 255, 120); margin: 0 8px 6px 8px;",
     });
     actor.add_child(overlayState.webcamLabelActor);
+
+    actor.connect("button-press-event", (_actor, event) => {
+        const controlsState = sessionState.controlsState;
+        const snapshot = sessionState.runtimeOverlaySnapshot;
+        if (!controlsState || !snapshot)
+            return Clutter.EVENT_PROPAGATE;
+
+        const [stageX, stageY] = event.get_coords();
+        const [actorX, actorY] = actor.get_position();
+        overlayState.webcamDragging = true;
+        overlayState.webcamDragOffsetX = stageX - actorX;
+        overlayState.webcamDragOffsetY = stageY - actorY;
+        return Clutter.EVENT_STOP;
+    });
+
+    actor.connect("motion-event", (_actor, event) => {
+        if (!overlayState.webcamDragging)
+            return Clutter.EVENT_PROPAGATE;
+
+        const controlsState = sessionState.controlsState;
+        const snapshot = sessionState.runtimeOverlaySnapshot;
+        if (!controlsState || !snapshot)
+            return Clutter.EVENT_STOP;
+
+        const size = webcamPreviewSize(snapshot, controlsState.rect);
+        const [stageX, stageY] = event.get_coords();
+        const bounds = clampPlacement(
+            controlsState.rect,
+            stageX - overlayState.webcamDragOffsetX,
+            stageY - overlayState.webcamDragOffsetY,
+            size.width,
+            size.height,
+            OVERLAY_MARGIN
+        );
+        const minX = controlsState.rect.x + OVERLAY_MARGIN;
+        const maxX = Math.max(minX, controlsState.rect.x + controlsState.rect.width - size.width - OVERLAY_MARGIN);
+        const minY = controlsState.rect.y + OVERLAY_MARGIN;
+        const maxY = Math.max(minY, controlsState.rect.y + controlsState.rect.height - size.height - OVERLAY_MARGIN);
+        const relX = maxX > minX ? (bounds.x - minX) / (maxX - minX) : 0;
+        const relY = maxY > minY ? 1 - ((bounds.y - minY) / (maxY - minY)) : 0;
+        setRuntimeOverlayWebcamPosition(sessionState, relX, relY);
+        updateRuntimeOverlaySnapshot(sessionState);
+        return Clutter.EVENT_STOP;
+    });
+
+    const stopDragging = () => {
+        overlayState.webcamDragging = false;
+        return Clutter.EVENT_STOP;
+    };
+    actor.connect("button-release-event", stopDragging);
+    actor.connect("leave-event", () => Clutter.EVENT_PROPAGATE);
 
     return actor;
 }
@@ -182,30 +211,6 @@ function createKeystrokesActor(overlayState) {
     return actor;
 }
 
-function createAudioIndicatorsActor(overlayState) {
-    const actor = new St.BoxLayout({
-        reactive: false,
-        clip_to_allocation: true,
-        style: "spacing: 8px;",
-    });
-
-    overlayState.micIndicatorActor = createChip(
-        "audio-input-microphone-symbolic",
-        "Mic",
-        "background-color: rgba(26, 91, 60, 0.84); color: white;"
-    );
-    actor.add_child(overlayState.micIndicatorActor);
-
-    overlayState.speakerIndicatorActor = createChip(
-        "audio-volume-high-symbolic",
-        "Speaker",
-        "background-color: rgba(31, 59, 120, 0.84); color: white;"
-    );
-    actor.add_child(overlayState.speakerIndicatorActor);
-
-    return actor;
-}
-
 function webcamPreviewSize(snapshot, rect) {
     const base = WEBCAM_SIZE_MAP[snapshot.webcam_size] ?? WEBCAM_SIZE_MAP[2];
     let width = base.width;
@@ -242,7 +247,7 @@ function webcamBorderRadius(snapshot, width, height) {
     case 2:
         return 12;
     case 3:
-        return 18;
+        return 12;
     default:
         return 12;
     }
@@ -295,35 +300,96 @@ function updateChromeSize(overlayState) {
     overlayState.chrome?.set_size(global.stage.width, global.stage.height);
 }
 
-function updateAudioIndicators(overlayState, snapshot, rect) {
-    const showAudio = overlayState.visibility.mic || overlayState.visibility.speaker;
-    setActorVisible(overlayState.audioIndicatorsActor, showAudio);
-    setActorVisible(overlayState.micIndicatorActor, overlayState.visibility.mic);
-    setActorVisible(overlayState.speakerIndicatorActor, overlayState.visibility.speaker);
+function loadWebcamPreviewManifest(path) {
+    if (!path)
+        return null;
 
-    if (!showAudio)
+    try {
+        const [, bytes] = GLib.file_get_contents(path);
+        const text = new TextDecoder().decode(bytes);
+        const parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== "object")
+            return null;
+        if (typeof parsed.sequence !== "number" || typeof parsed.frame_path !== "string")
+            return null;
+        return parsed;
+    } catch (_) {
+        return null;
+    }
+}
+
+function applyWebcamPreviewFrame(overlayState, framePath) {
+    const file = Gio.File.new_for_path(framePath);
+    const width = Math.max(1, overlayState.webcamActor.width);
+    const height = Math.max(1, overlayState.webcamActor.height);
+    
+    const texture = St.TextureCache.get_default().load_file_async(file, -1, height, 1, 1);
+    texture.reactive = false;
+
+    const applyContent = () => {
+        if (!texture.content || !overlayState.webcamFrameActor) {
+            return;
+        }
+
+        // Transfer content to frame actor
+        const content = texture.content;
+        overlayState.webcamFrameActor.set({
+            content,
+            width,
+            height,
+            contentGravity: Clutter.ContentGravity.RESIZE_ASPECT,
+        });
+        overlayState.webcamLastFramePath = framePath;
+        
+        // Clear the temp texture's content so it doesn't destroy our content
+        texture.content = null;
+        texture.destroy();
+    };
+
+    if (texture.content) {
+        applyContent();
+    } else {
+        texture.connect("notify::content", applyContent);
+    }
+}
+
+function ensureWebcamPreviewPolling(sessionState, overlayState) {
+    if (overlayState.webcamPollSource != null)
         return;
 
-    const visibleCount = (overlayState.visibility.mic ? 1 : 0) + (overlayState.visibility.speaker ? 1 : 0);
-    const desiredWidth = visibleCount > 1 ? 180 : 86;
-    const desiredHeight = 34;
-    const bounds = clampPlacement(
-        rect,
-        rect.x + AUDIO_INDICATORS_MARGIN,
-        rect.y + AUDIO_INDICATORS_MARGIN,
-        desiredWidth,
-        desiredHeight,
-        AUDIO_INDICATORS_MARGIN
-    );
-    overlayState.audioIndicatorsActor.set_size(bounds.width, bounds.height);
-    overlayState.audioIndicatorsActor.set_position(bounds.x, bounds.y);
+    overlayState.webcamPollSource = GLib.timeout_add(GLib.PRIORITY_HIGH_IDLE, 33, () => {
+        const snapshot = sessionState.runtimeOverlaySnapshot;
+        if (!snapshot?.webcam_preview_manifest_path || !overlayState.webcamActor) {
+            overlayState.webcamPollSource = null;
+            return GLib.SOURCE_REMOVE;
+        }
+
+        const manifest = loadWebcamPreviewManifest(snapshot.webcam_preview_manifest_path);
+        if (manifest && manifest.sequence !== overlayState.webcamLastSequence) {
+            overlayState.webcamLastSequence = manifest.sequence;
+            try {
+                applyWebcamPreviewFrame(overlayState, manifest.frame_path);
+            } catch (error) {
+                logError(error, `[apexshot] webcam preview apply failed path=${manifest.frame_path}`);
+            }
+        }
+        return GLib.SOURCE_CONTINUE;
+    });
+}
+
+function stopWebcamPreviewPolling(overlayState) {
+    if (typeof overlayState.webcamPollSource === "number" && overlayState.webcamPollSource > 0)
+        GLib.source_remove(overlayState.webcamPollSource);
+    overlayState.webcamPollSource = null;
 }
 
 function updateWebcamActor(overlayState, snapshot, rect) {
-    const visible = overlayState.visibility.webcam;
+    const visible = createRenderableRuntimeOverlayVisibility(overlayState.visibility).webcam;
     setActorVisible(overlayState.webcamActor, visible);
-    if (!visible)
+    if (!visible) {
+        stopWebcamPreviewPolling(overlayState);
         return;
+    }
 
     const size = webcamPreviewSize(snapshot, rect);
     const radius = webcamBorderRadius(snapshot, size.width, size.height);
@@ -336,28 +402,24 @@ function updateWebcamActor(overlayState, snapshot, rect) {
 
     overlayState.webcamActor.set_size(size.width, size.height);
     overlayState.webcamActor.set_position(x, y);
-    overlayState.webcamActor.set_style([
-        "background-color: rgba(8, 10, 18, 0.88);",
-        "border: 1px solid rgba(255, 255, 255, 0.18);",
+    overlayState.webcamFrameStyle = `border-radius: ${radius}px;`;
+    if (overlayState.webcamFrameActor)
+        overlayState.webcamFrameActor.set_style(overlayState.webcamFrameStyle);
+    overlayState.webcamBaseStyle = [
+        "background-color: transparent;",
         `border-radius: ${radius}px;`,
-        "padding: 16px;",
-        "spacing: 10px;",
-        "box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);",
-    ].join(" "));
-    overlayState.webcamIconActor.set_style([
-        "icon-size: 42px;",
-        "color: rgba(255, 255, 255, 0.9);",
-    ].join(" "));
+    ].join(" ");
+    overlayState.webcamActor.set_style(overlayState.webcamBaseStyle);
     const webcamLabel = snapshot.webcam_device >= 0
         ? `Camera ${snapshot.webcam_device}`
         : "Webcam";
-    overlayState.webcamLabelActor.text = snapshot.webcam_flip
-        ? `${webcamLabel} mirrored`
-        : webcamLabel;
+    overlayState.webcamLabelActor.text = webcamLabel;
+
+    ensureWebcamPreviewPolling({runtimeOverlaySnapshot: snapshot}, overlayState);
 }
 
 function updateClicksActor(overlayState, snapshot, rect) {
-    const visible = overlayState.visibility.clicks;
+    const visible = createRenderableRuntimeOverlayVisibility(overlayState.visibility).clicks;
     const click = getRuntimeOverlayClickIndicator(
         {runtimeOverlayState: overlayState},
         Math.floor(GLib.get_monotonic_time() / 1000)
@@ -471,7 +533,7 @@ function updateClicksActor(overlayState, snapshot, rect) {
 }
 
 function updateKeystrokesActor(sessionState, overlayState, snapshot, rect) {
-    const visible = overlayState.visibility.keystrokes;
+    const visible = createRenderableRuntimeOverlayVisibility(overlayState.visibility).keystrokes;
     setActorVisible(overlayState.keystrokesActor, visible);
     if (!visible)
         return;
@@ -527,7 +589,7 @@ export function attachRuntimeOverlays(sessionState) {
         return null;
 
     const overlayState = ensureRuntimeOverlayState(sessionState);
-    if (!hasVisibleRuntimeOverlays(overlayState)) {
+    if (!hasRenderableRuntimeOverlays(overlayState.visibility)) {
         destroyRuntimeOverlays(sessionState);
         return null;
     }
@@ -541,21 +603,18 @@ export function attachRuntimeOverlays(sessionState) {
     });
     updateChromeSize(overlayState);
 
-    overlayState.webcamActor = createWebcamActor(overlayState);
+    overlayState.webcamActor = createWebcamActor(sessionState, overlayState);
     overlayState.clicksActor = createClicksActor(overlayState);
     overlayState.keystrokesActor = createKeystrokesActor(overlayState);
-    overlayState.audioIndicatorsActor = createAudioIndicatorsActor(overlayState);
 
     overlayState.chrome.add_child(overlayState.webcamActor);
     overlayState.chrome.add_child(overlayState.clicksActor);
     overlayState.chrome.add_child(overlayState.keystrokesActor);
-    overlayState.chrome.add_child(overlayState.audioIndicatorsActor);
 
     registerSelfOwnedActor(sessionState, overlayState.chrome, "runtime-overlay.chrome");
     registerSelfOwnedActor(sessionState, overlayState.webcamActor, "runtime-overlay.webcam");
     registerSelfOwnedActor(sessionState, overlayState.clicksActor, "runtime-overlay.clicks");
     registerSelfOwnedActor(sessionState, overlayState.keystrokesActor, "runtime-overlay.keystrokes");
-    registerSelfOwnedActor(sessionState, overlayState.audioIndicatorsActor, "runtime-overlay.audio");
 
     Main.layoutManager.addChrome(overlayState.chrome, {
         affectsInputRegion: false,
@@ -584,7 +643,6 @@ export function updateRuntimeOverlaySnapshot(sessionState) {
         return;
 
     updateChromeSize(overlayState);
-    updateAudioIndicators(overlayState, snapshot, rect);
     updateWebcamActor(overlayState, snapshot, rect);
     updateClicksActor(overlayState, snapshot, rect);
     updateKeystrokesActor(sessionState, overlayState, snapshot, rect);
@@ -595,6 +653,7 @@ export function destroyRuntimeOverlays(sessionState) {
         return;
 
     const overlayState = ensureRuntimeOverlayState(sessionState);
+    stopWebcamPreviewPolling(overlayState);
     if (overlayState.chrome) {
         if (overlayState.chrome.get_parent())
             Main.layoutManager.removeChrome(overlayState.chrome);
@@ -603,8 +662,12 @@ export function destroyRuntimeOverlays(sessionState) {
 
     overlayState.chrome = null;
     overlayState.webcamActor = null;
-    overlayState.webcamIconActor = null;
+    overlayState.webcamFrameActor = null;
     overlayState.webcamLabelActor = null;
+    overlayState.webcamFrameLoadSerial = 0;
+    overlayState.webcamFrameImageUri = "";
+    overlayState.webcamLastFramePath = "";
+    overlayState.webcamLastSequence = -1;
     overlayState.clicksActor = null;
     overlayState.clickPulseStackActor = null;
     overlayState.clickPulseActor = null;
@@ -612,9 +675,6 @@ export function destroyRuntimeOverlays(sessionState) {
     overlayState.clickLabelActor = null;
     overlayState.keystrokesActor = null;
     overlayState.keystrokeLabelActor = null;
-    overlayState.audioIndicatorsActor = null;
-    overlayState.micIndicatorActor = null;
-    overlayState.speakerIndicatorActor = null;
 }
 
 export function shouldExcludeOverlayEvent(sessionState, target) {

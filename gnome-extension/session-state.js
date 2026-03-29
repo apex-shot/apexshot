@@ -28,6 +28,7 @@ const DEFAULT_RUNTIME_OVERLAY_SNAPSHOT = Object.freeze({
     mic_visible: false,
     speaker_visible: false,
     webcam_enabled: false,
+    webcam_preview_manifest_path: "",
     webcam_rel_x: 0,
     webcam_rel_y: 0,
     webcam_size: 1,
@@ -201,6 +202,9 @@ export function parseRuntimeOverlaySnapshot(payload) {
         mic_visible: normalizeBoolean(parsed.mic_visible, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.mic_visible),
         speaker_visible: normalizeBoolean(parsed.speaker_visible, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.speaker_visible),
         webcam_enabled: normalizeBoolean(parsed.webcam_enabled, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.webcam_enabled),
+        webcam_preview_manifest_path: typeof parsed.webcam_preview_manifest_path === "string"
+            ? parsed.webcam_preview_manifest_path
+            : DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.webcam_preview_manifest_path,
         webcam_rel_x: normalizeNumber(parsed.webcam_rel_x, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.webcam_rel_x, 0, 1),
         webcam_rel_y: normalizeNumber(parsed.webcam_rel_y, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.webcam_rel_y, 0, 1),
         webcam_size: normalizeInteger(parsed.webcam_size, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.webcam_size, 0, 4),
@@ -255,6 +259,21 @@ export function setRuntimeOverlaySnapshot(sessionState, payload) {
         sessionState.controlsState.runtimeOverlaySnapshot = runtimeOverlaySnapshot;
     applyRuntimeOverlayVisibility(sessionState, runtimeOverlaySnapshot);
     return runtimeOverlaySnapshot;
+}
+
+export function setRuntimeOverlayWebcamPosition(sessionState, relX, relY) {
+    if (!sessionState?.runtimeOverlaySnapshot)
+        return null;
+
+    const nextSnapshot = Object.freeze({
+        ...sessionState.runtimeOverlaySnapshot,
+        webcam_rel_x: clamp(relX, 0, 1),
+        webcam_rel_y: clamp(relY, 0, 1),
+    });
+    sessionState.runtimeOverlaySnapshot = nextSnapshot;
+    if (sessionState.controlsState)
+        sessionState.controlsState.runtimeOverlaySnapshot = nextSnapshot;
+    return nextSnapshot;
 }
 
 export function setControlsState(sessionState, spec, runningStartMs) {

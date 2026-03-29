@@ -515,13 +515,13 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
     // ── Toolbar (hide when recording panel is open) ────────────────────────────
     if (!m_recordingPanelOpen) {
         drawToolbar(p, sx, sy, selW, selH, sw, sh);
-    } else {
+    } else if (!m_recordingToolsHidden) {
         // Draw recording panel inside selection
         drawRecordingPanel(p, sx, sy, selW, selH);
     }
 
     // ── Webcam preview ──────────────────────────────────────────────────────
-    if (m_recWebcam) {
+    if (m_recordingPanelOpen && m_recWebcam) {
         p.save();
         p.setRenderHint(QPainter::Antialiasing);
         const QRectF previewRect = webcamPreviewRect(sx, sy, selW, selH);
@@ -584,43 +584,28 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         drawKeystrokePreview(p, sx, sy, selW, selH);
     }
 
-    // ── Visible countdown overlay (Top Center Pill) ──────────────────────────
+    // ── Visible countdown overlay (Centered Circle) ──────────────────────────
     if (m_countdownActive && m_countdownValue > 0) {
-        const double pillW = 108.0;
-        const double pillH = 48.0;
-        const double pillX = (sw - pillW) / 2.0;
-        const double pillY = 40.0;
-        const QRectF pillRect(pillX, pillY, pillW, pillH);
+        const double bubbleSize = 184.0;
+        const double bubbleX = (sw - bubbleSize) / 2.0;
+        const double bubbleY = (sh - bubbleSize) / 2.0;
+        const QRectF bubbleRect(bubbleX, bubbleY, bubbleSize, bubbleSize);
 
         p.save();
         p.setRenderHint(QPainter::Antialiasing);
 
-        // Draw pill background
         p.setPen(Qt::NoPen);
-        p.setBrush(QColor(253, 76, 70)); // Vibrant Red/Orange matching screenshot
-        p.drawRoundedRect(pillRect, pillH / 2.0, pillH / 2.0);
+        p.setBrush(QColor(0, 0, 0, 240));
+        p.drawEllipse(bubbleRect);
 
-        // Draw timer icon
-        const double iconCX = pillX + 36.0;
-        const double iconCY = pillY + pillH / 2.0;
-
-        p.save();
-        p.setPen(QPen(QColor(255, 255, 255, 180), 2.2, Qt::SolidLine, Qt::RoundCap));
-        p.setBrush(Qt::NoBrush);
-        p.drawArc(QRectF(iconCX - 8.5, iconCY - 8.5, 17, 17), 50 * 16, 260 * 16);
-        p.drawLine(QPointF(iconCX, iconCY - 8.5), QPointF(iconCX, iconCY - 5.5));
-        p.drawLine(QPointF(iconCX, iconCY), QPointF(iconCX + 4.5, iconCY - 4.5)); // diagonal hand
-        p.restore();
-
-        // Draw countdown number
         QFont countdownFont(QStringLiteral("Sans"));
         countdownFont.setBold(true);
-        countdownFont.setPointSizeF(20);
+        countdownFont.setPointSizeF(72);
         p.setFont(countdownFont);
         p.setPen(Qt::white);
 
-        p.drawText(QRectF(pillX + 58, pillY, 40, pillH),
-                   Qt::AlignLeft | Qt::AlignVCenter,
+        p.drawText(bubbleRect,
+                   Qt::AlignCenter,
                    QString::number(m_countdownValue));
 
         p.restore();

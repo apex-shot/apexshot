@@ -263,8 +263,8 @@ void CaptureOverlay::showWebcamContextMenu(const QPoint& globalPos)
         // Camera device selection
         m_webcamDevice = chosen->data().toInt();
         if (!m_recWebcam) m_recWebcam = true;
-        startWebcamCapture();
+        if (m_recordingPanelOpen)
+            startWebcamCapture();
     }
     update();
 }
-
