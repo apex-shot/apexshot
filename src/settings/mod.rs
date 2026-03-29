@@ -135,7 +135,7 @@ fn build_settings_window(app: &Application) {
         ("camera-video-symbolic", "Recording"),
         ("camera-photo-symbolic", "Screenshots"),
         ("draw-freehand-symbolic", "Annotate"),
-        ("folder-cloud-symbolic", "Cloud"),
+        ("goa-panel-symbolic", "Cloud"),
         ("applications-system-symbolic", "Advanced"),
         ("help-about-symbolic", "About"),
     ];

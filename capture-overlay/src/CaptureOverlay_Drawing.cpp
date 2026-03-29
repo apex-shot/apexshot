@@ -1835,9 +1835,8 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         double cx = cell.x() + cell.width() / 2.0;
         bool hovered = (m_hoveredTool == i);
         bool active = (activeTool == i) || (i == 5 && timerToolActive);
-        bool enabled = (i != 5) || timerToolEnabled;
-        double iconAlpha = enabled ? ((hovered || active) ? 1.0 : 0.98) : 0.42;
-        double shadowAlpha = enabled ? (hovered ? 0.30 : (active ? 0.38 : 0.52)) : 0.22;
+        double iconAlpha = (hovered || active) ? 1.0 : 0.98;
+        double shadowAlpha = hovered ? 0.30 : (active ? 0.38 : 0.52);
         double iconY = layout.toolsPanel.y() + ((hovered || active) ? 15.5 : 16.0);
         QColor iconColor = active
             ? QColor(223, 241, 255, int(iconAlpha * 255))

@@ -140,7 +140,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     save_btn.set_focusable(false);
     save_btn.add_css_class("preview-pill-action");
     let (edit_btn, _) = icon_button("document-edit-symbolic", "Edit");
-    let (upload_btn, _) = icon_button("cloud-upload-symbolic", "Upload");
+    let (upload_btn, _) = icon_button("document-send-symbolic", "Upload");
 
     let top_controls = GtkBox::new(Orientation::Horizontal, 0);
     top_controls.add_css_class("preview-controls");
@@ -412,7 +412,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
 
         // Swap pin icon to reflect pinned state
         if now_pinned {
-            pin_icon.set_icon_name(Some("view-pinned-symbolic"));
+            pin_icon.set_icon_name(Some("starred-symbolic"));
         } else {
             pin_icon.set_icon_name(Some("view-pin-symbolic"));
         }
