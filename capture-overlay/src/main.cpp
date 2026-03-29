@@ -186,6 +186,7 @@ int main(int argc, char* argv[])
     bool areaInitMode = false;
     bool windowCaptureMode = false;
     bool recordControlsMode = false;
+    bool timerCaptureEnabled = false;
     QString backgroundPath;
     QString controlDbusDest;
     QString controlSessionId;
@@ -549,7 +550,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    CaptureOverlay overlay(background, nullptr, areaInitMode, initialMic, initialSpeaker);
+    CaptureOverlay overlay(background, nullptr, timerCaptureEnabled, initialMic, initialSpeaker);
     if (!restoreSel.isNull() && restoreSel.isValid()) {
         overlay.setInitialSelection(restoreSel);
     }

@@ -446,7 +446,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 return true;
             } else if (toolIndex == 5) {
                 if (!m_timerCaptureEnabled) {
-                    return true;
+                    m_timerCaptureEnabled = true;
                 }
                 if (!m_timerDelayActive) {
                     m_timerDelayActive = true;
