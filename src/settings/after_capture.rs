@@ -1,6 +1,7 @@
 use crate::config::AppConfig;
 use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, Grid, Label, Orientation, Separator};
 
+#[allow(dead_code)]
 pub struct AfterCaptureWidgets {
     pub wrapper: GtkBox,
     pub screenshot_after_capture_checks: Vec<CheckButton>,

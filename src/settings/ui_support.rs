@@ -6,7 +6,7 @@ pub fn install_settings_css() {
         let provider = CssProvider::new();
         provider.load_from_data(
             r#"
-            window,
+            /* Main settings window transparency for rounded corners */
             window.editor-window,
             .editor-window {
                 background-color: transparent;
@@ -263,6 +263,202 @@ pub fn install_settings_css() {
 
             .settings-select {
                 min-width: 220px;
+            }
+
+            .recording-tab-switcher {
+                background-color: alpha(white, 0.04);
+                border-radius: 9px;
+                padding: 4px;
+                border: 1px solid alpha(white, 0.08);
+            }
+
+            .recording-tab-button {
+                min-width: 90px;
+                min-height: 28px;
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+                color: alpha(white, 0.6);
+                font-size: 13px;
+                font-weight: 500;
+                box-shadow: none;
+                transition: all 0.2s;
+            }
+
+            .recording-tab-button:hover {
+                color: alpha(white, 0.9);
+                background-color: alpha(white, 0.05);
+            }
+
+            .recording-tab-button.active {
+                background-color: alpha(white, 0.1);
+                color: white;
+                box-shadow: 0 2px 4px alpha(black, 0.2);
+            }
+
+            .settings-action-button {
+                min-height: 24px;
+                padding: 2px 10px;
+                background-color: alpha(white, 0.08);
+                border-radius: 6px;
+                border: 1px solid alpha(white, 0.1);
+                font-size: 11px;
+                color: white;
+            }
+
+            .settings-action-button:hover {
+                background-color: alpha(white, 0.12);
+            }
+
+            .settings-sub-option-hint {
+                font-size: 11px;
+                opacity: 0.64;
+                line-height: 1.4;
+            }
+
+            .mode-preview-box {
+                background-color: alpha(white, 0.04);
+                border-radius: 10px;
+                border: 2px solid transparent;
+                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .mode-preview-box.active {
+                border-color: #4aa3ff;
+                background-color: alpha(#4aa3ff, 0.08);
+                box-shadow: 0 4px 12px alpha(black, 0.3);
+            }
+
+            .mode-icon-check {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+
+            .selection-mode-radio {
+                margin-right: 8px;
+            }
+
+            .shortcuts-header-title {
+                font-weight: bold;
+                font-size: 15px;
+            }
+
+            .shortcuts-row-zebra {
+                background-color: alpha(white, 0.04);
+            }
+
+            .shortcuts-label {
+                font-size: 13px;
+                opacity: 0.9;
+            }
+
+            .shortcuts-record-btn {
+                background-color: alpha(white, 0.06);
+                border: 1px solid alpha(white, 0.1);
+                border-radius: 8px;
+                color: alpha(white, 0.86);
+                font-family: monospace;
+                transition: all 0.2s;
+            }
+
+            .shortcuts-record-btn:hover {
+                background-color: alpha(white, 0.12);
+                border-color: alpha(white, 0.2);
+            }
+
+            .shortcuts-record-btn:active {
+                background-color: alpha(white, 0.2);
+            }
+
+            .secondary-settings-button {
+                background: none;
+                border: 1px solid alpha(white, 0.15);
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 12px;
+                transition: all 0.2s;
+            }
+
+            .secondary-settings-button:hover { background: #e5e5e5; }
+            .secondary-settings-button:active { background: #d5d5d5; }
+
+            /* FILENAME TAG PILLS */
+            .filename-tag-pill {
+                background-color: #d1e7ff;
+                color: #007aff;
+                border: none;
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-family: monospace;
+                font-weight: bold;
+                box-shadow: none;
+            }
+            .filename-tag-pill:hover {
+                background-color: #b9daff;
+            }
+
+            .format-palette-box {
+                background-color: alpha(@window_fg_color, 0.05); /* Adaptive gray */
+                border: 1px solid alpha(@window_fg_color, 0.1);
+                border-radius: 8px;
+                padding: 20px;
+            }
+
+            .format-entry {
+                background: @view_bg_color;
+                color: @view_fg_color;
+                border: 1px solid alpha(@window_fg_color, 0.2);
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 14px;
+            }
+
+            .modal-container {
+                background-color: @window_bg_color;
+                border-radius: 12px;
+            }
+
+            /* ABOUT TAB STYLES */
+            .about-app-name {
+                font-size: 24px;
+                font-weight: 800;
+                margin-bottom: 4px;
+            }
+            .about-version-label {
+                font-size: 13px;
+                opacity: 0.6;
+                margin-bottom: 24px;
+            }
+            .about-link-button {
+                background: transparent;
+                border: none;
+                color: @link_color;
+                font-size: 13px;
+                box-shadow: none;
+            }
+            .about-link-button:hover {
+                background: transparent;
+                text-decoration: underline;
+                color: shade(@link_color, 0.8);
+            }
+
+            .cloud-avatar {
+                background-color: #bb6d7a;
+                color: white;
+                border-radius: 50%;
+                font-size: 24px;
+                font-weight: bold;
+            }
+
+            .cloud-user-name {
+                font-weight: bold;
+                font-size: 16px;
+            }
+
+            .cloud-user-email {
+                font-size: 13px;
+                opacity: 0.6;
             }
             "#,
         );
