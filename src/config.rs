@@ -71,6 +71,71 @@ pub struct AppConfig {
     pub rec_webcam_rel_y: f64,
     pub rec_mic: bool,
     pub rec_speaker: bool,
+    // Quick Access settings
+    pub quick_access_position: String,
+    pub quick_access_multi_display: bool,
+    pub quick_access_overlay_size: f64,
+    pub quick_access_auto_close_enabled: bool,
+    pub quick_access_auto_close_action: String,
+    pub quick_access_auto_close_interval: u32,
+    pub quick_access_close_after_dragging: bool,
+    pub quick_access_close_after_uploading: bool,
+    // Screenshots tab settings
+    pub screenshot_format: String,
+    pub screenshot_retina_scale: bool,
+    pub screenshot_frame_border: bool,
+    pub screenshot_freeze_screen: bool,
+    pub screenshot_crosshair_mode: String,
+    pub screenshot_show_magnifier: bool,
+    pub screenshot_timer_interval: u32,
+    pub screenshot_show_cursor: bool,
+    // Annotate tab settings
+    pub annotate_inverse_arrow: bool,
+    pub annotate_smooth_drawing: bool,
+    pub annotate_draw_shadow: bool,
+    pub annotate_auto_expand: bool,
+    pub annotate_show_color_names: bool,
+    pub annotate_always_on_top: bool,
+    pub annotate_show_dock_icon: bool,
+    // Wallpaper settings
+    pub wallpaper_mode: String,
+    pub wallpaper_dont_change_on_space: bool,
+    pub wallpaper_custom_path: String,
+    pub wallpaper_plain_color: String,
+    pub window_screenshot_mode: String,
+    pub window_screenshot_padding: f64,
+    pub window_screenshot_shadow: bool,
+    // Shortcut settings
+    pub shortcut_toggle_desktop_icons: String,
+    pub shortcut_open_file: String,
+    pub shortcut_open_from_clipboard: String,
+    pub shortcut_pin_to_screen: String,
+    pub shortcut_restore_recently_closed: String,
+    pub shortcut_toggle_overlays: String,
+    pub shortcut_capture_area: String,
+    pub shortcut_capture_previous_area: String,
+    pub shortcut_capture_fullscreen: String,
+    pub shortcut_capture_window: String,
+    pub shortcut_capture_menu: String,
+    // Cloud settings
+    pub cloud_screenshot_quality: String,
+    pub cloud_copy_to_clipboard: String,
+    pub cloud_show_recently_uploaded: bool,
+    pub cloud_ask_name_tags: bool,
+    pub cloud_user_name: String,
+    pub cloud_user_email: String,
+    pub cloud_pro_plan: bool,
+    // Advanced settings
+    pub adv_filename_pattern: String,
+    pub adv_ask_name_after_capture: bool,
+    pub adv_retina_suffix: bool,
+    pub adv_clipboard_mode: String,
+    pub adv_pinned_rounded_corners: bool,
+    pub adv_pinned_shadow: bool,
+    pub adv_pinned_border: bool,
+    pub adv_ocr_language: String,
+    pub adv_ocr_keep_line_breaks: bool,
+    pub adv_filename_use_utc: bool,
 }
 
 impl Default for AppConfig {
@@ -128,6 +193,64 @@ impl Default for AppConfig {
             rec_webcam_rel_y: 0.0,
             rec_mic: false,
             rec_speaker: false,
+            quick_access_position: "Left".to_string(),
+            quick_access_multi_display: true,
+            quick_access_overlay_size: 0.5,
+            quick_access_auto_close_enabled: false,
+            quick_access_auto_close_action: "Close".to_string(),
+            quick_access_auto_close_interval: 30,
+            quick_access_close_after_dragging: true,
+            quick_access_close_after_uploading: true,
+            screenshot_format: "PNG".to_string(),
+            screenshot_retina_scale: false,
+            screenshot_frame_border: false,
+            screenshot_freeze_screen: true,
+            screenshot_crosshair_mode: "Disabled".to_string(),
+            screenshot_show_magnifier: false,
+            screenshot_timer_interval: 5,
+            screenshot_show_cursor: true,
+            annotate_inverse_arrow: false,
+            annotate_smooth_drawing: true,
+            annotate_draw_shadow: true,
+            annotate_auto_expand: false,
+            annotate_show_color_names: false,
+            annotate_always_on_top: false,
+            annotate_show_dock_icon: true,
+            wallpaper_mode: "Desktop".to_string(),
+            wallpaper_dont_change_on_space: false,
+            wallpaper_custom_path: String::new(),
+            wallpaper_plain_color: "#b0c4de".to_string(), // LightSteelBlue from image
+            window_screenshot_mode: "Wallpaper".to_string(),
+            window_screenshot_padding: 0.5,
+            window_screenshot_shadow: true,
+            shortcut_toggle_desktop_icons: "Ctrl+Super+H".to_string(),
+            shortcut_open_file: String::new(),
+            shortcut_open_from_clipboard: String::new(),
+            shortcut_pin_to_screen: String::new(),
+            shortcut_restore_recently_closed: String::new(),
+            shortcut_toggle_overlays: String::new(),
+            shortcut_capture_area: "Shift+Super+4".to_string(),
+            shortcut_capture_previous_area: String::new(),
+            shortcut_capture_fullscreen: "Shift+Super+3".to_string(),
+            shortcut_capture_window: "Shift+Super+5".to_string(),
+            shortcut_capture_menu: String::new(),
+            cloud_screenshot_quality: "Optimized for sharing".to_string(),
+            cloud_copy_to_clipboard: "CleanShot Cloud link".to_string(),
+            cloud_show_recently_uploaded: true,
+            cloud_ask_name_tags: false,
+            cloud_user_name: "Paweł Magiera".to_string(),
+            cloud_user_email: "pawel@magiera.me".to_string(),
+            cloud_pro_plan: true,
+            adv_filename_pattern: "CleanShot {Date} at {Time}".to_string(),
+            adv_ask_name_after_capture: false,
+            adv_retina_suffix: true,
+            adv_clipboard_mode: "File & Image (default)".to_string(),
+            adv_pinned_rounded_corners: true,
+            adv_pinned_shadow: true,
+            adv_pinned_border: true,
+            adv_ocr_language: "English".to_string(),
+            adv_ocr_keep_line_breaks: true,
+            adv_filename_use_utc: false,
         }
     }
 }
@@ -164,6 +287,32 @@ impl AppConfig {
         self.rec_webcam_shape = self.rec_webcam_shape.min(3);
         self.rec_webcam_rel_x = self.rec_webcam_rel_x.clamp(0.0, 1.0);
         self.rec_webcam_rel_y = self.rec_webcam_rel_y.clamp(0.0, 1.0);
+        self.quick_access_overlay_size = self.quick_access_overlay_size.clamp(0.0, 1.0);
+        self.quick_access_position = match self.quick_access_position.as_str() {
+            "Left" | "Right" | "Top" | "Bottom" => self.quick_access_position,
+            _ => "Left".to_string(),
+        };
+        self.quick_access_auto_close_action = match self.quick_access_auto_close_action.as_str() {
+            "Close" | "Hide" => self.quick_access_auto_close_action,
+            _ => "Close".to_string(),
+        };
+        self.screenshot_format = match self.screenshot_format.as_str() {
+            "PNG" | "JPEG" | "WebP" => self.screenshot_format,
+            _ => "PNG".to_string(),
+        };
+        self.screenshot_crosshair_mode = match self.screenshot_crosshair_mode.as_str() {
+            "Disabled" | "Crosshair" | "Magnifier" => self.screenshot_crosshair_mode,
+            _ => "Disabled".to_string(),
+        };
+        self.wallpaper_mode = match self.wallpaper_mode.as_str() {
+            "Desktop" | "Custom" | "Color" => self.wallpaper_mode,
+            _ => "Desktop".to_string(),
+        };
+        self.window_screenshot_mode = match self.window_screenshot_mode.as_str() {
+            "Wallpaper" | "Transparent" => self.window_screenshot_mode,
+            _ => "Wallpaper".to_string(),
+        };
+        self.window_screenshot_padding = self.window_screenshot_padding.clamp(0.0, 1.0);
         self
     }
 }

@@ -3,6 +3,7 @@ use gtk4::{
     prelude::*, Align, Box as GtkBox, Button, CheckButton, Entry, Grid, Label, Orientation,
 };
 
+#[allow(dead_code)]
 pub struct StorageSettingsWidgets {
     pub wrapper: GtkBox,
     pub export_location_entry: Entry,
@@ -10,6 +11,7 @@ pub struct StorageSettingsWidgets {
     pub hide_desktop_icons_check: CheckButton,
 }
 
+#[allow(dead_code)]
 pub fn build_storage_section(config: &AppConfig) -> StorageSettingsWidgets {
     let secondary_wrapper = GtkBox::new(Orientation::Vertical, 0);
     secondary_wrapper.set_halign(Align::Center);

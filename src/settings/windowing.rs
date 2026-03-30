@@ -1,6 +1,8 @@
 use gtk4::{gdk, prelude::*, EventControllerMotion, GestureClick};
 
+#[allow(dead_code)]
 pub const SETTINGS_WINDOW_MIN_WIDTH: i32 = 920;
+#[allow(dead_code)]
 pub const SETTINGS_WINDOW_MIN_HEIGHT: i32 = 760;
 const SETTINGS_WINDOW_EDGE_RESIZE_MARGIN: f64 = 8.0;
 
@@ -102,6 +104,7 @@ pub fn prefers_reduced_transparency() -> bool {
     false
 }
 
+#[allow(dead_code)]
 fn autostart_dir() -> anyhow::Result<std::path::PathBuf> {
     let config_home = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
@@ -112,6 +115,7 @@ fn autostart_dir() -> anyhow::Result<std::path::PathBuf> {
     Ok(config_home.join("autostart"))
 }
 
+#[allow(dead_code)]
 pub fn install_autostart_entry_for_current_exe() -> anyhow::Result<std::path::PathBuf> {
     let autostart_dir = autostart_dir()?;
     std::fs::create_dir_all(&autostart_dir)?;
@@ -141,6 +145,7 @@ pub fn install_autostart_entry_for_current_exe() -> anyhow::Result<std::path::Pa
     Ok(desktop_path)
 }
 
+#[allow(dead_code)]
 pub fn uninstall_autostart_entry() -> anyhow::Result<()> {
     let desktop_path = autostart_dir()?.join("apexshot-daemon.desktop");
     match std::fs::remove_file(&desktop_path) {
