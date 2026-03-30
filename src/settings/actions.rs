@@ -1,6 +1,6 @@
 use crate::config::{save_config, AppConfig};
 use gtk4::prelude::*;
-use gtk4::{Button, CheckButton, ColorButton, ComboBoxText, Scale};
+use gtk4::{Button, CheckButton, ColorButton, ComboBoxText, Entry, Scale};
 
 #[allow(dead_code)]
 pub struct SaveInputs {
@@ -8,6 +8,8 @@ pub struct SaveInputs {
     pub play_sounds: CheckButton,
     pub shutter_sound: ComboBoxText,
     pub show_menu_bar_icon: CheckButton,
+    pub export_location: Entry,
+    pub hide_desktop_icons: CheckButton,
     pub screenshot_quick_access: CheckButton,
     pub screenshot_copy_to_clipboard: CheckButton,
     pub screenshot_save: CheckButton,
@@ -80,14 +82,38 @@ pub fn install_checkbox_behaviors(
         shutter_sound_input_toggle.set_sensitive(check.is_active());
     });
 
-    let q1 = screenshot_copy_to_clipboard_check.clone();
-    let q2 = screenshot_save_check.clone();
-    let q3 = screenshot_open_annotate_check.clone();
+    let screenshot_open_annotate_toggle = screenshot_open_annotate_check.clone();
     screenshot_quick_access_check.connect_toggled(move |check| {
+        if check.is_active() {
+            screenshot_open_annotate_toggle.set_active(false);
+        }
+    });
+
+    let screenshot_quick_access_toggle = screenshot_quick_access_check.clone();
+    screenshot_open_annotate_check.connect_toggled(move |check| {
+        if check.is_active() {
+            screenshot_quick_access_toggle.set_active(false);
+        }
+    });
+
+    screenshot_copy_to_clipboard_check.set_sensitive(screenshot_save_check.is_active());
+    let screenshot_copy_to_clipboard_toggle_for_save = screenshot_copy_to_clipboard_check.clone();
+    screenshot_save_check.connect_toggled(move |check| {
         let active = check.is_active();
-        q1.set_sensitive(active);
-        q2.set_sensitive(active);
-        q3.set_sensitive(active);
+        screenshot_copy_to_clipboard_toggle_for_save.set_sensitive(active);
+        if !active {
+            screenshot_copy_to_clipboard_toggle_for_save.set_active(false);
+        }
+    });
+
+    screenshot_open_annotate_check.set_sensitive(screenshot_save_check.is_active());
+    let screenshot_open_annotate_toggle_for_save = screenshot_open_annotate_check.clone();
+    screenshot_save_check.connect_toggled(move |check| {
+        let active = check.is_active();
+        screenshot_open_annotate_toggle_for_save.set_sensitive(active);
+        if !active {
+            screenshot_open_annotate_toggle_for_save.set_active(false);
+        }
     });
 
     let a1 = quick_access_auto_close_action_input.clone();
@@ -114,13 +140,16 @@ pub fn save_settings(inputs: &SaveInputs, mut config: AppConfig) -> anyhow::Resu
         .unwrap_or_else(|| "Default".into())
         .to_string();
     config.show_menu_bar_icon = inputs.show_menu_bar_icon.is_active();
+    config.export_location = inputs.export_location.text().to_string();
+    config.hide_desktop_icons_while_capturing = inputs.hide_desktop_icons.is_active();
 
     config.after_capture_show_quick_access = inputs.screenshot_quick_access.is_active();
     config.after_capture_copy_file_to_clipboard = inputs.screenshot_copy_to_clipboard.is_active();
     config.after_capture_save = inputs.screenshot_save.is_active();
     config.after_capture_open_annotate = inputs.screenshot_open_annotate.is_active();
 
-    config.quick_access_auto_close_interval = if inputs.quick_access_auto_close_enabled.is_active() {
+    config.quick_access_auto_close_interval = if inputs.quick_access_auto_close_enabled.is_active()
+    {
         inputs
             .quick_access_auto_close_interval
             .active_id()
