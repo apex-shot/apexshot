@@ -1,7 +1,7 @@
 use crate::config::load_config;
 use gtk4::{
-    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
-    Image, Label, Orientation, ScrolledWindow,
+    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, FileChooserAction,
+    FileChooserNative, Image, Label, Orientation, ResponseType, ScrolledWindow, Separator,
 };
 
 mod about;
@@ -17,16 +17,17 @@ mod screenshots;
 mod shortcuts;
 mod storage;
 mod ui_support;
-mod windowing;
 mod wallpaper;
+mod windowing;
 
 use self::{
     actions::{install_checkbox_behaviors, save_settings, SaveInputs},
     after_capture::build_after_capture_section,
+    annotate::build_annotate_section,
     general::build_general_section,
     quick_access::build_quick_access_section,
     screenshots::build_screenshots_section,
-    annotate::build_annotate_section,
+    storage::build_storage_section,
     ui_support::{install_settings_css, traffic_light_button},
     windowing::{
         install_edge_resize, install_window_drag, prefers_dark_glass_theme,
@@ -80,15 +81,15 @@ fn build_settings_window(app: &Application) {
     left_box.set_halign(Align::Start);
     left_box.add_css_class("editor-toolbar-left");
 
-    let close_btn = traffic_light_button("close", "Close");
+    let close_btn = traffic_light_button("traffic-light-red", "Close");
     let win_clone = window.clone();
     close_btn.connect_clicked(move |_| win_clone.close());
 
-    let min_btn = traffic_light_button("minimize", "Minimize");
+    let min_btn = traffic_light_button("traffic-light-yellow", "Minimize");
     let win_clone = window.clone();
     min_btn.connect_clicked(move |_| win_clone.minimize());
 
-    let max_btn = traffic_light_button("maximize", "Maximize");
+    let max_btn = traffic_light_button("traffic-light-green", "Maximize");
 
     left_box.append(&close_btn);
     left_box.append(&min_btn);
@@ -97,9 +98,9 @@ fn build_settings_window(app: &Application) {
 
     let save_status = Label::new(None);
     save_status.add_css_class("settings-save-status");
-    let save_btn = Button::with_label("Save Changes");
-    save_btn.add_css_class("primary-settings-button");
-    
+    let save_btn = Button::with_label("Save");
+    save_btn.add_css_class("suggested-action");
+
     let right_box = GtkBox::new(Orientation::Horizontal, 12);
     right_box.set_hexpand(true);
     right_box.set_halign(Align::End);
@@ -115,20 +116,21 @@ fn build_settings_window(app: &Application) {
     install_edge_resize(&root_box, &window);
 
     // --- NAVIGATION ---
-    let nav_strip = GtkBox::new(Orientation::Horizontal, 0);
+    let nav_strip = GtkBox::new(Orientation::Horizontal, 18);
     nav_strip.add_css_class("settings-nav-strip");
-    nav_strip.set_halign(Align::Center);
+    nav_strip.set_halign(Align::Start);
+    nav_strip.set_hexpand(true);
 
     let labels = [
         ("General", "preferences-system-symbolic"),
-        ("Wallpaper", "folder-pictures-symbolic"),
+        ("Wallpaper", "image-x-generic-symbolic"),
         ("Shortcuts", "input-keyboard-symbolic"),
-        ("Quick Access", "view-list-symbolic"),
-        ("Recording", "media-record-symbolic"),
+        ("Quick Access", "starred-symbolic"),
+        ("Recording", "camera-video-symbolic"),
         ("Screenshots", "camera-photo-symbolic"),
-        ("Annotate", "content-loading-symbolic"),
-        ("Cloud", "folder-remote-symbolic"),
-        ("Advanced", "preferences-other-symbolic"),
+        ("Annotate", "draw-freehand-symbolic"),
+        ("Cloud", "goa-panel-symbolic"),
+        ("Advanced", "applications-system-symbolic"),
         ("About", "help-about-symbolic"),
     ];
 
@@ -136,32 +138,66 @@ fn build_settings_window(app: &Application) {
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.set_vexpand(true);
 
-    let mut nav_buttons = Vec::new();
+    let mut nav_items = Vec::new();
 
     for (i, (label_text, icon_name)) in labels.iter().enumerate() {
-        let btn = Button::builder()
-            .has_frame(false)
-            .build();
-        btn.add_css_class("settings-nav-item");
+        let item = GtkBox::new(Orientation::Vertical, 0);
+        item.add_css_class("settings-nav-item");
+        item.set_halign(Align::Center);
+        item.set_valign(Align::Start);
 
         let content = GtkBox::new(Orientation::Vertical, 4);
         let icon = Image::from_icon_name(icon_name);
         icon.add_css_class("settings-nav-icon");
+        icon.set_pixel_size(22);
+        icon.set_halign(Align::Center);
         let label = Label::new(Some(label_text));
         label.add_css_class("settings-nav-label");
+        label.set_halign(Align::Center);
 
         content.append(&icon);
         content.append(&label);
-        btn.set_child(Some(&content));
+        item.append(&content);
+
+        if i == 0 {
+            item.add_css_class("settings-nav-item-selected");
+            icon.add_css_class("settings-nav-icon-selected");
+            label.add_css_class("settings-nav-label-selected");
+        }
+
+        let motion = gtk4::EventControllerMotion::new();
+        {
+            let item = item.clone();
+            let icon = icon.clone();
+            let label = label.clone();
+            motion.connect_enter(move |_, _, _| {
+                item.add_css_class("settings-nav-item-hover");
+                icon.add_css_class("settings-nav-icon-hover");
+                label.add_css_class("settings-nav-label-hover");
+            });
+        }
+        {
+            let item = item.clone();
+            let icon = icon.clone();
+            let label = label.clone();
+            motion.connect_leave(move |_| {
+                item.remove_css_class("settings-nav-item-hover");
+                icon.remove_css_class("settings-nav-icon-hover");
+                label.remove_css_class("settings-nav-label-hover");
+            });
+        }
+        item.add_controller(motion);
 
         let s_clone = stack.clone();
         let idx_str = i.to_string();
-        btn.connect_clicked(move |_| {
+        let click = gtk4::GestureClick::new();
+        click.connect_released(move |_, _, _, _| {
             s_clone.set_visible_child_name(&idx_str);
         });
+        item.add_controller(click);
 
-        nav_strip.append(&btn);
-        nav_buttons.push(btn);
+        nav_strip.append(&item);
+        nav_items.push((item, icon, label));
     }
 
     root_box.append(&nav_strip);
@@ -173,6 +209,7 @@ fn build_settings_window(app: &Application) {
 
     // Build all sections
     let general = build_general_section(&config);
+    let storage = build_storage_section(&config);
     let after_capture = build_after_capture_section(&config);
     let recordings = recording::build_recording_section(&config);
     let screenshots = build_screenshots_section(&config);
@@ -183,6 +220,47 @@ fn build_settings_window(app: &Application) {
     let shortcuts = shortcuts::build_shortcuts_section(&config);
     let quick_access = build_quick_access_section(&config);
     let wallpaper = wallpaper::build_wallpaper_section(&config);
+
+    let general_separator = Separator::new(Orientation::Horizontal);
+    general_separator.set_margin_top(8);
+    general_separator.set_margin_bottom(8);
+    general_separator.set_hexpand(true);
+
+    let after_capture_separator = Separator::new(Orientation::Horizontal);
+    after_capture_separator.set_margin_top(8);
+    after_capture_separator.set_margin_bottom(8);
+    after_capture_separator.set_hexpand(true);
+
+    let export_location_entry_pick = storage.export_location_entry.clone();
+    let window_weak_picker = window.downgrade();
+    storage.export_location_browse.connect_clicked(move |_| {
+        let chooser = FileChooserNative::new(
+            Some("Select export location"),
+            window_weak_picker.upgrade().as_ref(),
+            FileChooserAction::SelectFolder,
+            Some("Select"),
+            Some("Cancel"),
+        );
+        let export_location_entry_pick = export_location_entry_pick.clone();
+        chooser.connect_response(move |dialog, response| {
+            if response == ResponseType::Accept {
+                if let Some(file) = dialog.file() {
+                    if let Some(path) = file.path() {
+                        export_location_entry_pick.set_text(&path.to_string_lossy());
+                    }
+                }
+            }
+            dialog.hide();
+        });
+        chooser.show();
+    });
+
+    let general_tab_section = GtkBox::new(Orientation::Vertical, 0);
+    general_tab_section.append(&general.section);
+    general_tab_section.append(&general_separator);
+    general_tab_section.append(&storage.wrapper);
+    general_tab_section.append(&after_capture_separator);
+    general_tab_section.append(&after_capture.wrapper);
 
     // Add them to stack
     fn add_section(stack: &gtk4::Stack, widget: &impl IsA<gtk4::Widget>, name: &str, title: &str) {
@@ -196,7 +274,7 @@ fn build_settings_window(app: &Application) {
         stack.add_titled(&scroller, Some(name), title);
     }
 
-    add_section(&stack, &general.section, "0", "General");
+    add_section(&stack, &general_tab_section, "0", "General");
     add_section(&stack, &wallpaper.section, "1", "Wallpaper");
     add_section(&stack, &shortcuts.section, "2", "Shortcuts");
     add_section(&stack, &quick_access.section, "3", "Quick Access");
@@ -210,22 +288,25 @@ fn build_settings_window(app: &Application) {
     body_frame.append(&stack);
 
     // Update nav selection on stack change
-    let nav_btns_clone = nav_buttons.clone();
+    let nav_items_clone = nav_items.clone();
     stack.connect_visible_child_name_notify(move |s| {
         if let Some(name) = s.visible_child_name() {
             if let Ok(idx) = name.parse::<usize>() {
-                for (i, btn) in nav_btns_clone.iter().enumerate() {
+                for (i, (item, icon, label)) in nav_items_clone.iter().enumerate() {
                     if i == idx {
-                        btn.add_css_class("settings-nav-item-selected");
+                        item.add_css_class("settings-nav-item-selected");
+                        icon.add_css_class("settings-nav-icon-selected");
+                        label.add_css_class("settings-nav-label-selected");
                     } else {
-                        btn.remove_css_class("settings-nav-item-selected");
+                        item.remove_css_class("settings-nav-item-selected");
+                        icon.remove_css_class("settings-nav-icon-selected");
+                        label.remove_css_class("settings-nav-label-selected");
                     }
                 }
             }
         }
     });
-    // Set initial
-    nav_buttons[0].add_css_class("settings-nav-item-selected");
+    stack.set_visible_child_name("0");
 
     root_box.append(&body_frame);
     window.set_child(Some(&root_box));
@@ -236,6 +317,8 @@ fn build_settings_window(app: &Application) {
         play_sounds: general.play_sounds_check.clone(),
         shutter_sound: general.shutter_sound_input.clone(),
         show_menu_bar_icon: general.show_icon_check.clone(),
+        export_location: storage.export_location_entry.clone(),
+        hide_desktop_icons: storage.hide_desktop_icons_check.clone(),
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),
@@ -288,7 +371,7 @@ fn build_settings_window(app: &Application) {
         adv_ocr_language: advanced.ocr_lang_input.clone(),
         adv_ocr_keep_line_breaks: advanced.ocr_line_breaks_check.clone(),
     };
-    
+
     let edit_btn = advanced.filename_edit_btn.clone();
     let win_weak = window.downgrade();
     let config_clone = config.clone();
