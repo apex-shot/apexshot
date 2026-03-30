@@ -264,8 +264,9 @@ fn write_webcam_preview_manifest(
     }
 
     let tmp_manifest = transport.manifest_path.with_extension("json.tmp");
-    let payload = serde_json::to_vec(manifest)
-        .map_err(|err| RecordError::GStreamerError(format!("Failed to encode webcam preview manifest: {err}")))?;
+    let payload = serde_json::to_vec(manifest).map_err(|err| {
+        RecordError::GStreamerError(format!("Failed to encode webcam preview manifest: {err}"))
+    })?;
     std::fs::write(&tmp_manifest, payload)?;
     std::fs::rename(tmp_manifest, &transport.manifest_path)?;
     Ok(())
@@ -298,7 +299,7 @@ fn encode_webcam_preview_frame(
         .get::<i32>("height")
         .map_err(|_| RecordError::GStreamerError("Missing webcam preview height".into()))?
         as u32;
-    
+
     // Convert BGRA to RGBA
     let mut rgba = map.as_slice().to_vec();
     if format == "BGRA" {
@@ -311,15 +312,22 @@ fn encode_webcam_preview_frame(
         )));
     }
 
-    let image = image::RgbaImage::from_raw(width, height, rgba)
-        .ok_or_else(|| RecordError::GStreamerError("Unexpected webcam preview frame shape".into()))?;
-    
+    let image = image::RgbaImage::from_raw(width, height, rgba).ok_or_else(|| {
+        RecordError::GStreamerError("Unexpected webcam preview frame shape".into())
+    })?;
+
     // Use JPEG for faster encoding (much faster than PNG)
-    let mut output = std::fs::File::create(frame_path)
-        .map_err(|err| RecordError::GStreamerError(format!("Failed to create webcam preview frame: {err}")))?;
+    let mut output = std::fs::File::create(frame_path).map_err(|err| {
+        RecordError::GStreamerError(format!("Failed to create webcam preview frame: {err}"))
+    })?;
     image
-        .write_to(&mut std::io::BufWriter::new(&mut output), image::ImageFormat::Jpeg)
-        .map_err(|err| RecordError::GStreamerError(format!("Failed to write webcam preview frame: {err}")))?;
+        .write_to(
+            &mut std::io::BufWriter::new(&mut output),
+            image::ImageFormat::Jpeg,
+        )
+        .map_err(|err| {
+            RecordError::GStreamerError(format!("Failed to write webcam preview frame: {err}"))
+        })?;
     Ok((width, height))
 }
 
@@ -354,11 +362,13 @@ fn start_webcam_preview_transport(
         }
 
         let pipeline = match gst::parse::launch(&pipeline_str)
-            .map_err(|e| RecordError::GStreamerError(format!("Failed to parse webcam preview pipeline: {e}")))
+            .map_err(|e| {
+                RecordError::GStreamerError(format!("Failed to parse webcam preview pipeline: {e}"))
+            })
             .and_then(|element| {
-                element
-                    .downcast::<gst::Pipeline>()
-                    .map_err(|_| RecordError::GStreamerError("Failed to cast webcam preview pipeline".into()))
+                element.downcast::<gst::Pipeline>().map_err(|_| {
+                    RecordError::GStreamerError("Failed to cast webcam preview pipeline".into())
+                })
             }) {
             Ok(pipeline) => pipeline,
             Err(err) => {
@@ -371,9 +381,9 @@ fn start_webcam_preview_transport(
             .by_name("sink")
             .ok_or_else(|| RecordError::GStreamerError("Webcam preview appsink not found".into()))
             .and_then(|element| {
-                element
-                    .downcast::<gst_app::AppSink>()
-                    .map_err(|_| RecordError::GStreamerError("Failed to cast webcam preview appsink".into()))
+                element.downcast::<gst_app::AppSink>().map_err(|_| {
+                    RecordError::GStreamerError("Failed to cast webcam preview appsink".into())
+                })
             }) {
             Ok(appsink) => appsink,
             Err(err) => {
@@ -428,7 +438,9 @@ fn start_webcam_preview_transport(
                             logged_first_frame = true;
                         }
                         if sequence > 2 {
-                            let old_path = transport.frame_dir.join(format!("frame-{}.jpg", sequence - 2));
+                            let old_path = transport
+                                .frame_dir
+                                .join(format!("frame-{}.jpg", sequence - 2));
                             let _ = std::fs::remove_file(old_path);
                         }
                     }
@@ -1854,13 +1866,12 @@ async fn run_recording_with_shell_controls(
     );
     let control_server = RecordingControlServer::start(session_id.clone()).await?;
     let mut runtime_overlay_snapshot = runtime_overlay_snapshot;
-    let webcam_preview = runtime_overlay_snapshot
-        .as_mut()
-        .and_then(|snapshot| {
-            let handle = start_webcam_preview_transport(&session_id, snapshot)?;
-            snapshot.webcam_preview_manifest_path = handle.manifest_path().to_string_lossy().into_owned();
-            Some(handle)
-        });
+    let webcam_preview = runtime_overlay_snapshot.as_mut().and_then(|snapshot| {
+        let handle = start_webcam_preview_transport(&session_id, snapshot)?;
+        snapshot.webcam_preview_manifest_path =
+            handle.manifest_path().to_string_lossy().into_owned();
+        Some(handle)
+    });
     let controls_handle =
         crate::gnome_shell::show_recording_controls(&crate::gnome_shell::RecordingControlsSpec {
             dbus_dest: control_server.bus_name().to_string(),

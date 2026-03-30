@@ -1,5 +1,8 @@
 use crate::config::AppConfig;
-use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation, Separator, Button, Entry, Window};
+use gtk4::{
+    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Grid, Label,
+    Orientation, Separator, Window,
+};
 
 #[allow(dead_code)]
 pub struct AdvancedSettingsWidgets {
@@ -28,8 +31,10 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     grid.set_hexpand(true);
 
     // Spacers for center-hugging
-    let l_spacer = GtkBox::new(Orientation::Horizontal, 0); l_spacer.set_hexpand(true);
-    let r_spacer = GtkBox::new(Orientation::Horizontal, 0); r_spacer.set_hexpand(true);
+    let l_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    l_spacer.set_hexpand(true);
+    let r_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    r_spacer.set_hexpand(true);
     grid.attach(&l_spacer, 0, 0, 1, 1);
     grid.attach(&r_spacer, 3, 0, 1, 1);
 
@@ -46,7 +51,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     let filename_edit_btn = Button::with_label("Edit");
     filename_edit_btn.add_css_class("secondary-settings-button");
     filename_edit_btn.set_halign(Align::Start);
-    
+
     grid.attach(&filename_label, 1, row, 1, 1);
     grid.attach(&filename_edit_btn, 2, row, 1, 1);
 
@@ -81,7 +86,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     clipboard_mode_input.append(Some("Image Only"), "Image Only");
     clipboard_mode_input.set_active_id(Some(&config.adv_clipboard_mode));
     clipboard_mode_input.set_halign(Align::Start);
-    
+
     grid.attach(&clipboard_label, 1, row, 1, 1);
     grid.attach(&clipboard_mode_input, 2, row, 1, 1);
 
@@ -214,7 +219,9 @@ pub fn show_filename_format_modal(parent: &impl IsA<Window>, config: &AppConfig)
     vbox.set_margin_top(24);
     vbox.set_margin_bottom(24);
 
-    let instr = Label::new(Some("Type text and drag elements to create a custom format:"));
+    let instr = Label::new(Some(
+        "Type text and drag elements to create a custom format:",
+    ));
     instr.set_xalign(0.0);
     vbox.append(&instr);
 
@@ -237,7 +244,7 @@ pub fn show_filename_format_modal(parent: &impl IsA<Window>, config: &AppConfig)
     palette_box.set_margin_top(10);
     palette_box.set_margin_bottom(10);
     palette_box.add_css_class("format-palette-box"); // Gray background box
-    
+
     let grid = Grid::new();
     grid.set_column_spacing(40);
     grid.set_row_spacing(12);
@@ -253,18 +260,23 @@ pub fn show_filename_format_modal(parent: &impl IsA<Window>, config: &AppConfig)
 
     let mut r = 0;
     for (l1, t1, l2, t2) in tags {
-        let lbl1 = Label::new(Some(l1)); lbl1.set_xalign(1.0);
-        let btn1 = Button::with_label(t1); btn1.add_css_class("filename-tag-pill");
+        let lbl1 = Label::new(Some(l1));
+        lbl1.set_xalign(1.0);
+        let btn1 = Button::with_label(t1);
+        btn1.add_css_class("filename-tag-pill");
         grid.attach(&lbl1, 0, r, 1, 1);
         grid.attach(&btn1, 1, r, 1, 1);
 
         if !l2.is_empty() {
-            let lbl2 = Label::new(Some(l2)); lbl2.set_xalign(1.0);
-            let btn2 = Button::with_label(t2); btn2.add_css_class("filename-tag-pill");
+            let lbl2 = Label::new(Some(l2));
+            lbl2.set_xalign(1.0);
+            let btn2 = Button::with_label(t2);
+            btn2.add_css_class("filename-tag-pill");
             grid.attach(&lbl2, 2, r, 1, 1);
             grid.attach(&btn2, 3, r, 1, 1);
-            
-            let e = entry.clone(); let t = t2.to_string();
+
+            let e = entry.clone();
+            let t = t2.to_string();
             btn2.connect_clicked(move |_| {
                 let pos = e.position();
                 let txt = e.text().to_string();
@@ -274,8 +286,9 @@ pub fn show_filename_format_modal(parent: &impl IsA<Window>, config: &AppConfig)
                 e.set_position(pos + t.len() as i32);
             });
         }
-        
-        let e = entry.clone(); let t = t1.to_string();
+
+        let e = entry.clone();
+        let t = t1.to_string();
         btn1.connect_clicked(move |_| {
             let pos = e.position();
             let txt = e.text().to_string();
@@ -304,7 +317,8 @@ pub fn show_filename_format_modal(parent: &impl IsA<Window>, config: &AppConfig)
     ok_btn.set_width_request(80);
 
     bottom_box.append(&restore_btn);
-    let spacer = GtkBox::new(Orientation::Horizontal, 0); spacer.set_hexpand(true);
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
     bottom_box.append(&spacer);
     bottom_box.append(&cancel_btn);
     bottom_box.append(&ok_btn);
