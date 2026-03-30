@@ -1,5 +1,8 @@
 use crate::config::AppConfig;
-use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation, Stack, Button, Scale, Popover};
+use gtk4::{
+    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Grid, Label, Orientation,
+    Popover, Scale, Stack,
+};
 
 #[allow(dead_code)]
 pub struct RecordingSettingsWidgets {
@@ -68,22 +71,34 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
 
     // --- Switcher Handlers ---
     let s_clone = stack.clone();
-    let bg = btn_general.clone(); let bv = btn_video.clone(); let bgif = btn_gif.clone();
+    let bg = btn_general.clone();
+    let bv = btn_video.clone();
+    let bgif = btn_gif.clone();
     btn_general.connect_clicked(move |_| {
         s_clone.set_visible_child_name("general");
-        bg.add_css_class("active"); bv.remove_css_class("active"); bgif.remove_css_class("active");
+        bg.add_css_class("active");
+        bv.remove_css_class("active");
+        bgif.remove_css_class("active");
     });
     let s_clone = stack.clone();
-    let bg = btn_general.clone(); let bv = btn_video.clone(); let bgif = btn_gif.clone();
+    let bg = btn_general.clone();
+    let bv = btn_video.clone();
+    let bgif = btn_gif.clone();
     btn_video.connect_clicked(move |_| {
         s_clone.set_visible_child_name("video");
-        bg.remove_css_class("active"); bv.add_css_class("active"); bgif.remove_css_class("active");
+        bg.remove_css_class("active");
+        bv.add_css_class("active");
+        bgif.remove_css_class("active");
     });
     let s_clone = stack.clone();
-    let bg = btn_general.clone(); let bv = btn_video.clone(); let bgif = btn_gif.clone();
+    let bg = btn_general.clone();
+    let bv = btn_video.clone();
+    let bgif = btn_gif.clone();
     btn_gif.connect_clicked(move |_| {
         s_clone.set_visible_child_name("gif");
-        bg.remove_css_class("active"); bv.remove_css_class("active"); bgif.add_css_class("active");
+        bg.remove_css_class("active");
+        bv.remove_css_class("active");
+        bgif.add_css_class("active");
     });
 
     // --- GENERAL TAB ---
@@ -91,8 +106,10 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     general_grid.set_hexpand(true);
     general_grid.set_row_spacing(24);
     general_grid.set_column_spacing(12);
-    let l_spacer = GtkBox::new(Orientation::Horizontal, 0); l_spacer.set_hexpand(true);
-    let r_spacer = GtkBox::new(Orientation::Horizontal, 0); r_spacer.set_hexpand(true);
+    let l_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    l_spacer.set_hexpand(true);
+    let r_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    r_spacer.set_hexpand(true);
     general_grid.attach(&l_spacer, 0, 0, 1, 1);
     general_grid.attach(&r_spacer, 4, 0, 1, 1);
 
@@ -170,7 +187,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     click_content.set_margin_bottom(12);
     click_content.set_margin_start(16);
     click_content.set_margin_end(16);
-    
+
     let rec_click_size_input = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.05);
     rec_click_size_input.set_value(config.rec_click_size);
     rec_click_size_input.set_size_request(120, -1);
@@ -180,7 +197,9 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     click_content.append(&size_box);
 
     let rec_click_color_input = ComboBoxText::new();
-    for c in ["Gray", "Indigo", "Red", "Blue", "Green", "Yellow", "Orange", "Purple", "White"] {
+    for c in [
+        "Gray", "Indigo", "Red", "Blue", "Green", "Yellow", "Orange", "Purple", "White",
+    ] {
         rec_click_color_input.append(Some(c), c);
     }
     rec_click_color_input.set_active(Some(config.rec_click_color as u32));
@@ -246,7 +265,14 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     key_content.append(&ksize_box);
 
     let rec_key_position_input = ComboBoxText::new();
-    for p in ["Bottom-Center", "Bottom-Left", "Bottom-Right", "Top-Center", "Top-Left", "Top-Right"] {
+    for p in [
+        "Bottom-Center",
+        "Bottom-Left",
+        "Bottom-Right",
+        "Top-Center",
+        "Top-Left",
+        "Top-Right",
+    ] {
         rec_key_position_input.append(Some(p), p);
     }
     rec_key_position_input.set_active(Some(config.rec_key_position as u32));
@@ -327,8 +353,10 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     video_grid.set_hexpand(true);
     video_grid.set_row_spacing(30);
     video_grid.set_column_spacing(12);
-    let l_spacer_v = GtkBox::new(Orientation::Horizontal, 0); l_spacer_v.set_hexpand(true);
-    let r_spacer_v = GtkBox::new(Orientation::Horizontal, 0); r_spacer_v.set_hexpand(true);
+    let l_spacer_v = GtkBox::new(Orientation::Horizontal, 0);
+    l_spacer_v.set_hexpand(true);
+    let r_spacer_v = GtkBox::new(Orientation::Horizontal, 0);
+    r_spacer_v.set_hexpand(true);
     video_grid.attach(&l_spacer_v, 0, 0, 1, 1);
     video_grid.attach(&r_spacer_v, 4, 0, 1, 1);
 
@@ -394,7 +422,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     editor_opt.set_xalign(0.0);
     video_grid.attach(&editor_cell, 2, vrow, 1, 1);
     video_grid.attach(&editor_opt, 3, vrow, 1, 1);
-    
+
     stack.add_named(&video_grid, Some("video"));
 
     // --- GIF TAB ---
@@ -402,8 +430,10 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     gif_grid.set_hexpand(true);
     gif_grid.set_row_spacing(30);
     gif_grid.set_column_spacing(12);
-    let l_spacer_g = GtkBox::new(Orientation::Horizontal, 0); l_spacer_g.set_hexpand(true);
-    let r_spacer_g = GtkBox::new(Orientation::Horizontal, 0); r_spacer_g.set_hexpand(true);
+    let l_spacer_g = GtkBox::new(Orientation::Horizontal, 0);
+    l_spacer_g.set_hexpand(true);
+    let r_spacer_g = GtkBox::new(Orientation::Horizontal, 0);
+    r_spacer_g.set_hexpand(true);
     gif_grid.attach(&l_spacer_g, 0, 0, 1, 1);
     gif_grid.attach(&r_spacer_g, 4, 0, 1, 1);
 
@@ -446,7 +476,12 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     gsize_label.set_xalign(1.0);
     let rec_gif_size_idx_input = ComboBoxText::new();
     rec_gif_size_idx_input.add_css_class("settings-select");
-    for (i, lbl) in [("0", "800 x auto (default)"), ("1", "640 x auto"), ("2", "480 x auto"), ("3", "Original")] {
+    for (i, lbl) in [
+        ("0", "800 x auto (default)"),
+        ("1", "640 x auto"),
+        ("2", "480 x auto"),
+        ("3", "Original"),
+    ] {
         rec_gif_size_idx_input.append(Some(i), lbl);
     }
     rec_gif_size_idx_input.set_active_id(Some(&config.rec_gif_size_idx.to_string()));

@@ -1,5 +1,8 @@
 use crate::config::AppConfig;
-use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation, Separator, Scale};
+use gtk4::{
+    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation, Scale,
+    Separator,
+};
 
 #[allow(dead_code)]
 pub struct QuickAccessSettingsWidgets {
@@ -40,7 +43,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     overlay_label.add_css_class("settings-group-title");
     overlay_label.set_xalign(1.0);
     overlay_label.set_size_request(165, -1);
-    
+
     // Position
     let position_input = ComboBoxText::new();
     position_input.add_css_class("settings-select");
@@ -127,10 +130,16 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     // Sub-option: Interval
     let auto_close_interval_input = ComboBoxText::new();
     auto_close_interval_input.add_css_class("settings-select");
-    for (id, lbl) in [("5", "5 Seconds"), ("10", "10 Seconds"), ("30", "30 Seconds"), ("60", "1 Minute")] {
+    for (id, lbl) in [
+        ("5", "5 Seconds"),
+        ("10", "10 Seconds"),
+        ("30", "30 Seconds"),
+        ("60", "1 Minute"),
+    ] {
         auto_close_interval_input.append(Some(id), lbl);
     }
-    auto_close_interval_input.set_active_id(Some(&config.quick_access_auto_close_interval.to_string()));
+    auto_close_interval_input
+        .set_active_id(Some(&config.quick_access_auto_close_interval.to_string()));
     auto_close_interval_input.set_halign(Align::Start);
     let interval_label = Label::new(Some("Interval"));
     interval_label.add_css_class("settings-sub-option");
@@ -152,7 +161,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     let behaviors_label = Label::new(Some("Behaviors:"));
     behaviors_label.add_css_class("settings-group-title");
     behaviors_label.set_xalign(1.0);
-    
+
     // Drag & Drop
     let close_after_dragging_check = CheckButton::new();
     close_after_dragging_check.set_active(config.quick_access_close_after_dragging);

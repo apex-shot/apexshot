@@ -1,5 +1,8 @@
 use crate::config::AppConfig;
-use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation, Separator};
+use gtk4::{
+    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation,
+    Separator,
+};
 
 #[allow(dead_code)]
 pub struct ScreenshotsSettingsWidgets {
@@ -159,7 +162,13 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     timer_label.set_xalign(1.0);
     let timer_interval_input = ComboBoxText::new();
     timer_interval_input.add_css_class("settings-select");
-    for (id, label) in [("0", "Off"), ("1", "1 Second"), ("3", "3 Seconds"), ("5", "5 Seconds"), ("10", "10 Seconds")] {
+    for (id, label) in [
+        ("0", "Off"),
+        ("1", "1 Second"),
+        ("3", "3 Seconds"),
+        ("5", "5 Seconds"),
+        ("10", "10 Seconds"),
+    ] {
         timer_interval_input.append(Some(id), label);
     }
     timer_interval_input.set_active_id(Some(&config.screenshot_timer_interval.to_string()));

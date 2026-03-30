@@ -1,5 +1,8 @@
 use crate::AppConfig;
-use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation, Separator, Button};
+use gtk4::{
+    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Grid, Label, Orientation,
+    Separator,
+};
 
 pub struct CloudSettingsWidgets {
     pub section: GtkBox,
@@ -20,8 +23,10 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     grid.set_hexpand(true);
 
     // Spacers for horizontal center alignment
-    let l_spacer = GtkBox::new(Orientation::Horizontal, 0); l_spacer.set_hexpand(true);
-    let r_spacer = GtkBox::new(Orientation::Horizontal, 0); r_spacer.set_hexpand(true);
+    let l_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    l_spacer.set_hexpand(true);
+    let r_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    r_spacer.set_hexpand(true);
     grid.attach(&l_spacer, 0, 0, 1, 1);
     grid.attach(&r_spacer, 3, 0, 1, 1);
 
@@ -34,7 +39,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     avatar_lbl.set_size_request(64, 64);
     avatar_lbl.set_halign(Align::End);
     avatar_lbl.set_valign(Align::Center);
-    
+
     let profile_info_box = GtkBox::new(Orientation::Horizontal, 16);
     let info_text_vbox = GtkBox::new(Orientation::Vertical, 2);
     let name_lbl = Label::new(Some(&config.cloud_user_name));
@@ -69,7 +74,11 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     row += 1;
     // --- 2. PLAN ROW ---
     let plan_info_vbox = GtkBox::new(Orientation::Vertical, 2);
-    let plan_title = Label::new(Some(if config.cloud_pro_plan { "Pro plan" } else { "Free plan" }));
+    let plan_title = Label::new(Some(if config.cloud_pro_plan {
+        "Pro plan"
+    } else {
+        "Free plan"
+    }));
     plan_title.add_css_class("shortcuts-header-title"); // Bold
     plan_title.set_xalign(1.0);
     let plan_sub = Label::new(Some("Unlimited storage"));
@@ -94,14 +103,14 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
 
     row += 1;
     // --- 3. SETTINGS ROWS ---
-    
+
     // Quality
     let quality_label = Label::new(Some("Screenshot quality:"));
     quality_label.add_css_class("settings-group-title");
     quality_label.set_xalign(1.0);
     quality_label.set_halign(Align::End);
     label_group.add_widget(&quality_label);
-    
+
     let quality_vbox = GtkBox::new(Orientation::Vertical, 6);
     quality_vbox.set_halign(Align::Start);
     let cloud_quality_input = ComboBoxText::new();
@@ -109,7 +118,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     cloud_quality_input.append(Some("Optimized for sharing"), "Optimized for sharing");
     cloud_quality_input.append(Some("Full quality"), "Full quality");
     cloud_quality_input.set_active_id(Some(&config.cloud_screenshot_quality));
-    
+
     let quality_hint = Label::new(Some("The \"Optimized for sharing\" option offers perfect\nbalance between quality and loading time."));
     quality_hint.add_css_class("settings-sub-option-hint");
     quality_hint.set_xalign(0.0);
@@ -126,13 +135,13 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     clipboard_label.set_xalign(1.0);
     clipboard_label.set_halign(Align::End);
     label_group.add_widget(&clipboard_label);
-    
+
     let cloud_clipboard_input = ComboBoxText::new();
     cloud_clipboard_input.set_halign(Align::Start);
     cloud_clipboard_input.append(Some("CleanShot Cloud link"), "CleanShot Cloud link");
     cloud_clipboard_input.append(Some("Direct image link"), "Direct image link");
     cloud_clipboard_input.set_active_id(Some(&config.cloud_copy_to_clipboard));
-    
+
     grid.attach(&clipboard_label, 1, row, 1, 1);
     grid.attach(&cloud_clipboard_input, 2, row, 1, 1);
 
@@ -143,11 +152,11 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     menu_bar_label.set_xalign(1.0);
     menu_bar_label.set_halign(Align::End);
     label_group.add_widget(&menu_bar_label);
-    
+
     let cloud_show_recent_check = CheckButton::with_label("Show recently uploaded media");
     cloud_show_recent_check.set_halign(Align::Start);
     cloud_show_recent_check.set_active(config.cloud_show_recently_uploaded);
-    
+
     grid.attach(&menu_bar_label, 1, row, 1, 1);
     grid.attach(&cloud_show_recent_check, 2, row, 1, 1);
 
@@ -158,11 +167,11 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     tags_label.set_xalign(1.0);
     tags_label.set_halign(Align::End);
     label_group.add_widget(&tags_label);
-    
+
     let cloud_ask_tags_check = CheckButton::with_label("Ask for name and tags every upload");
     cloud_ask_tags_check.set_halign(Align::Start);
     cloud_ask_tags_check.set_active(config.cloud_ask_name_tags);
-    
+
     grid.attach(&tags_label, 1, row, 1, 1);
     grid.attach(&cloud_ask_tags_check, 2, row, 1, 1);
 
