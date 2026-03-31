@@ -1085,6 +1085,8 @@ impl EditorState {
         let Some(action) = self.actions.get_mut(action_index) else {
             return;
         };
+        let iw = self.base_image.width() as f64;
+        let ih = self.base_image.height() as f64;
         if let AnnotationAction::Arrow {
             control_points: Some(handles),
             start,
@@ -1093,38 +1095,49 @@ impl EditorState {
         } = action
         {
             if handles.len() >= 3 {
+                let clamp_point = |mut point: Point| {
+                    point.x = point.x.max(0.0).min(iw);
+                    point.y = point.y.max(0.0).min(ih);
+                    point
+                };
                 match index {
                     0 => {
-                        *start = new_pos;
-                        handles[0] = new_pos;
+                        let clamped = clamp_point(new_pos);
+                        *start = clamped;
+                        handles[0] = clamped;
+                        handles[1] = clamp_point(handles[1]);
                     }
                     1 => {
                         // new_pos is the desired on-curve midpoint B(0.5).
                         // Invert: P1 = 2*B(0.5) - 0.5*P0 - 0.5*P2
-                        let iw = self.working_image.width() as f64;
-                        let ih = self.working_image.height() as f64;
-                        handles[1] = Point {
-                            x: (2.0 * new_pos.x - 0.5 * handles[0].x - 0.5 * handles[2].x)
-                                .clamp(0.0, iw),
-                            y: (2.0 * new_pos.y - 0.5 * handles[0].y - 0.5 * handles[2].y)
-                                .clamp(0.0, ih),
-                        };
+                        handles[1] = clamp_point(Point {
+                            x: 2.0 * new_pos.x - 0.5 * handles[0].x - 0.5 * handles[2].x,
+                            y: 2.0 * new_pos.y - 0.5 * handles[0].y - 0.5 * handles[2].y,
+                        });
                     }
                     2 => {
-                        *end = new_pos;
-                        handles[2] = new_pos;
+                        let clamped = clamp_point(new_pos);
+                        *end = clamped;
+                        handles[2] = clamped;
+                        handles[1] = clamp_point(handles[1]);
                     }
                     _ => {}
                 }
             } else {
                 match index {
                     0 => {
-                        *start = new_pos;
-                        handles[0] = new_pos;
+                        let mut clamped = new_pos;
+                        clamped.x = clamped.x.max(0.0).min(iw);
+                        clamped.y = clamped.y.max(0.0).min(ih);
+                        *start = clamped;
+                        handles[0] = clamped;
                     }
                     1 => {
-                        *end = new_pos;
-                        handles[1] = new_pos;
+                        let mut clamped = new_pos;
+                        clamped.x = clamped.x.max(0.0).min(iw);
+                        clamped.y = clamped.y.max(0.0).min(ih);
+                        *end = clamped;
+                        handles[1] = clamped;
                     }
                     _ => {}
                 }
@@ -1135,6 +1148,14 @@ impl EditorState {
     pub fn finalize_arrow_control_editing(&mut self) {
         self.arrow_editing_controls = false;
         self.arrow_control_dragging = None;
+    }
+
+    pub fn finalize_arrow_interaction_cleanup(&mut self) {
+        self.clear_drag_without_rebuild();
+        self.arrow_editing_controls = self
+            .selected_action_index
+            .and_then(|index| self.actions.get(index))
+            .is_some_and(|action| matches!(action, AnnotationAction::Arrow { .. }));
     }
 
     pub fn current_obfuscate_amount(&self) -> f64 {
@@ -2271,49 +2292,79 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
             start,
             end,
             control_points,
+            stroke_size,
             ..
         } => {
             let iw = img_w as f64;
             let ih = img_h as f64;
-            // Collect all defining points so we can shift the whole shape as a unit
-            let mut all_pts: Vec<&mut crate::capture::editor::types::Point> = Vec::new();
-            all_pts.push(start);
-            all_pts.push(end);
-            if let Some(cps) = control_points.as_mut() {
-                for cp in cps.iter_mut() {
-                    all_pts.push(cp);
+            // Account for stroke width — the arrow's visual bounds extend
+            // beyond the curve centerline by roughly half the stroke size.
+            let margin = *stroke_size * 0.5;
+            // Compute the actual visual bounds of the arrow including Bezier
+            // curve extrema, not just the endpoints. A quadratic Bezier can
+            // bulge well beyond its start/end points.
+            let mut min_x = start.x.min(end.x);
+            let mut max_x = start.x.max(end.x);
+            let mut min_y = start.y.min(end.y);
+            let mut max_y = start.y.max(end.y);
+
+            if let Some(cps) = control_points.as_ref() {
+                if cps.len() >= 3 {
+                    let p0 = *start;
+                    let p1 = cps[1]; // middle control point
+                    let p2 = *end;
+                    // Quadratic Bezier extrema: t = (P0 - P1) / (P0 - 2*P1 + P2)
+                    // Check x-axis extremum
+                    let denom_x = p0.x - 2.0 * p1.x + p2.x;
+                    if denom_x.abs() > 1e-10 {
+                        let t = (p0.x - p1.x) / denom_x;
+                        if t > 0.0 && t < 1.0 {
+                            let bx = (1.0 - t).powi(2) * p0.x
+                                + 2.0 * (1.0 - t) * t * p1.x
+                                + t.powi(2) * p2.x;
+                            min_x = min_x.min(bx);
+                            max_x = max_x.max(bx);
+                        }
+                    }
+                    // Check y-axis extremum
+                    let denom_y = p0.y - 2.0 * p1.y + p2.y;
+                    if denom_y.abs() > 1e-10 {
+                        let t = (p0.y - p1.y) / denom_y;
+                        if t > 0.0 && t < 1.0 {
+                            let by = (1.0 - t).powi(2) * p0.y
+                                + 2.0 * (1.0 - t) * t * p1.y
+                                + t.powi(2) * p2.y;
+                            min_y = min_y.min(by);
+                            max_y = max_y.max(by);
+                        }
+                    }
                 }
             }
-            // Find current extents
-            let min_x = all_pts.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
-            let max_x = all_pts
-                .iter()
-                .map(|p| p.x)
-                .fold(f64::NEG_INFINITY, f64::max);
-            let min_y = all_pts.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
-            let max_y = all_pts
-                .iter()
-                .map(|p| p.y)
-                .fold(f64::NEG_INFINITY, f64::max);
-            // Compute the shift needed to bring the whole arrow inside
-            let shift_x = if min_x < 0.0 {
-                -min_x
-            } else if max_x > iw {
-                iw - max_x
+
+            let shift_x = if min_x < margin {
+                margin - min_x
+            } else if max_x > iw - margin {
+                (iw - margin) - max_x
             } else {
                 0.0
             };
-            let shift_y = if min_y < 0.0 {
-                -min_y
-            } else if max_y > ih {
-                ih - max_y
+            let shift_y = if min_y < margin {
+                margin - min_y
+            } else if max_y > ih - margin {
+                (ih - margin) - max_y
             } else {
                 0.0
             };
             if shift_x != 0.0 || shift_y != 0.0 {
-                for p in all_pts {
-                    p.x += shift_x;
-                    p.y += shift_y;
+                start.x += shift_x;
+                start.y += shift_y;
+                end.x += shift_x;
+                end.y += shift_y;
+                if let Some(cps) = control_points.as_mut() {
+                    for cp in cps.iter_mut() {
+                        cp.x += shift_x;
+                        cp.y += shift_y;
+                    }
                 }
             }
         }
@@ -2438,6 +2489,7 @@ impl EditorState {
         self.drag_start_view = None;
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
+        self.arrow_control_dragging = None;
         self.drag_path.clear();
         self.drag_shift_active = false;
         self.locked_highlighter_stroke_size = None;
@@ -2520,15 +2572,20 @@ impl EditorState {
             }),
             Tool::Arrow => {
                 let (start, end) = self.arrow_points(start, end);
-                Some(AnnotationAction::Arrow {
-                    start,
-                    end,
-                    color,
-                    stroke_size,
-                    style: self.arrow_style,
-                    control_points: None,
-                    shadow: self.draw_object_shadow,
-                })
+                // Reject zero-length arrows (clicks without dragging).
+                if (start.x - end.x).abs() < 0.5 && (start.y - end.y).abs() < 0.5 {
+                    None
+                } else {
+                    Some(AnnotationAction::Arrow {
+                        start,
+                        end,
+                        color,
+                        stroke_size,
+                        style: self.arrow_style,
+                        control_points: None,
+                        shadow: self.draw_object_shadow,
+                    })
+                }
             }
             Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
                 rect,
@@ -2642,15 +2699,20 @@ impl EditorState {
             }),
             Tool::Arrow => {
                 let (start, end) = self.arrow_points(start, end);
-                Some(AnnotationAction::Arrow {
-                    start,
-                    end,
-                    color,
-                    stroke_size,
-                    style: self.arrow_style,
-                    control_points: None,
-                    shadow: self.draw_object_shadow,
-                })
+                // Reject zero-length arrows (clicks without dragging).
+                if (start.x - end.x).abs() < 0.5 && (start.y - end.y).abs() < 0.5 {
+                    None
+                } else {
+                    Some(AnnotationAction::Arrow {
+                        start,
+                        end,
+                        color,
+                        stroke_size,
+                        style: self.arrow_style,
+                        control_points: None,
+                        shadow: self.draw_object_shadow,
+                    })
+                }
             }
             Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
                 rect,

@@ -27,6 +27,7 @@ use super::super::{
 
 const MOVE_HANDLE_DRAG_RADIUS: f64 = 10.0;
 const RESIZE_HANDLE_DRAG_SIZE: f64 = 18.0;
+const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
 use super::super::pen_weight::{HighlighterMode, PenWeight};
 use super::{
     canvas::{
@@ -1739,7 +1740,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         // Arrow control point dragging: clear and return
         if st.arrow_control_dragging.is_some() {
-            st.arrow_control_dragging = None;
+            st.finalize_arrow_interaction_cleanup();
             drop(st);
             if let Some(area) = drawing_area_end.upgrade() {
                 area.queue_draw();
@@ -1781,6 +1782,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             }
 
             if matches!(st.selected_tool, Tool::Text | Tool::Number) {
+                return;
+            }
+
+            if st.selected_tool == Tool::Arrow
+                && st.selected_action_index.is_none()
+                && offset_x.hypot(offset_y) < ARROW_CLICK_NOOP_DISTANCE
+            {
+                st.finalize_arrow_interaction_cleanup();
+                drop(st);
+                if let Some(area) = drawing_area_end.upgrade() {
+                    area.queue_draw();
+                }
+                drag_last_redraw_end.set(glib::monotonic_time());
                 return;
             }
 
