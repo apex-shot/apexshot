@@ -451,12 +451,14 @@ pub enum AnnotationAction {
         rect: Rect,
         color: DrawColor,
         stroke_size: f64,
+        shadow: bool,
     },
     Line {
         start: Point,
         end: Point,
         color: DrawColor,
         stroke_size: f64,
+        shadow: bool,
     },
     Arrow {
         start: Point,
@@ -465,11 +467,13 @@ pub enum AnnotationAction {
         stroke_size: f64,
         style: ArrowStyle,
         control_points: Option<Vec<Point>>,
+        shadow: bool,
     },
     Box {
         rect: Rect,
         color: DrawColor,
         stroke_size: f64,
+        shadow: bool,
     },
     #[allow(dead_code)]
     Text {
@@ -478,6 +482,7 @@ pub enum AnnotationAction {
         color: DrawColor,
         font: FontSettings,
         max_width: Option<f64>,
+        shadow: bool,
     },
     Number {
         position: Point,
@@ -485,6 +490,7 @@ pub enum AnnotationAction {
         color: DrawColor,
         style: NumberingStyle,
         size: NumberSize,
+        shadow: bool,
     },
     Obfuscate {
         rect: Rect,

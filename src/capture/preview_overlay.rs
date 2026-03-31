@@ -614,7 +614,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
             main_loop_close.quit();
         }
         if emit_extension_events {
-            crate::gnome_integration::emit_preview_closed(&preview_id_close);
+            crate::gnome_integration::emit_tracked_window_closed(&preview_id_close);
         }
         glib::Propagation::Proceed
     });
@@ -649,10 +649,11 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     // 2. Layer-shell surfaces are not exposed as MetaWindow, so the extension can't find it
     if emit_extension_events {
         let pid = std::process::id();
-        crate::gnome_integration::emit_preview_opened(
+        crate::gnome_integration::emit_tracked_window_opened(
             &preview_id,
             pid,
             "Screenshot",
+            "preview",
             "apexshot-capture-preview",
         );
     }

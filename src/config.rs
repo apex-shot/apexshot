@@ -501,6 +501,46 @@ mod tests {
     }
 
     #[test]
+    fn annotate_settings_round_trip_through_yaml() {
+        let original = AppConfig {
+            annotate_inverse_arrow: true,
+            annotate_smooth_drawing: false,
+            annotate_draw_shadow: false,
+            annotate_auto_expand: true,
+            annotate_show_color_names: true,
+            annotate_always_on_top: true,
+            annotate_show_dock_icon: false,
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+
+        assert_eq!(
+            loaded.annotate_inverse_arrow,
+            original.annotate_inverse_arrow
+        );
+        assert_eq!(
+            loaded.annotate_smooth_drawing,
+            original.annotate_smooth_drawing
+        );
+        assert_eq!(loaded.annotate_draw_shadow, original.annotate_draw_shadow);
+        assert_eq!(loaded.annotate_auto_expand, original.annotate_auto_expand);
+        assert_eq!(
+            loaded.annotate_show_color_names,
+            original.annotate_show_color_names
+        );
+        assert_eq!(
+            loaded.annotate_always_on_top,
+            original.annotate_always_on_top
+        );
+        assert_eq!(
+            loaded.annotate_show_dock_icon,
+            original.annotate_show_dock_icon
+        );
+    }
+
+    #[test]
     fn recording_settings_have_correct_defaults() {
         let cfg = AppConfig::default();
         assert!(cfg.rec_controls);

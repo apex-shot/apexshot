@@ -48,6 +48,7 @@ pub fn build_color_picker(
     state: Arc<Mutex<EditorState>>,
     canvas_queue_draw_signal: Rc<dyn Fn()>,
     drawing_area: Rc<RefCell<Option<glib::object::WeakRef<DrawingArea>>>>,
+    show_color_names: bool,
 ) -> ColorPickerParts {
     // Color specs
     let color_specs = [
@@ -153,8 +154,22 @@ pub fn build_color_picker(
     let color_column_primary = GtkBox::new(Orientation::Vertical, 1);
     color_column_primary.add_css_class("editor-color-dropdown-column");
     color_column_primary.set_halign(gtk4::Align::Center);
-    for button in &color_buttons {
-        color_column_primary.append(button);
+    for ((label, _), button) in visible_color_specs.iter().zip(color_buttons.iter()) {
+        if show_color_names {
+            let row = GtkBox::new(Orientation::Horizontal, 8);
+            row.add_css_class("editor-color-row");
+            row.set_halign(gtk4::Align::Start);
+
+            let text = Label::new(Some(label));
+            text.add_css_class("editor-color-row-label");
+            text.set_xalign(0.0);
+
+            row.append(button);
+            row.append(&text);
+            color_column_primary.append(&row);
+        } else {
+            color_column_primary.append(button);
+        }
     }
 
     // Column 2: custom slots

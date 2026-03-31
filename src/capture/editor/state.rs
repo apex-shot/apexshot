@@ -41,6 +41,10 @@ pub struct EditorState {
     pub selected_action_index: Option<usize>,
     pub selected_color: DrawColor,
     pub stroke_size: f64,
+    pub smooth_drawing_enabled: bool,
+    pub draw_object_shadow: bool,
+    pub auto_expand_canvas: bool,
+    pub inverse_arrow_direction: bool,
     pub text_size: f64,
     pub text_font_family: String,
     pub obfuscate_method: ObfuscateMethod,
@@ -198,6 +202,85 @@ fn crop_rect_with_aspect_fit(
     Rect::from_bounds(x, y, x + width, y + height)
 }
 
+fn simplify_drag_path(points: &[Point], epsilon: f64) -> Vec<Point> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+
+    let mut keep = vec![false; points.len()];
+    keep[0] = true;
+    keep[points.len() - 1] = true;
+    simplify_drag_path_range(points, 0, points.len() - 1, epsilon, &mut keep);
+
+    points
+        .iter()
+        .zip(keep)
+        .filter_map(|(point, keep)| keep.then_some(*point))
+        .collect()
+}
+
+fn simplify_drag_path_range(
+    points: &[Point],
+    start: usize,
+    end: usize,
+    epsilon: f64,
+    keep: &mut [bool],
+) {
+    if end <= start + 1 {
+        return;
+    }
+
+    let first = points[start];
+    let last = points[end];
+    let mut max_distance = 0.0;
+    let mut max_index = None;
+
+    for (index, point) in points.iter().enumerate().take(end).skip(start + 1) {
+        let distance = perpendicular_distance(*point, first, last);
+        if distance > max_distance {
+            max_distance = distance;
+            max_index = Some(index);
+        }
+    }
+
+    if max_distance > epsilon {
+        if let Some(index) = max_index {
+            keep[index] = true;
+            simplify_drag_path_range(points, start, index, epsilon, keep);
+            simplify_drag_path_range(points, index, end, epsilon, keep);
+        }
+    }
+}
+
+fn perpendicular_distance(point: Point, start: Point, end: Point) -> f64 {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    if dx.abs() <= f64::EPSILON && dy.abs() <= f64::EPSILON {
+        return ((point.x - start.x).powi(2) + (point.y - start.y).powi(2)).sqrt();
+    }
+
+    let numerator = ((dy * point.x) - (dx * point.y) + (end.x * start.y) - (end.y * start.x)).abs();
+    let denominator = (dx * dx + dy * dy).sqrt();
+    numerator / denominator
+}
+
+fn expand_rgba_image(
+    image: &RgbaImage,
+    new_width: u32,
+    new_height: u32,
+    offset_x: u32,
+    offset_y: u32,
+) -> RgbaImage {
+    if new_width == image.width() && new_height == image.height() && offset_x == 0 && offset_y == 0
+    {
+        return image.clone();
+    }
+
+    let mut expanded = RgbaImage::from_pixel(new_width, new_height, image::Rgba([0, 0, 0, 0]));
+    image::imageops::overlay(&mut expanded, image, offset_x as i64, offset_y as i64);
+    expanded
+}
+
 fn resize_crop_rect_with_fixed_aspect(
     rect: &mut Rect,
     handle: SelectHandle,
@@ -263,6 +346,10 @@ impl EditorState {
             selected_action_index: None,
             selected_color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
             stroke_size: STROKE_WIDTH,
+            smooth_drawing_enabled: false,
+            draw_object_shadow: false,
+            auto_expand_canvas: false,
+            inverse_arrow_direction: false,
             text_size: TEXT_SIZE,
             text_font_family: String::from("Sans"),
             obfuscate_method: ObfuscateMethod::Pixelate,
@@ -520,6 +607,7 @@ impl EditorState {
                         color,
                         font,
                         max_width,
+                        ..
                     }) = self.actions.get_mut(index)
                     else {
                         return None;
@@ -575,6 +663,7 @@ impl EditorState {
                     color: input_state.color,
                     font,
                     max_width: Some(clamped_width),
+                    shadow: self.draw_object_shadow,
                 });
             }
         }
@@ -1460,7 +1549,9 @@ impl EditorState {
         self.working_image_revision = self.working_image_revision.wrapping_add(1);
     }
 
-    pub fn push_action(&mut self, action: AnnotationAction) {
+    pub fn push_action(&mut self, mut action: AnnotationAction) {
+        self.expand_canvas_for_action_if_needed(&mut action);
+
         let next_number_after_push = match &action {
             AnnotationAction::Number { number, style, .. } if *style == self.numbering_style => {
                 Some(number.saturating_add(1))
@@ -1625,6 +1716,7 @@ impl EditorState {
             color: self.selected_color,
             style: self.numbering_style,
             size: self.number_size,
+            shadow: self.draw_object_shadow,
         });
     }
 
@@ -1643,6 +1735,7 @@ impl EditorState {
             color,
             font,
             max_width,
+            ..
         } = self.actions.get(index)?
         else {
             return None;
@@ -1841,6 +1934,7 @@ impl EditorState {
             rect: crop_rect,
             color: self.selected_color,
             stroke_size: self.stroke_size,
+            shadow: false,
         };
         let handle_hit_radius = selection_handle_hit_radius_for_scale(view_scale);
         if let Some(handle) =
@@ -2076,6 +2170,7 @@ impl EditorState {
             color,
             font,
             max_width: Some(bounds.rect.width as f64),
+            shadow: self.draw_object_shadow,
         });
 
         self.active_text_edit = None;
@@ -2371,9 +2466,10 @@ impl EditorState {
             Tool::Crop => None,
             Tool::Background => None,
             Tool::Pen => {
-                if self.drag_path.len() >= 2 {
+                let points = self.processed_drag_path(self.drag_path.clone());
+                if points.len() >= 2 {
                     Some(AnnotationAction::Pen {
-                        points: self.drag_path.clone(),
+                        points,
                         color,
                         stroke_size: self.pen_weight.stroke_width(),
                     })
@@ -2382,10 +2478,11 @@ impl EditorState {
                 }
             }
             Tool::Highlighter => {
-                if self.drag_path.len() >= 2 {
+                let source_points = self.processed_drag_path(self.drag_path.clone());
+                if source_points.len() >= 2 {
                     let points = if self.drag_shift_active {
-                        let first = self.drag_path[0];
-                        let last = self.drag_path[self.drag_path.len() - 1];
+                        let first = source_points[0];
+                        let last = source_points[source_points.len() - 1];
                         vec![
                             first,
                             super::types::constrained_drag_endpoint(
@@ -2396,7 +2493,7 @@ impl EditorState {
                             ),
                         ]
                     } else {
-                        self.drag_path.clone()
+                        source_points
                     };
 
                     Some(AnnotationAction::Highlighter {
@@ -2412,25 +2509,32 @@ impl EditorState {
                 rect,
                 color,
                 stroke_size,
+                shadow: self.draw_object_shadow,
             }),
             Tool::Line => Some(AnnotationAction::Line {
                 start,
                 end,
                 color,
                 stroke_size,
+                shadow: self.draw_object_shadow,
             }),
-            Tool::Arrow => Some(AnnotationAction::Arrow {
-                start,
-                end,
-                color,
-                stroke_size,
-                style: self.arrow_style,
-                control_points: None,
-            }),
+            Tool::Arrow => {
+                let (start, end) = self.arrow_points(start, end);
+                Some(AnnotationAction::Arrow {
+                    start,
+                    end,
+                    color,
+                    stroke_size,
+                    style: self.arrow_style,
+                    control_points: None,
+                    shadow: self.draw_object_shadow,
+                })
+            }
             Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
                 rect,
                 color,
                 stroke_size,
+                shadow: self.draw_object_shadow,
             }),
             Tool::Number => None,
             Tool::Obfuscate => {
@@ -2451,7 +2555,8 @@ impl EditorState {
 
     pub fn finalize_drag_action(&mut self) -> Option<AnnotationAction> {
         if matches!(self.selected_tool, Tool::Pen | Tool::Highlighter) {
-            let mut points = std::mem::take(&mut self.drag_path);
+            let drag_path = std::mem::take(&mut self.drag_path);
+            let mut points = self.processed_drag_path(drag_path);
             let color = self.selected_color;
             let tool = self.selected_tool;
             let shift_active = self.drag_shift_active;
@@ -2526,25 +2631,32 @@ impl EditorState {
                 rect,
                 color,
                 stroke_size,
+                shadow: self.draw_object_shadow,
             }),
             Tool::Line => Some(AnnotationAction::Line {
                 start,
                 end,
                 color,
                 stroke_size,
+                shadow: self.draw_object_shadow,
             }),
-            Tool::Arrow => Some(AnnotationAction::Arrow {
-                start,
-                end,
-                color,
-                stroke_size,
-                style: self.arrow_style,
-                control_points: None,
-            }),
+            Tool::Arrow => {
+                let (start, end) = self.arrow_points(start, end);
+                Some(AnnotationAction::Arrow {
+                    start,
+                    end,
+                    color,
+                    stroke_size,
+                    style: self.arrow_style,
+                    control_points: None,
+                    shadow: self.draw_object_shadow,
+                })
+            }
             Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
                 rect,
                 color,
                 stroke_size,
+                shadow: self.draw_object_shadow,
             }),
             Tool::Number => None,
             Tool::Obfuscate => {
@@ -2585,6 +2697,90 @@ impl EditorState {
         }
 
         result
+    }
+
+    fn arrow_points(&self, start: Point, end: Point) -> (Point, Point) {
+        if self.inverse_arrow_direction {
+            (end, start)
+        } else {
+            (start, end)
+        }
+    }
+
+    fn processed_drag_path(&self, points: Vec<Point>) -> Vec<Point> {
+        if !self.smooth_drawing_enabled {
+            return points;
+        }
+
+        simplify_drag_path(&points, 0.6)
+    }
+
+    fn expand_canvas_for_action_if_needed(&mut self, action: &mut AnnotationAction) {
+        if !self.auto_expand_canvas {
+            return;
+        }
+
+        let Some(bounds) = action_bounds_with_padding(action, 0.0) else {
+            return;
+        };
+
+        let left_padding = (-bounds.x).max(0);
+        let top_padding = (-bounds.y).max(0);
+        let right_edge = (bounds.x + bounds.width).max(self.working_image.width() as i32);
+        let bottom_edge = (bounds.y + bounds.height).max(self.working_image.height() as i32);
+        let new_width = (right_edge + left_padding).max(self.working_image.width() as i32);
+        let new_height = (bottom_edge + top_padding).max(self.working_image.height() as i32);
+
+        let expand_left = left_padding.max(0) as u32;
+        let expand_top = top_padding.max(0) as u32;
+        let next_width = new_width.max(1) as u32;
+        let next_height = new_height.max(1) as u32;
+
+        if next_width == self.working_image.width()
+            && next_height == self.working_image.height()
+            && expand_left == 0
+            && expand_top == 0
+        {
+            return;
+        }
+
+        self.base_image = expand_rgba_image(
+            &self.base_image,
+            next_width,
+            next_height,
+            expand_left,
+            expand_top,
+        );
+        self.working_image = expand_rgba_image(
+            &self.working_image,
+            next_width,
+            next_height,
+            expand_left,
+            expand_top,
+        );
+
+        if expand_left > 0 || expand_top > 0 {
+            let dx = expand_left as f64;
+            let dy = expand_top as f64;
+
+            for existing in &mut self.actions {
+                translate_action(existing, dx, dy);
+            }
+            translate_action(action, dx, dy);
+
+            if let Some(crop) = self.crop_selection.as_mut() {
+                crop.x += expand_left as i32;
+                crop.y += expand_top as i32;
+            }
+
+            if let Some(bounds) = self.active_text_bounds.as_mut() {
+                bounds.rect.x += expand_left as i32;
+                bounds.rect.y += expand_top as i32;
+                bounds.sync_handles();
+            }
+        }
+
+        self.mark_working_image_dirty();
     }
 
     pub fn apply_crop_selection(&mut self) -> Result<bool, EditorError> {
