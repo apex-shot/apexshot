@@ -1,3 +1,4 @@
+use gdk4x11::X11Surface;
 use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation, Popover,
 };
@@ -6,6 +7,8 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+use x11rb::{connection::Connection, protocol::xproto, protocol::xproto::ConnectionExt};
 
 use super::color::selection_hit_padding_for_scale;
 use super::render::{
@@ -21,6 +24,31 @@ use super::types::{
     AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError, Point,
     Rect, Tool, ViewTransform,
 };
+
+#[derive(Debug, Clone, Copy)]
+pub struct AnnotateRuntimeConfig {
+    pub inverse_arrow_direction: bool,
+    pub smooth_drawing: bool,
+    pub draw_object_shadow: bool,
+    pub auto_expand_canvas: bool,
+    pub show_color_names: bool,
+    pub always_on_top: bool,
+    pub show_dock_icon: bool,
+}
+
+impl AnnotateRuntimeConfig {
+    pub fn from_app_config(config: &crate::config::AppConfig) -> Self {
+        Self {
+            inverse_arrow_direction: config.annotate_inverse_arrow,
+            smooth_drawing: config.annotate_smooth_drawing,
+            draw_object_shadow: config.annotate_draw_shadow,
+            auto_expand_canvas: config.annotate_auto_expand,
+            show_color_names: config.annotate_show_color_names,
+            always_on_top: config.annotate_always_on_top,
+            show_dock_icon: config.annotate_show_dock_icon,
+        }
+    }
+}
 use super::ui_support::{
     install_editor_css, prefers_dark_glass_theme, prefers_reduced_transparency,
     recommended_window_size,
@@ -60,6 +88,122 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
 #[cfg(test)]
 pub(super) use cursor::cursor_name_for_view_point;
 
+fn env_var_contains_case_insensitive(key: &str, needle: &str) -> bool {
+    std::env::var(key)
+        .map(|value| value.to_lowercase().contains(&needle.to_lowercase()))
+        .unwrap_or(false)
+}
+
+fn is_gnome_wayland_session() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && (env_var_contains_case_insensitive("XDG_CURRENT_DESKTOP", "gnome")
+            || env_var_contains_case_insensitive("DESKTOP_SESSION", "gnome"))
+}
+
+fn next_tracked_window_id(role: &str) -> String {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("{role}-{stamp}")
+}
+
+fn intern_atom<C: Connection>(conn: &C, atom_name: &[u8]) -> Result<u32, String> {
+    conn.intern_atom(false, atom_name)
+        .map_err(|e| e.to_string())?
+        .reply()
+        .map_err(|e| e.to_string())
+        .map(|reply| reply.atom)
+}
+
+fn send_net_wm_state_client_message<C: Connection>(
+    conn: &C,
+    root: xproto::Window,
+    window: xproto::Window,
+    net_wm_state_atom: u32,
+    action: u32,
+    first_property: u32,
+    second_property: u32,
+) -> Result<(), String> {
+    let client_message = xproto::ClientMessageEvent::new(
+        32,
+        window,
+        net_wm_state_atom,
+        [action, first_property, second_property, 1, 0],
+    );
+
+    conn.send_event(
+        false,
+        root,
+        xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY,
+        client_message,
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn request_x11_state(
+    window: &ApplicationWindow,
+    state_atom_name: &[u8],
+    enable: bool,
+) -> Result<(), String> {
+    let surface = window
+        .surface()
+        .ok_or_else(|| "missing GTK surface".to_string())?;
+    let x11_surface = surface
+        .downcast::<X11Surface>()
+        .map_err(|_| "surface is not X11".to_string())?;
+
+    let xid = u32::try_from(x11_surface.xid())
+        .map_err(|_| "X11 window id is out of range".to_string())?;
+    let (conn, screen_num) = x11rb::connect(None).map_err(|e| e.to_string())?;
+    let root = conn
+        .setup()
+        .roots
+        .get(screen_num)
+        .map(|screen| screen.root)
+        .ok_or_else(|| "missing X11 root window".to_string())?;
+
+    let net_wm_state = intern_atom(&conn, b"_NET_WM_STATE")?;
+    let state_atom = intern_atom(&conn, state_atom_name)?;
+    let action = if enable { 1 } else { 0 };
+    send_net_wm_state_client_message(&conn, root, xid, net_wm_state, action, state_atom, 0)?;
+    conn.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn set_window_always_on_top(
+    window: &ApplicationWindow,
+    tracked_id: &str,
+    enabled: bool,
+    title: &str,
+    namespace: &str,
+) {
+    if is_gnome_wayland_session() {
+        if enabled {
+            crate::gnome_integration::emit_tracked_window_opened(
+                tracked_id,
+                std::process::id(),
+                title,
+                "annotate-editor",
+                namespace,
+            );
+        } else {
+            crate::gnome_integration::emit_tracked_window_closed(tracked_id);
+        }
+    }
+
+    let _ = request_x11_state(window, b"_NET_WM_STATE_ABOVE", enabled);
+    let _ = request_x11_state(window, b"_NET_WM_STATE_STICKY", enabled);
+}
+
+fn set_window_dock_visibility(window: &ApplicationWindow, show_dock_icon: bool) {
+    let hide = !show_dock_icon;
+    let _ = request_x11_state(window, b"_NET_WM_STATE_SKIP_TASKBAR", hide);
+    let _ = request_x11_state(window, b"_NET_WM_STATE_SKIP_PAGER", hide);
+}
+
 pub fn setup_editor_window(app: &Application, path: PathBuf) {
     use std::sync::Once;
     static INIT_ICONS: Once = Once::new();
@@ -68,6 +212,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     });
 
     install_editor_css();
+    let annotate_config =
+        AnnotateRuntimeConfig::from_app_config(&crate::config::load_config().sanitized());
 
     let drawing_area_placeholder = Rc::new(RefCell::new(
         None::<glib::object::WeakRef<gtk4::DrawingArea>>,
@@ -86,6 +232,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let state = Arc::new(Mutex::new(EditorState::new(image.clone())));
     {
         let mut st = state.lock().unwrap();
+        st.inverse_arrow_direction = annotate_config.inverse_arrow_direction;
+        st.smooth_drawing_enabled = annotate_config.smooth_drawing;
+        st.draw_object_shadow = annotate_config.draw_object_shadow;
+        st.auto_expand_canvas = annotate_config.auto_expand_canvas;
         let detector = st.text_detector.clone();
         let ready_flag = st.text_detection_ready.clone();
         st.text_detection_handle = Some(super::text_detect::spawn_text_detection(
@@ -172,6 +322,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         state.clone(),
         canvas_queue_draw_signal,
         drawing_area_placeholder.clone(),
+        annotate_config.show_color_names,
     );
     let color_picker_trigger_host = color_picker_parts.trigger_host;
     let color_popover = color_picker_parts.popover;
@@ -267,6 +418,16 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let drag_btn = footer_parts.drag_btn;
     let copy_btn = footer_parts.copy_btn;
     let upload_btn = footer_parts.upload_btn;
+
+    let tracked_window_id = next_tracked_window_id("annotate-editor");
+    let window_title = "Screenshot Editor";
+    let window_namespace = "apexshot-annotate-editor";
+
+    pin_icon.set_icon_name(Some(if annotate_config.always_on_top {
+        icon_names::PIN
+    } else {
+        icon_names::VIEW_PIN
+    }));
 
     let canvas::CanvasShellParts {
         root: canvas,
@@ -1647,6 +1808,20 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         traffic_zoom: traffic_zoom.clone(),
         pin_btn: pin_btn.clone(),
         pin_icon: pin_icon.clone(),
+        initial_pin_state: annotate_config.always_on_top,
+        set_window_pinned: Rc::new({
+            let window = window.clone();
+            let tracked_window_id = tracked_window_id.clone();
+            move |enabled| {
+                set_window_always_on_top(
+                    &window,
+                    &tracked_window_id,
+                    enabled,
+                    window_title,
+                    window_namespace,
+                );
+            }
+        }),
         drag_btn: drag_btn.clone(),
         copy_btn: copy_btn.clone(),
         upload_btn: upload_btn.clone(),
@@ -1692,4 +1867,19 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     });
 
     window.present();
+    set_window_dock_visibility(&window, annotate_config.show_dock_icon);
+    if annotate_config.always_on_top {
+        set_window_always_on_top(
+            &window,
+            &tracked_window_id,
+            true,
+            window_title,
+            window_namespace,
+        );
+    }
+
+    window.connect_close_request(move |_| {
+        crate::gnome_integration::emit_tracked_window_closed(&tracked_window_id);
+        glib::Propagation::Proceed
+    });
 }

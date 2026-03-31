@@ -64,8 +64,8 @@ rm -rf ~/.local/share/gnome-shell/extensions/apexshot-preview-helper@apexshot.gi
 
 ## How It Works
 
-1. For screenshot previews, ApexShot emits `PreviewOpened` / `PreviewClosed` signals on `org.apexshot.Preview`
-2. The extension tracks the preview window and keeps it above other windows while it is active
+1. For screenshot previews and annotate editor windows, ApexShot emits `TrackedWindowOpened` / `TrackedWindowClosed` signals on `org.apexshot.TrackedWindow`
+2. The extension tracks matching ApexShot windows and keeps them above other windows while they are active
 3. For recording masks, ApexShot calls `ShowMask(x, y, width, height)` on `org.apexshot.ShellOverlay`
 4. The extension creates shell-managed dim regions around the selected recording area
 5. When recording ends or errors out, ApexShot calls `HideMask()` and the extension removes the mask

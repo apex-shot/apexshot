@@ -136,6 +136,7 @@ mod tests {
             },
             color: DRAW_COLORS[1],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
         state.selected_action_index = Some(0);
 
@@ -263,6 +264,7 @@ mod tests {
             },
             color: DRAW_COLORS[0],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         state.selected_action_index = Some(0);
@@ -281,7 +283,7 @@ mod tests {
                 width: 18,
                 height: 18,
             },
-            method: ObfuscateMethod::Blur,
+            method: ObfuscateMethod::BlurSmooth,
             amount: DEFAULT_OBFUSCATE_AMOUNT,
         });
 
@@ -318,6 +320,7 @@ mod tests {
             end: Point { x: 20.0, y: 24.0 },
             color: DRAW_COLORS[0],
             stroke_size: 4.0,
+            shadow: false,
         });
 
         state.selected_action_index = Some(0);
@@ -338,12 +341,12 @@ mod tests {
             },
             color: DRAW_COLORS[2],
             stroke_size: 6.0,
+            shadow: false,
         });
 
         state.selected_action_index = Some(0);
         state.set_stroke_size(6.0);
-        assert!(state.adjust_stroke_size(STROKE_SIZE_STEP));
-        assert_eq!(state.stroke_size, 7.0);
+        assert!(state.set_selected_action_stroke_size(7.0));
         assert_eq!(state.selected_action_stroke_size(), Some(7.0));
     }
 
@@ -362,6 +365,7 @@ mod tests {
                 alignment: TextAlignment::Left,
             },
             max_width: None,
+            shadow: false,
         });
 
         state.selected_action_index = Some(0);
@@ -385,12 +389,12 @@ mod tests {
                 alignment: TextAlignment::Left,
             },
             max_width: None,
+            shadow: false,
         });
 
         state.selected_action_index = Some(0);
         state.set_text_size(20.0);
-        assert!(state.adjust_text_size(TEXT_SIZE_STEP));
-        assert_eq!(state.text_size, 22.0);
+        assert!(state.set_selected_text_action_size(22.0));
         assert_eq!(state.selected_text_action_size(), Some(22.0));
     }
 
@@ -404,6 +408,7 @@ mod tests {
             end: Point { x: 10.0, y: 8.0 },
             color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
         assert_eq!(state.history_availability(), (true, false));
 
@@ -426,6 +431,7 @@ mod tests {
             },
             color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert!(!state.can_remove_selected_action());
@@ -449,6 +455,7 @@ mod tests {
             stroke_size: STROKE_WIDTH,
             style: ArrowStyle::Standard,
             control_points: None,
+            shadow: false,
         });
         state.push_action(AnnotationAction::Box {
             rect: Rect {
@@ -459,6 +466,7 @@ mod tests {
             },
             color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert_eq!(state.actions.len(), 2);
@@ -482,6 +490,7 @@ mod tests {
             },
             color: DRAW_COLORS[0],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
         state.push_action(AnnotationAction::Box {
             rect: Rect {
@@ -492,6 +501,7 @@ mod tests {
             },
             color: DRAW_COLORS[1],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert!(state.select_action_at_point_with_scale(Point { x: 20.0, y: 20.0 }, 1.0));
@@ -506,6 +516,7 @@ mod tests {
             end: Point { x: 18.0, y: 20.0 },
             color: DRAW_COLORS[2],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert!(state.begin_select_drag_with_scale(Point { x: 8.0, y: 10.0 }, 1.0));
@@ -529,6 +540,7 @@ mod tests {
             end: Point { x: 92.0, y: 20.0 },
             color: DRAW_COLORS[3],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert!(!state.select_action_at_point_with_scale(Point { x: 40.0, y: 45.0 }, 1.0));
@@ -543,6 +555,7 @@ mod tests {
             end: Point { x: 70.0, y: 42.0 },
             color: DRAW_COLORS[2],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert!(state.select_action_at_point_with_scale(Point { x: 34.0, y: 23.0 }, 1.0));
@@ -561,6 +574,7 @@ mod tests {
             },
             color: DRAW_COLORS[0],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         };
 
         assert_eq!(
@@ -588,6 +602,7 @@ mod tests {
             },
             color: DRAW_COLORS[0],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         };
 
         assert_eq!(
@@ -620,6 +635,7 @@ mod tests {
             },
             color: DRAW_COLORS[1],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert!(state.select_action_at_point_with_scale(Point { x: 24.0, y: 20.0 }, 1.0));
@@ -650,6 +666,7 @@ mod tests {
             },
             color: DRAW_COLORS[1],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert!(state.select_action_at_point_with_scale(Point { x: 24.0, y: 20.0 }, 1.0));
@@ -676,6 +693,7 @@ mod tests {
             end: Point { x: 28.0, y: 22.0 },
             color: DRAW_COLORS[2],
             stroke_size: STROKE_WIDTH,
+            shadow: false,
         });
 
         assert!(state.select_action_at_point_with_scale(Point { x: 12.0, y: 11.0 }, 1.0));
@@ -729,13 +747,27 @@ mod tests {
                 alignment: TextAlignment::Left,
             },
             max_width: None,
+            shadow: false,
         });
         state.selected_action_index = Some(0);
 
         assert!(state.update_text_action(0, "new text".to_string()));
         assert_eq!(
             state.selected_text_action_data(),
-            Some((0, "new text".to_string()))
+            Some((
+                0,
+                "new text".to_string(),
+                DRAW_COLORS[0],
+                FontSettings {
+                    family: "Sans".to_string(),
+                    size: TEXT_SIZE,
+                    style: FontStyle::Normal,
+                    decoration: TextDecoration::None,
+                    alignment: TextAlignment::Left,
+                },
+                None,
+                Point { x: 18.0, y: 22.0 },
+            ))
         );
     }
 
@@ -754,6 +786,7 @@ mod tests {
                 alignment: TextAlignment::Left,
             },
             max_width: None,
+            shadow: false,
         });
         state.selected_action_index = Some(0);
 
@@ -778,6 +811,7 @@ mod tests {
                 position,
                 number,
                 color,
+                ..
             } => {
                 assert_eq!(*position, Point { x: 6.0, y: 8.0 });
                 assert_eq!(*number, 1);
@@ -852,7 +886,7 @@ mod tests {
         };
         let before_outside = *image.get_pixel(0, 0);
 
-        render::apply_blur_rect(&mut image, rect, 2);
+        render::apply_blur_rect(&mut image, rect, 2.0);
 
         let inside = *image.get_pixel(4, 4);
         let outside = *image.get_pixel(0, 0);
@@ -884,7 +918,7 @@ mod tests {
         let before_outside = *image.get_pixel(0, 0);
         let before_inside = *image.get_pixel(2, 2);
 
-        render::apply_censor_rect(&mut image, rect, 3);
+        render::apply_censor_rect(&mut image, rect, 3.0);
 
         let outside = *image.get_pixel(0, 0);
         let inside = *image.get_pixel(2, 2);
@@ -1312,6 +1346,82 @@ mod tests {
     }
 
     #[test]
+    fn annotate_inverse_arrow_reverses_new_arrow_direction() {
+        let mut state = EditorState::new(RgbaImage::new(100, 100));
+        state.inverse_arrow_direction = true;
+        state.set_tool(Tool::Arrow);
+        state.begin_drag(Point { x: 10.0, y: 20.0 });
+        state.update_drag(Point { x: 90.0, y: 20.0 });
+
+        match state.finalize_drag_action().unwrap() {
+            AnnotationAction::Arrow { start, end, .. } => {
+                assert_eq!(start, Point { x: 90.0, y: 20.0 });
+                assert_eq!(end, Point { x: 10.0, y: 20.0 });
+            }
+            other => panic!("unexpected finalized action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn annotate_smooth_drawing_simplifies_pen_points() {
+        let mut state = EditorState::new(RgbaImage::new(100, 100));
+        state.smooth_drawing_enabled = true;
+        state.set_tool(Tool::Pen);
+        state.begin_drag(Point { x: 0.0, y: 0.0 });
+        state.drag_path = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 5.0, y: 0.2 },
+            Point { x: 10.0, y: 0.0 },
+            Point { x: 15.0, y: 0.2 },
+            Point { x: 20.0, y: 0.0 },
+        ];
+        state.update_drag(Point { x: 20.0, y: 0.0 });
+
+        match state.finalize_drag_action().unwrap() {
+            AnnotationAction::Pen { points, .. } => {
+                assert_eq!(points.first(), Some(&Point { x: 0.0, y: 0.0 }));
+                assert_eq!(points.last(), Some(&Point { x: 20.0, y: 0.0 }));
+                assert!(points.len() < 5);
+            }
+            other => panic!("unexpected finalized action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn annotate_draw_shadow_applies_to_new_box_actions() {
+        let mut state = EditorState::new(RgbaImage::new(80, 80));
+        state.draw_object_shadow = true;
+        state.set_tool(Tool::Box);
+        state.begin_drag(Point { x: 10.0, y: 10.0 });
+        state.update_drag(Point { x: 30.0, y: 32.0 });
+
+        match state.finalize_drag_action().unwrap() {
+            AnnotationAction::Box { shadow, .. } => assert!(shadow),
+            other => panic!("unexpected finalized action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn annotate_auto_expand_grows_canvas_for_new_action() {
+        let mut state = EditorState::new(RgbaImage::new(20, 20));
+        state.auto_expand_canvas = true;
+        state.push_action(AnnotationAction::Box {
+            rect: Rect {
+                x: 15,
+                y: 16,
+                width: 18,
+                height: 12,
+            },
+            color: DRAW_COLORS[0],
+            stroke_size: STROKE_WIDTH,
+            shadow: false,
+        });
+
+        assert_eq!(state.working_image.width(), 33);
+        assert_eq!(state.working_image.height(), 28);
+    }
+
+    #[test]
     fn draft_action_returns_obfuscate_rect_when_tool_is_obfuscate() {
         let mut state = EditorState::new(RgbaImage::new(20, 20));
         state.set_tool(Tool::Obfuscate);
@@ -1328,8 +1438,8 @@ mod tests {
                 assert_eq!(rect.y, 1);
                 assert_eq!(rect.width, 8);
                 assert_eq!(rect.height, 7);
-                assert_eq!(method, &ObfuscateMethod::Blur);
-                assert!(*amount > 0.0);
+                assert_eq!(method, ObfuscateMethod::BlurSmooth);
+                assert!(amount > 0.0);
             }
             other => panic!("unexpected draft action: {:?}", other),
         }
@@ -1462,6 +1572,7 @@ mod tests {
                 Point { x: 50.0, y: 50.0 },
                 Point { x: 90.0, y: 90.0 },
             ]),
+            shadow: false,
         });
         state.selected_action_index = Some(0);
 
@@ -1585,6 +1696,7 @@ mod tests {
             stroke_size: 8.0,
             style: ArrowStyle::Fancy,
             control_points: None,
+            shadow: false,
         });
 
         // Click near the arrow head tip (should be selectable)
@@ -1612,6 +1724,7 @@ mod tests {
                 Point { x: 100.0, y: 30.0 },
                 Point { x: 180.0, y: 50.0 },
             ]),
+            shadow: false,
         });
 
         // Click near the arrow head
@@ -1635,6 +1748,7 @@ mod tests {
             stroke_size: 6.0,
             style: ArrowStyle::Double,
             control_points: None,
+            shadow: false,
         });
 
         // Click near the end head
@@ -1666,6 +1780,7 @@ mod tests {
                 Point { x: 50.0, y: 50.0 },
                 Point { x: 90.0, y: 90.0 },
             ]),
+            shadow: false,
         });
         state.selected_action_index = Some(0);
         state.arrow_editing_controls = true;

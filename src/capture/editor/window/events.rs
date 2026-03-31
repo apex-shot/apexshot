@@ -63,6 +63,8 @@ pub(super) struct EventContext {
     pub traffic_zoom: Button,
     pub pin_btn: Button,
     pub pin_icon: Image,
+    pub initial_pin_state: bool,
+    pub set_window_pinned: Rc<dyn Fn(bool)>,
     pub drag_btn: Button,
     pub copy_btn: Button,
     pub upload_btn: Button,
@@ -135,6 +137,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         traffic_zoom,
         pin_btn,
         pin_icon,
+        initial_pin_state,
+        set_window_pinned,
         drag_btn,
         copy_btn,
         upload_btn,
@@ -408,9 +412,15 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     });
     drag_btn.add_controller(drag_window_gesture);
 
-    let pin_state = Arc::new(AtomicBool::new(false));
+    let pin_state = Arc::new(AtomicBool::new(initial_pin_state));
+    pin_icon.set_icon_name(Some(if initial_pin_state {
+        icon_names::PIN
+    } else {
+        icon_names::VIEW_PIN
+    }));
     let pin_state_btn = pin_state.clone();
     let pin_icon_btn = pin_icon.clone();
+    let set_window_pinned_btn = set_window_pinned.clone();
     pin_btn.connect_clicked(move |_| {
         let now_pinned = !pin_state_btn.load(Ordering::Relaxed);
         pin_state_btn.store(now_pinned, Ordering::Relaxed);
@@ -419,6 +429,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         } else {
             icon_names::VIEW_PIN
         }));
+        set_window_pinned_btn(now_pinned);
     });
 
     let path_copy = path.clone();
