@@ -87,6 +87,7 @@ fn crop_hover_cursor_name(state: &EditorState, point: Point, view_scale: f64) ->
             rect,
             color: state.selected_color,
             stroke_size: state.stroke_size,
+            shadow: false,
         };
         let handle_hit_radius = selection_handle_hit_radius_for_scale(view_scale);
         if let Some(handle) = super::super::selection::action_resize_handle_at_point_with_radius(

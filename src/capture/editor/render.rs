@@ -69,13 +69,15 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             rect,
             color,
             stroke_size,
-        } => draw_circle(context, *rect, *color, *stroke_size),
+            shadow,
+        } => draw_circle_with_shadow(context, *rect, *color, *stroke_size, *shadow),
         AnnotationAction::Line {
             start,
             end,
             color,
             stroke_size,
-        } => draw_line(context, *start, *end, *color, *stroke_size),
+            shadow,
+        } => draw_line_with_shadow(context, *start, *end, *color, *stroke_size, *shadow),
         AnnotationAction::Arrow {
             start,
             end,
@@ -83,7 +85,7 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             stroke_size,
             style,
             control_points,
-            ..
+            shadow,
         } => draw_arrow(
             context,
             *start,
@@ -92,18 +94,21 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             *stroke_size,
             *style,
             control_points.clone(),
+            *shadow,
         ),
         AnnotationAction::Box {
             rect,
             color,
             stroke_size,
-        } => draw_box(context, *rect, *color, *stroke_size),
+            shadow,
+        } => draw_box_with_shadow(context, *rect, *color, *stroke_size, *shadow),
         AnnotationAction::Text {
             position,
             text,
             color,
             font,
             max_width,
+            shadow,
         } => {
             let available_width = max_width
                 .unwrap_or_else(|| {
@@ -119,13 +124,14 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
                         .unwrap_or(f64::INFINITY),
                 )
                 .max(font.size * 1.8);
-            draw_wrapped_text(
+            draw_text_with_shadow(
                 context,
                 *position,
                 text,
                 *color,
                 font,
                 Some(available_width),
+                *shadow,
             );
         }
         AnnotationAction::Number {
@@ -134,7 +140,8 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             color,
             style,
             size,
-        } => draw_number(context, *position, *number, *color, *style, *size),
+            shadow,
+        } => draw_number_with_shadow(context, *position, *number, *color, *style, *size, *shadow),
         AnnotationAction::Obfuscate { .. } => {}
         AnnotationAction::Focus { .. } => {}
     }
@@ -160,16 +167,31 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             rect,
             color,
             stroke_size,
+            shadow,
         } => {
-            draw_circle(context, *rect, color.with_alpha(0.82), *stroke_size);
+            draw_circle_with_shadow(
+                context,
+                *rect,
+                color.with_alpha(0.82),
+                *stroke_size,
+                *shadow,
+            );
         }
         AnnotationAction::Line {
             start,
             end,
             color,
             stroke_size,
+            shadow,
         } => {
-            draw_line(context, *start, *end, color.with_alpha(0.82), *stroke_size);
+            draw_line_with_shadow(
+                context,
+                *start,
+                *end,
+                color.with_alpha(0.82),
+                *stroke_size,
+                *shadow,
+            );
         }
         AnnotationAction::Arrow {
             start,
@@ -178,7 +200,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             stroke_size,
             style,
             control_points,
-            ..
+            shadow,
         } => {
             draw_arrow(
                 context,
@@ -188,14 +210,22 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
                 *stroke_size,
                 *style,
                 control_points.clone(),
+                *shadow,
             );
         }
         AnnotationAction::Box {
             rect,
             color,
             stroke_size,
+            shadow,
         } => {
-            draw_box(context, *rect, color.with_alpha(0.82), *stroke_size);
+            draw_box_with_shadow(
+                context,
+                *rect,
+                color.with_alpha(0.82),
+                *stroke_size,
+                *shadow,
+            );
         }
         AnnotationAction::Text {
             position,
@@ -203,6 +233,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             color,
             font,
             max_width,
+            shadow,
         } => {
             let available_width = max_width
                 .unwrap_or_else(|| {
@@ -218,13 +249,14 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
                         .unwrap_or(f64::INFINITY),
                 )
                 .max(font.size * 1.8);
-            draw_wrapped_text(
+            draw_text_with_shadow(
                 context,
                 *position,
                 text,
                 color.with_alpha(0.9),
                 font,
                 Some(available_width),
+                *shadow,
             );
         }
         AnnotationAction::Number {
@@ -233,14 +265,16 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             color,
             style,
             size,
+            shadow,
         } => {
-            draw_number(
+            draw_number_with_shadow(
                 context,
                 *position,
                 *number,
                 color.with_alpha(0.88),
                 *style,
                 *size,
+                *shadow,
             );
         }
         AnnotationAction::Obfuscate { rect, .. } => {
@@ -809,6 +843,26 @@ pub fn draw_highlighter(
     let _ = context.restore();
 }
 
+fn shadow_color_for(color: DrawColor) -> DrawColor {
+    DrawColor::new(0.0, 0.0, 0.0, (color.a * 0.35).clamp(0.12, 0.35))
+}
+
+fn draw_shadow_layer(
+    context: &gtk4::cairo::Context,
+    shadow: bool,
+    color: DrawColor,
+    draw: impl Fn(&gtk4::cairo::Context, DrawColor),
+) {
+    if shadow {
+        let _ = context.save();
+        context.translate(3.0, 3.0);
+        draw(context, shadow_color_for(color));
+        let _ = context.restore();
+    }
+
+    draw(context, color);
+}
+
 pub fn draw_circle(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor, stroke_size: f64) {
     let width = rect.width as f64;
     let height = rect.height as f64;
@@ -832,6 +886,18 @@ pub fn draw_circle(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor,
     let _ = context.restore();
 }
 
+fn draw_circle_with_shadow(
+    context: &gtk4::cairo::Context,
+    rect: Rect,
+    color: DrawColor,
+    stroke_size: f64,
+    shadow: bool,
+) {
+    draw_shadow_layer(context, shadow, color, |ctx, draw_color| {
+        draw_circle(ctx, rect, draw_color, stroke_size);
+    });
+}
+
 pub fn draw_line(
     context: &gtk4::cairo::Context,
     start: Point,
@@ -845,6 +911,19 @@ pub fn draw_line(
     context.move_to(start.x, start.y);
     context.line_to(end.x, end.y);
     let _ = context.stroke();
+}
+
+fn draw_line_with_shadow(
+    context: &gtk4::cairo::Context,
+    start: Point,
+    end: Point,
+    color: DrawColor,
+    stroke_size: f64,
+    shadow: bool,
+) {
+    draw_shadow_layer(context, shadow, color, |ctx, draw_color| {
+        draw_line(ctx, start, end, draw_color, stroke_size);
+    });
 }
 
 fn draw_arrow_head(
@@ -1451,6 +1530,29 @@ pub fn draw_arrow(
     stroke_size: f64,
     style: ArrowStyle,
     control_points: Option<Vec<Point>>,
+    shadow: bool,
+) {
+    draw_shadow_layer(context, shadow, color, |ctx, draw_color| {
+        draw_arrow_internal(
+            ctx,
+            start,
+            end,
+            draw_color,
+            stroke_size,
+            style,
+            control_points.clone(),
+        );
+    });
+}
+
+fn draw_arrow_internal(
+    context: &gtk4::cairo::Context,
+    start: Point,
+    end: Point,
+    color: DrawColor,
+    stroke_size: f64,
+    style: ArrowStyle,
+    control_points: Option<Vec<Point>>,
 ) {
     if matches!(
         style,
@@ -1659,6 +1761,18 @@ pub fn draw_box(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor, st
     let _ = context.stroke();
 }
 
+fn draw_box_with_shadow(
+    context: &gtk4::cairo::Context,
+    rect: Rect,
+    color: DrawColor,
+    stroke_size: f64,
+    shadow: bool,
+) {
+    draw_shadow_layer(context, shadow, color, |ctx, draw_color| {
+        draw_box(ctx, rect, draw_color, stroke_size);
+    });
+}
+
 fn apply_font_settings(context: &gtk4::cairo::Context, font: &FontSettings) {
     let slant = match font.style {
         FontStyle::Normal | FontStyle::Bold => gtk4::cairo::FontSlant::Normal,
@@ -1842,6 +1956,20 @@ pub fn draw_wrapped_text(
     }
 }
 
+fn draw_text_with_shadow(
+    context: &gtk4::cairo::Context,
+    position: Point,
+    text: &str,
+    color: DrawColor,
+    font: &FontSettings,
+    max_width: Option<f64>,
+    shadow: bool,
+) {
+    draw_shadow_layer(context, shadow, color, |ctx, draw_color| {
+        draw_wrapped_text(ctx, position, text, draw_color, font, max_width);
+    });
+}
+
 pub fn cursor_position_for_text_point(
     context: &gtk4::cairo::Context,
     bounds: &TextEditBounds,
@@ -2020,6 +2148,20 @@ pub fn draw_number(
     }
 
     let _ = context.show_text(&label);
+}
+
+fn draw_number_with_shadow(
+    context: &gtk4::cairo::Context,
+    position: Point,
+    number: u32,
+    color: DrawColor,
+    style: NumberingStyle,
+    size: NumberSize,
+    shadow: bool,
+) {
+    draw_shadow_layer(context, shadow, color, |ctx, draw_color| {
+        draw_number(ctx, position, number, draw_color, style, size);
+    });
 }
 
 const BLUR_PERFORMANCE_THRESHOLD: usize = 400 * 400; // 400x400 pixels
