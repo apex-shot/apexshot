@@ -89,15 +89,6 @@ impl ArrowStyle {
             Self::Double => "Double",
         }
     }
-
-    pub fn icon_name(self) -> &'static str {
-        match self {
-            Self::Standard => "go-next-symbolic",
-            Self::Fancy => "go-next-symbolic",
-            Self::Curved => "path-bezier-symbolic",
-            Self::Double => "object-flip-horizontal-symbolic",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

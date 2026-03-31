@@ -103,7 +103,7 @@ pub fn build_color_picker(
     color_picker_arrow_box.add_css_class("editor-color-trigger-arrow-box");
     color_picker_arrow_box.set_halign(gtk4::Align::Center);
     color_picker_arrow_box.set_valign(gtk4::Align::Center);
-    let color_picker_arrow = Image::from_icon_name("pan-down-symbolic");
+    let color_picker_arrow = Image::from_icon_name(icon_names::CHEVRON_DOWN_REGULAR);
     color_picker_arrow.set_pixel_size(10);
     color_picker_arrow.add_css_class("editor-color-trigger-arrow");
     color_picker_arrow_box.append(&color_picker_arrow);
@@ -217,7 +217,7 @@ pub fn build_color_picker(
         remove_btn.set_margin_top(-3);
         remove_btn.set_margin_end(-3);
         remove_btn.add_css_class("editor-custom-color-remove-button");
-        let remove_icon = Image::from_icon_name("window-close-symbolic");
+        let remove_icon = Image::from_icon_name(icon_names::DISMISS_REGULAR);
         remove_icon.set_pixel_size(7);
         remove_icon.add_css_class("editor-custom-color-remove-icon");
         remove_btn.set_child(Some(&remove_icon));
@@ -394,7 +394,7 @@ pub fn build_color_picker(
     eyedropper_btn.set_has_frame(false);
     eyedropper_btn.set_valign(gtk4::Align::Center);
     eyedropper_btn.add_css_class("editor-eyedropper-button");
-    let eyedropper_icon = Image::from_icon_name("color-select-symbolic");
+    let eyedropper_icon = Image::from_icon_name(icon_names::EYEDROPPER_REGULAR);
     eyedropper_icon.set_pixel_size(16);
     eyedropper_btn.set_child(Some(&eyedropper_icon));
 
