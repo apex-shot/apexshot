@@ -1,6 +1,34 @@
+use super::types::ArrowStyle;
 use gtk4::gdk;
-use gtk4::{prelude::*, Box as GtkBox, Button, CssProvider, Image, Label, Orientation};
+use gtk4::{
+    prelude::*, Box as GtkBox, Button, CssProvider, DrawingArea, Image, Label, Orientation,
+    Widget,
+};
 use std::process::Command;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorToolIcon {
+    Named(String),
+    ArrowStyle(ArrowStyle),
+}
+
+pub fn arrow_style_toolbar_icon(style: ArrowStyle) -> EditorToolIcon {
+    EditorToolIcon::ArrowStyle(style)
+}
+
+pub fn toolbar_icon_size(icon: &EditorToolIcon) -> i32 {
+    match icon {
+        EditorToolIcon::Named(_) => 14,
+        _ => 14,
+    }
+}
+
+fn custom_toolbar_icon_inset(icon: &EditorToolIcon) -> f64 {
+    match icon {
+        EditorToolIcon::ArrowStyle(_) => 2.1,
+        EditorToolIcon::Named(_) => 0.0,
+    }
+}
 
 pub fn parse_env_bool(name: &str) -> Option<bool> {
     let value = std::env::var(name).ok()?.trim().to_ascii_lowercase();
@@ -1790,9 +1818,123 @@ pub fn install_editor_css() {
     }
 }
 
+fn icon_stroke_color(widget: &DrawingArea) -> gdk::RGBA {
+    widget
+        .style_context()
+        .lookup_color("theme_fg_color")
+        .unwrap_or_else(|| gdk::RGBA::new(1.0, 1.0, 1.0, 1.0))
+}
+
+fn draw_arrow_icon(
+    context: &gtk4::cairo::Context,
+    width: f64,
+    height: f64,
+    style: ArrowStyle,
+) {
+    let start_x = width * 0.22;
+    let start_y = height * 0.78;
+    let end_x = width * 0.78;
+    let end_y = height * 0.26;
+
+    match style {
+        ArrowStyle::Curved => {
+            context.move_to(start_x, start_y);
+            context.curve_to(
+                width * 0.28,
+                height * 0.24,
+                width * 0.62,
+                height * 0.82,
+                end_x,
+                end_y,
+            );
+            let _ = context.stroke();
+            context.move_to(end_x - width * 0.18, end_y + height * 0.03);
+            context.line_to(end_x, end_y);
+            context.line_to(end_x - width * 0.05, end_y + height * 0.18);
+        }
+        ArrowStyle::Double => {
+            context.move_to(start_x, start_y);
+            context.line_to(end_x, end_y);
+            let _ = context.stroke();
+            context.move_to(start_x + width * 0.15, start_y - height * 0.01);
+            context.line_to(start_x, start_y);
+            context.line_to(start_x + width * 0.05, start_y - height * 0.16);
+            context.move_to(end_x - width * 0.18, end_y + height * 0.03);
+            context.line_to(end_x, end_y);
+            context.line_to(end_x - width * 0.05, end_y + height * 0.18);
+        }
+        ArrowStyle::Fancy => {
+            context.set_line_width(2.4);
+            context.move_to(start_x, start_y);
+            context.line_to(end_x - width * 0.08, end_y + height * 0.08);
+            let _ = context.stroke();
+            context.move_to(end_x - width * 0.22, end_y + height * 0.06);
+            context.line_to(end_x, end_y);
+            context.line_to(end_x - width * 0.08, end_y + height * 0.24);
+        }
+        ArrowStyle::Standard => {
+            context.move_to(start_x, start_y);
+            context.line_to(end_x, end_y);
+            let _ = context.stroke();
+            context.move_to(end_x - width * 0.18, end_y + height * 0.03);
+            context.line_to(end_x, end_y);
+            context.line_to(end_x - width * 0.05, end_y + height * 0.18);
+        }
+    }
+}
+
+fn custom_tool_icon_widget(icon: EditorToolIcon, size: i32) -> Widget {
+    let area = DrawingArea::new();
+    area.set_content_width(size);
+    area.set_content_height(size);
+    area.set_draw_func(move |widget, context, width, height| {
+        let inset = custom_toolbar_icon_inset(&icon);
+        let color = icon_stroke_color(widget);
+        context.set_source_rgba(
+            color.red() as f64,
+            color.green() as f64,
+            color.blue() as f64,
+            color.alpha() as f64,
+        );
+        context.set_line_width(1.55);
+        context.set_line_cap(gtk4::cairo::LineCap::Round);
+        context.set_line_join(gtk4::cairo::LineJoin::Round);
+
+        let width = (width as f64 - (inset * 2.0)).max(1.0);
+        let height = (height as f64 - (inset * 2.0)).max(1.0);
+        let _ = context.save();
+        context.translate(inset, inset);
+
+        match icon {
+            EditorToolIcon::ArrowStyle(style) => {
+                draw_arrow_icon(context, width, height, style);
+                let _ = context.stroke();
+            }
+            EditorToolIcon::Named(_) => {}
+        }
+        let _ = context.restore();
+    });
+    area.upcast::<Widget>()
+}
+
+pub fn tool_icon_widget(icon: EditorToolIcon, size: i32) -> Widget {
+    match icon {
+        EditorToolIcon::Named(icon_name) => {
+            let image = Image::from_icon_name(&icon_name);
+            image.set_pixel_size(size);
+            image.upcast::<Widget>()
+        }
+        _ => custom_tool_icon_widget(icon, size),
+    }
+}
+
+pub fn set_button_tool_icon(button: &Button, icon: EditorToolIcon, size: i32) {
+    let child = tool_icon_widget(icon, size);
+    button.set_child(Some(&child));
+}
+
 pub fn icon_tool_button(icon_name: &str, tooltip: &str) -> Button {
-    let image = Image::from_icon_name(icon_name);
-    image.set_pixel_size(14);
+    let image = tool_icon_widget(EditorToolIcon::Named(icon_name.to_owned()), 14);
 
     let button = Button::new();
     button.set_child(Some(&image));
@@ -1954,4 +2096,41 @@ pub fn set_crop_apply_button_state(button: &Button, crop_mode: bool, has_selecti
     }
     button.set_visible(crop_mode);
     button.set_sensitive(crop_mode && has_selection);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{arrow_style_toolbar_icon, custom_toolbar_icon_inset, toolbar_icon_size, EditorToolIcon};
+    use crate::capture::editor::types::ArrowStyle;
+
+    #[test]
+    fn arrow_style_toolbar_icon_maps_each_style_to_a_custom_preview() {
+        for style in ArrowStyle::ALL {
+            assert_eq!(
+                arrow_style_toolbar_icon(style),
+                EditorToolIcon::ArrowStyle(style)
+            );
+        }
+    }
+
+    #[test]
+    fn toolbar_icon_size_uses_the_same_box_for_named_and_custom_icons() {
+        assert_eq!(
+            toolbar_icon_size(&EditorToolIcon::ArrowStyle(ArrowStyle::Curved)),
+            14
+        );
+        assert_eq!(
+            toolbar_icon_size(&EditorToolIcon::Named("fallback".to_owned())),
+            14
+        );
+    }
+
+    #[test]
+    fn custom_toolbar_icons_use_internal_padding_to_match_stock_icon_optics() {
+        assert!(custom_toolbar_icon_inset(&EditorToolIcon::ArrowStyle(ArrowStyle::Curved)) > 0.0);
+        assert_eq!(
+            custom_toolbar_icon_inset(&EditorToolIcon::Named("fallback".to_owned())),
+            0.0
+        );
+    }
 }

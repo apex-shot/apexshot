@@ -4,11 +4,13 @@ use gtk4::{
 };
 use std::rc::Rc;
 
+use super::icon_names;
 use super::super::{
     pen_weight::PenWeight,
     types::{ArrowStyle, ObfuscateMethod, Tool},
     ui_support::{
-        icon_tool_button, recommended_window_size, recommended_window_size_with_extra_width,
+        arrow_style_toolbar_icon, icon_tool_button, recommended_window_size,
+        recommended_window_size_with_extra_width, tool_icon_widget, toolbar_icon_size,
         traffic_light_button,
     },
 };
@@ -142,10 +144,10 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     traffic_lights.append(&traffic_minimize);
     traffic_lights.append(&traffic_zoom);
 
-    let select_btn = icon_tool_button("pointer-primary-click-symbolic", "Select");
+    let select_btn = icon_tool_button(icon_names::POINTER_PRIMARY_CLICK, "Select");
     let crop_btn = icon_tool_button(icon_names.crop, "Crop");
     crop_btn.add_css_class("standalone-tool");
-    let background_btn = icon_tool_button("image-x-generic-symbolic", "Background");
+    let background_btn = icon_tool_button(icon_names::IMAGE_REGULAR, "Background");
     background_btn.add_css_class("standalone-tool");
     let draw_btn = icon_tool_button(icon_names.draw, "Pen");
 
@@ -208,7 +210,7 @@ pub(super) fn build_obfuscate_method_controls() -> (GtkBox, Button, Popover, Gtk
     obfuscate_method_button.add_css_class("flat");
     obfuscate_method_button.set_tooltip_text(Some("Obfuscate method"));
 
-    let obfuscate_method_icon = Image::from_icon_name("view-grid-symbolic");
+    let obfuscate_method_icon = Image::from_icon_name(icon_names::VIEW_GRID);
     obfuscate_method_button.set_child(Some(&obfuscate_method_icon));
 
     let obfuscate_method_popover = Popover::new();
@@ -333,7 +335,11 @@ fn build_arrow_style_controls() -> (GtkBox, Button, Popover, GtkBox) {
     arrow_style_button.add_css_class("flat");
     arrow_style_button.set_tooltip_text(Some("Arrow style"));
 
-    let arrow_style_icon = Image::from_icon_name(ArrowStyle::Standard.icon_name());
+    let standard_arrow_icon = arrow_style_toolbar_icon(ArrowStyle::Standard);
+    let arrow_style_icon = tool_icon_widget(
+        standard_arrow_icon.clone(),
+        toolbar_icon_size(&standard_arrow_icon),
+    );
     arrow_style_button.set_child(Some(&arrow_style_icon));
 
     let arrow_style_popover = Popover::new();
@@ -391,7 +397,7 @@ fn build_number_options_dropdown() -> (
     let btn_box = GtkBox::new(Orientation::Horizontal, 2);
     let btn_label = Label::new(Some("123"));
     btn_label.add_css_class("editor-number-options-label");
-    let btn_arrow = Image::from_icon_name("pan-down-symbolic");
+    let btn_arrow = Image::from_icon_name(icon_names::CHEVRON_DOWN_REGULAR);
     btn_arrow.set_pixel_size(10);
     btn_box.append(&btn_label);
     btn_box.append(&btn_arrow);
@@ -417,7 +423,7 @@ fn build_number_options_dropdown() -> (
     // Numbering style options
     for style in NumberingStyle::ALL {
         let btn_box = GtkBox::new(Orientation::Horizontal, 8);
-        let check_icon = Image::from_icon_name("object-select-symbolic");
+        let check_icon = Image::from_icon_name(icon_names::SELECT);
         check_icon.set_pixel_size(12);
         check_icon.set_visible(style == NumberingStyle::default());
         check_icon.add_css_class("editor-number-style-check");
@@ -493,7 +499,7 @@ fn build_number_options_dropdown() -> (
     let size_label = Label::new(Some("Size"));
     size_label.set_hexpand(true);
     size_label.set_halign(gtk4::Align::Start);
-    let size_arrow = Image::from_icon_name("pan-end-symbolic");
+    let size_arrow = Image::from_icon_name(icon_names::CHEVRON_RIGHT_REGULAR);
     size_arrow.set_pixel_size(10);
     size_arrow.set_halign(gtk4::Align::End);
     size_btn_box.append(&size_label);
@@ -605,7 +611,7 @@ pub(super) fn build_toolbar_mode_controls(
     text_size_button_box.set_valign(gtk4::Align::Center);
     let text_size_label = Label::new(Some("24pt"));
     text_size_label.add_css_class("editor-text-size-label");
-    let text_size_arrow = Image::from_icon_name("pan-down-symbolic");
+    let text_size_arrow = Image::from_icon_name(icon_names::CHEVRON_DOWN_REGULAR);
     text_size_arrow.set_pixel_size(10);
     text_size_arrow.add_css_class("editor-text-size-arrow");
     text_size_button_box.append(&text_size_label);
@@ -649,7 +655,7 @@ pub(super) fn build_toolbar_mode_controls(
     font_family_button_box.set_valign(gtk4::Align::Center);
     let font_family_label = Label::new(Some("Sans"));
     font_family_label.add_css_class("editor-font-family-label");
-    let font_family_arrow = Image::from_icon_name("pan-down-symbolic");
+    let font_family_arrow = Image::from_icon_name(icon_names::CHEVRON_DOWN_REGULAR);
     font_family_arrow.set_pixel_size(10);
     font_family_arrow.add_css_class("editor-font-family-arrow");
     font_family_button_box.append(&font_family_label);
@@ -714,7 +720,7 @@ pub(super) fn build_toolbar_mode_controls(
     crop_type_arrow_box.add_css_class("editor-crop-type-arrow-box");
     crop_type_arrow_box.set_halign(gtk4::Align::Center);
     crop_type_arrow_box.set_valign(gtk4::Align::Center);
-    let crop_type_arrow = Image::from_icon_name("pan-down-symbolic");
+    let crop_type_arrow = Image::from_icon_name(icon_names::CHEVRON_DOWN_REGULAR);
     crop_type_arrow.set_pixel_size(10);
     crop_type_arrow.add_css_class("editor-crop-type-arrow");
     crop_type_arrow_box.append(&crop_type_arrow);
@@ -791,20 +797,20 @@ pub(super) fn build_toolbar_mode_controls(
 
     // Populate obfuscate method list with options
     let methods = [
-        (ObfuscateMethod::Pixelate, "view-grid-symbolic", "Pixelate"),
+        (ObfuscateMethod::Pixelate, icon_names::VIEW_GRID, "Pixelate"),
         (
             ObfuscateMethod::BlurSecure,
-            "security-high-symbolic",
+            icon_names::SHIELD_REGULAR,
             "Blur (Secure)",
         ),
         (
             ObfuscateMethod::BlurSmooth,
-            "blur-symbolic",
+            icon_names::BLUR,
             "Blur (Smooth)",
         ),
         (
             ObfuscateMethod::Blackout,
-            "media-playback-stop-symbolic",
+            icon_names::MEDIA_PLAYBACK_STOP,
             "Blackout",
         ),
     ];
@@ -866,7 +872,8 @@ pub(super) fn build_toolbar_mode_controls(
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let icon = Image::from_icon_name(style.icon_name());
+        let style_icon = arrow_style_toolbar_icon(style);
+        let icon = tool_icon_widget(style_icon.clone(), toolbar_icon_size(&style_icon));
         let label_widget = Label::new(Some(style.display_name()));
 
         btn_box.append(&icon);
@@ -1032,10 +1039,11 @@ pub(super) fn build_toolbar_mode_controls(
 pub(super) fn build_toolbar_right_controls(
     undo_icon_name: &str,
     redo_icon_name: &str,
+    delete_icon_name: &str,
 ) -> ToolbarRightParts {
     let undo_btn = icon_tool_button(undo_icon_name, "Undo");
     let redo_btn = icon_tool_button(redo_icon_name, "Redo");
-    let delete_selected_btn = icon_tool_button("edit-delete-symbolic", "Delete selected");
+    let delete_selected_btn = icon_tool_button(delete_icon_name, "Delete selected");
     undo_btn.set_sensitive(false);
     redo_btn.set_sensitive(false);
     delete_selected_btn.set_sensitive(false);

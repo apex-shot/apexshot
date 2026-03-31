@@ -291,20 +291,20 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         sep_2,
     } = toolbar::build_toolbar_base(toolbar::ToolbarBaseIconNames {
         crop: icon_names::CROP,
-        draw: icon_names::DOCUMENT_EDIT_REGULAR,
-        arrow: icon_names::GO_NEXT,
+        draw: icon_names::PEN_REGULAR,
+        arrow: icon_names::ARROW_UP_RIGHT_REGULAR,
         line: icon_names::DRAW_LINE,
-        box_: icon_names::DRAW_RECTANGLE,
-        circle: icon_names::CIRCLE_LINE_REGULAR,
-        text: icon_names::TEXT_FONT_REGULAR,
+        box_: icon_names::RECTANGLE_LANDSCAPE_REGULAR,
+        circle: icon_names::CIRCLE_REGULAR,
+        text: icon_names::TEXT_T_REGULAR,
         number: icon_names::NUMBER_CIRCLE_1_REGULAR,
         highlighter: icon_names::HIGHLIGHT_REGULAR,
         obfuscate: icon_names::FOG,
         focus: icon_names::SMALL_RECTANGLE_IN_FOCUS,
-        obfuscate_pixelate: "view-grid-symbolic",
-        obfuscate_blur_secure: "security-high-symbolic",
-        obfuscate_blur_smooth: "blur-symbolic",
-        obfuscate_blackout: "media-playback-stop-symbolic",
+        obfuscate_pixelate: icon_names::VIEW_GRID,
+        obfuscate_blur_secure: icon_names::SHIELD_REGULAR,
+        obfuscate_blur_smooth: icon_names::BLUR,
+        obfuscate_blackout: icon_names::MEDIA_PLAYBACK_STOP,
     });
 
     let canvas_queue_draw_signal: Rc<dyn Fn()> = Rc::new({
@@ -400,6 +400,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let toolbar_right_parts = toolbar::build_toolbar_right_controls(
         icon_names::ARROW_UNDO_REGULAR,
         icon_names::ARROW_REDO_REGULAR,
+        icon_names::DELETE_REGULAR,
     );
     let undo_btn = toolbar_right_parts.undo_btn;
     let redo_btn = toolbar_right_parts.redo_btn;
@@ -1507,9 +1508,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
 
         if let Some(surface) = cached_surface_draw.borrow().as_ref() {
-            if context.set_source_surface(surface, 0.0, 0.0).is_ok() {
-                let _ = context.paint();
-            }
+            super::render::paint_surface_with_filter(
+                context,
+                surface,
+                0.0,
+                0.0,
+                super::render::editor_image_filter_for_scale(t.scale),
+            );
         } else {
             draw_rgba_to_context(context, &working_image);
         }

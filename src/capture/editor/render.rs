@@ -29,9 +29,13 @@ pub fn draw_rgba_to_context(context: &gtk4::cairo::Context, image: &RgbaImage) {
         Err(_) => return,
     };
 
-    if context.set_source_surface(&surface, 0.0, 0.0).is_ok() {
-        let _ = context.paint();
-    }
+    paint_surface_with_filter(
+        context,
+        &surface,
+        0.0,
+        0.0,
+        gtk4::cairo::Filter::Nearest,
+    );
 }
 
 pub fn rgba_image_to_surface(image: &RgbaImage) -> Option<gtk4::cairo::ImageSurface> {
@@ -51,6 +55,62 @@ pub fn rgba_image_to_surface(image: &RgbaImage) -> Option<gtk4::cairo::ImageSurf
         stride,
     )
     .ok()
+}
+
+pub fn paint_surface_with_filter(
+    context: &gtk4::cairo::Context,
+    surface: &gtk4::cairo::ImageSurface,
+    x: f64,
+    y: f64,
+    filter: gtk4::cairo::Filter,
+) {
+    if context.set_source_surface(surface, x, y).is_ok() {
+        let source = context.source();
+        source.set_filter(filter);
+        let _ = context.paint();
+    }
+}
+
+pub fn editor_image_filter_for_scale(scale: f64) -> gtk4::cairo::Filter {
+    if scale < 0.999 {
+        gtk4::cairo::Filter::Good
+    } else {
+        gtk4::cairo::Filter::Nearest
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paint_surface_with_filter_sets_requested_filter() {
+        let surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 4, 4)
+            .expect("surface");
+        let context = gtk4::cairo::Context::new(&surface).expect("context");
+
+        paint_surface_with_filter(
+            &context,
+            &surface,
+            0.0,
+            0.0,
+            gtk4::cairo::Filter::Nearest,
+        );
+
+        assert_eq!(context.source().filter(), gtk4::cairo::Filter::Nearest);
+    }
+
+    #[test]
+    fn editor_image_filter_uses_good_when_downscaling() {
+        assert_eq!(editor_image_filter_for_scale(0.75), gtk4::cairo::Filter::Good);
+        assert_eq!(editor_image_filter_for_scale(0.25), gtk4::cairo::Filter::Good);
+    }
+
+    #[test]
+    fn editor_image_filter_uses_nearest_at_full_scale() {
+        assert_eq!(editor_image_filter_for_scale(1.0), gtk4::cairo::Filter::Nearest);
+        assert_eq!(editor_image_filter_for_scale(1.2), gtk4::cairo::Filter::Nearest);
+    }
 }
 
 pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &AnnotationAction) {

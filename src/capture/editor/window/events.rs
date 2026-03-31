@@ -22,7 +22,10 @@ use super::super::{
         tool_shortcut_target, ArrowStyle, BackgroundStyle, DrawColor, FontSettings, FontStyle,
         MoveHandle, ObfuscateMethod, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
     },
-    ui_support::{set_active_tool_button, set_crop_apply_button_state},
+    ui_support::{
+        arrow_style_toolbar_icon, set_active_tool_button, set_button_tool_icon,
+        set_crop_apply_button_state, toolbar_icon_size,
+    },
 };
 
 const MOVE_HANDLE_DRAG_RADIUS: f64 = 10.0;
@@ -777,10 +780,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             if let Some(child) = obfuscate_method_button.child() {
                 if let Ok(img) = child.downcast::<Image>() {
                     let icon_name = match method {
-                        ObfuscateMethod::Pixelate => "view-grid-symbolic",
-                        ObfuscateMethod::BlurSecure => "security-high-symbolic",
-                        ObfuscateMethod::BlurSmooth => "blur-symbolic",
-                        ObfuscateMethod::Blackout => "media-playback-stop-symbolic",
+                        ObfuscateMethod::Pixelate => icon_names::VIEW_GRID,
+                        ObfuscateMethod::BlurSecure => icon_names::SHIELD_REGULAR,
+                        ObfuscateMethod::BlurSmooth => icon_names::BLUR,
+                        ObfuscateMethod::Blackout => icon_names::MEDIA_PLAYBACK_STOP,
                     };
                     img.set_icon_name(Some(icon_name));
                 }
@@ -830,12 +833,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 st.set_arrow_style(style);
             }
 
-            // Update the trigger button icon
-            if let Some(child) = arrow_style_button.child() {
-                if let Ok(img) = child.downcast::<Image>() {
-                    img.set_icon_name(Some(style.icon_name()));
-                }
-            }
+            let icon = arrow_style_toolbar_icon(style);
+            set_button_tool_icon(&arrow_style_button, icon.clone(), toolbar_icon_size(&icon));
 
             if let Some(popover) = b.ancestor(Popover::static_type()) {
                 popover.downcast::<Popover>().unwrap().popdown();
