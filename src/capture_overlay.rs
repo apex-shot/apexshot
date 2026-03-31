@@ -318,6 +318,7 @@ pub enum AreaCapturePathResult {
     ScrollCaptured(PathBuf),
     OcrRequested(CaptureData),
     RecordingRequested(RecordingRequest),
+    RecordingConfigUpdated,
     Cancelled,
 }
 
@@ -657,6 +658,15 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
             }
         }
         Some(1) | None => {
+            let mode = extract_string(stdout.trim(), "mode");
+            if matches!(mode.as_deref(), Some("record-config")) {
+                let request = parse_recording_json(stdout.trim())?;
+                crate::recording::persist_overlay_recording_request_state(&request)
+                    .map_err(|e| SelectionError::InitError(format!(
+                        "Failed to persist recording overlay state: {e}"
+                    )))?;
+                return Ok(AreaCapturePathResult::RecordingConfigUpdated);
+            }
             eprintln!("[capture_overlay] capture_area_via_cpp: cancelled or no exit code");
             Ok(AreaCapturePathResult::Cancelled)
         }
@@ -690,6 +700,7 @@ pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
         AreaCapturePathResult::RecordingRequested(request) => {
             Ok(AreaCaptureResult::RecordingRequested(request))
         }
+        AreaCapturePathResult::RecordingConfigUpdated => Ok(AreaCaptureResult::Cancelled),
         AreaCapturePathResult::Cancelled => Ok(AreaCaptureResult::Cancelled),
     }
 }

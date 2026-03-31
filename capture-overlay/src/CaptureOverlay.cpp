@@ -114,6 +114,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_captureDelaySeconds(5)
     , m_countdownActive(false)
     , m_countdownValue(0)
+    , m_countdownCancelRequested(false)
+    , m_hoveredCountdownCancel(false)
     , m_captureIntent(CaptureIntent::Area)
     , m_scrollStage(ScrollStage::Inactive)
     , m_scrollCaptureReady(false)
@@ -139,6 +141,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_showCursor(true)
     , m_recClicks(false)
     , m_recKeystrokes(false)
+    , m_recordAspectRatioIndex(0)
     , m_rememberSelection(false)
     , m_dimScreen(true)
     , m_showCountdown(true)
@@ -180,6 +183,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_hoveredSizeCard(false)
     , m_hoveredActionCard(ToolbarActionCard::None)
     , m_hoveredSettingsItem(-1)
+    , m_hoveredCropMenuItem(-1)
+    , m_cropMenuOpen(false)
 {
     // Init GStreamer for webcam capture
     static bool gstInited = false;

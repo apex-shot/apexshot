@@ -92,7 +92,7 @@ void printCaptureScreenJson(const QString& path, const QSize& size, const char* 
     std::fflush(stdout);
 }
 
-void printRecordingJson(const QRect& sel, const char* recordType,
+void printRecordingJson(const QRect& sel, const char* mode, const char* recordType,
                          bool controls, bool mic, bool speaker,
                          bool clicks, bool keystrokes,
                          bool webcam, double clickSize, int clickColor, int clickStyle,
@@ -108,7 +108,7 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                          bool fullscreen)
 {
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
-                "\"mode\":\"record\",\"record_type\":\"%s\","
+                "\"mode\":\"%s\",\"record_type\":\"%s\","
                 "\"controls\":%s,\"mic\":%s,\"speaker\":%s,"
                 "\"clicks\":%s,\"keystrokes\":%s,"
                 "\"webcam\":%s,\"click_size\":%.4f,\"click_color\":%d,"
@@ -126,6 +126,7 @@ void printRecordingJson(const QRect& sel, const char* recordType,
                 "\"gif_fps\":%d,\"gif_quality\":%.4f,"
                 "\"gif_size_idx\":%d,\"optimize_gif\":%s,\"fullscreen\":%s}\n",
                 sel.x(), sel.y(), sel.width(), sel.height(),
+                mode,
                 recordType,
                 controls ? "true" : "false",
                 mic ? "true" : "false",
@@ -597,6 +598,57 @@ int main(int argc, char* argv[])
         return 3;
     }
     if (ret != 0) {
+        if (areaInitMode) {
+            const QRect sel = overlay.selection();
+            int screenHeight = 0;
+            for (QScreen* screen : QGuiApplication::screens()) {
+                screenHeight = std::max(screenHeight, screen->geometry().height());
+            }
+            const int yOffset = screenHeight - overlay.height();
+            const QRect selGlobal = sel.translated(overlay.geometry().x(), yOffset);
+            const char* recordType = "video";
+            if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
+                recordType = "gif";
+            }
+            printRecordingJson(selGlobal, "record-config", recordType,
+                               overlay.recordControlsEnabled(),
+                               overlay.recordMicEnabled(),
+                               overlay.recordSpeakerEnabled(),
+                               overlay.recordClicksEnabled(),
+                               overlay.recordKeystrokesEnabled(),
+                               overlay.recordWebcamEnabled(),
+                               overlay.recordClickSize(),
+                               overlay.recordClickColor(),
+                               overlay.recordClickStyle(),
+                               overlay.recordClickAnimate(),
+                               overlay.recordKeySize(),
+                               overlay.recordKeyPosition(),
+                               overlay.recordKeyAppearance(),
+                               overlay.recordKeyBlurBg(),
+                               overlay.recordKeyFilter(),
+                               overlay.recordWebcamSize(),
+                               overlay.recordWebcamShape(),
+                               overlay.recordWebcamFlip(),
+                               overlay.recordWebcamDevice(),
+                               overlay.recordWebcamRelX(),
+                               overlay.recordWebcamRelY(),
+                               overlay.recordDisplayRecTime(),
+                               overlay.recordHidpiEnabled(),
+                               overlay.recordDoNotDisturb(),
+                               overlay.recordShowCursor(),
+                               overlay.recordRememberSelection(),
+                               overlay.recordDimScreen(),
+                               overlay.recordShowCountdown(),
+                               overlay.recordVideoMaxRes(),
+                               overlay.recordVideoFps(),
+                               overlay.recordMono(),
+                               overlay.recordOpenEditor(),
+                               overlay.recordGifFps(),
+                               overlay.recordGifQuality(),
+                               overlay.recordGifSizeIdx(),
+                               overlay.recordOptimizeGif(),
+                               overlay.recordFullscreen());
+        }
         std::fprintf(stderr, "apexshot-capture: event loop exited with code %d\n", ret);
         return 1;
     }
@@ -636,7 +688,7 @@ int main(int argc, char* argv[])
         // Translate from local overlay coords to global screen coords
         // Include yOffset because overlay doesn't cover the top bar
         const QRect selGlobal = sel.translated(overlay.geometry().x(), yOffset);
-        printRecordingJson(selGlobal, recordType,
+        printRecordingJson(selGlobal, "record", recordType,
                            overlay.recordControlsEnabled(),
                            overlay.recordMicEnabled(),
                            overlay.recordSpeakerEnabled(),

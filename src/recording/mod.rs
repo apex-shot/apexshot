@@ -1929,6 +1929,16 @@ pub fn run_overlay_recording_request(request: RecordingRequest) -> anyhow::Resul
     run_overlay_recording_request_with_gtk(request, None)
 }
 
+pub fn persist_overlay_recording_request_state(request: &RecordingRequest) -> anyhow::Result<()> {
+    let prepared = prepare_overlay_recording_request(
+        crate::config::load_config(),
+        request,
+        chrono::Utc::now(),
+    );
+    save_config(&prepared.updated_app_config)?;
+    Ok(())
+}
+
 pub fn run_overlay_recording_request_with_gtk(
     request: RecordingRequest,
     _gtk_tx: Option<std::sync::mpsc::Sender<crate::daemon::GtkWork>>,

@@ -64,6 +64,10 @@ void CaptureOverlay::confirmRecordingSelection()
     stopWebcamCapture();
     m_recordingToolsHidden = true;
     m_hoveredRecordTile = RecordPanelTile::None;
+    m_cropMenuOpen = false;
+    m_hoveredCropMenuItem = -1;
+    m_countdownCancelRequested = false;
+    m_hoveredCountdownCancel = false;
     update();
     QApplication::processEvents();
 
@@ -72,11 +76,27 @@ void CaptureOverlay::confirmRecordingSelection()
         for (int remaining = 3; remaining > 0; --remaining) {
             m_countdownValue = remaining;
             update();
-            QApplication::processEvents();
-            QThread::sleep(1);
+            for (int step = 0; step < 20; ++step) {
+                QApplication::processEvents();
+                if (m_countdownCancelRequested) {
+                    m_countdownActive = false;
+                    m_countdownValue = 0;
+                    m_countdownCancelRequested = false;
+                    m_hoveredCountdownCancel = false;
+                    m_recordingToolsHidden = false;
+                    if (m_recWebcam && m_webcamDevice >= 0) {
+                        startWebcamCapture();
+                    }
+                    update();
+                    QApplication::processEvents();
+                    return;
+                }
+                QThread::msleep(50);
+            }
         }
         m_countdownActive = false;
         m_countdownValue = 0;
+        m_hoveredCountdownCancel = false;
         update();
         QApplication::processEvents();
     }
@@ -140,12 +160,12 @@ CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoi
         return RecordPanelTile::None;
     }
 
-    // Full panel: Controls, Size, Crop, Mic, Speaker, Record, Click, Keystrokes, RecordGif, RecordVideo
+    // Rect order must match the append order in drawRecordingPanel().
     static const RecordPanelTile tileOrder[] = {
         RecordPanelTile::Controls, RecordPanelTile::Size, RecordPanelTile::Crop,
         RecordPanelTile::Mic, RecordPanelTile::Speaker, RecordPanelTile::Webcam,
         RecordPanelTile::Click, RecordPanelTile::Keystrokes,
-        RecordPanelTile::RecordGif, RecordPanelTile::RecordVideo
+        RecordPanelTile::RecordVideo, RecordPanelTile::RecordGif
     };
 
     for (int i = 0; i < (int)m_recTileRects.size() && i < 10; ++i) {
@@ -183,6 +203,7 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
         case HandlePos::Bottom:      setCursor(Qt::SizeVerCursor);   break;
         case HandlePos::Left:
         case HandlePos::Right:       setCursor(Qt::SizeHorCursor);   break;
+        case HandlePos::Inside:      setCursor(Qt::SizeAllCursor);   break;
         default:                     setCursor(Qt::ArrowCursor);     break;
         }
         return;
