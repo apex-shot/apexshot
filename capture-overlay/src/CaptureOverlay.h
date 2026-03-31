@@ -191,6 +191,12 @@ private:
         RecordVideo, RecordGif
     };
 
+    enum class ToolbarActionCard {
+        None,
+        Confirm,
+        Cancel
+    };
+
 private slots:
     void onMicLevelUpdated(double level);
 
@@ -416,7 +422,8 @@ private:
 
     // Toolbar hover state
     int  m_hoveredTool;             // -1 = none
-    bool m_hoveredSizePanel;
+    bool m_hoveredSizeCard;
+    ToolbarActionCard m_hoveredActionCard;
     int  m_hoveredSettingsItem;     // new: index into m_settingsClickableRects, -1 = none
 
     static constexpr int kHandleHitSize = 20;

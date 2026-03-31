@@ -177,7 +177,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_speakerLevel(0.0)
     , m_micTimer(new QTimer(this))
     , m_hoveredTool(-1)
-    , m_hoveredSizePanel(false)
+    , m_hoveredSizeCard(false)
+    , m_hoveredActionCard(ToolbarActionCard::None)
     , m_hoveredSettingsItem(-1)
 {
     // Init GStreamer for webcam capture

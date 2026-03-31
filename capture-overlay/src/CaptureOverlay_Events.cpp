@@ -386,6 +386,15 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
     // (not when clicking outside, which should start a fresh selection)
     if (m_hasSelection) {
         const QRect sel = m_selection.normalized();
+        ToolbarLayout layout = computeToolbarLayout(
+            sel.x(),
+            sel.y(),
+            sel.width(),
+            sel.height(),
+            width(),
+            height(),
+            m_captureIntent == CaptureIntent::Scroll
+        );
 
         // Only allow toolbar clicks when the click point is NOT outside the
         // selection area — otherwise the user is starting a new selection and
@@ -395,7 +404,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 
         // Helper lambda to handle toolbar tool click
         auto handleToolClick = [&](int toolIndex) -> bool {
-            if (toolIndex == 2) {
+            if (toolIndex == 1) {
                 // Fullscreen: expand selection to cover entire screen, wait for Enter
                 exitScrollMode();
                 exitWindowMode();
@@ -405,7 +414,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 m_captureIntent = CaptureIntent::Area;
                 update();
                 return true;
-            } else if (toolIndex == 1) {
+            } else if (toolIndex == 0) {
                 // Area: restore default centered area selection
                 exitScrollMode();
                 exitWindowMode();
@@ -420,7 +429,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 m_captureIntent = CaptureIntent::Area;
                 update();
                 return true;
-            } else if (toolIndex == 3) {
+            } else if (toolIndex == 2) {
                 // Window: on Wayland use GNOME DBus (exit code 3),
                 // on X11 use hover-select mode
                 exitScrollMode();
@@ -438,13 +447,13 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     enterWindowMode();
                 }
                 return true;
-            } else if (toolIndex == 4) {
+            } else if (toolIndex == 3) {
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Area;
                 update();
                 showWebScrollCaptureInfo(this);
                 return true;
-            } else if (toolIndex == 5) {
+            } else if (toolIndex == 4) {
                 if (!m_timerCaptureEnabled) {
                     m_timerCaptureEnabled = true;
                 }
@@ -458,12 +467,12 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     cycleCaptureDelay();
                 }
                 return true;
-            } else if (toolIndex == 6) {
+            } else if (toolIndex == 5) {
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Ocr;
                 update();
                 return true;
-            } else if (toolIndex == 7) {
+            } else if (toolIndex == 6) {
                 // Recording: open recording panel
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Record;
@@ -481,41 +490,58 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             }
         };
 
+        auto handleActionClick = [&](CaptureOverlay::ToolbarActionCard action) -> bool {
+            switch (action) {
+            case ToolbarActionCard::Confirm:
+                if (m_captureIntent == CaptureIntent::Record) {
+                    confirmRecordingSelection();
+                } else {
+                    confirmSelection();
+                }
+                return true;
+            case ToolbarActionCard::Cancel:
+                cancelSelection();
+                return true;
+            case ToolbarActionCard::None:
+                return false;
+            }
+            return false;
+        };
+
         if (clickInsideOrOnSelection) {
-            ToolbarLayout layout = computeToolbarLayout(
-                sel.x(),
-                sel.y(),
-                sel.width(),
-                sel.height(),
-                width(),
-                height(),
-                m_captureIntent == CaptureIntent::Scroll
-            );
             for (int i = 0; i < NUM_TOOLS; ++i) {
-                if (layout.itemCells[i].contains(pos)) {
+                if (layout.toolCells[i].contains(pos)) {
                     std::fprintf(stderr, "[CaptureOverlay] Tool clicked (inside): index=%d\n", i);
                     handleToolClick(i);
                     return;
                 }
             }
+            if (layout.confirmCard.contains(pos)) {
+                handleActionClick(ToolbarActionCard::Confirm);
+                return;
+            }
+            if (layout.cancelCard.contains(pos)) {
+                handleActionClick(ToolbarActionCard::Cancel);
+                return;
+            }
         } else {
-            ToolbarLayout layout = computeToolbarLayout(
-                sel.x(),
-                sel.y(),
-                sel.width(),
-                sel.height(),
-                width(),
-                height(),
-                m_captureIntent == CaptureIntent::Scroll
-            );
-            bool clickedToolbar = layout.toolsPanel.contains(pos) ||
-                                  layout.sizePanel.contains(pos);
+            bool clickedToolbar = layout.leftToolsPanel.contains(pos) ||
+                                  layout.rightActionsPanel.contains(pos) ||
+                                  layout.sizeCard.contains(pos);
             if (clickedToolbar) {
                 for (int i = 0; i < NUM_TOOLS; ++i) {
-                    if (layout.itemCells[i].contains(pos)) {
+                    if (layout.toolCells[i].contains(pos)) {
                         handleToolClick(i);
                         return;
                     }
+                }
+                if (layout.confirmCard.contains(pos)) {
+                    handleActionClick(ToolbarActionCard::Confirm);
+                    return;
+                }
+                if (layout.cancelCard.contains(pos)) {
+                    handleActionClick(ToolbarActionCard::Cancel);
+                    return;
                 }
                 // Clicked toolbar panel background but not a specific tool —
                 // do nothing (don't start a new selection from here).
@@ -755,12 +781,21 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         );
         int newHover = -1;
         for (int i = 0; i < NUM_TOOLS; ++i) {
-            if (layout.itemCells[i].contains(pos)) { newHover = i; break; }
+            if (layout.toolCells[i].contains(pos)) { newHover = i; break; }
         }
-        bool newSizeHover = layout.sizePanel.contains(pos);
-        if (newHover != m_hoveredTool || newSizeHover != m_hoveredSizePanel) {
+        bool newSizeHover = layout.sizeCard.contains(pos);
+        ToolbarActionCard newActionHover = ToolbarActionCard::None;
+        if (layout.confirmCard.contains(pos)) {
+            newActionHover = ToolbarActionCard::Confirm;
+        } else if (layout.cancelCard.contains(pos)) {
+            newActionHover = ToolbarActionCard::Cancel;
+        }
+        if (newHover != m_hoveredTool
+            || newSizeHover != m_hoveredSizeCard
+            || newActionHover != m_hoveredActionCard) {
             m_hoveredTool = newHover;
-            m_hoveredSizePanel = newSizeHover;
+            m_hoveredSizeCard = newSizeHover;
+            m_hoveredActionCard = newActionHover;
             update();
         }
     }
@@ -841,20 +876,21 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
             height(),
             m_captureIntent == CaptureIntent::Scroll
         );
-        bool clickedToolbar = layout.toolsPanel.contains(pos) ||
-                              layout.sizePanel.contains(pos);
+        bool clickedToolbar = layout.leftToolsPanel.contains(pos) ||
+                              layout.rightActionsPanel.contains(pos) ||
+                              layout.sizeCard.contains(pos);
         if (clickedToolbar) {
             for (int i = 0; i < NUM_TOOLS; ++i) {
-                if (layout.itemCells[i].contains(pos)) {
+                if (layout.toolCells[i].contains(pos)) {
                     // Reuse same handleToolClick logic
-                    if (i == 2) {
+                    if (i == 1) {
                         exitScrollMode();
                         m_selection = QRect(0, 0, width(), height());
                         m_hasSelection = true;
                         m_fullscreenMode = true;
                         m_captureIntent = CaptureIntent::Area;
                         update();
-                    } else if (i == 1) {
+                    } else if (i == 0) {
                         exitScrollMode();
                         int defaultW = std::max(kMinSize, std::min(DEFAULT_SELECTION_W, width()));
                         int defaultH = std::max(kMinSize, std::min(DEFAULT_SELECTION_H, height()));
@@ -864,12 +900,12 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         m_timerDelayActive = false;
                         m_captureIntent = CaptureIntent::Area;
                         update();
-                    } else if (i == 4) {
+                    } else if (i == 3) {
                         exitScrollMode();
                         m_captureIntent = CaptureIntent::Area;
                         update();
                         showWebScrollCaptureInfo(this);
-                    } else if (i == 5) {
+                    } else if (i == 4) {
                         if (m_timerCaptureEnabled) {
                             if (!m_timerDelayActive) {
                                 m_timerDelayActive = true;
@@ -881,9 +917,17 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                                 cycleCaptureDelay();
                             }
                         }
-                    } else if (i == 6) {
+                    } else if (i == 5) {
                         exitScrollMode();
                         m_captureIntent = CaptureIntent::Ocr;
+                        update();
+                    } else if (i == 6) {
+                        exitScrollMode();
+                        m_captureIntent = CaptureIntent::Record;
+                        m_recordingPanelOpen = true;
+                        m_recordingToolsHidden = false;
+                        if (m_recWebcam && m_webcamDevice >= 0)
+                            startWebcamCapture();
                         update();
                     } else {
                         exitScrollMode();
@@ -892,6 +936,18 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                     }
                     return;
                 }
+            }
+            if (layout.confirmCard.contains(pos)) {
+                if (m_captureIntent == CaptureIntent::Record) {
+                    confirmRecordingSelection();
+                } else {
+                    confirmSelection();
+                }
+                return;
+            }
+            if (layout.cancelCard.contains(pos)) {
+                cancelSelection();
+                return;
             }
             return; // Clicked toolbar background — do nothing
         }
