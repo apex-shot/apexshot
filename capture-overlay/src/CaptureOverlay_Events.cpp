@@ -7,6 +7,34 @@
 #include <QDateTime>
 #include <QPoint>
 #include <QRect>
+#include <cmath>
+
+namespace {
+constexpr double kRecordingAspectRatios[] = {
+    0.0,
+    1.0,
+    5.0 / 4.0,
+    4.0 / 3.0,
+    7.0 / 5.0,
+    3.0 / 2.0,
+    16.0 / 10.0,
+    16.0 / 9.0,
+    2.35,
+    2.0 / 3.0,
+    9.0 / 16.0,
+};
+
+constexpr int kRecordingAspectRatioCount =
+    static_cast<int>(sizeof(kRecordingAspectRatios) / sizeof(kRecordingAspectRatios[0]));
+
+double recordingAspectRatioForIndex(int index)
+{
+    if (index < 0 || index >= kRecordingAspectRatioCount) {
+        return 0.0;
+    }
+    return kRecordingAspectRatios[index];
+}
+}
 
 static void showWebScrollCaptureInfo(QWidget* parent)
 {
@@ -69,6 +97,68 @@ static QString keyEventToPreviewText(QKeyEvent* event)
 void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 {
     const QPoint pos = event->pos();
+    auto closeRecordingMenus = [&]() {
+        m_settingsOpen = false;
+        m_clickOptionsOpen = false;
+        m_keystrokeOptionsOpen = false;
+        m_cropMenuOpen = false;
+        m_hoveredCropMenuItem = -1;
+        stopClickAnimTimer();
+        m_clickPreviews.clear();
+        m_showKeystrokePreview = false;
+        m_keyPreviews.clear();
+        m_dropdownOpen = -1;
+        m_dropdownAnchor = QRectF();
+        m_dropdownOptions.clear();
+        m_dropdownColors.clear();
+        m_dropdownValuePtr = nullptr;
+        m_hoveredDropdownItem = -1;
+        m_dropdownItemRects.clear();
+    };
+    auto applyCurrentRecordingAspect = [&]() {
+        const double ratio = recordingAspectRatioForIndex(m_recordAspectRatioIndex);
+        if (ratio <= 0.0 || !m_hasSelection) {
+            return;
+        }
+
+        const QRect bounds = rect();
+        QRect sel = m_selection.normalized();
+        double newW = sel.width();
+        double newH = newW / ratio;
+        if (newH > sel.height()) {
+            newH = sel.height();
+            newW = newH * ratio;
+        }
+
+        newW = std::max<double>(kMinSize, std::min<double>(newW, bounds.width()));
+        newH = std::max<double>(kMinSize, std::min<double>(newH, bounds.height()));
+        if (newW / ratio > bounds.height()) {
+            newH = bounds.height();
+            newW = newH * ratio;
+        }
+        if (newH * ratio > bounds.width()) {
+            newW = bounds.width();
+            newH = newW / ratio;
+        }
+
+        const QPoint center = sel.center();
+        int x = center.x() - static_cast<int>(std::round(newW / 2.0));
+        int y = center.y() - static_cast<int>(std::round(newH / 2.0));
+        int w = std::max(kMinSize, static_cast<int>(std::round(newW)));
+        int h = std::max(kMinSize, static_cast<int>(std::round(newH)));
+
+        x = std::max(0, std::min(x, bounds.width() - w));
+        y = std::max(0, std::min(y, bounds.height() - h));
+        m_selection = QRect(x, y, w, h);
+        m_hasSelection = true;
+    };
+
+    if (m_countdownActive) {
+        if (event->button() == Qt::LeftButton && m_countdownBubbleRect.contains(pos)) {
+            m_countdownCancelRequested = true;
+        }
+        return;
+    }
 
     // Right-click on webcam tile shows context menu
     if (event->button() == Qt::RightButton && m_recordingPanelOpen) {
@@ -78,7 +168,11 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                      (int)tile, (int)RecordPanelTile::Webcam);
         if (tile == RecordPanelTile::Webcam) {
             std::fprintf(stderr, "[mousePressEvent] Showing webcam context menu\n");
-            showWebcamContextMenu(event->globalPos());
+            const QRect sel = m_selection.normalized();
+            const double contextualX = std::max(10.0, std::min(sel.x() + (sel.width() - 440.0) / 2.0, width() - 450.0));
+            const double contextualY = std::max(10.0, std::min(sel.y() + 24.0, height() - 510.0));
+            closeRecordingMenus();
+            showWebcamContextMenu(mapToGlobal(QPoint((int)contextualX, (int)contextualY)));
             return;
         }
     }
@@ -103,6 +197,22 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         m_hoveredDropdownItem = -1;
         update();
         return;
+    }
+
+    if (m_cropMenuOpen) {
+        for (int i = 0; i < m_cropMenuItemRects.size(); ++i) {
+            if (m_cropMenuItemRects[i].contains(pos)) {
+                m_recordAspectRatioIndex = i;
+                m_cropMenuOpen = false;
+                m_hoveredCropMenuItem = -1;
+                applyCurrentRecordingAspect();
+                update();
+                return;
+            }
+        }
+        m_cropMenuOpen = false;
+        m_hoveredCropMenuItem = -1;
+        update();
     }
 
     // Keystroke Options sub-panel clicks
@@ -208,7 +318,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
     // Settings menu clicks
     if (m_settingsOpen) {
         if (m_settingsPanelRect.contains(pos)) {
-            // Check in reverse order so buttons (added last) are hit before the rows they are in
+            // Check in reverse order so the latest clickable rects win when rows overlap.
             for (int i = m_settingsClickableRects.size() - 1; i >= 0; --i) {
                 if (m_settingsClickableRects[i].contains(pos)) {
                     if (i < 3) { // Tab clicks (indices 0, 1, 2)
@@ -226,13 +336,25 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                         case 5: m_hidpi = !m_hidpi; break;
                         case 6: m_doNotDisturb = !m_doNotDisturb; break;
                         case 7: m_showCursor = !m_showCursor; break;
-                        case 8: m_recClicks = !m_recClicks; break;
-                        case 9: m_clickOptionsOpen = true; break;
-                        case 10: m_recKeystrokes = !m_recKeystrokes; break;
-                        case 11: m_keystrokeOptionsOpen = true; break;
-                        case 12: m_rememberSelection = !m_rememberSelection; break;
-                        case 13: m_dimScreen = !m_dimScreen; break;
-                        case 14: m_showCountdown = !m_showCountdown; break;
+                        case 8:
+                            m_recClicks = !m_recClicks;
+                            if (!m_recClicks) {
+                                m_clickOptionsOpen = false;
+                                stopClickAnimTimer();
+                                m_clickPreviews.clear();
+                            }
+                            break;
+                        case 9:
+                            m_recKeystrokes = !m_recKeystrokes;
+                            if (!m_recKeystrokes) {
+                                m_keystrokeOptionsOpen = false;
+                                m_showKeystrokePreview = false;
+                                m_keyPreviews.clear();
+                            }
+                            break;
+                        case 10: m_rememberSelection = !m_rememberSelection; break;
+                        case 11: m_dimScreen = !m_dimScreen; break;
+                        case 12: m_showCountdown = !m_showCountdown; break;
                         }
                         update();
                         return;
@@ -250,9 +372,8 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                             m_dropdownOptions = QStringList() << "24" << "30" << "50" << "60";
                             m_dropdownValuePtr = &m_videoFps;
                             break;
-                        case 5: /* Open Audio Settings */ break;
-                        case 6: m_recordMono = !m_recordMono; break;
-                        case 7: m_openEditor = !m_openEditor; break;
+                        case 5: m_recordMono = !m_recordMono; break;
+                        case 6: m_openEditor = !m_openEditor; break;
                         }
                         update();
                         return;
@@ -314,9 +435,21 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         RecordPanelTile tile = hitTestRecordingPanel(pos);
         switch (tile) {
         case RecordPanelTile::Controls:
-            m_settingsOpen = !m_settingsOpen;
+        {
+            const bool willOpen = !m_settingsOpen;
+            closeRecordingMenus();
+            m_settingsOpen = willOpen;
             update();
             return;
+        }
+        case RecordPanelTile::Crop:
+        {
+            const bool willOpen = !m_cropMenuOpen;
+            closeRecordingMenus();
+            m_cropMenuOpen = willOpen;
+            update();
+            return;
+        }
         case RecordPanelTile::Mic:
             m_recMic = !m_recMic;
             update();
@@ -326,11 +459,29 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             update();
             return;
         case RecordPanelTile::Click:
-            m_recClicks = !m_recClicks;
+            if (m_recClicks) {
+                closeRecordingMenus();
+                m_recClicks = false;
+                stopClickAnimTimer();
+                m_clickPreviews.clear();
+            } else {
+                closeRecordingMenus();
+                m_recClicks = true;
+                m_clickOptionsOpen = true;
+            }
             update();
             return;
         case RecordPanelTile::Keystrokes:
-            m_recKeystrokes = !m_recKeystrokes;
+            if (m_recKeystrokes) {
+                closeRecordingMenus();
+                m_recKeystrokes = false;
+                m_showKeystrokePreview = false;
+                m_keyPreviews.clear();
+            } else {
+                closeRecordingMenus();
+                m_recKeystrokes = true;
+                m_keystrokeOptionsOpen = true;
+            }
             update();
             return;
         case RecordPanelTile::Webcam:
@@ -368,7 +519,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         }
         // If click is on resize handle, allow it
         HandlePos h = hitTest(pos);
-        if (h != HandlePos::None && h != HandlePos::Inside) {
+        if (h != HandlePos::None) {
             // Pass through to resize handling below
         } else {
             return; // Click was on panel background, don't start drag
@@ -592,6 +743,16 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 {
     const QPoint pos = event->pos();
 
+    if (m_countdownActive) {
+        const bool hoveringCancel = m_countdownBubbleRect.contains(pos);
+        if (hoveringCancel != m_hoveredCountdownCancel) {
+            m_hoveredCountdownCancel = hoveringCancel;
+            update();
+        }
+        setCursor(hoveringCancel ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        return;
+    }
+
     // ── Slider Drag ─────────────────────────────────────────────────────────
     if (m_sliderDragging) {
         double relX = pos.x() - m_sliderTrackRect.x();
@@ -660,6 +821,26 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 
     // Recording panel hover
     if (m_recordingPanelOpen && !m_dragging && m_resizing == HandlePos::None && !m_moving) {
+        if (m_cropMenuOpen && m_cropMenuPanelRect.contains(pos)) {
+            int newHover = -1;
+            for (int i = 0; i < m_cropMenuItemRects.size(); ++i) {
+                if (m_cropMenuItemRects[i].contains(pos)) {
+                    newHover = i;
+                    break;
+                }
+            }
+            if (newHover != m_hoveredCropMenuItem) {
+                m_hoveredCropMenuItem = newHover;
+                update();
+            }
+            setCursor(Qt::PointingHandCursor);
+            return;
+        }
+        if (m_cropMenuOpen && m_hoveredCropMenuItem != -1) {
+            m_hoveredCropMenuItem = -1;
+            update();
+        }
+
         // Click Options sub-panel hover
         if (m_clickOptionsOpen && m_clickOptionsPanelRect.contains(pos)) {
             int newHover = -1;
@@ -748,6 +929,131 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
     if (m_resizing != HandlePos::None) {
         QPoint delta = pos - m_dragStart;
         QRect r = m_selectionAtDragStart.normalized();
+        const double aspectRatio = (m_recordingPanelOpen && m_recordAspectRatioIndex > 0)
+            ? recordingAspectRatioForIndex(m_recordAspectRatioIndex)
+            : 0.0;
+
+        if (aspectRatio > 0.0) {
+            const QRect bounds = rect();
+            const int minW = std::max(kMinSize, static_cast<int>(std::ceil(kMinSize * aspectRatio)));
+            const int minH = std::max(kMinSize, static_cast<int>(std::ceil(kMinSize / aspectRatio)));
+            const int left = r.left();
+            const int right = r.right();
+            const int top = r.top();
+            const int bottom = r.bottom();
+            const double centerX = (left + right) / 2.0;
+            const double centerY = (top + bottom) / 2.0;
+
+            auto clampRect = [&](QRect candidate) {
+                int w = std::max(minW, candidate.width());
+                int h = std::max(minH, candidate.height());
+                if (w > bounds.width()) {
+                    w = bounds.width();
+                    h = std::max(minH, static_cast<int>(std::round(w / aspectRatio)));
+                }
+                if (h > bounds.height()) {
+                    h = bounds.height();
+                    w = std::max(minW, static_cast<int>(std::round(h * aspectRatio)));
+                }
+                candidate.setSize(QSize(w, h));
+                if (candidate.left() < bounds.left()) candidate.moveLeft(bounds.left());
+                if (candidate.top() < bounds.top()) candidate.moveTop(bounds.top());
+                if (candidate.right() > bounds.right()) candidate.moveRight(bounds.right());
+                if (candidate.bottom() > bounds.bottom()) candidate.moveBottom(bounds.bottom());
+                return candidate;
+            };
+
+            switch (m_resizing) {
+            case HandlePos::Left: {
+                int newWidth = std::max(minW, right - pos.x() + 1);
+                int newHeight = std::max(minH, static_cast<int>(std::round(newWidth / aspectRatio)));
+                QRect candidate(right - newWidth + 1,
+                                static_cast<int>(std::round(centerY - newHeight / 2.0)),
+                                newWidth, newHeight);
+                m_selection = clampRect(candidate);
+                update();
+                return;
+            }
+            case HandlePos::Right: {
+                int newWidth = std::max(minW, pos.x() - left + 1);
+                int newHeight = std::max(minH, static_cast<int>(std::round(newWidth / aspectRatio)));
+                QRect candidate(left,
+                                static_cast<int>(std::round(centerY - newHeight / 2.0)),
+                                newWidth, newHeight);
+                m_selection = clampRect(candidate);
+                update();
+                return;
+            }
+            case HandlePos::Top: {
+                int newHeight = std::max(minH, bottom - pos.y() + 1);
+                int newWidth = std::max(minW, static_cast<int>(std::round(newHeight * aspectRatio)));
+                QRect candidate(static_cast<int>(std::round(centerX - newWidth / 2.0)),
+                                bottom - newHeight + 1,
+                                newWidth, newHeight);
+                m_selection = clampRect(candidate);
+                update();
+                return;
+            }
+            case HandlePos::Bottom: {
+                int newHeight = std::max(minH, pos.y() - top + 1);
+                int newWidth = std::max(minW, static_cast<int>(std::round(newHeight * aspectRatio)));
+                QRect candidate(static_cast<int>(std::round(centerX - newWidth / 2.0)),
+                                top,
+                                newWidth, newHeight);
+                m_selection = clampRect(candidate);
+                update();
+                return;
+            }
+            case HandlePos::TopLeft:
+            case HandlePos::TopRight:
+            case HandlePos::BottomLeft:
+            case HandlePos::BottomRight: {
+                const QPoint anchor =
+                    (m_resizing == HandlePos::TopLeft) ? QPoint(right, bottom) :
+                    (m_resizing == HandlePos::TopRight) ? QPoint(left, bottom) :
+                    (m_resizing == HandlePos::BottomLeft) ? QPoint(right, top) :
+                                                            QPoint(left, top);
+                double rawW = std::abs(pos.x() - anchor.x()) + 1.0;
+                double rawH = std::abs(pos.y() - anchor.y()) + 1.0;
+                double newW = std::max<double>(minW, rawW);
+                double newH = std::max<double>(minH, rawH);
+                if (newW / newH > aspectRatio) {
+                    newH = newW / aspectRatio;
+                } else {
+                    newW = newH * aspectRatio;
+                }
+
+                int leftEdge = anchor.x();
+                int topEdge = anchor.y();
+                if (m_resizing == HandlePos::TopLeft || m_resizing == HandlePos::BottomLeft) {
+                    leftEdge = anchor.x() - static_cast<int>(std::round(newW)) + 1;
+                }
+                if (m_resizing == HandlePos::TopLeft || m_resizing == HandlePos::TopRight) {
+                    topEdge = anchor.y() - static_cast<int>(std::round(newH)) + 1;
+                }
+                if (m_resizing == HandlePos::BottomRight) {
+                    leftEdge = anchor.x();
+                    topEdge = anchor.y();
+                }
+                if (m_resizing == HandlePos::BottomLeft) {
+                    topEdge = anchor.y();
+                }
+                if (m_resizing == HandlePos::TopRight) {
+                    leftEdge = anchor.x();
+                }
+
+                QRect candidate(leftEdge, topEdge,
+                                static_cast<int>(std::round(newW)),
+                                static_cast<int>(std::round(newH)));
+                m_selection = clampRect(candidate);
+                update();
+                return;
+            }
+            default:
+                break;
+            }
+        }
+
         switch (m_resizing) {
         case HandlePos::TopLeft:     r.setTopLeft(r.topLeft() + delta);         break;
         case HandlePos::Top:         r.setTop(r.top() + delta.y());             break;

@@ -291,6 +291,9 @@ private:
     int       m_captureDelaySeconds;
     bool      m_countdownActive;
     int       m_countdownValue;
+    bool      m_countdownCancelRequested;
+    bool      m_hoveredCountdownCancel;
+    QRectF    m_countdownBubbleRect;
     CaptureIntent m_captureIntent;   // current capture intent for confirmation
     ScrollStage m_scrollStage;       // inactive / ready / actively sampling scroll frames
 
@@ -340,6 +343,7 @@ private:
     bool m_showCursor;         // "Show cursor"
     bool m_recClicks;          // "Highlight clicks"
     bool m_recKeystrokes;      // "Show keystrokes"
+    int  m_recordAspectRatioIndex; // 0 = Freeform
     bool m_rememberSelection;  // "Remember last selection"
     bool m_dimScreen;          // "Dim screen while recording"
     bool m_showCountdown;      // "Show countdown"
@@ -412,19 +416,26 @@ private:
     
     // Recording panel layout caches (for hit testing)
     QRectF m_recPanelRect;
+    QRectF m_recordingToggleRailRect;
+    QRectF m_recordingTopClusterRect;
+    QRectF m_recordingBottomBarRect;
     QRectF m_settingsPanelRect; // for hit testing settings menu
     QRectF m_clickOptionsPanelRect;
     QRectF m_keystrokeOptionsPanelRect;
+    QRectF m_cropMenuPanelRect;
     QList<QRectF> m_recTileRects; // Matches RecordPanelTile order (skip None)
     QList<QRectF> m_settingsClickableRects; // checkbox & tab rects for hit testing
     QList<QRectF> m_clickOptionsClickableRects;
     QList<QRectF> m_keystrokeOptionsClickableRects;
+    QList<QRectF> m_cropMenuItemRects;
 
     // Toolbar hover state
     int  m_hoveredTool;             // -1 = none
     bool m_hoveredSizeCard;
     ToolbarActionCard m_hoveredActionCard;
     int  m_hoveredSettingsItem;     // new: index into m_settingsClickableRects, -1 = none
+    int  m_hoveredCropMenuItem;
+    bool m_cropMenuOpen;
 
     static constexpr int kHandleHitSize = 20;
     static constexpr int kMinSize       = 4;

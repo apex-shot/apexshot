@@ -24,6 +24,9 @@ inline constexpr double SCROLL_BUTTON_H           = 36.0;
 inline constexpr double SCROLL_BUTTON_GAP         = 10.0;
 inline constexpr double SCROLL_BUTTON_RADIUS      = 10.0;
 inline constexpr double SCROLL_BUTTON_MIN_W       = 128.0;
+inline constexpr double REC_TOP_CLUSTER_W         = 292.0;
+inline constexpr double REC_TOP_CLUSTER_H         = 56.0;
+inline constexpr double REC_DECK_TOP_GAP          = 14.0;
 inline constexpr int    SCROLL_CAPTURE_INTERVAL_MS = 300;
 inline constexpr int    DEFAULT_SELECTION_W       = 600;
 inline constexpr int    DEFAULT_SELECTION_H       = 744;
@@ -42,7 +45,19 @@ struct ToolbarLayout {
     bool compactMode = false;
 };
 
+struct RecordingDeckLayout {
+    QRectF leftToggleRail;
+    QRectF topCluster;
+    QRectF bottomActionBar;
+    QRectF deckBounds;
+    bool placedAbove = false;
+};
+
 ToolbarLayout computeToolbarLayout(double selX, double selY,
                                    double selW, double selH,
                                    double screenW, double screenH,
                                    bool forceAbove = false);
+
+RecordingDeckLayout computeRecordingDeckLayout(double selX, double selY,
+                                               double selW, double selH,
+                                               double screenW, double screenH);

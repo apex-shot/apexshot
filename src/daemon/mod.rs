@@ -2179,6 +2179,10 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
             eprintln!("[daemon] Area selection cancelled.");
             return;
         }
+        Ok(AreaCapturePathResult::RecordingConfigUpdated) => {
+            eprintln!("[daemon] Recording overlay state updated.");
+            return;
+        }
         Ok(AreaCapturePathResult::RecordingRequested(request)) => {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
                 eprintln!("[daemon] Recording failed: {err}");
@@ -2244,6 +2248,9 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
                             }
                             Ok(AreaCapturePathResult::Cancelled) => {
                                 eprintln!("[daemon] Area capture cancelled")
+                            }
+                            Ok(AreaCapturePathResult::RecordingConfigUpdated) => {
+                                eprintln!("[daemon] Recording overlay state updated")
                             }
                             Ok(AreaCapturePathResult::RecordingRequested(request)) => {
                                 if let Err(err) =

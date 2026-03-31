@@ -140,7 +140,7 @@ void CaptureOverlay::showWebcamContextMenu(const QPoint& globalPos)
 
     QMenu menu(this);
     
-    // Apply macOS-inspired styling: dark translucent with blue focus and rounded items
+    // Keep the existing menu base styling, only warm up the hover state.
     menu.setStyleSheet(
         "QMenu {"
         "    background-color: rgba(30, 30, 30, 235);"
@@ -157,8 +157,8 @@ void CaptureOverlay::showWebcamContextMenu(const QPoint& globalPos)
         "    margin: 1px 4px;"
         "}"
         "QMenu::item:selected {"
-        "    background-color: #007AFF;" // macOS Blue highlight
-        "    color: white;"
+        "    background-color: rgba(176, 92, 56, 220);"
+        "    color: #FFEAD6;"
         "}"
         "QMenu::separator {"
         "    height: 1px;"
