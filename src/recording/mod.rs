@@ -219,8 +219,8 @@ fn clear_recording_restore_token(target: RecordingScreenCastTarget) {
 }
 
 fn overlay_recording_output_dir(app_config: &AppConfig) -> PathBuf {
-    if !app_config.export_location.is_empty() {
-        PathBuf::from(&app_config.export_location)
+    if !app_config.video_export_location.is_empty() {
+        PathBuf::from(&app_config.video_export_location)
     } else {
         dirs::video_dir().unwrap_or_else(|| PathBuf::from("."))
     }

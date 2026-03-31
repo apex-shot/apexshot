@@ -17,7 +17,6 @@ mod quick_access;
 mod recording;
 mod screenshots;
 mod shortcuts;
-mod storage;
 mod ui_support;
 mod wallpaper;
 mod windowing;
@@ -29,7 +28,6 @@ use self::{
     general::build_general_section,
     quick_access::build_quick_access_section,
     screenshots::build_screenshots_section,
-    storage::build_storage_section,
     ui_support::{install_settings_css, traffic_light_button},
     windowing::{
         install_edge_resize, install_window_drag, prefers_dark_glass_theme,
@@ -223,7 +221,6 @@ fn build_settings_window(app: &Application) {
 
     // Build all sections
     let general = build_general_section(&config);
-    let storage = build_storage_section(&config);
     let after_capture = build_after_capture_section(&config);
     let recordings = recording::build_recording_section(&config);
     let screenshots = build_screenshots_section(&config);
@@ -235,44 +232,65 @@ fn build_settings_window(app: &Application) {
     let quick_access = build_quick_access_section(&config);
     let wallpaper = wallpaper::build_wallpaper_section(&config);
 
-    let general_separator = Separator::new(Orientation::Horizontal);
-    general_separator.set_margin_top(8);
-    general_separator.set_margin_bottom(8);
-    general_separator.set_hexpand(true);
-
     let after_capture_separator = Separator::new(Orientation::Horizontal);
     after_capture_separator.set_margin_top(8);
     after_capture_separator.set_margin_bottom(8);
     after_capture_separator.set_hexpand(true);
 
-    let export_location_entry_pick = storage.export_location_entry.clone();
+    let screenshot_export_location_entry_pick = screenshots.export_location_entry.clone();
     let window_weak_picker = window.downgrade();
-    storage.export_location_browse.connect_clicked(move |_| {
-        let chooser = FileChooserNative::new(
-            Some("Select export location"),
-            window_weak_picker.upgrade().as_ref(),
-            FileChooserAction::SelectFolder,
-            Some("Select"),
-            Some("Cancel"),
-        );
-        let export_location_entry_pick = export_location_entry_pick.clone();
-        chooser.connect_response(move |dialog, response| {
-            if response == ResponseType::Accept {
-                if let Some(file) = dialog.file() {
-                    if let Some(path) = file.path() {
-                        export_location_entry_pick.set_text(&path.to_string_lossy());
+    screenshots
+        .export_location_browse
+        .connect_clicked(move |_| {
+            let chooser = FileChooserNative::new(
+                Some("Select screenshot save location"),
+                window_weak_picker.upgrade().as_ref(),
+                FileChooserAction::SelectFolder,
+                Some("Select"),
+                Some("Cancel"),
+            );
+            let export_location_entry_pick = screenshot_export_location_entry_pick.clone();
+            chooser.connect_response(move |dialog, response| {
+                if response == ResponseType::Accept {
+                    if let Some(file) = dialog.file() {
+                        if let Some(path) = file.path() {
+                            export_location_entry_pick.set_text(&path.to_string_lossy());
+                        }
                     }
                 }
-            }
-            dialog.hide();
+                dialog.hide();
+            });
+            chooser.show();
         });
-        chooser.show();
-    });
+
+    let video_export_location_entry_pick = recordings.video_export_location_entry.clone();
+    let window_weak_picker = window.downgrade();
+    recordings
+        .video_export_location_browse
+        .connect_clicked(move |_| {
+            let chooser = FileChooserNative::new(
+                Some("Select video save location"),
+                window_weak_picker.upgrade().as_ref(),
+                FileChooserAction::SelectFolder,
+                Some("Select"),
+                Some("Cancel"),
+            );
+            let export_location_entry_pick = video_export_location_entry_pick.clone();
+            chooser.connect_response(move |dialog, response| {
+                if response == ResponseType::Accept {
+                    if let Some(file) = dialog.file() {
+                        if let Some(path) = file.path() {
+                            export_location_entry_pick.set_text(&path.to_string_lossy());
+                        }
+                    }
+                }
+                dialog.hide();
+            });
+            chooser.show();
+        });
 
     let general_tab_section = GtkBox::new(Orientation::Vertical, 0);
     general_tab_section.append(&general.section);
-    general_tab_section.append(&general_separator);
-    general_tab_section.append(&storage.wrapper);
     general_tab_section.append(&after_capture_separator);
     general_tab_section.append(&after_capture.wrapper);
 
@@ -331,8 +349,8 @@ fn build_settings_window(app: &Application) {
         play_sounds: general.play_sounds_check.clone(),
         shutter_sound: general.shutter_sound_input.clone(),
         show_menu_bar_icon: general.show_icon_check.clone(),
-        export_location: storage.export_location_entry.clone(),
-        hide_desktop_icons: storage.hide_desktop_icons_check.clone(),
+        screenshot_export_location: screenshots.export_location_entry.clone(),
+        video_export_location: recordings.video_export_location_entry.clone(),
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),

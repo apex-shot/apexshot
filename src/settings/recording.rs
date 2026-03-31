@@ -1,13 +1,15 @@
 use crate::config::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Grid, Label, Orientation,
-    Popover, Scale, Stack,
+    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Grid, Label,
+    Orientation, Popover, Scale, Stack,
 };
 
 #[allow(dead_code)]
 pub struct RecordingSettingsWidgets {
     pub section: GtkBox,
     // General
+    pub video_export_location_entry: Entry,
+    pub video_export_location_browse: Button,
     pub rec_controls_check: CheckButton,
     pub rec_display_time_check: CheckButton,
     pub rec_hidpi_check: CheckButton,
@@ -128,6 +130,25 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         grid.attach(&cell, 2, row_idx, 1, 1);
         check
     };
+
+    let save_location_label = Label::new(Some("Save location:"));
+    save_location_label.add_css_class("settings-group-title");
+    save_location_label.set_xalign(1.0);
+    save_location_label.set_size_request(140, -1);
+    let video_export_location_entry = Entry::new();
+    video_export_location_entry.set_hexpand(true);
+    video_export_location_entry.set_width_chars(28);
+    video_export_location_entry.set_placeholder_text(Some("Choose a folder"));
+    video_export_location_entry.set_text(&config.video_export_location);
+    let video_export_location_browse = Button::with_label("Browse");
+    let video_export_location_row = GtkBox::new(Orientation::Horizontal, 8);
+    video_export_location_row.set_halign(Align::Start);
+    video_export_location_row.append(&video_export_location_entry);
+    video_export_location_row.append(&video_export_location_browse);
+    general_grid.attach(&save_location_label, 1, row, 1, 1);
+    general_grid.attach(&video_export_location_row, 3, row, 1, 1);
+
+    row += 1;
 
     let rec_controls_check = create_row(&general_grid, "Controls:", row);
     rec_controls_check.set_active(config.rec_controls);
@@ -496,6 +517,8 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
 
     RecordingSettingsWidgets {
         section,
+        video_export_location_entry,
+        video_export_location_browse,
         rec_controls_check,
         rec_display_time_check,
         rec_hidpi_check,

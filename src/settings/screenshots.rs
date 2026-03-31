@@ -1,12 +1,14 @@
 use crate::config::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation,
-    Separator,
+    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Grid, Label,
+    Orientation, Separator,
 };
 
 #[allow(dead_code)]
 pub struct ScreenshotsSettingsWidgets {
     pub section: GtkBox,
+    pub export_location_entry: Entry,
+    pub export_location_browse: Button,
     pub format_input: ComboBoxText,
     pub retina_scale_check: CheckButton,
     pub frame_border_check: CheckButton,
@@ -39,6 +41,24 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     let mut row = 0;
 
     // --- GROUP 1 ---
+    let export_label = Label::new(Some("Save location:"));
+    export_label.add_css_class("settings-group-title");
+    export_label.set_xalign(1.0);
+    export_label.set_size_request(165, -1);
+    let export_location_entry = Entry::new();
+    export_location_entry.set_hexpand(true);
+    export_location_entry.set_width_chars(28);
+    export_location_entry.set_placeholder_text(Some("Choose a folder"));
+    export_location_entry.set_text(&config.screenshot_export_location);
+    let export_location_browse = Button::with_label("Browse");
+    let export_location_row = GtkBox::new(Orientation::Horizontal, 8);
+    export_location_row.set_halign(Align::Start);
+    export_location_row.append(&export_location_entry);
+    export_location_row.append(&export_location_browse);
+    grid.attach(&export_label, 1, row, 1, 1);
+    grid.attach(&export_location_row, 3, row, 1, 1);
+
+    row += 1;
 
     // File format
     let format_label = Label::new(Some("File format:"));
@@ -203,6 +223,8 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
 
     ScreenshotsSettingsWidgets {
         section,
+        export_location_entry,
+        export_location_browse,
         format_input,
         retina_scale_check,
         frame_border_check,

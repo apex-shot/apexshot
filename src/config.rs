@@ -24,6 +24,8 @@ pub struct AppConfig {
     pub shutter_sound: String,
     pub show_menu_bar_icon: bool,
     pub export_location: String,
+    pub screenshot_export_location: String,
+    pub video_export_location: String,
     pub hide_desktop_icons_while_capturing: bool,
     pub after_capture_show_quick_access: bool,
     pub after_capture_copy_file_to_clipboard: bool,
@@ -150,6 +152,8 @@ impl Default for AppConfig {
             shutter_sound: DEFAULT_SHUTTER_SOUND.to_string(),
             show_menu_bar_icon: true,
             export_location: String::new(),
+            screenshot_export_location: String::new(),
+            video_export_location: String::new(),
             hide_desktop_icons_while_capturing: false,
             after_capture_show_quick_access: DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS,
             after_capture_copy_file_to_clipboard: DEFAULT_AFTER_CAPTURE_COPY_FILE_TO_CLIPBOARD,
@@ -266,6 +270,14 @@ impl AppConfig {
         );
         self.shutter_sound = sanitize_shutter_sound(self.shutter_sound);
         self.export_location = self.export_location.trim().to_string();
+        self.screenshot_export_location = self.screenshot_export_location.trim().to_string();
+        self.video_export_location = self.video_export_location.trim().to_string();
+        if self.screenshot_export_location.is_empty() && !self.export_location.is_empty() {
+            self.screenshot_export_location = self.export_location.clone();
+        }
+        if self.video_export_location.is_empty() && !self.export_location.is_empty() {
+            self.video_export_location = self.export_location.clone();
+        }
         if self.after_capture_open_annotate {
             self.after_capture_show_quick_access = false;
         }
@@ -433,6 +445,32 @@ mod tests {
 
         assert_eq!(cfg.shutter_sound, DEFAULT_SHUTTER_SOUND);
         assert_eq!(cfg.export_location, "/tmp/apexshot");
+    }
+
+    #[test]
+    fn sanitize_migrates_legacy_shared_export_location() {
+        let cfg = AppConfig {
+            export_location: "  /tmp/shared  ".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+
+        assert_eq!(cfg.screenshot_export_location, "/tmp/shared");
+        assert_eq!(cfg.video_export_location, "/tmp/shared");
+    }
+
+    #[test]
+    fn sanitize_preserves_explicit_per_feature_export_locations() {
+        let cfg = AppConfig {
+            export_location: "/tmp/shared".into(),
+            screenshot_export_location: " /tmp/screens ".into(),
+            video_export_location: " /tmp/video ".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+
+        assert_eq!(cfg.screenshot_export_location, "/tmp/screens");
+        assert_eq!(cfg.video_export_location, "/tmp/video");
     }
 
     #[test]
