@@ -18,7 +18,11 @@
 #include <cmath>
 
 const char* TOOLBAR_LABELS[NUM_TOOLS] = {
-    "Capture","Area","Fullscreen","Window","Scroll","Timer","OCR","Recording"
+    "Area","Fullscreen","Window","Scroll","Timer","OCR","Recording"
+};
+
+const int TOOLBAR_ICON_IDS[NUM_TOOLS] = {
+    1, 2, 3, 4, 5, 6, 7
 };
 
 static void roundedRectPath(QPainterPath& path, double x, double y,
@@ -42,53 +46,75 @@ ToolbarLayout computeToolbarLayout(double selX, double selY,
                                            double screenW, double screenH,
                                            bool forceAbove)
 {
-    double panelW      = FEATURE_PANEL_ITEM_W * NUM_TOOLS;
-    double sizePanelW  = 98.0;
-    double sizePanelH  = 46.0;
-    double panelGap    = 12.0;
-
-    double groupW = panelW + panelGap + sizePanelW;
-    double groupX = selX + (selW - groupW) / 2.0;
-    groupX = std::max(FEATURE_PANEL_MARGIN,
-             std::min(groupX, screenW - groupW - FEATURE_PANEL_MARGIN));
-
-    double groupH    = std::max(FEATURE_PANEL_H, sizePanelH);
-    double aboveY    = selY - FEATURE_PANEL_TOP_GAP - groupH;
-    double belowY    = selY + selH + FEATURE_PANEL_TOP_GAP;
-    bool canAbove    = aboveY >= FEATURE_PANEL_MARGIN;
-    bool canBelow    = (belowY + groupH + FEATURE_PANEL_MARGIN) <= screenH;
-
-    double groupY;
-    if (forceAbove) {
-        groupY = std::max(
-            FEATURE_PANEL_MARGIN,
-            std::min(aboveY, screenH - groupH - FEATURE_PANEL_MARGIN)
-        );
-    } else if (canAbove) {
-        groupY = aboveY;
-    } else if (canBelow) {
-        groupY = belowY;
-    } else {
-        groupY = std::max(FEATURE_PANEL_MARGIN,
-                 std::min(aboveY, screenH - groupH - FEATURE_PANEL_MARGIN));
-    }
-
-    groupY = std::max(FEATURE_PANEL_MARGIN,
-             std::min(groupY, screenH - groupH - FEATURE_PANEL_MARGIN));
-
     ToolbarLayout layout;
-    layout.toolsPanel = QRectF(groupX,
-                               groupY + (groupH - FEATURE_PANEL_H) / 2.0,
-                               panelW, FEATURE_PANEL_H);
-    layout.sizePanel  = QRectF(groupX + panelW + panelGap,
-                               groupY + (groupH - sizePanelH) / 2.0,
-                               sizePanelW, sizePanelH);
+    const double toolPanelH = TOOL_CARD_H * NUM_TOOLS;
+    const double actionBarW = (2.0 * ACTION_RAIL_W) + ACTION_CARD_GAP;
+    const double actionBarH = ACTION_CARD_H;
+    const double sizeCardW = 108.0;
+    const double centerY = selY + (selH / 2.0);
 
+    const double leftCandidateX = selX - TOOL_RAIL_GAP - TOOL_RAIL_W;
+    const bool toolRailClamped = leftCandidateX < FEATURE_PANEL_MARGIN;
+    const double leftPanelX = std::max(FEATURE_PANEL_MARGIN, leftCandidateX);
+
+    const double leftPanelY = std::max(
+        FEATURE_PANEL_MARGIN,
+        std::min(centerY - (toolPanelH / 2.0), screenH - toolPanelH - FEATURE_PANEL_MARGIN)
+    );
+
+    const double preferredActionX = selX + (selW - actionBarW) / 2.0;
+    const double actionBarX = std::max(
+        FEATURE_PANEL_MARGIN,
+        std::min(preferredActionX, screenW - actionBarW - FEATURE_PANEL_MARGIN)
+    );
+    const double preferredActionY = selY + selH + FEATURE_PANEL_TOP_GAP;
+    const bool actionBelowFits = (preferredActionY + actionBarH + FEATURE_PANEL_MARGIN) <= screenH;
+    const double actionBarY = actionBelowFits
+        ? preferredActionY
+        : std::max(FEATURE_PANEL_MARGIN, screenH - actionBarH - FEATURE_PANEL_MARGIN);
+
+    const double preferredSizeX = selX + (selW - sizeCardW) / 2.0;
+    const double sizeCardX = std::max(
+        FEATURE_PANEL_MARGIN,
+        std::min(preferredSizeX, screenW - sizeCardW - FEATURE_PANEL_MARGIN)
+    );
+    const double preferredSizeY = selY - FEATURE_PANEL_TOP_GAP - SIZE_CARD_H;
+    const bool sizeAboveFits = preferredSizeY >= FEATURE_PANEL_MARGIN;
+    const double sizeCardY = sizeAboveFits
+        ? preferredSizeY
+        : FEATURE_PANEL_MARGIN;
+
+    layout.compactMode = forceAbove || toolRailClamped || !actionBelowFits || !sizeAboveFits;
+
+    layout.leftToolsPanel = QRectF(leftPanelX, leftPanelY, TOOL_RAIL_W, toolPanelH);
+    layout.rightActionsPanel = QRectF(actionBarX, actionBarY, actionBarW, actionBarH);
     for (int i = 0; i < NUM_TOOLS; ++i) {
-        layout.itemCells[i] = QRectF(layout.toolsPanel.x() + i * FEATURE_PANEL_ITEM_W,
-                                      layout.toolsPanel.y(),
-                                      FEATURE_PANEL_ITEM_W, FEATURE_PANEL_H);
+        layout.toolCells[i] = QRectF(
+            layout.leftToolsPanel.x(),
+            layout.leftToolsPanel.y() + (i * TOOL_CARD_H),
+            TOOL_RAIL_W,
+            TOOL_CARD_H
+        );
     }
+
+    layout.sizeCard = QRectF(
+        sizeCardX,
+        sizeCardY,
+        sizeCardW,
+        SIZE_CARD_H
+    );
+    layout.confirmCard = QRectF(
+        layout.rightActionsPanel.x(),
+        layout.rightActionsPanel.y(),
+        ACTION_RAIL_W,
+        ACTION_CARD_H
+    );
+    layout.cancelCard = QRectF(
+        layout.confirmCard.right() + ACTION_CARD_GAP,
+        layout.rightActionsPanel.y(),
+        ACTION_RAIL_W,
+        ACTION_CARD_H
+    );
     return layout;
 }
 
@@ -1730,14 +1756,17 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     );
     const QImage* blurPtr = m_blurredBg.isNull() ? nullptr : &m_blurredBg;
 
-    int activeTool = 1;
+    int activeTool = 0;
     if (scrollModeActive) {
-        activeTool = 4;
+        activeTool = 3;
     }
     if (m_fullscreenMode) {
-        activeTool = 2;
+        activeTool = 1;
     }
     if (m_captureIntent == CaptureIntent::Ocr) {
+        activeTool = 5;
+    }
+    if (m_captureIntent == CaptureIntent::Record) {
         activeTool = 6;
     }
 
@@ -1745,35 +1774,64 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     const bool timerToolActive = timerToolEnabled && m_timerDelayActive && m_captureDelaySeconds > 0;
 
     drawFrostedPanel(p,
-                     layout.toolsPanel.x(), layout.toolsPanel.y(),
-                     layout.toolsPanel.width(), layout.toolsPanel.height(),
+                     layout.leftToolsPanel.x(), layout.leftToolsPanel.y(),
+                     layout.leftToolsPanel.width(), layout.leftToolsPanel.height(),
                      FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
+
+    drawFrostedPanel(p,
+                     layout.sizeCard.x(), layout.sizeCard.y(),
+                     layout.sizeCard.width(), layout.sizeCard.height(),
+                     FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
+
+    drawFrostedPanel(p,
+                     layout.rightActionsPanel.x(), layout.rightActionsPanel.y(),
+                     layout.rightActionsPanel.width(), layout.rightActionsPanel.height(),
+                     12.0, blurPtr, screenW, screenH);
+
+    auto drawAccentCard = [&](const QRectF& rect,
+                              const QColor& fill,
+                              const QColor& rim,
+                              double radius,
+                              bool includeTopAccent) {
+        const double hx = rect.x() + 4.0;
+        const double hy = rect.y() + 4.0;
+        const double hw = rect.width() - 8.0;
+        const double hh = rect.height() - 8.0;
+
+        QPainterPath glow;
+        roundedRectPath(glow, hx - 1.0, hy - 1.0, hw + 2.0, hh + 2.0, radius + 1.0);
+        p.fillPath(glow, QColor(fill.red(), fill.green(), fill.blue(), std::min(255, fill.alpha() / 2)));
+
+        QPainterPath card;
+        roundedRectPath(card, hx, hy, hw, hh, radius);
+        p.fillPath(card, fill);
+
+        p.save();
+        p.setClipPath(card);
+        p.setPen(QPen(rim, 1.2));
+        p.setBrush(Qt::NoBrush);
+        QPainterPath border;
+        roundedRectPath(border, hx + 0.6, hy + 0.6, hw - 1.2, hh - 1.2, std::max(0.0, radius - 0.5));
+        p.drawPath(border);
+        if (includeTopAccent) {
+            p.setPen(QPen(QColor(255, 224, 184, 180), 1.4));
+            p.drawLine(QPointF(hx + 10.0, hy + 0.75), QPointF(hx + hw - 10.0, hy + 0.75));
+        }
+        p.restore();
+    };
 
     auto drawActiveToolCell = [&](int toolIndex) {
         if (toolIndex < 0 || toolIndex >= NUM_TOOLS) {
             return;
         }
 
-        QRectF cell = layout.itemCells[toolIndex];
-        double hx = cell.x() + 3.0, hy = cell.y() + 4.0;
-        double hw = cell.width() - 6.0, hh = cell.height() - 8.0;
-
-        QPainterPath glow;
-        roundedRectPath(glow, hx - 1.0, hy - 1.0, hw + 2.0, hh + 2.0, 9.0);
-        p.fillPath(glow, QColor(0, 122, 255, 54));
-
-        QPainterPath pill;
-        roundedRectPath(pill, hx, hy, hw, hh, 8.0);
-        p.fillPath(pill, QColor(38, 140, 255, 66));
-
-        p.save();
-        p.setClipPath(pill);
-        p.setPen(QPen(QColor(150, 206, 255, 225), 1.2));
-        p.setBrush(Qt::NoBrush);
-        QPainterPath rim;
-        roundedRectPath(rim, hx + 0.6, hy + 0.6, hw - 1.2, hh - 1.2, 7.5);
-        p.drawPath(rim);
-        p.restore();
+        drawAccentCard(
+            layout.toolCells[toolIndex],
+            QColor(160, 82, 45, 78),
+            QColor(255, 196, 142, 214),
+            10.0,
+            true
+        );
     };
 
     drawActiveToolCell(activeTool);
@@ -1783,70 +1841,43 @@ void CaptureOverlay::drawToolbar(QPainter& p,
 
     // ── Hover highlight on hovered tool ──────────────────────────────────────
     if (m_hoveredTool >= 0 && m_hoveredTool < NUM_TOOLS) {
-        QRectF cell = layout.itemCells[m_hoveredTool];
-        double hx = cell.x() + 3.0, hy = cell.y() + 4.0;
-        double hw = cell.width() - 6.0, hh = cell.height() - 8.0;
-
-        // Outer glow
-        QPainterPath glow; roundedRectPath(glow, hx-1, hy-1, hw+2, hh+2, 9.0);
-        p.fillPath(glow, QColor(255,255,255,20));
-        // Main pill
-        QPainterPath pill; roundedRectPath(pill, hx, hy, hw, hh, 8.0);
-        p.fillPath(pill, QColor(255,255,255,66));
-        // Inner rim
-        p.save();
-        p.setClipPath(pill);
-        p.setPen(QPen(QColor(255,255,255,140), 1.2));
-        p.setBrush(Qt::NoBrush);
-        QPainterPath rim; roundedRectPath(rim, hx+0.6, hy+0.6, hw-1.2, hh-1.2, 7.5);
-        p.drawPath(rim);
-        // Top accent
-        p.setPen(QPen(QColor(255,255,255,204), 1.5));
-        p.drawLine(QPointF(hx+10, hy+0.75), QPointF(hx+hw-10, hy+0.75));
-        p.restore();
+        drawAccentCard(
+            layout.toolCells[m_hoveredTool],
+            QColor(255, 165, 115, 58),
+            QColor(255, 226, 196, 168),
+            10.0,
+            true
+        );
     }
 
-    // ── Size panel frosted glass ──────────────────────────────────────────────
-    drawFrostedPanel(p,
-                     layout.sizePanel.x(), layout.sizePanel.y(),
-                     layout.sizePanel.width(), layout.sizePanel.height(),
-                     FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
-
-    // ── Hover highlight on size panel ─────────────────────────────────────────
-    if (m_hoveredSizePanel) {
-        double hx = layout.sizePanel.x()+3, hy = layout.sizePanel.y()+3;
-        double hw = layout.sizePanel.width()-6, hh = layout.sizePanel.height()-6;
-        QPainterPath glow; roundedRectPath(glow, hx-1, hy-1, hw+2, hh+2, 8.0);
-        p.fillPath(glow, QColor(255,255,255,18));
-        QPainterPath pill; roundedRectPath(pill, hx, hy, hw, hh, 7.0);
-        p.fillPath(pill, QColor(255,255,255,56));
-        p.save(); p.setClipPath(pill);
-        p.setPen(QPen(QColor(255,255,255,128), 1.2)); p.setBrush(Qt::NoBrush);
-        QPainterPath rim; roundedRectPath(rim, hx+0.6, hy+0.6, hw-1.2, hh-1.2, 6.5);
-        p.drawPath(rim);
-        p.setPen(QPen(QColor(255,255,255,191), 1.5));
-        p.drawLine(QPointF(hx+8, hy+0.75), QPointF(hx+hw-8, hy+0.75));
-        p.restore();
+    if (m_hoveredSizeCard) {
+        drawAccentCard(
+            layout.sizeCard,
+            QColor(255, 255, 255, 40),
+            QColor(255, 255, 255, 136),
+            9.0,
+            false
+        );
     }
 
     // ── Tool icons + labels ───────────────────────────────────────────────────
     for (int i = 0; i < NUM_TOOLS; ++i) {
-        QRectF cell = layout.itemCells[i];
+        QRectF cell = layout.toolCells[i];
         double cx = cell.x() + cell.width() / 2.0;
         bool hovered = (m_hoveredTool == i);
-        bool active = (activeTool == i) || (i == 5 && timerToolActive);
-        double iconAlpha = (hovered || active) ? 1.0 : 0.98;
-        double shadowAlpha = hovered ? 0.30 : (active ? 0.38 : 0.52);
-        double iconY = layout.toolsPanel.y() + ((hovered || active) ? 15.5 : 16.0);
+        bool active = (activeTool == i) || (i == 4 && timerToolActive);
+        double iconAlpha = (hovered || active) ? 1.0 : 0.94;
+        double shadowAlpha = hovered ? 0.24 : (active ? 0.32 : 0.50);
+        double iconY = cell.y() + ((hovered || active) ? 23.5 : 24.0);
         QColor iconColor = active
-            ? QColor(223, 241, 255, int(iconAlpha * 255))
+            ? QColor(255, 229, 206, int(iconAlpha * 255))
             : QColor(255, 255, 255, int(iconAlpha * 255));
 
-        drawToolbarIcon(p, i, cx + 0.6, iconY + 0.8,
+        drawToolbarIcon(p, TOOLBAR_ICON_IDS[i], cx + 0.6, iconY + 0.8,
                         QColor(0,0,0, int(shadowAlpha*255)));
-        drawToolbarIcon(p, i, cx, iconY, iconColor);
+        drawToolbarIcon(p, TOOLBAR_ICON_IDS[i], cx, iconY, iconColor);
 
-        QFont f; f.setFamily("Sans"); f.setPointSizeF(7.5);
+        QFont f; f.setFamily("Sans"); f.setPointSizeF(7.1);
         f.setBold(hovered || active); p.setFont(f);
         QFontMetricsF fm(f);
         QString label(TOOLBAR_LABELS[i]);
@@ -1854,55 +1885,84 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         p.setPen(QColor(0,0,0, int(shadowAlpha*255)));
         double tw = fm.horizontalAdvance(label);
         p.drawText(QPointF(cx - tw/2.0 + 0.6,
-                           layout.toolsPanel.y() + 34.0 + 0.8), label);
+                           cell.y() + 50.0 + 0.8), label);
         p.setPen(active
-            ? QColor(223,241,255, int(iconAlpha * 255))
-            : QColor(255,255,255, int(iconAlpha * 255)));
+            ? QColor(255,229,206, int(iconAlpha * 255))
+            : QColor(244,244,244, int(iconAlpha * 255)));
         p.drawText(QPointF(cx - tw/2.0,
-                           layout.toolsPanel.y() + 34.0), label);
+                           cell.y() + 50.0), label);
 
-        if (i == 5 && timerToolActive) {
+        if (i == 4 && timerToolActive) {
             const QString badgeText = QStringLiteral("%1s").arg(m_captureDelaySeconds);
             QFont badgeFont; badgeFont.setFamily("Sans"); badgeFont.setPointSizeF(6.6); badgeFont.setBold(true);
             p.setFont(badgeFont);
             QFontMetricsF badgeMetrics(badgeFont);
             const double badgeTextW = badgeMetrics.horizontalAdvance(badgeText);
             const double badgeW = std::max(22.0, badgeTextW + 10.0);
-            const QRectF badgeRect(cell.right() - badgeW - 5.0, cell.y() + 5.0, badgeW, 14.0);
+            const QRectF badgeRect(cell.right() - badgeW - 6.0, cell.y() + 6.0, badgeW, 14.0);
             QPainterPath badgePath;
             roundedRectPath(badgePath, badgeRect.x(), badgeRect.y(), badgeRect.width(), badgeRect.height(), 7.0);
-            p.fillPath(badgePath, QColor(0, 122, 255, 230));
+            p.fillPath(badgePath, QColor(178, 84, 42, 230));
             p.setPen(QColor(255, 255, 255, 248));
             p.drawText(badgeRect, Qt::AlignCenter, badgeText);
         }
     }
 
-    // ── Size label ("Size" header + "WxH" value) ──────────────────────────────
-    double scx = layout.sizePanel.x() + layout.sizePanel.width() / 2.0;
+    // ── Right rail text ───────────────────────────────────────────────────────
+    double scx = layout.sizeCard.x() + layout.sizeCard.width() / 2.0;
     QString sizeVal = QString("%1×%2").arg((int)selW).arg((int)selH);
 
-    // "Size" header
     {
-        QFont f; f.setFamily("Sans"); f.setPointSizeF(7.5); f.setBold(false); p.setFont(f);
+        QFont f; f.setFamily("Sans"); f.setPointSizeF(7.2); f.setBold(true); p.setFont(f);
         QFontMetricsF fm(f);
-        double tw = fm.horizontalAdvance("Size");
-        double ty = layout.sizePanel.y() + 14.0;
+        const QString header = QStringLiteral("SIZE");
+        double tw = fm.horizontalAdvance(header);
+        double ty = layout.sizeCard.y() + 17.0;
         p.setPen(QColor(0,0,0,128));
-        p.drawText(QPointF(scx - tw/2.0 + 0.6, ty + 0.8), "Size");
-        p.setPen(QColor(255,255,255,230));
-        p.drawText(QPointF(scx - tw/2.0, ty), "Size");
+        p.drawText(QPointF(scx - tw/2.0 + 0.6, ty + 0.8), header);
+        p.setPen(QColor(255,224,196,214));
+        p.drawText(QPointF(scx - tw/2.0, ty), header);
     }
-    // Dimension value
     {
-        QFont f; f.setFamily("Sans"); f.setPointSizeF(9.0); f.setBold(true); p.setFont(f);
+        QFont f; f.setFamily("Sans"); f.setPointSizeF(9.4); f.setBold(true); p.setFont(f);
         QFontMetricsF fm(f);
         double tw = fm.horizontalAdvance(sizeVal);
-        double ty = layout.sizePanel.y() + 30.0;
+        double ty = layout.sizeCard.y() + 39.0;
         p.setPen(QColor(0,0,0,140));
         p.drawText(QPointF(scx - tw/2.0 + 0.6, ty + 0.8), sizeVal);
-        p.setPen(QColor(255,255,255,250));
+        p.setPen(QColor(255,255,255,248));
         p.drawText(QPointF(scx - tw/2.0, ty), sizeVal);
     }
+
+    auto drawActionLabel = [&](const QRectF& rect, const QString& text, bool primary) {
+        QFont f; f.setFamily("Sans"); f.setPointSizeF(9.0); f.setBold(true); p.setFont(f);
+        p.setPen(QColor(0, 0, 0, primary ? 132 : 118));
+        p.drawText(rect.translated(0.6, 0.8), Qt::AlignCenter, text);
+        p.setPen(primary ? QColor(255, 231, 214, 248) : QColor(244, 244, 244, 244));
+        p.drawText(rect, Qt::AlignCenter, text);
+    };
+
+    drawAccentCard(
+        layout.confirmCard,
+        m_hoveredActionCard == ToolbarActionCard::Confirm
+            ? QColor(176, 92, 56, 88)
+            : QColor(176, 92, 56, 60),
+        QColor(255, 212, 178, 214),
+        8.0,
+        true
+    );
+    drawAccentCard(
+        layout.cancelCard,
+        m_hoveredActionCard == ToolbarActionCard::Cancel
+            ? QColor(255, 255, 255, 34)
+            : QColor(255, 255, 255, 18),
+        QColor(255, 255, 255, 112),
+        8.0,
+        false
+    );
+
+    drawActionLabel(layout.confirmCard, QStringLiteral("CAPTURE"), true);
+    drawActionLabel(layout.cancelCard, QStringLiteral("CANCEL"), false);
 
     if (scrollModeActive) {
         auto drawScrollButton = [&](const QRectF& rect,

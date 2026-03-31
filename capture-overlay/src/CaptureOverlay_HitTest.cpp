@@ -199,12 +199,16 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
         m_captureIntent == CaptureIntent::Scroll
     );
     for (int i = 0; i < NUM_TOOLS; ++i) {
-        if (layout.itemCells[i].contains(pos)) {
+        if (layout.toolCells[i].contains(pos)) {
             setCursor(Qt::PointingHandCursor);
             return;
         }
     }
-    if (layout.sizePanel.contains(pos)) {
+    if (layout.confirmCard.contains(pos) || layout.cancelCard.contains(pos)) {
+        setCursor(Qt::PointingHandCursor);
+        return;
+    }
+    if (layout.sizeCard.contains(pos)) {
         setCursor(Qt::ArrowCursor);
         return;
     }
