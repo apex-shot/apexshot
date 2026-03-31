@@ -1,6 +1,11 @@
-use crate::config::{save_config, AppConfig};
+use crate::{
+    config::{load_config, save_config},
+    daemon::{set_daemon_tray_visibility, start_daemon_subprocess, stop_daemon_via_dbus},
+};
 use gtk4::prelude::*;
 use gtk4::{Button, CheckButton, ColorButton, ComboBoxText, Entry, Scale};
+
+use super::windowing::{install_autostart_entry_for_current_exe, uninstall_autostart_entry};
 
 #[allow(dead_code)]
 pub struct SaveInputs {
@@ -14,9 +19,14 @@ pub struct SaveInputs {
     pub screenshot_copy_to_clipboard: CheckButton,
     pub screenshot_save: CheckButton,
     pub screenshot_open_annotate: CheckButton,
+    pub quick_access_position: ComboBoxText,
+    pub quick_access_multi_display: CheckButton,
+    pub quick_access_overlay_size: Scale,
     pub quick_access_auto_close_enabled: CheckButton,
     pub quick_access_auto_close_action: ComboBoxText,
     pub quick_access_auto_close_interval: ComboBoxText,
+    pub quick_access_close_after_dragging: CheckButton,
+    pub quick_access_close_after_uploading: CheckButton,
     pub screenshot_crosshair_mode: ComboBoxText,
     pub screenshot_show_magnifier: CheckButton,
     // pub screenshot_selection_color: ColorButton, // Removed missing mapping
@@ -118,6 +128,8 @@ pub fn install_checkbox_behaviors(
 
     let a1 = quick_access_auto_close_action_input.clone();
     let a2 = quick_access_auto_close_interval_input.clone();
+    a1.set_sensitive(quick_access_auto_close_enabled_check.is_active());
+    a2.set_sensitive(quick_access_auto_close_enabled_check.is_active());
     quick_access_auto_close_enabled_check.connect_toggled(move |check| {
         let active = check.is_active();
         a1.set_sensitive(active);
@@ -131,14 +143,12 @@ pub fn install_checkbox_behaviors(
     });
 }
 
-pub fn save_settings(inputs: &SaveInputs, mut config: AppConfig) -> anyhow::Result<()> {
+pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
+    let previous_config = load_config().sanitized();
+    let mut config = previous_config.clone();
     config.start_at_login = inputs.start_at_login.is_active();
     config.play_sounds = inputs.play_sounds.is_active();
-    config.shutter_sound = inputs
-        .shutter_sound
-        .active_id()
-        .unwrap_or_else(|| "Default".into())
-        .to_string();
+    config.shutter_sound = combo_value(&inputs.shutter_sound, "Default");
     config.show_menu_bar_icon = inputs.show_menu_bar_icon.is_active();
     config.export_location = inputs.export_location.text().to_string();
     config.hide_desktop_icons_while_capturing = inputs.hide_desktop_icons.is_active();
@@ -147,24 +157,29 @@ pub fn save_settings(inputs: &SaveInputs, mut config: AppConfig) -> anyhow::Resu
     config.after_capture_copy_file_to_clipboard = inputs.screenshot_copy_to_clipboard.is_active();
     config.after_capture_save = inputs.screenshot_save.is_active();
     config.after_capture_open_annotate = inputs.screenshot_open_annotate.is_active();
-
-    config.quick_access_auto_close_interval = if inputs.quick_access_auto_close_enabled.is_active()
-    {
-        inputs
-            .quick_access_auto_close_interval
-            .active_id()
-            .unwrap_or_else(|| "5".into())
-            .parse()
-            .unwrap_or(5)
-    } else {
-        0
-    };
-
-    config.screenshot_crosshair_mode = inputs
-        .screenshot_crosshair_mode
+    config.quick_access_position = combo_value(&inputs.quick_access_position, "Left");
+    config.quick_access_multi_display = inputs.quick_access_multi_display.is_active();
+    config.quick_access_overlay_size = inputs.quick_access_overlay_size.value();
+    config.quick_access_auto_close_enabled = inputs.quick_access_auto_close_enabled.is_active();
+    config.quick_access_auto_close_action =
+        combo_value(&inputs.quick_access_auto_close_action, "Close");
+    config.quick_access_auto_close_interval = inputs
+        .quick_access_auto_close_interval
         .active_id()
-        .unwrap_or_else(|| "On".into())
-        .to_string();
+        .or_else(|| {
+            inputs
+                .quick_access_auto_close_interval
+                .active_text()
+                .map(Into::into)
+        })
+        .unwrap_or_else(|| "30".into())
+        .parse()
+        .unwrap_or(30);
+    config.quick_access_close_after_dragging = inputs.quick_access_close_after_dragging.is_active();
+    config.quick_access_close_after_uploading =
+        inputs.quick_access_close_after_uploading.is_active();
+
+    config.screenshot_crosshair_mode = combo_value(&inputs.screenshot_crosshair_mode, "On");
     config.screenshot_show_magnifier = inputs.screenshot_show_magnifier.is_active();
     config.screenshot_freeze_screen = inputs.screenshot_freeze_screen.is_active();
     config.screenshot_show_cursor = inputs.screenshot_capture_cursor.is_active();
@@ -176,10 +191,7 @@ pub fn save_settings(inputs: &SaveInputs, mut config: AppConfig) -> anyhow::Resu
     config.rec_cursor = inputs.rec_cursor.is_active();
     config.rec_clicks = inputs.rec_clicks.is_active();
     config.rec_keystrokes = inputs.rec_keystrokes.is_active();
-    config.rec_key_filter = inputs
-        .rec_key_filter
-        .active_id()
-        .unwrap_or_else(|| "0".into())
+    config.rec_key_filter = combo_value(&inputs.rec_key_filter, "0")
         .parse::<u8>()
         .unwrap_or(0);
 
@@ -187,41 +199,71 @@ pub fn save_settings(inputs: &SaveInputs, mut config: AppConfig) -> anyhow::Resu
     config.window_screenshot_padding = inputs.window_screenshot_padding.value();
     config.window_screenshot_shadow = inputs.window_screenshot_shadow.is_active();
 
-    config.cloud_screenshot_quality = inputs
-        .cloud_screenshot_quality
-        .active_id()
-        .unwrap_or_else(|| "Optimized for sharing".into())
-        .to_string();
-    config.cloud_copy_to_clipboard = inputs
-        .cloud_copy_to_clipboard
-        .active_id()
-        .unwrap_or_else(|| "CleanShot Cloud link".into())
-        .to_string();
+    config.cloud_screenshot_quality =
+        combo_value(&inputs.cloud_screenshot_quality, "Optimized for sharing");
+    config.cloud_copy_to_clipboard =
+        combo_value(&inputs.cloud_copy_to_clipboard, "CleanShot Cloud link");
     config.cloud_show_recently_uploaded = inputs.cloud_show_recently_uploaded.is_active();
     config.cloud_ask_name_tags = inputs.cloud_ask_name_tags.is_active();
 
     config.adv_ask_name_after_capture = inputs.adv_ask_name_after_capture.is_active();
     config.adv_retina_suffix = inputs.adv_retina_suffix.is_active();
-    config.adv_clipboard_mode = inputs
-        .adv_clipboard_mode
-        .active_id()
-        .unwrap_or_else(|| "File & Image (default)".into())
-        .to_string();
+    config.adv_clipboard_mode = combo_value(&inputs.adv_clipboard_mode, "File & Image (default)");
     config.adv_pinned_rounded_corners = inputs.adv_pinned_rounded_corners.is_active();
     config.adv_pinned_shadow = inputs.adv_pinned_shadow.is_active();
     config.adv_pinned_border = inputs.adv_pinned_border.is_active();
-    config.adv_ocr_language = inputs
-        .adv_ocr_language
-        .active_id()
-        .unwrap_or_else(|| "English".into())
-        .to_string();
+    config.adv_ocr_language = combo_value(&inputs.adv_ocr_language, "English");
     config.adv_ocr_keep_line_breaks = inputs.adv_ocr_keep_line_breaks.is_active();
 
     let config = config.sanitized();
+    let quick_access_runtime_changed = previous_config.quick_access_position
+        != config.quick_access_position
+        || previous_config.quick_access_multi_display != config.quick_access_multi_display
+        || (previous_config.quick_access_overlay_size - config.quick_access_overlay_size).abs()
+            > f64::EPSILON
+        || previous_config.quick_access_auto_close_enabled
+            != config.quick_access_auto_close_enabled
+        || previous_config.quick_access_auto_close_action != config.quick_access_auto_close_action
+        || previous_config.quick_access_auto_close_interval
+            != config.quick_access_auto_close_interval
+        || previous_config.quick_access_close_after_dragging
+            != config.quick_access_close_after_dragging
+        || previous_config.quick_access_close_after_uploading
+            != config.quick_access_close_after_uploading;
 
     save_config(&config)?;
 
+    if config.start_at_login {
+        install_autostart_entry_for_current_exe()?;
+    } else {
+        uninstall_autostart_entry()?;
+    }
+
+    let tray_visible = config.show_menu_bar_icon;
+    std::thread::spawn(move || {
+        if quick_access_runtime_changed && stop_daemon_via_dbus() {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let _ = start_daemon_subprocess();
+            return;
+        }
+
+        if set_daemon_tray_visibility(tray_visible) {
+            return;
+        }
+        if tray_visible {
+            let _ = start_daemon_subprocess();
+        }
+    });
+
     Ok(())
+}
+
+fn combo_value(combo: &ComboBoxText, fallback: &str) -> String {
+    combo
+        .active_id()
+        .or_else(|| combo.active_text().map(Into::into))
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 #[allow(dead_code)]

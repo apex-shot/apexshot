@@ -201,6 +201,25 @@ pub fn set_daemon_tray_visibility(visible: bool) -> bool {
         .is_ok()
 }
 
+pub fn stop_daemon_via_dbus() -> bool {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let proxy = match zbus::blocking::Proxy::new(
+        &conn,
+        DAEMON_BUS_NAME,
+        DAEMON_OBJECT_PATH,
+        DAEMON_INTERFACE,
+    ) {
+        Ok(proxy) => proxy,
+        Err(_) => return false,
+    };
+
+    proxy
+        .call::<_, _, ()>("Trigger", &("quit".to_string(),))
+        .is_ok()
+}
+
 pub fn start_daemon_subprocess() -> anyhow::Result<()> {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
     std::process::Command::new(&exe)

@@ -183,27 +183,37 @@ pub fn install_settings_css() {
                 color: #1976d2;
             }
 
-            .settings-save-status {
+            .settings-toast {
+                padding: 9px 16px;
+                border-radius: 999px;
+                border: 1px solid alpha(white, 0.12);
+                background: alpha(#101317, 0.94);
+                color: #f5f7fb;
                 font-size: 12px;
-                font-weight: 600;
-                opacity: 0.92;
-                margin-right: 4px;
+                font-weight: 700;
+                box-shadow: 0 10px 28px alpha(black, 0.28);
             }
 
-            .settings-save-status-success {
-                color: #59d88d;
+            .settings-toast-success {
+                border-color: alpha(#59d88d, 0.35);
             }
 
-            .settings-save-status-error {
-                color: #ff8f84;
+            .settings-toast-error {
+                border-color: alpha(#ff8f84, 0.38);
             }
 
-            .editor-root.editor-theme-light .settings-save-status-success {
-                color: #1f8a4c;
+            .editor-root.editor-theme-light .settings-toast {
+                background: alpha(white, 0.96);
+                color: #17202a;
+                border-color: alpha(#111827, 0.10);
             }
 
-            .editor-root.editor-theme-light .settings-save-status-error {
-                color: #c93d2b;
+            .editor-root.editor-theme-light .settings-toast-success {
+                border-color: alpha(#1f8a4c, 0.30);
+            }
+
+            .editor-root.editor-theme-light .settings-toast-error {
+                border-color: alpha(#c93d2b, 0.28);
             }
 
             .settings-group-title {
@@ -214,6 +224,12 @@ pub fn install_settings_css() {
             .settings-sub-option {
                 font-size: 12px;
                 opacity: 0.84;
+            }
+
+            .settings-scale-caption {
+                font-size: 13px;
+                font-weight: 700;
+                opacity: 0.94;
             }
 
             .settings-table-header {

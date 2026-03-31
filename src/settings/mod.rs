@@ -1,8 +1,10 @@
 use crate::config::load_config;
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, FileChooserAction,
-    FileChooserNative, Image, Label, Orientation, ResponseType, ScrolledWindow, Separator,
+    FileChooserNative, Image, Label, Orientation, Overlay as GtkOverlay, ResponseType,
+    ScrolledWindow, Separator,
 };
+use std::rc::Rc;
 
 mod about;
 mod actions;
@@ -77,7 +79,6 @@ fn build_settings_window(app: &Application) {
     toolbar.add_css_class("editor-toolbar");
 
     let left_box = GtkBox::new(Orientation::Horizontal, 8);
-    left_box.set_hexpand(true);
     left_box.set_halign(Align::Start);
     left_box.add_css_class("editor-toolbar-left");
 
@@ -96,23 +97,36 @@ fn build_settings_window(app: &Application) {
     left_box.append(&max_btn);
     toolbar.append(&left_box);
 
-    let save_status = Label::new(None);
-    save_status.add_css_class("settings-save-status");
+    let drag_handle = GtkBox::new(Orientation::Horizontal, 0);
+    drag_handle.set_hexpand(true);
+    drag_handle.set_halign(Align::Fill);
+    drag_handle.set_vexpand(false);
+    toolbar.append(&drag_handle);
+
     let save_btn = Button::with_label("Save");
     save_btn.add_css_class("suggested-action");
 
     let right_box = GtkBox::new(Orientation::Horizontal, 12);
-    right_box.set_hexpand(true);
     right_box.set_halign(Align::End);
     right_box.add_css_class("editor-toolbar-right");
-    right_box.append(&save_status);
     right_box.append(&save_btn);
     toolbar.append(&right_box);
+
+    let toast = Label::new(None);
+    toast.add_css_class("settings-toast");
+    toast.set_halign(Align::Center);
+    toast.set_valign(Align::Start);
+    toast.set_margin_top(18);
+    toast.set_visible(false);
+
+    let window_overlay = GtkOverlay::new();
+    window_overlay.set_child(Some(&root_box));
+    window_overlay.add_overlay(&toast);
 
     root_box.append(&toolbar);
 
     // --- WINDOW GESTURES ---
-    install_window_drag(&toolbar, &window);
+    install_window_drag(&drag_handle, &window);
     install_edge_resize(&root_box, &window);
 
     // --- NAVIGATION ---
@@ -309,10 +323,10 @@ fn build_settings_window(app: &Application) {
     stack.set_visible_child_name("0");
 
     root_box.append(&body_frame);
-    window.set_child(Some(&root_box));
+    window.set_child(Some(&window_overlay));
 
     // --- SAVE LOGIC ---
-    let save_inputs = SaveInputs {
+    let save_inputs = Rc::new(SaveInputs {
         start_at_login: general.start_at_login_check.clone(),
         play_sounds: general.play_sounds_check.clone(),
         shutter_sound: general.shutter_sound_input.clone(),
@@ -323,9 +337,14 @@ fn build_settings_window(app: &Application) {
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),
         screenshot_open_annotate: after_capture.screenshot_after_capture_checks[3].clone(),
+        quick_access_position: quick_access.position_input.clone(),
+        quick_access_multi_display: quick_access.multi_display_check.clone(),
+        quick_access_overlay_size: quick_access.overlay_size_input.clone(),
         quick_access_auto_close_enabled: quick_access.auto_close_enabled_check.clone(),
         quick_access_auto_close_action: quick_access.auto_close_action_input.clone(),
         quick_access_auto_close_interval: quick_access.auto_close_interval_input.clone(),
+        quick_access_close_after_dragging: quick_access.close_after_dragging_check.clone(),
+        quick_access_close_after_uploading: quick_access.close_after_uploading_check.clone(),
         screenshot_crosshair_mode: screenshots.crosshair_mode_input.clone(),
         screenshot_show_magnifier: screenshots.show_magnifier_check.clone(),
         screenshot_freeze_screen: screenshots.freeze_screen_check.clone(),
@@ -370,7 +389,7 @@ fn build_settings_window(app: &Application) {
         adv_pinned_border: advanced.pinned_border_check.clone(),
         adv_ocr_language: advanced.ocr_lang_input.clone(),
         adv_ocr_keep_line_breaks: advanced.ocr_line_breaks_check.clone(),
-    };
+    });
 
     let edit_btn = advanced.filename_edit_btn.clone();
     let win_weak = window.downgrade();
@@ -381,23 +400,35 @@ fn build_settings_window(app: &Application) {
         }
     });
 
-    let save_status_label = save_status.clone();
-    let config_clone_for_save = config.clone();
-    save_btn.connect_clicked(move |_| {
-        save_status_label.remove_css_class("settings-save-status-success");
-        save_status_label.remove_css_class("settings-save-status-error");
-        save_status_label.set_text("Saving...");
+    let trigger_save: Rc<dyn Fn()> = {
+        let save_inputs = Rc::clone(&save_inputs);
+        let toast = toast.clone();
+        Rc::new(move || {
+            toast.remove_css_class("settings-toast-success");
+            toast.remove_css_class("settings-toast-error");
 
-        match save_settings(&save_inputs, config_clone_for_save.clone()) {
-            Ok(_) => {
-                save_status_label.set_text("Saved");
-                save_status_label.add_css_class("settings-save-status-success");
+            match save_settings(&save_inputs) {
+                Ok(_) => {
+                    toast.set_text("Settings saved");
+                    toast.add_css_class("settings-toast-success");
+                }
+                Err(e) => {
+                    toast.set_text(&format!("Save failed: {}", e));
+                    toast.add_css_class("settings-toast-error");
+                }
             }
-            Err(e) => {
-                save_status_label.set_text(&format!("Error: {}", e));
-                save_status_label.add_css_class("settings-save-status-error");
-            }
-        }
+            toast.set_visible(true);
+            let toast = toast.clone();
+            gtk4::glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+                toast.set_visible(false);
+                toast.remove_css_class("settings-toast-success");
+                toast.remove_css_class("settings-toast-error");
+            });
+        })
+    };
+    let trigger_save_click = Rc::clone(&trigger_save);
+    save_btn.connect_clicked(move |_| {
+        trigger_save_click();
     });
 
     install_checkbox_behaviors(

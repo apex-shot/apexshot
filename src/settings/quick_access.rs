@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation, Scale,
-    Separator,
+    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Grid, Label, Orientation,
+    PositionType, Scale, Separator,
 };
 
 #[allow(dead_code)]
@@ -47,7 +47,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     // Position
     let position_input = ComboBoxText::new();
     position_input.add_css_class("settings-select");
-    for pos in ["Left", "Right", "Top", "Bottom"] {
+    for pos in ["Left", "Right"] {
         position_input.append(Some(pos), pos);
     }
     position_input.set_active_id(Some(&config.quick_access_position));
@@ -76,13 +76,35 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     row += 1;
     // Overlay Size (Scale)
     let size_label = Label::new(Some("Overlay size"));
-    size_label.add_css_class("settings-sub-option");
-    let overlay_size_input = Scale::with_range(Orientation::Horizontal, 0.5, 2.0, 0.1);
+    size_label.add_css_class("settings-group-title");
+    size_label.set_xalign(0.0);
+    let overlay_size_input = Scale::with_range(Orientation::Horizontal, 0.5, 1.5, 0.1);
     overlay_size_input.set_value(config.quick_access_overlay_size);
-    overlay_size_input.set_size_request(150, -1);
+    overlay_size_input.set_size_request(190, -1);
+    overlay_size_input.set_digits(1);
+    overlay_size_input.add_mark(0.5, PositionType::Bottom, None);
+    overlay_size_input.add_mark(1.0, PositionType::Bottom, None);
+    overlay_size_input.add_mark(1.5, PositionType::Bottom, None);
     let size_box = GtkBox::new(Orientation::Horizontal, 12);
-    size_box.append(&size_label);
-    size_box.append(&overlay_size_input);
+    let size_control_box = GtkBox::new(Orientation::Vertical, 8);
+    size_control_box.append(&size_label);
+    size_control_box.append(&overlay_size_input);
+
+    let size_caption_row = GtkBox::new(Orientation::Horizontal, 0);
+    size_caption_row.set_hexpand(true);
+    for (text, align) in [
+        ("Smaller", Align::Start),
+        ("Current", Align::Center),
+        ("Larger", Align::End),
+    ] {
+        let caption = Label::new(Some(text));
+        caption.add_css_class("settings-scale-caption");
+        caption.set_hexpand(true);
+        caption.set_halign(align);
+        size_caption_row.append(&caption);
+    }
+    size_control_box.append(&size_caption_row);
+    size_box.append(&size_control_box);
     grid.attach(&size_box, 3, row, 1, 1);
 
     row += 1;
