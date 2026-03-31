@@ -32,6 +32,13 @@ pub struct SaveInputs {
     // pub screenshot_selection_color: ColorButton, // Removed missing mapping
     pub screenshot_freeze_screen: CheckButton,
     pub screenshot_capture_cursor: CheckButton,
+    pub annotate_inverse_arrow: CheckButton,
+    pub annotate_smooth_drawing: CheckButton,
+    pub annotate_draw_shadow: CheckButton,
+    pub annotate_auto_expand: CheckButton,
+    pub annotate_show_color_names: CheckButton,
+    pub annotate_always_on_top: CheckButton,
+    pub annotate_show_dock_icon: CheckButton,
     pub rec_controls: CheckButton,
     pub rec_display_time: CheckButton,
     pub rec_hidpi: CheckButton,
@@ -184,6 +191,13 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.screenshot_show_magnifier = inputs.screenshot_show_magnifier.is_active();
     config.screenshot_freeze_screen = inputs.screenshot_freeze_screen.is_active();
     config.screenshot_show_cursor = inputs.screenshot_capture_cursor.is_active();
+    config.annotate_inverse_arrow = inputs.annotate_inverse_arrow.is_active();
+    config.annotate_smooth_drawing = inputs.annotate_smooth_drawing.is_active();
+    config.annotate_draw_shadow = inputs.annotate_draw_shadow.is_active();
+    config.annotate_auto_expand = inputs.annotate_auto_expand.is_active();
+    config.annotate_show_color_names = inputs.annotate_show_color_names.is_active();
+    config.annotate_always_on_top = inputs.annotate_always_on_top.is_active();
+    config.annotate_show_dock_icon = inputs.annotate_show_dock_icon.is_active();
 
     config.rec_controls = inputs.rec_controls.is_active();
     config.rec_display_time = inputs.rec_display_time.is_active();

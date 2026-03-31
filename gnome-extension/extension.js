@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// ApexShot Preview Helper — D-Bus lifecycle tracking, per-preview watchdog
+// ApexShot tracked window helper — D-Bus lifecycle tracking for topmost windows
 
 import Meta from "gi://Meta";
 import Gio from "gi://Gio";
@@ -17,23 +17,24 @@ import {ControlsUi} from "./controls-ui.js";
 
 // D-Bus interface exposed by the apexshot native process.
 // The extension listens for signals on this name/path/iface.
-const PREVIEW_DBUS_NAME      = "org.apexshot.Preview";
-const PREVIEW_DBUS_PATH      = "/org/apexshot/Preview";
-const PREVIEW_DBUS_IFACE     = "org.apexshot.Preview";
+const TRACKED_WINDOW_DBUS_NAME      = "org.apexshot.TrackedWindow";
+const TRACKED_WINDOW_DBUS_PATH      = "/org/apexshot/TrackedWindow";
+const TRACKED_WINDOW_DBUS_IFACE     = "org.apexshot.TrackedWindow";
 
 // Introspection XML so Gio can proxy the signal types.
-const PREVIEW_DBUS_IFACE_XML = `
+const TRACKED_WINDOW_DBUS_IFACE_XML = `
 <node>
-  <interface name="org.apexshot.Preview">
-    <signal name="PreviewOpened">
-      <arg type="s" name="preview_id"/>
+  <interface name="org.apexshot.TrackedWindow">
+    <signal name="TrackedWindowOpened">
+      <arg type="s" name="tracked_id"/>
       <arg type="u" name="pid"/>
       <arg type="s" name="title"/>
+      <arg type="s" name="role"/>
       <arg type="s" name="namespace"/>
       <arg type="t" name="opened_at_ms"/>
     </signal>
-    <signal name="PreviewClosed">
-      <arg type="s" name="preview_id"/>
+    <signal name="TrackedWindowClosed">
+      <arg type="s" name="tracked_id"/>
     </signal>
   </interface>
 </node>`;
@@ -76,10 +77,10 @@ const MASK_DBUS_IFACE_XML = `
 
 class PreviewStackingHelper {
     constructor() {
-        // Map<preview_id, { pid, title, openedAtMs, window, signalIds }>
+        // Map<tracked_id, { pid, title, role, openedAtMs, window, signalIds }>
         this._trackedPreviews = new Map();
 
-        // Map<preview_id, { pid, title, openedAtMs }>  — waiting for MetaWindow
+        // Map<tracked_id, { pid, title, role, openedAtMs }>  — waiting for MetaWindow
         this._pendingPreviews = new Map();
 
         // GLib source id for the 50 ms watchdog (null when no tracked previews)
@@ -102,18 +103,18 @@ class PreviewStackingHelper {
         this._dbusConn = Gio.DBus.session;
         this._dbusSubId = this._dbusConn.signal_subscribe(
             null,          // sender — any (apexshot may not own the name)
-            PREVIEW_DBUS_IFACE,
+            TRACKED_WINDOW_DBUS_IFACE,
             null,          // member — subscribe to all signals on the iface
-            PREVIEW_DBUS_PATH,
+            TRACKED_WINDOW_DBUS_PATH,
             null,
             Gio.DBusSignalFlags.NONE,
             (conn, sender, path, iface, signal, params) => {
-                if (signal === "PreviewOpened") {
-                    const [previewId, pid, title, namespace, openedAtMs] = params.recursiveUnpack();
-                    this._onPreviewOpened(previewId, pid, title, openedAtMs);
-                } else if (signal === "PreviewClosed") {
-                    const [previewId] = params.recursiveUnpack();
-                    this._onPreviewClosed(previewId);
+                if (signal === "TrackedWindowOpened") {
+                    const [trackedId, pid, title, role, namespace, openedAtMs] = params.recursiveUnpack();
+                    this._onPreviewOpened(trackedId, pid, title, role, openedAtMs);
+                } else if (signal === "TrackedWindowClosed") {
+                    const [trackedId] = params.recursiveUnpack();
+                    this._onPreviewClosed(trackedId);
                 }
             }
         );
@@ -158,7 +159,7 @@ class PreviewStackingHelper {
     // D-Bus event handlers
     // -------------------------------------------------------------------------
 
-    _onPreviewOpened(previewId, pid, title, openedAtMs) {
+    _onPreviewOpened(previewId, pid, title, role, openedAtMs) {
         if (this._trackedPreviews.has(previewId) || this._pendingPreviews.has(previewId)) {
             return; // already known
         }
@@ -166,10 +167,10 @@ class PreviewStackingHelper {
         // Try to resolve the MetaWindow immediately.
         const win = this._findWindowByPid(pid, title);
         if (win) {
-            this._bindPreview(previewId, pid, title, openedAtMs, win);
+            this._bindPreview(previewId, pid, title, role, openedAtMs, win);
         } else {
             // Keep pending — resolve loop will pick it up.
-            this._pendingPreviews.set(previewId, { pid, title, openedAtMs });
+            this._pendingPreviews.set(previewId, { pid, title, role, openedAtMs });
             this._startResolveLoop();
         }
     }
@@ -212,7 +213,7 @@ class PreviewStackingHelper {
     // Bind / unbind a tracked preview
     // -------------------------------------------------------------------------
 
-    _bindPreview(previewId, pid, title, openedAtMs, win) {
+    _bindPreview(previewId, pid, title, role, openedAtMs, win) {
         const signalIds = [];
 
         signalIds.push(win.connect("notify::minimized", () => {
@@ -229,7 +230,7 @@ class PreviewStackingHelper {
             this._onWindowUnmanaged(previewId);
         }));
 
-        this._trackedPreviews.set(previewId, { pid, title, openedAtMs, window: win, signalIds });
+        this._trackedPreviews.set(previewId, { pid, title, role, openedAtMs, window: win, signalIds });
         this._pendingPreviews.delete(previewId);
 
         this._applyAbove(win);
