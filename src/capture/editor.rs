@@ -1486,6 +1486,41 @@ mod tests {
     }
 
     #[test]
+    fn zero_length_arrow_finalization_returns_none_for_all_styles() {
+        for style in ArrowStyle::ALL {
+            let mut state = EditorState::new(RgbaImage::new(100, 100));
+            state.set_arrow_style(style);
+            state.set_tool(Tool::Arrow);
+            state.begin_drag(Point { x: 42.0, y: 24.0 });
+            state.update_drag(Point { x: 42.0, y: 24.0 });
+
+            assert!(
+                state.finalize_drag_action().is_none(),
+                "expected click-only arrow finalize to return None for style {style:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn arrow_interaction_cleanup_clears_stale_drag_state_without_selection() {
+        let mut state = EditorState::new(RgbaImage::new(100, 100));
+        state.set_tool(Tool::Arrow);
+        state.begin_drag(Point { x: 12.0, y: 18.0 });
+        state.update_drag(Point { x: 12.0, y: 18.0 });
+        state.arrow_editing_controls = true;
+        state.arrow_control_dragging = Some(1);
+
+        state.finalize_arrow_interaction_cleanup();
+
+        assert!(state.drag_start.is_none());
+        assert!(state.drag_current.is_none());
+        assert!(state.drag_start_view.is_none());
+        assert!(state.select_drag_anchor.is_none());
+        assert!(state.arrow_control_dragging.is_none());
+        assert!(!state.arrow_editing_controls);
+    }
+
+    #[test]
     fn arrow_control_points_initialized_for_curved_style() {
         let mut state = EditorState::new(RgbaImage::new(100, 100));
         state.set_arrow_style(ArrowStyle::Curved);
@@ -1602,6 +1637,42 @@ mod tests {
                 assert_eq!(*end, Point { x: 95.0, y: 85.0 });
                 let pts = control_points.as_ref().unwrap();
                 assert_eq!(pts[2], Point { x: 95.0, y: 85.0 });
+            }
+            other => panic!("unexpected action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn curved_arrow_endpoint_move_keeps_middle_control_point_inside_image() {
+        let mut state = EditorState::new(RgbaImage::new(100, 100));
+        state.push_action(AnnotationAction::Arrow {
+            start: Point { x: 10.0, y: 60.0 },
+            end: Point { x: 80.0, y: 60.0 },
+            color: DRAW_COLORS[0],
+            stroke_size: STROKE_WIDTH,
+            style: ArrowStyle::Curved,
+            control_points: Some(vec![
+                Point { x: 10.0, y: 60.0 },
+                Point { x: 120.0, y: 20.0 },
+                Point { x: 80.0, y: 60.0 },
+            ]),
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+
+        state.move_arrow_control_handle(2, Point { x: 95.0, y: 60.0 });
+
+        match &state.actions[0] {
+            AnnotationAction::Arrow {
+                end,
+                control_points,
+                ..
+            } => {
+                assert_eq!(*end, Point { x: 95.0, y: 60.0 });
+                let pts = control_points.as_ref().unwrap();
+                assert_eq!(pts[2], Point { x: 95.0, y: 60.0 });
+                assert!((0.0..=100.0).contains(&pts[1].x));
+                assert!((0.0..=100.0).contains(&pts[1].y));
             }
             other => panic!("unexpected action: {:?}", other),
         }
@@ -1789,6 +1860,32 @@ mod tests {
         state.set_tool(Tool::Pen);
         assert!(!state.arrow_editing_controls);
         assert!(state.arrow_control_dragging.is_none());
+    }
+
+    #[test]
+    fn arrow_interaction_cleanup_preserves_controls_for_selected_arrow() {
+        let mut state = EditorState::new(RgbaImage::new(100, 100));
+        state.push_action(AnnotationAction::Arrow {
+            start: Point { x: 10.0, y: 10.0 },
+            end: Point { x: 90.0, y: 90.0 },
+            color: DRAW_COLORS[0],
+            stroke_size: STROKE_WIDTH,
+            style: ArrowStyle::Curved,
+            control_points: Some(vec![
+                Point { x: 10.0, y: 10.0 },
+                Point { x: 50.0, y: 50.0 },
+                Point { x: 90.0, y: 90.0 },
+            ]),
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+        state.arrow_editing_controls = true;
+        state.arrow_control_dragging = Some(1);
+
+        state.finalize_arrow_interaction_cleanup();
+
+        assert!(state.arrow_control_dragging.is_none());
+        assert!(state.arrow_editing_controls);
     }
 
     #[test]
