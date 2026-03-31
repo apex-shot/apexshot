@@ -1832,8 +1832,8 @@ fn crop_capture_data(
 fn screenshot_save_config() -> SaveConfig {
     let app_config = load_config().sanitized();
     let mut save_config = SaveConfig::default();
-    if !app_config.export_location.is_empty() {
-        save_config = save_config.with_output_dir(&app_config.export_location);
+    if !app_config.screenshot_export_location.is_empty() {
+        save_config = save_config.with_output_dir(&app_config.screenshot_export_location);
     }
     save_config
 }

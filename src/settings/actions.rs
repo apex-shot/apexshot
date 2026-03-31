@@ -13,8 +13,8 @@ pub struct SaveInputs {
     pub play_sounds: CheckButton,
     pub shutter_sound: ComboBoxText,
     pub show_menu_bar_icon: CheckButton,
-    pub export_location: Entry,
-    pub hide_desktop_icons: CheckButton,
+    pub screenshot_export_location: Entry,
+    pub video_export_location: Entry,
     pub screenshot_quick_access: CheckButton,
     pub screenshot_copy_to_clipboard: CheckButton,
     pub screenshot_save: CheckButton,
@@ -150,8 +150,9 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.play_sounds = inputs.play_sounds.is_active();
     config.shutter_sound = combo_value(&inputs.shutter_sound, "Default");
     config.show_menu_bar_icon = inputs.show_menu_bar_icon.is_active();
-    config.export_location = inputs.export_location.text().to_string();
-    config.hide_desktop_icons_while_capturing = inputs.hide_desktop_icons.is_active();
+    config.export_location.clear();
+    config.screenshot_export_location = inputs.screenshot_export_location.text().to_string();
+    config.video_export_location = inputs.video_export_location.text().to_string();
 
     config.after_capture_show_quick_access = inputs.screenshot_quick_access.is_active();
     config.after_capture_copy_file_to_clipboard = inputs.screenshot_copy_to_clipboard.is_active();

@@ -184,36 +184,41 @@ pub fn install_settings_css() {
             }
 
             .settings-toast {
-                padding: 9px 16px;
-                border-radius: 999px;
-                border: 1px solid alpha(white, 0.12);
-                background: alpha(#101317, 0.94);
+                padding: 10px 18px;
+                border-radius: 14px;
+                border: 1px solid alpha(white, 0.10);
+                background: linear-gradient(to bottom, alpha(#1c222b, 0.96), alpha(#12171e, 0.93));
                 color: #f5f7fb;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 700;
-                box-shadow: 0 10px 28px alpha(black, 0.28);
+                letter-spacing: 0.01em;
+                box-shadow: 0 14px 34px alpha(black, 0.30);
             }
 
             .settings-toast-success {
-                border-color: alpha(#59d88d, 0.35);
+                border-color: alpha(#6fd9a0, 0.28);
+                color: #effaf3;
             }
 
             .settings-toast-error {
-                border-color: alpha(#ff8f84, 0.38);
+                border-color: alpha(#ff9b90, 0.30);
+                color: #fff2f0;
             }
 
             .editor-root.editor-theme-light .settings-toast {
-                background: alpha(white, 0.96);
+                background: linear-gradient(to bottom, alpha(#ffffff, 0.97), alpha(#f4f6fa, 0.95));
                 color: #17202a;
-                border-color: alpha(#111827, 0.10);
+                border-color: alpha(#111827, 0.08);
             }
 
             .editor-root.editor-theme-light .settings-toast-success {
-                border-color: alpha(#1f8a4c, 0.30);
+                border-color: alpha(#1f8a4c, 0.20);
+                color: #163423;
             }
 
             .editor-root.editor-theme-light .settings-toast-error {
-                border-color: alpha(#c93d2b, 0.28);
+                border-color: alpha(#c93d2b, 0.18);
+                color: #4a1f1a;
             }
 
             .settings-group-title {
