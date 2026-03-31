@@ -11,6 +11,9 @@ pub const DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS: bool = true;
 pub const DEFAULT_AFTER_CAPTURE_COPY_FILE_TO_CLIPBOARD: bool = false;
 pub const DEFAULT_AFTER_CAPTURE_SAVE: bool = true;
 pub const DEFAULT_AFTER_CAPTURE_OPEN_ANNOTATE: bool = false;
+pub const QUICK_ACCESS_OVERLAY_SCALE_MIN: f64 = 0.5;
+pub const QUICK_ACCESS_OVERLAY_SCALE_BASELINE: f64 = 1.0;
+pub const QUICK_ACCESS_OVERLAY_SCALE_MAX: f64 = 1.5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -195,7 +198,7 @@ impl Default for AppConfig {
             rec_speaker: false,
             quick_access_position: "Left".to_string(),
             quick_access_multi_display: true,
-            quick_access_overlay_size: 0.5,
+            quick_access_overlay_size: QUICK_ACCESS_OVERLAY_SCALE_BASELINE,
             quick_access_auto_close_enabled: false,
             quick_access_auto_close_action: "Close".to_string(),
             quick_access_auto_close_interval: 30,
@@ -287,9 +290,10 @@ impl AppConfig {
         self.rec_webcam_shape = self.rec_webcam_shape.min(3);
         self.rec_webcam_rel_x = self.rec_webcam_rel_x.clamp(0.0, 1.0);
         self.rec_webcam_rel_y = self.rec_webcam_rel_y.clamp(0.0, 1.0);
-        self.quick_access_overlay_size = self.quick_access_overlay_size.clamp(0.0, 1.0);
+        self.quick_access_overlay_size =
+            sanitize_quick_access_overlay_size(self.quick_access_overlay_size);
         self.quick_access_position = match self.quick_access_position.as_str() {
-            "Left" | "Right" | "Top" | "Bottom" => self.quick_access_position,
+            "Left" | "Right" => self.quick_access_position,
             _ => "Left".to_string(),
         };
         self.quick_access_auto_close_action = match self.quick_access_auto_close_action.as_str() {
@@ -324,6 +328,19 @@ fn sanitize_shutter_sound(value: String) -> String {
     }
 }
 
+fn sanitize_quick_access_overlay_size(value: f64) -> f64 {
+    value.clamp(
+        QUICK_ACCESS_OVERLAY_SCALE_MIN,
+        QUICK_ACCESS_OVERLAY_SCALE_MAX,
+    )
+}
+
+fn should_migrate_legacy_quick_access_overlay_size(raw: &str, config: &AppConfig) -> bool {
+    !raw.contains("quick_access_position:")
+        && raw.contains("quick_access_overlay_size:")
+        && (config.quick_access_overlay_size - QUICK_ACCESS_OVERLAY_SCALE_MIN).abs() < f64::EPSILON
+}
+
 pub fn config_path() -> Option<PathBuf> {
     let mut path = dirs::config_dir()?;
     path.push("apexshot");
@@ -341,7 +358,13 @@ pub fn load_config() -> AppConfig {
     };
 
     serde_yml::from_str::<AppConfig>(&raw)
-        .map(AppConfig::sanitized)
+        .map(|config| {
+            let mut sanitized = config.sanitized();
+            if should_migrate_legacy_quick_access_overlay_size(&raw, &sanitized) {
+                sanitized.quick_access_overlay_size = QUICK_ACCESS_OVERLAY_SCALE_BASELINE;
+            }
+            sanitized
+        })
         .unwrap_or_default()
 }
 
@@ -581,5 +604,78 @@ mod tests {
         assert!(cfg.rec_controls);
         assert!(cfg.rec_cursor);
         assert!(!cfg.rec_hidpi);
+    }
+
+    #[test]
+    fn sanitize_quick_access_position_rejects_unsupported_values() {
+        let top = AppConfig {
+            quick_access_position: "Top".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(top.quick_access_position, "Left");
+
+        let right = AppConfig {
+            quick_access_position: "Right".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(right.quick_access_position, "Right");
+    }
+
+    #[test]
+    fn sanitize_preserves_smallest_quick_access_overlay_size() {
+        let cfg = AppConfig {
+            quick_access_overlay_size: 0.5,
+            ..AppConfig::default()
+        }
+        .sanitized();
+
+        assert_eq!(cfg.quick_access_overlay_size, 0.5);
+    }
+
+    #[test]
+    fn legacy_quick_access_overlay_size_migrates_only_for_old_schema() {
+        let legacy_raw = r#"
+preview_auto_close_seconds: 12
+quick_access_overlay_size: 0.5
+"#;
+        let legacy_cfg = serde_yml::from_str::<AppConfig>(legacy_raw)
+            .unwrap()
+            .sanitized();
+        assert!(should_migrate_legacy_quick_access_overlay_size(
+            legacy_raw,
+            &legacy_cfg
+        ));
+
+        let current_raw = r#"
+preview_auto_close_seconds: 12
+quick_access_position: Right
+quick_access_overlay_size: 0.5
+"#;
+        let current_cfg = serde_yml::from_str::<AppConfig>(current_raw)
+            .unwrap()
+            .sanitized();
+        assert!(!should_migrate_legacy_quick_access_overlay_size(
+            current_raw,
+            &current_cfg
+        ));
+    }
+
+    #[test]
+    fn sanitize_clamps_quick_access_overlay_size() {
+        let low = AppConfig {
+            quick_access_overlay_size: -10.0,
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(low.quick_access_overlay_size, 0.5);
+
+        let high = AppConfig {
+            quick_access_overlay_size: 10.0,
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(high.quick_access_overlay_size, 1.5);
     }
 }

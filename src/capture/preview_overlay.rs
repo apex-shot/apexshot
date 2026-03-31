@@ -40,6 +40,50 @@ const PREVIEW_HEIGHT: i32 = 151;
 const PREVIEW_EDGE_MARGIN: i32 = 24;
 const PREVIEW_BOTTOM_SAFE_OFFSET: i32 = 80;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewSide {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewDismissAction {
+    Close,
+    Hide,
+}
+
+fn preview_dimensions(scale: f64) -> (i32, i32) {
+    let width = ((PREVIEW_WIDTH as f64) * scale).round() as i32;
+    let height = ((PREVIEW_HEIGHT as f64) * scale).round() as i32;
+    (width.max(1), height.max(1))
+}
+
+fn preview_side(position: &str) -> PreviewSide {
+    match position {
+        "Right" => PreviewSide::Right,
+        _ => PreviewSide::Left,
+    }
+}
+
+fn should_emit_extension_events(multi_display: bool, layer_shell_active: bool) -> bool {
+    multi_display && !layer_shell_active
+}
+
+fn initial_preview_pinned(auto_close_enabled: bool) -> bool {
+    !auto_close_enabled
+}
+
+fn preview_dismiss_action(action: &str) -> PreviewDismissAction {
+    match action {
+        "Hide" => PreviewDismissAction::Hide,
+        _ => PreviewDismissAction::Close,
+    }
+}
+
+fn should_dismiss_for_behavior(currently_pinned: bool, behavior_enabled: bool) -> bool {
+    behavior_enabled || !currently_pinned
+}
+
 #[derive(Debug, Error)]
 pub enum CapturePreviewError {
     #[error("Screenshot file not found: {0}")]
@@ -85,16 +129,24 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
 
 fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: String) {
     install_preview_css();
+    let config = load_config();
+    let side = preview_side(&config.quick_access_position);
+    let (preview_width, preview_height) = preview_dimensions(config.quick_access_overlay_size);
+    let dismiss_action = preview_dismiss_action(&config.quick_access_auto_close_action);
+    let dismiss_after_dragging = config.quick_access_close_after_dragging;
+    let dismiss_after_uploading = config.quick_access_close_after_uploading;
+    let start_pinned = initial_preview_pinned(config.quick_access_auto_close_enabled);
+    let auto_close_seconds = config.quick_access_auto_close_interval as u64;
 
     let window = Window::builder()
         .title("Screenshot")
-        .default_width(PREVIEW_WIDTH)
-        .default_height(PREVIEW_HEIGHT)
+        .default_width(preview_width)
+        .default_height(preview_height)
         .resizable(false)
         .decorated(false)
         .build();
     window.add_css_class("capture-preview-window");
-    let layer_shell_active = configure_window_positioning(&window);
+    let layer_shell_active = configure_window_positioning(&window, side, preview_width);
     let limited_always_on_top = should_warn_about_wayland_topmost(layer_shell_active);
     if limited_always_on_top {
         window.add_css_class("capture-preview-window-limited");
@@ -104,19 +156,21 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     // and non-layer-shell Wayland compositors. Logging this at startup every
     // time a preview appears creates unnecessary noise in system journals.
 
-    let pinned = Arc::new(AtomicBool::new(false));
+    let emit_extension_events =
+        should_emit_extension_events(config.quick_access_multi_display, layer_shell_active);
+
+    let pinned = Arc::new(AtomicBool::new(start_pinned));
     let edit_opened = Arc::new(AtomicBool::new(false));
     let auto_close_anchor = Arc::new(Mutex::new(Instant::now()));
-    let auto_close_seconds = load_config().preview_auto_close_seconds as u64;
     let source_bytes = Arc::new(Mutex::new(None::<Arc<Vec<u8>>>));
 
-    let preview_area = build_preview_area(path.clone());
+    let preview_area = build_preview_area(path.clone(), preview_width, preview_height);
     preview_area.set_widget_name("capture-preview-image");
 
     let card = Overlay::new();
     card.set_widget_name("capture-preview-card");
     card.set_overflow(gtk4::Overflow::Hidden);
-    card.set_size_request(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    card.set_size_request(preview_width, preview_height);
     card.set_hexpand(false);
     card.set_vexpand(false);
     card.set_child(Some(&preview_area));
@@ -225,9 +279,9 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
             })
             .unwrap_or((1280, 720));
 
-        let fallback_window_width = fallback_width.max(PREVIEW_WIDTH + PREVIEW_EDGE_MARGIN * 2);
+        let fallback_window_width = fallback_width.max(preview_width + PREVIEW_EDGE_MARGIN * 2);
         let fallback_window_height = fallback_height
-            .max(PREVIEW_HEIGHT + (PREVIEW_EDGE_MARGIN * 2) + PREVIEW_BOTTOM_SAFE_OFFSET);
+            .max(preview_height + (PREVIEW_EDGE_MARGIN * 2) + PREVIEW_BOTTOM_SAFE_OFFSET);
         window.set_default_size(fallback_window_width, fallback_window_height);
 
         let fallback_shell = Overlay::new();
@@ -244,10 +298,21 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
         fallback_shell.set_child(Some(&fallback_backdrop));
         fallback_shell.set_size_request(fallback_window_width, fallback_window_height);
 
-        card.set_halign(Align::Start);
+        card.set_halign(match side {
+            PreviewSide::Left => Align::Start,
+            PreviewSide::Right => Align::End,
+        });
         card.set_valign(Align::End);
-        card.set_margin_start(PREVIEW_EDGE_MARGIN);
-        card.set_margin_end(PREVIEW_EDGE_MARGIN);
+        card.set_margin_start(if side == PreviewSide::Left {
+            PREVIEW_EDGE_MARGIN
+        } else {
+            0
+        });
+        card.set_margin_end(if side == PreviewSide::Right {
+            PREVIEW_EDGE_MARGIN
+        } else {
+            0
+        });
         card.set_margin_top(PREVIEW_EDGE_MARGIN);
         card.set_margin_bottom(PREVIEW_EDGE_MARGIN + PREVIEW_BOTTOM_SAFE_OFFSET);
         fallback_shell.add_overlay(&card);
@@ -378,15 +443,17 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     let window_weak_drag = window.downgrade();
     let pinned_drag = pinned.clone();
     let edit_opened_drag = edit_opened.clone();
+    let drag_dismiss_action = dismiss_action;
     drag_source.connect_drag_end(move |_, _, _| {
         if edit_opened_drag.load(Ordering::Relaxed) {
             return;
         }
-        if pinned_drag.load(Ordering::Relaxed) {
+        if !should_dismiss_for_behavior(pinned_drag.load(Ordering::Relaxed), dismiss_after_dragging)
+        {
             return;
         }
         if let Some(window) = window_weak_drag.upgrade() {
-            window.close();
+            dismiss_preview_window(&window, drag_dismiss_action);
         }
     });
     card.add_controller(drag_source);
@@ -400,6 +467,9 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
 
     let pin_state = pinned.clone();
     let auto_close_anchor_pin = auto_close_anchor.clone();
+    if start_pinned {
+        pin_icon.set_icon_name(Some("starred-symbolic"));
+    }
     pin_btn.connect_clicked(move |_| {
         let now_pinned = !pin_state.load(Ordering::Relaxed);
         pin_state.store(now_pinned, Ordering::Relaxed);
@@ -467,6 +537,9 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     });
 
     let path_upload = path.clone();
+    let window_weak_upload = window.downgrade();
+    let pinned_upload = pinned.clone();
+    let upload_dismiss_action = dismiss_action;
     upload_btn.connect_clicked(move |_| {
         let target = path_upload
             .parent()
@@ -474,6 +547,18 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
             .unwrap_or_else(|| path_upload.clone());
         if let Err(e) = open_target(&target) {
             eprintln!("Upload action failed: {e}");
+            return;
+        }
+
+        if !should_dismiss_for_behavior(
+            pinned_upload.load(Ordering::Relaxed),
+            dismiss_after_uploading,
+        ) {
+            return;
+        }
+
+        if let Some(window) = window_weak_upload.upgrade() {
+            dismiss_preview_window(&window, upload_dismiss_action);
         }
     });
 
@@ -500,6 +585,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     let pinned_timeout = pinned.clone();
     let edit_opened_timeout = edit_opened.clone();
     let auto_close_anchor_timeout = auto_close_anchor.clone();
+    let timeout_dismiss_action = dismiss_action;
     glib::timeout_add_seconds_local(1, move || {
         if edit_opened_timeout.load(Ordering::Relaxed) {
             return ControlFlow::Break;
@@ -512,7 +598,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
 
         if !pinned_timeout.load(Ordering::Relaxed) && auto_close_elapsed >= auto_close_seconds {
             if let Some(window) = window_weak_timeout.upgrade() {
-                window.close();
+                dismiss_preview_window(&window, timeout_dismiss_action);
             }
             return ControlFlow::Break;
         }
@@ -527,7 +613,9 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
         if !edit_opened_close.load(Ordering::Relaxed) {
             main_loop_close.quit();
         }
-        crate::gnome_integration::emit_preview_closed(&preview_id_close);
+        if emit_extension_events {
+            crate::gnome_integration::emit_preview_closed(&preview_id_close);
+        }
         glib::Propagation::Proceed
     });
 
@@ -559,7 +647,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     // Skip this when layer_shell_active is true because:
     // 1. Layer-shell Overlay already keeps the window above everything
     // 2. Layer-shell surfaces are not exposed as MetaWindow, so the extension can't find it
-    if !layer_shell_active {
+    if emit_extension_events {
         let pid = std::process::id();
         crate::gnome_integration::emit_preview_opened(
             &preview_id,
@@ -1002,9 +1090,9 @@ fn send_net_wm_state_client_message<C: Connection>(
     Ok(())
 }
 
-fn build_preview_area(path: PathBuf) -> DrawingArea {
+fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) -> DrawingArea {
     let area = DrawingArea::new();
-    area.set_size_request(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    area.set_size_request(preview_width, preview_height);
     area.set_hexpand(false);
     area.set_vexpand(false);
     area.set_can_target(true);
@@ -1041,18 +1129,18 @@ fn build_preview_area(path: PathBuf) -> DrawingArea {
         let Some(area) = area_weak.upgrade() else {
             return;
         };
-        *texture.borrow_mut() = preview_texture(&path);
+        *texture.borrow_mut() = preview_texture(&path, preview_width, preview_height);
         area.queue_draw();
     });
 
     area
 }
 
-fn preview_texture(path: &Path) -> Option<gdk::Texture> {
+fn preview_texture(path: &Path, preview_width: i32, preview_height: i32) -> Option<gdk::Texture> {
     let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(
         path,
-        PREVIEW_WIDTH,
-        PREVIEW_HEIGHT,
+        preview_width,
+        preview_height,
         true,
     ) {
         Ok(pixbuf) => pixbuf,
@@ -1068,20 +1156,34 @@ fn preview_texture(path: &Path) -> Option<gdk::Texture> {
     Some(gdk::Texture::for_pixbuf(&preview_pixbuf))
 }
 
-fn configure_window_positioning(window: &Window) -> bool {
+fn configure_window_positioning(window: &Window, side: PreviewSide, preview_width: i32) -> bool {
     if gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
         window.set_namespace(Some("apexshot-capture-preview"));
         window.set_layer(Layer::Overlay);
 
-        // Keep preview docked bottom-left.
-        window.set_anchor(Edge::Left, true);
-        window.set_anchor(Edge::Right, false);
+        window.set_anchor(Edge::Left, side == PreviewSide::Left);
+        window.set_anchor(Edge::Right, side == PreviewSide::Right);
         window.set_anchor(Edge::Top, false);
         window.set_anchor(Edge::Bottom, true);
 
-        window.set_margin(Edge::Left, PREVIEW_EDGE_MARGIN);
-        window.set_margin(Edge::Right, 0);
+        window.set_exclusive_zone(preview_width + PREVIEW_EDGE_MARGIN * 2);
+        window.set_margin(
+            Edge::Left,
+            if side == PreviewSide::Left {
+                PREVIEW_EDGE_MARGIN
+            } else {
+                0
+            },
+        );
+        window.set_margin(
+            Edge::Right,
+            if side == PreviewSide::Right {
+                PREVIEW_EDGE_MARGIN
+            } else {
+                0
+            },
+        );
         window.set_margin(Edge::Top, 0);
         window.set_margin(
             Edge::Bottom,
@@ -1093,4 +1195,43 @@ fn configure_window_positioning(window: &Window) -> bool {
     }
 
     false
+}
+
+fn dismiss_preview_window(window: &Window, action: PreviewDismissAction) {
+    match action {
+        // The preview is a standalone transient window; "Hide" currently maps to
+        // the same lifecycle as close because there is no background controller
+        // that can restore a hidden preview later.
+        PreviewDismissAction::Close | PreviewDismissAction::Hide => window.close(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_dimensions_keep_current_size_at_midpoint() {
+        assert_eq!(preview_dimensions(1.0), (PREVIEW_WIDTH, PREVIEW_HEIGHT));
+    }
+
+    #[test]
+    fn preview_side_resolves_left_and_right() {
+        assert_eq!(preview_side("Left"), PreviewSide::Left);
+        assert_eq!(preview_side("Right"), PreviewSide::Right);
+        assert_eq!(preview_side("Top"), PreviewSide::Left);
+    }
+
+    #[test]
+    fn preview_extension_signals_follow_multi_display_setting() {
+        assert!(should_emit_extension_events(true, false));
+        assert!(!should_emit_extension_events(false, false));
+        assert!(!should_emit_extension_events(true, true));
+    }
+
+    #[test]
+    fn preview_starts_pinned_when_auto_close_is_disabled() {
+        assert!(initial_preview_pinned(false));
+        assert!(!initial_preview_pinned(true));
+    }
 }
