@@ -804,7 +804,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         if (h == HandlePos::Inside) {
             m_moving = true;
             m_selectionAtDragStart = m_selection.normalized();
-            setCursor(Qt::SizeAllCursor);
+            setCursor(Qt::ClosedHandCursor);
             return;
         } else if (h != HandlePos::None) {
             m_resizing = h;
@@ -1013,6 +1013,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
     }
 
     if (m_moving) {
+        setCursor(Qt::ClosedHandCursor);
         QPoint delta = pos - m_dragStart;
         QRect newSel = m_selectionAtDragStart.translated(delta);
         const QRect bounds = rect();
@@ -1406,9 +1407,7 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
                     startWebcamCapture();
             } else {
                 // Close recording panel, restore normal capture mode
-                m_recordingPanelOpen = false;
-                m_captureIntent = CaptureIntent::Area;
-                stopWebcamCapture();
+                resetRecordingPanelToAreaMode();
             }
             update();
             return;

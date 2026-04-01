@@ -56,6 +56,9 @@ pub enum SelectionError {
     #[error("GTK initialization failed: {0}")]
     InitError(String),
 
+    #[error("{0}")]
+    Blocked(String),
+
     #[error("Selection was cancelled by user")]
     Cancelled,
 }

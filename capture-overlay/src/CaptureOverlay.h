@@ -64,9 +64,11 @@ public:
     QSize scrollCaptureSize() const { return m_scrollCaptureSize; }
     int captureDelaySeconds() const { return m_captureDelaySeconds; }
     bool countdownHandledInOverlay() const { return true; }
+    void focusAndRaiseOverlay();
 
     // Recording accessors
     bool recordRequested() const { return m_captureIntent == CaptureIntent::Record; }
+    bool recordConfigRequested() const { return m_recordConfigRequested; }
     RecordType recordType() const { return m_recordType; }
     bool recordControlsEnabled() const { return m_recControls; }
     bool recordFullscreen() const { return m_fullscreenMode; }
@@ -264,6 +266,7 @@ private:
     void confirmSelection();
     void confirmRecordingSelection();
     void cancelSelection();
+    void resetRecordingPanelToAreaMode(bool keepSelection = true);
 
     struct WindowInfo {
         QRect   rect;
@@ -337,6 +340,7 @@ private:
     int  m_hoveredDropdownItem; // index into current dropdown options
     QList<QRectF> m_dropdownItemRects;
     bool m_recordingToolsHidden; // true when user clicks Record tile
+    bool m_recordConfigRequested;
     RecordType m_recordType;
     RecordPanelTile m_hoveredRecordTile;
     

@@ -36,6 +36,11 @@ pub struct RecordingControlsHandle {
     shown: bool,
 }
 
+#[derive(Debug)]
+pub struct ScreenshotLockHandle {
+    shown: bool,
+}
+
 impl MaskHandle {
     pub fn inactive() -> Self {
         Self { shown: false }
@@ -62,6 +67,19 @@ impl RecordingControlsHandle {
     }
 }
 
+impl ScreenshotLockHandle {
+    pub fn inactive() -> Self {
+        Self { shown: false }
+    }
+
+    pub fn hide(mut self) {
+        if self.shown {
+            let _ = end_screenshot_lock();
+            self.shown = false;
+        }
+    }
+}
+
 impl Drop for MaskHandle {
     fn drop(&mut self) {
         if self.shown {
@@ -75,6 +93,15 @@ impl Drop for RecordingControlsHandle {
     fn drop(&mut self) {
         if self.shown {
             let _ = hide_recording_controls();
+            self.shown = false;
+        }
+    }
+}
+
+impl Drop for ScreenshotLockHandle {
+    fn drop(&mut self) {
+        if self.shown {
+            let _ = end_screenshot_lock();
             self.shown = false;
         }
     }
@@ -94,8 +121,22 @@ pub fn current_session_supports_gnome_shell_overlay() -> bool {
     current_session_supports_gnome_shell_mask()
 }
 
+pub fn should_use_gnome_shell_screenshot_lock(
+    wayland_display: Option<&str>,
+    desktop: Option<&str>,
+) -> bool {
+    should_use_gnome_shell_mask(wayland_display, desktop)
+}
+
 pub fn current_session_supports_gnome_shell_mask() -> bool {
     should_use_gnome_shell_mask(
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+    )
+}
+
+pub fn current_session_supports_gnome_shell_screenshot_lock() -> bool {
+    should_use_gnome_shell_screenshot_lock(
         std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
         std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
     )
@@ -139,12 +180,27 @@ pub fn show_recording_controls(
     Ok(RecordingControlsHandle { shown: true })
 }
 
+pub fn begin_screenshot_lock(session_id: &str) -> anyhow::Result<ScreenshotLockHandle> {
+    if !current_session_supports_gnome_shell_screenshot_lock() {
+        return Ok(ScreenshotLockHandle::inactive());
+    }
+
+    run_shell_overlay_method("BeginScreenshotLock", show_screenshot_lock_args(session_id))
+        .context("failed to launch dbus-send for BeginScreenshotLock")?;
+
+    Ok(ScreenshotLockHandle { shown: true })
+}
+
 pub fn hide_recording_mask_best_effort() {
     let _ = hide_recording_mask();
 }
 
 pub fn hide_recording_controls_best_effort() {
     let _ = hide_recording_controls();
+}
+
+pub fn release_screenshot_lock_best_effort() {
+    let _ = end_screenshot_lock();
 }
 
 pub fn push_recording_keystroke(session_id: &str, text: &str) -> anyhow::Result<()> {
@@ -223,12 +279,24 @@ fn hide_recording_controls() -> anyhow::Result<()> {
     run_shell_overlay_method("HideControls", Vec::new())
 }
 
+fn end_screenshot_lock() -> anyhow::Result<()> {
+    if !current_session_supports_gnome_shell_screenshot_lock() {
+        return Ok(());
+    }
+
+    run_shell_overlay_method("EndScreenshotLock", Vec::new())
+}
+
 fn show_toggle_overlay_args(key: &str, visible: bool) -> Vec<String> {
     vec![format!("string:{key}"), format!("boolean:{visible}")]
 }
 
 fn show_push_keystroke_args(session_id: &str, text: &str) -> Vec<String> {
     vec![format!("string:{session_id}"), format!("string:{text}")]
+}
+
+fn show_screenshot_lock_args(session_id: &str) -> Vec<String> {
+    vec![format!("string:{session_id}")]
 }
 
 pub fn toggle_overlay_visibility(key: &str, visible: bool) -> anyhow::Result<()> {
@@ -261,6 +329,30 @@ mod tests {
             Some("wayland-1"),
             Some("GNOME")
         ));
+    }
+
+    #[test]
+    fn screenshot_lock_uses_same_gnome_wayland_support_gate() {
+        assert!(should_use_gnome_shell_screenshot_lock(
+            Some("wayland-0"),
+            Some("ubuntu:GNOME")
+        ));
+        assert!(!should_use_gnome_shell_screenshot_lock(
+            Some("wayland-0"),
+            Some("KDE")
+        ));
+        assert!(!should_use_gnome_shell_screenshot_lock(
+            None,
+            Some("GNOME")
+        ));
+    }
+
+    #[test]
+    fn screenshot_lock_begin_payload_includes_session_id() {
+        assert_eq!(
+            show_screenshot_lock_args("capture-123"),
+            vec!["string:capture-123".to_string()]
+        );
     }
 
     #[test]

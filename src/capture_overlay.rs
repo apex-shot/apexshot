@@ -11,13 +11,246 @@
 //!   exit 2 → error
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::process::{Child, Command, Output, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::{
+    io::Write,
+    os::unix::{net::UnixStream, process::ExitStatusExt},
+};
 
 use crate::{
     backend::{CaptureData, DisplayBackend, PixelFormat, WaylandBackend},
     capture::{save_capture, ImageFormat, SaveConfig},
+    gnome_integration::{emit_tracked_window_closed, emit_tracked_window_opened},
     overlay::{SelectionArea, SelectionError, SelectionResult},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureSessionState {
+    Idle,
+    ApexOverlayActive,
+    BuiltinOverlayActive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchBlockedReason {
+    ApexOverlayAlreadyActive,
+    BuiltinOverlayActive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum OverlayExitCode {
+    Cancelled = 1,
+    Error = 2,
+    WindowCaptureRequested = 3,
+    SwitchToArea = 4,
+    SwitchToFullscreen = 5,
+    RecordConfigUpdated = 6,
+    ForwardedToExistingOverlay = 10,
+    BlockedByBuiltinOverlay = 11,
+}
+
+#[derive(Debug)]
+pub struct CaptureSessionCoordinator {
+    state: Mutex<CaptureSessionState>,
+}
+
+impl Default for CaptureSessionCoordinator {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(CaptureSessionState::Idle),
+        }
+    }
+}
+
+#[must_use]
+pub struct CaptureOverlayGuard<'a> {
+    coordinator: &'a CaptureSessionCoordinator,
+}
+
+#[derive(Debug)]
+struct InteractiveOverlaySessionGuard {
+    tracked_overlay_id: Option<String>,
+}
+
+impl CaptureSessionCoordinator {
+    pub fn begin_apex_overlay_session(
+        &self,
+        builtin_overlay_active: bool,
+    ) -> Result<CaptureOverlayGuard<'_>, LaunchBlockedReason> {
+        let mut state = self.state.lock().expect("capture session mutex poisoned");
+        if matches!(*state, CaptureSessionState::ApexOverlayActive) {
+            return Err(LaunchBlockedReason::ApexOverlayAlreadyActive);
+        }
+        if builtin_overlay_active {
+            *state = CaptureSessionState::BuiltinOverlayActive;
+            *state = CaptureSessionState::Idle;
+            return Err(LaunchBlockedReason::BuiltinOverlayActive);
+        }
+        *state = CaptureSessionState::ApexOverlayActive;
+        drop(state);
+        Ok(CaptureOverlayGuard { coordinator: self })
+    }
+}
+
+impl Drop for CaptureOverlayGuard<'_> {
+    fn drop(&mut self) {
+        let mut state = self
+            .coordinator
+            .state
+            .lock()
+            .expect("capture session mutex poisoned");
+        *state = CaptureSessionState::Idle;
+    }
+}
+
+fn capture_session_coordinator() -> &'static CaptureSessionCoordinator {
+    static COORDINATOR: OnceLock<CaptureSessionCoordinator> = OnceLock::new();
+    COORDINATOR.get_or_init(CaptureSessionCoordinator::default)
+}
+
+fn classify_overlay_exit_code(code: Option<i32>) -> Result<Option<&'static str>, LaunchBlockedReason> {
+    match code {
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
+            Ok(Some("forwarded"))
+        }
+        Some(code) if code == OverlayExitCode::BlockedByBuiltinOverlay as i32 => {
+            Err(LaunchBlockedReason::BuiltinOverlayActive)
+        }
+        _ => Ok(None),
+    }
+}
+
+const OVERLAY_FOCUS_REQUEST: &str = "focus";
+const OVERLAY_CANCEL_REQUEST: &str = "cancel";
+
+fn overlay_socket_path() -> PathBuf {
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("apexshot-capture-overlay.sock")
+}
+
+pub fn request_existing_overlay_focus() -> bool {
+    send_overlay_socket_request(OVERLAY_FOCUS_REQUEST)
+}
+
+pub fn request_existing_overlay_cancel() -> bool {
+    send_overlay_socket_request(OVERLAY_CANCEL_REQUEST)
+}
+
+fn send_overlay_socket_request(request: &str) -> bool {
+    #[cfg(unix)]
+    {
+        match UnixStream::connect(overlay_socket_path()) {
+            Ok(mut stream) => {
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.write_all(b"\n");
+                true
+            }
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+fn overlay_socket_is_listening() -> bool {
+    #[cfg(unix)]
+    {
+        UnixStream::connect(overlay_socket_path()).is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+fn is_gnome_session() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .ok()
+        .map(|desktop| {
+            desktop
+                .split(':')
+                .any(|part| part.trim().eq_ignore_ascii_case("gnome"))
+        })
+        .unwrap_or(false)
+}
+
+fn execute_builtin_overlay_query<F>(query: F) -> bool
+where
+    F: FnOnce() -> bool + Send + 'static,
+{
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return std::thread::spawn(query).join().unwrap_or(false);
+    }
+
+    query()
+}
+
+pub fn builtin_screenshot_overlay_active() -> bool {
+    if !is_gnome_session() {
+        return false;
+    }
+
+    execute_builtin_overlay_query(|| {
+        let Ok(conn) = zbus::blocking::Connection::session() else {
+            return false;
+        };
+        let Ok(proxy) = zbus::blocking::Proxy::new(
+            &conn,
+            "org.gnome.Shell",
+            "/org/gnome/Shell",
+            "org.gnome.Shell",
+        ) else {
+            return false;
+        };
+
+        let script = "(() => { try { const Main = imports.ui.main; return !!(Main.screenshotUI && Main.screenshotUI.visible); } catch (e) { return false; } })()";
+        let Ok((success, value)) = proxy.call::<_, _, (bool, String)>("Eval", &(script)) else {
+            return false;
+        };
+        if !success {
+            return false;
+        }
+
+        let normalized = value.trim().trim_matches('"');
+        matches!(normalized, "true" | "1")
+    })
+}
+
+pub fn begin_capture_session() -> Result<CaptureOverlayGuard<'static>, LaunchBlockedReason> {
+    capture_session_coordinator().begin_apex_overlay_session(builtin_screenshot_overlay_active())
+}
+
+pub fn is_launch_blocked_error(err: &SelectionError) -> bool {
+    matches!(err, SelectionError::Blocked(_))
+}
+
+fn blocked_selection_error(reason: LaunchBlockedReason) -> SelectionError {
+    match reason {
+        LaunchBlockedReason::ApexOverlayAlreadyActive => SelectionError::Blocked(
+            "ApexShot capture overlay is already active".into(),
+        ),
+        LaunchBlockedReason::BuiltinOverlayActive => SelectionError::Blocked(
+            "GNOME screenshot UI is already active".into(),
+        ),
+    }
+}
+
+#[cfg(unix)]
+fn synthetic_output(status_code: i32) -> Output {
+    Output {
+        status: std::process::ExitStatus::from_raw(status_code << 8),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    }
+}
 
 /// Find the `apexshot-capture` binary.
 ///
@@ -113,6 +346,12 @@ fn run_capture_binary(
     extra_args: &[&str],
     background_png: Option<&Path>,
 ) -> Result<Output, SelectionError> {
+    if builtin_screenshot_overlay_active() {
+        return Err(blocked_selection_error(
+            LaunchBlockedReason::BuiltinOverlayActive,
+        ));
+    }
+
     let binary = find_capture_binary().ok_or_else(|| {
         SelectionError::InitError(
             "apexshot-capture binary not found. \
@@ -120,6 +359,8 @@ fn run_capture_binary(
                 .into(),
         )
     })?;
+
+    let mut interactive_session = InteractiveOverlaySessionGuard::begin(extra_args);
 
     let mut cmd = Command::new(&binary);
     cmd.env("QT_IM_MODULE", "compose")
@@ -135,13 +376,102 @@ fn run_capture_binary(
         cmd.arg("--background").arg(bg);
     }
 
-    cmd.output().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
         SelectionError::InitError(format!(
             "Failed to launch apexshot-capture ({}): {}",
             binary.display(),
             e
         ))
-    })
+    })?;
+    interactive_session.attach_child_pid(child.id());
+    let output = child.wait_with_output().map_err(|e| {
+        SelectionError::InitError(format!(
+            "Failed to wait for apexshot-capture ({}): {}",
+            binary.display(),
+            e
+        ))
+    })?;
+
+    match classify_overlay_exit_code(output.status.code()) {
+        Ok(Some("forwarded")) => {
+            #[cfg(unix)]
+            {
+                return Ok(synthetic_output(
+                    OverlayExitCode::ForwardedToExistingOverlay as i32,
+                ));
+            }
+            #[cfg(not(unix))]
+            {
+                return Ok(output);
+            }
+        }
+        Err(reason) => return Err(blocked_selection_error(reason)),
+        _ => {}
+    }
+
+    Ok(output)
+}
+
+impl InteractiveOverlaySessionGuard {
+    fn begin(extra_args: &[&str]) -> Self {
+        if !should_request_screenshot_lock(extra_args)
+            || overlay_socket_is_listening()
+        {
+            return Self {
+                tracked_overlay_id: None,
+            };
+        }
+
+        let session_id = next_screenshot_lock_session_id();
+
+        Self {
+            tracked_overlay_id: Some(tracked_overlay_id(&session_id)),
+        }
+    }
+
+    fn attach_child_pid(&mut self, pid: u32) {
+        let Some(tracked_id) = self.tracked_overlay_id.as_deref() else {
+            return;
+        };
+
+        emit_tracked_window_opened(
+            tracked_id,
+            pid,
+            "ApexShot Capture",
+            "capture-overlay",
+            "screenshot",
+        );
+    }
+}
+
+impl Drop for InteractiveOverlaySessionGuard {
+    fn drop(&mut self) {
+        if let Some(tracked_id) = self.tracked_overlay_id.take() {
+            emit_tracked_window_closed(&tracked_id);
+        }
+    }
+}
+
+fn should_request_screenshot_lock(extra_args: &[&str]) -> bool {
+    if extra_args.is_empty() {
+        return true;
+    }
+
+    extra_args
+        .iter()
+        .any(|arg| matches!(*arg, "--area-init" | "--window-capture"))
+}
+
+fn next_screenshot_lock_session_id() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    format!("screenshot-{}-{now}", std::process::id())
+}
+
+fn tracked_overlay_id(session_id: &str) -> String {
+    format!("capture-overlay-{session_id}")
 }
 
 pub fn spawn_recording_controls_via_cpp(
@@ -322,6 +652,74 @@ pub enum AreaCapturePathResult {
     Cancelled,
 }
 
+fn parse_area_capture_output(
+    exit_code: Option<i32>,
+    stdout: &str,
+) -> Result<AreaCapturePathResult, SelectionError> {
+    match exit_code {
+        Some(0) => {
+            let mode = extract_string(stdout.trim(), "mode");
+            if matches!(mode.as_deref(), Some("record")) {
+                let request = parse_recording_json(stdout.trim())?;
+                Ok(AreaCapturePathResult::RecordingRequested(request))
+            } else {
+                let (path, mode) = parse_capture_screen_json_with_mode(stdout.trim())?;
+                if matches!(mode.as_deref(), Some("ocr")) {
+                    match load_capture_data_from_path(&path) {
+                        Ok(capture) => {
+                            let _ = std::fs::remove_file(&path);
+                            Ok(AreaCapturePathResult::OcrRequested(capture))
+                        }
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&path);
+                            Err(e)
+                        }
+                    }
+                } else if matches!(mode.as_deref(), Some("scroll")) {
+                    Ok(AreaCapturePathResult::ScrollCaptured(path))
+                } else {
+                    Ok(AreaCapturePathResult::Captured(path))
+                }
+            }
+        }
+        Some(code) if code == OverlayExitCode::RecordConfigUpdated as i32 => {
+            let mode = extract_string(stdout.trim(), "mode");
+            if matches!(mode.as_deref(), Some("record-config")) {
+                let request = parse_recording_json(stdout.trim())?;
+                crate::recording::persist_overlay_recording_request_state(&request).map_err(
+                    |e| {
+                        SelectionError::InitError(format!(
+                            "Failed to persist recording overlay state: {e}"
+                        ))
+                    },
+                )?;
+                Ok(AreaCapturePathResult::RecordingConfigUpdated)
+            } else {
+                Err(SelectionError::InitError(format!(
+                    "apexshot-capture --area-init exited with record-config code but stdout was not record-config: {stdout}"
+                )))
+            }
+        }
+        Some(1) | None => {
+            eprintln!("[capture_overlay] capture_area_via_cpp: cancelled or no exit code");
+            Ok(AreaCapturePathResult::Cancelled)
+        }
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
+            eprintln!("[capture_overlay] capture_area_via_cpp: request forwarded to active overlay");
+            Ok(AreaCapturePathResult::Cancelled)
+        }
+        Some(3) => {
+            eprintln!(
+                "[capture_overlay] Window capture requested from area toolbar — launching portal"
+            );
+            capture_window_file_via_cpp().map(AreaCapturePathResult::Captured)
+        }
+        Some(code) => Err(SelectionError::InitError(format!(
+            "apexshot-capture --area-init exited with code {code}"
+        ))),
+    }
+}
+
 /// Run the capture overlay and handle the Window toolbar button (exit code 3)
 /// by immediately doing a window capture via the portal.
 /// Returns `SelectionResult` — `Ok(None)` means "window capture was done and
@@ -337,6 +735,7 @@ pub fn run_capture_overlay_with_window(
             parse_selection_json(stdout.trim())
         }
         Some(1) | None => Ok(None),
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => Ok(None),
         Some(3) => {
             // Window capture requested — signal by returning a special sentinel area
             Ok(Some(SelectionArea {
@@ -390,6 +789,7 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
             parse_selection_json(stdout.trim())
         }
         Some(1) | None => Ok(None),
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => Ok(None),
         Some(3) => {
             // Window capture requested via toolbar button (Wayland path)
             eprintln!(
@@ -419,6 +819,12 @@ fn save_capture_to_temp_png(
 }
 
 pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
+    if builtin_screenshot_overlay_active() {
+        return Err(blocked_selection_error(
+            LaunchBlockedReason::BuiltinOverlayActive,
+        ));
+    }
+
     if WaylandBackend::is_supported() {
         eprintln!("[capture_overlay] capture_window_file: using Wayland ScreenCast window capture");
         let backend = WaylandBackend::new().map_err(|e| {
@@ -445,6 +851,9 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
     match exit_code {
         Some(0) => parse_capture_screen_json(stdout.trim()),
         Some(1) | None => Err(SelectionError::Cancelled),
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
+            Err(SelectionError::Cancelled)
+        }
         Some(code) => Err(SelectionError::InitError(format!(
             "apexshot-capture --window-capture exited with code {code}"
         ))),
@@ -467,6 +876,9 @@ pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
             parse_capture_screen_json(stdout.trim())
         }
         Some(1) | None => Err(SelectionError::Cancelled),
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
+            Err(SelectionError::Cancelled)
+        }
         Some(code) => Err(SelectionError::InitError(format!(
             "apexshot-capture --capture-screen exited with code {code}"
         ))),
@@ -631,55 +1043,7 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
         stdout.trim()
     );
 
-    match exit_code {
-        Some(0) => {
-            let mode = extract_string(stdout.trim(), "mode");
-            if matches!(mode.as_deref(), Some("record")) {
-                let request = parse_recording_json(stdout.trim())?;
-                Ok(AreaCapturePathResult::RecordingRequested(request))
-            } else {
-                let (path, mode) = parse_capture_screen_json_with_mode(stdout.trim())?;
-                if matches!(mode.as_deref(), Some("ocr")) {
-                    match load_capture_data_from_path(&path) {
-                        Ok(capture) => {
-                            let _ = std::fs::remove_file(&path);
-                            Ok(AreaCapturePathResult::OcrRequested(capture))
-                        }
-                        Err(e) => {
-                            let _ = std::fs::remove_file(&path);
-                            Err(e)
-                        }
-                    }
-                } else if matches!(mode.as_deref(), Some("scroll")) {
-                    Ok(AreaCapturePathResult::ScrollCaptured(path))
-                } else {
-                    Ok(AreaCapturePathResult::Captured(path))
-                }
-            }
-        }
-        Some(1) | None => {
-            let mode = extract_string(stdout.trim(), "mode");
-            if matches!(mode.as_deref(), Some("record-config")) {
-                let request = parse_recording_json(stdout.trim())?;
-                crate::recording::persist_overlay_recording_request_state(&request)
-                    .map_err(|e| SelectionError::InitError(format!(
-                        "Failed to persist recording overlay state: {e}"
-                    )))?;
-                return Ok(AreaCapturePathResult::RecordingConfigUpdated);
-            }
-            eprintln!("[capture_overlay] capture_area_via_cpp: cancelled or no exit code");
-            Ok(AreaCapturePathResult::Cancelled)
-        }
-        Some(3) => {
-            eprintln!(
-                "[capture_overlay] Window capture requested from area toolbar — launching portal"
-            );
-            capture_window_file_via_cpp().map(AreaCapturePathResult::Captured)
-        }
-        Some(code) => Err(SelectionError::InitError(format!(
-            "apexshot-capture --area-init exited with code {code}"
-        ))),
-    }
+    parse_area_capture_output(exit_code, stdout.trim())
 }
 
 pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
@@ -939,8 +1303,11 @@ fn extract_string(json: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_area_init_args, parse_capture_screen_json, parse_capture_screen_json_with_mode,
-        parse_recording_json, parse_selection_json, RecordingType,
+        build_area_init_args, classify_overlay_exit_code, execute_builtin_overlay_query,
+        parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
+        parse_recording_json, parse_selection_json, should_request_screenshot_lock,
+        tracked_overlay_id,
+        CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, RecordingType,
     };
     use crate::config::AppConfig;
 
@@ -1096,5 +1463,105 @@ mod tests {
         assert!(args.contains(&"--rec-webcam-device=2".to_string()));
         assert!(args.contains(&"--rec-webcam-rel-x=0.1250".to_string()));
         assert!(args.contains(&"--rec-webcam-rel-y=0.8750".to_string()));
+    }
+
+    #[test]
+    fn forwarded_overlay_exit_code_is_classified_distinctly() {
+        assert_eq!(
+            classify_overlay_exit_code(Some(OverlayExitCode::ForwardedToExistingOverlay as i32)),
+            Ok(Some("forwarded"))
+        );
+    }
+
+    #[test]
+    fn builtin_block_overlay_exit_code_is_classified_distinctly() {
+        assert_eq!(
+            classify_overlay_exit_code(Some(OverlayExitCode::BlockedByBuiltinOverlay as i32)),
+            Err(LaunchBlockedReason::BuiltinOverlayActive)
+        );
+    }
+
+    #[test]
+    fn capture_session_coordinator_blocks_duplicate_apex_sessions() {
+        let coordinator = CaptureSessionCoordinator::default();
+        let _guard = coordinator
+            .begin_apex_overlay_session(false)
+            .expect("first session should acquire the guard");
+
+        assert!(
+            matches!(
+                coordinator.begin_apex_overlay_session(false),
+                Err(LaunchBlockedReason::ApexOverlayAlreadyActive)
+            )
+        );
+    }
+
+    #[test]
+    fn capture_session_coordinator_blocks_builtin_overlay_without_latching() {
+        let coordinator = CaptureSessionCoordinator::default();
+
+        assert!(
+            matches!(
+                coordinator.begin_apex_overlay_session(true),
+                Err(LaunchBlockedReason::BuiltinOverlayActive)
+            )
+        );
+
+        assert!(
+            coordinator.begin_apex_overlay_session(false).is_ok(),
+            "builtin detection should not permanently wedge the coordinator"
+        );
+    }
+
+    #[test]
+    fn builtin_overlay_query_can_run_inside_tokio_runtime_without_panicking() {
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+        let result = runtime.block_on(async {
+            std::panic::catch_unwind(|| execute_builtin_overlay_query(|| true))
+        });
+
+        assert_eq!(result.expect("query should not panic"), true);
+    }
+
+    #[test]
+    fn screenshot_lock_only_wraps_interactive_overlay_launches() {
+        assert!(should_request_screenshot_lock(&[]));
+        assert!(should_request_screenshot_lock(&["--area-init"]));
+        assert!(should_request_screenshot_lock(&["--window-capture"]));
+        assert!(!should_request_screenshot_lock(&["--capture-screen"]));
+    }
+
+    #[test]
+    fn tracked_overlay_id_matches_preview_helper_contract() {
+        assert_eq!(
+            tracked_overlay_id("session-123"),
+            "capture-overlay-session-123"
+        );
+    }
+
+    #[test]
+    fn area_init_cancel_does_not_parse_record_config_payload() {
+        let result = parse_area_capture_output(
+            Some(OverlayExitCode::Cancelled as i32),
+            r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video"}"#,
+        )
+        .expect("cancel should parse");
+
+        assert!(matches!(result, super::AreaCapturePathResult::Cancelled));
+    }
+
+    #[test]
+    fn explicit_record_config_exit_is_distinct_from_cancel() {
+        let result = parse_area_capture_output(
+            Some(OverlayExitCode::RecordConfigUpdated as i32),
+            r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video","controls":true,"mic":false,"speaker":false,"clicks":true,"keystrokes":false,"webcam":false,"click_size":0.1464,"click_color":3,"click_style":0,"click_animate":true,"key_size":0.8929,"key_position":0,"key_appearance":0,"key_blur_bg":true,"key_filter":0,"webcam_size":1,"webcam_shape":1,"webcam_flip":false,"webcam_device":0,"webcam_rel_x":0.0000,"webcam_rel_y":0.0000,"display_rec_time":false,"hidpi":false,"notifications":true,"cursor":true,"remember_selection":false,"dim_screen":true,"countdown":true,"video_max_res":0,"video_fps":1,"record_mono":false,"open_editor":false,"gif_fps":60,"gif_quality":0.7500,"gif_size_idx":0,"optimize_gif":true,"fullscreen":false}"#,
+        )
+        .expect("record config should parse");
+
+        assert!(matches!(
+            result,
+            super::AreaCapturePathResult::RecordingConfigUpdated
+        ));
     }
 }

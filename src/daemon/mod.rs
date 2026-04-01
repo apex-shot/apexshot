@@ -29,8 +29,9 @@ use crate::{
         SaveConfig,
     },
     capture_overlay::{
-        capture_area_file_via_cpp, capture_screen_file_via_cpp, capture_window_file_via_cpp,
-        AreaCapturePathResult,
+        begin_capture_session, capture_area_file_via_cpp, capture_screen_file_via_cpp,
+        capture_window_file_via_cpp, is_launch_blocked_error, request_existing_overlay_focus,
+        AreaCapturePathResult, CaptureOverlayGuard, LaunchBlockedReason,
     },
     config::load_config,
     hotkeys::{
@@ -91,10 +92,6 @@ struct DaemonState {
     /// Channel to send GTK work to the main OS thread. `None` when the daemon
     /// owns the main thread itself (legacy / test mode).
     gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
-    /// Whether the Wayland compositor supports the Layer Shell protocol.
-    /// Detected once on the GTK main thread (where GTK is initialized) and
-    /// stored here so worker threads can read it without calling GTK APIs.
-    layer_shell_supported: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,16 +269,15 @@ pub enum GtkWork {
 /// Entry point used when GTK runs on the main OS thread.
 /// The daemon sends `GtkWork` items through `gtk_tx`; the caller's main thread
 /// executes them and sends results back via the embedded reply channels.
-/// `layer_shell_supported` must be detected on the GTK main thread before calling this.
 pub async fn run_daemon_with_gtk_channel(
     gtk_tx: std::sync::mpsc::Sender<GtkWork>,
-    layer_shell_supported: bool,
+    _layer_shell_supported: bool,
 ) -> anyhow::Result<()> {
-    run_daemon_inner(Some(gtk_tx), layer_shell_supported).await
+    run_daemon_inner(Some(gtk_tx)).await
 }
 
 pub async fn run_daemon() -> anyhow::Result<()> {
-    run_daemon_inner(None, false).await
+    run_daemon_inner(None).await
 }
 
 /// Ensure ydotoold daemon is running for scroll capture on Wayland.
@@ -326,7 +322,6 @@ fn should_autostart_ydotoold() -> bool {
 
 async fn run_daemon_inner(
     gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
-    layer_shell_supported: bool,
 ) -> anyhow::Result<()> {
     eprintln!("[daemon] ApexShot daemon starting…");
 
@@ -341,7 +336,6 @@ async fn run_daemon_inner(
     let state = Arc::new(Mutex::new(DaemonState {
         last_capture_path: None,
         gtk_tx,
-        layer_shell_supported,
     }));
 
     // Ensure GNOME Shell can associate this process with our desktop entry
@@ -1777,32 +1771,6 @@ fn capture_area_to_temp_png_path(
     Err("No display backend available for area capture".into())
 }
 
-fn capture_full_screen_for_area_selector() -> Option<crate::backend::CaptureData> {
-    eprintln!(
-        "[capture] capture_full_screen_for_area_selector: starting background capture for selector"
-    );
-    if let Some(b) = make_wayland_backend() {
-        eprintln!("[capture] capture_full_screen_for_area_selector: using Wayland backend (capture_screen_for_selection_impl)");
-        let result = b.capture_screen_for_selection_impl().ok();
-        match &result {
-            Some(d) => eprintln!("[capture] capture_full_screen_for_area_selector: Wayland capture succeeded ({}x{})", d.width, d.height),
-            None => eprintln!("[capture] capture_full_screen_for_area_selector: Wayland capture failed (returned None)"),
-        }
-        result
-    } else if let Some(b) = make_x11_backend() {
-        eprintln!("[capture] capture_full_screen_for_area_selector: using X11 backend");
-        let result = <crate::backend::X11Backend as DisplayBackend>::capture_screen(&b).ok();
-        match &result {
-            Some(d) => eprintln!("[capture] capture_full_screen_for_area_selector: X11 capture succeeded ({}x{})", d.width, d.height),
-            None => eprintln!("[capture] capture_full_screen_for_area_selector: X11 capture failed (returned None)"),
-        }
-        result
-    } else {
-        eprintln!("[capture] capture_full_screen_for_area_selector: no backend available");
-        None
-    }
-}
-
 fn crop_capture_data(
     capture: &crate::backend::CaptureData,
     x: u32,
@@ -2143,6 +2111,13 @@ fn save_temp_png_daemon(capture: &crate::backend::CaptureData) -> Option<std::pa
 }
 
 fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
+    let Some(_session_guard) = acquire_capture_session_guard("area") else {
+        return;
+    };
+    handle_capture_area_with_active_session(state);
+}
+
+fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
     let gtk_tx = state.lock().unwrap().gtk_tx.clone();
 
     let cpp_area_init = if let Some(gtk_tx) = gtk_tx.clone() {
@@ -2190,283 +2165,79 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
             return;
         }
         Err(err) => {
-            eprintln!(
-                "[daemon] C++ area-init capture path failed ({err}); falling back to Rust backend."
-            );
-        }
-    }
-
-    eprintln!(
-        "[daemon] handle_capture_area: START — thread={:?}",
-        std::thread::current().id()
-    );
-    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    eprintln!("[daemon] handle_capture_area: is_wayland={is_wayland}");
-    eprintln!(
-        "[daemon] handle_capture_area: gtk_tx available={}",
-        gtk_tx.is_some()
-    );
-
-    if is_wayland {
-        let Some(backend) = make_wayland_backend() else {
-            eprintln!("[daemon] No Wayland backend available for area capture.");
-            return;
-        };
-
-        // On Wayland compositors that don't support the Layer Shell protocol
-        // (e.g. GNOME Shell), a transparent live overlay is impossible.
-        // This was detected on the GTK main thread at startup and stored in state.
-        let layer_shell_supported = state.lock().unwrap().layer_shell_supported;
-        eprintln!("[daemon] handle_capture_area: layer_shell_supported={layer_shell_supported}");
-
-        // Use the C++ overlay with screenshot background for area selection.
-        // Capture full screen first, save as temp PNG, pass to C++ overlay.
-        let state_for_window = state.clone();
-        let run_cpp_selector_fn =
-            |bg: Option<&std::path::Path>| -> crate::overlay::SelectionResult {
-                let result = crate::capture_overlay::run_capture_overlay_with_window(bg);
-                // Handle sentinels from window picker toolbar
-                if let Ok(Some(ref area)) = result {
-                    if area.x == i32::MIN {
-                        eprintln!("[daemon] Window capture sentinel");
-                        match capture_window_file_via_cpp() {
-                            Ok(path) => save_existing_png_and_open(path, state_for_window.clone()),
-                            Err(e) => eprintln!("[daemon] Window capture failed: {e}"),
-                        }
-                        return Ok(None);
-                    } else if area.x == i32::MIN + 1 {
-                        eprintln!("[daemon] Switching to area mode from window picker");
-                        match capture_area_file_via_cpp() {
-                            Ok(AreaCapturePathResult::Captured(path)) => {
-                                save_existing_png_and_open(path, state_for_window.clone())
-                            }
-                            Ok(AreaCapturePathResult::ScrollCaptured(path)) => {
-                                save_existing_png_and_open(path, state_for_window.clone())
-                            }
-                            Ok(AreaCapturePathResult::OcrRequested(capture)) => {
-                                run_ocr_and_report(capture)
-                            }
-                            Ok(AreaCapturePathResult::Cancelled) => {
-                                eprintln!("[daemon] Area capture cancelled")
-                            }
-                            Ok(AreaCapturePathResult::RecordingConfigUpdated) => {
-                                eprintln!("[daemon] Recording overlay state updated")
-                            }
-                            Ok(AreaCapturePathResult::RecordingRequested(request)) => {
-                                if let Err(err) =
-                                    run_overlay_recording_request_with_gtk(request, gtk_tx.clone())
-                                {
-                                    eprintln!("[daemon] Recording failed: {err}");
-                                }
-                            }
-                            Err(e) => eprintln!("[daemon] Area capture failed: {e}"),
-                        }
-                        return Ok(None);
-                    } else if area.x == i32::MIN + 2 {
-                        eprintln!("[daemon] Switching to fullscreen from window picker");
-                        match capture_screen_file_via_cpp() {
-                            Ok(path) => save_existing_png_and_open(path, state_for_window.clone()),
-                            Err(e) => eprintln!("[daemon] Fullscreen capture failed: {e}"),
-                        }
-                        return Ok(None);
-                    }
-                }
-                result
-            };
-
-        let run_live_selector = || -> crate::overlay::SelectionResult {
-            let bg_capture = backend.capture_screen_for_selection_impl().ok();
-            let tmp_bg = bg_capture.as_ref().and_then(|c| save_temp_png_daemon(c));
-            let result = run_cpp_selector_fn(tmp_bg.as_deref());
-            if let Some(ref p) = tmp_bg {
-                let _ = std::fs::remove_file(p);
-            }
-            result
-        };
-
-        // Fast path: show transparent live overlay immediately.
-        // Skip on compositors that don't support Layer Shell (e.g. GNOME Wayland) —
-        // we use the capture-after-selection (Option B) path below instead.
-        if !layer_shell_supported {
-            eprintln!(
-                "[daemon] Wayland compositor does not support Layer Shell; \
-                 will use dark-overlay selector + capture-after-selection."
-            );
-        }
-
-        let live_selector_result = if layer_shell_supported {
-            Some(run_live_selector())
-        } else {
-            None
-        };
-
-        // If we ran the live selector, process its result.
-        // None means we skipped it (no layer-shell), so fall through to screenshot-backed path.
-        match live_selector_result {
-            Some(Ok(Some(area))) => {
-                match backend.capture_area_direct_impl(area.x, area.y, area.width, area.height) {
-                    Ok(capture) => {
-                        save_and_open(capture, state.clone());
-                        return;
-                    }
-                    Err(err) => {
-                        eprintln!(
-                            "[daemon] Wayland area capture failed ({err}); trying full-screen crop fallback."
-                        );
-
-                        match backend.capture_screen_impl() {
-                            Ok(full) => {
-                                let x = area.x.max(0) as u32;
-                                let y = area.y.max(0) as u32;
-                                let w = area.width.max(1) as u32;
-                                let h = area.height.max(1) as u32;
-                                if let Some(cropped) = crop_capture_data(&full, x, y, w, h) {
-                                    save_and_open(cropped, state.clone());
-                                    return;
-                                }
-                                eprintln!("[daemon] Full-screen crop fallback was out of bounds.");
-                            }
-                            Err(full_err) => {
-                                eprintln!(
-                                    "[daemon] Full-screen fallback capture failed: {full_err}"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-            Some(Ok(None)) => {
-                eprintln!("[daemon] Area selection cancelled.");
+            if err
+                .downcast_ref::<crate::overlay::SelectionError>()
+                .is_some_and(is_launch_blocked_error)
+            {
+                eprintln!("[daemon] Area capture blocked: {err}");
                 return;
             }
-            Some(Err(err)) => {
-                eprintln!(
-                    "[daemon] Live selector unavailable ({err}); falling back to screenshot-backed selector."
-                );
-            }
-            None => {
-                // Layer shell not supported — go straight to screenshot-backed selector.
-            }
+            eprintln!("[daemon] C++ area-init capture path failed: {err}");
         }
-
-        // Option B path: on compositors without Layer Shell (e.g. GNOME Wayland),
-        // show the dark-overlay selector UI FIRST (no pre-capture, no flash/sound),
-        // then capture only the selected region AFTER the user confirms.
-        // The flash/sound from the portal fires after selection — feels like a shutter.
-        eprintln!("[daemon] No Layer Shell — using capture-after-selection (Option B): showing dark overlay selector first.");
-        let selector_start = std::time::Instant::now();
-        let area_result = run_live_selector();
-        eprintln!(
-            "[daemon] Dark overlay selector returned after {:.0}ms: {:?}",
-            selector_start.elapsed().as_millis(),
-            area_result.as_ref().map(|o| o.as_ref().map(|_| "area"))
-        );
-        match area_result {
-            Ok(Some(area)) => {
-                eprintln!("[daemon] Selection confirmed: ({}, {}, {}x{}); now capturing selected region...", area.x, area.y, area.width, area.height);
-                let capture_start = std::time::Instant::now();
-                match backend.capture_area_direct_impl(area.x, area.y, area.width, area.height) {
-                    Ok(capture) => {
-                        eprintln!(
-                            "[daemon] Region capture succeeded in {:.0}ms ({}x{})",
-                            capture_start.elapsed().as_millis(),
-                            capture.width,
-                            capture.height
-                        );
-                        save_and_open(capture, state.clone());
-                    }
-                    Err(err) => {
-                        eprintln!("[daemon] Region capture failed ({:.0}ms): {err}; falling back to full-screen capture + crop.", capture_start.elapsed().as_millis());
-                        // Fallback: full-screen capture then crop
-                        match backend.capture_screen_impl() {
-                            Ok(full) => {
-                                let x = area.x.max(0) as u32;
-                                let y = area.y.max(0) as u32;
-                                let w = area.width.max(1) as u32;
-                                let h = area.height.max(1) as u32;
-                                if let Some(cropped) = crop_capture_data(&full, x, y, w, h) {
-                                    save_and_open(cropped, state.clone());
-                                } else {
-                                    eprintln!("[daemon] Crop out of bounds.");
-                                }
-                            }
-                            Err(full_err) => eprintln!(
-                                "[daemon] Full-screen fallback capture failed: {full_err}"
-                            ),
-                        }
-                    }
-                }
-            }
-            Ok(None) => eprintln!("[daemon] Area selection cancelled."),
-            Err(err) => eprintln!("[daemon] Dark overlay selector failed: {err}"),
-        }
-        return;
-    }
-
-    // X11 path: capture full screen, save as temp PNG, pass to C++ overlay.
-    let Some(full) = capture_full_screen_for_area_selector() else {
-        eprintln!("[daemon] Could not capture screen for area selector.");
-        return;
-    };
-
-    let tmp_bg = save_temp_png_daemon(&full);
-    let area_opt = match crate::capture_overlay::run_capture_overlay(tmp_bg.as_deref()) {
-        Ok(area) => area,
-        Err(e) => {
-            eprintln!("[daemon] C++ overlay failed: {e}");
-            None
-        }
-    };
-    if let Some(ref p) = tmp_bg {
-        let _ = std::fs::remove_file(p);
-    }
-
-    match area_opt {
-        Some(area) => {
-            // Crop from the already-captured frame.
-            let x = area.x.max(0) as u32;
-            let y = area.y.max(0) as u32;
-            let w = area.width.max(1) as u32;
-            let h = area.height.max(1) as u32;
-
-            if let Some(cropped) = crop_capture_data(&full, x, y, w, h) {
-                save_and_open(cropped, state);
-            } else {
-                eprintln!("[daemon] Crop out of bounds.");
-            }
-        }
-        None => eprintln!("[daemon] Area selection cancelled."),
     }
 }
 
 fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
+    let Some(_session_guard) = acquire_capture_session_guard("screen") else {
+        return;
+    };
+    handle_capture_screen_with_active_session(state);
+}
+
+fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonState>>) {
     match capture_screen_file_via_cpp() {
         Ok(path) => {
             save_existing_png_and_open(path, state);
             return;
         }
-        Err(err) => {
-            eprintln!(
-                "[daemon] C++ fullscreen capture failed ({err}); falling back to Rust backend."
-            );
+        Err(err) if is_launch_blocked_error(&err) => {
+            eprintln!("[daemon] Fullscreen capture blocked: {err}");
+            return;
         }
-    }
-
-    match capture_full_screen() {
-        Some(c) => save_and_open(c, state),
-        None => eprintln!("[daemon] No backend available for screen capture."),
+        Err(err) => {
+            eprintln!("[daemon] C++ fullscreen capture failed: {err}");
+        }
     }
 }
 
 fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
+    let Some(_session_guard) = acquire_capture_session_guard("window") else {
+        return;
+    };
+    handle_capture_window_with_active_session(state);
+}
+
+fn handle_capture_window_with_active_session(state: Arc<Mutex<DaemonState>>) {
     eprintln!("[daemon] Window capture requested — using the shared window capture flow");
     match capture_window_file_via_cpp() {
         Ok(path) => {
             save_existing_png_and_open(path, state);
         }
+        Err(err) if is_launch_blocked_error(&err) => {
+            eprintln!("[daemon] Window capture blocked: {err}");
+        }
         Err(e) => {
             eprintln!("[daemon] Window capture failed: {e}; falling back to area capture.");
-            handle_capture_area(state);
+            handle_capture_area_with_active_session(state);
+        }
+    }
+}
+
+fn acquire_capture_session_guard(context: &str) -> Option<CaptureOverlayGuard<'static>> {
+    match begin_capture_session() {
+        Ok(guard) => Some(guard),
+        Err(LaunchBlockedReason::ApexOverlayAlreadyActive) => {
+            let refocused = request_existing_overlay_focus();
+            eprintln!(
+                "[daemon] Ignoring duplicate {context} request while ApexShot overlay is active (refocused={refocused})."
+            );
+            None
+        }
+        Err(LaunchBlockedReason::BuiltinOverlayActive) => {
+            eprintln!(
+                "[daemon] Refusing {context} request because the GNOME screenshot UI is active."
+            );
+            None
         }
     }
 }

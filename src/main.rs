@@ -17,7 +17,8 @@ use apexshot::{
         open_image_editor, save_capture, show_capture_preview_overlay, ImageFormat, SaveConfig,
     },
     capture_overlay::{
-        capture_area_via_cpp, capture_screen_via_cpp, run_capture_overlay, AreaCaptureResult,
+        capture_area_via_cpp, capture_screen_via_cpp, is_launch_blocked_error,
+        run_capture_overlay, AreaCaptureResult,
     },
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
@@ -1010,22 +1011,34 @@ fn run_capture(args: &[String]) {
         }
     }
 
-    let cpp_capture = match capture_type {
+    let capture: CaptureData = match capture_type {
         "screen" => match capture_screen_via_cpp() {
-            Ok(capture) => Some(capture),
+            Ok(capture) => {
+                println!("Using C++ capture backend...");
+                capture
+            }
+            Err(err) if is_launch_blocked_error(&err) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
             Err(err) => {
-                eprintln!(
-                    "[capture] C++ fullscreen capture failed ({err}); falling back to Rust backend."
-                );
-                None
+                eprintln!("[capture] C++ fullscreen capture failed: {err}");
+                std::process::exit(1);
             }
         },
         "area" => match capture_area_via_cpp() {
-            Ok(AreaCaptureResult::Captured(capture)) => Some(capture),
-            Ok(AreaCaptureResult::ScrollCaptured(capture)) => Some(capture),
+            Ok(AreaCaptureResult::Captured(capture)) => {
+                println!("Using C++ capture backend...");
+                capture
+            }
+            Ok(AreaCaptureResult::ScrollCaptured(capture)) => {
+                println!("Using C++ capture backend...");
+                capture
+            }
             Ok(AreaCaptureResult::OcrRequested(capture)) => {
+                println!("Using C++ capture backend...");
                 run_ocr = true;
-                Some(capture)
+                capture
             }
             Ok(AreaCaptureResult::RecordingRequested(request)) => {
                 if let Err(err) = run_overlay_recording_request(request) {
@@ -1039,58 +1052,20 @@ fn run_capture(args: &[String]) {
                 eprintln!("Selection cancelled");
                 std::process::exit(0);
             }
+            Err(err) if is_launch_blocked_error(&err) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
             Err(err) => {
-                eprintln!(
-                    "[capture] C++ area-init capture failed ({err}); falling back to Rust backend."
-                );
-                None
+                eprintln!("[capture] C++ area-init capture failed: {err}");
+                std::process::exit(1);
             }
         },
-        _ => None,
-    };
-
-    let capture: CaptureData = if let Some(capture) = cpp_capture {
-        println!("Using C++ capture backend...");
-        capture
-    } else if WaylandBackend::is_supported() {
+        _ if WaylandBackend::is_supported() => {
         println!("Using Wayland backend...");
         let backend = WaylandBackend::new().expect("Failed to initialize Wayland backend");
 
         match capture_type {
-            "screen" => backend.capture_screen().expect("Screen capture failed"),
-            "area" => {
-                println!("Select an area by dragging the mouse. Press ESC to cancel.");
-
-                // 1. Take full screenshot via Rust Wayland backend
-                let full_capture = backend
-                    .capture_screen_for_selection_impl()
-                    .expect("Failed to capture screen for area selection");
-
-                // 2. Save to temp PNG and pass to C++ overlay as background
-                let tmp_bg = save_temp_png(&full_capture);
-                let selection = run_capture_overlay(tmp_bg.as_deref())
-                    .expect("Failed to show area selection UI");
-                if let Some(ref p) = tmp_bg {
-                    let _ = std::fs::remove_file(p);
-                }
-
-                let Some(area) = selection else {
-                    eprintln!("Selection cancelled");
-                    std::process::exit(0);
-                };
-
-                let is_fullscreen = area.x <= 0
-                    && area.y <= 0
-                    && area.width >= full_capture.width as i32
-                    && area.height >= full_capture.height as i32;
-
-                if is_fullscreen {
-                    full_capture
-                } else {
-                    crop_capture_data(&full_capture, area.x, area.y, area.width, area.height)
-                        .expect("Area crop failed")
-                }
-            }
             "window" => {
                 println!(
                     "Note: On Wayland, window capture requires selecting the window in the portal prompt"
@@ -1103,60 +1078,28 @@ fn run_capture(args: &[String]) {
                 std::process::exit(1);
             }
         }
-    } else if X11Backend::is_supported() {
-        println!("Using X11 backend...");
-        let backend = X11Backend::new().expect("Failed to initialize X11 backend");
+        }
+        _ if X11Backend::is_supported() => {
+            println!("Using X11 backend...");
 
-        match capture_type {
-            "screen" => backend.capture_screen().expect("Screen capture failed"),
-            "area" => {
-                println!("Select an area by dragging the mouse. Press ESC to cancel.");
-
-                // 1. Take full screenshot via Rust X11 backend
-                let full_capture = backend
-                    .capture_screen()
-                    .expect("Failed to capture screen for area selection");
-
-                // 2. Save to temp PNG and pass to C++ overlay as background
-                let tmp_bg = save_temp_png(&full_capture);
-                let selection = run_capture_overlay(tmp_bg.as_deref())
-                    .expect("Failed to show area selection UI");
-                if let Some(ref p) = tmp_bg {
-                    let _ = std::fs::remove_file(p);
+            match capture_type {
+                "window" => {
+                    eprintln!("Error: window capture by ID not yet supported via CLI");
+                    eprintln!("Use 'capture screen' and crop manually");
+                    std::process::exit(1);
                 }
-
-                let Some(area) = selection else {
-                    eprintln!("Selection cancelled");
-                    std::process::exit(0);
-                };
-
-                let is_fullscreen = area.x <= 0
-                    && area.y <= 0
-                    && area.width >= full_capture.width as i32
-                    && area.height >= full_capture.height as i32;
-
-                if is_fullscreen {
-                    full_capture
-                } else {
-                    crop_capture_data(&full_capture, area.x, area.y, area.width, area.height)
-                        .expect("Area crop failed")
+                _ => {
+                    eprintln!("Error: unknown capture type '{}'", capture_type);
+                    print_usage();
+                    std::process::exit(1);
                 }
-            }
-            "window" => {
-                eprintln!("Error: window capture by ID not yet supported via CLI");
-                eprintln!("Use 'capture screen' and crop manually");
-                std::process::exit(1);
-            }
-            _ => {
-                eprintln!("Error: unknown capture type '{}'", capture_type);
-                print_usage();
-                std::process::exit(1);
             }
         }
-    } else {
-        eprintln!("Error: No supported display backend found");
-        eprintln!("This application requires X11 or Wayland");
-        std::process::exit(1);
+        _ => {
+            eprintln!("Error: No supported display backend found");
+            eprintln!("This application requires X11 or Wayland");
+            std::process::exit(1);
+        }
     };
 
     println!("Captured: {}x{}", capture.width, capture.height);
@@ -1317,66 +1260,6 @@ fn save_temp_png(capture: &CaptureData) -> Option<std::path::PathBuf> {
     let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(w, h, rgba)?;
     img.save(&tmp).ok()?;
     Some(tmp)
-}
-
-fn crop_capture_data(
-    capture: &CaptureData,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Result<CaptureData, String> {
-    if width <= 0 || height <= 0 || x < 0 || y < 0 {
-        return Err(format!("Invalid dimensions: {}x{}", width, height));
-    }
-
-    let x_end = x
-        .checked_add(width)
-        .ok_or_else(|| "Area width overflow".to_string())?;
-    let y_end = y
-        .checked_add(height)
-        .ok_or_else(|| "Area height overflow".to_string())?;
-
-    if x_end as u32 > capture.width || y_end as u32 > capture.height {
-        return Err(format!(
-            "Requested area ({x}, {y}, {width}, {height}) is out of bounds for {}x{} capture",
-            capture.width, capture.height
-        ));
-    }
-
-    let width_u32 = width as u32;
-    let height_u32 = height as u32;
-    let bytes_per_pixel = capture.format.bytes_per_pixel as usize;
-    let source_stride = capture.stride as usize;
-    let row_len = width_u32 as usize * bytes_per_pixel;
-
-    let mut cropped = Vec::with_capacity(row_len * height_u32 as usize);
-    for row in 0..height_u32 as usize {
-        let src_y = y as usize + row;
-        let src_offset = src_y * source_stride + x as usize * bytes_per_pixel;
-        let src_end = src_offset + row_len;
-        cropped.extend_from_slice(&capture.pixels[src_offset..src_end]);
-    }
-
-    let cursor = capture.cursor.clone().and_then(|mut cursor| {
-        let in_x = cursor.x >= x && cursor.x < x + width;
-        let in_y = cursor.y >= y && cursor.y < y + height;
-        if in_x && in_y {
-            cursor.x -= x;
-            cursor.y -= y;
-            Some(cursor)
-        } else {
-            None
-        }
-    });
-
-    Ok(CaptureData::with_cursor(
-        cropped,
-        width_u32,
-        height_u32,
-        capture.format,
-        cursor,
-    ))
 }
 
 fn run_ocr(args: &[String]) {

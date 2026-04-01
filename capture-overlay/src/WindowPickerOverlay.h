@@ -21,6 +21,7 @@ class WindowPickerOverlay : public QWidget
 
 public:
     explicit WindowPickerOverlay(QWidget* parent = nullptr);
+    void focusAndRaiseOverlay();
 
     bool wasSelected() const { return m_selected; }
     AppWindowInfo selectedWindow() const { return m_selectedWindow; }

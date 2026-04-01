@@ -102,6 +102,20 @@ static void drawTbIcon(QPainter& p, int idx, double cx, double cy, QColor col) {
     p.restore();
 }
 
+static Qt::WindowFlags windowPickerWindowFlags()
+{
+    if (qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+        return Qt::Popup
+               | Qt::FramelessWindowHint
+               | Qt::WindowStaysOnTopHint
+               | Qt::BypassWindowManagerHint;
+    }
+
+    return Qt::FramelessWindowHint
+           | Qt::WindowStaysOnTopHint
+           | Qt::Tool;
+}
+
 // ── Toolbar helpers ───────────────────────────────────────────────────────────
 
 QRectF WindowPickerOverlay::toolbarItemRect(int i) const
@@ -426,7 +440,7 @@ void WindowPickerOverlay::recomputeThumbnailLayout()
 WindowPickerOverlay::WindowPickerOverlay(QWidget* parent)
     : QWidget(parent)
 {
-    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    setWindowFlags(windowPickerWindowFlags());
     setAttribute(Qt::WA_TranslucentBackground, true);
     setMouseTracking(true);
     setCursor(Qt::CrossCursor);
@@ -448,10 +462,23 @@ WindowPickerOverlay::WindowPickerOverlay(QWidget* parent)
         update();
     });
 
+    focusAndRaiseOverlay();
+}
+
+void WindowPickerOverlay::focusAndRaiseOverlay()
+{
     show();
     raise();
-    activateWindow();
-    grabKeyboard();
+    if (!qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+        activateWindow();
+    }
+    setFocus(Qt::ActiveWindowFocusReason);
+    if (QWidget::keyboardGrabber() != this) {
+        grabKeyboard();
+    }
+    if (QWidget::mouseGrabber() != this) {
+        grabMouse();
+    }
 }
 
 void WindowPickerOverlay::resizeEvent(QResizeEvent* event)

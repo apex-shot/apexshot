@@ -34,6 +34,7 @@ void CaptureOverlay::cycleCaptureDelay()
 
 void CaptureOverlay::confirmSelection()
 {
+    m_recordConfigRequested = false;
     m_captureCropMenuOpen = false;
     m_hoveredCaptureCropMenuItem = -1;
     m_captureCropMenuPanelRect = QRectF();
@@ -65,6 +66,7 @@ void CaptureOverlay::confirmSelection()
 
 void CaptureOverlay::confirmRecordingSelection()
 {
+    m_recordConfigRequested = false;
     stopWebcamCapture();
     m_recordingToolsHidden = true;
     m_hoveredRecordTile = RecordPanelTile::None;
@@ -112,8 +114,32 @@ void CaptureOverlay::confirmRecordingSelection()
     QApplication::exit(0);
 }
 
+void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
+{
+    Q_UNUSED(keepSelection);
+    m_recordingPanelOpen = false;
+    m_recordingToolsHidden = false;
+    m_settingsOpen = false;
+    m_clickOptionsOpen = false;
+    m_keystrokeOptionsOpen = false;
+    m_cropMenuOpen = false;
+    m_hoveredRecordTile = RecordPanelTile::None;
+    m_hoveredCropMenuItem = -1;
+    m_captureIntent = CaptureIntent::Area;
+    m_recordType = RecordType::None;
+    m_showKeystrokePreview = false;
+    m_keyPreviews.clear();
+    m_clickPreviews.clear();
+    m_countdownCancelRequested = false;
+    m_hoveredCountdownCancel = false;
+    stopClickAnimTimer();
+    stopWebcamCapture();
+}
+
 void CaptureOverlay::cancelSelection()
 {
+    m_recordConfigRequested = false;
+    resetRecordingPanelToAreaMode();
     m_captureCropMenuOpen = false;
     m_hoveredCaptureCropMenuItem = -1;
     m_captureCropMenuPanelRect = QRectF();
@@ -145,7 +171,6 @@ CaptureOverlay::HandlePos CaptureOverlay::hitTest(const QPoint& pos) const
 {
     if (!m_hasSelection) return HandlePos::None;
     const QRect selection = m_selection.normalized();
-    if (!selection.contains(pos)) return HandlePos::None;
 
     const QList<QPoint> centers = handleCenters();
     const HandlePos handles[] = {
@@ -211,7 +236,7 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
         case HandlePos::Bottom:      setCursor(Qt::SizeVerCursor);   break;
         case HandlePos::Left:
         case HandlePos::Right:       setCursor(Qt::SizeHorCursor);   break;
-        case HandlePos::Inside:      setCursor(Qt::SizeAllCursor);   break;
+        case HandlePos::Inside:      setCursor(Qt::OpenHandCursor);  break;
         default:                     setCursor(Qt::ArrowCursor);     break;
         }
         return;
@@ -270,7 +295,7 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
     case HandlePos::Bottom:      setCursor(Qt::SizeVerCursor);   break;
     case HandlePos::Left:
     case HandlePos::Right:       setCursor(Qt::SizeHorCursor);   break;
-    case HandlePos::Inside:      setCursor(Qt::SizeAllCursor);   break;
+    case HandlePos::Inside:      setCursor(Qt::OpenHandCursor);  break;
     default:                     setCursor(Qt::CrossCursor);     break;
     }
 }
