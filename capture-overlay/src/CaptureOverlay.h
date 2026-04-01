@@ -294,6 +294,11 @@ private:
     bool      m_countdownCancelRequested;
     bool      m_hoveredCountdownCancel;
     QRectF    m_countdownBubbleRect;
+    bool      m_captureCropMenuOpen;
+    int       m_captureAspectRatioIndex;
+    int       m_hoveredCaptureCropMenuItem;
+    QRectF    m_captureCropMenuPanelRect;
+    QList<QRectF> m_captureCropMenuItemRects;
     CaptureIntent m_captureIntent;   // current capture intent for confirmation
     ScrollStage m_scrollStage;       // inactive / ready / actively sampling scroll frames
 
@@ -432,6 +437,7 @@ private:
     // Toolbar hover state
     int  m_hoveredTool;             // -1 = none
     bool m_hoveredSizeCard;
+    bool m_hoveredCaptureCropCard;
     ToolbarActionCard m_hoveredActionCard;
     int  m_hoveredSettingsItem;     // new: index into m_settingsClickableRects, -1 = none
     int  m_hoveredCropMenuItem;

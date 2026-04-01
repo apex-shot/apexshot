@@ -34,6 +34,10 @@ void CaptureOverlay::cycleCaptureDelay()
 
 void CaptureOverlay::confirmSelection()
 {
+    m_captureCropMenuOpen = false;
+    m_hoveredCaptureCropMenuItem = -1;
+    m_captureCropMenuPanelRect = QRectF();
+    m_captureCropMenuItemRects.clear();
     if (m_scrollCaptureTimer && m_scrollCaptureTimer->isActive()) {
         m_scrollCaptureTimer->stop();
     }
@@ -110,6 +114,10 @@ void CaptureOverlay::confirmRecordingSelection()
 
 void CaptureOverlay::cancelSelection()
 {
+    m_captureCropMenuOpen = false;
+    m_hoveredCaptureCropMenuItem = -1;
+    m_captureCropMenuPanelRect = QRectF();
+    m_captureCropMenuItemRects.clear();
     exitScrollMode();
     releaseKeyboard();
     QApplication::exit(1);
@@ -219,11 +227,23 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
         height(),
         m_captureIntent == CaptureIntent::Scroll
     );
+    if (m_captureCropMenuOpen) {
+        for (int i = 0; i < m_captureCropMenuItemRects.size(); ++i) {
+            if (m_captureCropMenuItemRects[i].contains(pos)) {
+                setCursor(Qt::PointingHandCursor);
+                return;
+            }
+        }
+    }
     for (int i = 0; i < NUM_TOOLS; ++i) {
         if (layout.toolCells[i].contains(pos)) {
             setCursor(Qt::PointingHandCursor);
             return;
         }
+    }
+    if (layout.cropCard.contains(pos)) {
+        setCursor(Qt::PointingHandCursor);
+        return;
     }
     if (layout.confirmCard.contains(pos) || layout.cancelCard.contains(pos)) {
         setCursor(Qt::PointingHandCursor);
