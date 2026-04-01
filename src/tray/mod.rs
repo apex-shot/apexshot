@@ -20,6 +20,7 @@ pub enum TrayAction {
     CaptureWindow,
     RecordScreen,
     RecordArea,
+    OpenRecentCaptures,
     ShowLastPreview,
     OpenLastCapture,
     OpenSettings,
@@ -223,8 +224,8 @@ impl ksni::Tray for ApexShotTray {
             MenuItem::Separator,
             // ── Utility section ───────────────────────────────────────────
             StandardItem {
-                label: ltr("Show Last Preview"),
-                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::ShowLastPreview)),
+                label: ltr("Recent Captures"),
+                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::OpenRecentCaptures)),
                 ..Default::default()
             }
             .into(),

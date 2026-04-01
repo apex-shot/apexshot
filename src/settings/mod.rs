@@ -17,9 +17,9 @@ mod quick_access;
 mod recording;
 mod screenshots;
 mod shortcuts;
-mod ui_support;
+pub(crate) mod ui_support;
 mod wallpaper;
-mod windowing;
+pub(crate) mod windowing;
 
 use self::{
     actions::{install_checkbox_behaviors, save_settings, SaveInputs},
