@@ -5,6 +5,7 @@ import Meta from "gi://Meta";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Clutter from "gi://Clutter";
+import St from "gi://St";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {createSessionState} from "./session-state.js";
 import {pushRuntimeOverlayKeystrokeText} from "./session-state.js";
@@ -14,6 +15,7 @@ import {setRuntimeOverlayVisibility} from "./session-state.js";
 import {shouldExcludeOverlayEvent, updateRuntimeOverlaySnapshot} from "./runtime-overlays.js";
 import {MaskUi} from "./mask-ui.js";
 import {ControlsUi} from "./controls-ui.js";
+import {ScreenshotLockController} from "./screenshot-lock.js";
 
 // D-Bus interface exposed by the apexshot native process.
 // The extension listens for signals on this name/path/iface.
@@ -72,9 +74,12 @@ const MASK_DBUS_IFACE_XML = `
       <arg type="s" name="session_id" direction="in"/>
       <arg type="s" name="text" direction="in"/>
     </method>
+    <method name="BeginScreenshotLock">
+      <arg type="s" name="session_id" direction="in"/>
+    </method>
+    <method name="EndScreenshotLock"/>
   </interface>
 </node>`;
-
 class PreviewStackingHelper {
     constructor() {
         // Map<tracked_id, { pid, title, role, openedAtMs, window, signalIds }>
@@ -392,6 +397,7 @@ class RecordingMaskService {
         this._controlsUi = new ControlsUi(this._sessionState, {
             sendRecordingCommand: method => this._sendRecordingCommand(method),
         });
+        this._screenshotLock = new ScreenshotLockController();
     }
 
     enable() {
@@ -423,6 +429,7 @@ class RecordingMaskService {
     }
 
     disable() {
+        this._endScreenshotLock();
         this._hideControls();
         this._hideMask();
 
@@ -517,6 +524,25 @@ class RecordingMaskService {
         }
     }
 
+    BeginScreenshotLockAsync(params, invocation) {
+        try {
+            const [sessionId] = params;
+            this._beginScreenshotLock(sessionId);
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
+    EndScreenshotLockAsync(_params, invocation) {
+        try {
+            this._endScreenshotLock();
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
     _showMask(x, y, width, height) {
         this._maskUi.showMask(x, y, width, height);
     }
@@ -537,6 +563,14 @@ class RecordingMaskService {
     _hideControls() {
         this._stopPointerPolling();
         this._controlsUi.hideControls();
+    }
+
+    _beginScreenshotLock(sessionId) {
+        log(`[apexshot] screenshot lock request ignored for ${sessionId}`);
+    }
+
+    _endScreenshotLock() {
+        log("[apexshot] screenshot lock release ignored");
     }
 
     _repositionControls() {

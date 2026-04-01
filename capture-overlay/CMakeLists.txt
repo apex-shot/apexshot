@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt5 REQUIRED COMPONENTS Widgets DBus X11Extras)
+find_package(Qt5 REQUIRED COMPONENTS Widgets DBus X11Extras Network)
 find_package(X11 REQUIRED COMPONENTS Xtst)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED gstreamer-1.0 gstreamer-app-1.0)
@@ -35,7 +35,7 @@ add_executable(apexshot-capture
 
 target_include_directories(apexshot-capture PRIVATE ${GST_INCLUDE_DIRS})
 target_link_libraries(apexshot-capture
-    PRIVATE Qt5::Widgets Qt5::DBus Qt5::X11Extras ${X11_LIBRARIES} ${X11_Xtst_LIB} ${GST_LIBRARIES}
+    PRIVATE Qt5::Widgets Qt5::DBus Qt5::X11Extras Qt5::Network ${X11_LIBRARIES} ${X11_Xtst_LIB} ${GST_LIBRARIES}
 )
 
 install(TARGETS apexshot-capture

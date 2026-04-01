@@ -13,6 +13,8 @@
 #include <QTemporaryFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QStandardPaths>
 #include <QUrl>
 #include <QEventLoop>
@@ -42,6 +44,44 @@ public slots:
 };
 
 namespace {
+
+constexpr int kExitRecordConfigUpdated = 6;
+constexpr int kExitForwardedToExistingOverlay = 10;
+constexpr char kOverlayFocusRequest[] = "focus";
+constexpr char kOverlayCancelRequest[] = "cancel";
+
+QString overlaySocketPath()
+{
+    const QString runtimeDir = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    const QString baseDir = runtimeDir.isEmpty() ? QDir::tempPath() : runtimeDir;
+    return QDir(baseDir).filePath(QStringLiteral("apexshot-capture-overlay.sock"));
+}
+
+bool forwardOverlayRequestToExistingOverlay(const QString& socketPath, const char* request)
+{
+    QLocalSocket socket;
+    socket.connectToServer(socketPath);
+    if (!socket.waitForConnected(150)) {
+        return false;
+    }
+
+    socket.write(request);
+    socket.write("\n");
+    socket.flush();
+    socket.waitForBytesWritten(150);
+    socket.disconnectFromServer();
+    return true;
+}
+
+template <typename FocusFn, typename CancelFn>
+void handleOverlayControlPayload(const QByteArray& payload, FocusFn&& focusFn, CancelFn&& cancelFn)
+{
+    if (payload == kOverlayFocusRequest) {
+        focusFn();
+    } else if (payload == kOverlayCancelRequest) {
+        cancelFn();
+    }
+}
 
 QByteArray jsonEscape(const QString& value)
 {
@@ -234,6 +274,8 @@ int main(int argc, char* argv[])
     double initialGifQuality = 0.75;
     int initialGifSizeIdx = 0;
     bool initialGifOptimize = true;
+    const QString sessionSocketPath = overlaySocketPath();
+    QLocalServer sessionServer;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--background") == 0 && i + 1 < argc) {
@@ -422,6 +464,27 @@ int main(int argc, char* argv[])
         return 2;
     }
 
+    const bool interactiveOverlayMode =
+      !captureScreenMode && !recordControlsMode;
+    if (interactiveOverlayMode) {
+        if (forwardOverlayRequestToExistingOverlay(sessionSocketPath, kOverlayFocusRequest)) {
+            return kExitForwardedToExistingOverlay;
+        }
+
+        QLocalServer::removeServer(sessionSocketPath);
+        if (!sessionServer.listen(sessionSocketPath)) {
+            if (forwardOverlayRequestToExistingOverlay(sessionSocketPath, kOverlayFocusRequest)) {
+                return kExitForwardedToExistingOverlay;
+            }
+
+            std::fprintf(stderr,
+                         "apexshot-capture: failed to listen on overlay socket %s: %s\n",
+                         sessionSocketPath.toLocal8Bit().constData(),
+                         sessionServer.errorString().toLocal8Bit().constData());
+            return 2;
+        }
+    }
+
     if (recordControlsMode) {
         if (controlDbusDest.isEmpty() || controlSessionId.isEmpty()) {
             std::fprintf(stderr, "apexshot-capture: --record-controls requires --dbus-dest and --session-id\n");
@@ -455,6 +518,31 @@ int main(int argc, char* argv[])
     if (windowCaptureMode) {
         // Show our custom window picker overlay UI
         WindowPickerOverlay picker;
+        QObject::connect(&sessionServer, &QLocalServer::newConnection, [&sessionServer, &picker, &app]() {
+            while (QLocalSocket* socket = sessionServer.nextPendingConnection()) {
+                QObject::connect(socket, &QLocalSocket::readyRead, [socket, &picker, &app]() {
+                    const QByteArray payload = socket->readAll().trimmed();
+                    handleOverlayControlPayload(
+                        payload,
+                        [&picker]() { picker.focusAndRaiseOverlay(); },
+                        [&picker, &app]() {
+                            picker.hide();
+                            app.exit(1);
+                        });
+                });
+                QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+                if (socket->bytesAvailable() > 0) {
+                    const QByteArray payload = socket->readAll().trimmed();
+                    handleOverlayControlPayload(
+                        payload,
+                        [&picker]() { picker.focusAndRaiseOverlay(); },
+                        [&picker, &app]() {
+                            picker.hide();
+                            app.exit(1);
+                        });
+                }
+            }
+        });
         const int ret = app.exec();
 
         if (ret != 3 || !picker.wasSelected()) {
@@ -552,6 +640,31 @@ int main(int argc, char* argv[])
     }
 
     CaptureOverlay overlay(background, nullptr, timerCaptureEnabled, initialMic, initialSpeaker);
+    QObject::connect(&sessionServer, &QLocalServer::newConnection, [&sessionServer, &overlay, &app]() {
+        while (QLocalSocket* socket = sessionServer.nextPendingConnection()) {
+            QObject::connect(socket, &QLocalSocket::readyRead, [socket, &overlay, &app]() {
+                const QByteArray payload = socket->readAll().trimmed();
+                handleOverlayControlPayload(
+                    payload,
+                    [&overlay]() { overlay.focusAndRaiseOverlay(); },
+                    [&overlay, &app]() {
+                        overlay.hide();
+                        app.exit(1);
+                    });
+            });
+            QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+            if (socket->bytesAvailable() > 0) {
+                const QByteArray payload = socket->readAll().trimmed();
+                handleOverlayControlPayload(
+                    payload,
+                    [&overlay]() { overlay.focusAndRaiseOverlay(); },
+                    [&overlay, &app]() {
+                        overlay.hide();
+                        app.exit(1);
+                    });
+            }
+        }
+    });
     if (!restoreSel.isNull() && restoreSel.isValid()) {
         overlay.setInitialSelection(restoreSel);
     }
@@ -592,13 +705,17 @@ int main(int argc, char* argv[])
     overlay.show();
 
     const int ret = app.exec();
+    if (interactiveOverlayMode) {
+        sessionServer.close();
+        QLocalServer::removeServer(sessionSocketPath);
+    }
 
     if (ret == 3) {
         // Window capture requested via toolbar button
         return 3;
     }
-    if (ret != 0) {
-        if (areaInitMode) {
+    if (ret == kExitRecordConfigUpdated) {
+        if (areaInitMode && overlay.recordConfigRequested()) {
             const QRect sel = overlay.selection();
             int screenHeight = 0;
             for (QScreen* screen : QGuiApplication::screens()) {
@@ -648,7 +765,13 @@ int main(int argc, char* argv[])
                                overlay.recordGifSizeIdx(),
                                overlay.recordOptimizeGif(),
                                overlay.recordFullscreen());
+            return kExitRecordConfigUpdated;
         }
+        std::fprintf(stderr,
+                     "apexshot-capture: record-config exit requested without explicit record-config state\n");
+        return 2;
+    }
+    if (ret != 0) {
         std::fprintf(stderr, "apexshot-capture: event loop exited with code %d\n", ret);
         return 1;
     }

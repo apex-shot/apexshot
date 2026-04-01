@@ -95,6 +95,37 @@ void CaptureOverlay::setWebcamPreviewTopLeft(const QPointF& topLeft,
     m_webcamRelX = std::clamp(m_webcamRelX, 0.0, 1.0);
     m_webcamRelY = std::clamp(m_webcamRelY, 0.0, 1.0);
 }
+
+void CaptureOverlay::focusAndRaiseOverlay()
+{
+    show();
+    raise();
+    if (!qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+        activateWindow();
+    }
+    setFocus(Qt::ActiveWindowFocusReason);
+    if (QWidget::keyboardGrabber() != this) {
+        grabKeyboard();
+    }
+    if (!qEnvironmentVariableIsSet("WAYLAND_DISPLAY")
+        && QWidget::mouseGrabber() != this) {
+        grabMouse();
+    }
+}
+
+static Qt::WindowFlags captureOverlayWindowFlags()
+{
+    if (qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+        return Qt::BypassWindowManagerHint
+               | Qt::WindowStaysOnTopHint
+               | Qt::FramelessWindowHint
+               | Qt::Tool;
+    }
+
+    return Qt::FramelessWindowHint
+           | Qt::WindowStaysOnTopHint
+           | Qt::Tool;
+}
 // ── Constructor ───────────────────────────────────────────────────────────────
 
 CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
@@ -189,6 +220,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_hoveredSettingsItem(-1)
     , m_hoveredCropMenuItem(-1)
     , m_cropMenuOpen(false)
+    , m_recordConfigRequested(false)
 {
     // Init GStreamer for webcam capture
     static bool gstInited = false;
@@ -205,10 +237,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
         desktop = desktop.united(screen->geometry());
     setGeometry(desktop);
 
-    setWindowFlags(Qt::FramelessWindowHint
-                   | Qt::WindowStaysOnTopHint
-                   | Qt::BypassWindowManagerHint
-                   | Qt::Tool);
+    setWindowFlags(captureOverlayWindowFlags());
 
     if (m_background.isNull())
         setAttribute(Qt::WA_TranslucentBackground, true);
@@ -216,7 +245,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     setAttribute(Qt::WA_DeleteOnClose, false);
     setMouseTracking(true);
     setCursor(Qt::CrossCursor);
-    grabKeyboard();
+    focusAndRaiseOverlay();
 
     const int defaultW = std::max(kMinSize, std::min(DEFAULT_SELECTION_W, width()));
     const int defaultH = std::max(kMinSize, std::min(DEFAULT_SELECTION_H, height()));
