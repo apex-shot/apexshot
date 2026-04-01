@@ -10,7 +10,7 @@
 #include <cmath>
 
 namespace {
-constexpr double kRecordingAspectRatios[] = {
+constexpr double kAspectRatios[] = {
     0.0,
     1.0,
     5.0 / 4.0,
@@ -24,15 +24,15 @@ constexpr double kRecordingAspectRatios[] = {
     9.0 / 16.0,
 };
 
-constexpr int kRecordingAspectRatioCount =
-    static_cast<int>(sizeof(kRecordingAspectRatios) / sizeof(kRecordingAspectRatios[0]));
+constexpr int kAspectRatioCount =
+    static_cast<int>(sizeof(kAspectRatios) / sizeof(kAspectRatios[0]));
 
-double recordingAspectRatioForIndex(int index)
+double aspectRatioForIndex(int index)
 {
-    if (index < 0 || index >= kRecordingAspectRatioCount) {
+    if (index < 0 || index >= kAspectRatioCount) {
         return 0.0;
     }
-    return kRecordingAspectRatios[index];
+    return kAspectRatios[index];
 }
 }
 
@@ -115,8 +115,51 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         m_hoveredDropdownItem = -1;
         m_dropdownItemRects.clear();
     };
+    auto closeCaptureCropMenu = [&]() {
+        m_captureCropMenuOpen = false;
+        m_hoveredCaptureCropMenuItem = -1;
+        m_captureCropMenuPanelRect = QRectF();
+        m_captureCropMenuItemRects.clear();
+    };
     auto applyCurrentRecordingAspect = [&]() {
-        const double ratio = recordingAspectRatioForIndex(m_recordAspectRatioIndex);
+        const double ratio = aspectRatioForIndex(m_recordAspectRatioIndex);
+        if (ratio <= 0.0 || !m_hasSelection) {
+            return;
+        }
+
+        const QRect bounds = rect();
+        QRect sel = m_selection.normalized();
+        double newW = sel.width();
+        double newH = newW / ratio;
+        if (newH > sel.height()) {
+            newH = sel.height();
+            newW = newH * ratio;
+        }
+
+        newW = std::max<double>(kMinSize, std::min<double>(newW, bounds.width()));
+        newH = std::max<double>(kMinSize, std::min<double>(newH, bounds.height()));
+        if (newW / ratio > bounds.height()) {
+            newH = bounds.height();
+            newW = newH * ratio;
+        }
+        if (newH * ratio > bounds.width()) {
+            newW = bounds.width();
+            newH = newW / ratio;
+        }
+
+        const QPoint center = sel.center();
+        int x = center.x() - static_cast<int>(std::round(newW / 2.0));
+        int y = center.y() - static_cast<int>(std::round(newH / 2.0));
+        int w = std::max(kMinSize, static_cast<int>(std::round(newW)));
+        int h = std::max(kMinSize, static_cast<int>(std::round(newH)));
+
+        x = std::max(0, std::min(x, bounds.width() - w));
+        y = std::max(0, std::min(y, bounds.height() - h));
+        m_selection = QRect(x, y, w, h);
+        m_hasSelection = true;
+    };
+    auto applyCurrentCaptureAspect = [&]() {
+        const double ratio = aspectRatioForIndex(m_captureAspectRatioIndex);
         if (ratio <= 0.0 || !m_hasSelection) {
             return;
         }
@@ -197,6 +240,20 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         m_hoveredDropdownItem = -1;
         update();
         return;
+    }
+
+    if (m_captureCropMenuOpen) {
+        for (int i = 0; i < m_captureCropMenuItemRects.size(); ++i) {
+            if (m_captureCropMenuItemRects[i].contains(pos)) {
+                m_captureAspectRatioIndex = i;
+                closeCaptureCropMenu();
+                applyCurrentCaptureAspect();
+                update();
+                return;
+            }
+        }
+        closeCaptureCropMenu();
+        update();
     }
 
     if (m_cropMenuOpen) {
@@ -557,6 +614,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         auto handleToolClick = [&](int toolIndex) -> bool {
             if (toolIndex == 1) {
                 // Fullscreen: expand selection to cover entire screen, wait for Enter
+                closeCaptureCropMenu();
                 exitScrollMode();
                 exitWindowMode();
                 m_selection = QRect(0, 0, width(), height());
@@ -567,6 +625,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 return true;
             } else if (toolIndex == 0) {
                 // Area: restore default centered area selection
+                closeCaptureCropMenu();
                 exitScrollMode();
                 exitWindowMode();
                 int defaultW = std::max(kMinSize, std::min(DEFAULT_SELECTION_W, width()));
@@ -577,12 +636,14 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 m_hasSelection = true;
                 m_fullscreenMode = false;
                 m_timerDelayActive = false;
+                m_captureAspectRatioIndex = 0;
                 m_captureIntent = CaptureIntent::Area;
                 update();
                 return true;
             } else if (toolIndex == 2) {
                 // Window: on Wayland use GNOME DBus (exit code 3),
                 // on X11 use hover-select mode
+                closeCaptureCropMenu();
                 exitScrollMode();
                 std::fprintf(stderr, "[CaptureOverlay] Window tool clicked (index 3)\n");
                 std::fprintf(stderr, "[CaptureOverlay] WAYLAND_DISPLAY=%s\n",
@@ -599,12 +660,14 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 }
                 return true;
             } else if (toolIndex == 3) {
+                closeCaptureCropMenu();
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Area;
                 update();
                 showWebScrollCaptureInfo(this);
                 return true;
             } else if (toolIndex == 4) {
+                closeCaptureCropMenu();
                 if (!m_timerCaptureEnabled) {
                     m_timerCaptureEnabled = true;
                 }
@@ -619,12 +682,14 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 }
                 return true;
             } else if (toolIndex == 5) {
+                closeCaptureCropMenu();
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Ocr;
                 update();
                 return true;
             } else if (toolIndex == 6) {
                 // Recording: open recording panel
+                closeCaptureCropMenu();
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Record;
                 m_recordingPanelOpen = true;
@@ -634,6 +699,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 update();
                 return true;
             } else {
+                closeCaptureCropMenu();
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Area;
                 confirmSelection();
@@ -667,6 +733,13 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     return;
                 }
             }
+            if (layout.cropCard.contains(pos)) {
+                const bool wasOpen = m_captureCropMenuOpen;
+                closeCaptureCropMenu();
+                m_captureCropMenuOpen = !wasOpen;
+                update();
+                return;
+            }
             if (layout.confirmCard.contains(pos)) {
                 handleActionClick(ToolbarActionCard::Confirm);
                 return;
@@ -686,6 +759,13 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                         return;
                     }
                 }
+                if (layout.cropCard.contains(pos)) {
+                    const bool wasOpen = m_captureCropMenuOpen;
+                    closeCaptureCropMenu();
+                    m_captureCropMenuOpen = !wasOpen;
+                    update();
+                    return;
+                }
                 if (layout.confirmCard.contains(pos)) {
                     handleActionClick(ToolbarActionCard::Confirm);
                     return;
@@ -704,6 +784,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             m_moving = false;
             m_resizing = HandlePos::None;
             m_hasSelection = false;
+            closeCaptureCropMenu();
             m_selection = QRect(pos, pos);
             m_dragStart = pos;
             setCursor(Qt::CrossCursor);
@@ -819,6 +900,24 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
+    if (!m_recordingPanelOpen && m_captureCropMenuOpen) {
+        int newHover = -1;
+        for (int i = 0; i < m_captureCropMenuItemRects.size(); ++i) {
+            if (m_captureCropMenuItemRects[i].contains(pos)) {
+                newHover = i;
+                break;
+            }
+        }
+        if (newHover != m_hoveredCaptureCropMenuItem) {
+            m_hoveredCaptureCropMenuItem = newHover;
+            update();
+        }
+        if (newHover != -1) {
+            setCursor(Qt::PointingHandCursor);
+            return;
+        }
+    }
+
     // Recording panel hover
     if (m_recordingPanelOpen && !m_dragging && m_resizing == HandlePos::None && !m_moving) {
         if (m_cropMenuOpen && m_cropMenuPanelRect.contains(pos)) {
@@ -929,9 +1028,12 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
     if (m_resizing != HandlePos::None) {
         QPoint delta = pos - m_dragStart;
         QRect r = m_selectionAtDragStart.normalized();
-        const double aspectRatio = (m_recordingPanelOpen && m_recordAspectRatioIndex > 0)
-            ? recordingAspectRatioForIndex(m_recordAspectRatioIndex)
-            : 0.0;
+        double aspectRatio = 0.0;
+        if (m_recordingPanelOpen && m_recordAspectRatioIndex > 0) {
+            aspectRatio = aspectRatioForIndex(m_recordAspectRatioIndex);
+        } else if (!m_recordingPanelOpen && m_captureAspectRatioIndex > 0) {
+            aspectRatio = aspectRatioForIndex(m_captureAspectRatioIndex);
+        }
 
         if (aspectRatio > 0.0) {
             const QRect bounds = rect();
@@ -1090,6 +1192,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
             if (layout.toolCells[i].contains(pos)) { newHover = i; break; }
         }
         bool newSizeHover = layout.sizeCard.contains(pos);
+        bool newCropHover = layout.cropCard.contains(pos);
         ToolbarActionCard newActionHover = ToolbarActionCard::None;
         if (layout.confirmCard.contains(pos)) {
             newActionHover = ToolbarActionCard::Confirm;
@@ -1098,9 +1201,11 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         }
         if (newHover != m_hoveredTool
             || newSizeHover != m_hoveredSizeCard
+            || newCropHover != m_hoveredCaptureCropCard
             || newActionHover != m_hoveredActionCard) {
             m_hoveredTool = newHover;
             m_hoveredSizeCard = newSizeHover;
+            m_hoveredCaptureCropCard = newCropHover;
             m_hoveredActionCard = newActionHover;
             update();
         }
@@ -1184,7 +1289,8 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
         );
         bool clickedToolbar = layout.leftToolsPanel.contains(pos) ||
                               layout.rightActionsPanel.contains(pos) ||
-                              layout.sizeCard.contains(pos);
+                              layout.sizeCard.contains(pos) ||
+                              layout.cropCard.contains(pos);
         if (clickedToolbar) {
             for (int i = 0; i < NUM_TOOLS; ++i) {
                 if (layout.toolCells[i].contains(pos)) {
@@ -1195,6 +1301,7 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         m_hasSelection = true;
                         m_fullscreenMode = true;
                         m_captureIntent = CaptureIntent::Area;
+                        m_captureCropMenuOpen = false;
                         update();
                     } else if (i == 0) {
                         exitScrollMode();
@@ -1204,14 +1311,17 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         m_hasSelection = true;
                         m_fullscreenMode = false;
                         m_timerDelayActive = false;
+                        m_captureAspectRatioIndex = 0;
+                        m_captureCropMenuOpen = false;
                         m_captureIntent = CaptureIntent::Area;
                         update();
-                    } else if (i == 3) {
+                    } else if (i == 2) {
                         exitScrollMode();
+                        m_captureCropMenuOpen = false;
                         m_captureIntent = CaptureIntent::Area;
                         update();
                         showWebScrollCaptureInfo(this);
-                    } else if (i == 4) {
+                    } else if (i == 3) {
                         if (m_timerCaptureEnabled) {
                             if (!m_timerDelayActive) {
                                 m_timerDelayActive = true;
@@ -1223,12 +1333,14 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                                 cycleCaptureDelay();
                             }
                         }
-                    } else if (i == 5) {
+                    } else if (i == 4) {
                         exitScrollMode();
+                        m_captureCropMenuOpen = false;
                         m_captureIntent = CaptureIntent::Ocr;
                         update();
-                    } else if (i == 6) {
+                    } else if (i == 5) {
                         exitScrollMode();
+                        m_captureCropMenuOpen = false;
                         m_captureIntent = CaptureIntent::Record;
                         m_recordingPanelOpen = true;
                         m_recordingToolsHidden = false;
@@ -1237,11 +1349,18 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         update();
                     } else {
                         exitScrollMode();
+                        m_captureCropMenuOpen = false;
                         m_captureIntent = CaptureIntent::Area;
                         confirmSelection();
                     }
                     return;
                 }
+            }
+            if (layout.cropCard.contains(pos)) {
+                const bool wasOpen = m_captureCropMenuOpen;
+                m_captureCropMenuOpen = !wasOpen;
+                update();
+                return;
             }
             if (layout.confirmCard.contains(pos)) {
                 if (m_captureIntent == CaptureIntent::Record) {
@@ -1263,6 +1382,8 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
         m_resizing = HandlePos::None;
         m_hasSelection = false;
         m_fullscreenMode = false;
+        m_captureCropMenuOpen = false;
+        m_hoveredCaptureCropMenuItem = -1;
         m_selection = QRect(pos, pos);
         m_dragStart = pos;
         setCursor(Qt::CrossCursor);

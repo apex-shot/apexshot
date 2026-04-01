@@ -74,7 +74,10 @@ ToolbarLayout computeToolbarLayout(double selX, double selY,
     const double toolPanelH = TOOL_CARD_H * NUM_TOOLS;
     const double actionBarW = (2.0 * ACTION_RAIL_W) + ACTION_CARD_GAP;
     const double actionBarH = ACTION_CARD_H;
-    const double sizeCardW = 108.0;
+    const double sizeCardW = 152.0;
+    const double cropCardW = 62.0;
+    const double topClusterH = REC_TOP_CLUSTER_H;
+    const double topGroupW = sizeCardW + ACTION_CARD_GAP + cropCardW;
     const double centerY = selY + (selH / 2.0);
 
     const double leftCandidateX = selX - TOOL_RAIL_GAP - TOOL_RAIL_W;
@@ -97,12 +100,12 @@ ToolbarLayout computeToolbarLayout(double selX, double selY,
         ? preferredActionY
         : std::max(FEATURE_PANEL_MARGIN, screenH - actionBarH - FEATURE_PANEL_MARGIN);
 
-    const double preferredSizeX = selX + (selW - sizeCardW) / 2.0;
-    const double sizeCardX = std::max(
+    const double preferredTopX = selX + (selW - topGroupW) / 2.0;
+    const double topGroupX = std::max(
         FEATURE_PANEL_MARGIN,
-        std::min(preferredSizeX, screenW - sizeCardW - FEATURE_PANEL_MARGIN)
+        std::min(preferredTopX, screenW - topGroupW - FEATURE_PANEL_MARGIN)
     );
-    const double preferredSizeY = selY - FEATURE_PANEL_TOP_GAP - SIZE_CARD_H;
+    const double preferredSizeY = selY - FEATURE_PANEL_TOP_GAP - topClusterH;
     const bool sizeAboveFits = preferredSizeY >= FEATURE_PANEL_MARGIN;
     const double sizeCardY = sizeAboveFits
         ? preferredSizeY
@@ -121,11 +124,23 @@ ToolbarLayout computeToolbarLayout(double selX, double selY,
         );
     }
 
+    layout.topCluster = QRectF(
+        topGroupX,
+        sizeCardY,
+        topGroupW,
+        topClusterH
+    );
     layout.sizeCard = QRectF(
-        sizeCardX,
+        topGroupX,
         sizeCardY,
         sizeCardW,
-        SIZE_CARD_H
+        topClusterH
+    );
+    layout.cropCard = QRectF(
+        layout.sizeCard.right() + ACTION_CARD_GAP,
+        sizeCardY,
+        cropCardW,
+        topClusterH
     );
     layout.confirmCard = QRectF(
         layout.rightActionsPanel.x(),
@@ -738,22 +753,8 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
 
     const QColor warmAccent(176, 92, 56);
     const QColor warmRim(255, 212, 178);
-    const QColor panelGlow(176, 92, 56, 28);
-    const QColor supportGlow(255, 190, 140, 16);
-    const QColor railGlow(255, 255, 255, 8);
-
     m_recTileRects.clear();
     const double panelRadius = 10.0;
-
-    // ── Helper: draw brand outer glow ─────────────────────────────────────
-    auto drawPanelGlow = [&](double x, double y, double w, double h, const QColor& glowColor) {
-        p.save();
-        QRadialGradient glow(x + w/2.0, y + h/2.0, std::max(w, h));
-        glow.setColorAt(0, glowColor);
-        glow.setColorAt(0.5, QColor(0, 0, 0, 0));
-        p.fillRect(QRectF(x - 40, y - 40, w + 80, h + 80), glow);
-        p.restore();
-    };
 
     // ── Helper: draw brand rounded hover ─────────────────────────────────
     auto drawTileHover = [&](QRectF r, double radius = 10.0, bool topLeft = false, bool topRight = false, bool bottomLeft = false, bool bottomRight = false) {
@@ -834,20 +835,32 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
             p.fillPath(activePath, warm ? QColor(warmAccent.red(), warmAccent.green(), warmAccent.blue(), 76)
                                         : QColor(255, 255, 255, 18));
         }
+        const bool hovered = (m_hoveredRecordTile == tile);
         const bool hasLabel = !label.isEmpty();
-        const double iconY = hasLabel ? r.y() + 20.0 : r.center().y() - 2.0;
-        const QRectF labelRect(r.x() + 4.0, r.bottom() - 28.0, r.width() - 8.0, 14.0);
+        const double iconAlpha = (hovered || active) ? 1.0 : 0.94;
+        const double shadowAlpha = hovered ? 0.24 : (active ? 0.32 : 0.50);
+        const double iconY = hasLabel
+            ? r.y() + ((hovered || active) ? 19.5 : 20.0)
+            : r.center().y() - ((hovered || active) ? 2.5 : 2.0);
         const QRectF meterSafeRect(r.x() + 4.0, r.bottom() - 22.0, r.width() - 8.0, 10.0);
         const QPointF iconCenter(r.center().x(), iconY);
         const QColor iconColor = active
-            ? QColor(255, 229, 206)
-            : QColor(255, 255, 255, 242);
+            ? QColor(255, 229, 206, int(iconAlpha * 255))
+            : QColor(255, 255, 255, int(iconAlpha * 255));
+        drawToolbarIcon(p, iconIdx, iconCenter.x() + 0.6, iconCenter.y() + 0.8,
+                        QColor(0, 0, 0, int(shadowAlpha * 255)));
         drawToolbarIcon(p, iconIdx, iconCenter.x(), iconCenter.y(), iconColor);
         if (hasLabel) {
-            QFont f; f.setFamily("Sans"); f.setPointSizeF(8.0); f.setBold(active);
+            QFont f; f.setFamily("Sans"); f.setPointSizeF(8.0); f.setBold(hovered || active);
             p.setFont(f);
-            p.setPen(active ? QColor(255, 229, 206) : QColor(240, 240, 242));
-            p.drawText(labelRect, Qt::AlignCenter, label);
+            QFontMetricsF fm(f);
+            const double tw = fm.horizontalAdvance(label);
+            p.setPen(QColor(0, 0, 0, int(shadowAlpha * 255)));
+            p.drawText(QPointF(r.center().x() - tw / 2.0 + 0.6, r.y() + 50.8), label);
+            p.setPen(active
+                ? QColor(255, 229, 206, int(iconAlpha * 255))
+                : QColor(244, 244, 244, int(iconAlpha * 255)));
+            p.drawText(QPointF(r.center().x() - tw / 2.0, r.y() + 50.0), label);
         }
         if (showMeter) {
             p.save();
@@ -863,8 +876,12 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
                                  RecordPanelTile tile,
                                  int iconIdx,
                                  const QString& title,
-                                 bool primary) {
-        if (m_hoveredRecordTile == tile) {
+                                  bool primary) {
+        const bool hovered = (m_hoveredRecordTile == tile);
+        const bool active = hovered || primary;
+        const double iconAlpha = active ? 1.0 : 0.94;
+        const double shadowAlpha = hovered ? 0.24 : (primary ? 0.32 : 0.50);
+        if (hovered) {
             drawTileHover(rect, 10.0);
         }
 
@@ -881,23 +898,29 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
         p.drawPath(rim);
         p.restore();
 
-        drawToolbarIcon(p, iconIdx, rect.x() + 28.0, rect.center().y(), Qt::white);
+        const double iconY = rect.center().y() - (hovered ? 0.5 : 0.0);
+        drawToolbarIcon(p, iconIdx, rect.x() + 28.6, iconY + 0.8,
+                        QColor(0, 0, 0, int(shadowAlpha * 255)));
+        drawToolbarIcon(p, iconIdx, rect.x() + 28.0, iconY,
+                        QColor(255, 255, 255, int(iconAlpha * 255)));
         QFont titleFont; titleFont.setFamily("Sans"); titleFont.setPointSizeF(11.8); titleFont.setBold(true);
         p.setFont(titleFont);
-        p.setPen(primary ? QColor(255, 232, 214) : QColor(245, 245, 246));
-        p.drawText(QRectF(rect.x() + 50.0, rect.y() + 6.0, rect.width() - 60.0, rect.height() - 12.0),
-                   Qt::AlignLeft | Qt::AlignVCenter, title);
+        const double textX = rect.x() + 50.0;
+        const double textY = rect.y() + 30.0;
+        p.setPen(QColor(0, 0, 0, int(shadowAlpha * 255)));
+        p.drawText(QPointF(textX + 0.6, textY + 0.8), title);
+        p.setPen(primary
+            ? QColor(255, 232, 214, int(iconAlpha * 255))
+            : QColor(245, 245, 246, int(iconAlpha * 255)));
+        p.drawText(QPointF(textX, textY), title);
     };
 
-    drawPanelGlow(deck.leftToggleRail.x(), deck.leftToggleRail.y(), deck.leftToggleRail.width(), deck.leftToggleRail.height(), railGlow);
     drawFrostedPanel(p, deck.leftToggleRail.x(), deck.leftToggleRail.y(), deck.leftToggleRail.width(), deck.leftToggleRail.height(),
                      panelRadius, blurPtr, screenW, screenH);
 
-    drawPanelGlow(deck.topCluster.x(), deck.topCluster.y(), deck.topCluster.width(), deck.topCluster.height(), supportGlow);
     drawFrostedPanel(p, deck.topCluster.x(), deck.topCluster.y(), deck.topCluster.width(), deck.topCluster.height(),
                      panelRadius, blurPtr, screenW, screenH);
 
-    drawPanelGlow(deck.bottomActionBar.x(), deck.bottomActionBar.y(), deck.bottomActionBar.width(), deck.bottomActionBar.height(), panelGlow);
     drawFrostedPanel(p, deck.bottomActionBar.x(), deck.bottomActionBar.y(), deck.bottomActionBar.width(), deck.bottomActionBar.height(),
                      panelRadius, blurPtr, screenW, screenH);
 
@@ -987,7 +1010,6 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
         m_cropMenuPanelRect = QRectF(menuX, menuY, menuW, menuH);
         m_cropMenuItemRects.clear();
 
-        drawPanelGlow(menuX, menuY, menuW, menuH, supportGlow);
         drawFrostedPanel(p, menuX, menuY, menuW, menuH, 12.0, blurPtr, screenW, screenH);
 
         for (int i = 0; i < kRecordingAspectOptionCount; ++i) {
@@ -1888,8 +1910,8 @@ void CaptureOverlay::drawToolbar(QPainter& p,
                      FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
 
     drawFrostedPanel(p,
-                     layout.sizeCard.x(), layout.sizeCard.y(),
-                     layout.sizeCard.width(), layout.sizeCard.height(),
+                     layout.topCluster.x(), layout.topCluster.y(),
+                     layout.topCluster.width(), layout.topCluster.height(),
                      FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
 
     drawFrostedPanel(p,
@@ -1901,15 +1923,11 @@ void CaptureOverlay::drawToolbar(QPainter& p,
                               const QColor& fill,
                               const QColor& rim,
                               double radius,
-                              bool includeTopAccent) {
+                              bool drawBorder = true) {
         const double hx = rect.x() + 4.0;
         const double hy = rect.y() + 4.0;
         const double hw = rect.width() - 8.0;
         const double hh = rect.height() - 8.0;
-
-        QPainterPath glow;
-        roundedRectPath(glow, hx - 1.0, hy - 1.0, hw + 2.0, hh + 2.0, radius + 1.0);
-        p.fillPath(glow, QColor(fill.red(), fill.green(), fill.blue(), std::min(255, fill.alpha() / 2)));
 
         QPainterPath card;
         roundedRectPath(card, hx, hy, hw, hh, radius);
@@ -1917,14 +1935,12 @@ void CaptureOverlay::drawToolbar(QPainter& p,
 
         p.save();
         p.setClipPath(card);
-        p.setPen(QPen(rim, 1.2));
-        p.setBrush(Qt::NoBrush);
-        QPainterPath border;
-        roundedRectPath(border, hx + 0.6, hy + 0.6, hw - 1.2, hh - 1.2, std::max(0.0, radius - 0.5));
-        p.drawPath(border);
-        if (includeTopAccent) {
-            p.setPen(QPen(QColor(255, 224, 184, 180), 1.4));
-            p.drawLine(QPointF(hx + 10.0, hy + 0.75), QPointF(hx + hw - 10.0, hy + 0.75));
+        if (drawBorder) {
+            p.setPen(QPen(rim, 1.2));
+            p.setBrush(Qt::NoBrush);
+            QPainterPath border;
+            roundedRectPath(border, hx + 0.6, hy + 0.6, hw - 1.2, hh - 1.2, std::max(0.0, radius - 0.5));
+            p.drawPath(border);
         }
         p.restore();
     };
@@ -1936,26 +1952,26 @@ void CaptureOverlay::drawToolbar(QPainter& p,
 
         drawAccentCard(
             layout.toolCells[toolIndex],
-            QColor(160, 82, 45, 78),
-            QColor(255, 196, 142, 214),
+            QColor(176, 92, 56, 76),
+            QColor(255, 212, 178, 152),
             10.0,
-            true
+            false
         );
     };
 
     drawActiveToolCell(activeTool);
-    if (timerToolActive && activeTool != 5) {
-        drawActiveToolCell(5);
+    if (timerToolActive && activeTool != 4) {
+        drawActiveToolCell(4);
     }
 
     // ── Hover highlight on hovered tool ──────────────────────────────────────
     if (m_hoveredTool >= 0 && m_hoveredTool < NUM_TOOLS) {
         drawAccentCard(
             layout.toolCells[m_hoveredTool],
-            QColor(255, 165, 115, 58),
-            QColor(255, 226, 196, 168),
+            QColor(255, 255, 255, 22),
+            QColor(255, 255, 255, 86),
             10.0,
-            true
+            false
         );
     }
 
@@ -1964,6 +1980,19 @@ void CaptureOverlay::drawToolbar(QPainter& p,
             layout.sizeCard,
             QColor(255, 255, 255, 40),
             QColor(255, 255, 255, 136),
+            9.0,
+            false
+        );
+    }
+    if (m_hoveredCaptureCropCard || m_captureCropMenuOpen || m_captureAspectRatioIndex > 0) {
+        drawAccentCard(
+            layout.cropCard,
+            (m_captureCropMenuOpen || m_captureAspectRatioIndex > 0)
+                ? QColor(176, 92, 56, 76)
+                : QColor(255, 255, 255, 22),
+            (m_captureCropMenuOpen || m_captureAspectRatioIndex > 0)
+                ? QColor(255, 212, 178, 152)
+                : QColor(255, 255, 255, 86),
             9.0,
             false
         );
@@ -2024,7 +2053,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     {
         QFont f; f.setFamily("Sans"); f.setPointSizeF(7.2); f.setBold(true); p.setFont(f);
         QFontMetricsF fm(f);
-        const QString header = QStringLiteral("SIZE");
+        const QString header = QStringLiteral("FRAME");
         double tw = fm.horizontalAdvance(header);
         double ty = layout.sizeCard.y() + 17.0;
         p.setPen(QColor(0,0,0,128));
@@ -2043,6 +2072,20 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         p.drawText(QPointF(scx - tw/2.0, ty), sizeVal);
     }
 
+    {
+        const QRectF cropRect = layout.cropCard;
+        const bool hovered = m_hoveredCaptureCropCard;
+        const bool active = m_captureCropMenuOpen || m_captureAspectRatioIndex > 0;
+        const QColor iconColor = active
+            ? QColor(255, 229, 206)
+            : QColor(255, 255, 255, 242);
+        const double cx = cropRect.center().x();
+        const double iconY = cropRect.y() + ((hovered || active) ? 27.0 : 27.5);
+
+        drawToolbarIcon(p, 10, cx + 0.6, iconY + 0.8, QColor(0, 0, 0, hovered ? 62 : 118));
+        drawToolbarIcon(p, 10, cx, iconY, iconColor);
+    }
+
     auto drawActionLabel = [&](const QRectF& rect, const QString& text, bool primary) {
         QFont f; f.setFamily("Sans"); f.setPointSizeF(9.0); f.setBold(true); p.setFont(f);
         p.setPen(QColor(0, 0, 0, primary ? 132 : 118));
@@ -2057,8 +2100,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
             ? QColor(176, 92, 56, 88)
             : QColor(176, 92, 56, 60),
         QColor(255, 212, 178, 214),
-        8.0,
-        true
+        8.0
     );
     drawAccentCard(
         layout.cancelCard,
@@ -2066,12 +2108,59 @@ void CaptureOverlay::drawToolbar(QPainter& p,
             ? QColor(255, 255, 255, 34)
             : QColor(255, 255, 255, 18),
         QColor(255, 255, 255, 112),
-        8.0,
-        false
+        8.0
     );
 
     drawActionLabel(layout.confirmCard, QStringLiteral("CAPTURE"), true);
     drawActionLabel(layout.cancelCard, QStringLiteral("CANCEL"), false);
+
+    if (m_captureIntent != CaptureIntent::Record && m_captureCropMenuOpen) {
+        const QRectF cropRect = layout.cropCard;
+        const double itemH = 34.0;
+        const double menuW = 196.0;
+        const double menuH = (kRecordingAspectOptionCount * itemH) + 10.0;
+        const double menuX = std::max(10.0, std::min(cropRect.center().x() - (menuW / 2.0), screenW - menuW - 10.0));
+        const double menuY = std::max(10.0, std::min(cropRect.bottom() + 8.0, screenH - menuH - 10.0));
+        m_captureCropMenuPanelRect = QRectF(menuX, menuY, menuW, menuH);
+        m_captureCropMenuItemRects.clear();
+
+        drawFrostedPanel(p, menuX, menuY, menuW, menuH, 12.0, blurPtr, screenW, screenH);
+
+        for (int i = 0; i < kRecordingAspectOptionCount; ++i) {
+            const QRectF itemRect(menuX + 5.0, menuY + 5.0 + (i * itemH), menuW - 10.0, itemH);
+            const QRectF indicatorRect(itemRect.x() + 8.0, itemRect.y(), 18.0, itemRect.height());
+            const QRectF labelRect(itemRect.x() + 30.0, itemRect.y(), itemRect.width() - 40.0, itemRect.height());
+            m_captureCropMenuItemRects.append(itemRect);
+
+            if (i == m_hoveredCaptureCropMenuItem) {
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(255, 255, 255, 18));
+                p.drawRoundedRect(itemRect, 7.0, 7.0);
+            }
+
+            const bool selected = (i == m_captureAspectRatioIndex);
+            if (selected) {
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(176, 92, 56, 94));
+                p.drawRoundedRect(itemRect.adjusted(1.0, 1.0, -1.0, -1.0), 7.0, 7.0);
+                p.setPen(QPen(QColor(255, 238, 224), 1.5));
+                const double cy = indicatorRect.center().y();
+                p.drawLine(QPointF(indicatorRect.x() + 3.5, cy), QPointF(indicatorRect.x() + 6.5, cy + 3.0));
+                p.drawLine(QPointF(indicatorRect.x() + 6.5, cy + 3.0), QPointF(indicatorRect.x() + 12.5, cy - 4.0));
+            }
+
+            QFont itemFont(QStringLiteral("Sans"));
+            itemFont.setPointSizeF(10.0);
+            itemFont.setBold(selected);
+            p.setFont(itemFont);
+            p.setPen(selected ? QColor(255, 240, 226) : QColor(242, 242, 244));
+            p.drawText(labelRect, Qt::AlignVCenter | Qt::AlignLeft,
+                       QString::fromUtf8(kRecordingAspectOptions[i].label));
+        }
+    } else {
+        m_captureCropMenuPanelRect = QRectF();
+        m_captureCropMenuItemRects.clear();
+    }
 
     if (scrollModeActive) {
         auto drawScrollButton = [&](const QRectF& rect,

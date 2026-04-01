@@ -38,8 +38,10 @@ extern const int TOOLBAR_ICON_IDS[NUM_TOOLS];
 struct ToolbarLayout {
     QRectF leftToolsPanel;
     QRectF rightActionsPanel;
+    QRectF topCluster;
     QRectF toolCells[NUM_TOOLS];
     QRectF sizeCard;
+    QRectF cropCard;
     QRectF confirmCard;
     QRectF cancelCard;
     bool compactMode = false;
