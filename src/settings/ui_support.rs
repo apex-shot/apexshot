@@ -1,5 +1,5 @@
 use gtk4::gdk;
-use gtk4::{prelude::*, Align, Box as GtkBox, Button, CssProvider, Label, Orientation};
+use gtk4::{prelude::*, Button, CssProvider};
 
 pub fn install_settings_css() {
     if let Some(display) = gdk::Display::default() {
@@ -159,7 +159,7 @@ pub fn install_settings_css() {
             .settings-nav-label-hover,
             .settings-nav-icon-selected,
             .settings-nav-label-selected {
-                color: #4aa3ff;
+                color: #b05c38;
             }
 
             .editor-root.editor-theme-light .settings-nav-strip {
@@ -180,7 +180,7 @@ pub fn install_settings_css() {
             .editor-root.editor-theme-light .settings-nav-label-hover,
             .editor-root.editor-theme-light .settings-nav-icon-selected,
             .editor-root.editor-theme-light .settings-nav-label-selected {
-                color: #1976d2;
+                color: #9a4c2c;
             }
 
             .settings-toast {
@@ -345,15 +345,15 @@ pub fn install_settings_css() {
             }
 
             .mode-preview-box.active {
-                border-color: #4aa3ff;
-                background-color: alpha(#4aa3ff, 0.08);
+                border-color: #b05c38;
+                background-color: alpha(#b05c38, 0.08);
                 box-shadow: 0 4px 12px alpha(black, 0.3);
             }
 
             .mode-icon-check {
                 opacity: 0;
-                width: 0;
-                height: 0;
+                min-width: 0;
+                min-height: 0;
             }
 
             .selection-mode-radio {
@@ -406,8 +406,8 @@ pub fn install_settings_css() {
 
             /* FILENAME TAG PILLS */
             .filename-tag-pill {
-                background-color: #d1e7ff;
-                color: #007aff;
+                background-color: #fce4d6;
+                color: #b05c38;
                 border: none;
                 border-radius: 4px;
                 padding: 2px 8px;
@@ -416,7 +416,7 @@ pub fn install_settings_css() {
                 box-shadow: none;
             }
             .filename-tag-pill:hover {
-                background-color: #b9daff;
+                background-color: #f8d0b5;
             }
 
             .format-palette-box {
@@ -481,6 +481,340 @@ pub fn install_settings_css() {
                 font-size: 13px;
                 opacity: 0.6;
             }
+
+            /* COHESIVE SETTINGS-LIKE DESIGN */
+            .recent-captures-root {
+                /* Intentionally empty to let .editor-root's background and borders shine through natively */
+            }
+
+            .recent-captures-toolbar-status {
+                font-size: 12px;
+                font-weight: 400;
+                opacity: 0.5;
+            }
+
+            .recent-captures-statusbar {
+                padding: 6px 0;
+                border-top: 1px solid alpha(white, 0.06);
+            }
+
+            .recent-captures-shell {
+                margin: 0;
+            }
+
+            .recent-captures-header {
+                padding: 10px 0;
+                margin-bottom: 24px;
+            }
+
+            .recent-captures-title {
+                font-size: 26px;
+                font-weight: 700;
+            }
+
+            .recent-captures-subtitle {
+                font-size: 13px;
+                opacity: 0.7;
+            }
+
+            .recent-captures-hero {
+                padding: 0;
+                border-radius: 12px;
+                background: transparent;
+                border: none;
+            }
+
+            .recent-captures-hero-image {
+                border-radius: 8px;
+                border: 1px solid alpha(white, 0.1);
+                background: alpha(white, 0.04);
+            }
+
+            .recent-captures-card-image {
+                border-radius: 8px;
+                border: 1px solid alpha(white, 0.1);
+                background: alpha(white, 0.04);
+            }
+
+            .recent-captures-list-row {
+                padding: 12px;
+                border-radius: 12px;
+                transition: background 0.2s;
+            }
+
+            .recent-captures-list-row:hover {
+                background: alpha(white, 0.03);
+            }
+
+            .recent-captures-list-row.recent-captures-card-alt {
+                background: alpha(white, 0.015);
+            }
+            .recent-captures-list-row.recent-captures-card-alt:hover {
+                background: alpha(white, 0.03);
+            }
+
+            .recent-captures-hero-meta {
+                min-width: 320px;
+                padding-left: 20px;
+                margin-top: 8px;
+            }
+
+            .recent-captures-hero-title {
+                font-size: 20px;
+                font-weight: 700;
+            }
+
+            .recent-captures-hero-timestamp {
+                font-size: 13px;
+                font-weight: 500;
+                color: #b05c38;
+                margin-top: 4px;
+            }
+
+            .recent-captures-hero-supporting {
+                font-size: 13px;
+                line-height: 1.5;
+                opacity: 0.8;
+                margin-top: 10px;
+                margin-bottom: 24px;
+            }
+
+            .recent-captures-hero-actions {
+                margin-top: 24px;
+            }
+
+            .recent-captures-grid-title {
+                font-size: 18px;
+                font-weight: 700;
+                margin-top: 32px;
+                margin-bottom: 8px;
+            }
+
+            .recent-captures-grid {
+                margin-top: 0;
+            }
+
+            button.recent-captures-card {
+                padding: 12px;
+                border-radius: 10px;
+                border: none;
+                background: transparent;
+                box-shadow: none;
+                transition: opacity 0.2s ease, transform 0.2s ease;
+            }
+
+            button.recent-captures-card:hover,
+            button.recent-captures-card:focus {
+                background: transparent;
+                opacity: 0.7;
+            }
+
+            button.recent-captures-card-alt {
+                margin-top: 0px; 
+            }
+
+            .recent-captures-card-title {
+                font-size: 14px;
+                font-weight: 700;
+                margin-top: 10px;
+            }
+
+            .recent-captures-card-timestamp {
+                font-size: 12px;
+                font-weight: 500;
+                color: #b05c38;
+                margin-top: 4px;
+            }
+
+            .recent-captures-card-meta {
+                font-size: 12px;
+                opacity: 0.6;
+                margin-top: 2px;
+            }
+
+            .recent-captures-empty-state {
+                padding: 48px 20px;
+                border-radius: 12px;
+                background: alpha(white, 0.03);
+                border: 1px solid alpha(white, 0.08);
+            }
+
+            .recent-captures-empty-title {
+                font-size: 18px;
+                font-weight: 700;
+            }
+
+            .recent-captures-empty-detail {
+                font-size: 14px;
+                opacity: 0.7;
+                margin-top: 8px;
+                max-width: 500px;
+            }
+
+            .recent-captures-primary-button,
+            .recent-captures-secondary-button,
+            .recent-captures-refresh-button {
+                background: alpha(white, 0.08);
+                border: 1px solid alpha(white, 0.1);
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: 600;
+                color: white;
+                transition: all 0.2s;
+            }
+
+            .recent-captures-primary-button {
+                background-color: #b05c38;
+                border-color: #9a4c2c;
+                color: white;
+            }
+
+            .recent-captures-primary-button:hover,
+            .recent-captures-primary-button:focus {
+                background-color: #c06540;
+            }
+
+            .recent-captures-secondary-button:hover,
+            .recent-captures-secondary-button:focus,
+            .recent-captures-refresh-button:hover,
+            .recent-captures-refresh-button:focus {
+                background-color: alpha(white, 0.12);
+            }
+
+            .recent-captures-icon-btn {
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 8px;
+                color: #b05c38;
+                opacity: 0.8;
+                transition: opacity 0.2s, background 0.2s;
+            }
+
+            .recent-captures-icon-btn:hover {
+                background: alpha(white, 0.08);
+                opacity: 1.0;
+            }
+
+            .recent-captures-picture-missing {
+                background: alpha(white, 0.04);
+            }
+
+            .recent-captures-media-badge {
+                color: white;
+                background: alpha(black, 0.5);
+                border: 1px solid alpha(white, 0.2);
+                border-radius: 99px;
+                padding: 12px;
+            }
+
+            .recent-captures-wm-btn {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 4px;
+                border-radius: 6px;
+                background: transparent;
+                color: alpha(white, 0.65);
+                transition: background 0.15s, color 0.15s;
+            }
+            .recent-captures-wm-btn:hover {
+                background: alpha(white, 0.1);
+                color: white;
+            }
+            .recent-captures-wm-close:hover {
+                background: alpha(#e34a4a, 0.75);
+                color: white;
+            }
+
+            .recent-captures-segmented-control {
+                background: alpha(white, 0.05);
+                border-radius: 8px;
+                padding: 4px;
+            }
+            .recent-captures-segmented-btn {
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 16px;
+                color: alpha(white, 0.6);
+                font-size: 13px;
+                font-weight: 500;
+                transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+            }
+            .recent-captures-segmented-btn:hover {
+                color: white;
+            }
+            .recent-captures-segmented-btn:checked {
+                background: #b05c38;
+                color: white;
+                box-shadow: 0 1px 3px alpha(black, 0.2);
+            }
+
+            /* LIGHT THEME OVERRIDES (Match settings UI light theme) */
+            .editor-root.editor-theme-light .recent-captures-hero-image,
+            .editor-root.editor-theme-light .recent-captures-card-image {
+                border-color: alpha(#111827, 0.12);
+                background: alpha(#111827, 0.04);
+            }
+
+            .editor-root.editor-theme-light button.recent-captures-card:hover,
+            .editor-root.editor-theme-light button.recent-captures-card:focus {
+                background: transparent;
+                opacity: 0.7;
+            }
+
+            .editor-root.editor-theme-light .recent-captures-primary-button {
+                background-color: #b05c38;
+                border-color: #9a4c2c;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light .recent-captures-primary-button:hover,
+            .editor-root.editor-theme-light .recent-captures-primary-button:focus {
+                background-color: #c06540;
+            }
+
+            .editor-root.editor-theme-light .recent-captures-secondary-button,
+            .editor-root.editor-theme-light .recent-captures-refresh-button {
+                background-color: transparent;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.2);
+            }
+
+            .editor-root.editor-theme-light .recent-captures-secondary-button:hover,
+            .editor-root.editor-theme-light .recent-captures-secondary-button:focus,
+            .editor-root.editor-theme-light .recent-captures-refresh-button:hover,
+            .editor-root.editor-theme-light .recent-captures-refresh-button:focus {
+                background-color: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .recent-captures-empty-state {
+                background: alpha(#111827, 0.03);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light .recent-captures-icon-btn {
+                color: #9a4c2c;
+            }
+
+            .editor-root.editor-theme-light .recent-captures-icon-btn:hover {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light .recent-captures-segmented-control {
+                background: alpha(black, 0.05);
+            }
+            .editor-root.editor-theme-light .recent-captures-segmented-btn {
+                color: alpha(black, 0.6);
+            }
+            .editor-root.editor-theme-light .recent-captures-segmented-btn:hover {
+                color: black;
+            }
+            .editor-root.editor-theme-light .recent-captures-segmented-btn:checked {
+                background: #b05c38;
+                color: white;
+                box-shadow: 0 1px 3px alpha(black, 0.1);
+            }
             "#,
         );
         gtk4::style_context_add_provider_for_display(
@@ -492,34 +826,24 @@ pub fn install_settings_css() {
 }
 
 pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
-    let dot = GtkBox::new(Orientation::Horizontal, 0);
-    dot.set_size_request(12, 12);
-    dot.set_halign(Align::Center);
-    dot.set_valign(Align::Center);
-    dot.add_css_class("traffic-light-dot");
-    dot.add_css_class(color_class);
-
-    let symbol = match color_class {
-        "traffic-light-red" => "x",
-        "traffic-light-yellow" => "-",
-        "traffic-light-green" => "+",
-        _ => "",
+    let icon_name = match color_class {
+        "traffic-light-red" => "window-close-symbolic",
+        "traffic-light-yellow" => "window-minimize-symbolic",
+        "traffic-light-green" => "window-maximize-symbolic",
+        _ => "window-close-symbolic",
     };
-    let symbol_label = Label::new(Some(symbol));
-    symbol_label.add_css_class("traffic-light-symbol");
-    symbol_label.set_halign(Align::Center);
-    symbol_label.set_valign(Align::Center);
-    symbol_label.set_xalign(0.5);
-    symbol_label.set_yalign(0.5);
-    dot.append(&symbol_label);
 
-    let button = Button::new();
-    button.set_size_request(14, 14);
-    button.set_child(Some(&dot));
-    button.set_has_frame(false);
-    button.set_focusable(false);
-    button.set_tooltip_text(Some(tooltip));
-    button.add_css_class("traffic-light");
-    button.add_css_class("flat");
+    let button = Button::builder()
+        .icon_name(icon_name)
+        .has_frame(false)
+        .focusable(false)
+        .tooltip_text(tooltip)
+        .build();
+
+    button.add_css_class("recent-captures-wm-btn");
+    if color_class == "traffic-light-red" {
+        button.add_css_class("recent-captures-wm-close");
+    }
+
     button
 }

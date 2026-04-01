@@ -31,7 +31,7 @@ use apexshot::{
         run_recording_countdown_bar, run_recording_with_controls, start_recording, RecordingConfig,
         RecordingControlsParams, StopAction,
     },
-    show_settings_window,
+    show_recent_captures_window, show_settings_window,
 };
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -118,6 +118,13 @@ async fn main() {
         "show-last-preview" => {
             if !trigger_daemon_action("show_last_preview").await {
                 eprintln!("Show last preview requires a running ApexShot daemon.");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "recent-captures" => {
+            if let Err(e) = show_recent_captures_window() {
+                eprintln!("Failed to open recent captures window: {e}");
                 std::process::exit(1);
             }
             return;
@@ -799,6 +806,7 @@ fn print_usage() {
     println!("  ocr <image>       Extract text from an image");
     println!("  edit <image>      Open image editor window");
     println!("  show-last-preview Reopen the last capture preview via daemon");
+    println!("  recent-captures   Open the recent captures gallery");
     println!("  settings          Open settings window");
     println!("  native-host <sub> Install/uninstall native messaging host");
     println!("  install           Install binary to /usr/local/bin/ and set up autostart");

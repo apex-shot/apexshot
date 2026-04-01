@@ -54,6 +54,7 @@ pub enum DaemonAction {
     CaptureWindow,
     RecordScreen,
     RecordArea,
+    OpenRecentCaptures,
     ShowLastPreview,
     OpenLastCapture,
     OpenSettings,
@@ -75,6 +76,7 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::CaptureWindow => DaemonAction::CaptureWindow,
             TrayAction::RecordScreen => DaemonAction::RecordScreen,
             TrayAction::RecordArea => DaemonAction::RecordArea,
+            TrayAction::OpenRecentCaptures => DaemonAction::OpenRecentCaptures,
             TrayAction::ShowLastPreview => DaemonAction::ShowLastPreview,
             TrayAction::OpenLastCapture => DaemonAction::OpenLastCapture,
             TrayAction::OpenSettings => DaemonAction::OpenSettings,
@@ -428,6 +430,9 @@ async fn run_daemon_inner(
             }
             DaemonAction::RecordArea => {
                 tokio::spawn(handle_record_area(action_tx_clone));
+            }
+            DaemonAction::OpenRecentCaptures => {
+                tokio::task::spawn_blocking(show_recent_captures_subprocess);
             }
             DaemonAction::ShowLastPreview => {
                 let path = state.lock().unwrap().last_capture_path.clone();
@@ -2043,6 +2048,17 @@ fn show_settings_subprocess() {
 
     if let Err(e) = std::process::Command::new(&exe).arg("settings").spawn() {
         eprintln!("[daemon] Failed to spawn settings window: {e}");
+    }
+}
+
+fn show_recent_captures_subprocess() {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+
+    if let Err(e) = std::process::Command::new(&exe)
+        .arg("recent-captures")
+        .spawn()
+    {
+        eprintln!("[daemon] Failed to spawn recent captures window: {e}");
     }
 }
 

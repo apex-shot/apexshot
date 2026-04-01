@@ -8,6 +8,7 @@ pub mod gnome_shell;
 pub mod hotkeys;
 pub mod ocr;
 pub mod overlay;
+pub mod recent_captures;
 pub mod recording;
 pub mod settings;
 pub mod tray;
@@ -28,5 +29,6 @@ pub use overlay::{
     select_area, select_area_from_capture, select_area_from_image, AreaSelector, SelectionArea,
     SelectionError, SelectionResult,
 };
+pub use recent_captures::show_recent_captures_window;
 pub use recording::{start_recording, RecordError, RecordResult, RecordingConfig};
 pub use settings::show_settings_window;
