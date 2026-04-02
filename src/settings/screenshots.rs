@@ -1,7 +1,6 @@
 use crate::config::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Label,
-    Orientation,
+    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Label, Orientation,
 };
 
 #[allow(dead_code)]
@@ -62,7 +61,7 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     export_location_entry.set_placeholder_text(Some("Choose a folder"));
     export_location_entry.set_text(&config.screenshot_export_location);
     let export_location_browse = Button::with_label("Browse");
-    
+
     let export_location_hbox = GtkBox::new(Orientation::Horizontal, 12);
     export_location_hbox.set_hexpand(true);
     let export_label = Label::new(Some("Save location"));
@@ -117,7 +116,6 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
 
     section.append(&export_frame);
 
-
     // --- Interface Group ---
     let interface_title = Label::new(Some("Interface"));
     interface_title.add_css_class("settings-group-title");
@@ -170,7 +168,6 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
 
     section.append(&interface_frame);
 
-
     // --- Advanced Group ---
     let adv_title = Label::new(Some("Advanced"));
     adv_title.add_css_class("settings-group-title");
@@ -208,7 +205,7 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     show_cursor_check.set_active(config.screenshot_show_cursor);
     let cursor_hbox = GtkBox::new(Orientation::Horizontal, 12);
     cursor_hbox.set_hexpand(true);
-    
+
     let cursor_vbox = GtkBox::new(Orientation::Vertical, 4);
     cursor_vbox.set_hexpand(true);
     let cursor_option = Label::new(Some("Show cursor on screenshots"));
@@ -218,7 +215,7 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     cursor_desc.add_css_class("settings-sub-option-hint");
     cursor_vbox.append(&cursor_option);
     cursor_vbox.append(&cursor_desc);
-    
+
     cursor_hbox.append(&cursor_vbox);
     cursor_hbox.append(&show_cursor_check);
     adv_frame.append(&build_row!(&cursor_hbox, true));

@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, CenterBox, CheckButton, ColorButton, Image,
-    Label, Orientation, Scale,
+    prelude::*, Align, Box as GtkBox, Button, CenterBox, CheckButton, ColorButton, Image, Label,
+    Orientation, Scale,
 };
 
 pub struct WallpaperSettingsWidgets {
@@ -91,7 +91,7 @@ pub fn build_wallpaper_section(config: &AppConfig) -> WallpaperSettingsWidgets {
     let wallpaper_mode_custom = CheckButton::new();
     wallpaper_mode_custom.set_group(Some(&wallpaper_mode_desktop));
     wallpaper_mode_custom.set_active(config.wallpaper_mode == "Custom");
-    
+
     let wallpaper_custom_path_btn = Button::new();
     wallpaper_custom_path_btn.add_css_class("secondary-settings-button");
     wallpaper_custom_path_btn.set_label(if config.wallpaper_custom_path.is_empty() {
@@ -116,12 +116,12 @@ pub fn build_wallpaper_section(config: &AppConfig) -> WallpaperSettingsWidgets {
     let wallpaper_mode_color = CheckButton::new();
     wallpaper_mode_color.set_group(Some(&wallpaper_mode_desktop));
     wallpaper_mode_color.set_active(config.wallpaper_mode == "Color");
-    
+
     let wallpaper_color_btn = ColorButton::new();
     if let Ok(rgba) = gtk4::gdk::RGBA::parse(&config.wallpaper_plain_color) {
         wallpaper_color_btn.set_rgba(&rgba);
     }
-    
+
     let color_hbox = GtkBox::new(Orientation::Horizontal, 12);
     color_hbox.set_hexpand(true);
     let color_label = Label::new(Some("Plain color"));
@@ -217,19 +217,23 @@ pub fn build_wallpaper_section(config: &AppConfig) -> WallpaperSettingsWidgets {
     mode_hbox.append(&full_btn);
     mode_hbox.append(&trans_btn);
 
-    let shift_hint = Label::new(Some("Hold ⇧ Shift while taking a screenshot to get a transparent background."));
+    let shift_hint = Label::new(Some(
+        "Hold ⇧ Shift while taking a screenshot to get a transparent background.",
+    ));
     shift_hint.add_css_class("settings-sub-option-hint");
     shift_hint.set_xalign(0.0);
-    
+
     let mode_vbox1 = GtkBox::new(Orientation::Vertical, 4);
     mode_vbox1.append(&Label::new(Some("Mode")));
     mode_vbox1.append(&shift_hint);
-    
+
     let w_mode_hbox = GtkBox::new(Orientation::Horizontal, 12);
     w_mode_hbox.set_hexpand(true);
     let lbl_m = Label::new(Some("Mode"));
     lbl_m.set_xalign(0.0);
-    let hint_m = Label::new(Some("Hold ⇧ Shift while taking a screenshot for transparent background."));
+    let hint_m = Label::new(Some(
+        "Hold ⇧ Shift while taking a screenshot for transparent background.",
+    ));
     hint_m.add_css_class("settings-sub-option-hint");
     hint_m.set_xalign(0.0);
     let v_m = GtkBox::new(Orientation::Vertical, 4);
@@ -241,7 +245,8 @@ pub fn build_wallpaper_section(config: &AppConfig) -> WallpaperSettingsWidgets {
     win_frame.append(&build_row!(&w_mode_hbox, false));
 
     // Padding
-    let window_screenshot_padding_input = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.05);
+    let window_screenshot_padding_input =
+        Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.05);
     window_screenshot_padding_input.set_value(config.window_screenshot_padding);
     window_screenshot_padding_input.set_hexpand(false);
     window_screenshot_padding_input.set_size_request(200, -1);
@@ -252,7 +257,7 @@ pub fn build_wallpaper_section(config: &AppConfig) -> WallpaperSettingsWidgets {
     padding_labels.set_center_widget(Some(&Label::new(Some("Default"))));
     padding_labels.set_end_widget(Some(&Label::new(Some("Max"))));
     padding_vbox.append(&padding_labels);
-    
+
     let padding_hbox = GtkBox::new(Orientation::Horizontal, 12);
     padding_hbox.set_hexpand(true);
     let padding_label = Label::new(Some("Padding"));
@@ -271,7 +276,9 @@ pub fn build_wallpaper_section(config: &AppConfig) -> WallpaperSettingsWidgets {
     shadow_vbox.set_hexpand(true);
     let shadow_main = Label::new(Some("Capture window shadow"));
     shadow_main.set_xalign(0.0);
-    let opt_hint = Label::new(Some("Hold ⌥ (alt/option) while taking a screenshot to disable shadow."));
+    let opt_hint = Label::new(Some(
+        "Hold ⌥ (alt/option) while taking a screenshot to disable shadow.",
+    ));
     opt_hint.add_css_class("settings-sub-option-hint");
     opt_hint.set_xalign(0.0);
     shadow_vbox.append(&shadow_main);

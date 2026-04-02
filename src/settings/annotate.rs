@@ -73,7 +73,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     pencil_hbox.append(&pencil_option);
     pencil_hbox.append(&smooth_drawing_check);
     tools_frame.append(&build_row!(&pencil_hbox, true));
-    
+
     // Shadow
     let draw_shadow_check = CheckButton::new();
     draw_shadow_check.set_active(config.annotate_draw_shadow);
@@ -87,7 +87,6 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     tools_frame.append(&build_row!(&shadow_hbox, false));
 
     section.append(&tools_frame);
-
 
     // --- Canvas Group ---
     let canvas_title = Label::new(Some("Canvas & Interface"));
@@ -124,7 +123,6 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     canvas_frame.append(&build_row!(&access_hbox, true));
 
     section.append(&canvas_frame);
-
 
     // --- Window Group ---
     let window_title = Label::new(Some("Window"));

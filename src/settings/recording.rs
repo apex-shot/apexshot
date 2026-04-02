@@ -161,11 +161,18 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     export_hbox.append(&entry_row);
     general_frame.append(&build_row!(&export_hbox, false));
 
-    let rec_controls_check = create_row(&general_frame, "Use keyboard shortcuts to control recordings (elapsed time appears in the top bar)", true);
+    let rec_controls_check = create_row(
+        &general_frame,
+        "Use keyboard shortcuts to control recordings (elapsed time appears in the top bar)",
+        true,
+    );
     rec_controls_check.set_active(config.rec_controls);
 
-    let rec_display_time_check =
-        create_row(&general_frame, "Display recording time in the top bar", false);
+    let rec_display_time_check = create_row(
+        &general_frame,
+        "Display recording time in the top bar",
+        false,
+    );
     rec_display_time_check.set_active(config.rec_display_time);
 
     let rec_hidpi_check = create_row(&general_frame, "Scale Retina videos to 1x", true);

@@ -48,7 +48,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     section.append(&startup_title);
 
     let startup_frame = build_frame();
-    
+
     let start_at_login_check = CheckButton::new();
     start_at_login_check.set_active(config.start_at_login);
     let startup_hbox = GtkBox::new(Orientation::Horizontal, 12);
@@ -70,7 +70,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     section.append(&sound_title);
 
     let sounds_frame = build_frame();
-    
+
     let play_sounds_check = CheckButton::new();
     play_sounds_check.set_active(config.play_sounds);
     let sounds_hbox = GtkBox::new(Orientation::Horizontal, 12);
@@ -91,7 +91,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
         shutter_sound_input.set_active_id(Some(DEFAULT_SHUTTER_SOUND));
     }
     shutter_sound_input.set_sensitive(config.play_sounds);
-    
+
     let shutter_hbox = GtkBox::new(Orientation::Horizontal, 12);
     shutter_hbox.set_hexpand(true);
     let shutter_title = Label::new(Some("Shutter sound"));

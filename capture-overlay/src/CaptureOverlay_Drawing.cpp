@@ -983,8 +983,8 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
     drawPrimaryAction(gifRect, RecordPanelTile::RecordGif, 17, QStringLiteral("GIF"), false);
 
     const double contextualX = std::max(10.0, std::min(selX + (selW - 440.0) / 2.0, screenW - 450.0));
-    const double contextualY = std::max(10.0, std::min(selY + 24.0, screenH - 510.0));
-    const QRectF contextualRect(contextualX, contextualY, 440.0, 500.0);
+    const double contextualY = std::max(10.0, std::min(selY + 24.0, screenH - 570.0));
+    const QRectF contextualRect(contextualX, contextualY, 440.0, 560.0);
 
     if (m_settingsOpen) {
         drawSettingsMenu(p, contextualRect.x(), contextualRect.y());
@@ -1056,7 +1056,7 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
 void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
 {
     const double menuW = 440.0;
-    const double menuH = 500.0;
+    const double menuH = 560.0;
     const double menuX = std::max(10.0, std::min(panelX, (double)width() - menuW - 10.0));
     const double menuY = std::max(10.0, std::min(startY, (double)height() - menuH - 10.0));
     
@@ -1256,7 +1256,7 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
         m_settingsClickableRects.append(monoRow);
         currY += 50;
 
-        // 4. Video Encoder
+        // 4. Video Editor
         drawLabel("Video Encoder:", currY);
         QRectF encoderRow(valueX, currY, 250, 30);
         QRectF cb2(valueX, currY + (30 - 18) / 2.0, 18, 18);

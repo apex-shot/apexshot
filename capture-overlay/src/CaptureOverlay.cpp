@@ -197,6 +197,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_keyAppearance(0) // Dark
     , m_keyBlurBg(true)
     , m_keyFilter(0) // Show all keys
+    , m_videoFormat(0) // MP4
     , m_videoMaxRes(0) // Original
     , m_videoFps(2) // 50 (index 2: 24, 30, 50, 60)
     , m_recordMono(false)

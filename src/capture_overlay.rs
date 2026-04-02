@@ -11,8 +11,8 @@
 //!   exit 2 → error
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 use std::{
@@ -112,7 +112,9 @@ fn capture_session_coordinator() -> &'static CaptureSessionCoordinator {
     COORDINATOR.get_or_init(CaptureSessionCoordinator::default)
 }
 
-fn classify_overlay_exit_code(code: Option<i32>) -> Result<Option<&'static str>, LaunchBlockedReason> {
+fn classify_overlay_exit_code(
+    code: Option<i32>,
+) -> Result<Option<&'static str>, LaunchBlockedReason> {
     match code {
         Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
             Ok(Some("forwarded"))
@@ -234,12 +236,12 @@ pub fn is_launch_blocked_error(err: &SelectionError) -> bool {
 
 fn blocked_selection_error(reason: LaunchBlockedReason) -> SelectionError {
     match reason {
-        LaunchBlockedReason::ApexOverlayAlreadyActive => SelectionError::Blocked(
-            "ApexShot capture overlay is already active".into(),
-        ),
-        LaunchBlockedReason::BuiltinOverlayActive => SelectionError::Blocked(
-            "GNOME screenshot UI is already active".into(),
-        ),
+        LaunchBlockedReason::ApexOverlayAlreadyActive => {
+            SelectionError::Blocked("ApexShot capture overlay is already active".into())
+        }
+        LaunchBlockedReason::BuiltinOverlayActive => {
+            SelectionError::Blocked("GNOME screenshot UI is already active".into())
+        }
     }
 }
 
@@ -414,9 +416,7 @@ fn run_capture_binary(
 
 impl InteractiveOverlaySessionGuard {
     fn begin(extra_args: &[&str]) -> Self {
-        if !should_request_screenshot_lock(extra_args)
-            || overlay_socket_is_listening()
-        {
+        if !should_request_screenshot_lock(extra_args) || overlay_socket_is_listening() {
             return Self {
                 tracked_overlay_id: None,
             };
@@ -576,6 +576,7 @@ pub struct RecordingRequest {
     pub dim_screen: bool,
     pub countdown: bool,
     // Video tab settings
+    pub video_format: u8,
     pub video_max_res: u8,
     pub video_fps: u8,
     pub record_mono: bool,
@@ -624,6 +625,7 @@ impl Default for RecordingRequest {
             remember_selection: false,
             dim_screen: true,
             countdown: true,
+            video_format: 0,
             video_max_res: 0,
             video_fps: 2,
             record_mono: false,
@@ -705,7 +707,9 @@ fn parse_area_capture_output(
             Ok(AreaCapturePathResult::Cancelled)
         }
         Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
-            eprintln!("[capture_overlay] capture_area_via_cpp: request forwarded to active overlay");
+            eprintln!(
+                "[capture_overlay] capture_area_via_cpp: request forwarded to active overlay"
+            );
             Ok(AreaCapturePathResult::Cancelled)
         }
         Some(3) => {
@@ -998,6 +1002,7 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
         "--no-show-countdown".into()
     });
     extra_args.push(format!("--video-max-res={}", config.rec_video_max_res));
+    extra_args.push("--video-format=0".to_string());
     extra_args.push(format!("--video-fps={}", config.rec_video_fps));
     extra_args.push(if config.rec_video_mono {
         "--record-mono".into()
@@ -1150,6 +1155,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let countdown = extract_bool(json, "countdown").unwrap_or(true);
 
     // Video tab settings
+    let video_format = extract_int(json, "video_format").unwrap_or(0).clamp(0, 0) as u8;
     let video_max_res = extract_int(json, "video_max_res").unwrap_or(0) as u8;
     let video_fps = extract_int(json, "video_fps").unwrap_or(2) as u8; // Default matches the overlay constructor
     let record_mono = extract_bool(json, "record_mono").unwrap_or(false);
@@ -1196,6 +1202,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         remember_selection,
         dim_screen,
         countdown,
+        video_format,
         video_max_res,
         video_fps,
         record_mono,
@@ -1306,8 +1313,8 @@ mod tests {
         build_area_init_args, classify_overlay_exit_code, execute_builtin_overlay_query,
         parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
         parse_recording_json, parse_selection_json, should_request_screenshot_lock,
-        tracked_overlay_id,
-        CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, RecordingType,
+        tracked_overlay_id, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,
+        RecordingType,
     };
     use crate::config::AppConfig;
 
@@ -1366,7 +1373,7 @@ mod tests {
                 "notifications":true,"cursor":false,
                 "remember_selection":true,"dim_screen":false,
                 "countdown":true,
-                "video_max_res":2,"video_fps":1,
+                "video_format":1,"video_max_res":2,"video_fps":1,
                 "record_mono":true,"open_editor":false,
                 "gif_fps":33,"gif_quality":0.8125,
                 "gif_size_idx":2,"optimize_gif":false,"fullscreen":true,
@@ -1396,6 +1403,7 @@ mod tests {
         assert!(request.remember_selection);
         assert!(!request.dim_screen);
         assert!(request.countdown);
+        assert_eq!(request.video_format, 0);
         assert_eq!(request.video_max_res, 2);
         assert_eq!(request.video_fps, 1);
         assert!(request.record_mono);
@@ -1426,6 +1434,7 @@ mod tests {
     #[test]
     fn build_area_init_args_includes_runtime_overlay_defaults() {
         let config = AppConfig {
+            rec_video_format: 1,
             rec_click_size: 0.42,
             rec_click_color: 4,
             rec_click_style: 1,
@@ -1447,6 +1456,7 @@ mod tests {
 
         let args = build_area_init_args(&config);
 
+        assert!(args.contains(&"--video-format=0".to_string()));
         assert!(args.contains(&"--rec-click-size=0.4200".to_string()));
         assert!(args.contains(&"--rec-click-color=4".to_string()));
         assert!(args.contains(&"--rec-click-style=1".to_string()));
@@ -1488,24 +1498,20 @@ mod tests {
             .begin_apex_overlay_session(false)
             .expect("first session should acquire the guard");
 
-        assert!(
-            matches!(
-                coordinator.begin_apex_overlay_session(false),
-                Err(LaunchBlockedReason::ApexOverlayAlreadyActive)
-            )
-        );
+        assert!(matches!(
+            coordinator.begin_apex_overlay_session(false),
+            Err(LaunchBlockedReason::ApexOverlayAlreadyActive)
+        ));
     }
 
     #[test]
     fn capture_session_coordinator_blocks_builtin_overlay_without_latching() {
         let coordinator = CaptureSessionCoordinator::default();
 
-        assert!(
-            matches!(
-                coordinator.begin_apex_overlay_session(true),
-                Err(LaunchBlockedReason::BuiltinOverlayActive)
-            )
-        );
+        assert!(matches!(
+            coordinator.begin_apex_overlay_session(true),
+            Err(LaunchBlockedReason::BuiltinOverlayActive)
+        ));
 
         assert!(
             coordinator.begin_apex_overlay_session(false).is_ok(),

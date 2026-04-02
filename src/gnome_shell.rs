@@ -343,10 +343,7 @@ fn show_push_keystroke_args(session_id: &str, text: &str) -> Vec<String> {
 }
 
 fn show_recording_paused_args(session_id: &str, paused: bool) -> Vec<String> {
-    vec![
-        format!("string:{session_id}"),
-        format!("boolean:{paused}"),
-    ]
+    vec![format!("string:{session_id}"), format!("boolean:{paused}")]
 }
 
 fn show_session_id_arg(session_id: &str) -> Vec<String> {

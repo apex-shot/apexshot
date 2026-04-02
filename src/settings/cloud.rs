@@ -63,7 +63,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     email_lbl.set_xalign(0.0);
     info_text_vbox.append(&name_lbl);
     info_text_vbox.append(&email_lbl);
-    
+
     profile_info_box.append(&avatar_lbl);
     profile_info_box.append(&info_text_vbox);
 
@@ -100,12 +100,12 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     let manage_plan_btn = Button::with_label("Manage Plan");
     manage_plan_btn.add_css_class("secondary-settings-button");
     manage_plan_btn.set_valign(Align::Center);
-    
+
     let plan_row_hbox = GtkBox::new(Orientation::Horizontal, 12);
     plan_row_hbox.append(&plan_info_vbox);
     plan_row_hbox.append(&manage_plan_btn);
     profile_frame.append(&build_row!(&plan_row_hbox, true));
-    
+
     section.append(&profile_frame);
 
     // --- Settings Group ---
@@ -124,7 +124,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     cloud_quality_input.append(Some("Optimized for sharing"), "Optimized for sharing");
     cloud_quality_input.append(Some("Full quality"), "Full quality");
     cloud_quality_input.set_active_id(Some(&config.cloud_screenshot_quality));
-    
+
     let quality_hbox = GtkBox::new(Orientation::Horizontal, 12);
     quality_hbox.set_hexpand(true);
     let quality_vbox = GtkBox::new(Orientation::Vertical, 4);
