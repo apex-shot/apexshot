@@ -63,6 +63,7 @@ mod events;
 mod footer;
 mod toolbar;
 
+#[allow(dead_code)]
 pub mod icon_names {
     pub use shipped::*;
     include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
