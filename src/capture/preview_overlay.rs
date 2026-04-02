@@ -35,8 +35,8 @@ fn generate_preview_id(pid: u32) -> String {
     format!("preview-{}-{}", pid, ts)
 }
 
-const PREVIEW_WIDTH: i32 = 211;
-const PREVIEW_HEIGHT: i32 = 151;
+const PREVIEW_WIDTH: i32 = 190;
+const PREVIEW_HEIGHT: i32 = 135;
 const PREVIEW_EDGE_MARGIN: i32 = 24;
 const PREVIEW_BOTTOM_SAFE_OFFSET: i32 = 80;
 
@@ -186,7 +186,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     let (edit_btn, _) = icon_button(crate::capture::editor::window::icon_names::PEN_REGULAR, "Edit");
     let (copy_btn, _) = icon_button(crate::capture::editor::window::icon_names::COPY_REGULAR, "Copy");
     let (save_btn, _) = icon_button(crate::capture::editor::window::icon_names::SAVE_REGULAR, "Save");
-    let (upload_btn, _) = icon_button(crate::capture::editor::window::icon_names::FOLDER_OPEN_REGULAR, "Open Folder");
+    let (upload_btn, _) = icon_button(crate::capture::editor::window::icon_names::CLOUD_ARROW_UP_REGULAR, "Upload");
     let (pin_btn, pin_icon) = icon_button("view-pin-symbolic", "Pin");
     let (close_btn, _) = icon_button("window-close-symbolic", "Close");
 
@@ -705,7 +705,7 @@ fn install_preview_css() {
                 background-color: #141414;
                 border-radius: 16px;
                 border: 1px solid rgba(255, 255, 255, 0.08);
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+                box-shadow: none;
                 padding: 12px 12px 0 12px;
                 outline-width: 0;
             }
