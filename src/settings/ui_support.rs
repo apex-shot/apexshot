@@ -235,25 +235,24 @@ pub fn install_settings_css() {
             }
 
             .settings-toast {
-                padding: 10px 18px;
-                border-radius: 14px;
-                border: 1px solid alpha(white, 0.10);
-                background: linear-gradient(to bottom, alpha(#1c222b, 0.96), alpha(#12171e, 0.93));
-                color: #f5f7fb;
+                padding: 12px 24px;
+                border-radius: 10px;
+                border: 1px solid alpha(white, 0.12);
+                background-color: alpha(#080808, 0.95);
+                color: white;
                 font-size: 13px;
-                font-weight: 700;
-                letter-spacing: 0.01em;
-                box-shadow: 0 14px 34px alpha(black, 0.30);
+                font-weight: 600;
+                box-shadow: 0 12px 32px alpha(black, 0.60);
             }
 
             .settings-toast-success {
-                border-color: alpha(#6fd9a0, 0.28);
-                color: #effaf3;
+                border-color: #b05c38;
+                color: white;
             }
 
             .settings-toast-error {
-                border-color: alpha(#ff9b90, 0.30);
-                color: #fff2f0;
+                border-color: #cf433c;
+                color: white;
             }
 
             .editor-root.editor-theme-light .settings-toast {
