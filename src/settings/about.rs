@@ -14,7 +14,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
 
     // --- 1. ICON & TITLE ---
     let header_vbox = GtkBox::new(Orientation::Vertical, 8);
-    
+
     // Procedural Logo Drawing
     let drawing_area = gtk4::DrawingArea::new();
     drawing_area.set_content_width(128);
@@ -31,10 +31,34 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         cr.set_source_rgba(0.05, 0.05, 0.05, 1.0); // Pitch black/Noir
         let size_half = 56.0 * s;
         let radius = 16.0 * s;
-        cr.arc(cx + size_half - radius, cy - size_half + radius, radius, -std::f64::consts::FRAC_PI_2, 0.0);
-        cr.arc(cx + size_half - radius, cy + size_half - radius, radius, 0.0, std::f64::consts::FRAC_PI_2);
-        cr.arc(cx - size_half + radius, cy + size_half - radius, radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-        cr.arc(cx - size_half + radius, cy - size_half + radius, radius, std::f64::consts::PI, -std::f64::consts::FRAC_PI_2);
+        cr.arc(
+            cx + size_half - radius,
+            cy - size_half + radius,
+            radius,
+            -std::f64::consts::FRAC_PI_2,
+            0.0,
+        );
+        cr.arc(
+            cx + size_half - radius,
+            cy + size_half - radius,
+            radius,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        );
+        cr.arc(
+            cx - size_half + radius,
+            cy + size_half - radius,
+            radius,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+        );
+        cr.arc(
+            cx - size_half + radius,
+            cy - size_half + radius,
+            radius,
+            std::f64::consts::PI,
+            -std::f64::consts::FRAC_PI_2,
+        );
         cr.close_path();
         cr.fill().expect("Failed to render logo background");
 
@@ -46,7 +70,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
 
         let crn_dist = 36.0 * s;
         let crn_len = 16.0 * s;
-        
+
         // Top Left
         cr.move_to(cx - crn_dist, cy - crn_dist + crn_len);
         cr.line_to(cx - crn_dist, cy - crn_dist);
@@ -72,7 +96,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         let peak_y = cy - 14.0 * s;
         let base_y = cy + 18.0 * s;
         let peak_half_w = 22.0 * s;
-        
+
         cr.move_to(cx, peak_y);
         cr.line_to(cx + peak_half_w, base_y);
         cr.line_to(cx - peak_half_w, base_y);
@@ -80,7 +104,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         cr.fill().expect("Failed to render logo");
 
         // Theme Orange (#b05c38) Shadow / Slice on the peak
-        cr.set_source_rgba(0.69, 0.36, 0.22, 1.0); 
+        cr.set_source_rgba(0.69, 0.36, 0.22, 1.0);
         cr.move_to(cx, peak_y);
         cr.line_to(cx + peak_half_w, base_y);
         cr.line_to(cx, base_y);

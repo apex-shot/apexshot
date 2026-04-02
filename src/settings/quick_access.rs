@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Label, Orientation,
-    PositionType, Scale,
+    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Label, Orientation, PositionType,
+    Scale,
 };
 
 #[allow(dead_code)]
@@ -90,10 +90,10 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     overlay_size_input.add_mark(0.5, PositionType::Bottom, None);
     overlay_size_input.add_mark(1.0, PositionType::Bottom, None);
     overlay_size_input.add_mark(1.5, PositionType::Bottom, None);
-    
+
     let size_vbox = GtkBox::new(Orientation::Vertical, 4);
     size_vbox.append(&overlay_size_input);
-    
+
     let size_caption_row = GtkBox::new(Orientation::Horizontal, 0);
     for (text, align) in [
         ("Min", Align::Start),
@@ -107,7 +107,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
         size_caption_row.append(&caption);
     }
     size_vbox.append(&size_caption_row);
-    
+
     let size_hbox = GtkBox::new(Orientation::Horizontal, 12);
     size_hbox.set_hexpand(true);
     let size_label = Label::new(Some("Overlay size"));
@@ -119,7 +119,6 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
 
     section.append(&overlay_frame);
 
-
     // --- Auto-close Group ---
     let auto_close_title = Label::new(Some("Auto-close"));
     auto_close_title.add_css_class("settings-group-title");
@@ -129,7 +128,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     section.append(&auto_close_title);
 
     let auto_close_frame = build_frame();
-    
+
     // Auto-close check
     let auto_close_enabled_check = CheckButton::new();
     auto_close_enabled_check.set_active(config.quick_access_auto_close_enabled);
@@ -170,7 +169,8 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     ] {
         auto_close_interval_input.append(Some(id), lbl);
     }
-    auto_close_interval_input.set_active_id(Some(&config.quick_access_auto_close_interval.to_string()));
+    auto_close_interval_input
+        .set_active_id(Some(&config.quick_access_auto_close_interval.to_string()));
     let interval_hbox = GtkBox::new(Orientation::Horizontal, 12);
     interval_hbox.set_hexpand(true);
     let interval_label = Label::new(Some("Interval"));
@@ -182,7 +182,6 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     auto_close_frame.append(&build_row!(&interval_hbox, false));
     section.append(&auto_close_frame);
 
-
     // --- Behaviors Group ---
     let behaviors_title = Label::new(Some("Behaviors"));
     behaviors_title.add_css_class("settings-group-title");
@@ -192,7 +191,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     section.append(&behaviors_title);
 
     let behaviors_frame = build_frame();
-    
+
     // Drag
     let close_after_dragging_check = CheckButton::new();
     close_after_dragging_check.set_active(config.quick_access_close_after_dragging);

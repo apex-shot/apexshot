@@ -143,7 +143,7 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                          bool displayRecTime, bool hidpi, bool doNotDisturb,
                          bool showCursor, bool rememberSelection,
                          bool dimScreen, bool countdown,
-                         int videoMaxRes, int videoFps, bool recordMono, bool openEditor,
+                         int videoFormat, int videoMaxRes, int videoFps, bool recordMono, bool openEditor,
                          int gifFps, double gifQuality, int gifSizeIdx, bool optimizeGif,
                          bool fullscreen)
 {
@@ -161,7 +161,7 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 "\"notifications\":%s,\"cursor\":%s,"
                 "\"remember_selection\":%s,\"dim_screen\":%s,"
                 "\"countdown\":%s,"
-                "\"video_max_res\":%d,\"video_fps\":%d,"
+                "\"video_format\":%d,\"video_max_res\":%d,\"video_fps\":%d,"
                 "\"record_mono\":%s,\"open_editor\":%s,"
                 "\"gif_fps\":%d,\"gif_quality\":%.4f,"
                 "\"gif_size_idx\":%d,\"optimize_gif\":%s,\"fullscreen\":%s}\n",
@@ -196,6 +196,7 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 rememberSelection ? "true" : "false",
                 dimScreen ? "true" : "false",
                 countdown ? "true" : "false",
+                0,
                 videoMaxRes,
                 videoFps,
                 recordMono ? "true" : "false",
@@ -266,6 +267,7 @@ int main(int argc, char* argv[])
     bool initialRememberSelection = false;
     bool initialDimScreen = true;
     bool initialShowCountdown = true;
+    int initialVideoFormat = 0;
     int initialVideoMaxRes = 0;
     int initialVideoFps = 2;
     bool initialRecordMono = false;
@@ -423,6 +425,10 @@ int main(int argc, char* argv[])
             initialShowCountdown = true;
         } else if (std::strcmp(argv[i], "--no-show-countdown") == 0) {
             initialShowCountdown = false;
+        } else if (QString(argv[i]).startsWith("--video-format=")) {
+            bool ok = false;
+            int v = QString(argv[i]).mid(15).toInt(&ok);
+            if (ok && v >= 0 && v <= 1) initialVideoFormat = v;
         } else if (QString(argv[i]).startsWith("--video-max-res=")) {
             bool ok = false;
             int v = QString(argv[i]).mid(16).toInt(&ok);
@@ -698,6 +704,7 @@ int main(int argc, char* argv[])
     overlay.setInitialRememberSelection(initialRememberSelection);
     overlay.setInitialDimScreen(initialDimScreen);
     overlay.setInitialShowCountdown(initialShowCountdown);
+    overlay.setInitialVideoFormat(initialVideoFormat);
     overlay.setInitialVideoMaxRes(initialVideoMaxRes);
     overlay.setInitialVideoFps(initialVideoFps);
     overlay.setInitialRecordMono(initialRecordMono);
@@ -756,6 +763,7 @@ int main(int argc, char* argv[])
                                overlay.recordRememberSelection(),
                                overlay.recordDimScreen(),
                                overlay.recordShowCountdown(),
+                               overlay.recordVideoFormat(),
                                overlay.recordVideoMaxRes(),
                                overlay.recordVideoFps(),
                                overlay.recordMono(),
@@ -840,6 +848,7 @@ int main(int argc, char* argv[])
                            overlay.recordRememberSelection(),
                            overlay.recordDimScreen(),
                            overlay.recordShowCountdown(),
+                           overlay.recordVideoFormat(),
                            overlay.recordVideoMaxRes(),
                            overlay.recordVideoFps(),
                            overlay.recordMono(),
@@ -854,6 +863,7 @@ int main(int argc, char* argv[])
 
     if (areaInitMode) {
         const bool ocrRequested = overlay.ocrRequested();
+        const bool fullscreenRequested = overlay.recordFullscreen();
         // Translate from local overlay coords to global screen coords
         // Include yOffset because overlay doesn't cover the top bar
         const QRect selGlobal = sel.translated(overlay.geometry().x(), yOffset);
@@ -869,7 +879,9 @@ int main(int argc, char* argv[])
         QString error;
         bool ok = false;
 
-        if (isGnomeWayland) {
+        if (fullscreenRequested) {
+            ok = ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error);
+        } else if (isGnomeWayland) {
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
               sel, overlay.geometry(), imagePath, imageSize, error);
         } else {

@@ -57,29 +57,30 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         section.append(&hbox);
     };
 
-    let create_row = |frame: &GtkBox, label_text: &str, current_val: &str, is_muted: bool| -> Button {
-        let hbox = GtkBox::new(Orientation::Horizontal, 12);
-        hbox.set_hexpand(true);
+    let create_row =
+        |frame: &GtkBox, label_text: &str, current_val: &str, is_muted: bool| -> Button {
+            let hbox = GtkBox::new(Orientation::Horizontal, 12);
+            hbox.set_hexpand(true);
 
-        let lbl = Label::new(Some(label_text));
-        lbl.set_xalign(0.0);
-        lbl.set_hexpand(true);
+            let lbl = Label::new(Some(label_text));
+            lbl.set_xalign(0.0);
+            lbl.set_hexpand(true);
 
-        let btn = Button::new();
-        btn.add_css_class("shortcuts-record-btn");
-        btn.set_label(if current_val.is_empty() {
-            "Record shortcut"
-        } else {
-            current_val
-        });
-        btn.set_size_request(200, -1);
+            let btn = Button::new();
+            btn.add_css_class("shortcuts-record-btn");
+            btn.set_label(if current_val.is_empty() {
+                "Record shortcut"
+            } else {
+                current_val
+            });
+            btn.set_size_request(200, -1);
 
-        hbox.append(&lbl);
-        hbox.append(&btn);
+            hbox.append(&lbl);
+            hbox.append(&btn);
 
-        frame.append(&build_row!(&hbox, is_muted));
-        btn
-    };
+            frame.append(&build_row!(&hbox, is_muted));
+            btn
+        };
 
     // --- General Section ---
     create_header(&section, "General", "emblem-system-symbolic");

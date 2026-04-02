@@ -48,6 +48,7 @@ pub struct AppConfig {
     pub last_selection_w: Option<i32>,
     pub last_selection_h: Option<i32>,
     // Recording Video tab settings
+    pub rec_video_format: u8,
     pub rec_video_max_res: u8,
     pub rec_video_fps: u8,
     pub rec_video_mono: bool,
@@ -174,6 +175,7 @@ impl Default for AppConfig {
             last_selection_w: None,
             last_selection_h: None,
             // Video tab defaults
+            rec_video_format: 0,  // 0 = MP4
             rec_video_max_res: 0, // 0 = Original
             rec_video_fps: 1,     // 1 = 30fps
             rec_video_mono: false,
@@ -288,6 +290,7 @@ impl AppConfig {
         {
             self.after_capture_show_quick_access = DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS;
         }
+        self.rec_video_format = self.rec_video_format.min(1);
         self.rec_gif_fps = self.rec_gif_fps.clamp(5, 60);
         self.rec_gif_quality = self.rec_gif_quality.clamp(0.0, 1.0);
         self.rec_gif_size_idx = self.rec_gif_size_idx.min(3);
@@ -554,6 +557,7 @@ mod tests {
         assert!(cfg.rec_dim_screen);
         assert!(cfg.rec_countdown);
         assert!(cfg.last_selection_x.is_none());
+        assert_eq!(cfg.rec_video_format, 0);
     }
 
     #[test]
@@ -682,6 +686,7 @@ mod tests {
         assert!(cfg.rec_controls);
         assert!(cfg.rec_cursor);
         assert!(!cfg.rec_hidpi);
+        assert_eq!(cfg.rec_video_format, 0);
     }
 
     #[test]

@@ -37,7 +37,9 @@ fn active_recording_control() -> &'static Mutex<Option<ActiveRecordingControl>> 
 
 fn notify_shell_overlay(command: RecordingControlCommand, session_id: &str) {
     let result = match command {
-        RecordingControlCommand::Pause => crate::gnome_shell::set_recording_paused(session_id, true),
+        RecordingControlCommand::Pause => {
+            crate::gnome_shell::set_recording_paused(session_id, true)
+        }
         RecordingControlCommand::Resume => {
             crate::gnome_shell::set_recording_paused(session_id, false)
         }
@@ -49,7 +51,11 @@ fn notify_shell_overlay(command: RecordingControlCommand, session_id: &str) {
     let _ = result;
 }
 
-fn apply_command_side_effects(command: RecordingControlCommand, paused: &AtomicBool, session_id: &str) {
+fn apply_command_side_effects(
+    command: RecordingControlCommand,
+    paused: &AtomicBool,
+    session_id: &str,
+) {
     match command {
         RecordingControlCommand::Pause => {
             paused.store(true, Ordering::Relaxed);

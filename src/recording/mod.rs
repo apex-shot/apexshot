@@ -566,19 +566,19 @@ struct EncoderProfile {
 
 // Priority list of encoders
 const PROFILES: &[EncoderProfile] = &[
-    // VP8 (WebM) - Prioritized fallback over H.264 if missing, and better than Theora
-    EncoderProfile {
-        name: "VP8",
-        encoder: "vp8enc",
-        props: "deadline=1",
-        muxer: "webmmux",
-        extension: "webm",
-    },
     // VP9 (WebM)
     EncoderProfile {
         name: "VP9",
         encoder: "vp9enc",
-        props: "deadline=1",
+        props: "",
+        muxer: "webmmux",
+        extension: "webm",
+    },
+    // VP8 (WebM) - fallback when VP9 is unavailable
+    EncoderProfile {
+        name: "VP8",
+        encoder: "vp8enc",
+        props: "",
         muxer: "webmmux",
         extension: "webm",
     },
@@ -586,7 +586,7 @@ const PROFILES: &[EncoderProfile] = &[
     EncoderProfile {
         name: "H.264 (x264)",
         encoder: "x264enc",
-        props: "speed-preset=ultrafast tune=zerolatency",
+        props: "",
         muxer: "mp4mux",
         extension: "mp4",
     },
@@ -918,7 +918,8 @@ pub fn copy_to_clipboard(path: &PathBuf) -> RecordResult<()> {
 fn select_encoder(
     requested_path: &std::path::Path,
 ) -> RecordResult<(&'static EncoderProfile, PathBuf)> {
-    // Check for x264enc first to warn user if missing
+    // Check for x264enc first to warn user if missing. We can fall back, but motion-heavy
+    // captures will usually look worse on the alternative encoders.
     if gst::ElementFactory::find("x264enc").is_none() {
         println!("\n\x1b[33mWARNING: H.264 encoder (x264enc) not found!\x1b[0m");
         println!("Falling back to inferior encoders (Theora/VP8). For high-quality MP4 recording, please install:");
@@ -988,6 +989,66 @@ fn select_audio_encoder(muxer: &str) -> Option<&'static str> {
         .iter()
         .find(|&&enc| gst::ElementFactory::find(enc).is_some())
         .copied()
+}
+
+fn video_encoder_props(profile: &EncoderProfile, config: &RecordingConfig) -> String {
+    let key_int_max = config.fps.saturating_mul(2).max(1);
+
+    if profile.encoder == "x264enc" {
+        // Screen recordings favor detail retention over ultra-low-latency delivery.
+        // Bias toward structural detail so scrolling text and thumbnails stay sharper
+        // in both area and fullscreen recordings.
+        return format!(
+            "speed-preset=medium pass=qual quantizer=14 bitrate=8000 key-int-max={} rc-lookahead=20 ref=4 subme=6 psy-tune=ssim",
+            key_int_max
+        );
+    }
+
+    if profile.encoder == "vp9enc" {
+        // The libvpx defaults target just 256 kbps, which is far too low for desktop
+        // capture and leads to obvious grain on moving text and thumbnails. Keep a
+        // higher quality target, but avoid realtime settings that turn desktop motion
+        // into visible blockiness.
+        return format!(
+            "deadline=10000 end-usage=cq cq-level=10 target-bitrate=0 bits-per-pixel=0.12 cpu-used=4 row-mt=true threads=8 keyframe-max-dist={} lag-in-frames=0",
+            key_int_max
+        );
+    }
+
+    if profile.encoder == "vp8enc" {
+        return format!(
+            "deadline=8 end-usage=cq cq-level=10 target-bitrate=0 bits-per-pixel=0.12 cpu-used=4 threads=8 keyframe-max-dist={} lag-in-frames=0",
+            key_int_max
+        );
+    }
+
+    profile.props.to_string()
+}
+
+fn video_raw_caps(profile: &EncoderProfile, config: &RecordingConfig) -> String {
+    if profile.encoder == "x264enc" {
+        return format!("video/x-raw,framerate={}/1,format=I420", config.fps);
+    }
+
+    format!("video/x-raw,framerate={}/1", config.fps)
+}
+
+fn video_queue_props(profile: &EncoderProfile) -> &'static str {
+    if profile.encoder == "x264enc" {
+        // x264enc can accumulate latency; use a larger queue budget than the
+        // default live-pipeline settings to avoid visible stutter under motion.
+        "queue max-size-time=5000000000 max-size-bytes=0 max-size-buffers=0"
+    } else {
+        "queue"
+    }
+}
+
+fn video_post_encoder_caps(profile: &EncoderProfile) -> &'static str {
+    if profile.encoder == "x264enc" {
+        " ! video/x-h264,profile=high"
+    } else {
+        ""
+    }
 }
 
 async fn build_pipeline(
@@ -1073,15 +1134,31 @@ async fn build_pipeline(
         .speaker_source
         .clone()
         .unwrap_or_else(get_pulse_speaker_monitor);
+    let video_encoder = {
+        let props = video_encoder_props(profile, config);
+        if props.is_empty() {
+            profile.encoder.to_string()
+        } else {
+            format!("{} {}", profile.encoder, props)
+        }
+    };
+    let video_raw_caps = video_raw_caps(profile, config);
+    let video_queue = video_queue_props(profile);
+    let video_post_caps = video_post_encoder_caps(profile);
 
     if let Some(aenc) = audio_encoder {
         let muxer_named = format!("{} name=mux", profile.muxer);
 
-        let video_leg =
-            format!(
-            "{}{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! mux.",
-            video_source, crop_filter, hidpi_filter, resolution_filter, config.fps,
-            profile.encoder, profile.props
+        let video_leg = format!(
+            "{}{} ! videoconvert{}{} ! videorate ! {} ! {} ! {}{} ! mux.",
+            video_source,
+            crop_filter,
+            hidpi_filter,
+            resolution_filter,
+            video_raw_caps,
+            video_queue,
+            video_encoder,
+            video_post_caps
         );
 
         let filesink_leg = format!("{} ! filesink location=\"{}\"", muxer_named, output_str);
@@ -1123,9 +1200,9 @@ async fn build_pipeline(
     } else {
         Ok(BuiltPipeline {
             pipeline_str: format!(
-            "{}{} ! videoconvert{}{} ! videorate ! video/x-raw,framerate={}/1 ! queue ! {} {} ! {} ! filesink location=\"{}\"",
-            video_source, crop_filter, hidpi_filter, resolution_filter, config.fps,
-            profile.encoder, profile.props, profile.muxer, output_str
+            "{}{} ! videoconvert{}{} ! videorate ! {} ! {} ! {}{} ! {} ! filesink location=\"{}\"",
+            video_source, crop_filter, hidpi_filter, resolution_filter, video_raw_caps,
+            video_queue, video_encoder, video_post_caps, profile.muxer, output_str
             ),
             wayland_source,
         })
@@ -1652,6 +1729,7 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_webcam_rel_y = request.webcam_rel_y;
     app_config.rec_mic = request.mic;
     app_config.rec_speaker = request.speaker;
+    app_config.rec_video_format = 0;
     app_config.rec_video_max_res = request.video_max_res;
     app_config.rec_video_fps = request.video_fps;
     app_config.rec_video_mono = request.record_mono;
@@ -1712,12 +1790,23 @@ pub fn prepare_overlay_recording_request(
             (video_fps, 0.75, true, Some(800))
         };
 
+    let (capture_x, capture_y, capture_width, capture_height) = if request.fullscreen {
+        (None, None, None, None)
+    } else {
+        (
+            Some(request.x),
+            Some(request.y),
+            Some(request.width as u32),
+            Some(request.height as u32),
+        )
+    };
+
     let recording_config = RecordingConfig {
         output_path: output_path.clone(),
-        width: Some(request.width as u32),
-        height: Some(request.height as u32),
-        x: Some(request.x),
-        y: Some(request.y),
+        width: capture_width,
+        height: capture_height,
+        x: capture_x,
+        y: capture_y,
         cursor: request.cursor,
         hidpi: request.hidpi,
         max_resolution,
@@ -2092,6 +2181,36 @@ mod tests {
     use crate::config::AppConfig;
     use chrono::TimeZone;
     use pretty_assertions::assert_eq;
+    use std::path::Path;
+
+    fn x11_recording_config() -> RecordingConfig {
+        RecordingConfig {
+            output_path: PathBuf::from("/tmp/apexshot-test.mp4"),
+            width: Some(2560),
+            height: Some(1440),
+            x: Some(120),
+            y: Some(80),
+            cursor: true,
+            hidpi: false,
+            max_resolution: None,
+            fps: 30,
+            mono_audio: false,
+            mic_enabled: false,
+            speaker_enabled: false,
+            mic_source: None,
+            speaker_source: None,
+            gif_quality: 0.75,
+            gif_optimize: true,
+            gif_max_width: Some(800),
+        }
+    }
+
+    fn profile_by_encoder(encoder: &str) -> &'static EncoderProfile {
+        PROFILES
+            .iter()
+            .find(|profile| profile.encoder == encoder)
+            .expect("expected encoder profile to exist")
+    }
 
     #[test]
     fn prepare_overlay_recording_request_maps_video_settings() {
@@ -2113,6 +2232,7 @@ mod tests {
             remember_selection: true,
             dim_screen: false,
             countdown: false,
+            video_format: 0,
             video_max_res: 2,
             video_fps: 3,
             record_mono: true,
@@ -2150,6 +2270,7 @@ mod tests {
         assert_eq!(prepared.updated_app_config.last_selection_y, Some(20));
         assert_eq!(prepared.updated_app_config.last_selection_w, Some(640));
         assert_eq!(prepared.updated_app_config.last_selection_h, Some(480));
+        assert_eq!(prepared.updated_app_config.rec_video_format, 0);
         assert_eq!(prepared.updated_app_config.rec_video_max_res, 2);
         assert_eq!(prepared.updated_app_config.rec_video_fps, 3);
         assert_eq!(prepared.updated_app_config.rec_video_mono, true);
@@ -2189,6 +2310,274 @@ mod tests {
     }
 
     #[test]
+    fn prepare_overlay_recording_request_maps_video_setting_variants() {
+        let cases = [
+            (0, 0, None, 24_u32, "mp4"),
+            (1, 1, Some((1920, 1080)), 30_u32, "mp4"),
+            (0, 2, Some((1280, 720)), 50_u32, "mp4"),
+            (1, 0, None, 60_u32, "mp4"),
+        ];
+
+        for (index, (video_format, video_max_res, expected_max_res, expected_fps, extension)) in
+            cases.into_iter().enumerate()
+        {
+            let request = RecordingRequest {
+                x: 5,
+                y: 10,
+                width: 800,
+                height: 600,
+                record_type: RecordingType::Video,
+                video_format,
+                video_max_res,
+                video_fps: index as u8,
+                ..RecordingRequest::default()
+            };
+
+            let prepared = prepare_overlay_recording_request(
+                AppConfig::default(),
+                &request,
+                chrono::Utc
+                    .with_ymd_and_hms(2026, 4, 2, 10, 0, index as u32)
+                    .unwrap(),
+            );
+
+            assert_eq!(prepared.recording_config.max_resolution, expected_max_res);
+            assert_eq!(prepared.recording_config.fps, expected_fps);
+            assert_eq!(prepared.updated_app_config.rec_video_format, 0);
+            assert_eq!(
+                prepared
+                    .output_path
+                    .extension()
+                    .and_then(|ext| ext.to_str()),
+                Some(extension)
+            );
+        }
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_uses_full_monitor_bounds_for_fullscreen_capture() {
+        let request = RecordingRequest {
+            x: 0,
+            y: 32,
+            width: 1920,
+            height: 1048,
+            record_type: RecordingType::Video,
+            fullscreen: true,
+            ..RecordingRequest::default()
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 4, 2, 10, 0, 0).unwrap(),
+        );
+
+        assert_eq!(prepared.recording_config.x, None);
+        assert_eq!(prepared.recording_config.y, None);
+        assert_eq!(prepared.recording_config.width, None);
+        assert_eq!(prepared.recording_config.height, None);
+        assert_eq!(
+            prepared.controls_params,
+            Some(RecordingControlsParams {
+                capture_x: 0,
+                capture_y: 32,
+                capture_w: 1920,
+                capture_h: 1048,
+                is_fullscreen: true,
+                show_timer: true,
+                use_shell_mask: false,
+            })
+        );
+    }
+
+    #[test]
+    fn video_encoder_props_uses_quality_focused_x264_settings() {
+        let config = RecordingConfig {
+            fps: 60,
+            ..x11_recording_config()
+        };
+
+        let props = video_encoder_props(profile_by_encoder("x264enc"), &config);
+
+        assert!(props.contains("speed-preset=medium"));
+        assert!(props.contains("quantizer=14"));
+        assert!(props.contains("bitrate=8000"));
+        assert!(props.contains("key-int-max=120"));
+        assert!(props.contains("rc-lookahead=20"));
+        assert!(props.contains("ref=4"));
+        assert!(props.contains("subme=6"));
+        assert!(props.contains("psy-tune=ssim"));
+        assert!(!props.contains("tune=zerolatency"));
+        assert!(!props.contains("speed-preset=fast "));
+        assert!(!props.contains("speed-preset=ultrafast"));
+    }
+
+    #[test]
+    fn video_encoder_props_uses_quality_focused_webm_settings() {
+        let config = RecordingConfig {
+            fps: 60,
+            ..x11_recording_config()
+        };
+
+        let vp9_props = video_encoder_props(profile_by_encoder("vp9enc"), &config);
+        assert!(vp9_props.contains("end-usage=cq"));
+        assert!(vp9_props.contains("cq-level=10"));
+        assert!(vp9_props.contains("target-bitrate=0"));
+        assert!(vp9_props.contains("bits-per-pixel=0.12"));
+        assert!(vp9_props.contains("cpu-used=4"));
+        assert!(vp9_props.contains("keyframe-max-dist=120"));
+        assert!(vp9_props.contains("deadline=10000"));
+
+        let vp8_props = video_encoder_props(profile_by_encoder("vp8enc"), &config);
+        assert!(vp8_props.contains("end-usage=cq"));
+        assert!(vp8_props.contains("target-bitrate=0"));
+        assert!(vp8_props.contains("bits-per-pixel=0.12"));
+        assert!(vp8_props.contains("cpu-used=4"));
+        assert!(vp8_props.contains("keyframe-max-dist=120"));
+        assert!(vp8_props.contains("deadline=8"));
+
+        assert_eq!(
+            video_encoder_props(profile_by_encoder("openh264enc"), &config),
+            ""
+        );
+    }
+
+    #[test]
+    fn select_encoder_prefers_vp9_for_webm_when_available() {
+        gst::init().expect("gstreamer should initialize for encoder selection");
+
+        let (profile, path) = select_encoder(Path::new("/tmp/out.webm"))
+            .expect("webm encoder selection should succeed");
+
+        assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("webm"));
+
+        if gst::ElementFactory::find("vp9enc").is_some()
+            && gst::ElementFactory::find("webmmux").is_some()
+        {
+            assert_eq!(profile.encoder, "vp9enc");
+        } else if gst::ElementFactory::find("vp8enc").is_some()
+            && gst::ElementFactory::find("webmmux").is_some()
+        {
+            assert_eq!(profile.encoder, "vp8enc");
+        } else {
+            panic!("expected either vp9enc or vp8enc to be available for webm");
+        }
+    }
+
+    #[tokio::test]
+    async fn build_pipeline_includes_requested_frame_rate_and_quality_encoder_props() {
+        std::env::remove_var("WAYLAND_DISPLAY");
+        let config = RecordingConfig {
+            fps: 60,
+            ..x11_recording_config()
+        };
+
+        let built = build_pipeline(
+            &config,
+            profile_by_encoder("x264enc"),
+            Path::new("/tmp/out.mp4"),
+        )
+        .await
+        .expect("pipeline should build");
+
+        assert!(built
+            .pipeline_str
+            .contains("videorate ! video/x-raw,framerate=60/1"));
+        assert!(built.pipeline_str.contains("x264enc"));
+        assert!(built.pipeline_str.contains("quantizer=14"));
+        assert!(built.pipeline_str.contains("bitrate=8000"));
+        assert!(built.pipeline_str.contains("speed-preset=medium"));
+        assert!(built.pipeline_str.contains("rc-lookahead=20"));
+        assert!(built.pipeline_str.contains("ref=4"));
+        assert!(built.pipeline_str.contains("subme=6"));
+        assert!(built.pipeline_str.contains("psy-tune=ssim"));
+        assert!(built
+            .pipeline_str
+            .contains("video/x-raw,framerate=60/1,format=I420"));
+        assert!(built
+            .pipeline_str
+            .contains("queue max-size-time=5000000000 max-size-bytes=0 max-size-buffers=0"));
+        assert!(built.pipeline_str.contains("video/x-h264,profile=high"));
+        assert!(!built.pipeline_str.contains("tune=zerolatency"));
+        assert!(!built.pipeline_str.contains("speed-preset=ultrafast"));
+    }
+
+    #[tokio::test]
+    async fn build_pipeline_only_downscales_when_max_resolution_requires_it() {
+        std::env::remove_var("WAYLAND_DISPLAY");
+
+        let no_downscale = RecordingConfig {
+            max_resolution: Some((1920, 1080)),
+            width: Some(1280),
+            height: Some(720),
+            ..x11_recording_config()
+        };
+        let no_downscale_pipeline = build_pipeline(
+            &no_downscale,
+            profile_by_encoder("vp9enc"),
+            Path::new("/tmp/no-downscale.webm"),
+        )
+        .await
+        .expect("pipeline should build");
+        assert!(!no_downscale_pipeline
+            .pipeline_str
+            .contains("video/x-raw,width=1920,height=1080"));
+
+        let downscale = RecordingConfig {
+            max_resolution: Some((1280, 720)),
+            ..x11_recording_config()
+        };
+        let downscale_pipeline = build_pipeline(
+            &downscale,
+            profile_by_encoder("vp9enc"),
+            Path::new("/tmp/downscale.webm"),
+        )
+        .await
+        .expect("pipeline should build");
+        assert!(downscale_pipeline
+            .pipeline_str
+            .contains("! videoscale ! video/x-raw,width=1280,height=720"));
+    }
+
+    #[tokio::test]
+    async fn build_pipeline_keeps_hidpi_and_audio_settings_authoritative() {
+        std::env::remove_var("WAYLAND_DISPLAY");
+        gst::init().expect("gstreamer should initialize for pipeline inspection");
+
+        let config = RecordingConfig {
+            hidpi: true,
+            mic_enabled: true,
+            speaker_enabled: true,
+            mono_audio: true,
+            mic_source: Some("mic.test".into()),
+            speaker_source: Some("speaker.test.monitor".into()),
+            ..x11_recording_config()
+        };
+
+        let built = build_pipeline(
+            &config,
+            profile_by_encoder("vp9enc"),
+            Path::new("/tmp/audio.webm"),
+        )
+        .await
+        .expect("pipeline should build");
+
+        assert!(built.pipeline_str.contains("videoconvert ! videoscale"));
+
+        if gst::ElementFactory::find("pulsesrc").is_some()
+            && select_audio_encoder(PROFILES[0].muxer).is_some()
+        {
+            assert!(built.pipeline_str.contains("pulsesrc device=\"mic.test\""));
+            assert!(built
+                .pipeline_str
+                .contains("pulsesrc device=\"speaker.test.monitor\""));
+            assert!(built.pipeline_str.contains("audio/x-raw,channels=1"));
+        } else {
+            assert!(!built.pipeline_str.contains("pulsesrc device="));
+        }
+    }
+
+    #[test]
     fn prepare_overlay_recording_request_maps_gif_settings_without_controls() {
         let request = RecordingRequest {
             x: 1,
@@ -2208,6 +2597,7 @@ mod tests {
             remember_selection: false,
             dim_screen: true,
             countdown: true,
+            video_format: 0,
             video_max_res: 1,
             video_fps: 2,
             record_mono: false,
@@ -2288,6 +2678,7 @@ mod tests {
             remember_selection: false,
             dim_screen: true,
             countdown: true,
+            video_format: 0,
             video_max_res: 1,
             video_fps: 1,
             record_mono: false,
@@ -2389,6 +2780,7 @@ mod tests {
             remember_selection: false,
             dim_screen: true,
             countdown: true,
+            video_format: 0,
             video_max_res: 1,
             video_fps: 1,
             record_mono: false,

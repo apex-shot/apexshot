@@ -4,7 +4,6 @@ use gtk4::{
 };
 use std::rc::Rc;
 
-use super::icon_names;
 use super::super::{
     pen_weight::PenWeight,
     types::{ArrowStyle, ObfuscateMethod, Tool},
@@ -15,6 +14,7 @@ use super::super::{
     },
 };
 use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
+use super::icon_names;
 
 pub(super) struct ToolbarBaseParts {
     pub root: CenterBox,

@@ -101,6 +101,7 @@ public:
     bool recordShowCountdown() const { return m_showCountdown; }
 
     // Video tab settings
+    int recordVideoFormat() const { return m_videoFormat; }
     int recordVideoMaxRes() const { return m_videoMaxRes; }
     int recordVideoFps() const { return m_videoFps; }
     bool recordMono() const { return m_recordMono; }
@@ -155,6 +156,7 @@ public:
     void setInitialRememberSelection(bool v) { m_rememberSelection = v; }
     void setInitialDimScreen(bool v) { m_dimScreen = v; }
     void setInitialShowCountdown(bool v) { m_showCountdown = v; }
+    void setInitialVideoFormat(int v) { m_videoFormat = std::clamp(v, 0, 1); }
     void setInitialVideoMaxRes(int v) { m_videoMaxRes = v; }
     void setInitialVideoFps(int v) { m_videoFps = v; }
     void setInitialRecordMono(bool v) { m_recordMono = v; }
@@ -394,6 +396,7 @@ private:
     QList<KeyPreview> m_keyPreviews; // recent key presses for live preview
     
     // Video settings
+    int  m_videoFormat;      // index
     int  m_videoMaxRes;      // index
     int  m_videoFps;         // index
     bool m_recordMono;

@@ -1,8 +1,7 @@
 use super::types::ArrowStyle;
 use gtk4::gdk;
 use gtk4::{
-    prelude::*, Box as GtkBox, Button, CssProvider, DrawingArea, Image, Label, Orientation,
-    Widget,
+    prelude::*, Box as GtkBox, Button, CssProvider, DrawingArea, Image, Label, Orientation, Widget,
 };
 use std::process::Command;
 
@@ -1825,12 +1824,7 @@ fn icon_stroke_color(widget: &DrawingArea) -> gdk::RGBA {
         .unwrap_or_else(|| gdk::RGBA::new(1.0, 1.0, 1.0, 1.0))
 }
 
-fn draw_arrow_icon(
-    context: &gtk4::cairo::Context,
-    width: f64,
-    height: f64,
-    style: ArrowStyle,
-) {
+fn draw_arrow_icon(context: &gtk4::cairo::Context, width: f64, height: f64, style: ArrowStyle) {
     let start_x = width * 0.22;
     let start_y = height * 0.78;
     let end_x = width * 0.78;
@@ -2100,7 +2094,9 @@ pub fn set_crop_apply_button_state(button: &Button, crop_mode: bool, has_selecti
 
 #[cfg(test)]
 mod tests {
-    use super::{arrow_style_toolbar_icon, custom_toolbar_icon_inset, toolbar_icon_size, EditorToolIcon};
+    use super::{
+        arrow_style_toolbar_icon, custom_toolbar_icon_inset, toolbar_icon_size, EditorToolIcon,
+    };
     use crate::capture::editor::types::ArrowStyle;
 
     #[test]

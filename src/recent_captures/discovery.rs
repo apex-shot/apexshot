@@ -68,7 +68,11 @@ pub(crate) fn discover_recent_captures_in_dir(
             }
 
             if filter != CaptureModeFilter::All {
-                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
                 let is_anim = matches!(ext.as_str(), "mp4" | "webm" | "mkv" | "mov" | "gif");
                 if filter == CaptureModeFilter::Screenshots && is_anim {
                     return None;
@@ -156,7 +160,10 @@ mod tests {
         let result = discover_recent_captures_in_dir(&dir, 13, CaptureModeFilter::All);
 
         assert_eq!(
-            result.featured.as_ref().map(|entry| entry.file_name.as_str()),
+            result
+                .featured
+                .as_ref()
+                .map(|entry| entry.file_name.as_str()),
             Some("newest.png")
         );
         assert_eq!(result.remaining.len(), 1);
@@ -177,7 +184,10 @@ mod tests {
         let result = discover_recent_captures_in_dir(&dir, 13, CaptureModeFilter::All);
 
         assert_eq!(
-            result.featured.as_ref().map(|entry| entry.file_name.as_str()),
+            result
+                .featured
+                .as_ref()
+                .map(|entry| entry.file_name.as_str()),
             Some("three.png")
         );
         assert_eq!(result.remaining.len(), 2);
@@ -214,7 +224,10 @@ mod tests {
         let result = discover_recent_captures_in_dir(&dir, 13, CaptureModeFilter::All);
 
         assert_eq!(
-            result.featured.as_ref().map(|entry| entry.file_name.as_str()),
+            result
+                .featured
+                .as_ref()
+                .map(|entry| entry.file_name.as_str()),
             Some("capture.png")
         );
         assert!(result.remaining.is_empty());
@@ -233,7 +246,10 @@ mod tests {
         let result = discover_recent_captures_in_dir(&dir, 13, CaptureModeFilter::All);
 
         assert_eq!(
-            result.featured.as_ref().map(|entry| entry.file_name.as_str()),
+            result
+                .featured
+                .as_ref()
+                .map(|entry| entry.file_name.as_str()),
             Some("capture.png")
         );
         assert!(result.remaining.is_empty());

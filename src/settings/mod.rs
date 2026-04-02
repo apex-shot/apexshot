@@ -317,11 +317,11 @@ fn build_settings_window(app: &Application) {
 
         let header = GtkBox::new(Orientation::Vertical, 4);
         header.set_margin_bottom(24);
-        
+
         let title_lbl = Label::new(Some(title));
         title_lbl.add_css_class("settings-page-title");
         title_lbl.set_halign(Align::Start);
-        
+
         header.append(&title_lbl);
         vbox.append(&header);
 
@@ -407,6 +407,10 @@ fn build_settings_window(app: &Application) {
         rec_clicks: recordings.rec_clicks_check.clone(),
         rec_keystrokes: recordings.rec_keystrokes_check.clone(),
         rec_key_filter: recordings.rec_key_filter_input.clone(),
+        rec_video_max_res: recordings.rec_video_max_res_input.clone(),
+        rec_video_fps: recordings.rec_video_fps_input.clone(),
+        rec_video_mono: recordings.rec_video_mono_check.clone(),
+        rec_video_open_editor: recordings.rec_video_open_editor_check.clone(),
         wallpaper_mode_desktop: wallpaper.wallpaper_mode_desktop.clone(),
         wallpaper_dont_change_on_space: wallpaper.wallpaper_dont_change_check.clone(),
         wallpaper_mode_custom: wallpaper.wallpaper_mode_custom.clone(),

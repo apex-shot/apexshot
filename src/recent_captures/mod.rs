@@ -6,14 +6,15 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use discovery::{discover_recent_captures, recent_capture_source_dir};
 use gtk4::{
-    gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
-    Grid, Label, Orientation, PolicyType, ScrolledWindow, ToggleButton,
+    gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Grid,
+    Label, Orientation, PolicyType, ScrolledWindow, ToggleButton,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::time::SystemTime;
 
+use crate::capture::show_capture_preview_overlay;
 use crate::settings::{
     ui_support::{install_settings_css, traffic_light_button},
     windowing::{
@@ -21,7 +22,6 @@ use crate::settings::{
         prefers_reduced_transparency,
     },
 };
-use crate::capture::show_capture_preview_overlay;
 
 const HERO_IMAGE_WIDTH: i32 = 640;
 const HERO_IMAGE_HEIGHT: i32 = 380;
@@ -86,7 +86,11 @@ fn build_recent_captures_window(app: &Application) {
     let max_btn = traffic_light_button("traffic-light-green", "Maximize");
     let window_max = window.clone();
     max_btn.connect_clicked(move |_| {
-        if window_max.is_maximized() { window_max.unmaximize(); } else { window_max.maximize(); }
+        if window_max.is_maximized() {
+            window_max.unmaximize();
+        } else {
+            window_max.maximize();
+        }
     });
 
     left_box.append(&close_btn);
@@ -94,7 +98,9 @@ fn build_recent_captures_window(app: &Application) {
     left_box.append(&max_btn);
     toolbar.append(&left_box);
 
-    let filter_state = Rc::new(std::cell::Cell::new(discovery::CaptureModeFilter::Screenshots));
+    let filter_state = Rc::new(std::cell::Cell::new(
+        discovery::CaptureModeFilter::Screenshots,
+    ));
 
     let drag_handle_left = GtkBox::new(Orientation::Horizontal, 0);
     drag_handle_left.set_hexpand(true);
@@ -277,7 +283,9 @@ fn load_recent_capture_content(
     content.append(&header);
 
     let collection_name = match filter {
-        discovery::CaptureModeFilter::Screenshots | discovery::CaptureModeFilter::All => "screenshot",
+        discovery::CaptureModeFilter::Screenshots | discovery::CaptureModeFilter::All => {
+            "screenshot"
+        }
         discovery::CaptureModeFilter::Recordings => "recording",
     };
 
@@ -286,7 +294,11 @@ fn load_recent_capture_content(
             "{} recent {}{}",
             1 + collection.remaining.len(),
             collection_name,
-            if collection.remaining.is_empty() { "" } else { "s" }
+            if collection.remaining.is_empty() {
+                ""
+            } else {
+                "s"
+            }
         ));
         let hero = build_featured_section(featured, status_label);
         content.append(&hero);
@@ -302,7 +314,11 @@ fn load_recent_capture_content(
     }
 }
 
-fn build_header(source_dir: Option<&PathBuf>, has_results: bool, filter: discovery::CaptureModeFilter) -> GtkBox {
+fn build_header(
+    source_dir: Option<&PathBuf>,
+    has_results: bool,
+    filter: discovery::CaptureModeFilter,
+) -> GtkBox {
     let header = GtkBox::new(Orientation::Vertical, 10);
     header.add_css_class("recent-captures-header");
 
@@ -316,11 +332,13 @@ fn build_header(source_dir: Option<&PathBuf>, has_results: bool, filter: discove
         (Some(dir), true) => format!("Browsing {}", dir.display()),
         (Some(dir), false) => {
             let noun = match filter {
-                discovery::CaptureModeFilter::Screenshots | discovery::CaptureModeFilter::All => "screenshots",
+                discovery::CaptureModeFilter::Screenshots | discovery::CaptureModeFilter::All => {
+                    "screenshots"
+                }
                 discovery::CaptureModeFilter::Recordings => "recordings",
             };
             format!("Watching {} for saved {}", dir.display(), noun)
-        },
+        }
         (None, _) => "Capture save location is unavailable on this system".to_string(),
     };
 
@@ -339,7 +357,12 @@ fn build_featured_section(entry: &RecentCaptureEntry, status_label: &Label) -> G
     let section = GtkBox::new(Orientation::Horizontal, 32);
     section.add_css_class("recent-captures-hero");
 
-    let thumbnail = build_thumbnail(entry.path.clone(), HERO_IMAGE_WIDTH, HERO_IMAGE_HEIGHT, true);
+    let thumbnail = build_thumbnail(
+        entry.path.clone(),
+        HERO_IMAGE_WIDTH,
+        HERO_IMAGE_HEIGHT,
+        true,
+    );
 
     let hero_image = GtkBox::new(Orientation::Vertical, 0);
     hero_image.add_css_class("recent-captures-hero-image");
@@ -391,11 +414,9 @@ fn build_featured_section(entry: &RecentCaptureEntry, status_label: &Label) -> G
     {
         let path = entry.path.clone();
         let status = status_label.clone();
-        overlay_button.connect_clicked(move |_| {
-            match show_capture_preview_overlay(path.clone()) {
-                Ok(_) => status.set_text("Floating overlay launched"),
-                Err(e) => status.set_text(&format!("Failed to launch overlay: {}", e)),
-            }
+        overlay_button.connect_clicked(move |_| match show_capture_preview_overlay(path.clone()) {
+            Ok(_) => status.set_text("Floating overlay launched"),
+            Err(e) => status.set_text(&format!("Failed to launch overlay: {}", e)),
         });
     }
 
@@ -455,7 +476,13 @@ fn build_recent_grid(entries: &[RecentCaptureEntry], status_label: &Label, colum
     for (index, entry) in entries.iter().enumerate() {
         let card = build_grid_card(entry, status_label, index % 2 == 1, columns);
         card.set_hexpand(true);
-        grid.attach(&card, (index as u32 % columns) as i32, (index as u32 / columns) as i32, 1, 1);
+        grid.attach(
+            &card,
+            (index as u32 % columns) as i32,
+            (index as u32 / columns) as i32,
+            1,
+            1,
+        );
     }
 
     wrapper.append(&title);
@@ -463,7 +490,12 @@ fn build_recent_grid(entries: &[RecentCaptureEntry], status_label: &Label, colum
     wrapper
 }
 
-fn build_grid_card(entry: &RecentCaptureEntry, status_label: &Label, alternate: bool, columns: u32) -> GtkBox {
+fn build_grid_card(
+    entry: &RecentCaptureEntry,
+    status_label: &Label,
+    alternate: bool,
+    columns: u32,
+) -> GtkBox {
     let list_mode = columns == 1;
 
     // In list mode: horizontal row. In grid mode: vertical card.
@@ -478,16 +510,24 @@ fn build_grid_card(entry: &RecentCaptureEntry, status_label: &Label, alternate: 
     }
 
     // Thumbnail — smaller in list mode, full-width in grid mode
-    let (thumb_w, thumb_h) = if list_mode { (140, 88) } else { (CARD_IMAGE_WIDTH, CARD_IMAGE_HEIGHT) };
+    let (thumb_w, thumb_h) = if list_mode {
+        (140, 88)
+    } else {
+        (CARD_IMAGE_WIDTH, CARD_IMAGE_HEIGHT)
+    };
 
     let preview_trigger = Button::new();
     preview_trigger.set_has_frame(false);
-    if !list_mode { preview_trigger.set_hexpand(true); }
+    if !list_mode {
+        preview_trigger.set_hexpand(true);
+    }
     preview_trigger.add_css_class("recent-captures-card");
 
     let thumbnail = build_thumbnail(entry.path.clone(), thumb_w, thumb_h, false);
     thumbnail.add_css_class("recent-captures-card-image");
-    if !list_mode { thumbnail.set_hexpand(true); }
+    if !list_mode {
+        thumbnail.set_hexpand(true);
+    }
     preview_trigger.set_child(Some(&thumbnail));
 
     {
@@ -533,11 +573,9 @@ fn build_grid_card(entry: &RecentCaptureEntry, status_label: &Label, alternate: 
     {
         let path = entry.path.clone();
         let status = status_label.clone();
-        btn_overlay.connect_clicked(move |_| {
-            match show_capture_preview_overlay(path.clone()) {
-                Ok(_) => status.set_text("Floating overlay launched"),
-                Err(e) => status.set_text(&format!("Failed to launch overlay: {}", e)),
-            }
+        btn_overlay.connect_clicked(move |_| match show_capture_preview_overlay(path.clone()) {
+            Ok(_) => status.set_text("Floating overlay launched"),
+            Err(e) => status.set_text(&format!("Failed to launch overlay: {}", e)),
         });
     }
 
@@ -578,7 +616,10 @@ fn build_grid_card(entry: &RecentCaptureEntry, status_label: &Label, alternate: 
     actions.append(&btn_reveal);
 
     let metadata_box = GtkBox::new(Orientation::Vertical, 4);
-    if list_mode { metadata_box.set_hexpand(true); metadata_box.set_valign(Align::Center); }
+    if list_mode {
+        metadata_box.set_hexpand(true);
+        metadata_box.set_valign(Align::Center);
+    }
     metadata_box.append(&title);
     metadata_box.append(&timestamp);
     metadata_box.append(&meta);
@@ -698,7 +739,7 @@ fn format_capture_meta(entry: &RecentCaptureEntry) -> String {
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.to_ascii_uppercase())
         .unwrap_or_else(|| "FILE".to_string());
-        
+
     if is_anim {
         format!("{extension} recording")
     } else {
@@ -712,7 +753,6 @@ fn format_capture_supporting_copy(entry: &RecentCaptureEntry) -> String {
         format_capture_meta(entry)
     )
 }
-
 
 fn open_path_with_default_app(path: &Path, status_label: &Label, success_message: &str) {
     if !path.exists() {

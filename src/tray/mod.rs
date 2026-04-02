@@ -66,7 +66,7 @@ impl ApexShotTray {
 
 /// Generate the new 'A-Mark' tray icon procedurally as raw ARGB32 bytes.
 ///
-/// This provides razor-sharp, pixel-perfect lines by drawing the logo 
+/// This provides razor-sharp, pixel-perfect lines by drawing the logo
 /// directly using geometric primitives at the desired resolution.
 fn apex_icon(size: i32) -> ksni::Icon {
     use gtk4::cairo::{Context, Format, ImageSurface, LineCap, LineJoin};
@@ -79,7 +79,8 @@ fn apex_icon(size: i32) -> ksni::Icon {
 
     // Transparent background for system tray
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
-    cr.paint().expect("Failed to clear tray transparent background");
+    cr.paint()
+        .expect("Failed to clear tray transparent background");
 
     // Viewfinder / Crop Corners
     cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
@@ -123,7 +124,7 @@ fn apex_icon(size: i32) -> ksni::Icon {
     cr.fill().expect("Failed to draw tray icon");
 
     // Theme Orange (#b05c38) Shadow / Slice on the peak
-    cr.set_source_rgba(0.69, 0.36, 0.22, 1.0); 
+    cr.set_source_rgba(0.69, 0.36, 0.22, 1.0);
     cr.move_to(cx, peak_y);
     cr.line_to(cx + peak_half_w, base_y);
     cr.line_to(cx, base_y);
@@ -139,14 +140,16 @@ fn apex_icon(size: i32) -> ksni::Icon {
     let mut pixels = vec![0u8; width * height * 4];
 
     {
-        let data = surface.data().expect("Failed to extract cairo surface data");
+        let data = surface
+            .data()
+            .expect("Failed to extract cairo surface data");
         // Extract raw stride rows into exact contiguous W * 4 buffer
         for y in 0..height {
             let src_start = y * stride;
             let src_end = src_start + width * 4;
             let dst_start = y * width * 4;
             let dst_end = dst_start + width * 4;
-            
+
             pixels[dst_start..dst_end].copy_from_slice(&data[src_start..src_end]);
         }
     }
@@ -230,14 +233,12 @@ impl ksni::Tray for ApexShotTray {
         let ltr = |label: &str| format!("\u{200E}{label}");
 
         if matches!(self.presentation, TrayPresentation::Recording { .. }) {
-            return vec![
-                StandardItem {
-                    label: ltr("Stop Recording"),
-                    activate: Box::new(|tray: &mut Self| tray.send(TrayAction::StopRecordingSave)),
-                    ..Default::default()
-                }
-                .into(),
-            ];
+            return vec![StandardItem {
+                label: ltr("Stop Recording"),
+                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::StopRecordingSave)),
+                ..Default::default()
+            }
+            .into()];
         }
 
         vec![

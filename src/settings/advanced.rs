@@ -55,7 +55,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     section.append(&filename_title);
 
     let filename_frame = build_frame();
-    
+
     // Edit filename
     let filename_edit_btn = Button::with_label("Edit");
     filename_edit_btn.add_css_class("secondary-settings-button");
@@ -94,7 +94,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
 
     section.append(&filename_frame);
 
-
     // --- Clipboard Group ---
     let clipboard_title = Label::new(Some("Copy to clipboard"));
     clipboard_title.add_css_class("settings-group-title");
@@ -104,14 +103,14 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     section.append(&clipboard_title);
 
     let clipboard_frame = build_frame();
-    
+
     // Clipboard mode
     let clipboard_mode_input = ComboBoxText::new();
     clipboard_mode_input.add_css_class("settings-select");
     clipboard_mode_input.append(Some("File & Image (default)"), "File & Image (default)");
     clipboard_mode_input.append(Some("Image Only"), "Image Only");
     clipboard_mode_input.set_active_id(Some(&config.adv_clipboard_mode));
-    
+
     let clipboard_hbox = GtkBox::new(Orientation::Horizontal, 12);
     clipboard_hbox.set_hexpand(true);
     let clip_vbox = GtkBox::new(Orientation::Vertical, 4);
@@ -128,7 +127,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     clipboard_frame.append(&build_row!(&clipboard_hbox, false));
 
     section.append(&clipboard_frame);
-
 
     // --- Pinned Screenshots Group ---
     let pinned_title = Label::new(Some("Pinned screenshots"));
@@ -175,7 +173,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
 
     section.append(&pinned_frame);
 
-
     // --- Text Recognition Group ---
     let ocr_title = Label::new(Some("Text recognition"));
     ocr_title.add_css_class("settings-group-title");
@@ -191,7 +188,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     ocr_lang_input.append(Some("English"), "English");
     ocr_lang_input.append(Some("Spanish"), "Spanish");
     ocr_lang_input.set_active_id(Some(&config.adv_ocr_language));
-    
+
     let ocr_lang_hbox = GtkBox::new(Orientation::Horizontal, 12);
     ocr_lang_hbox.set_hexpand(true);
     let lbl_lang = Label::new(Some("Main language"));
@@ -214,7 +211,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
 
     section.append(&ocr_frame);
 
-
     // --- Dialogs Group ---
     let dialogs_title = Label::new(Some("Dialogs"));
     dialogs_title.add_css_class("settings-group-title");
@@ -224,7 +220,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     section.append(&dialogs_title);
 
     let dialogs_frame = build_frame();
-    
+
     let reset_dialogs_btn = Button::with_label("Reset All Warning Dialogs");
     reset_dialogs_btn.add_css_class("secondary-settings-button");
     let dialogs_hbox = GtkBox::new(Orientation::Horizontal, 12);
@@ -235,7 +231,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     dialogs_hbox.append(&lbl_dialogs);
     dialogs_hbox.append(&reset_dialogs_btn);
     dialogs_frame.append(&build_row!(&dialogs_hbox, false));
-    
+
     section.append(&dialogs_frame);
 
     AdvancedSettingsWidgets {

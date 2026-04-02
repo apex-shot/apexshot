@@ -47,6 +47,10 @@ pub struct SaveInputs {
     pub rec_clicks: CheckButton,
     pub rec_keystrokes: CheckButton,
     pub rec_key_filter: ComboBoxText,
+    pub rec_video_max_res: ComboBoxText,
+    pub rec_video_fps: ComboBoxText,
+    pub rec_video_mono: CheckButton,
+    pub rec_video_open_editor: CheckButton,
     pub wallpaper_mode_desktop: CheckButton,
     pub wallpaper_dont_change_on_space: CheckButton,
     pub wallpaper_mode_custom: CheckButton,
@@ -209,6 +213,15 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.rec_key_filter = combo_value(&inputs.rec_key_filter, "0")
         .parse::<u8>()
         .unwrap_or(0);
+    config.rec_video_format = 0;
+    config.rec_video_max_res = combo_value(&inputs.rec_video_max_res, "0")
+        .parse::<u8>()
+        .unwrap_or(0);
+    config.rec_video_fps = combo_value(&inputs.rec_video_fps, "1")
+        .parse::<u8>()
+        .unwrap_or(1);
+    config.rec_video_mono = inputs.rec_video_mono.is_active();
+    config.rec_video_open_editor = inputs.rec_video_open_editor.is_active();
 
     config.wallpaper_dont_change_on_space = inputs.wallpaper_dont_change_on_space.is_active();
     config.window_screenshot_padding = inputs.window_screenshot_padding.value();
