@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import {
+    computeControlsDockPosition,
     computeAdjacentPopupPosition,
     createRuntimeOverlayHeaderStyle,
     createRuntimeOverlayMenuStyle,
@@ -65,9 +66,9 @@ runTest("runtime overlay rows reserve full width for left-aligned labels", () =>
     assert(styles.label.style.includes("text-align: left;"), "label text should be explicitly left aligned");
 });
 
-runTest("menu and popup styles drop the white border outline", () => {
-    assert(!createRuntimeOverlayMenuStyle(200).includes("border:"), "menu should not render a border outline");
-    assert(!createWarningPopupStyle().includes("border:"), "warning popup should not render a border outline");
+runTest("menu and popup styles include the updated border treatment", () => {
+    assert(createRuntimeOverlayMenuStyle(200).includes("border:"), "menu should render the updated border outline");
+    assert(createWarningPopupStyle().includes("border:"), "warning popup should render the updated border outline");
 });
 
 runTest("overlay header matches the webcam menu heading treatment", () => {
@@ -75,14 +76,39 @@ runTest("overlay header matches the webcam menu heading treatment", () => {
 
     assertEqual(
         style,
-        "padding: 10px 14px 4px 14px; font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 110); background: transparent;",
+        "padding: 10px 14px 6px 14px; font-size: 10px; font-weight: 800; color: rgba(255, 255, 255, 0.45); background: transparent; letter-spacing: 0.8px;",
         "header style should match the webcam menu disabled header"
     );
 });
 
-runTest("runtime overlay menu style is compact and shadowless", () => {
+runTest("runtime overlay menu style is compact and retains the new shadow", () => {
     const style = createRuntimeOverlayMenuStyle(168);
 
     assert(style.includes("width: 168px;"), "menu should use the reduced compact width");
-    assert(!style.includes("box-shadow:"), "menu should not render a drop shadow");
+    assert(style.includes("box-shadow:"), "menu should render the updated drop shadow");
+});
+
+runTest("docks area recording controls outside the captured rectangle", () => {
+    const position = computeControlsDockPosition({
+        rect: {x: 100, y: 100, width: 640, height: 360},
+        isFullscreen: false,
+        visibilityPolicy: "area-outside-capture",
+        monitor: {x: 0, y: 0, width: 1280, height: 720},
+        controlsSize: {width: 420, height: 46},
+    });
+
+    assertEqual(position.x, 210, "controls should remain centered to the capture width");
+    assertEqual(position.y, 462, "controls should dock below the captured area");
+});
+
+runTest("suppresses fullscreen controls when the visibility policy is hidden", () => {
+    const position = computeControlsDockPosition({
+        rect: {x: 0, y: 0, width: 1920, height: 1080},
+        isFullscreen: true,
+        visibilityPolicy: "hidden",
+        monitor: {x: 0, y: 0, width: 1920, height: 1080},
+        controlsSize: {width: 420, height: 46},
+    });
+
+    assertEqual(position, null, "hidden fullscreen controls should not produce a dock position");
 });

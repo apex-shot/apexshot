@@ -16,6 +16,21 @@ pub struct RecordingMaskGeometry {
     pub height: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordingControlsVisibilityPolicy {
+    AreaOutsideCapture,
+    Hidden,
+}
+
+impl RecordingControlsVisibilityPolicy {
+    pub fn as_dbus_value(self) -> &'static str {
+        match self {
+            Self::AreaOutsideCapture => "area-outside-capture",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordingControlsSpec {
     pub dbus_dest: String,
@@ -23,6 +38,7 @@ pub struct RecordingControlsSpec {
     pub geometry: RecordingMaskGeometry,
     pub is_fullscreen: bool,
     pub show_timer: bool,
+    pub visibility_policy: RecordingControlsVisibilityPolicy,
     pub runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
 }
 
@@ -212,6 +228,36 @@ pub fn push_recording_keystroke(session_id: &str, text: &str) -> anyhow::Result<
         .context("failed to launch dbus-send for PushKeystroke")
 }
 
+pub fn set_recording_paused(session_id: &str, paused: bool) -> anyhow::Result<()> {
+    if !current_session_supports_gnome_shell_overlay() {
+        return Ok(());
+    }
+
+    run_shell_overlay_method(
+        "SetRecordingPaused",
+        show_recording_paused_args(session_id, paused),
+    )
+    .context("failed to launch dbus-send for SetRecordingPaused")
+}
+
+pub fn restart_recording_ui(session_id: &str) -> anyhow::Result<()> {
+    if !current_session_supports_gnome_shell_overlay() {
+        return Ok(());
+    }
+
+    run_shell_overlay_method("RestartRecordingUi", show_session_id_arg(session_id))
+        .context("failed to launch dbus-send for RestartRecordingUi")
+}
+
+pub fn end_recording_ui(session_id: &str) -> anyhow::Result<()> {
+    if !current_session_supports_gnome_shell_overlay() {
+        return Ok(());
+    }
+
+    run_shell_overlay_method("EndRecordingUi", show_session_id_arg(session_id))
+        .context("failed to launch dbus-send for EndRecordingUi")
+}
+
 fn show_mask_args(geometry: RecordingMaskGeometry) -> Vec<String> {
     vec![
         format!("int32:{}", geometry.x),
@@ -231,11 +277,12 @@ fn show_controls_args(spec: &RecordingControlsSpec) -> anyhow::Result<Vec<String
         format!("int32:{}", spec.geometry.height),
         format!("boolean:{}", spec.is_fullscreen),
         format!("boolean:{}", spec.show_timer),
+        format!("string:{}", spec.visibility_policy.as_dbus_value()),
         "string:".to_string(),
     ];
 
     if let Some(snapshot) = &spec.runtime_overlay_snapshot {
-        args[8] = format!(
+        args[9] = format!(
             "string:{}",
             serde_json::to_string(&snapshot)
                 .context("failed to serialize runtime overlay snapshot")?
@@ -295,8 +342,19 @@ fn show_push_keystroke_args(session_id: &str, text: &str) -> Vec<String> {
     vec![format!("string:{session_id}"), format!("string:{text}")]
 }
 
-fn show_screenshot_lock_args(session_id: &str) -> Vec<String> {
+fn show_recording_paused_args(session_id: &str, paused: bool) -> Vec<String> {
+    vec![
+        format!("string:{session_id}"),
+        format!("boolean:{paused}"),
+    ]
+}
+
+fn show_session_id_arg(session_id: &str) -> Vec<String> {
     vec![format!("string:{session_id}")]
+}
+
+fn show_screenshot_lock_args(session_id: &str) -> Vec<String> {
+    show_session_id_arg(session_id)
 }
 
 pub fn toggle_overlay_visibility(key: &str, visible: bool) -> anyhow::Result<()> {
@@ -341,10 +399,7 @@ mod tests {
             Some("wayland-0"),
             Some("KDE")
         ));
-        assert!(!should_use_gnome_shell_screenshot_lock(
-            None,
-            Some("GNOME")
-        ));
+        assert!(!should_use_gnome_shell_screenshot_lock(None, Some("GNOME")));
     }
 
     #[test]
@@ -393,10 +448,19 @@ mod tests {
             },
             is_fullscreen: true,
             show_timer: false,
+            visibility_policy: RecordingControlsVisibilityPolicy::Hidden,
             runtime_overlay_snapshot: Some(snapshot),
         };
 
         let args = show_controls_args(&spec).expect("snapshot payload should serialize");
+
+        let expected_snapshot = serde_json::to_string(
+            &spec
+                .runtime_overlay_snapshot
+                .clone()
+                .expect("snapshot should exist"),
+        )
+        .expect("snapshot should serialize");
 
         assert_eq!(
             args,
@@ -409,35 +473,21 @@ mod tests {
                 "int32:1080".to_string(),
                 "boolean:true".to_string(),
                 "boolean:false".to_string(),
-                format!(
-                    "string:{}",
-                    serde_json::json!({
-                        "mic_visible": true,
-                        "speaker_visible": false,
-                        "webcam_enabled": true,
-                        "webcam_preview_manifest_path": "",
-                        "webcam_rel_x": 0.61,
-                        "webcam_rel_y": 0.17,
-                        "webcam_size": 2,
-                        "webcam_shape": 1,
-                        "webcam_flip": true,
-                        "webcam_device": 7,
-                        "clicks_enabled": true,
-                        "click_size": 0.45,
-                        "click_color": 3,
-                        "click_style": 2,
-                        "click_animate": false,
-                        "keystrokes_enabled": true,
-                        "keystrokes_supported": false,
-                        "keystrokes_support_message": "Not supported on GNOME Wayland yet",
-                        "key_size": 0.5,
-                        "key_position": 2,
-                        "key_appearance": 1,
-                        "key_blur_bg": false,
-                        "key_filter": 4,
-                    })
-                ),
+                "string:hidden".to_string(),
+                format!("string:{expected_snapshot}"),
             ]
+        );
+    }
+
+    #[test]
+    fn visibility_policy_serializes_to_expected_wire_values() {
+        assert_eq!(
+            RecordingControlsVisibilityPolicy::AreaOutsideCapture.as_dbus_value(),
+            "area-outside-capture"
+        );
+        assert_eq!(
+            RecordingControlsVisibilityPolicy::Hidden.as_dbus_value(),
+            "hidden"
         );
     }
 
@@ -511,6 +561,7 @@ mod tests {
             },
             is_fullscreen: true,
             show_timer: false,
+            visibility_policy: RecordingControlsVisibilityPolicy::Hidden,
             runtime_overlay_snapshot: None,
         };
 
@@ -527,6 +578,7 @@ mod tests {
                 "int32:1080".to_string(),
                 "boolean:true".to_string(),
                 "boolean:false".to_string(),
+                "string:hidden".to_string(),
                 "string:".to_string(),
             ]
         );

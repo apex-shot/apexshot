@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Label,
-    Orientation, Popover, Scale, Stack,
+    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Label, Orientation,
+    Popover, Scale, Stack,
 };
 
 #[allow(dead_code)]
@@ -148,7 +148,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     video_export_location_entry.set_placeholder_text(Some("Choose a folder"));
     video_export_location_entry.set_text(&config.video_export_location);
     let video_export_location_browse = Button::with_label("Browse");
-    
+
     let export_hbox = GtkBox::new(Orientation::Horizontal, 12);
     export_hbox.set_hexpand(true);
     let export_label = Label::new(Some("Save location"));
@@ -161,16 +161,21 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     export_hbox.append(&entry_row);
     general_frame.append(&build_row!(&export_hbox, false));
 
-    let rec_controls_check = create_row(&general_frame, "Show controls while recording", true);
+    let rec_controls_check = create_row(&general_frame, "Use keyboard shortcuts to control recordings (elapsed time appears in the top bar)", true);
     rec_controls_check.set_active(config.rec_controls);
 
-    let rec_display_time_check = create_row(&general_frame, "Display recording time in menu bar", false);
+    let rec_display_time_check =
+        create_row(&general_frame, "Display recording time in the top bar", false);
     rec_display_time_check.set_active(config.rec_display_time);
 
     let rec_hidpi_check = create_row(&general_frame, "Scale Retina videos to 1x", true);
     rec_hidpi_check.set_active(config.rec_hidpi);
 
-    let rec_notifications_check = create_row(&general_frame, "Enable \"Do Not Disturb\" while recording", false);
+    let rec_notifications_check = create_row(
+        &general_frame,
+        "Enable \"Do Not Disturb\" while recording",
+        false,
+    );
     rec_notifications_check.set_active(config.rec_notifications);
 
     let rec_cursor_check = create_row(&general_frame, "Show cursor", true);
@@ -331,7 +336,8 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         key_popover.popup();
     });
 
-    let rec_remember_selection_check = create_row(&general_frame, "Remember last selection area", false);
+    let rec_remember_selection_check =
+        create_row(&general_frame, "Remember last selection area", false);
     rec_remember_selection_check.set_active(config.rec_remember_selection);
 
     let rec_dim_screen_check = create_row(&general_frame, "Dim screen while recording", true);

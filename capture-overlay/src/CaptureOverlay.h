@@ -345,8 +345,8 @@ private:
     RecordPanelTile m_hoveredRecordTile;
     
     // Recording & Settings state (matching screenshot)
-    bool m_recControls;        // "Show controls while recording"
-    bool m_displayRecTime;     // "Display recording time"
+    bool m_recControls;        // "Use keyboard shortcuts to control recordings (elapsed time appears in the top bar)"
+    bool m_displayRecTime;     // "Display recording time in the top bar"
     bool m_hidpi;              // "HiDPI Scaling — record at display scale resolution"
     bool m_doNotDisturb;       // ""Do Not Disturb" while recording"
     bool m_showCursor;         // "Show cursor"

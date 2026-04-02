@@ -64,3 +64,22 @@ runTest("parses webcam preview manifest path from the runtime snapshot", () => {
         "manifest path should be preserved for GNOME live webcam preview"
     );
 });
+
+runTest("stores the recording controls visibility policy on the active session", () => {
+    const session = createSessionState();
+    setControlsState(session, {
+        dbusDest: "org.apexshot.RecordingControl",
+        sessionId: "recording-controls-policy",
+        rect: {x: 20, y: 30, width: 640, height: 360},
+        isFullscreen: false,
+        showTimer: true,
+        visibilityPolicy: "area-outside-capture",
+        runtimeOverlaySnapshot: null,
+    }, 0);
+
+    assertEqual(
+        session.controlsState.visibilityPolicy,
+        "area-outside-capture",
+        "controls state should preserve the runtime visibility policy"
+    );
+});

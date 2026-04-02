@@ -84,6 +84,12 @@ function normalizeNonNegativeInteger(value, fallback) {
     return Math.max(0, Math.trunc(value));
 }
 
+function normalizeControlsVisibilityPolicy(value, fallback = "visible") {
+    return value === "area-outside-capture" || value === "hidden" || value === "visible"
+        ? value
+        : fallback;
+}
+
 function normalizeRuntimeOverlayVisibilityKey(key) {
     return RUNTIME_OVERLAY_VISIBILITY_KEYS.includes(key) ? key : null;
 }
@@ -286,6 +292,10 @@ export function setControlsState(sessionState, spec, runningStartMs) {
         rect,
         isFullscreen: spec.isFullscreen,
         showTimer: spec.showTimer,
+        visibilityPolicy: normalizeControlsVisibilityPolicy(
+            spec.visibilityPolicy,
+            spec.isFullscreen ? "visible" : "area-outside-capture"
+        ),
         runtimeOverlaySnapshot,
         paused: false,
         elapsedBeforePauseMs: 0,

@@ -20,6 +20,7 @@ pub enum TrayAction {
     CaptureWindow,
     RecordScreen,
     RecordArea,
+    StopRecordingSave,
     OpenRecentCaptures,
     ShowLastPreview,
     OpenLastCapture,
@@ -27,19 +28,39 @@ pub enum TrayAction {
     Quit,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TrayPresentation {
+    Idle,
+    Recording { elapsed_text: String },
+}
+
 /// The ksni tray icon state.
 pub struct ApexShotTray {
     /// Channel to send actions to the daemon main loop.
     tx: Sender<TrayAction>,
+    presentation: TrayPresentation,
 }
 
 impl ApexShotTray {
     pub fn new(tx: Sender<TrayAction>) -> Self {
-        Self { tx }
+        Self {
+            tx,
+            presentation: TrayPresentation::Idle,
+        }
     }
 
     fn send(&self, action: TrayAction) {
         let _ = self.tx.send(action);
+    }
+
+    pub fn show_recording_timer(&mut self, elapsed_text: impl Into<String>) {
+        self.presentation = TrayPresentation::Recording {
+            elapsed_text: elapsed_text.into(),
+        };
+    }
+
+    pub fn show_idle(&mut self) {
+        self.presentation = TrayPresentation::Idle;
     }
 }
 
@@ -177,15 +198,29 @@ impl ksni::Tray for ApexShotTray {
     }
 
     fn title(&self) -> String {
-        "ApexShot".to_string()
+        match &self.presentation {
+            TrayPresentation::Idle => "ApexShot".to_string(),
+            TrayPresentation::Recording { elapsed_text } => elapsed_text.clone(),
+        }
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
+        let (title, description) = match &self.presentation {
+            TrayPresentation::Idle => (
+                "ApexShot".to_string(),
+                "Left-click: Capture Area • Right-click: Menu".to_string(),
+            ),
+            TrayPresentation::Recording { elapsed_text } => (
+                elapsed_text.clone(),
+                "Recording in progress • Use shortcuts for pause, restart, or discard".to_string(),
+            ),
+        };
+
         ksni::ToolTip {
             icon_name: String::new(),
             icon_pixmap: vec![apex_icon(22)],
-            title: "ApexShot".to_string(),
-            description: "Left-click: Capture Area • Right-click: Menu".to_string(),
+            title,
+            description,
         }
     }
 
@@ -193,6 +228,17 @@ impl ksni::Tray for ApexShotTray {
         use ksni::menu::*;
 
         let ltr = |label: &str| format!("\u{200E}{label}");
+
+        if matches!(self.presentation, TrayPresentation::Recording { .. }) {
+            return vec![
+                StandardItem {
+                    label: ltr("Stop Recording"),
+                    activate: Box::new(|tray: &mut Self| tray.send(TrayAction::StopRecordingSave)),
+                    ..Default::default()
+                }
+                .into(),
+            ];
+        }
 
         vec![
             // ── Capture section ──────────────────────────────────────────
@@ -274,4 +320,30 @@ pub fn spawn_tray(tx: Sender<TrayAction>) -> anyhow::Result<ksni::Handle<ApexSho
     let handle = service.handle();
     service.spawn();
     Ok(handle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ApexShotTray, TrayAction};
+    use ksni::Tray;
+    use std::sync::mpsc::channel;
+
+    #[test]
+    fn tray_defaults_to_idle_presentation() {
+        let (tx, _rx) = channel::<TrayAction>();
+        let tray = ApexShotTray::new(tx);
+
+        assert_eq!(tray.title(), "ApexShot");
+        assert!(tray.menu().len() > 1);
+    }
+
+    #[test]
+    fn tray_switches_to_recording_timer_mode() {
+        let (tx, _rx) = channel::<TrayAction>();
+        let mut tray = ApexShotTray::new(tx);
+        tray.show_recording_timer("1:23");
+
+        assert_eq!(tray.title(), "1:23");
+        assert_eq!(tray.menu().len(), 1);
+    }
 }
