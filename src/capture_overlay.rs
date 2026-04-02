@@ -459,7 +459,7 @@ fn should_request_screenshot_lock(extra_args: &[&str]) -> bool {
 
     extra_args
         .iter()
-        .any(|arg| matches!(*arg, "--area-init" | "--window-capture"))
+        .any(|arg| matches!(*arg, "--area-init" | "--window-capture" | "--crosshair-capture"))
 }
 
 fn next_screenshot_lock_session_id() -> String {
@@ -1074,6 +1074,28 @@ pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
     }
 }
 
+pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
+    let output = run_capture_binary(&["--crosshair-capture"], None)?;
+
+    match output.status.code() {
+        Some(0) => parse_capture_screen_json(&String::from_utf8_lossy(&output.stdout)),
+        Some(1) | None => Err(SelectionError::Cancelled),
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
+            Err(SelectionError::Cancelled)
+        }
+        Some(code) => Err(SelectionError::InitError(format!(
+            "apexshot-capture crosshair mode exited with code {code}"
+        ))),
+    }
+}
+
+pub fn capture_crosshair_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
+    let path = capture_crosshair_file_via_cpp()?;
+    let capture = load_capture_data_from_path(&path);
+    let _ = std::fs::remove_file(&path);
+    capture.map(AreaCaptureResult::Captured)
+}
+
 fn load_capture_data_from_path(path: &Path) -> Result<CaptureData, SelectionError> {
     let image = image::open(path).map_err(|e| {
         SelectionError::InitError(format!(
@@ -1535,6 +1557,7 @@ mod tests {
         assert!(should_request_screenshot_lock(&[]));
         assert!(should_request_screenshot_lock(&["--area-init"]));
         assert!(should_request_screenshot_lock(&["--window-capture"]));
+        assert!(should_request_screenshot_lock(&["--crosshair-capture"]));
         assert!(!should_request_screenshot_lock(&["--capture-screen"]));
     }
 

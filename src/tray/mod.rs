@@ -16,6 +16,7 @@ use std::sync::mpsc::Sender;
 #[derive(Debug, Clone)]
 pub enum TrayAction {
     CaptureArea,
+    CaptureCrosshair,
     CaptureScreen,
     CaptureWindow,
     RecordScreen,
@@ -246,6 +247,12 @@ impl ksni::Tray for ApexShotTray {
             StandardItem {
                 label: ltr("Capture Area"),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::CaptureArea)),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: ltr("Crosshair Capture"),
+                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::CaptureCrosshair)),
                 ..Default::default()
             }
             .into(),

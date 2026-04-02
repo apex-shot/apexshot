@@ -34,6 +34,11 @@ class CaptureOverlay : public QWidget
     Q_OBJECT
 
 public:
+    enum class OverlayMode {
+        StandardArea,
+        CrosshairCapture
+    };
+
     enum class HandlePos {
         None,
         TopLeft, Top, TopRight,
@@ -52,7 +57,8 @@ public:
                              QWidget* parent = nullptr,
                              bool timerCaptureEnabled = false,
                              bool initialMic = false,
-                             bool initialSpeaker = false);
+                             bool initialSpeaker = false,
+                             OverlayMode overlayMode = OverlayMode::StandardArea);
 
     /// Returns the selected rectangle in screen (logical pixel) coordinates.
     /// Only valid when QApplication exits with code 0.
@@ -269,6 +275,7 @@ private:
     void confirmRecordingSelection();
     void cancelSelection();
     void resetRecordingPanelToAreaMode(bool keepSelection = true);
+    bool isCrosshairMode() const { return m_overlayMode == OverlayMode::CrosshairCapture; }
 
     struct WindowInfo {
         QRect   rect;
@@ -282,12 +289,14 @@ private:
     // ── State ──────────────────────────────────────────────────────────────
     QPixmap   m_background;
     QImage    m_blurredBg;          // 1/4-res blurred bg for frosted glass
+    OverlayMode m_overlayMode;
     QRect     m_selection;
     bool      m_hasSelection;
     bool      m_dragging;
     bool      m_moving;
     HandlePos m_resizing;
     QPoint    m_dragStart;
+    QPoint    m_pointerPos;
     QRect     m_selectionAtDragStart;
     bool      m_fullscreenMode;     // true when Fullscreen tool is active
     bool      m_windowMode;         // true when Window tool is active

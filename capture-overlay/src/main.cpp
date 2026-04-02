@@ -226,6 +226,7 @@ int main(int argc, char* argv[])
 
     bool captureScreenMode = false;
     bool areaInitMode = false;
+    bool crosshairCaptureMode = false;
     bool windowCaptureMode = false;
     bool recordControlsMode = false;
     bool timerCaptureEnabled = false;
@@ -287,6 +288,8 @@ int main(int argc, char* argv[])
             captureScreenMode = true;
         } else if (std::strcmp(argv[i], "--area-init") == 0) {
             areaInitMode = true;
+        } else if (std::strcmp(argv[i], "--crosshair-capture") == 0) {
+            crosshairCaptureMode = true;
         } else if (std::strcmp(argv[i], "--window-capture") == 0) {
             windowCaptureMode = true;
         } else if (std::strcmp(argv[i], "--record-controls") == 0) {
@@ -464,9 +467,11 @@ int main(int argc, char* argv[])
         }
     }
 
-    if (captureScreenMode && areaInitMode) {
+    if ((captureScreenMode && areaInitMode) ||
+        (captureScreenMode && crosshairCaptureMode) ||
+        (areaInitMode && crosshairCaptureMode)) {
         std::fprintf(stderr,
-                     "apexshot-capture: --capture-screen and --area-init are mutually exclusive\n");
+                     "apexshot-capture: interactive capture modes are mutually exclusive\n");
         return 2;
     }
 
@@ -645,7 +650,10 @@ int main(int argc, char* argv[])
         }
     }
 
-    CaptureOverlay overlay(background, nullptr, timerCaptureEnabled, initialMic, initialSpeaker);
+    const CaptureOverlay::OverlayMode overlayMode =
+      crosshairCaptureMode ? CaptureOverlay::OverlayMode::CrosshairCapture
+                           : CaptureOverlay::OverlayMode::StandardArea;
+    CaptureOverlay overlay(background, nullptr, timerCaptureEnabled, initialMic, initialSpeaker, overlayMode);
     QObject::connect(&sessionServer, &QLocalServer::newConnection, [&sessionServer, &overlay, &app]() {
         while (QLocalSocket* socket = sessionServer.nextPendingConnection()) {
             QObject::connect(socket, &QLocalSocket::readyRead, [socket, &overlay, &app]() {
@@ -861,7 +869,7 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    if (areaInitMode) {
+    if (areaInitMode || crosshairCaptureMode) {
         const bool ocrRequested = overlay.ocrRequested();
         const bool fullscreenRequested = overlay.recordFullscreen();
         // Translate from local overlay coords to global screen coords
@@ -879,7 +887,15 @@ int main(int argc, char* argv[])
         QString error;
         bool ok = false;
 
-        if (fullscreenRequested) {
+        if (crosshairCaptureMode) {
+            if (isGnomeWayland) {
+                ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
+                  sel, overlay.geometry(), imagePath, imageSize, error);
+            } else {
+                ok =
+                  ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
+            }
+        } else if (fullscreenRequested) {
             ok = ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error);
         } else if (isGnomeWayland) {
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
@@ -904,7 +920,10 @@ int main(int argc, char* argv[])
                          error.toLocal8Bit().constData());
             return 2;
         }
-        printCaptureScreenJson(imagePath, imageSize, ocrRequested ? "ocr" : "area");
+        printCaptureScreenJson(
+          imagePath,
+          imageSize,
+          crosshairCaptureMode ? "area" : (ocrRequested ? "ocr" : "area"));
     } else {
         std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d}\n",
                     sel.x(),

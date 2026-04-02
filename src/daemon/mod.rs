@@ -25,14 +25,15 @@ use ashpd::desktop::{
 
 use crate::{
     backend::DisplayBackend,
-    capture::{
+    capture::{ 
         copy_capture_uri_to_clipboard, open_image_editor, save_capture, save_existing_png,
         SaveConfig,
     },
     capture_overlay::{
-        begin_capture_session, capture_area_file_via_cpp, capture_screen_file_via_cpp,
-        capture_window_file_via_cpp, is_launch_blocked_error, request_existing_overlay_focus,
-        AreaCapturePathResult, CaptureOverlayGuard, LaunchBlockedReason,
+        begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
+        capture_screen_file_via_cpp, capture_window_file_via_cpp, is_launch_blocked_error,
+        request_existing_overlay_focus, AreaCapturePathResult, CaptureOverlayGuard,
+        LaunchBlockedReason,
     },
     config::load_config,
     hotkeys::{
@@ -51,6 +52,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum DaemonAction {
     CaptureArea,
+    CaptureCrosshair,
     CaptureScreen,
     CaptureWindow,
     RecordScreen,
@@ -83,6 +85,7 @@ impl From<TrayAction> for DaemonAction {
     fn from(a: TrayAction) -> Self {
         match a {
             TrayAction::CaptureArea => DaemonAction::CaptureArea,
+            TrayAction::CaptureCrosshair => DaemonAction::CaptureCrosshair,
             TrayAction::CaptureScreen => DaemonAction::CaptureScreen,
             TrayAction::CaptureWindow => DaemonAction::CaptureWindow,
             TrayAction::RecordScreen => DaemonAction::RecordScreen,
@@ -546,6 +549,9 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
         match action {
             DaemonAction::CaptureArea => {
                 tokio::task::spawn_blocking(move || handle_capture_area(state_clone));
+            }
+            DaemonAction::CaptureCrosshair => {
+                tokio::task::spawn_blocking(move || handle_capture_crosshair(state_clone));
             }
             DaemonAction::CaptureScreen => {
                 tokio::task::spawn_blocking(move || handle_capture_screen(state_clone));
@@ -1023,6 +1029,7 @@ impl DaemonIpc {
         eprintln!("[daemon] D-Bus Trigger: {action}");
         let daemon_action = match action.as_str() {
             "capture_area" => DaemonAction::CaptureArea,
+            "capture_crosshair" => DaemonAction::CaptureCrosshair,
             "capture_screen" => DaemonAction::CaptureScreen,
             "capture_window" => DaemonAction::CaptureWindow,
             "record_screen" => DaemonAction::RecordScreen,
@@ -1863,6 +1870,9 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
     if let Some(name) = binding.name.as_deref() {
         match name {
             "capture_area" | "capture-area" => return Some(DaemonAction::CaptureArea),
+            "capture_crosshair" | "capture-crosshair" => {
+                return Some(DaemonAction::CaptureCrosshair);
+            }
             "capture_screen" | "capture-screen" => return Some(DaemonAction::CaptureScreen),
             "capture_window" | "capture-window" => return Some(DaemonAction::CaptureWindow),
             "show_last_preview" | "show-last-preview" => {
@@ -1890,6 +1900,7 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
     match binding.args.get(0).map(|s| s.as_str()) {
         Some("capture") => match binding.args.get(1).map(|s| s.as_str()) {
             Some("area") => Some(DaemonAction::CaptureArea),
+            Some("crosshair") => Some(DaemonAction::CaptureCrosshair),
             Some("screen") => Some(DaemonAction::CaptureScreen),
             Some("window") => Some(DaemonAction::CaptureWindow),
             _ => None,
@@ -2366,6 +2377,13 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
     handle_capture_area_with_active_session(state);
 }
 
+fn handle_capture_crosshair(state: Arc<Mutex<DaemonState>>) {
+    let Some(_session_guard) = acquire_capture_session_guard("crosshair") else {
+        return;
+    };
+    handle_capture_crosshair_with_active_session(state);
+}
+
 fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
     let gtk_tx = state.lock().unwrap().gtk_tx.clone();
 
@@ -2422,6 +2440,23 @@ fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
                 return;
             }
             eprintln!("[daemon] C++ area-init capture path failed: {err}");
+        }
+    }
+}
+
+fn handle_capture_crosshair_with_active_session(state: Arc<Mutex<DaemonState>>) {
+    match capture_crosshair_file_via_cpp() {
+        Ok(path) => {
+            save_existing_png_and_open(path, state);
+        }
+        Err(err) if is_launch_blocked_error(&err) => {
+            eprintln!("[daemon] Crosshair capture blocked: {err}");
+        }
+        Err(crate::overlay::SelectionError::Cancelled) => {
+            eprintln!("[daemon] Crosshair capture cancelled.");
+        }
+        Err(err) => {
+            eprintln!("[daemon] Crosshair capture failed: {err}");
         }
     }
 }
@@ -2651,6 +2686,28 @@ mod tests {
         assert!(matches!(
             super::binding_to_daemon_action(&discard),
             Some(super::DaemonAction::DiscardRecording)
+        ));
+    }
+
+    #[test]
+    fn binding_to_daemon_action_maps_crosshair_capture_hotkey() {
+        let crosshair = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+X".into(),
+            args: vec!["capture".into(), "crosshair".into()],
+            name: Some("capture_crosshair".into()),
+        };
+
+        assert!(matches!(
+            super::binding_to_daemon_action(&crosshair),
+            Some(super::DaemonAction::CaptureCrosshair)
+        ));
+    }
+
+    #[test]
+    fn tray_action_maps_crosshair_capture_to_daemon_action() {
+        assert!(matches!(
+            super::DaemonAction::from(crate::tray::TrayAction::CaptureCrosshair),
+            super::DaemonAction::CaptureCrosshair
         ));
     }
 

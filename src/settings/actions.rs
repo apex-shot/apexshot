@@ -68,6 +68,7 @@ pub struct SaveInputs {
     pub shortcut_restore_recently_closed: Button,
     pub shortcut_toggle_overlays: Button,
     pub shortcut_capture_area: Button,
+    pub shortcut_capture_crosshair: Button,
     pub shortcut_capture_previous_area: Button,
     pub shortcut_capture_fullscreen: Button,
     pub shortcut_capture_window: Button,

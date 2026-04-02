@@ -130,14 +130,17 @@ static Qt::WindowFlags captureOverlayWindowFlags()
 
 CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
                                bool timerCaptureEnabled,
-                               bool initialMic, bool initialSpeaker)
+                               bool initialMic, bool initialSpeaker,
+                               OverlayMode overlayMode)
     : QWidget(parent)
     , m_background(background)
+    , m_overlayMode(overlayMode)
     , m_hasSelection(false)
     , m_dragging(false)
     , m_moving(false)
     , m_resizing(HandlePos::None)
     , m_dragStart(0, 0)
+    , m_pointerPos(0, 0)
     , m_fullscreenMode(false)
     , m_windowMode(false)
     , m_timerCaptureEnabled(timerCaptureEnabled)
@@ -248,12 +251,18 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     setCursor(Qt::CrossCursor);
     focusAndRaiseOverlay();
 
-    const int defaultW = std::max(kMinSize, std::min(DEFAULT_SELECTION_W, width()));
-    const int defaultH = std::max(kMinSize, std::min(DEFAULT_SELECTION_H, height()));
-    const int defaultX = (width() - defaultW) / 2;
-    const int defaultY = (height() - defaultH) / 2;
-    m_selection = QRect(defaultX, defaultY, defaultW, defaultH);
-    m_hasSelection = true;
+    if (isCrosshairMode()) {
+        m_dimScreen = false;
+        m_selection = QRect();
+        m_hasSelection = false;
+    } else {
+        const int defaultW = std::max(kMinSize, std::min(DEFAULT_SELECTION_W, width()));
+        const int defaultH = std::max(kMinSize, std::min(DEFAULT_SELECTION_H, height()));
+        const int defaultX = (width() - defaultW) / 2;
+        const int defaultY = (height() - defaultH) / 2;
+        m_selection = QRect(defaultX, defaultY, defaultW, defaultH);
+        m_hasSelection = true;
+    }
 
     // Pre-build blurred background for frosted glass (1/4 res gaussian)
     if (!m_background.isNull()) {

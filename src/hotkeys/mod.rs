@@ -462,6 +462,11 @@ fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
             args: vec!["capture".into(), "area".into()],
         },
         HotkeyBinding {
+            name: Some("capture_crosshair".into()),
+            accelerator: "CTRL+ALT+X".into(),
+            args: vec!["capture".into(), "crosshair".into()],
+        },
+        HotkeyBinding {
             name: Some("capture_screen".into()),
             accelerator: "CTRL+ALT+S".into(),
             args: vec!["capture".into(), "screen".into()],
@@ -1826,5 +1831,18 @@ mod tests {
         assert!(names.contains(&"recording_stop_save".to_string()));
         assert!(names.contains(&"recording_restart".to_string()));
         assert!(names.contains(&"recording_discard".to_string()));
+    }
+
+    #[test]
+    fn default_hotkeys_include_crosshair_capture_binding() {
+        let cfg = HotkeyConfig::default();
+        let crosshair = cfg
+            .bindings
+            .iter()
+            .find(|binding| binding.name.as_deref() == Some("capture_crosshair"))
+            .expect("crosshair binding should exist");
+
+        assert_eq!(crosshair.accelerator, "CTRL+ALT+X");
+        assert_eq!(crosshair.args, vec!["capture", "crosshair"]);
     }
 }

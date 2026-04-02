@@ -10,6 +10,7 @@ pub struct ShortcutSettingsWidgets {
     pub restore_file_btn: Button,
     pub toggle_overlays_btn: Button,
     pub capture_area_btn: Button,
+    pub capture_crosshair_btn: Button,
     pub capture_prev_btn: Button,
     pub capture_fullscreen_btn: Button,
     pub capture_window_btn: Button,
@@ -132,6 +133,12 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         &config.shortcut_capture_area,
         false,
     );
+    let capture_crosshair_btn = create_row(
+        &screenshots_frame,
+        "Crosshair Capture:",
+        &config.shortcut_capture_crosshair,
+        false,
+    );
     let capture_prev_btn = create_row(
         &screenshots_frame,
         "Capture Previous Area:",
@@ -181,6 +188,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         restore_file_btn,
         toggle_overlays_btn,
         capture_area_btn,
+        capture_crosshair_btn,
         capture_prev_btn,
         capture_fullscreen_btn,
         capture_window_btn,

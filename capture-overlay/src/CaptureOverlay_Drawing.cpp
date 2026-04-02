@@ -12,6 +12,7 @@
 #include <QRadialGradient>
 #include <QPen>
 #include <QDateTime>
+#include <QCursor>
 #include <QMutexLocker>
 #include <QTimer>
 #include <algorithm>
@@ -484,11 +485,97 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
     const double sw = widgetRect.width();
     const double sh = widgetRect.height();
 
+    if (isCrosshairMode()) {
+        if (!m_background.isNull()) {
+            p.drawPixmap(widgetRect, m_background);
+        }
+
+        const QPoint cursorPoint = mapFromGlobal(QCursor::pos());
+        const QPoint guidePoint = widgetRect.contains(cursorPoint) ? cursorPoint : m_pointerPos;
+
+        p.save();
+        // Brand orange for crosshair lines (more visible on white backgrounds)
+        p.setPen(QPen(QColor(255, 102, 0, 200), 1.0));
+        p.drawLine(QPoint(0, guidePoint.y()), QPoint(widgetRect.width(), guidePoint.y()));
+        p.drawLine(QPoint(guidePoint.x(), 0), QPoint(guidePoint.x(), widgetRect.height()));
+        p.restore();
+
+        if (m_dragging || m_hasSelection) {
+            const QRect sel = m_selection.normalized();
+            p.save();
+            // Distinct orange border for the selection area
+            p.setPen(QPen(QColor(255, 102, 0, 240), 2.0));
+            // Subtle orange fill so it's visible on white backgrounds during capture
+            p.setBrush(QColor(255, 102, 0, 40));
+            p.drawRect(sel.adjusted(0, 0, -1, -1));
+            p.restore();
+        }
+
+        // ── Clean, native-looking size/position bubble ──────────────────────────────
+        QString labelText;
+        if (m_dragging || m_hasSelection) {
+            const QRect sel = m_selection.normalized();
+            // Use proper multiplication sign
+            labelText = QStringLiteral("%1 \u00D7 %2").arg(sel.width()).arg(sel.height());
+        } else {
+            labelText = QStringLiteral("%1, %2").arg(guidePoint.x()).arg(guidePoint.y());
+        }
+
+        QFont font(QStringLiteral("Sans"));
+        font.setPixelSize(12);
+        font.setWeight(QFont::Medium);
+        p.setFont(font);
+
+        const QFontMetrics fm(font);
+        const QRect textRect = fm.boundingRect(labelText);
+        
+        // Tight padding for a native feel
+        const int paddingX = 10;
+        const int paddingY = 6;
+        const int bw = textRect.width() + paddingX * 2;
+        const int bh = textRect.height() + paddingY * 2;
+        
+        const QRect bubbleRect(
+            std::clamp(guidePoint.x() + 16, 8, widgetRect.width() - bw - 8),
+            std::clamp(guidePoint.y() + 16, 8, widgetRect.height() - bh - 8),
+            bw, bh
+        );
+
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing);
+
+        // Standard semi-transparent dark background
+        QPainterPath bubble;
+        bubble.addRoundedRect(bubbleRect, 6, 6);
+        p.fillPath(bubble, QColor(0, 0, 0, 180));
+
+        // Very subtle white border to define the edge against dark backgrounds
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1.0));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(bubble);
+
+        // Crisp white text
+        p.setPen(QColor(255, 255, 255));
+        p.drawText(bubbleRect, Qt::AlignCenter, labelText);
+
+        p.restore();
+        return;
+    }
+
     // ── Background ────────────────────────────────────────────────────────────
     if (!m_background.isNull()) {
         p.drawPixmap(widgetRect, m_background);
     } else {
         p.fillRect(widgetRect, QColor(0, 0, 0, 51)); // 0.20 alpha
+    }
+
+    // ── Dragging Crosshair (Standard Mode) ────────────────────────────────────
+    if (m_dragging || m_moving || m_resizing != HandlePos::None) {
+        p.save();
+        p.setPen(QPen(QColor(255, 102, 0, 160), 1.0));
+        p.drawLine(QPoint(0, m_pointerPos.y()), QPoint(widgetRect.width(), m_pointerPos.y()));
+        p.drawLine(QPoint(m_pointerPos.x(), 0), QPoint(m_pointerPos.x(), widgetRect.height()));
+        p.restore();
     }
 
     // ── Window mode ───────────────────────────────────────────────────────────
@@ -579,6 +666,11 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);
     }
 
+    // Add a subtle orange tint during active drag/resize for better feedback
+    if (m_dragging || m_moving || m_resizing != HandlePos::None) {
+        p.fillRect(sel, QColor(255, 102, 0, 30));
+    }
+
     // ── Selection handles ─────────────────────────────────────────────────────
     {
         const bool scrollModeActive = (m_captureIntent == CaptureIntent::Scroll);
@@ -608,7 +700,8 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
             }
         } else {
             double half = HANDLE_MARKER_LENGTH / 2.0;
-            p.setPen(QPen(QColor(255,255,255,245), HANDLE_MARKER_THICKNESS,
+            // Use orange for handles to match brand and ensure visibility on white
+            p.setPen(QPen(QColor(255, 102, 0, 245), HANDLE_MARKER_THICKNESS,
                           Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
 
             // Corners
