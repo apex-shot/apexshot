@@ -123,6 +123,8 @@ fn main() {
             "media-playback-stop",
             "dismiss-regular",
             "eyedropper-regular",
+            "save-regular",
+            "folder-open-regular",
         ],
     );
 }

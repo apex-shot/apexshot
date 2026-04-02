@@ -12,7 +12,7 @@ mod text_detect;
 mod types;
 mod ui_support;
 #[path = "editor/window/mod.rs"]
-mod window;
+pub mod window;
 
 pub use types::EditorError;
 pub use window::open_image_editor;

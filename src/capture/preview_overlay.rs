@@ -6,7 +6,7 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea, EventControllerKey,
-    Label, Orientation, Overlay, WidgetPaintable, Window,
+    Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::RefCell;
@@ -114,6 +114,12 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
         eprintln!("Preview GTK init warning: {err}");
     }
 
+    // Initialize relm4-icons to use the same icons as the main editor
+    relm4_icons::initialize_icons(
+        crate::capture::editor::window::icon_names::GRESOURCE_BYTES,
+        crate::capture::editor::window::icon_names::RESOURCE_PREFIX,
+    );
+
     unsafe {
         std::env::set_var("DESKTOP_STARTUP_ID", "");
     }
@@ -147,10 +153,6 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
         .build();
     window.add_css_class("capture-preview-window");
     let layer_shell_active = configure_window_positioning(&window, side, preview_width);
-    let limited_always_on_top = should_warn_about_wayland_topmost(layer_shell_active);
-    if limited_always_on_top {
-        window.add_css_class("capture-preview-window-limited");
-    }
     // Intentionally silent when layer-shell is unavailable — the fallback
     // (bottom-left placement via X11 input-region) works correctly on X11
     // and non-layer-shell Wayland compositors. Logging this at startup every
@@ -181,10 +183,10 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     image_frame.set_size_request(preview_width, preview_height);
     image_frame.append(&preview_area);
 
-    let (edit_btn, _) = icon_button("document-edit-symbolic", "Edit");
-    let (copy_btn, _) = icon_button("edit-copy-symbolic", "Copy");
-    let (save_btn, _) = icon_button("document-save-symbolic", "Save");
-    let (upload_btn, _) = icon_button("cloud-upload-symbolic", "Upload");
+    let (edit_btn, _) = icon_button(crate::capture::editor::window::icon_names::PEN_REGULAR, "Edit");
+    let (copy_btn, _) = icon_button(crate::capture::editor::window::icon_names::COPY_REGULAR, "Copy");
+    let (save_btn, _) = icon_button(crate::capture::editor::window::icon_names::SAVE_REGULAR, "Save");
+    let (upload_btn, _) = icon_button(crate::capture::editor::window::icon_names::FOLDER_OPEN_REGULAR, "Open Folder");
     let (pin_btn, pin_icon) = icon_button("view-pin-symbolic", "Pin");
     let (close_btn, _) = icon_button("window-close-symbolic", "Close");
 
@@ -210,11 +212,6 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
 
     card.append(&image_frame);
     card.append(&toolbar);
-
-    let fallback_notice = Label::new(None);
-    fallback_notice.add_css_class("preview-warning-badge");
-    fallback_notice.set_visible(false);
-    card.append(&fallback_notice);
 
     if layer_shell_active {
         window.set_child(Some(&card));
@@ -713,21 +710,6 @@ fn install_preview_css() {
                 outline-width: 0;
             }
 
-            .capture-preview-window-limited #capture-preview-card {
-                border-color: rgba(255, 197, 92, 0.82);
-            }
-
-            label.preview-warning-badge {
-                padding: 3px 10px;
-                border-radius: 999px;
-                border: 1px solid rgba(255, 222, 152, 0.68);
-                background: rgba(44, 28, 8, 0.88);
-                color: rgba(255, 238, 203, 0.98);
-                font-size: 10px;
-                font-weight: 700;
-                letter-spacing: 0.02em;
-            }
-
             /* Image sits inside with its own rounded corners */
             #capture-preview-image-frame {
                 border-radius: 12px;
@@ -789,7 +771,8 @@ fn install_preview_css() {
 
 fn icon_button(icon_name: &str, tooltip: &str) -> (Button, gtk4::Image) {
     let image = gtk4::Image::from_icon_name(icon_name);
-    image.set_pixel_size(16);
+    // Increase icon size slightly to match reference design
+    image.set_pixel_size(18);
 
     let button = Button::new();
     button.set_child(Some(&image));
@@ -799,28 +782,6 @@ fn icon_button(icon_name: &str, tooltip: &str) -> (Button, gtk4::Image) {
     button.add_css_class("preview-action");
 
     (button, image)
-}
-
-fn env_var_contains_case_insensitive(name: &str, needle: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|value| {
-            value
-                .to_ascii_lowercase()
-                .contains(&needle.to_ascii_lowercase())
-        })
-        .unwrap_or(false)
-}
-
-fn is_gnome_wayland_session() -> bool {
-    std::env::var_os("WAYLAND_DISPLAY").is_some()
-        && (env_var_contains_case_insensitive("XDG_CURRENT_DESKTOP", "gnome")
-            || env_var_contains_case_insensitive("DESKTOP_SESSION", "gnome")
-            || std::env::var_os("GNOME_DESKTOP_SESSION_ID").is_some())
-}
-
-fn should_warn_about_wayland_topmost(layer_shell_active: bool) -> bool {
-    !layer_shell_active && is_gnome_wayland_session()
 }
 
 fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
