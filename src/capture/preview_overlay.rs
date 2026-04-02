@@ -177,6 +177,8 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     let image_frame = GtkBox::new(Orientation::Vertical, 0);
     image_frame.set_widget_name("capture-preview-image-frame");
     image_frame.set_overflow(gtk4::Overflow::Hidden);
+    // Explicitly request size on the frame to prevent layout collapse
+    image_frame.set_size_request(preview_width, preview_height);
     image_frame.append(&preview_area);
 
     let (edit_btn, _) = icon_button("document-edit-symbolic", "Edit");
@@ -202,8 +204,9 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     toolbar.append(&copy_btn);
     toolbar.append(&save_btn);
     toolbar.append(&upload_btn);
-    toolbar.append(&pin_btn);
-    toolbar.append(&close_btn);
+
+    // intentionally keeping pin_btn and close_btn out of the UI
+    // to match design, but keeping their logic intact in case they are triggered programmatically
 
     card.append(&image_frame);
     card.append(&toolbar);
@@ -1017,15 +1020,19 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
             return;
         }
 
-        let scale = (width as f64 / tw).min(height as f64 / th);
+        // Use max to ensure the image covers the area (cropping the excess)
+        let scale = (width as f64 / tw).max(height as f64 / th);
         let sw = tw * scale;
         let sh = th * scale;
         let ox = (width as f64 - sw) / 2.0;
         let oy = (height as f64 - sh) / 2.0;
 
         let snapshot = gtk4::Snapshot::new();
+        // Clip to drawing area bounds to hide cropped overflow
+        snapshot.push_clip(&gtk4::graphene::Rect::new(0.0, 0.0, width as f32, height as f32));
         snapshot.translate(&gtk4::graphene::Point::new(ox as f32, oy as f32));
         tex.snapshot(&snapshot, sw, sh);
+        snapshot.pop();
         if let Some(node) = snapshot.to_node() {
             node.draw(cr);
         }
@@ -1043,12 +1050,10 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
     area
 }
 
-fn preview_texture(path: &Path, preview_width: i32, preview_height: i32) -> Option<gdk::Texture> {
-    let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(
+fn preview_texture(path: &Path, _preview_width: i32, _preview_height: i32) -> Option<gdk::Texture> {
+    // Load full image to allow the draw_func to 'cover' without distortion
+    let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file(
         path,
-        preview_width,
-        preview_height,
-        true,
     ) {
         Ok(pixbuf) => pixbuf,
         Err(err) => {
