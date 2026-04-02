@@ -43,96 +43,105 @@ impl ApexShotTray {
     }
 }
 
-/// Blend a pixel with white color and given alpha.
-#[inline]
-fn blend_white(pixels: &mut [u8], w: usize, h: usize, x: usize, y: usize, alpha: f32) {
-    if x < w && y < h {
-        let off = (y * w + x) * 4;
-        let a = (alpha * 255.0).round() as u8;
-        if a > pixels[off] {
-            pixels[off] = a;
-            pixels[off + 1] = 255;
-            pixels[off + 2] = 255;
-            pixels[off + 3] = 255;
+/// Generate the new 'A-Mark' tray icon procedurally as raw ARGB32 bytes.
+///
+/// This provides razor-sharp, pixel-perfect lines by drawing the logo 
+/// directly using geometric primitives at the desired resolution.
+fn apex_icon(size: i32) -> ksni::Icon {
+    use gtk4::cairo::{Context, Format, ImageSurface, LineCap, LineJoin};
+    let mut surface = ImageSurface::create(Format::ARgb32, size, size)
+        .expect("Failed to create tray icon surface");
+    let cr = Context::new(&surface).expect("Failed to create context");
+
+    let cx = size as f64 / 2.0;
+    let cy = size as f64 / 2.0;
+
+    // Transparent background for system tray
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+    cr.paint().expect("Failed to clear tray transparent background");
+
+    // Viewfinder / Crop Corners
+    cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    cr.set_line_width(size as f64 * 0.08);
+    cr.set_line_cap(LineCap::Square);
+    cr.set_line_join(LineJoin::Miter);
+
+    let crn_dist = size as f64 * 0.40;
+    let crn_len = size as f64 * 0.20;
+
+    // Top Left
+    cr.move_to(cx - crn_dist, cy - crn_dist + crn_len);
+    cr.line_to(cx - crn_dist, cy - crn_dist);
+    cr.line_to(cx - crn_dist + crn_len, cy - crn_dist);
+    cr.stroke().expect("Failed to draw tray icon");
+    // Top Right
+    cr.move_to(cx + crn_dist - crn_len, cy - crn_dist);
+    cr.line_to(cx + crn_dist, cy - crn_dist);
+    cr.line_to(cx + crn_dist, cy - crn_dist + crn_len);
+    cr.stroke().expect("Failed to draw tray icon");
+    // Bottom Right
+    cr.move_to(cx + crn_dist, cy + crn_dist - crn_len);
+    cr.line_to(cx + crn_dist, cy + crn_dist);
+    cr.line_to(cx + crn_dist - crn_len, cy + crn_dist);
+    cr.stroke().expect("Failed to draw tray icon");
+    // Bottom Left
+    cr.move_to(cx - crn_dist + crn_len, cy + crn_dist);
+    cr.line_to(cx - crn_dist, cy + crn_dist);
+    cr.line_to(cx - crn_dist, cy + crn_dist - crn_len);
+    cr.stroke().expect("Failed to draw tray icon");
+
+    // The Peak / Apex
+    let peak_y = cy - size as f64 * 0.12;
+    let base_y = cy + size as f64 * 0.22;
+    let peak_half_w = size as f64 * 0.26;
+
+    cr.move_to(cx, peak_y);
+    cr.line_to(cx + peak_half_w, base_y);
+    cr.line_to(cx - peak_half_w, base_y);
+    cr.close_path();
+    cr.fill().expect("Failed to draw tray icon");
+
+    // Theme Orange (#b05c38) Shadow / Slice on the peak
+    cr.set_source_rgba(0.69, 0.36, 0.22, 1.0); 
+    cr.move_to(cx, peak_y);
+    cr.line_to(cx + peak_half_w, base_y);
+    cr.line_to(cx, base_y);
+    cr.close_path();
+    cr.fill().expect("Failed to draw tray icon");
+
+    drop(cr);
+    surface.flush();
+
+    let stride = surface.stride() as usize;
+    let width = size as usize;
+    let height = size as usize;
+    let mut pixels = vec![0u8; width * height * 4];
+
+    {
+        let data = surface.data().expect("Failed to extract cairo surface data");
+        // Extract raw stride rows into exact contiguous W * 4 buffer
+        for y in 0..height {
+            let src_start = y * stride;
+            let src_end = src_start + width * 4;
+            let dst_start = y * width * 4;
+            let dst_end = dst_start + width * 4;
+            
+            pixels[dst_start..dst_end].copy_from_slice(&data[src_start..src_end]);
         }
     }
-}
 
-/// Generate a white 'A' reticle tray icon as raw ARGB32 bytes.
-fn apex_icon(size: i32) -> ksni::Icon {
-    let w = size as usize;
-    let h = size as usize;
-    let mut pixels: Vec<u8> = vec![0u8; w * h * 4];
-
-    let s = size as f32 / 22.0;
-
-    let stroke_width = 1.8 * s;
-    let apex_x = 11.0 * s;
-    let apex_y = 3.5 * s;
-    let left_x = 4.0 * s;
-    let right_x = 18.0 * s;
-    let bot_y = 18.5 * s;
-
-    let dash_y = 12.0 * s;
-    let dot_x = 11.0 * s;
-    let dot_y = 7.0 * s;
-    let dot_r = 1.2 * s;
-
-    let dist_to_segment = |px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32| -> f32 {
-        let l2 = (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2);
-        if l2 == 0.0 {
-            return ((px - x1) * (px - x1) + (py - y1) * (py - y1)).sqrt();
-        }
-        let mut t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
-        if t < 0.0 {
-            t = 0.0;
-        }
-        if t > 1.0 {
-            t = 1.0;
-        }
-        let proj_x = x1 + t * (x2 - x1);
-        let proj_y = y1 + t * (y2 - y1);
-        ((px - proj_x) * (px - proj_x) + (py - proj_y) * (py - proj_y)).sqrt()
-    };
-
-    for y in 0..h {
-        for x in 0..w {
-            let fx = x as f32 + 0.5;
-            let fy = y as f32 + 0.5;
-            let mut alpha = 0.0_f32;
-
-            // distance to left/right leg
-            let d_left = dist_to_segment(fx, fy, apex_x, apex_y, left_x, bot_y);
-            let d_right = dist_to_segment(fx, fy, apex_x, apex_y, right_x, bot_y);
-
-            let d_legs = d_left.min(d_right);
-            // soft anti-aliasing
-            let a_legs = (stroke_width - d_legs + 0.5).clamp(0.0, 1.0);
-            alpha = alpha.max(a_legs);
-
-            // distance to dashed line
-            let dash_thickness = 0.75 * s;
-            let dy = (fy - dash_y).abs();
-            if dy < dash_thickness + 0.5 {
-                if fx > 1.0 * s && fx < 21.0 * s {
-                    let dash_len = 2.5 * s;
-                    let dash_pos = (fx - 1.0 * s) % dash_len;
-                    if dash_pos < 1.4 * s {
-                        let a_dash = (dash_thickness - dy + 0.5).clamp(0.0, 1.0);
-                        alpha = alpha.max(a_dash);
-                    }
-                }
-            }
-
-            // distance to dot
-            let d_dot = ((fx - dot_x) * (fx - dot_x) + (fy - dot_y) * (fy - dot_y)).sqrt();
-            let a_dot = (dot_r - d_dot + 0.5).clamp(0.0, 1.0);
-            alpha = alpha.max(a_dot);
-
-            if alpha > 0.0 {
-                blend_white(&mut pixels, w, h, x, y, alpha);
-            }
-        }
+    // Convert Cairo native-endian ARGB32 (which is BGRA on little-endian) to KsNi expected ARGB byte order.
+    // KsNi expects exactly: [A, R, G, B] per pixel.
+    for pixel in pixels.chunks_exact_mut(4) {
+        let b = pixel[0];
+        let g = pixel[1];
+        let r = pixel[2];
+        let a = pixel[3];
+        // Swapping to ksni network byte order format
+        pixel[0] = a;
+        pixel[1] = r;
+        pixel[2] = g;
+        pixel[3] = b;
     }
 
     ksni::Icon {

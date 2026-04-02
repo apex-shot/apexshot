@@ -129,21 +129,27 @@ pub fn install_settings_css() {
                 background-color: #ffffff;
             }
 
-            .settings-nav-strip {
-                padding: 0 32px 12px 32px;
-                border-bottom: 1px solid alpha(white, 0.08);
+            .settings-sidebar {
+                padding: 16px 12px;
+                border-right: 1px solid alpha(white, 0.08);
+                background-color: alpha(black, 0.15);
+                min-width: 190px;
             }
 
             .settings-nav-item {
-                min-width: 57px;
-                min-height: 38px;
-                padding: 8px 6px 6px 6px;
-                border-radius: 10px;
+                min-height: 28px;
+                padding: 6px 12px;
+                border-radius: 6px;
+                margin-bottom: 2px;
             }
 
-            .settings-nav-item-hover,
+            .settings-nav-item-hover {
+                background-color: alpha(white, 0.08);
+            }
+
             .settings-nav-item-selected {
-                background-color: alpha(#eeeeee, 0.16);
+                background-color: #b05c38;
+                box-shadow: 0 2px 6px alpha(black, 0.2);
             }
 
             .settings-nav-icon {
@@ -151,36 +157,81 @@ pub fn install_settings_css() {
             }
 
             .settings-nav-label {
-                font-size: 12px;
-                margin-top: 6px;
+                font-size: 13px;
+                font-weight: 500;
+                margin-top: 0;
             }
 
             .settings-nav-icon-hover,
-            .settings-nav-label-hover,
+            .settings-nav-label-hover {
+                color: white;
+            }
+
             .settings-nav-icon-selected,
             .settings-nav-label-selected {
-                color: #b05c38;
+                color: white;
             }
 
-            .editor-root.editor-theme-light .settings-nav-strip {
-                border-bottom-color: alpha(#111827, 0.08);
+            button.settings-primary-btn {
+                background-image: none;
+                background-color: #b05c38;
+                border: 1px solid #9a4c2c;
+                border-radius: 6px;
+                padding: 6px 20px;
+                font-size: 13px;
+                font-weight: 600;
+                color: white;
+                transition: all 0.2s;
+                min-height: 28px;
+                box-shadow: 0 1px 3px alpha(black, 0.2);
             }
 
-            .editor-root.editor-theme-light .settings-nav-item-hover,
-            .editor-root.editor-theme-light .settings-nav-item-selected {
+            button.settings-primary-btn:hover {
+                background-image: none;
+                background-color: #c06540;
+                box-shadow: 0 2px 4px alpha(black, 0.3);
+            }
+
+            .editor-root.editor-theme-light .settings-sidebar {
+                border-right-color: alpha(#111827, 0.08);
+                background-color: alpha(#111827, 0.03);
+            }
+
+            .editor-root.editor-theme-light .settings-nav-item-hover {
                 background-color: alpha(#111827, 0.06);
             }
 
-            .editor-root.editor-theme-light .settings-nav-icon,
+            .editor-root.editor-theme-light .settings-nav-item-selected {
+                background-color: #b05c38;
+                box-shadow: 0 2px 6px alpha(#b05c38, 0.3);
+            }
+
+            .editor-root.editor-theme-light .settings-nav-icon {
+                color: #1d2129;
+            }
+
             .editor-root.editor-theme-light .settings-nav-label {
                 color: #1d2129;
             }
 
             .editor-root.editor-theme-light .settings-nav-icon-hover,
-            .editor-root.editor-theme-light .settings-nav-label-hover,
+            .editor-root.editor-theme-light .settings-nav-label-hover {
+                color: #1d2129;
+            }
+
             .editor-root.editor-theme-light .settings-nav-icon-selected,
             .editor-root.editor-theme-light .settings-nav-label-selected {
-                color: #9a4c2c;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light button.settings-primary-btn {
+                background-color: #b05c38;
+                border-color: #9a4c2c;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light button.settings-primary-btn:hover {
+                background-color: #c06540;
             }
 
             .settings-toast {
@@ -219,6 +270,12 @@ pub fn install_settings_css() {
             .editor-root.editor-theme-light .settings-toast-error {
                 border-color: alpha(#c93d2b, 0.18);
                 color: #4a1f1a;
+            }
+
+            .settings-page-title {
+                font-size: 24px;
+                font-weight: 700;
+                letter-spacing: -0.4px;
             }
 
             .settings-group-title {
@@ -283,7 +340,7 @@ pub fn install_settings_css() {
             }
 
             .settings-select {
-                min-width: 220px;
+                min-width: 180px;
             }
 
             .recording-tab-switcher {
@@ -307,14 +364,13 @@ pub fn install_settings_css() {
             }
 
             .recording-tab-button:hover {
-                color: alpha(white, 0.9);
-                background-color: alpha(white, 0.05);
+                color: white;
             }
 
             .recording-tab-button.active {
-                background-color: alpha(white, 0.1);
+                background-color: #b05c38;
                 color: white;
-                box-shadow: 0 2px 4px alpha(black, 0.2);
+                box-shadow: 0 1px 3px alpha(black, 0.2);
             }
 
             .settings-action-button {

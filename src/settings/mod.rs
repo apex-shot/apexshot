@@ -56,8 +56,8 @@ fn build_settings_window(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Settings")
-        .default_width(920)
-        .default_height(820)
+        .default_width(1020)
+        .default_height(840)
         .build();
 
     window.set_decorated(false);
@@ -102,7 +102,7 @@ fn build_settings_window(app: &Application) {
     toolbar.append(&drag_handle);
 
     let save_btn = Button::with_label("Save");
-    save_btn.add_css_class("suggested-action");
+    save_btn.add_css_class("settings-primary-btn");
 
     let right_box = GtkBox::new(Orientation::Horizontal, 12);
     right_box.set_halign(Align::End);
@@ -127,11 +127,23 @@ fn build_settings_window(app: &Application) {
     install_window_drag(&drag_handle, &window);
     install_edge_resize(&root_box, &window);
 
-    // --- NAVIGATION ---
-    let nav_strip = GtkBox::new(Orientation::Horizontal, 18);
-    nav_strip.add_css_class("settings-nav-strip");
-    nav_strip.set_halign(Align::Start);
-    nav_strip.set_hexpand(true);
+    // --- LAYOUT SPLIT ---
+    let content_split = GtkBox::new(Orientation::Horizontal, 0);
+    content_split.set_vexpand(true);
+    content_split.set_hexpand(true);
+
+    // --- NAVIGATION (SIDEBAR) ---
+    let sidebar_scroller = ScrolledWindow::new();
+    sidebar_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+
+    let nav_strip = GtkBox::new(Orientation::Vertical, 4);
+    nav_strip.add_css_class("settings-sidebar");
+    nav_strip.set_halign(Align::Fill);
+    nav_strip.set_valign(Align::Fill);
+    nav_strip.set_hexpand(false);
+    nav_strip.set_vexpand(true);
+
+    sidebar_scroller.set_child(Some(&nav_strip));
 
     let labels = [
         ("General", "preferences-system-symbolic"),
@@ -153,23 +165,22 @@ fn build_settings_window(app: &Application) {
     let mut nav_items = Vec::new();
 
     for (i, (label_text, icon_name)) in labels.iter().enumerate() {
-        let item = GtkBox::new(Orientation::Vertical, 0);
+        let item = GtkBox::new(Orientation::Horizontal, 12);
         item.add_css_class("settings-nav-item");
-        item.set_halign(Align::Center);
-        item.set_valign(Align::Start);
+        item.set_halign(Align::Fill);
+        item.set_valign(Align::Center);
 
-        let content = GtkBox::new(Orientation::Vertical, 4);
         let icon = Image::from_icon_name(icon_name);
         icon.add_css_class("settings-nav-icon");
-        icon.set_pixel_size(22);
-        icon.set_halign(Align::Center);
+        icon.set_pixel_size(18);
+        icon.set_halign(Align::Start);
+
         let label = Label::new(Some(label_text));
         label.add_css_class("settings-nav-label");
-        label.set_halign(Align::Center);
+        label.set_halign(Align::Start);
 
-        content.append(&icon);
-        content.append(&label);
-        item.append(&content);
+        item.append(&icon);
+        item.append(&label);
 
         if i == 0 {
             item.add_css_class("settings-nav-item-selected");
@@ -212,7 +223,7 @@ fn build_settings_window(app: &Application) {
         nav_items.push((item, icon, label));
     }
 
-    root_box.append(&nav_strip);
+    content_split.append(&sidebar_scroller);
 
     // --- BODY (STACK) ---
     let body_frame = GtkBox::new(Orientation::Vertical, 0);
@@ -299,8 +310,21 @@ fn build_settings_window(app: &Application) {
         let scroller = ScrolledWindow::new();
         scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
         let vbox = GtkBox::new(Orientation::Vertical, 0);
-        vbox.set_margin_top(12);
-        vbox.set_margin_bottom(16);
+        vbox.set_margin_top(24);
+        vbox.set_margin_bottom(40);
+        vbox.set_margin_start(36);
+        vbox.set_margin_end(36);
+
+        let header = GtkBox::new(Orientation::Vertical, 4);
+        header.set_margin_bottom(24);
+        
+        let title_lbl = Label::new(Some(title));
+        title_lbl.add_css_class("settings-page-title");
+        title_lbl.set_halign(Align::Start);
+        
+        header.append(&title_lbl);
+        vbox.append(&header);
+
         vbox.append(widget);
         scroller.set_child(Some(&vbox));
         stack.add_titled(&scroller, Some(name), title);
@@ -340,7 +364,8 @@ fn build_settings_window(app: &Application) {
     });
     stack.set_visible_child_name("0");
 
-    root_box.append(&body_frame);
+    content_split.append(&body_frame);
+    root_box.append(&content_split);
     window.set_child(Some(&window_overlay));
 
     // --- SAVE LOGIC ---
