@@ -119,6 +119,7 @@ pub struct AppConfig {
     pub shortcut_restore_recently_closed: String,
     pub shortcut_toggle_overlays: String,
     pub shortcut_capture_area: String,
+    pub shortcut_capture_crosshair: String,
     pub shortcut_capture_previous_area: String,
     pub shortcut_capture_fullscreen: String,
     pub shortcut_capture_window: String,
@@ -239,6 +240,7 @@ impl Default for AppConfig {
             shortcut_restore_recently_closed: String::new(),
             shortcut_toggle_overlays: String::new(),
             shortcut_capture_area: "Shift+Super+4".to_string(),
+            shortcut_capture_crosshair: "Ctrl+Alt+X".to_string(),
             shortcut_capture_previous_area: String::new(),
             shortcut_capture_fullscreen: "Shift+Super+3".to_string(),
             shortcut_capture_window: "Shift+Super+5".to_string(),
@@ -760,5 +762,27 @@ quick_access_overlay_size: 0.5
         }
         .sanitized();
         assert_eq!(high.quick_access_overlay_size, 1.5);
+    }
+
+    #[test]
+    fn shortcut_defaults_include_crosshair_capture() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.shortcut_capture_crosshair, "Ctrl+Alt+X");
+    }
+
+    #[test]
+    fn config_yaml_round_trip_preserves_crosshair_shortcut() {
+        let original = AppConfig {
+            shortcut_capture_crosshair: "Alt+Print".into(),
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+
+        assert_eq!(
+            loaded.shortcut_capture_crosshair,
+            original.shortcut_capture_crosshair
+        );
     }
 }

@@ -428,6 +428,7 @@ fn build_settings_window(app: &Application) {
         shortcut_restore_recently_closed: shortcuts.restore_file_btn.clone(),
         shortcut_toggle_overlays: shortcuts.toggle_overlays_btn.clone(),
         shortcut_capture_area: shortcuts.capture_area_btn.clone(),
+        shortcut_capture_crosshair: shortcuts.capture_crosshair_btn.clone(),
         shortcut_capture_previous_area: shortcuts.capture_prev_btn.clone(),
         shortcut_capture_fullscreen: shortcuts.capture_fullscreen_btn.clone(),
         shortcut_capture_window: shortcuts.capture_window_btn.clone(),

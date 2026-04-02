@@ -97,6 +97,22 @@ static QString keyEventToPreviewText(QKeyEvent* event)
 void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 {
     const QPoint pos = event->pos();
+    m_pointerPos = pos;
+
+    if (isCrosshairMode()) {
+        if (event->button() == Qt::LeftButton) {
+            m_dragStart = pos;
+            m_selection = QRect(pos, pos);
+            m_hasSelection = false;
+            m_dragging = true;
+            m_moving = false;
+            m_resizing = HandlePos::None;
+            setCursor(Qt::CrossCursor);
+            update();
+        }
+        return;
+    }
+
     auto closeRecordingMenus = [&]() {
         m_settingsOpen = false;
         m_clickOptionsOpen = false;
@@ -823,6 +839,16 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 {
     const QPoint pos = event->pos();
+    m_pointerPos = pos;
+
+    if (isCrosshairMode()) {
+        if (m_dragging) {
+            m_selection = QRect(m_dragStart, pos);
+        }
+        setCursor(Qt::CrossCursor);
+        update();
+        return;
+    }
 
     if (m_countdownActive) {
         const bool hoveringCancel = m_countdownBubbleRect.contains(pos);
@@ -1217,6 +1243,26 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) return;
+    m_pointerPos = event->pos();
+
+    if (isCrosshairMode()) {
+        if (!m_dragging) {
+            return;
+        }
+
+        m_dragging = false;
+        const QRect norm = m_selection.normalized();
+        if (norm.width() < kMinSize || norm.height() < kMinSize) {
+            m_hasSelection = false;
+            cancelSelection();
+            return;
+        }
+
+        m_selection = norm;
+        m_hasSelection = true;
+        confirmSelection();
+        return;
+    }
 
     // Stop slider drag
     if (m_sliderDragging) {
@@ -1259,6 +1305,7 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
 void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) return;
+    if (isCrosshairMode()) return;
     if (!m_hasSelection) return;
 
     // Ignore double-click when recording panel is open to prevent accidental triggers
@@ -1396,6 +1443,15 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
 
 void CaptureOverlay::keyPressEvent(QKeyEvent* event)
 {
+    if (isCrosshairMode()) {
+        if (event->key() == Qt::Key_Escape) {
+            cancelSelection();
+            return;
+        }
+        QWidget::keyPressEvent(event);
+        return;
+    }
+
     // Recording panel: ESC closes panel, restores normal mode
     if (m_recordingPanelOpen) {
         switch (event->key()) {

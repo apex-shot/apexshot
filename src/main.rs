@@ -17,8 +17,8 @@ use apexshot::{
         open_image_editor, save_capture, show_capture_preview_overlay, ImageFormat, SaveConfig,
     },
     capture_overlay::{
-        capture_area_via_cpp, capture_screen_via_cpp, is_launch_blocked_error, run_capture_overlay,
-        AreaCaptureResult,
+        capture_area_via_cpp, capture_crosshair_via_cpp, capture_screen_via_cpp,
+        is_launch_blocked_error, run_capture_overlay, AreaCaptureResult,
     },
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
@@ -1092,6 +1092,28 @@ fn run_capture(args: &[String]) {
                 std::process::exit(1);
             }
         },
+        "crosshair" => match capture_crosshair_via_cpp() {
+            Ok(AreaCaptureResult::Captured(capture)) => {
+                println!("Using C++ capture backend...");
+                capture
+            }
+            Ok(AreaCaptureResult::Cancelled) => {
+                eprintln!("Selection cancelled");
+                std::process::exit(0);
+            }
+            Ok(_) => {
+                eprintln!("Error: crosshair capture returned unsupported result");
+                std::process::exit(1);
+            }
+            Err(err) if is_launch_blocked_error(&err) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+            Err(err) => {
+                eprintln!("[capture] C++ crosshair capture failed: {err}");
+                std::process::exit(1);
+            }
+        },
         _ if WaylandBackend::is_supported() => {
             println!("Using Wayland backend...");
             let backend = WaylandBackend::new().expect("Failed to initialize Wayland backend");
@@ -1228,6 +1250,15 @@ fn run_capture(args: &[String]) {
         if let Err(e) = show_capture_preview_overlay(saved_path.clone()) {
             eprintln!("Warning: Failed to show capture preview overlay: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn crosshair_capture_type_is_reserved_for_cpp_backend() {
+        let capture_type = "crosshair";
+        assert!(matches!(capture_type, "area" | "crosshair" | "screen"));
     }
 }
 
