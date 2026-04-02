@@ -1,5 +1,5 @@
 use crate::config::AppConfig;
-use gtk4::{prelude::*, Align, Box as GtkBox, Button, Grid, Image, Label, Orientation};
+use gtk4::{prelude::*, Align, Box as GtkBox, Button, Image, Label, Orientation};
 
 pub struct ShortcutSettingsWidgets {
     pub section: GtkBox,
@@ -19,152 +19,137 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
     let section = GtkBox::new(Orientation::Vertical, 0);
     section.set_hexpand(true);
 
-    let grid = Grid::new();
-    grid.set_column_spacing(12);
-    grid.set_row_spacing(0); // Rows will have padding/backgrounds
+    macro_rules! build_row {
+        ($content:expr, $is_muted:expr) => {{
+            let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+            row.add_css_class("settings-table-row");
+            if $is_muted {
+                row.add_css_class("settings-table-row-muted");
+            }
+            row.set_hexpand(true);
+            row.append($content);
+            row
+        }};
+    }
 
-    // Spacers for horizontal centering
-    let l_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    l_spacer.set_hexpand(true);
-    let r_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    r_spacer.set_hexpand(true);
-    grid.attach(&l_spacer, 0, 0, 1, 1);
-    grid.attach(&r_spacer, 4, 0, 1, 1);
+    let build_frame = || -> gtk4::Box {
+        let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        frame.add_css_class("settings-table-frame");
+        frame.set_margin_bottom(24);
+        frame.set_margin_start(4);
+        frame.set_margin_end(4);
+        frame
+    };
 
-    let mut row = 0;
-
-    let create_header = |grid: &Grid, label: &str, icon: &str, row: &mut i32| {
+    let create_header = |section: &GtkBox, label_text: &str, icon: &str| {
         let hbox = GtkBox::new(Orientation::Horizontal, 10);
-        hbox.set_margin_top(24);
-        hbox.set_margin_bottom(12);
+        hbox.set_margin_bottom(8);
+        hbox.set_margin_top(8);
 
         let img = Image::from_icon_name(icon);
         img.set_pixel_size(20);
 
-        let lbl = Label::new(Some(label));
-        lbl.add_css_class("shortcuts-header-title"); // Style like image
+        let lbl = Label::new(Some(label_text));
+        lbl.add_css_class("settings-group-title");
 
         hbox.append(&img);
         hbox.append(&lbl);
-
-        grid.attach(&hbox, 1, *row, 3, 1);
-        *row += 1;
+        section.append(&hbox);
     };
 
-    let create_row =
-        |grid: &Grid, label: &str, current_val: &str, row: &mut i32, is_zebra: bool| -> Button {
-            if is_zebra {
-                let bg = GtkBox::new(Orientation::Horizontal, 0);
-                bg.add_css_class("shortcuts-row-zebra");
-                bg.set_vexpand(false);
-                grid.attach(&bg, 0, *row, 5, 1);
-            }
+    let create_row = |frame: &GtkBox, label_text: &str, current_val: &str, is_muted: bool| -> Button {
+        let hbox = GtkBox::new(Orientation::Horizontal, 12);
+        hbox.set_hexpand(true);
 
-            let lbl = Label::new(Some(label));
-            lbl.set_xalign(0.0);
-            lbl.set_halign(Align::Start);
-            lbl.set_margin_start(16);
-            lbl.set_margin_top(10);
-            lbl.set_margin_bottom(10);
-            lbl.add_css_class("shortcuts-label");
+        let lbl = Label::new(Some(label_text));
+        lbl.set_xalign(0.0);
+        lbl.set_hexpand(true);
 
-            let btn = Button::new();
-            btn.add_css_class("shortcuts-record-btn");
-            btn.set_label(if current_val.is_empty() {
-                "Record shortcut"
-            } else {
-                current_val
-            });
-            btn.set_halign(Align::End);
-            btn.set_margin_end(16);
-            btn.set_margin_top(8);
-            btn.set_margin_bottom(8);
-            btn.set_size_request(200, -1);
+        let btn = Button::new();
+        btn.add_css_class("shortcuts-record-btn");
+        btn.set_label(if current_val.is_empty() {
+            "Record shortcut"
+        } else {
+            current_val
+        });
+        btn.set_size_request(200, -1);
 
-            grid.attach(&lbl, 1, *row, 2, 1);
-            grid.attach(&btn, 3, *row, 1, 1);
+        hbox.append(&lbl);
+        hbox.append(&btn);
 
-            *row += 1;
-            btn
-        };
+        frame.append(&build_row!(&hbox, is_muted));
+        btn
+    };
 
     // --- General Section ---
-    create_header(&grid, "General", "emblem-system-symbolic", &mut row);
+    create_header(&section, "General", "emblem-system-symbolic");
+    let general_frame = build_frame();
     let toggle_icons_btn = create_row(
-        &grid,
+        &general_frame,
         "Toggle Desktop Icons:",
         &config.shortcut_toggle_desktop_icons,
-        &mut row,
         false,
     );
     let open_file_btn = create_row(
-        &grid,
+        &general_frame,
         "Open File:",
         &config.shortcut_open_file,
-        &mut row,
         true,
     );
     let open_clipboard_btn = create_row(
-        &grid,
+        &general_frame,
         "Open From Clipboard:",
         &config.shortcut_open_from_clipboard,
-        &mut row,
         false,
     );
     let pin_screen_btn = create_row(
-        &grid,
+        &general_frame,
         "Pin to the Screen:",
         &config.shortcut_pin_to_screen,
-        &mut row,
         true,
     );
     let restore_file_btn = create_row(
-        &grid,
+        &general_frame,
         "Restore Recently Closed File:",
         &config.shortcut_restore_recently_closed,
-        &mut row,
         false,
     );
     let toggle_overlays_btn = create_row(
-        &grid,
+        &general_frame,
         "Hide/Show Overlays:",
         &config.shortcut_toggle_overlays,
-        &mut row,
         true,
     );
+    section.append(&general_frame);
 
     // --- Screenshots Section ---
-    create_header(&grid, "Screenshots", "camera-photo-symbolic", &mut row);
+    create_header(&section, "Screenshots", "camera-photo-symbolic");
+    let screenshots_frame = build_frame();
     let capture_area_btn = create_row(
-        &grid,
+        &screenshots_frame,
         "Capture Area:",
         &config.shortcut_capture_area,
-        &mut row,
         false,
     );
     let capture_prev_btn = create_row(
-        &grid,
+        &screenshots_frame,
         "Capture Previous Area:",
         &config.shortcut_capture_previous_area,
-        &mut row,
         true,
     );
     let capture_fullscreen_btn = create_row(
-        &grid,
+        &screenshots_frame,
         "Capture Full Screen:",
         &config.shortcut_capture_fullscreen,
-        &mut row,
         false,
     );
     let capture_window_btn = create_row(
-        &grid,
+        &screenshots_frame,
         "Capture Window:",
         &config.shortcut_capture_window,
-        &mut row,
         true,
     );
-
-    section.append(&grid);
+    section.append(&screenshots_frame);
 
     // Bottom buttons
     let bottom_box = GtkBox::new(Orientation::Horizontal, 0);

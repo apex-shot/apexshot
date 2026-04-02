@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Grid, Label,
+    prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Label,
     Orientation, Popover, Scale, Stack,
 };
 
@@ -104,102 +104,93 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     });
 
     // --- GENERAL TAB ---
-    let general_grid = Grid::new();
-    general_grid.set_hexpand(true);
-    general_grid.set_row_spacing(24);
-    general_grid.set_column_spacing(12);
-    let l_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    l_spacer.set_hexpand(true);
-    let r_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    r_spacer.set_hexpand(true);
-    general_grid.attach(&l_spacer, 0, 0, 1, 1);
-    general_grid.attach(&r_spacer, 4, 0, 1, 1);
+    macro_rules! build_row {
+        ($content:expr, $is_muted:expr) => {{
+            let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+            row.add_css_class("settings-table-row");
+            if $is_muted {
+                row.add_css_class("settings-table-row-muted");
+            }
+            row.set_hexpand(true);
+            row.append($content);
+            row
+        }};
+    }
 
-    let mut row = 0;
-    let create_row = |grid: &Grid, label_text: &str, row_idx: i32| -> CheckButton {
+    let build_frame = || -> gtk4::Box {
+        let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        frame.add_css_class("settings-table-frame");
+        frame.set_margin_bottom(24);
+        frame.set_margin_start(4);
+        frame.set_margin_end(4);
+        frame
+    };
+
+    let general_frame = build_frame();
+    general_frame.set_margin_top(12);
+
+    let create_row = |frame: &GtkBox, label_text: &str, is_muted: bool| -> CheckButton {
+        let hbox = GtkBox::new(Orientation::Horizontal, 12);
+        hbox.set_hexpand(true);
         let label = Label::new(Some(label_text));
-        label.add_css_class("settings-group-title");
-        label.set_xalign(1.0);
-        label.set_size_request(140, -1);
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
         let check = CheckButton::new();
-        let cell = GtkBox::new(Orientation::Horizontal, 0);
-        cell.set_size_request(28, -1);
-        cell.set_halign(Align::Start);
-        cell.append(&check);
-        grid.attach(&label, 1, row_idx, 1, 1);
-        grid.attach(&cell, 2, row_idx, 1, 1);
+        hbox.append(&label);
+        hbox.append(&check);
+        frame.append(&build_row!(&hbox, is_muted));
         check
     };
 
-    let save_location_label = Label::new(Some("Save location:"));
-    save_location_label.add_css_class("settings-group-title");
-    save_location_label.set_xalign(1.0);
-    save_location_label.set_size_request(140, -1);
     let video_export_location_entry = Entry::new();
     video_export_location_entry.set_hexpand(true);
     video_export_location_entry.set_width_chars(28);
     video_export_location_entry.set_placeholder_text(Some("Choose a folder"));
     video_export_location_entry.set_text(&config.video_export_location);
     let video_export_location_browse = Button::with_label("Browse");
-    let video_export_location_row = GtkBox::new(Orientation::Horizontal, 8);
-    video_export_location_row.set_halign(Align::Start);
-    video_export_location_row.append(&video_export_location_entry);
-    video_export_location_row.append(&video_export_location_browse);
-    general_grid.attach(&save_location_label, 1, row, 1, 1);
-    general_grid.attach(&video_export_location_row, 3, row, 1, 1);
+    
+    let export_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    export_hbox.set_hexpand(true);
+    let export_label = Label::new(Some("Save location"));
+    export_label.set_xalign(0.0);
+    export_label.set_hexpand(true);
+    let entry_row = GtkBox::new(Orientation::Horizontal, 8);
+    entry_row.append(&video_export_location_entry);
+    entry_row.append(&video_export_location_browse);
+    export_hbox.append(&export_label);
+    export_hbox.append(&entry_row);
+    general_frame.append(&build_row!(&export_hbox, false));
 
-    row += 1;
-
-    let rec_controls_check = create_row(&general_grid, "Controls:", row);
+    let rec_controls_check = create_row(&general_frame, "Show controls while recording", true);
     rec_controls_check.set_active(config.rec_controls);
-    let rec_controls_opt = Label::new(Some("Show controls while recording"));
-    rec_controls_opt.set_xalign(0.0);
-    general_grid.attach(&rec_controls_opt, 3, row, 1, 1);
 
-    row += 1;
-    let rec_display_time_check = create_row(&general_grid, "Menu bar:", row);
+    let rec_display_time_check = create_row(&general_frame, "Display recording time in menu bar", false);
     rec_display_time_check.set_active(config.rec_display_time);
-    let rec_display_time_opt = Label::new(Some("Display recording time"));
-    rec_display_time_opt.set_xalign(0.0);
-    general_grid.attach(&rec_display_time_opt, 3, row, 1, 1);
 
-    row += 1;
-    let rec_hidpi_check = create_row(&general_grid, "Retina:", row);
+    let rec_hidpi_check = create_row(&general_frame, "Scale Retina videos to 1x", true);
     rec_hidpi_check.set_active(config.rec_hidpi);
-    let rec_hidpi_opt = Label::new(Some("Scale Retina videos to 1x"));
-    rec_hidpi_opt.set_xalign(0.0);
-    general_grid.attach(&rec_hidpi_opt, 3, row, 1, 1);
 
-    row += 1;
-    let rec_notifications_check = create_row(&general_grid, "Notifications:", row);
+    let rec_notifications_check = create_row(&general_frame, "Enable \"Do Not Disturb\" while recording", false);
     rec_notifications_check.set_active(config.rec_notifications);
-    let rec_notifications_opt = Label::new(Some("Enable \"Do Not Disturb\" while recording"));
-    rec_notifications_opt.set_xalign(0.0);
-    general_grid.attach(&rec_notifications_opt, 3, row, 1, 1);
 
-    row += 1;
-    let rec_cursor_check = create_row(&general_grid, "Cursor:", row);
+    let rec_cursor_check = create_row(&general_frame, "Show cursor", true);
     rec_cursor_check.set_active(config.rec_cursor);
-    let rec_cursor_opt = Label::new(Some("Show cursor"));
-    rec_cursor_opt.set_xalign(0.0);
-    general_grid.attach(&rec_cursor_opt, 3, row, 1, 1);
 
-    row += 1;
     let rec_clicks_check = CheckButton::new();
     rec_clicks_check.set_active(config.rec_clicks);
-    let clicks_cell = GtkBox::new(Orientation::Horizontal, 0);
-    clicks_cell.set_size_request(28, -1);
-    clicks_cell.set_halign(Align::Start);
-    clicks_cell.append(&rec_clicks_check);
     let clicks_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    clicks_hbox.set_hexpand(true);
     let clicks_opt = Label::new(Some("Highlight clicks"));
     clicks_opt.set_xalign(0.0);
+    clicks_opt.set_hexpand(true);
     let clicks_btn = Button::with_label("Options...");
-    clicks_btn.add_css_class("settings-action-button");
+    clicks_btn.add_css_class("secondary-settings-button");
+    let clicks_rhs = GtkBox::new(Orientation::Horizontal, 8);
+    clicks_rhs.append(&clicks_btn);
+    clicks_rhs.append(&rec_clicks_check);
     clicks_hbox.append(&clicks_opt);
-    clicks_hbox.append(&clicks_btn);
-    general_grid.attach(&clicks_cell, 2, row, 1, 1);
-    general_grid.attach(&clicks_hbox, 3, row, 1, 1);
+    clicks_hbox.append(&clicks_rhs);
+    general_frame.append(&build_row!(&clicks_hbox, false));
 
     // Click Options Popover
     let click_popover = Popover::new();
@@ -257,17 +248,21 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         click_popover.popup();
     });
 
-    row += 1;
-    let rec_keystrokes_check = create_row(&general_grid, "Keyboard:", row);
+    let rec_keystrokes_check = CheckButton::new();
     rec_keystrokes_check.set_active(config.rec_keystrokes);
     let keys_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    keys_hbox.set_hexpand(true);
     let keys_opt = Label::new(Some("Show Keystrokes"));
     keys_opt.set_xalign(0.0);
+    keys_opt.set_hexpand(true);
     let keys_btn = Button::with_label("Options...");
-    keys_btn.add_css_class("settings-action-button");
+    keys_btn.add_css_class("secondary-settings-button");
+    let keys_rhs = GtkBox::new(Orientation::Horizontal, 8);
+    keys_rhs.append(&keys_btn);
+    keys_rhs.append(&rec_keystrokes_check);
     keys_hbox.append(&keys_opt);
-    keys_hbox.append(&keys_btn);
-    general_grid.attach(&keys_hbox, 3, row, 1, 1);
+    keys_hbox.append(&keys_rhs);
+    general_frame.append(&build_row!(&keys_hbox, true));
 
     // Keystroke Options Popover
     let key_popover = Popover::new();
@@ -336,165 +331,125 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         key_popover.popup();
     });
 
-    row += 1;
-    let rec_remember_selection_check = create_row(&general_grid, "Recording area:", row);
+    let rec_remember_selection_check = create_row(&general_frame, "Remember last selection area", false);
     rec_remember_selection_check.set_active(config.rec_remember_selection);
-    let rec_area_opt = Label::new(Some("Remember last selection"));
-    rec_area_opt.set_xalign(0.0);
-    general_grid.attach(&rec_area_opt, 3, row, 1, 1);
 
-    row += 1;
-    let rec_dim_screen_check = CheckButton::new();
+    let rec_dim_screen_check = create_row(&general_frame, "Dim screen while recording", true);
     rec_dim_screen_check.set_active(config.rec_dim_screen);
-    let dim_cell = GtkBox::new(Orientation::Horizontal, 0);
-    dim_cell.set_size_request(28, -1);
-    dim_cell.set_halign(Align::Start);
-    dim_cell.append(&rec_dim_screen_check);
-    let dim_opt = Label::new(Some("Dim screen while recording"));
-    dim_opt.set_xalign(0.0);
-    general_grid.attach(&dim_cell, 2, row, 1, 1);
-    general_grid.attach(&dim_opt, 3, row, 1, 1);
 
-    row += 1;
-    let rec_countdown_check = CheckButton::new();
+    let rec_countdown_check = create_row(&general_frame, "Show countdown before start", false);
     rec_countdown_check.set_active(config.rec_countdown);
-    let countdown_cell = GtkBox::new(Orientation::Horizontal, 0);
-    countdown_cell.set_size_request(28, -1);
-    countdown_cell.set_halign(Align::Start);
-    countdown_cell.append(&rec_countdown_check);
-    let countdown_opt = Label::new(Some("Show countdown before start"));
-    countdown_opt.set_xalign(0.0);
-    general_grid.attach(&countdown_cell, 2, row, 1, 1);
-    general_grid.attach(&countdown_opt, 3, row, 1, 1);
 
-    stack.add_named(&general_grid, Some("general"));
+    stack.add_named(&general_frame, Some("general"));
 
     // --- VIDEO TAB ---
-    let video_grid = Grid::new();
-    video_grid.set_hexpand(true);
-    video_grid.set_row_spacing(30);
-    video_grid.set_column_spacing(12);
-    let l_spacer_v = GtkBox::new(Orientation::Horizontal, 0);
-    l_spacer_v.set_hexpand(true);
-    let r_spacer_v = GtkBox::new(Orientation::Horizontal, 0);
-    r_spacer_v.set_hexpand(true);
-    video_grid.attach(&l_spacer_v, 0, 0, 1, 1);
-    video_grid.attach(&r_spacer_v, 4, 0, 1, 1);
+    let video_frame = build_frame();
+    video_frame.set_margin_top(12);
 
-    let mut vrow = 0;
-    let res_label = Label::new(Some("Max resolution:"));
-    res_label.add_css_class("settings-group-title");
-    res_label.set_xalign(1.0);
-    res_label.set_size_request(140, -1);
+    let res_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    res_hbox.set_hexpand(true);
+    let res_label = Label::new(Some("Max resolution"));
+    res_label.set_xalign(0.0);
+    res_label.set_hexpand(true);
     let rec_video_max_res_input = ComboBoxText::new();
     rec_video_max_res_input.add_css_class("settings-select");
     for (i, lbl) in [("0", "Original"), ("1", "1080p"), ("2", "720p")] {
         rec_video_max_res_input.append(Some(i), lbl);
     }
     rec_video_max_res_input.set_active_id(Some(&config.rec_video_max_res.to_string()));
-    rec_video_max_res_input.set_halign(Align::Start);
-    video_grid.attach(&res_label, 1, vrow, 1, 1);
-    video_grid.attach(&rec_video_max_res_input, 3, vrow, 1, 1);
+    res_hbox.append(&res_label);
+    res_hbox.append(&rec_video_max_res_input);
+    video_frame.append(&build_row!(&res_hbox, false));
 
-    vrow += 1;
-    let fps_label = Label::new(Some("Video FPS:"));
-    fps_label.add_css_class("settings-group-title");
-    fps_label.set_xalign(1.0);
+    let fps_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    fps_hbox.set_hexpand(true);
+    let fps_label = Label::new(Some("Video FPS"));
+    fps_label.set_xalign(0.0);
+    fps_label.set_hexpand(true);
     let rec_video_fps_input = ComboBoxText::new();
     rec_video_fps_input.add_css_class("settings-select");
     for (i, lbl) in [("0", "24"), ("1", "30"), ("2", "50"), ("3", "60")] {
         rec_video_fps_input.append(Some(i), lbl);
     }
     rec_video_fps_input.set_active_id(Some(&config.rec_video_fps.to_string()));
-    rec_video_fps_input.set_halign(Align::Start);
-    video_grid.attach(&fps_label, 1, vrow, 1, 1);
-    video_grid.attach(&rec_video_fps_input, 3, vrow, 1, 1);
+    fps_hbox.append(&fps_label);
+    fps_hbox.append(&rec_video_fps_input);
+    video_frame.append(&build_row!(&fps_hbox, true));
 
-    vrow += 1;
-    let audio_label = Label::new(Some("Audio:"));
-    audio_label.add_css_class("settings-group-title");
-    audio_label.set_xalign(1.0);
+    let audio_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    audio_hbox.set_hexpand(true);
+    let audio_label = Label::new(Some("Audio"));
+    audio_label.set_xalign(0.0);
+    audio_label.set_hexpand(true);
     let audio_btn = Button::with_label("Computer Audio Settings...");
-    audio_btn.add_css_class("settings-action-button");
-    audio_btn.set_halign(Align::Start);
-    video_grid.attach(&audio_label, 1, vrow, 1, 1);
-    video_grid.attach(&audio_btn, 3, vrow, 1, 1);
+    audio_btn.add_css_class("secondary-settings-button");
+    audio_hbox.append(&audio_label);
+    audio_hbox.append(&audio_btn);
+    video_frame.append(&build_row!(&audio_hbox, false));
 
-    vrow += 1;
     let rec_video_mono_check = CheckButton::new();
     rec_video_mono_check.set_active(config.rec_video_mono);
-    let mono_cell = GtkBox::new(Orientation::Horizontal, 0);
-    mono_cell.set_size_request(28, -1);
-    mono_cell.set_halign(Align::Start);
-    mono_cell.append(&rec_video_mono_check);
+    let mono_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    mono_hbox.set_hexpand(true);
     let mono_opt = Label::new(Some("Record audio in mono"));
     mono_opt.set_xalign(0.0);
-    video_grid.attach(&mono_cell, 2, vrow, 1, 1);
-    video_grid.attach(&mono_opt, 3, vrow, 1, 1);
+    mono_opt.set_hexpand(true);
+    mono_hbox.append(&mono_opt);
+    mono_hbox.append(&rec_video_mono_check);
+    video_frame.append(&build_row!(&mono_hbox, true));
 
-    vrow += 1;
     let rec_video_open_editor_check = CheckButton::new();
     rec_video_open_editor_check.set_active(config.rec_video_open_editor);
-    let editor_cell = GtkBox::new(Orientation::Horizontal, 0);
-    editor_cell.set_size_request(28, -1);
-    editor_cell.set_halign(Align::Start);
-    editor_cell.append(&rec_video_open_editor_check);
+    let editor_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    editor_hbox.set_hexpand(true);
     let editor_opt = Label::new(Some("Open Video Editor after recording"));
     editor_opt.set_xalign(0.0);
-    video_grid.attach(&editor_cell, 2, vrow, 1, 1);
-    video_grid.attach(&editor_opt, 3, vrow, 1, 1);
+    editor_opt.set_hexpand(true);
+    editor_hbox.append(&editor_opt);
+    editor_hbox.append(&rec_video_open_editor_check);
+    video_frame.append(&build_row!(&editor_hbox, false));
 
-    stack.add_named(&video_grid, Some("video"));
+    stack.add_named(&video_frame, Some("video"));
 
     // --- GIF TAB ---
-    let gif_grid = Grid::new();
-    gif_grid.set_hexpand(true);
-    gif_grid.set_row_spacing(30);
-    gif_grid.set_column_spacing(12);
-    let l_spacer_g = GtkBox::new(Orientation::Horizontal, 0);
-    l_spacer_g.set_hexpand(true);
-    let r_spacer_g = GtkBox::new(Orientation::Horizontal, 0);
-    r_spacer_g.set_hexpand(true);
-    gif_grid.attach(&l_spacer_g, 0, 0, 1, 1);
-    gif_grid.attach(&r_spacer_g, 4, 0, 1, 1);
+    let gif_frame = build_frame();
+    gif_frame.set_margin_top(12);
 
-    let mut grow = 0;
-    let gfps_label = Label::new(Some("GIF FPS:"));
-    gfps_label.add_css_class("settings-group-title");
-    gfps_label.set_xalign(1.0);
-    gfps_label.set_size_request(140, -1);
     let rec_gif_fps_input = Scale::with_range(Orientation::Horizontal, 5.0, 60.0, 1.0);
     rec_gif_fps_input.set_value(config.rec_gif_fps as f64);
     rec_gif_fps_input.set_size_request(150, -1);
-    gif_grid.attach(&gfps_label, 1, grow, 1, 1);
-    gif_grid.attach(&rec_gif_fps_input, 3, grow, 1, 1);
+    let gfps_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    gfps_hbox.set_hexpand(true);
+    let gfps_label = Label::new(Some("GIF FPS"));
+    gfps_label.set_xalign(0.0);
+    gfps_label.set_hexpand(true);
+    gfps_hbox.append(&gfps_label);
+    gfps_hbox.append(&rec_gif_fps_input);
+    gif_frame.append(&build_row!(&gfps_hbox, false));
 
-    grow += 1;
-    let gqual_label = Label::new(Some("GIF quality:"));
-    gqual_label.add_css_class("settings-group-title");
-    gqual_label.set_xalign(1.0);
     let rec_gif_quality_input = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.05);
     rec_gif_quality_input.set_value(config.rec_gif_quality);
     rec_gif_quality_input.set_size_request(150, -1);
-    gif_grid.attach(&gqual_label, 1, grow, 1, 1);
-    gif_grid.attach(&rec_gif_quality_input, 3, grow, 1, 1);
+    let gqual_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    gqual_hbox.set_hexpand(true);
+    let gqual_label = Label::new(Some("GIF quality"));
+    gqual_label.set_xalign(0.0);
+    gqual_label.set_hexpand(true);
+    gqual_hbox.append(&gqual_label);
+    gqual_hbox.append(&rec_gif_quality_input);
+    gif_frame.append(&build_row!(&gqual_hbox, true));
 
-    grow += 1;
     let rec_gif_optimize_check = CheckButton::new();
     rec_gif_optimize_check.set_active(config.rec_gif_optimize);
-    let opt_cell = GtkBox::new(Orientation::Horizontal, 0);
-    opt_cell.set_size_request(28, -1);
-    opt_cell.set_halign(Align::Start);
-    opt_cell.append(&rec_gif_optimize_check);
+    let opt_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    opt_hbox.set_hexpand(true);
     let opt_opt = Label::new(Some("Optimize GIFs"));
     opt_opt.set_xalign(0.0);
-    gif_grid.attach(&opt_cell, 2, grow, 1, 1);
-    gif_grid.attach(&opt_opt, 3, grow, 1, 1);
+    opt_opt.set_hexpand(true);
+    opt_hbox.append(&opt_opt);
+    opt_hbox.append(&rec_gif_optimize_check);
+    gif_frame.append(&build_row!(&opt_hbox, false));
 
-    grow += 1;
-    let gsize_label = Label::new(Some("GIF size:"));
-    gsize_label.add_css_class("settings-group-title");
-    gsize_label.set_xalign(1.0);
     let rec_gif_size_idx_input = ComboBoxText::new();
     rec_gif_size_idx_input.add_css_class("settings-select");
     for (i, lbl) in [
@@ -506,11 +461,16 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         rec_gif_size_idx_input.append(Some(i), lbl);
     }
     rec_gif_size_idx_input.set_active_id(Some(&config.rec_gif_size_idx.to_string()));
-    rec_gif_size_idx_input.set_halign(Align::Start);
-    gif_grid.attach(&gsize_label, 1, grow, 1, 1);
-    gif_grid.attach(&rec_gif_size_idx_input, 3, grow, 1, 1);
+    let gsize_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    gsize_hbox.set_hexpand(true);
+    let gsize_label = Label::new(Some("GIF size"));
+    gsize_label.set_xalign(0.0);
+    gsize_label.set_hexpand(true);
+    gsize_hbox.append(&gsize_label);
+    gsize_hbox.append(&rec_gif_size_idx_input);
+    gif_frame.append(&build_row!(&gsize_hbox, true));
 
-    stack.add_named(&gif_grid, Some("gif"));
+    stack.add_named(&gif_frame, Some("gif"));
 
     section.append(&switcher_box);
     section.append(&stack);

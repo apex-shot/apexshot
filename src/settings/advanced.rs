@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use gtk4::{
     prelude::*, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Grid, Label,
-    Orientation, Separator, Window,
+    Orientation, Window,
 };
 
 #[allow(dead_code)]
@@ -24,168 +24,219 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     let section = GtkBox::new(Orientation::Vertical, 0);
     section.set_hexpand(true);
 
-    let grid = Grid::new();
-    grid.set_column_spacing(24);
-    grid.set_row_spacing(12); // Tighter row spacing for sub-items
-    grid.set_margin_top(20);
-    grid.set_hexpand(true);
+    macro_rules! build_row {
+        ($content:expr, $is_muted:expr) => {{
+            let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+            row.add_css_class("settings-table-row");
+            if $is_muted {
+                row.add_css_class("settings-table-row-muted");
+            }
+            row.set_hexpand(true);
+            row.append($content);
+            row
+        }};
+    }
 
-    // Spacers for center-hugging
-    let l_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    l_spacer.set_hexpand(true);
-    let r_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    r_spacer.set_hexpand(true);
-    grid.attach(&l_spacer, 0, 0, 1, 1);
-    grid.attach(&r_spacer, 3, 0, 1, 1);
+    let build_frame = || -> gtk4::Box {
+        let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        frame.add_css_class("settings-table-frame");
+        frame.set_margin_bottom(24);
+        frame.set_margin_start(4);
+        frame.set_margin_end(4);
+        frame
+    };
 
-    let mut row = 0;
-    let label_group = gtk4::SizeGroup::new(gtk4::SizeGroupMode::Horizontal);
+    // --- File name Group ---
+    let filename_title = Label::new(Some("File name"));
+    filename_title.add_css_class("settings-group-title");
+    filename_title.set_xalign(0.0);
+    filename_title.set_halign(Align::Start);
+    filename_title.set_margin_bottom(8);
+    section.append(&filename_title);
 
-    // 1. File name
-    let filename_label = Label::new(Some("File name:"));
-    filename_label.add_css_class("settings-group-title");
-    filename_label.set_xalign(1.0);
-    filename_label.set_halign(Align::End);
-    label_group.add_widget(&filename_label);
-
+    let filename_frame = build_frame();
+    
+    // Edit filename
     let filename_edit_btn = Button::with_label("Edit");
     filename_edit_btn.add_css_class("secondary-settings-button");
-    filename_edit_btn.set_halign(Align::Start);
+    let filename_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    filename_hbox.set_hexpand(true);
+    let lbl_filename = Label::new(Some("File name template"));
+    lbl_filename.set_xalign(0.0);
+    lbl_filename.set_hexpand(true);
+    filename_hbox.append(&lbl_filename);
+    filename_hbox.append(&filename_edit_btn);
+    filename_frame.append(&build_row!(&filename_hbox, false));
 
-    grid.attach(&filename_label, 1, row, 1, 1);
-    grid.attach(&filename_edit_btn, 2, row, 1, 1);
-
-    row += 1;
-    let ask_name_check = CheckButton::with_label("Ask for name after every capture");
+    // Ask name check
+    let ask_name_check = CheckButton::new();
     ask_name_check.set_active(config.adv_ask_name_after_capture);
-    ask_name_check.set_halign(Align::Start);
-    grid.attach(&ask_name_check, 2, row, 1, 1);
+    let ask_name_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    ask_name_hbox.set_hexpand(true);
+    let lbl_ask_name = Label::new(Some("Ask for name after every capture"));
+    lbl_ask_name.set_xalign(0.0);
+    lbl_ask_name.set_hexpand(true);
+    ask_name_hbox.append(&lbl_ask_name);
+    ask_name_hbox.append(&ask_name_check);
+    filename_frame.append(&build_row!(&ask_name_hbox, true));
 
-    row += 1;
-    let retina_suffix_check = CheckButton::with_label("Add @2x suffix to Retina screenshots");
+    // Retina suffix
+    let retina_suffix_check = CheckButton::new();
     retina_suffix_check.set_active(config.adv_retina_suffix);
-    retina_suffix_check.set_halign(Align::Start);
-    grid.attach(&retina_suffix_check, 2, row, 1, 1);
+    let retina_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    retina_hbox.set_hexpand(true);
+    let lbl_retina = Label::new(Some("Add @2x suffix to Retina screenshots"));
+    lbl_retina.set_xalign(0.0);
+    lbl_retina.set_hexpand(true);
+    retina_hbox.append(&lbl_retina);
+    retina_hbox.append(&retina_suffix_check);
+    filename_frame.append(&build_row!(&retina_hbox, false));
 
-    row += 1;
-    let sep1 = Separator::new(Orientation::Horizontal);
-    sep1.set_margin_top(12);
-    sep1.set_margin_bottom(12);
-    grid.attach(&sep1, 0, row, 4, 1);
+    section.append(&filename_frame);
 
-    row += 1;
-    // 2. Copy to clipboard
-    let clipboard_label = Label::new(Some("Copy to clipboard:"));
-    clipboard_label.add_css_class("settings-group-title");
-    clipboard_label.set_xalign(1.0);
-    clipboard_label.set_halign(Align::End);
-    label_group.add_widget(&clipboard_label);
 
+    // --- Clipboard Group ---
+    let clipboard_title = Label::new(Some("Copy to clipboard"));
+    clipboard_title.add_css_class("settings-group-title");
+    clipboard_title.set_xalign(0.0);
+    clipboard_title.set_halign(Align::Start);
+    clipboard_title.set_margin_bottom(8);
+    section.append(&clipboard_title);
+
+    let clipboard_frame = build_frame();
+    
+    // Clipboard mode
     let clipboard_mode_input = ComboBoxText::new();
+    clipboard_mode_input.add_css_class("settings-select");
     clipboard_mode_input.append(Some("File & Image (default)"), "File & Image (default)");
     clipboard_mode_input.append(Some("Image Only"), "Image Only");
     clipboard_mode_input.set_active_id(Some(&config.adv_clipboard_mode));
-    clipboard_mode_input.set_halign(Align::Start);
-
-    grid.attach(&clipboard_label, 1, row, 1, 1);
-    grid.attach(&clipboard_mode_input, 2, row, 1, 1);
-
-    row += 1;
-    let clip_hint = Label::new(Some("Adjust this option if you've encountered any issues\nwith pasting from clipboard or clipboard managers."));
+    
+    let clipboard_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    clipboard_hbox.set_hexpand(true);
+    let clip_vbox = GtkBox::new(Orientation::Vertical, 4);
+    clip_vbox.set_hexpand(true);
+    let lbl_clip = Label::new(Some("Clipboard behavior"));
+    lbl_clip.set_xalign(0.0);
+    let clip_hint = Label::new(Some("Adjust this option if you've encountered any issues with pasting from clipboard or clipboard managers."));
     clip_hint.add_css_class("settings-sub-option-hint");
     clip_hint.set_xalign(0.0);
-    clip_hint.set_halign(Align::Start);
-    grid.attach(&clip_hint, 2, row, 1, 1);
+    clip_vbox.append(&lbl_clip);
+    clip_vbox.append(&clip_hint);
+    clipboard_hbox.append(&clip_vbox);
+    clipboard_hbox.append(&clipboard_mode_input);
+    clipboard_frame.append(&build_row!(&clipboard_hbox, false));
 
-    row += 1;
-    let sep2 = Separator::new(Orientation::Horizontal);
-    sep2.set_margin_top(12);
-    sep2.set_margin_bottom(12);
-    grid.attach(&sep2, 0, row, 4, 1);
+    section.append(&clipboard_frame);
 
-    row += 1;
-    // 3. Pinned screenshots
-    let pinned_label = Label::new(Some("Pinned screenshots:"));
-    pinned_label.add_css_class("settings-group-title");
-    pinned_label.set_xalign(1.0);
-    pinned_label.set_halign(Align::End);
-    label_group.add_widget(&pinned_label);
 
-    let pinned_rounded_check = CheckButton::with_label("Rounded corners");
+    // --- Pinned Screenshots Group ---
+    let pinned_title = Label::new(Some("Pinned screenshots"));
+    pinned_title.add_css_class("settings-group-title");
+    pinned_title.set_xalign(0.0);
+    pinned_title.set_halign(Align::Start);
+    pinned_title.set_margin_bottom(8);
+    section.append(&pinned_title);
+
+    let pinned_frame = build_frame();
+
+    let pinned_rounded_check = CheckButton::new();
     pinned_rounded_check.set_active(config.adv_pinned_rounded_corners);
-    pinned_rounded_check.set_halign(Align::Start);
-    grid.attach(&pinned_label, 1, row, 1, 1);
-    grid.attach(&pinned_rounded_check, 2, row, 1, 1);
+    let pinned_rounded_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    pinned_rounded_hbox.set_hexpand(true);
+    let lbl_rounded = Label::new(Some("Rounded corners"));
+    lbl_rounded.set_xalign(0.0);
+    lbl_rounded.set_hexpand(true);
+    pinned_rounded_hbox.append(&lbl_rounded);
+    pinned_rounded_hbox.append(&pinned_rounded_check);
+    pinned_frame.append(&build_row!(&pinned_rounded_hbox, false));
 
-    row += 1;
-    let pinned_shadow_check = CheckButton::with_label("Shadow");
+    let pinned_shadow_check = CheckButton::new();
     pinned_shadow_check.set_active(config.adv_pinned_shadow);
-    pinned_shadow_check.set_halign(Align::Start);
-    grid.attach(&pinned_shadow_check, 2, row, 1, 1);
+    let pinned_shadow_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    pinned_shadow_hbox.set_hexpand(true);
+    let lbl_shadow = Label::new(Some("Shadow"));
+    lbl_shadow.set_xalign(0.0);
+    lbl_shadow.set_hexpand(true);
+    pinned_shadow_hbox.append(&lbl_shadow);
+    pinned_shadow_hbox.append(&pinned_shadow_check);
+    pinned_frame.append(&build_row!(&pinned_shadow_hbox, true));
 
-    row += 1;
-    let pinned_border_check = CheckButton::with_label("Border");
+    let pinned_border_check = CheckButton::new();
     pinned_border_check.set_active(config.adv_pinned_border);
-    pinned_border_check.set_halign(Align::Start);
-    grid.attach(&pinned_border_check, 2, row, 1, 1);
+    let pinned_border_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    pinned_border_hbox.set_hexpand(true);
+    let lbl_border = Label::new(Some("Border"));
+    lbl_border.set_xalign(0.0);
+    lbl_border.set_hexpand(true);
+    pinned_border_hbox.append(&lbl_border);
+    pinned_border_hbox.append(&pinned_border_check);
+    pinned_frame.append(&build_row!(&pinned_border_hbox, false));
 
-    row += 1;
-    let sep3 = Separator::new(Orientation::Horizontal);
-    sep3.set_margin_top(12);
-    sep3.set_margin_bottom(12);
-    grid.attach(&sep3, 0, row, 4, 1);
+    section.append(&pinned_frame);
 
-    row += 1;
-    // 4. Text recognition
-    let ocr_label = Label::new(Some("Text recognition:"));
-    ocr_label.add_css_class("settings-group-title");
-    ocr_label.set_xalign(1.0);
-    ocr_label.set_halign(Align::End);
-    label_group.add_widget(&ocr_label);
 
-    let lang_lbl = Label::new(Some("Main language:"));
-    lang_lbl.add_css_class("settings-sub-option-hint");
-    lang_lbl.set_xalign(0.0);
-    lang_lbl.set_halign(Align::Start);
-    grid.attach(&ocr_label, 1, row, 1, 1);
-    grid.attach(&lang_lbl, 2, row, 1, 1);
+    // --- Text Recognition Group ---
+    let ocr_title = Label::new(Some("Text recognition"));
+    ocr_title.add_css_class("settings-group-title");
+    ocr_title.set_xalign(0.0);
+    ocr_title.set_halign(Align::Start);
+    ocr_title.set_margin_bottom(8);
+    section.append(&ocr_title);
 
-    row += 1;
+    let ocr_frame = build_frame();
+
     let ocr_lang_input = ComboBoxText::new();
+    ocr_lang_input.add_css_class("settings-select");
     ocr_lang_input.append(Some("English"), "English");
     ocr_lang_input.append(Some("Spanish"), "Spanish");
     ocr_lang_input.set_active_id(Some(&config.adv_ocr_language));
-    ocr_lang_input.set_halign(Align::Start);
-    grid.attach(&ocr_lang_input, 2, row, 1, 1);
+    
+    let ocr_lang_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    ocr_lang_hbox.set_hexpand(true);
+    let lbl_lang = Label::new(Some("Main language"));
+    lbl_lang.set_xalign(0.0);
+    lbl_lang.set_hexpand(true);
+    ocr_lang_hbox.append(&lbl_lang);
+    ocr_lang_hbox.append(&ocr_lang_input);
+    ocr_frame.append(&build_row!(&ocr_lang_hbox, false));
 
-    row += 1;
-    let ocr_line_breaks_check = CheckButton::with_label("Keep line breaks");
+    let ocr_line_breaks_check = CheckButton::new();
     ocr_line_breaks_check.set_active(config.adv_ocr_keep_line_breaks);
-    ocr_line_breaks_check.set_halign(Align::Start);
-    grid.attach(&ocr_line_breaks_check, 2, row, 1, 1);
+    let ocr_breaks_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    ocr_breaks_hbox.set_hexpand(true);
+    let lbl_breaks = Label::new(Some("Keep line breaks"));
+    lbl_breaks.set_xalign(0.0);
+    lbl_breaks.set_hexpand(true);
+    ocr_breaks_hbox.append(&lbl_breaks);
+    ocr_breaks_hbox.append(&ocr_line_breaks_check);
+    ocr_frame.append(&build_row!(&ocr_breaks_hbox, true));
 
-    row += 1;
-    let sep4 = Separator::new(Orientation::Horizontal);
-    sep4.set_margin_top(12);
-    sep4.set_margin_bottom(12);
-    grid.attach(&sep4, 0, row, 4, 1);
+    section.append(&ocr_frame);
 
-    row += 1;
-    // 5. Dialogs
-    let dialogs_label = Label::new(Some("Dialogs:"));
-    dialogs_label.add_css_class("settings-group-title");
-    dialogs_label.set_xalign(1.0);
-    dialogs_label.set_halign(Align::End);
-    label_group.add_widget(&dialogs_label);
 
+    // --- Dialogs Group ---
+    let dialogs_title = Label::new(Some("Dialogs"));
+    dialogs_title.add_css_class("settings-group-title");
+    dialogs_title.set_xalign(0.0);
+    dialogs_title.set_halign(Align::Start);
+    dialogs_title.set_margin_bottom(8);
+    section.append(&dialogs_title);
+
+    let dialogs_frame = build_frame();
+    
     let reset_dialogs_btn = Button::with_label("Reset All Warning Dialogs");
     reset_dialogs_btn.add_css_class("secondary-settings-button");
-    reset_dialogs_btn.set_halign(Align::Start);
-
-    grid.attach(&dialogs_label, 1, row, 1, 1);
-    grid.attach(&reset_dialogs_btn, 2, row, 1, 1);
-
-    section.append(&grid);
+    let dialogs_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    dialogs_hbox.set_hexpand(true);
+    let lbl_dialogs = Label::new(Some("Warning preferences"));
+    lbl_dialogs.set_xalign(0.0);
+    lbl_dialogs.set_hexpand(true);
+    dialogs_hbox.append(&lbl_dialogs);
+    dialogs_hbox.append(&reset_dialogs_btn);
+    dialogs_frame.append(&build_row!(&dialogs_hbox, false));
+    
+    section.append(&dialogs_frame);
 
     AdvancedSettingsWidgets {
         section,
