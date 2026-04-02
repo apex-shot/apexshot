@@ -6,7 +6,7 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea, EventControllerKey,
-    EventControllerMotion, Label, Orientation, Overlay, WidgetPaintable, Window,
+    Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::RefCell;
@@ -35,8 +35,8 @@ fn generate_preview_id(pid: u32) -> String {
     format!("preview-{}-{}", pid, ts)
 }
 
-const PREVIEW_WIDTH: i32 = 211;
-const PREVIEW_HEIGHT: i32 = 151;
+const PREVIEW_WIDTH: i32 = 190;
+const PREVIEW_HEIGHT: i32 = 135;
 const PREVIEW_EDGE_MARGIN: i32 = 24;
 const PREVIEW_BOTTOM_SAFE_OFFSET: i32 = 80;
 
@@ -114,6 +114,12 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
         eprintln!("Preview GTK init warning: {err}");
     }
 
+    // Initialize relm4-icons to use the same icons as the main editor
+    relm4_icons::initialize_icons(
+        crate::capture::editor::window::icon_names::GRESOURCE_BYTES,
+        crate::capture::editor::window::icon_names::RESOURCE_PREFIX,
+    );
+
     unsafe {
         std::env::set_var("DESKTOP_STARTUP_ID", "");
     }
@@ -147,10 +153,6 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
         .build();
     window.add_css_class("capture-preview-window");
     let layer_shell_active = configure_window_positioning(&window, side, preview_width);
-    let limited_always_on_top = should_warn_about_wayland_topmost(layer_shell_active);
-    if limited_always_on_top {
-        window.add_css_class("capture-preview-window-limited");
-    }
     // Intentionally silent when layer-shell is unavailable — the fallback
     // (bottom-left placement via X11 input-region) works correctly on X11
     // and non-layer-shell Wayland compositors. Logging this at startup every
@@ -167,83 +169,49 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     let preview_area = build_preview_area(path.clone(), preview_width, preview_height);
     preview_area.set_widget_name("capture-preview-image");
 
-    let card = Overlay::new();
+    // Card = vertical box with internal padding, image sits inside with its own radius
+    let card = GtkBox::new(Orientation::Vertical, 0);
     card.set_widget_name("capture-preview-card");
-    card.set_overflow(gtk4::Overflow::Hidden);
-    card.set_size_request(preview_width, preview_height);
     card.set_hexpand(false);
     card.set_vexpand(false);
-    card.set_child(Some(&preview_area));
 
-    let hover_tint = GtkBox::new(Orientation::Vertical, 0);
-    hover_tint.set_widget_name("capture-preview-hover-tint");
-    hover_tint.set_hexpand(true);
-    hover_tint.set_vexpand(true);
-    hover_tint.set_can_target(false);
-    hover_tint.set_visible(false);
+    // Image frame: the preview sits inside with its own rounded corners
+    let image_frame = GtkBox::new(Orientation::Vertical, 0);
+    image_frame.set_widget_name("capture-preview-image-frame");
+    image_frame.set_overflow(gtk4::Overflow::Hidden);
+    // Explicitly request size on the frame to prevent layout collapse
+    image_frame.set_size_request(preview_width, preview_height);
+    image_frame.append(&preview_area);
 
+    let (edit_btn, _) = icon_button(crate::capture::editor::window::icon_names::PEN_REGULAR, "Edit");
+    let (copy_btn, _) = icon_button(crate::capture::editor::window::icon_names::COPY_REGULAR, "Copy");
+    let (save_btn, _) = icon_button(crate::capture::editor::window::icon_names::SAVE_REGULAR, "Save");
+    let (upload_btn, _) = icon_button(crate::capture::editor::window::icon_names::CLOUD_ARROW_UP_REGULAR, "Upload");
     let (pin_btn, pin_icon) = icon_button("view-pin-symbolic", "Pin");
     let (close_btn, _) = icon_button("window-close-symbolic", "Close");
-    let copy_btn = Button::with_label("Copy");
-    copy_btn.set_has_frame(false);
-    copy_btn.set_focusable(false);
-    copy_btn.add_css_class("preview-pill-action");
 
-    let save_btn = Button::with_label("Save");
-    save_btn.set_has_frame(false);
-    save_btn.set_focusable(false);
-    save_btn.add_css_class("preview-pill-action");
-    let (edit_btn, _) = icon_button("document-edit-symbolic", "Edit");
-    let (upload_btn, _) = icon_button("document-send-symbolic", "Upload");
+    let toolbar = GtkBox::new(Orientation::Horizontal, 0);
+    toolbar.add_css_class("preview-tools");
+    toolbar.set_halign(Align::Fill);
+    toolbar.set_hexpand(true);
 
-    let top_controls = GtkBox::new(Orientation::Horizontal, 0);
-    top_controls.add_css_class("preview-controls");
-    top_controls.set_halign(Align::Fill);
-    top_controls.set_valign(Align::Start);
-    top_controls.set_margin_top(4);
-    top_controls.set_margin_start(4);
-    top_controls.set_margin_end(4);
+    edit_btn.set_hexpand(true);
+    copy_btn.set_hexpand(true);
+    save_btn.set_hexpand(true);
+    upload_btn.set_hexpand(true);
+    pin_btn.set_hexpand(true);
+    close_btn.set_hexpand(true);
 
-    let top_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    top_spacer.set_hexpand(true);
-    top_controls.append(&pin_btn);
-    top_controls.append(&top_spacer);
-    top_controls.append(&close_btn);
+    toolbar.append(&edit_btn);
+    toolbar.append(&copy_btn);
+    toolbar.append(&save_btn);
+    toolbar.append(&upload_btn);
 
-    let center_controls = GtkBox::new(Orientation::Vertical, 10);
-    center_controls.add_css_class("preview-controls");
-    center_controls.set_halign(Align::Center);
-    center_controls.set_valign(Align::Center);
-    center_controls.append(&copy_btn);
-    center_controls.append(&save_btn);
+    // intentionally keeping pin_btn and close_btn out of the UI
+    // to match design, but keeping their logic intact in case they are triggered programmatically
 
-    let bottom_controls = GtkBox::new(Orientation::Horizontal, 0);
-    bottom_controls.add_css_class("preview-controls");
-    bottom_controls.set_halign(Align::Fill);
-    bottom_controls.set_valign(Align::End);
-    bottom_controls.set_margin_bottom(4);
-    bottom_controls.set_margin_start(4);
-    bottom_controls.set_margin_end(4);
-
-    let bottom_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    bottom_spacer.set_hexpand(true);
-    bottom_controls.append(&edit_btn);
-    bottom_controls.append(&bottom_spacer);
-    bottom_controls.append(&upload_btn);
-
-    let fallback_notice = Label::new(None);
-    fallback_notice.add_css_class("preview-warning-badge");
-    fallback_notice.set_visible(false);
-
-    top_controls.set_visible(false);
-    center_controls.set_visible(false);
-    bottom_controls.set_visible(false);
-
-    card.add_overlay(&hover_tint);
-    card.add_overlay(&fallback_notice);
-    card.add_overlay(&top_controls);
-    card.add_overlay(&center_controls);
-    card.add_overlay(&bottom_controls);
+    card.append(&image_frame);
+    card.append(&toolbar);
 
     if layer_shell_active {
         window.set_child(Some(&card));
@@ -388,33 +356,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
         });
     }
 
-    let motion = EventControllerMotion::new();
-    let card_hover_enter = card.clone();
-    let hover_tint_enter = hover_tint.clone();
-    let top_controls_enter = top_controls.clone();
-    let center_controls_enter = center_controls.clone();
-    let bottom_controls_enter = bottom_controls.clone();
-    motion.connect_enter(move |_, _, _| {
-        card_hover_enter.add_css_class("preview-card-hover");
-        hover_tint_enter.set_visible(true);
-        top_controls_enter.set_visible(true);
-        center_controls_enter.set_visible(true);
-        bottom_controls_enter.set_visible(true);
-    });
-
-    let card_hover_leave = card.clone();
-    let hover_tint_leave = hover_tint.clone();
-    let top_controls_leave = top_controls.clone();
-    let center_controls_leave = center_controls.clone();
-    let bottom_controls_leave = bottom_controls.clone();
-    motion.connect_leave(move |_| {
-        card_hover_leave.remove_css_class("preview-card-hover");
-        hover_tint_leave.set_visible(false);
-        top_controls_leave.set_visible(false);
-        center_controls_leave.set_visible(false);
-        bottom_controls_leave.set_visible(false);
-    });
-    card.add_controller(motion);
+    // Removed hover tint logic; controls are now always visible in the toolbar
 
     let uri = match file_uri(&path) {
         Ok(v) => v,
@@ -760,113 +702,61 @@ fn install_preview_css() {
             }
 
             #capture-preview-card {
-                border-radius: 10px;
-                border: 1px solid alpha(white, 0.26);
-                background: alpha(black, 0.12);
-                box-shadow: 0 14px 42px alpha(black, 0.45), inset 0 1px 0 alpha(white, 0.14);
+                background-color: #141414;
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                box-shadow: none;
+                padding: 12px 12px 0 12px;
                 outline-width: 0;
             }
 
-            #capture-preview-card.preview-card-hover {
-                border-color: alpha(white, 0.58);
-                background: alpha(white, 0.10);
-                box-shadow: 0 18px 54px alpha(black, 0.54), inset 0 1px 0 alpha(white, 0.20);
-            }
-
-            .capture-preview-window-limited #capture-preview-card {
-                border-color: rgba(255, 197, 92, 0.82);
-                box-shadow: 0 14px 42px alpha(black, 0.45), inset 0 0 0 1px rgba(255, 197, 92, 0.24);
-            }
-
-            label.preview-warning-badge {
-                padding: 3px 10px;
-                border-radius: 999px;
-                border: 1px solid rgba(255, 222, 152, 0.68);
-                background: rgba(44, 28, 8, 0.88);
-                color: rgba(255, 238, 203, 0.98);
-                font-size: 10px;
-                font-weight: 700;
-                letter-spacing: 0.02em;
-                box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
-            }
-
-            #capture-preview-hover-tint {
-                border-radius: 10px;
-                background: rgba(0, 0, 0, 0.52);
-                box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18),
-                            0 3px 8px rgba(0, 0, 0, 0.30);
+            /* Image sits inside with its own rounded corners */
+            #capture-preview-image-frame {
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.05);
             }
 
             #capture-preview-image {
-                border-radius: 10px;
+                border-radius: 0;
             }
 
-            .preview-controls {
-                opacity: 0.98;
+            /* Toolbar: sits below the image inside the same dark card */
+            .preview-tools {
+                min-height: 48px;
+                background: transparent;
+                margin-top: 4px;
+                margin-bottom: 4px;
             }
 
             button.preview-action {
-                min-width: 14px;
-                min-height: 14px;
-                padding: 1px;
-                border-radius: 999px;
-                border: 1px solid rgba(220, 220, 220, 1.0);
-                background: white;
-                color: rgba(20, 20, 20, 0.98);
+                min-width: 0;
+                min-height: 40px;
+                padding: 0;
+                margin: 0 4px;
+                border-radius: 8px;
+                border: none;
+                background: transparent;
+                color: rgba(255, 255, 255, 0.7);
                 box-shadow: none;
                 background-image: none;
                 outline-width: 0;
+                transition: all 150ms ease;
             }
 
             button.preview-action:hover {
-                border-color: rgba(160, 160, 160, 1.0);
-                background: rgba(240, 240, 240, 1.0);
-                color: rgba(8, 8, 8, 1.00);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-                transform: scale(1.12);
+                background: rgba(255, 255, 255, 0.1);
+                color: rgba(255, 255, 255, 1.0);
             }
 
             button.preview-action:active {
-                background: rgba(220, 220, 220, 1.0);
-                transform: scale(0.96);
-                box-shadow: none;
+                background: rgba(255, 255, 255, 0.15);
+                color: rgba(255, 255, 255, 0.8);
             }
 
             button.preview-action:focus,
             button.preview-action:focus-visible {
                 outline: none;
                 box-shadow: none;
-            }
-
-            button.preview-pill-action {
-                min-width: 55px;
-                min-height: 26px;
-                padding: 0px 6px;
-                border-radius: 999px;
-                border: 1px solid alpha(white, 0.64);
-                background: alpha(white, 0.80);
-                color: rgba(18, 18, 18, 0.98);
-                font-size: 11px;
-                font-weight: 600;
-                box-shadow: 0 6px 20px alpha(black, 0.20);
-                background-image: none;
-                outline-width: 0;
-            }
-
-            button.preview-pill-action:hover {
-                border-color: alpha(white, 0.80);
-                background: alpha(white, 0.96);
-                color: rgba(10, 10, 10, 1.00);
-            }
-
-            button.preview-pill-action:active {
-                background: alpha(white, 0.78);
-            }
-
-            button.preview-pill-action:focus,
-            button.preview-pill-action:focus-visible {
-                outline: none;
-                box-shadow: 0 6px 20px alpha(black, 0.20);
             }
             ",
         );
@@ -879,39 +769,19 @@ fn install_preview_css() {
     }
 }
 
-fn icon_button(icon_name: &str, _tooltip: &str) -> (Button, gtk4::Image) {
+fn icon_button(icon_name: &str, tooltip: &str) -> (Button, gtk4::Image) {
     let image = gtk4::Image::from_icon_name(icon_name);
-    image.set_pixel_size(12);
+    // Increase icon size slightly to match reference design
+    image.set_pixel_size(18);
 
     let button = Button::new();
     button.set_child(Some(&image));
+    button.set_tooltip_text(Some(tooltip));
     button.set_has_frame(false);
     button.set_focusable(false);
     button.add_css_class("preview-action");
 
     (button, image)
-}
-
-fn env_var_contains_case_insensitive(name: &str, needle: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|value| {
-            value
-                .to_ascii_lowercase()
-                .contains(&needle.to_ascii_lowercase())
-        })
-        .unwrap_or(false)
-}
-
-fn is_gnome_wayland_session() -> bool {
-    std::env::var_os("WAYLAND_DISPLAY").is_some()
-        && (env_var_contains_case_insensitive("XDG_CURRENT_DESKTOP", "gnome")
-            || env_var_contains_case_insensitive("DESKTOP_SESSION", "gnome")
-            || std::env::var_os("GNOME_DESKTOP_SESSION_ID").is_some())
-}
-
-fn should_warn_about_wayland_topmost(layer_shell_active: bool) -> bool {
-    !layer_shell_active && is_gnome_wayland_session()
 }
 
 fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
@@ -996,7 +866,7 @@ fn open_target(path: &Path) -> Result<(), CapturePreviewError> {
         .map_err(|e| CapturePreviewError::OpenTargetError(e.to_string()))
 }
 
-fn apply_fallback_input_region(window: &Window, card: &Overlay) {
+fn apply_fallback_input_region(window: &Window, card: &GtkBox) {
     let Some(surface) = window.surface() else {
         return;
     };
@@ -1111,15 +981,19 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
             return;
         }
 
-        let scale = (width as f64 / tw).min(height as f64 / th);
+        // Use max to ensure the image covers the area (cropping the excess)
+        let scale = (width as f64 / tw).max(height as f64 / th);
         let sw = tw * scale;
         let sh = th * scale;
         let ox = (width as f64 - sw) / 2.0;
         let oy = (height as f64 - sh) / 2.0;
 
         let snapshot = gtk4::Snapshot::new();
+        // Clip to drawing area bounds to hide cropped overflow
+        snapshot.push_clip(&gtk4::graphene::Rect::new(0.0, 0.0, width as f32, height as f32));
         snapshot.translate(&gtk4::graphene::Point::new(ox as f32, oy as f32));
         tex.snapshot(&snapshot, sw, sh);
+        snapshot.pop();
         if let Some(node) = snapshot.to_node() {
             node.draw(cr);
         }
@@ -1137,12 +1011,10 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
     area
 }
 
-fn preview_texture(path: &Path, preview_width: i32, preview_height: i32) -> Option<gdk::Texture> {
-    let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(
+fn preview_texture(path: &Path, _preview_width: i32, _preview_height: i32) -> Option<gdk::Texture> {
+    // Load full image to allow the draw_func to 'cover' without distortion
+    let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file(
         path,
-        preview_width,
-        preview_height,
-        true,
     ) {
         Ok(pixbuf) => pixbuf,
         Err(err) => {
