@@ -17,8 +17,8 @@ use apexshot::{
         open_image_editor, save_capture, show_capture_preview_overlay, ImageFormat, SaveConfig,
     },
     capture_overlay::{
-        capture_area_via_cpp, capture_screen_via_cpp, is_launch_blocked_error,
-        run_capture_overlay, AreaCaptureResult,
+        capture_area_via_cpp, capture_screen_via_cpp, is_launch_blocked_error, run_capture_overlay,
+        AreaCaptureResult,
     },
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
@@ -121,6 +121,29 @@ async fn main() {
                 std::process::exit(1);
             }
             return;
+        }
+        "recording-control" => {
+            if args.len() < 3 {
+                eprintln!("Error: missing recording control action");
+                std::process::exit(1);
+            }
+
+            let daemon_action = match args[2].as_str() {
+                "pause-resume" => Some("recording_pause_resume"),
+                "stop-save" => Some("recording_stop_save"),
+                "restart" => Some("recording_restart"),
+                "discard" => Some("recording_discard"),
+                _ => None,
+            };
+
+            if let Some(action) = daemon_action {
+                if trigger_daemon_action(action).await {
+                    return;
+                }
+            }
+
+            eprintln!("Recording control requires a running ApexShot daemon.");
+            std::process::exit(1);
         }
         "recent-captures" => {
             if let Err(e) = show_recent_captures_window() {
@@ -1070,22 +1093,22 @@ fn run_capture(args: &[String]) {
             }
         },
         _ if WaylandBackend::is_supported() => {
-        println!("Using Wayland backend...");
-        let backend = WaylandBackend::new().expect("Failed to initialize Wayland backend");
+            println!("Using Wayland backend...");
+            let backend = WaylandBackend::new().expect("Failed to initialize Wayland backend");
 
-        match capture_type {
-            "window" => {
-                println!(
+            match capture_type {
+                "window" => {
+                    println!(
                     "Note: On Wayland, window capture requires selecting the window in the portal prompt"
                 );
-                backend.capture_window(0).expect("Window capture failed")
+                    backend.capture_window(0).expect("Window capture failed")
+                }
+                _ => {
+                    eprintln!("Error: unknown capture type '{}'", capture_type);
+                    print_usage();
+                    std::process::exit(1);
+                }
             }
-            _ => {
-                eprintln!("Error: unknown capture type '{}'", capture_type);
-                print_usage();
-                std::process::exit(1);
-            }
-        }
         }
         _ if X11Backend::is_supported() => {
             println!("Using X11 backend...");

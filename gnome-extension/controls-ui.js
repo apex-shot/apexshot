@@ -18,6 +18,7 @@ import {
     updateRuntimeOverlaySnapshot,
 } from "./runtime-overlays.js";
 import {
+    computeControlsDockPosition,
     createRuntimeOverlayHeaderStyle,
     computeAdjacentPopupPosition,
     createRuntimeOverlayMenuStyle,
@@ -25,11 +26,8 @@ import {
     createWarningPopupStyle,
 } from "./controls-ui-layout.js";
 
-const CONTROLS_BAR_WIDTH = 280;
+const CONTROLS_BAR_WIDTH_MIN = 320;
 const CONTROLS_BAR_HEIGHT = 48;
-const CONTROLS_MARGIN = 32;
-const CONTROLS_DOCK_SAFE = 72;
-const CONTROLS_GAP = 8;
 const RUNTIME_OVERLAY_MENU_WIDTH = 168;
 const RUNTIME_OVERLAY_MENU_GAP = 10;
 const RUNTIME_OVERLAY_MENU_MARGIN = 24;
@@ -48,6 +46,8 @@ export class ControlsUi {
         this._controlsChrome = null;
         this._controlsTimerSource = null;
         this._timerLabel = null;
+        this._panelTimerLabel = null;
+        this._panelIndicator = null;
         this._pauseIcon = null;
         this._runtimeOverlayMenu = null;
         this._runtimeOverlayMenuButton = null;
@@ -62,14 +62,8 @@ export class ControlsUi {
 
         setControlsState(this._sessionState, spec, GLib.get_monotonic_time() / 1000);
         attachRuntimeOverlays(this._sessionState);
-
-        this._controlsChrome = this._buildControlsChrome();
-        Main.layoutManager.addChrome(this._controlsChrome, {
-            affectsInputRegion: true,
-            trackFullscreen: false,
-        });
-        this._controlsChrome.show();
-        this.reposition();
+        this._panelIndicator = this._buildPanelIndicator();
+        Main.panel._rightBox.insert_child_at_index(this._panelIndicator, 0);
         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this.reposition();
             return GLib.SOURCE_REMOVE;
@@ -85,30 +79,36 @@ export class ControlsUi {
         destroyRuntimeOverlays(this._sessionState);
         clearControlsState(this._sessionState);
         this._timerLabel = null;
+        this._panelTimerLabel = null;
         this._pauseIcon = null;
         this._runtimeOverlayMenuButton = null;
         this._runtimeOverlayToggleRows.clear();
 
-        if (!this._controlsChrome)
-            return;
+        if (this._controlsChrome) {
+            if (this._controlsChrome.get_parent())
+                Main.layoutManager.removeChrome(this._controlsChrome);
+            this._controlsChrome.destroy();
+            this._controlsChrome = null;
+        }
 
-        if (this._controlsChrome.get_parent())
-            Main.layoutManager.removeChrome(this._controlsChrome);
-        this._controlsChrome.destroy();
-        this._controlsChrome = null;
+        if (this._panelIndicator) {
+            this._panelIndicator.destroy();
+            this._panelIndicator = null;
+        }
     }
 
     reposition() {
         const controlsState = this._sessionState.controlsState;
-        if (!this._controlsChrome || !controlsState)
+        if (!controlsState)
             return;
 
+        if (!this._controlsChrome) {
+            updateRuntimeOverlaySnapshot(this._sessionState);
+            return;
+        }
+
         const monitor = this._monitorForRect(controlsState.rect);
-        const [x, y] = this._computeControlsPosition(
-            controlsState.rect,
-            controlsState.isFullscreen,
-            monitor
-        );
+        const [x, y] = this._computeControlsPosition(controlsState, monitor);
         this._controlsChrome.set_position(x, y);
         this._positionRuntimeOverlayMenu();
         this._positionWarningPopup();
@@ -123,11 +123,10 @@ export class ControlsUi {
             track_hover: true,
             style: [
                 "background-color: #141414;",
-                "border: 1px solid rgba(255, 255, 255, 0.10);",
-                "border-radius: 10px;",
-                "padding: 8px 12px;",
-                "spacing: 12px;",
-                "box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);",
+                "border: 1px solid rgba(255, 255, 255, 0.08);",
+                "border-radius: 12px;",
+                "padding: 4px 6px;",
+                "spacing: 0;",
             ].join(" "),
         }), "controls.chrome");
 
@@ -135,50 +134,44 @@ export class ControlsUi {
             reactive: true,
             y_align: Clutter.ActorAlign.CENTER,
             style: [
-                "background-color: #000000;",
-                "border: 1px solid rgba(255, 255, 255, 0.11);",
-                "border-radius: 6px;",
-                "padding: 3px 8px 3px 3px;",
-                "height: 36px;",
+                "background-color: #1e1f22;",
+                "border-radius: 8px;",
+                "padding: 4px 12px 4px 8px;",
+                "height: 38px;",
                 "spacing: 8px;",
             ].join(" "),
         });
 
         const stopBtn = this._createIconButton("media-playback-stop-symbolic", () => {
-            if (this._sendRecordingCommand("Stop"))
-                this.hideControls();
+            this._sendRecordingCommand("Stop", accepted => {
+                if (accepted)
+                    this.hideControls();
+            });
         }, {
-            accent: "color: #ed6a5e;",
-            width: 30,
-            height: 30,
-            iconSize: 15,
-            borderRadius: 6,
+            accent: "color: #f46357;",
+            width: 26,
+            height: 26,
+            iconSize: 13,
+            borderRadius: 0,
+            hoverBackground: "transparent",
+            pressBackground: "transparent",
+            hoverBorder: "transparent",
+            pressBorder: "transparent",
         });
         stopSegment.add_child(stopBtn);
 
         this._timerLabel = new St.Label({
             text: "0:00",
             visible: controlsState.showTimer,
-            style: "color: #f1f1f3; font-weight: 700; font-size: 14px; font-family: monospace; letter-spacing: 0.2px;",
+            style: "color: #f46357; font-weight: 800; font-size: 14px; letter-spacing: -0.1px;",
             y_align: Clutter.ActorAlign.CENTER,
         });
         stopSegment.add_child(this._timerLabel);
         chrome.add_child(stopSegment);
-
-        const buttonShell = new St.BoxLayout({
-            style: [
-                "background-color: #000000;",
-                "border: 1px solid rgba(255, 255, 255, 0.11);",
-                "border-radius: 6px;",
-                "padding: 3px;",
-            ].join(" "),
-            y_align: Clutter.ActorAlign.CENTER,
-            x_align: Clutter.ActorAlign.CENTER,
-            y_expand: true,
-        });
+        chrome.add_child(this._createSeparator());
 
         const buttonLayout = new St.BoxLayout({
-            style: "spacing: 2px;",
+            style: "spacing: 0;",
             y_align: Clutter.ActorAlign.CENTER,
             x_align: Clutter.ActorAlign.CENTER,
             y_expand: true,
@@ -191,43 +184,116 @@ export class ControlsUi {
         buttonLayout.add_child(this._createIconButton(this._pauseIcon, () => {
             const state = this._sessionState.controlsState;
             const method = state?.paused ? "Resume" : "Pause";
-            if (!this._sendRecordingCommand(method))
-                return;
-            this._setControlsPaused(!state.paused);
+            this._sendRecordingCommand(method, accepted => {
+                if (accepted)
+                    this._setControlsPaused(!state.paused);
+            });
+        }, {
+            width: 52,
+            height: 38,
+            borderRadius: 8,
         }));
 
+        buttonLayout.add_child(this._createSeparator());
+
         buttonLayout.add_child(this._createIconButton("system-reboot-symbolic", () => {
-            if (!this._sendRecordingCommand("Restart"))
-                return;
-            this._resetControlsTimer();
+            this._sendRecordingCommand("Restart", accepted => {
+                if (accepted)
+                    this._resetControlsTimer();
+            });
         }, {
             iconSize: 16,
+            width: 52,
+            height: 38,
+            borderRadius: 8,
         }));
 
         buttonLayout.add_child(this._createSeparator());
 
         buttonLayout.add_child(this._createIconButton("user-trash-symbolic", () => {
-            if (this._sendRecordingCommand("Discard"))
-                this.hideControls();
+            this._sendRecordingCommand("Discard", accepted => {
+                if (accepted)
+                    this.hideControls();
+            });
         }, {
             iconSize: 16,
-            accent: "color: rgba(236, 222, 187, 0.96);",
+            width: 52,
+            height: 38,
+            borderRadius: 8,
         }));
+
+        buttonLayout.add_child(this._createSeparator());
 
         if (controlsState.runtimeOverlaySnapshot)
             buttonLayout.add_child(this._createRuntimeOverlayMenuButton());
 
-        buttonShell.add_child(buttonLayout);
-        chrome.add_child(buttonShell);
+        chrome.add_child(buttonLayout);
 
         return chrome;
+    }
+
+    _buildPanelIndicator() {
+        const indicator = new St.BoxLayout({
+            style_class: "panel-status-menu-box",
+            y_align: Clutter.ActorAlign.CENTER,
+            reactive: false,
+        });
+
+        const pill = new St.BoxLayout({
+            reactive: false,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: [
+                "background-color: rgba(180, 62, 62, 0.92);",
+                "border-radius: 999px;",
+                "padding: 0 6px 0 10px;",
+                "spacing: 6px;",
+                "height: 26px;",
+            ].join(" "),
+        });
+
+        this._panelTimerLabel = new St.Label({
+            text: "0:00",
+            visible: this._sessionState.controlsState?.showTimer ?? true,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: "font-weight: 800; color: white; padding: 0 2px 0 0;",
+        });
+        pill.add_child(this._panelTimerLabel);
+
+        const stopButton = new St.Button({
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            style: [
+                "background-color: rgba(0, 0, 0, 0.18);",
+                "border-radius: 999px;",
+                "padding: 0;",
+                "width: 18px;",
+                "height: 18px;",
+            ].join(" "),
+            child: new St.Icon({
+                icon_name: "media-playback-stop-symbolic",
+                style: "icon-size: 11px; color: white;",
+                y_align: Clutter.ActorAlign.CENTER,
+            }),
+        });
+        stopButton.connect("button-press-event", () => {
+            this._sendRecordingCommand("Stop", accepted => {
+                if (accepted)
+                    this.hideControls();
+            });
+            return Clutter.EVENT_STOP;
+        });
+        pill.add_child(stopButton);
+        indicator.add_child(pill);
+
+        return indicator;
     }
 
     _createSeparator() {
         return new St.Widget({
             reactive: false,
-            style: "width: 1px; height: 20px; margin: 0 4px; background-color: rgba(255, 255, 255, 0.11); border-radius: 1px;",
-            y_align: Clutter.ActorAlign.CENTER,
+            style: "width: 1px; height: 100%; margin: 15px 0; background-color: rgba(255, 255, 255, 0.08);",
+            y_align: Clutter.ActorAlign.FILL,
         });
     }
 
@@ -260,10 +326,10 @@ export class ControlsUi {
         iconContainer.add_child(iconActor);
         button.set_child(iconContainer);
 
-        const hoverBackground = options.hoverBackground ?? "#1a1a1d";
-        const pressBackground = options.pressBackground ?? "#151517";
-        const hoverBorder = options.hoverBorder ?? "rgba(255, 255, 255, 0.09)";
-        const pressBorder = options.pressBorder ?? "rgba(255, 255, 255, 0.15)";
+        const hoverBackground = options.hoverBackground ?? "rgba(255, 255, 255, 0.086)";
+        const pressBackground = options.pressBackground ?? "rgba(255, 255, 255, 0.133)";
+        const hoverBorder = options.hoverBorder ?? "transparent";
+        const pressBorder = options.pressBorder ?? "transparent";
         const baseStyle = [
             `width: ${w}px;`,
             `height: ${h}px;`,
@@ -307,6 +373,9 @@ export class ControlsUi {
                 this._showRuntimeOverlayMenu();
         }, {
             iconSize: 16,
+            width: 52,
+            height: 38,
+            borderRadius: 8,
             owner: "controls.overlay-menu-button",
         });
         return this._runtimeOverlayMenuButton;
@@ -509,8 +578,8 @@ export class ControlsUi {
         button.connect("notify::hover", () => {
             const currentVisible = getRuntimeOverlayVisibility(this._sessionState, spec.key);
             if (button.hover) {
-                button.set_style(`${baseStyle} background-color: #007AFF;`);
-                label.set_style(rowStyles.label.hoverStyle);
+                button.set_style(`${baseStyle} background-color: rgba(255, 255, 255, 0.06);`);
+                label.set_style(rowStyles.label.hoverStyle || rowStyles.label.style);
                 checkIcon.set_style(`icon-size: 14px; color: ${currentVisible ? "white" : "transparent"};`);
             } else {
                 button.set_style(`${baseStyle} background-color: transparent;`);
@@ -540,8 +609,8 @@ export class ControlsUi {
             const rowStyles = createRuntimeOverlayRowStyles(Boolean(supportMessage));
 
             if (isHovered) {
-                row.button.set_style(`${rowStyles.baseButton} background-color: #007AFF;`);
-                row.label.set_style(rowStyles.label.hoverStyle);
+                row.button.set_style(`${rowStyles.baseButton} background-color: rgba(255, 255, 255, 0.06);`);
+                row.label.set_style(rowStyles.label.hoverStyle || rowStyles.label.style);
                 row.checkIcon.set_style(`icon-size: 14px; color: ${visible ? "white" : "transparent"};`);
             } else {
                 row.button.set_style(`${rowStyles.baseButton} background-color: transparent;`);
@@ -578,7 +647,7 @@ export class ControlsUi {
         const [, menuHeight] = this._runtimeOverlayMenu.get_preferred_height(menuWidth);
         const minX = monitor.x + RUNTIME_OVERLAY_MENU_MARGIN;
         const maxX = Math.max(minX, monitor.x + monitor.width - menuWidth - RUNTIME_OVERLAY_MENU_MARGIN);
-        const x = Math.max(minX, Math.min(controlsX + CONTROLS_BAR_WIDTH - menuWidth, maxX));
+        const x = Math.max(minX, Math.min(controlsX + this._controlsChrome.width - menuWidth, maxX));
 
         const topY = controlsY - menuHeight - RUNTIME_OVERLAY_MENU_GAP;
         const bottomY = controlsY + CONTROLS_BAR_HEIGHT + RUNTIME_OVERLAY_MENU_GAP;
@@ -595,32 +664,19 @@ export class ControlsUi {
         this._runtimeOverlayMenu.set_position(x, y);
     }
 
-    _computeControlsPosition(rect, isFullscreen, monitor) {
-        const minX = monitor.x + CONTROLS_MARGIN;
-        const maxX = Math.max(minX, monitor.x + monitor.width - CONTROLS_BAR_WIDTH - CONTROLS_MARGIN);
-        const topY = monitor.y + CONTROLS_MARGIN;
-
-        if (isFullscreen || rect.width <= 0 || rect.height <= 0) {
-            return [
-                monitor.x + Math.floor((monitor.width - CONTROLS_BAR_WIDTH) / 2),
-                topY,
-            ];
-        }
-
-        const x = Math.max(minX, Math.min(
-            rect.x + Math.floor((rect.width - CONTROLS_BAR_WIDTH) / 2),
-            maxX
-        ));
-        const belowY = rect.y + rect.height + CONTROLS_GAP;
-        if (belowY + CONTROLS_BAR_HEIGHT + CONTROLS_DOCK_SAFE <= monitor.y + monitor.height)
-            return [x, belowY];
-
-        const aboveY = rect.y - CONTROLS_BAR_HEIGHT - CONTROLS_GAP;
-        if (aboveY >= topY)
-            return [x, aboveY];
-
-        const maxY = monitor.y + monitor.height - CONTROLS_BAR_HEIGHT - CONTROLS_MARGIN;
-        return [x, Math.max(topY, Math.min(aboveY, maxY))];
+    _computeControlsPosition(controlsState, monitor) {
+        const barWidth = this._controlsChrome ? this._controlsChrome.width : CONTROLS_BAR_WIDTH_MIN;
+        const position = computeControlsDockPosition({
+            rect: controlsState.rect,
+            isFullscreen: controlsState.isFullscreen,
+            visibilityPolicy: controlsState.visibilityPolicy,
+            monitor,
+            controlsSize: {
+                width: barWidth,
+                height: CONTROLS_BAR_HEIGHT,
+            },
+        });
+        return position ? [position.x, position.y] : [monitor.x, monitor.y];
     }
 
     _monitorForRect(rect) {
@@ -709,6 +765,27 @@ export class ControlsUi {
         this._updateTimerText();
     }
 
+    setPaused(sessionId, paused) {
+        const controlsState = this._sessionState.controlsState;
+        if (!controlsState || controlsState.sessionId !== sessionId)
+            return;
+        this._setControlsPaused(paused);
+    }
+
+    resetTimer(sessionId) {
+        const controlsState = this._sessionState.controlsState;
+        if (!controlsState || controlsState.sessionId !== sessionId)
+            return;
+        this._resetControlsTimer();
+    }
+
+    endSession(sessionId) {
+        const controlsState = this._sessionState.controlsState;
+        if (!controlsState || controlsState.sessionId !== sessionId)
+            return;
+        this.hideControls();
+    }
+
     _elapsedControlsMs() {
         const controlsState = this._sessionState.controlsState;
         if (!controlsState)
@@ -721,9 +798,13 @@ export class ControlsUi {
 
     _updateTimerText() {
         const controlsState = this._sessionState.controlsState;
-        if (!this._timerLabel || !controlsState || !controlsState.showTimer)
+        if (!controlsState || !controlsState.showTimer)
             return;
-        this._timerLabel.text = this._formatElapsed(this._elapsedControlsMs());
+        const formatted = this._formatElapsed(this._elapsedControlsMs());
+        if (this._timerLabel)
+            this._timerLabel.text = formatted;
+        if (this._panelTimerLabel)
+            this._panelTimerLabel.text = formatted;
     }
 
     _formatElapsed(elapsedMs) {

@@ -481,6 +481,26 @@ fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
             accelerator: "CTRL+ALT+SHIFT+R".into(),
             args: vec!["record".into(), "area".into(), "--overlay-stop".into()],
         },
+        HotkeyBinding {
+            name: Some("recording_pause_resume".into()),
+            accelerator: "CTRL+ALT+SHIFT+P".into(),
+            args: vec!["recording-control".into(), "pause-resume".into()],
+        },
+        HotkeyBinding {
+            name: Some("recording_stop_save".into()),
+            accelerator: "CTRL+ALT+SHIFT+S".into(),
+            args: vec!["recording-control".into(), "stop-save".into()],
+        },
+        HotkeyBinding {
+            name: Some("recording_restart".into()),
+            accelerator: "CTRL+ALT+SHIFT+N".into(),
+            args: vec!["recording-control".into(), "restart".into()],
+        },
+        HotkeyBinding {
+            name: Some("recording_discard".into()),
+            accelerator: "CTRL+ALT+SHIFT+BackSpace".into(),
+            args: vec!["recording-control".into(), "discard".into()],
+        },
     ]
 }
 
@@ -1791,5 +1811,20 @@ mod tests {
         assert_eq!(issues.len(), 1);
         assert!(issues[0].contains("stale GNOME command"));
         assert!(issues[0].contains("/old/location/apexshot"));
+    }
+
+    #[test]
+    fn default_hotkeys_include_recording_control_bindings() {
+        let cfg = HotkeyConfig::default();
+        let names = cfg
+            .bindings
+            .iter()
+            .map(|binding| binding.name.clone().unwrap_or_default())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"recording_pause_resume".to_string()));
+        assert!(names.contains(&"recording_stop_save".to_string()));
+        assert!(names.contains(&"recording_restart".to_string()));
+        assert!(names.contains(&"recording_discard".to_string()));
     }
 }

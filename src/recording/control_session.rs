@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, OnceLock,
+};
 
 use anyhow::Context;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -20,9 +23,127 @@ impl RecordingControlCommand {
 }
 
 #[derive(Clone)]
+struct ActiveRecordingControl {
+    session_id: String,
+    command_tx: Arc<Mutex<Option<mpsc::UnboundedSender<RecordingControlCommand>>>>,
+    paused: Arc<AtomicBool>,
+}
+
+fn active_recording_control() -> &'static Mutex<Option<ActiveRecordingControl>> {
+    static ACTIVE_RECORDING_CONTROL: OnceLock<Mutex<Option<ActiveRecordingControl>>> =
+        OnceLock::new();
+    ACTIVE_RECORDING_CONTROL.get_or_init(|| Mutex::new(None))
+}
+
+fn notify_shell_overlay(command: RecordingControlCommand, session_id: &str) {
+    let result = match command {
+        RecordingControlCommand::Pause => crate::gnome_shell::set_recording_paused(session_id, true),
+        RecordingControlCommand::Resume => {
+            crate::gnome_shell::set_recording_paused(session_id, false)
+        }
+        RecordingControlCommand::Restart => crate::gnome_shell::restart_recording_ui(session_id),
+        RecordingControlCommand::StopSave | RecordingControlCommand::StopDiscard => {
+            crate::gnome_shell::end_recording_ui(session_id)
+        }
+    };
+    let _ = result;
+}
+
+fn apply_command_side_effects(command: RecordingControlCommand, paused: &AtomicBool, session_id: &str) {
+    match command {
+        RecordingControlCommand::Pause => {
+            paused.store(true, Ordering::Relaxed);
+            notify_shell_overlay(command, session_id);
+        }
+        RecordingControlCommand::Resume => {
+            paused.store(false, Ordering::Relaxed);
+            notify_shell_overlay(command, session_id);
+        }
+        RecordingControlCommand::Restart => {
+            paused.store(false, Ordering::Relaxed);
+            notify_shell_overlay(command, session_id);
+        }
+        RecordingControlCommand::StopSave | RecordingControlCommand::StopDiscard => {
+            notify_shell_overlay(command, session_id);
+        }
+    }
+}
+
+fn register_active_recording_control(
+    session_id: String,
+    command_tx: Arc<Mutex<Option<mpsc::UnboundedSender<RecordingControlCommand>>>>,
+    paused: Arc<AtomicBool>,
+) {
+    if let Ok(mut guard) = active_recording_control().lock() {
+        *guard = Some(ActiveRecordingControl {
+            session_id,
+            command_tx,
+            paused,
+        });
+    }
+}
+
+fn clear_active_recording_control(
+    command_tx: &Arc<Mutex<Option<mpsc::UnboundedSender<RecordingControlCommand>>>>,
+) {
+    if let Ok(mut guard) = active_recording_control().lock() {
+        if guard
+            .as_ref()
+            .is_some_and(|active| Arc::ptr_eq(&active.command_tx, command_tx))
+        {
+            *guard = None;
+        }
+    }
+}
+
+pub fn send_active_recording_command(command: RecordingControlCommand) -> bool {
+    let active = active_recording_control()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    let Some(active) = active else {
+        return false;
+    };
+
+    let tx = active
+        .command_tx
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    let Some(tx) = tx else {
+        return false;
+    };
+
+    if tx.send(command).is_err() {
+        return false;
+    }
+
+    apply_command_side_effects(command, &active.paused, &active.session_id);
+    true
+}
+
+pub fn toggle_active_recording_pause() -> bool {
+    let active = active_recording_control()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    let Some(active) = active else {
+        return false;
+    };
+
+    let command = if active.paused.load(Ordering::Relaxed) {
+        RecordingControlCommand::Resume
+    } else {
+        RecordingControlCommand::Pause
+    };
+    send_active_recording_command(command)
+}
+
+#[derive(Clone)]
 struct RecordingControlIface {
     session_id: String,
     command_tx: Arc<Mutex<Option<mpsc::UnboundedSender<RecordingControlCommand>>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl RecordingControlIface {
@@ -38,6 +159,7 @@ impl RecordingControlIface {
         tx.send(command).map_err(|err| {
             zbus::fdo::Error::Failed(format!("recording command channel unavailable: {err}"))
         })?;
+        apply_command_side_effects(command, &self.paused, &self.session_id);
         Ok(true)
     }
 }
@@ -69,6 +191,7 @@ pub struct RecordingControlServer {
     bus_name: String,
     session_id: String,
     command_tx: Arc<Mutex<Option<mpsc::UnboundedSender<RecordingControlCommand>>>>,
+    paused: Arc<AtomicBool>,
     task: JoinHandle<()>,
 }
 
@@ -76,9 +199,11 @@ impl RecordingControlServer {
     pub async fn start(session_id: String) -> anyhow::Result<Self> {
         let bus_name = format!("org.apexshot.RecordingControl.p{}", std::process::id());
         let command_tx = Arc::new(Mutex::new(None));
+        let paused = Arc::new(AtomicBool::new(false));
         let iface = RecordingControlIface {
             session_id: session_id.clone(),
             command_tx: command_tx.clone(),
+            paused: paused.clone(),
         };
         let bus_name_for_task = bus_name.clone();
         let task = tokio::spawn(async move {
@@ -106,6 +231,7 @@ impl RecordingControlServer {
             bus_name,
             session_id,
             command_tx,
+            paused,
             task,
         })
     }
@@ -122,24 +248,35 @@ impl RecordingControlServer {
         if let Ok(mut guard) = self.command_tx.lock() {
             *guard = Some(tx);
         }
+        self.paused.store(false, Ordering::Relaxed);
+        register_active_recording_control(
+            self.session_id.clone(),
+            self.command_tx.clone(),
+            self.paused.clone(),
+        );
     }
 
     pub fn clear_command_sender(&self) {
         if let Ok(mut guard) = self.command_tx.lock() {
             *guard = None;
         }
+        self.paused.store(false, Ordering::Relaxed);
+        clear_active_recording_control(&self.command_tx);
+        let _ = crate::gnome_shell::end_recording_ui(&self.session_id);
     }
 }
 
 impl Drop for RecordingControlServer {
     fn drop(&mut self) {
+        clear_active_recording_control(&self.command_tx);
         self.task.abort();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RecordingControlCommand;
+    use super::{send_active_recording_command, RecordingControlCommand, RecordingControlServer};
+    use tokio::sync::mpsc;
 
     #[test]
     fn session_ending_commands_are_limited_to_stop_and_discard() {
@@ -148,5 +285,22 @@ mod tests {
         assert!(!RecordingControlCommand::Pause.ends_session());
         assert!(!RecordingControlCommand::Resume.ends_session());
         assert!(!RecordingControlCommand::Restart.ends_session());
+    }
+
+    #[tokio::test]
+    async fn active_recording_command_is_forwarded_to_registered_session() {
+        let server = RecordingControlServer::start("recording-test".into())
+            .await
+            .expect("control server should start");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        server.set_command_sender(tx);
+
+        assert!(send_active_recording_command(
+            RecordingControlCommand::Pause
+        ));
+        assert_eq!(rx.recv().await, Some(RecordingControlCommand::Pause));
+
+        server.clear_command_sender();
+        drop(server);
     }
 }

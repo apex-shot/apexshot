@@ -63,6 +63,7 @@ const MASK_DBUS_IFACE_XML = `
       <arg type="i" name="height" direction="in"/>
       <arg type="b" name="is_fullscreen" direction="in"/>
       <arg type="b" name="show_timer" direction="in"/>
+      <arg type="s" name="visibility_policy" direction="in"/>
       <arg type="s" name="runtime_overlay_snapshot" direction="in"/>
     </method>
     <method name="HideControls"/>
@@ -73,6 +74,16 @@ const MASK_DBUS_IFACE_XML = `
     <method name="PushKeystroke">
       <arg type="s" name="session_id" direction="in"/>
       <arg type="s" name="text" direction="in"/>
+    </method>
+    <method name="SetRecordingPaused">
+      <arg type="s" name="session_id" direction="in"/>
+      <arg type="b" name="paused" direction="in"/>
+    </method>
+    <method name="RestartRecordingUi">
+      <arg type="s" name="session_id" direction="in"/>
+    </method>
+    <method name="EndRecordingUi">
+      <arg type="s" name="session_id" direction="in"/>
     </method>
     <method name="BeginScreenshotLock">
       <arg type="s" name="session_id" direction="in"/>
@@ -480,14 +491,31 @@ class RecordingMaskService {
 
     ShowControlsAsync(params, invocation) {
         try {
-            const [dbusDest, sessionId, x, y, width, height, isFullscreen, showTimer, runtimeOverlaySnapshot] = params;
+            const hasVisibilityPolicy = params.length >= 10;
+            const [
+                dbusDest,
+                sessionId,
+                x,
+                y,
+                width,
+                height,
+                isFullscreen,
+                showTimer,
+                visibilityPolicyOrSnapshot,
+                maybeRuntimeOverlaySnapshot,
+            ] = params;
             this._showControls({
                 dbusDest,
                 sessionId,
                 rect: {x, y, width, height},
                 isFullscreen,
                 showTimer,
-                runtimeOverlaySnapshot: runtimeOverlaySnapshot || null,
+                visibilityPolicy: hasVisibilityPolicy
+                    ? visibilityPolicyOrSnapshot
+                    : (isFullscreen ? "visible" : "area-outside-capture"),
+                runtimeOverlaySnapshot: hasVisibilityPolicy
+                    ? (maybeRuntimeOverlaySnapshot || null)
+                    : (visibilityPolicyOrSnapshot || null),
             });
             invocation.return_value(null);
         } catch (e) {
@@ -518,6 +546,36 @@ class RecordingMaskService {
         try {
             const [sessionId, text] = params;
             this._pushKeystroke(sessionId, text);
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
+    SetRecordingPausedAsync(params, invocation) {
+        try {
+            const [sessionId, paused] = params;
+            this._controlsUi.setPaused(sessionId, paused);
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
+    RestartRecordingUiAsync(params, invocation) {
+        try {
+            const [sessionId] = params;
+            this._controlsUi.resetTimer(sessionId);
+            invocation.return_value(null);
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
+        }
+    }
+
+    EndRecordingUiAsync(params, invocation) {
+        try {
+            const [sessionId] = params;
+            this._controlsUi.endSession(sessionId);
             invocation.return_value(null);
         } catch (e) {
             invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
@@ -642,29 +700,34 @@ class RecordingMaskService {
         updateRuntimeOverlaySnapshot(this._sessionState);
     }
 
-    _sendRecordingCommand(method) {
+    _sendRecordingCommand(method, onAccepted = null) {
         const controlsState = this._sessionState.controlsState;
-        if (!controlsState)
-            return false;
-
-        try {
-            const reply = Gio.DBus.session.call_sync(
-                controlsState.dbusDest,
-                "/org/apexshot/RecordingControl",
-                "org.apexshot.RecordingControl",
-                method,
-                new GLib.Variant("(s)", [controlsState.sessionId]),
-                new GLib.VariantType("(b)"),
-                Gio.DBusCallFlags.NONE,
-                -1,
-                null
-            );
-            const [accepted] = reply.deepUnpack();
-            return accepted;
-        } catch (e) {
-            logError(e, `[apexshot] Failed to send recording command ${method}`);
-            return false;
+        if (!controlsState) {
+            onAccepted?.(false);
+            return;
         }
+
+        Gio.DBus.session.call(
+            controlsState.dbusDest,
+            "/org/apexshot/RecordingControl",
+            "org.apexshot.RecordingControl",
+            method,
+            new GLib.Variant("(s)", [controlsState.sessionId]),
+            new GLib.VariantType("(b)"),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null,
+            (_conn, result) => {
+                try {
+                    const reply = Gio.DBus.session.call_finish(result);
+                    const [accepted] = reply.deepUnpack();
+                    onAccepted?.(accepted);
+                } catch (e) {
+                    logError(e, `[apexshot] Failed to send recording command ${method}`);
+                    onAccepted?.(false);
+                }
+            }
+        );
     }
 
     _onStageKeyPress(event) {

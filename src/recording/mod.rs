@@ -15,7 +15,10 @@ use crate::{
 mod control_session;
 mod runtime_keystrokes;
 mod stop_overlay;
-use control_session::{RecordingControlCommand, RecordingControlServer};
+use control_session::RecordingControlServer;
+pub use control_session::{
+    send_active_recording_command, toggle_active_recording_pause, RecordingControlCommand,
+};
 pub use stop_overlay::{
     run_recording_controls, run_recording_countdown_bar, run_recording_stop_overlay,
     RecordingControlsParams, StopAction, StopOverlayError,
@@ -90,6 +93,8 @@ pub struct PreparedOverlayRecordingRequest {
     pub output_path: PathBuf,
     pub recording_config: RecordingConfig,
     pub controls_params: Option<RecordingControlsParams>,
+    pub shell_controls_visibility_policy:
+        Option<crate::gnome_shell::RecordingControlsVisibilityPolicy>,
     pub runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     pub use_shell_mask: bool,
     pub use_shell_controls: bool,
@@ -1585,10 +1590,22 @@ fn should_use_shell_mask_for_request(
 }
 
 fn should_use_shell_controls_for_request(
-    request: &RecordingRequest,
+    _request: &RecordingRequest,
     shell_overlay_available: bool,
 ) -> bool {
-    shell_overlay_available && request.controls
+    shell_overlay_available
+}
+
+fn shell_controls_visibility_policy_for_request(
+    _request: &RecordingRequest,
+) -> crate::gnome_shell::RecordingControlsVisibilityPolicy {
+    crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden
+}
+
+fn shell_controls_visibility_policy_for_params(
+    _params: &RecordingControlsParams,
+) -> crate::gnome_shell::RecordingControlsVisibilityPolicy {
+    crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden
 }
 
 fn should_use_legacy_pre_record_dim(request: &RecordingRequest, use_shell_mask: bool) -> bool {
@@ -1605,6 +1622,8 @@ pub fn prepare_overlay_recording_request(
     let use_shell_mask = should_use_shell_mask_for_request(request, shell_overlay_available);
     let use_shell_controls =
         should_use_shell_controls_for_request(request, shell_overlay_available);
+    let shell_controls_visibility_policy =
+        use_shell_controls.then(|| shell_controls_visibility_policy_for_request(request));
     app_config.rec_controls = request.controls;
     app_config.rec_display_time = request.display_rec_time;
     app_config.rec_hidpi = request.hidpi;
@@ -1739,7 +1758,7 @@ pub fn prepare_overlay_recording_request(
         key_filter: request.key_filter,
     });
 
-    let controls_params = request.controls.then_some(RecordingControlsParams {
+    let controls_params = Some(RecordingControlsParams {
         capture_x: request.x,
         capture_y: request.y,
         capture_w: request.width,
@@ -1754,6 +1773,7 @@ pub fn prepare_overlay_recording_request(
         output_path,
         recording_config,
         controls_params,
+        shell_controls_visibility_policy,
         runtime_overlay_snapshot,
         use_shell_mask,
         use_shell_controls,
@@ -1764,17 +1784,24 @@ pub async fn run_recording_with_controls(
     config: RecordingConfig,
     params: RecordingControlsParams,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    run_recording_with_controls_with_runtime_overlay(config, params, None).await
+    run_recording_with_controls_with_runtime_overlay(config, params, None, None).await
 }
 
 async fn run_recording_with_controls_with_runtime_overlay(
     config: RecordingConfig,
     params: RecordingControlsParams,
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
+    visibility_policy: Option<crate::gnome_shell::RecordingControlsVisibilityPolicy>,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
     if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
-        match run_recording_with_shell_controls(config.clone(), params, runtime_overlay_snapshot)
-            .await
+        match run_recording_with_shell_controls(
+            config.clone(),
+            params,
+            runtime_overlay_snapshot,
+            visibility_policy
+                .unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
+        )
+        .await
         {
             Ok(outcome) => return Ok(outcome),
             Err(err) => {
@@ -1785,7 +1812,38 @@ async fn run_recording_with_controls_with_runtime_overlay(
         }
     }
 
-    run_recording_with_cpp_controls(config, params).await
+    run_recording_with_headless_controls(config, params).await
+}
+
+async fn run_recording_with_headless_controls(
+    config: RecordingConfig,
+    _params: RecordingControlsParams,
+) -> anyhow::Result<(PathBuf, StopAction)> {
+    let session_id = format!(
+        "recording-{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    );
+    let control_server = RecordingControlServer::start(session_id).await?;
+
+    let final_outcome = loop {
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        control_server.set_command_sender(command_tx);
+        let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
+        control_server.clear_command_sender();
+
+        match outcome? {
+            (path, RecordingTerminalAction::Restart) => {
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+            (path, RecordingTerminalAction::Save) => break (path, StopAction::Save),
+            (path, RecordingTerminalAction::Discard) => break (path, StopAction::Discard),
+        }
+    };
+
+    drop(control_server);
+    Ok(final_outcome)
 }
 
 pub async fn run_recording_with_cpp_controls(
@@ -1858,6 +1916,7 @@ async fn run_recording_with_shell_controls(
     config: RecordingConfig,
     params: RecordingControlsParams,
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
+    visibility_policy: crate::gnome_shell::RecordingControlsVisibilityPolicy,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
     let session_id = format!(
         "recording-{}-{}",
@@ -1884,6 +1943,7 @@ async fn run_recording_with_shell_controls(
             },
             is_fullscreen: params.is_fullscreen,
             show_timer: params.show_timer,
+            visibility_policy,
             runtime_overlay_snapshot: runtime_overlay_snapshot.clone(),
         })?;
     let keystroke_forwarder = runtime_overlay_snapshot
@@ -2001,6 +2061,7 @@ pub fn run_overlay_recording_request_with_gtk(
                 prepared.recording_config.clone(),
                 params,
                 prepared.runtime_overlay_snapshot,
+                prepared.shell_controls_visibility_policy,
             ))
             .map_err(|err| anyhow::anyhow!("failed to run recording controls: {err}"))
     } else {
@@ -2066,7 +2127,7 @@ mod tests {
 
         let prepared = prepare_overlay_recording_request(
             AppConfig {
-                export_location: "/tmp/apexshot-recordings".into(),
+                video_export_location: "/tmp/apexshot-recordings".into(),
                 ..AppConfig::default()
             },
             &request,
@@ -2121,7 +2182,10 @@ mod tests {
             })
         );
         assert_eq!(prepared.use_shell_mask, false);
-        assert_eq!(prepared.use_shell_controls, false);
+        assert_eq!(
+            prepared.use_shell_controls,
+            crate::gnome_shell::current_session_supports_gnome_shell_overlay()
+        );
     }
 
     #[test]
@@ -2158,7 +2222,7 @@ mod tests {
 
         let prepared = prepare_overlay_recording_request(
             AppConfig {
-                export_location: "/var/tmp/apexshot-gifs".into(),
+                video_export_location: "/var/tmp/apexshot-gifs".into(),
                 ..AppConfig::default()
             },
             &request,
@@ -2180,9 +2244,12 @@ mod tests {
         assert_eq!(prepared.recording_config.gif_optimize, false);
         assert_eq!(prepared.recording_config.gif_max_width, Some(640));
         assert_eq!(prepared.recording_config.speaker_enabled, true);
-        assert_eq!(prepared.controls_params, None);
+        assert!(prepared.controls_params.is_some());
         assert_eq!(prepared.use_shell_mask, false);
-        assert_eq!(prepared.use_shell_controls, false);
+        assert_eq!(
+            prepared.use_shell_controls,
+            crate::gnome_shell::current_session_supports_gnome_shell_overlay()
+        );
     }
 
     #[test]
@@ -2287,7 +2354,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_overlay_recording_request_does_not_carry_runtime_snapshot_without_shell_controls() {
+    fn prepare_overlay_recording_request_tracks_runtime_snapshot_based_on_shell_support() {
         let request = RecordingRequest {
             x: 42,
             y: 24,
@@ -2339,9 +2406,10 @@ mod tests {
             chrono::Utc.with_ymd_and_hms(2026, 3, 27, 9, 15, 0).unwrap(),
         );
 
-        assert_eq!(prepared.use_shell_controls, false);
-        assert_eq!(prepared.controls_params, None);
-        assert_eq!(prepared.runtime_overlay_snapshot, None);
+        let shell_supported = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
+        assert_eq!(prepared.use_shell_controls, shell_supported);
+        assert!(prepared.controls_params.is_some());
+        assert_eq!(prepared.runtime_overlay_snapshot.is_some(), shell_supported);
     }
 
     #[test]
@@ -2406,12 +2474,16 @@ mod tests {
                 capture_w: 640,
                 capture_h: 480,
                 is_fullscreen: false,
-                show_timer: false,
+                show_timer: true,
                 use_shell_mask: true,
             })
         );
         assert_eq!(prepared.use_shell_mask, true);
         assert_eq!(prepared.use_shell_controls, true);
+        assert_eq!(
+            prepared.shell_controls_visibility_policy,
+            Some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
+        );
     }
 
     #[test]
@@ -2455,6 +2527,10 @@ mod tests {
 
         assert_eq!(prepared.use_shell_mask, false);
         assert_eq!(prepared.use_shell_controls, true);
+        assert_eq!(
+            prepared.shell_controls_visibility_policy,
+            Some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
+        );
         assert_eq!(
             prepared.controls_params,
             Some(RecordingControlsParams {
@@ -2540,7 +2616,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_controls_follow_gnome_wayland_support_and_controls_toggle() {
+    fn shell_controls_follow_gnome_wayland_support() {
         let request = RecordingRequest {
             x: 10,
             y: 20,
@@ -2573,13 +2649,27 @@ mod tests {
 
         assert!(should_use_shell_controls_for_request(&request, true));
         assert!(!should_use_shell_controls_for_request(&request, false));
-        assert!(!should_use_shell_controls_for_request(
-            &RecordingRequest {
-                controls: false,
-                ..request
-            },
-            true
-        ));
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_keeps_shortcut_controls_when_toggle_is_off() {
+        let request = RecordingRequest {
+            controls: false,
+            fullscreen: false,
+            x: 30,
+            y: 40,
+            width: 320,
+            height: 200,
+            ..RecordingRequest::default()
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 4, 2, 8, 0, 0).unwrap(),
+        );
+
+        assert!(prepared.controls_params.is_some());
     }
 
     #[test]
