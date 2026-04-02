@@ -6,7 +6,7 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea, EventControllerKey,
-    Orientation, Overlay, WidgetPaintable, Window,
+    EventControllerMotion, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::RefCell;
@@ -188,7 +188,41 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     let (save_btn, _) = icon_button(crate::capture::editor::window::icon_names::SAVE_REGULAR, "Save");
     let (upload_btn, _) = icon_button(crate::capture::editor::window::icon_names::CLOUD_ARROW_UP_REGULAR, "Upload");
     let (pin_btn, pin_icon) = icon_button("view-pin-symbolic", "Pin");
-    let (close_btn, _) = icon_button("window-close-symbolic", "Close");
+
+    // Floating close button – centered, revealed on hover over the image
+    let close_btn = Button::new();
+    close_btn.set_widget_name("preview-close-btn");
+    close_btn.set_focusable(false);
+    close_btn.set_has_frame(false);
+    close_btn.set_tooltip_text(Some("Close"));
+    close_btn.set_halign(Align::Center);
+    close_btn.set_valign(Align::Center);
+    close_btn.set_opacity(0.0); // hidden until hover
+    let close_label = gtk4::Label::new(Some("Dismiss"));
+    close_label.add_css_class("preview-close-label");
+    close_btn.set_child(Some(&close_label));
+
+    // Wrap image_frame in an Overlay so the close button floats above it
+    let image_overlay = Overlay::new();
+    image_overlay.set_child(Some(&image_frame));
+    image_overlay.add_overlay(&close_btn);
+    image_overlay.set_measure_overlay(&close_btn, false);
+
+    // Show/hide close button on hover — does NOT interfere with DragSource on card
+    let hover_ctrl = EventControllerMotion::new();
+    let close_btn_enter = close_btn.downgrade();
+    hover_ctrl.connect_enter(move |_, _, _| {
+        if let Some(btn) = close_btn_enter.upgrade() {
+            btn.set_opacity(1.0);
+        }
+    });
+    let close_btn_leave = close_btn.downgrade();
+    hover_ctrl.connect_leave(move |_| {
+        if let Some(btn) = close_btn_leave.upgrade() {
+            btn.set_opacity(0.0);
+        }
+    });
+    image_overlay.add_controller(hover_ctrl);
 
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
     toolbar.add_css_class("preview-tools");
@@ -200,17 +234,13 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     save_btn.set_hexpand(true);
     upload_btn.set_hexpand(true);
     pin_btn.set_hexpand(true);
-    close_btn.set_hexpand(true);
 
     toolbar.append(&edit_btn);
     toolbar.append(&copy_btn);
     toolbar.append(&save_btn);
     toolbar.append(&upload_btn);
 
-    // intentionally keeping pin_btn and close_btn out of the UI
-    // to match design, but keeping their logic intact in case they are triggered programmatically
-
-    card.append(&image_frame);
+    card.append(&image_overlay);
     card.append(&toolbar);
 
     if layer_shell_active {
@@ -406,6 +436,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
             window.close();
         }
     });
+
 
     let pin_state = pinned.clone();
     let auto_close_anchor_pin = auto_close_anchor.clone();
@@ -757,6 +788,38 @@ fn install_preview_css() {
             button.preview-action:focus-visible {
                 outline: none;
                 box-shadow: none;
+            }
+
+            /* Centered hover-reveal text label over the preview image */
+            #preview-close-btn {
+                min-width: 80px;
+                min-height: 36px;
+                padding: 0 16px;
+                border-radius: 18px;
+                background: rgba(15, 15, 15, 0.85);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                color: rgba(255, 255, 255, 0.95);
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+                outline-width: 0;
+                transition: background 120ms ease, color 120ms ease, opacity 160ms ease;
+            }
+
+            #preview-close-btn:hover {
+                background: rgba(210, 45, 45, 0.92);
+                color: #fff;
+                border-color: rgba(255, 255, 255, 0.25);
+            }
+
+            #preview-close-btn:active {
+                background: rgba(175, 25, 25, 0.97);
+                color: #fff;
+            }
+
+            .preview-close-label {
+                font-size: 14px;
+                font-weight: 500;
+                letter-spacing: 0.2px;
+                line-height: 1;
             }
             ",
         );
