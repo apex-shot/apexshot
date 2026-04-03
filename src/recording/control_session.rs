@@ -35,6 +35,14 @@ fn active_recording_control() -> &'static Mutex<Option<ActiveRecordingControl>> 
     ACTIVE_RECORDING_CONTROL.get_or_init(|| Mutex::new(None))
 }
 
+pub fn has_active_recording_control() -> bool {
+    active_recording_control()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+        .is_some()
+}
+
 fn notify_shell_overlay(command: RecordingControlCommand, session_id: &str) {
     let result = match command {
         RecordingControlCommand::Pause => {
@@ -268,6 +276,9 @@ impl RecordingControlServer {
         }
         self.paused.store(false, Ordering::Relaxed);
         clear_active_recording_control(&self.command_tx);
+    }
+
+    pub fn end_recording_ui(&self) {
         let _ = crate::gnome_shell::end_recording_ui(&self.session_id);
     }
 }
@@ -281,7 +292,10 @@ impl Drop for RecordingControlServer {
 
 #[cfg(test)]
 mod tests {
-    use super::{send_active_recording_command, RecordingControlCommand, RecordingControlServer};
+    use super::{
+        has_active_recording_control, send_active_recording_command, RecordingControlCommand,
+        RecordingControlServer,
+    };
     use tokio::sync::mpsc;
 
     #[test]
@@ -301,12 +315,14 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         server.set_command_sender(tx);
 
+        assert!(has_active_recording_control());
         assert!(send_active_recording_command(
             RecordingControlCommand::Pause
         ));
         assert_eq!(rx.recv().await, Some(RecordingControlCommand::Pause));
 
         server.clear_command_sender();
+        assert!(!has_active_recording_control());
         drop(server);
     }
 }

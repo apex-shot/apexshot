@@ -128,6 +128,18 @@ static Qt::WindowFlags captureOverlayWindowFlags()
 }
 // ── Constructor ───────────────────────────────────────────────────────────────
 
+void CaptureOverlay::openRecordingPanelForShortcut()
+{
+    m_recordingPanelOpen = true;
+    m_recordingToolsHidden = false;
+    m_settingsOpen = false;
+    m_captureIntent = CaptureIntent::Area;
+    if (m_recordType == RecordType::None) {
+        m_recordType = RecordType::Video;
+    }
+    update();
+}
+
 CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
                                bool timerCaptureEnabled,
                                bool initialMic, bool initialSpeaker,

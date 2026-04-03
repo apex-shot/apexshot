@@ -447,6 +447,98 @@ pub fn install_settings_css() {
                 background-color: alpha(white, 0.2);
             }
 
+            .shortcuts-tip {
+                font-size: 13px;
+                line-height: 1.55;
+            }
+
+            .shortcut-capture-dialog {
+                background: #2f2f2f;
+                border-radius: 18px;
+            }
+
+            .shortcut-capture-title {
+                font-size: 20px;
+                font-weight: 700;
+                color: white;
+            }
+
+            .shortcut-capture-subtitle {
+                font-size: 14px;
+                color: rgba(255,255,255,0.92);
+                line-height: 1.35;
+            }
+
+            .shortcut-capture-hint {
+                font-size: 12px;
+                color: rgba(255,255,255,0.64);
+                line-height: 1.35;
+                margin-top: 12px;
+            }
+
+            .shortcut-capture-listening-icon {
+                font-size: 76px;
+                color: white;
+                margin-top: 18px;
+                margin-bottom: 12px;
+            }
+
+            .shortcut-capture-keycaps-row {
+                margin-top: 18px;
+            }
+
+            .shortcut-capture-keycap {
+                background: #4a4a4a;
+                color: white;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-size: 14px;
+                font-weight: 600;
+            }
+
+            .shortcut-capture-plus {
+                color: rgba(255,255,255,0.75);
+                font-size: 18px;
+                font-weight: 700;
+                margin-top: 7px;
+            }
+
+            .shortcut-capture-cleared-label {
+                color: rgba(255,255,255,0.82);
+                font-size: 14px;
+            }
+
+            .shortcut-capture-primary-btn {
+                background: #d95f1d;
+                color: white;
+                border-radius: 10px;
+                padding: 8px 18px;
+                font-weight: 700;
+                border: none;
+            }
+
+            .shortcut-capture-primary-btn:hover {
+                background: #e46d2f;
+            }
+
+            .shortcut-capture-primary-btn:disabled {
+                background: #5b5b5b;
+                color: rgba(255,255,255,0.45);
+            }
+
+            .shortcut-capture-secondary-btn {
+                background: #4a4a4a;
+                color: white;
+                border-radius: 10px;
+                padding: 8px 18px;
+                font-weight: 600;
+                border: none;
+            }
+
+            .shortcut-capture-secondary-btn:hover {
+                background: #585858;
+            }
+
             .secondary-settings-button {
                 background: none;
                 border: 1px solid alpha(white, 0.15);

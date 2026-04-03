@@ -19,8 +19,8 @@ pub enum TrayAction {
     CaptureCrosshair,
     CaptureScreen,
     CaptureWindow,
+    OpenRecordingUi,
     RecordScreen,
-    RecordArea,
     StopRecordingSave,
     ShowLastPreview,
     OpenLastCapture,
@@ -271,14 +271,14 @@ impl ksni::Tray for ApexShotTray {
             MenuItem::Separator,
             // ── Recording section ─────────────────────────────────────────
             StandardItem {
-                label: ltr("Record Screen"),
-                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::RecordScreen)),
+                label: ltr("Open Recording UI"),
+                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::OpenRecordingUi)),
                 ..Default::default()
             }
             .into(),
             StandardItem {
-                label: ltr("Record Area"),
-                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::RecordArea)),
+                label: ltr("Record Screen"),
+                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::RecordScreen)),
                 ..Default::default()
             }
             .into(),

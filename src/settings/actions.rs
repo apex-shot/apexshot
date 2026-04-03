@@ -7,6 +7,33 @@ use gtk4::{Button, CheckButton, ColorButton, ComboBoxText, Entry, Scale};
 
 use super::windowing::{install_autostart_entry_for_current_exe, uninstall_autostart_entry};
 
+fn shortcut_label_value(label: Option<gtk4::glib::GString>) -> String {
+    let label = label.unwrap_or_default();
+    if label == "Record shortcut" {
+        String::new()
+    } else {
+        label.to_string()
+    }
+}
+
+fn button_label_value(button: &Button) -> String {
+    shortcut_label_value(button.label())
+}
+
+fn should_auto_respawn_daemon_for_save_with_env(
+    gio_launched_desktop_file_present: bool,
+    daemon_desktop_relaunched_present: bool,
+) -> bool {
+    gio_launched_desktop_file_present || daemon_desktop_relaunched_present
+}
+
+fn should_auto_respawn_daemon_for_save() -> bool {
+    should_auto_respawn_daemon_for_save_with_env(
+        std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_some(),
+        std::env::var_os("APEXSHOT_DAEMON_DESKTOP_RELAUNCHED").is_some(),
+    )
+}
+
 #[allow(dead_code)]
 pub struct SaveInputs {
     pub start_at_login: CheckButton,
@@ -61,10 +88,8 @@ pub struct SaveInputs {
     pub window_screenshot_mode_trans: CheckButton,
     pub window_screenshot_padding: Scale,
     pub window_screenshot_shadow: CheckButton,
-    pub shortcut_toggle_desktop_icons: Button,
     pub shortcut_open_file: Button,
     pub shortcut_open_from_clipboard: Button,
-    pub shortcut_pin_to_screen: Button,
     pub shortcut_restore_recently_closed: Button,
     pub shortcut_toggle_overlays: Button,
     pub shortcut_capture_area: Button,
@@ -72,6 +97,12 @@ pub struct SaveInputs {
     pub shortcut_capture_previous_area: Button,
     pub shortcut_capture_fullscreen: Button,
     pub shortcut_capture_window: Button,
+    pub shortcut_open_recording_ui: Button,
+    pub shortcut_record_screen: Button,
+    pub shortcut_recording_pause_resume: Button,
+    pub shortcut_recording_stop_save: Button,
+    pub shortcut_recording_restart: Button,
+    pub shortcut_recording_discard: Button,
     pub cloud_screenshot_quality: ComboBoxText,
     pub cloud_copy_to_clipboard: ComboBoxText,
     pub cloud_show_recently_uploaded: CheckButton,
@@ -228,6 +259,26 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.window_screenshot_padding = inputs.window_screenshot_padding.value();
     config.window_screenshot_shadow = inputs.window_screenshot_shadow.is_active();
 
+    config.shortcut_open_file = button_label_value(&inputs.shortcut_open_file);
+    config.shortcut_open_from_clipboard = button_label_value(&inputs.shortcut_open_from_clipboard);
+    config.shortcut_restore_recently_closed =
+        button_label_value(&inputs.shortcut_restore_recently_closed);
+    config.shortcut_toggle_overlays = button_label_value(&inputs.shortcut_toggle_overlays);
+    config.shortcut_capture_area = button_label_value(&inputs.shortcut_capture_area);
+    config.shortcut_capture_crosshair = button_label_value(&inputs.shortcut_capture_crosshair);
+    config.shortcut_capture_previous_area =
+        button_label_value(&inputs.shortcut_capture_previous_area);
+    config.shortcut_capture_fullscreen = button_label_value(&inputs.shortcut_capture_fullscreen);
+    config.shortcut_capture_window = button_label_value(&inputs.shortcut_capture_window);
+    config.shortcut_open_recording_ui = button_label_value(&inputs.shortcut_open_recording_ui);
+    config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);
+    config.shortcut_recording_pause_resume =
+        button_label_value(&inputs.shortcut_recording_pause_resume);
+    config.shortcut_recording_stop_save =
+        button_label_value(&inputs.shortcut_recording_stop_save);
+    config.shortcut_recording_restart = button_label_value(&inputs.shortcut_recording_restart);
+    config.shortcut_recording_discard = button_label_value(&inputs.shortcut_recording_discard);
+
     config.cloud_screenshot_quality =
         combo_value(&inputs.cloud_screenshot_quality, "Optimized for sharing");
     config.cloud_copy_to_clipboard =
@@ -260,7 +311,27 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         || previous_config.quick_access_close_after_uploading
             != config.quick_access_close_after_uploading;
 
+    let shortcuts_runtime_changed = previous_config.shortcut_open_file != config.shortcut_open_file
+        || previous_config.shortcut_open_from_clipboard != config.shortcut_open_from_clipboard
+        || previous_config.shortcut_restore_recently_closed
+            != config.shortcut_restore_recently_closed
+        || previous_config.shortcut_toggle_overlays != config.shortcut_toggle_overlays
+        || previous_config.shortcut_capture_area != config.shortcut_capture_area
+        || previous_config.shortcut_capture_crosshair != config.shortcut_capture_crosshair
+        || previous_config.shortcut_capture_previous_area != config.shortcut_capture_previous_area
+        || previous_config.shortcut_capture_fullscreen != config.shortcut_capture_fullscreen
+        || previous_config.shortcut_capture_window != config.shortcut_capture_window
+        || previous_config.shortcut_open_recording_ui != config.shortcut_open_recording_ui
+        || previous_config.shortcut_record_screen != config.shortcut_record_screen
+        || previous_config.shortcut_recording_pause_resume
+            != config.shortcut_recording_pause_resume
+        || previous_config.shortcut_recording_stop_save != config.shortcut_recording_stop_save
+        || previous_config.shortcut_recording_restart != config.shortcut_recording_restart
+        || previous_config.shortcut_recording_discard != config.shortcut_recording_discard;
+
     save_config(&config)?;
+    crate::hotkeys::sync_hotkeys_from_app_config(&config)?;
+    let _ = crate::hotkeys::sync_gnome_hotkeys_for_current_desktop(None);
 
     if config.start_at_login {
         install_autostart_entry_for_current_exe()?;
@@ -269,17 +340,25 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     }
 
     let tray_visible = config.show_menu_bar_icon;
+    let allow_auto_respawn = should_auto_respawn_daemon_for_save();
     std::thread::spawn(move || {
-        if quick_access_runtime_changed && stop_daemon_via_dbus() {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            let _ = start_daemon_subprocess();
-            return;
+        if quick_access_runtime_changed || shortcuts_runtime_changed {
+            if allow_auto_respawn && stop_daemon_via_dbus() {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                let _ = start_daemon_subprocess();
+                return;
+            }
+
+            if !allow_auto_respawn {
+                let _ = set_daemon_tray_visibility(tray_visible);
+                return;
+            }
         }
 
         if set_daemon_tray_visibility(tray_visible) {
             return;
         }
-        if tray_visible {
+        if tray_visible && allow_auto_respawn {
             let _ = start_daemon_subprocess();
         }
     });
@@ -298,4 +377,26 @@ fn combo_value(combo: &ComboBoxText, fallback: &str) -> String {
 #[allow(dead_code)]
 pub fn close_window(window: &gtk4::ApplicationWindow) {
     window.close();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_auto_respawn_daemon_for_save_with_env, shortcut_label_value};
+
+    #[test]
+    fn button_label_value_treats_placeholder_as_empty() {
+        assert_eq!(shortcut_label_value(Some("Record shortcut".into())), "");
+        assert_eq!(shortcut_label_value(Some("Ctrl+Alt+R".into())), "Ctrl+Alt+R");
+    }
+
+    #[test]
+    fn auto_respawn_is_disabled_for_manual_daemon_sessions() {
+        assert!(!should_auto_respawn_daemon_for_save_with_env(false, false));
+    }
+
+    #[test]
+    fn auto_respawn_is_enabled_for_desktop_managed_daemon_sessions() {
+        assert!(should_auto_respawn_daemon_for_save_with_env(true, false));
+        assert!(should_auto_respawn_daemon_for_save_with_env(false, true));
+    }
 }

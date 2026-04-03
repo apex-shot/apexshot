@@ -557,6 +557,122 @@ pub fn ensure_desktop_entry_pub(app_id: &str) -> anyhow::Result<std::path::PathB
     ensure_desktop_entry(app_id)
 }
 
+fn normalize_settings_accel(value: &str) -> String {
+    as_portal_trigger(value)
+}
+
+pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> HotkeyConfig {
+    let mut bindings = Vec::new();
+
+    let push_binding = |bindings: &mut Vec<HotkeyBinding>,
+                        name: &str,
+                        accel: &str,
+                        args: &[&str]| {
+        let trimmed = accel.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        bindings.push(HotkeyBinding {
+            name: Some(name.to_string()),
+            accelerator: normalize_settings_accel(trimmed),
+            args: args.iter().map(|s| s.to_string()).collect(),
+        });
+    };
+
+    push_binding(
+        &mut bindings,
+        "open_file",
+        &app_config.shortcut_open_file,
+        &["open-file"],
+    );
+    push_binding(
+        &mut bindings,
+        "open_from_clipboard",
+        &app_config.shortcut_open_from_clipboard,
+        &["open-from-clipboard"],
+    );
+    push_binding(
+        &mut bindings,
+        "restore_recently_closed",
+        &app_config.shortcut_restore_recently_closed,
+        &["restore-recently-closed"],
+    );
+    push_binding(
+        &mut bindings,
+        "toggle_overlays",
+        &app_config.shortcut_toggle_overlays,
+        &["toggle-overlays"],
+    );
+    push_binding(
+        &mut bindings,
+        "capture_area",
+        &app_config.shortcut_capture_area,
+        &["capture", "area"],
+    );
+    push_binding(
+        &mut bindings,
+        "capture_crosshair",
+        &app_config.shortcut_capture_crosshair,
+        &["capture", "crosshair"],
+    );
+    push_binding(
+        &mut bindings,
+        "capture_screen",
+        &app_config.shortcut_capture_fullscreen,
+        &["capture", "screen"],
+    );
+    push_binding(
+        &mut bindings,
+        "capture_window",
+        &app_config.shortcut_capture_window,
+        &["capture", "window"],
+    );
+    push_binding(
+        &mut bindings,
+        "open_recording_ui",
+        &app_config.shortcut_open_recording_ui,
+        &["record", "ui"],
+    );
+    push_binding(
+        &mut bindings,
+        "record_screen",
+        &app_config.shortcut_record_screen,
+        &["record", "screen", "--overlay-stop"],
+    );
+    push_binding(
+        &mut bindings,
+        "recording_pause_resume",
+        &app_config.shortcut_recording_pause_resume,
+        &["recording-control", "pause-resume"],
+    );
+    push_binding(
+        &mut bindings,
+        "recording_stop_save",
+        &app_config.shortcut_recording_stop_save,
+        &["recording-control", "stop-save"],
+    );
+    push_binding(
+        &mut bindings,
+        "recording_restart",
+        &app_config.shortcut_recording_restart,
+        &["recording-control", "restart"],
+    );
+    push_binding(
+        &mut bindings,
+        "recording_discard",
+        &app_config.shortcut_recording_discard,
+        &["recording-control", "discard"],
+    );
+
+    HotkeyConfig { bindings }
+}
+
+pub fn sync_hotkeys_from_app_config(app_config: &crate::config::AppConfig) -> anyhow::Result<()> {
+    let path = default_config_path();
+    let cfg = hotkey_config_from_app_config(app_config);
+    save_hotkey_config(&path, &cfg)
+}
+
 pub fn reset_hotkey_config(config_path: Option<PathBuf>) -> anyhow::Result<PathBuf> {
     let path = config_path.unwrap_or_else(default_config_path);
     if let Some(parent) = path.parent() {
@@ -1844,5 +1960,108 @@ mod tests {
 
         assert_eq!(crosshair.accelerator, "CTRL+ALT+X");
         assert_eq!(crosshair.args, vec!["capture", "crosshair"]);
+    }
+
+    #[test]
+    fn default_hotkeys_do_not_expose_direct_record_start_actions() {
+        let cfg = crate::config::AppConfig::default();
+        let hotkeys = hotkey_config_from_app_config(&cfg);
+
+        assert!(!hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("record_screen")
+                || binding.name.as_deref() == Some("record_area")
+        }));
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("open_recording_ui")
+        }));
+    }
+
+    #[test]
+    fn app_config_can_expose_record_screen_separately_from_open_recording_ui() {
+        let cfg = crate::config::AppConfig {
+            shortcut_open_recording_ui: "Ctrl+Alt+R".into(),
+            shortcut_record_screen: "Ctrl+Shift+R".into(),
+            ..crate::config::AppConfig::default()
+        };
+
+        let hotkeys = hotkey_config_from_app_config(&cfg);
+
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("open_recording_ui")
+                && binding.accelerator == "CTRL+ALT+R"
+        }));
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("record_screen")
+                && binding.accelerator == "CTRL+SHIFT+R"
+                && binding.args == vec!["record", "screen", "--overlay-stop"]
+        }));
+    }
+
+    #[test]
+    fn app_config_shortcuts_map_to_runtime_hotkeys() {
+        let cfg = crate::config::AppConfig {
+            shortcut_open_file: "Ctrl+Alt+O".into(),
+            shortcut_open_from_clipboard: "Ctrl+Alt+V".into(),
+            shortcut_restore_recently_closed: "Ctrl+Alt+Z".into(),
+            shortcut_toggle_overlays: "Ctrl+Alt+H".into(),
+            shortcut_capture_area: "Shift+Super+4".into(),
+            shortcut_capture_crosshair: "Ctrl+Alt+X".into(),
+            shortcut_capture_fullscreen: "Shift+Super+3".into(),
+            shortcut_capture_window: "Shift+Super+5".into(),
+            shortcut_open_recording_ui: "Ctrl+Alt+R".into(),
+            shortcut_recording_pause_resume: "Ctrl+Alt+Shift+P".into(),
+            shortcut_recording_stop_save: "Ctrl+Alt+Shift+S".into(),
+            shortcut_recording_restart: "Ctrl+Alt+Shift+N".into(),
+            shortcut_recording_discard: "Ctrl+Alt+Shift+BackSpace".into(),
+            ..crate::config::AppConfig::default()
+        };
+
+        let hotkeys = hotkey_config_from_app_config(&cfg);
+
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("open_file")
+                && binding.accelerator == "CTRL+ALT+O"
+                && binding.args == vec!["open-file".to_string()]
+        }));
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("open_from_clipboard")
+                && binding.accelerator == "CTRL+ALT+V"
+                && binding.args == vec!["open-from-clipboard".to_string()]
+        }));
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("restore_recently_closed")
+                && binding.accelerator == "CTRL+ALT+Z"
+                && binding.args == vec!["restore-recently-closed".to_string()]
+        }));
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("toggle_overlays")
+                && binding.accelerator == "CTRL+ALT+H"
+                && binding.args == vec!["toggle-overlays".to_string()]
+        }));
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("open_recording_ui")
+                && binding.accelerator == "CTRL+ALT+R"
+                && binding.args == vec!["record".to_string(), "ui".to_string()]
+        }));
+    }
+
+    #[test]
+    fn blank_shortcuts_are_omitted_from_runtime_hotkeys() {
+        let cfg = crate::config::AppConfig {
+            shortcut_open_recording_ui: String::new(),
+            shortcut_recording_restart: String::new(),
+            ..crate::config::AppConfig::default()
+        };
+
+        let hotkeys = hotkey_config_from_app_config(&cfg);
+
+        assert!(!hotkeys
+            .bindings
+            .iter()
+            .any(|binding| binding.name.as_deref() == Some("open_recording_ui")));
+        assert!(!hotkeys
+            .bindings
+            .iter()
+            .any(|binding| binding.name.as_deref() == Some("recording_restart")));
     }
 }

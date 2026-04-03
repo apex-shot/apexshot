@@ -124,6 +124,12 @@ pub struct AppConfig {
     pub shortcut_capture_fullscreen: String,
     pub shortcut_capture_window: String,
     pub shortcut_capture_menu: String,
+    pub shortcut_open_recording_ui: String,
+    pub shortcut_record_screen: String,
+    pub shortcut_recording_pause_resume: String,
+    pub shortcut_recording_stop_save: String,
+    pub shortcut_recording_restart: String,
+    pub shortcut_recording_discard: String,
     // Cloud settings
     pub cloud_screenshot_quality: String,
     pub cloud_copy_to_clipboard: String,
@@ -245,6 +251,12 @@ impl Default for AppConfig {
             shortcut_capture_fullscreen: "Shift+Super+3".to_string(),
             shortcut_capture_window: "Shift+Super+5".to_string(),
             shortcut_capture_menu: String::new(),
+            shortcut_open_recording_ui: "Ctrl+Alt+R".to_string(),
+            shortcut_record_screen: String::new(),
+            shortcut_recording_pause_resume: "Ctrl+Alt+Shift+P".to_string(),
+            shortcut_recording_stop_save: "Ctrl+Alt+Shift+S".to_string(),
+            shortcut_recording_restart: "Ctrl+Alt+Shift+N".to_string(),
+            shortcut_recording_discard: "Ctrl+Alt+Shift+BackSpace".to_string(),
             cloud_screenshot_quality: "Optimized for sharing".to_string(),
             cloud_copy_to_clipboard: "CleanShot Cloud link".to_string(),
             cloud_show_recently_uploaded: true,
@@ -784,5 +796,45 @@ quick_access_overlay_size: 0.5
             loaded.shortcut_capture_crosshair,
             original.shortcut_capture_crosshair
         );
+    }
+
+    #[test]
+    fn shortcut_defaults_include_open_recording_ui_and_controls() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.shortcut_open_recording_ui, "Ctrl+Alt+R");
+        assert_eq!(cfg.shortcut_record_screen, "");
+        assert_eq!(cfg.shortcut_recording_pause_resume, "Ctrl+Alt+Shift+P");
+        assert_eq!(cfg.shortcut_recording_stop_save, "Ctrl+Alt+Shift+S");
+        assert_eq!(cfg.shortcut_recording_restart, "Ctrl+Alt+Shift+N");
+        assert_eq!(cfg.shortcut_recording_discard, "Ctrl+Alt+Shift+BackSpace");
+    }
+
+    #[test]
+    fn config_yaml_round_trip_preserves_recording_shortcuts() {
+        let original = AppConfig {
+            shortcut_open_recording_ui: "Alt+R".into(),
+            shortcut_record_screen: "Ctrl+Shift+R".into(),
+            shortcut_recording_pause_resume: "Alt+P".into(),
+            shortcut_recording_stop_save: "Alt+S".into(),
+            shortcut_recording_restart: "Alt+N".into(),
+            shortcut_recording_discard: "Alt+BackSpace".into(),
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+
+        assert_eq!(loaded.shortcut_open_recording_ui, original.shortcut_open_recording_ui);
+        assert_eq!(loaded.shortcut_record_screen, original.shortcut_record_screen);
+        assert_eq!(
+            loaded.shortcut_recording_pause_resume,
+            original.shortcut_recording_pause_resume
+        );
+        assert_eq!(
+            loaded.shortcut_recording_stop_save,
+            original.shortcut_recording_stop_save
+        );
+        assert_eq!(loaded.shortcut_recording_restart, original.shortcut_recording_restart);
+        assert_eq!(loaded.shortcut_recording_discard, original.shortcut_recording_discard);
     }
 }
