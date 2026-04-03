@@ -277,6 +277,7 @@ int main(int argc, char* argv[])
     double initialGifQuality = 0.75;
     int initialGifSizeIdx = 0;
     bool initialGifOptimize = true;
+    bool openRecordingUiMode = false;
     const QString sessionSocketPath = overlaySocketPath();
     QLocalServer sessionServer;
 
@@ -290,6 +291,8 @@ int main(int argc, char* argv[])
             areaInitMode = true;
         } else if (std::strcmp(argv[i], "--crosshair-capture") == 0) {
             crosshairCaptureMode = true;
+        } else if (std::strcmp(argv[i], "--open-recording-ui") == 0) {
+            openRecordingUiMode = true;
         } else if (std::strcmp(argv[i], "--window-capture") == 0) {
             windowCaptureMode = true;
         } else if (std::strcmp(argv[i], "--record-controls") == 0) {
@@ -717,6 +720,9 @@ int main(int argc, char* argv[])
     overlay.setInitialVideoFps(initialVideoFps);
     overlay.setInitialRecordMono(initialRecordMono);
     overlay.setInitialOpenEditor(initialOpenEditor);
+    if (openRecordingUiMode) {
+        overlay.openRecordingPanelForShortcut();
+    }
     overlay.show();
 
     const int ret = app.exec();

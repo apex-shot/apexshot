@@ -11,6 +11,16 @@
 use gtk4;
 use gtk4_layer_shell;
 
+fn capture_daemon_action(capture_type: &str) -> Option<&'static str> {
+    match capture_type {
+        "area" => Some("capture_area"),
+        "crosshair" => Some("capture_crosshair"),
+        "screen" => Some("capture_screen"),
+        "window" => Some("capture_window"),
+        _ => None,
+    }
+}
+
 use apexshot::{
     backend::{CaptureData, DisplayBackend, WaylandBackend, X11Backend},
     capture::{
@@ -18,7 +28,8 @@ use apexshot::{
     },
     capture_overlay::{
         capture_area_via_cpp, capture_crosshair_via_cpp, capture_screen_via_cpp,
-        is_launch_blocked_error, run_capture_overlay, AreaCaptureResult,
+        is_launch_blocked_error, open_recording_ui_via_cpp, run_capture_overlay,
+        AreaCapturePathResult, AreaCaptureResult,
     },
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
@@ -122,6 +133,34 @@ async fn main() {
             }
             return;
         }
+        "open-file" => {
+            if !trigger_daemon_action("open_file").await {
+                eprintln!("Open File requires a running ApexShot daemon.");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "open-from-clipboard" => {
+            if !trigger_daemon_action("open_from_clipboard").await {
+                eprintln!("Open From Clipboard requires a running ApexShot daemon.");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "restore-recently-closed" => {
+            if !trigger_daemon_action("restore_recently_closed").await {
+                eprintln!("Restore Recently Closed requires a running ApexShot daemon.");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "toggle-overlays" => {
+            if !trigger_daemon_action("toggle_overlays").await {
+                eprintln!("Hide/Show Overlays requires a running ApexShot daemon.");
+                std::process::exit(1);
+            }
+            return;
+        }
         "recording-control" => {
             if args.len() < 3 {
                 eprintln!("Error: missing recording control action");
@@ -153,12 +192,7 @@ async fn main() {
                 std::process::exit(1);
             }
             // Try to delegate to the running daemon first (instant, no GTK cold-start).
-            let daemon_action = match args[2].as_str() {
-                "area" => Some("capture_area"),
-                "screen" => Some("capture_screen"),
-                "window" => Some("capture_window"),
-                _ => None,
-            };
+            let daemon_action = capture_daemon_action(args[2].as_str());
             if let Some(action) = daemon_action {
                 if trigger_daemon_action(action).await {
                     // Daemon handled it — exit this short-lived subprocess immediately.
@@ -176,6 +210,7 @@ async fn main() {
             }
             // Try to delegate to the running daemon first.
             let daemon_action = match args[2].as_str() {
+                "ui" => Some("open_recording_ui"),
                 "screen" => Some("record_screen"),
                 "area" => Some("record_area"),
                 _ => None,
@@ -1249,10 +1284,18 @@ fn run_capture(args: &[String]) {
 
 #[cfg(test)]
 mod tests {
+    use crate::capture_daemon_action;
     #[test]
-    fn crosshair_capture_type_is_reserved_for_cpp_backend() {
-        let capture_type = "crosshair";
-        assert!(matches!(capture_type, "area" | "crosshair" | "screen"));
+    fn crosshair_capture_type_delegates_to_daemon() {
+        assert_eq!(capture_daemon_action("crosshair"), Some("capture_crosshair"));
+    }
+
+    #[test]
+    fn supported_capture_types_map_to_expected_daemon_actions() {
+        assert_eq!(capture_daemon_action("area"), Some("capture_area"));
+        assert_eq!(capture_daemon_action("screen"), Some("capture_screen"));
+        assert_eq!(capture_daemon_action("window"), Some("capture_window"));
+        assert_eq!(capture_daemon_action("unknown"), None);
     }
 }
 
@@ -1475,9 +1518,24 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             // Wayland area = portal selection (handled in start_recording)
             println!("Wayland detected: 'area' recording triggers system screen/window selection.");
         }
+    } else if record_type == "ui" {
+        match open_recording_ui_via_cpp()
+            .map_err(|e| format!("Failed to open recording UI: {e}"))?
+        {
+            AreaCapturePathResult::RecordingRequested(request) => {
+                let _ = run_overlay_recording_request(request)?;
+                return Ok(());
+            }
+            AreaCapturePathResult::RecordingConfigUpdated | AreaCapturePathResult::Cancelled => {
+                return Ok(());
+            }
+            other => {
+                return Err(format!("Unexpected recording UI result: {other:?}").into());
+            }
+        }
     } else if record_type != "screen" {
         eprintln!(
-            "Error: recording type '{}' not supported (use 'screen' or 'area')",
+            "Error: recording type '{}' not supported (use 'screen', 'area', or 'ui')",
             record_type
         );
         std::process::exit(1);

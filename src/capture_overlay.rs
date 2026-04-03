@@ -645,6 +645,7 @@ pub enum RecordingType {
     Gif,
 }
 
+#[derive(Debug)]
 pub enum AreaCapturePathResult {
     Captured(PathBuf),
     ScrollCaptured(PathBuf),
@@ -1026,6 +1027,21 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     extra_args
 }
 
+fn build_recording_ui_args(config: &crate::config::AppConfig) -> Vec<String> {
+    let mut args = build_area_init_args(config);
+    args.push("--open-recording-ui".into());
+    args
+}
+
+pub fn open_recording_ui_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
+    let config = crate::config::load_config();
+    let extra_args = build_recording_ui_args(&config);
+    let arg_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+    let output = run_capture_binary(&arg_refs, None)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_area_capture_output(output.status.code(), stdout.trim())
+}
+
 pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
     // Check config for remember selection
     let config = crate::config::load_config();
@@ -1332,7 +1348,8 @@ fn extract_string(json: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_area_init_args, classify_overlay_exit_code, execute_builtin_overlay_query,
+        build_area_init_args, build_recording_ui_args, classify_overlay_exit_code,
+        execute_builtin_overlay_query,
         parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
         parse_recording_json, parse_selection_json, should_request_screenshot_lock,
         tracked_overlay_id, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,
@@ -1567,6 +1584,13 @@ mod tests {
             tracked_overlay_id("session-123"),
             "capture-overlay-session-123"
         );
+    }
+
+    #[test]
+    fn build_recording_ui_args_adds_direct_recording_flag() {
+        let args = build_recording_ui_args(&crate::config::AppConfig::default());
+        assert!(args.iter().any(|arg| arg == "--area-init"));
+        assert!(args.iter().any(|arg| arg == "--open-recording-ui"));
     }
 
     #[test]
