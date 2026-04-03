@@ -61,7 +61,6 @@ pub enum DaemonAction {
     StopRecordingSave,
     RestartRecording,
     DiscardRecording,
-    OpenRecentCaptures,
     ShowLastPreview,
     OpenLastCapture,
     OpenSettings,
@@ -91,7 +90,6 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::RecordScreen => DaemonAction::RecordScreen,
             TrayAction::RecordArea => DaemonAction::RecordArea,
             TrayAction::StopRecordingSave => DaemonAction::StopRecordingSave,
-            TrayAction::OpenRecentCaptures => DaemonAction::OpenRecentCaptures,
             TrayAction::ShowLastPreview => DaemonAction::ShowLastPreview,
             TrayAction::OpenLastCapture => DaemonAction::OpenLastCapture,
             TrayAction::OpenSettings => DaemonAction::OpenSettings,
@@ -591,9 +589,7 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
                     eprintln!("[daemon] No active recording available for discard.");
                 }
             }
-            DaemonAction::OpenRecentCaptures => {
-                tokio::task::spawn_blocking(show_recent_captures_subprocess);
-            }
+
             DaemonAction::ShowLastPreview => {
                 let path = state.lock().unwrap().last_capture_path.clone();
                 if let Some(p) = path {
@@ -2295,16 +2291,6 @@ fn show_settings_subprocess() {
     }
 }
 
-fn show_recent_captures_subprocess() {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-
-    if let Err(e) = std::process::Command::new(&exe)
-        .arg("recent-captures")
-        .spawn()
-    {
-        eprintln!("[daemon] Failed to spawn recent captures window: {e}");
-    }
-}
 
 fn open_file(path: std::path::PathBuf) {
     let _ = std::process::Command::new("xdg-open").arg(&path).spawn();

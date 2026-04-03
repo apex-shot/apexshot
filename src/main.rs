@@ -31,7 +31,7 @@ use apexshot::{
         run_recording_countdown_bar, run_recording_with_controls, start_recording, RecordingConfig,
         RecordingControlsParams, StopAction,
     },
-    show_recent_captures_window, show_settings_window,
+    show_settings_window,
 };
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -145,13 +145,7 @@ async fn main() {
             eprintln!("Recording control requires a running ApexShot daemon.");
             std::process::exit(1);
         }
-        "recent-captures" => {
-            if let Err(e) = show_recent_captures_window() {
-                eprintln!("Failed to open recent captures window: {e}");
-                std::process::exit(1);
-            }
-            return;
-        }
+
         "capture" => {
             if args.len() < 3 {
                 eprintln!("Error: missing capture type");

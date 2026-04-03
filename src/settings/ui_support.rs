@@ -870,6 +870,78 @@ pub fn install_settings_css() {
                 color: white;
                 box-shadow: 0 1px 3px alpha(black, 0.1);
             }
+            .noir-gallery-window {
+                background-color: #141414;
+                color: #F1F1F3;
+            }
+            .noir-header {
+                background-color: #141414;
+                border-bottom: 1px solid alpha(white, 0.10);
+            }
+            .noir-content {
+                background: transparent;
+            }
+            .noir-gallery {
+                margin: 0;
+            }
+            .noir-card {
+                border-radius: 10px;
+                overflow: hidden;
+                transition: transform 0.3s ease, box-shadow 0.3s ease;
+                box-shadow: 0 4px 12px alpha(black, 0.3);
+                border: 1px solid alpha(white, 0.10);
+            }
+            .noir-card-button {
+                padding: 0;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
+            .noir-card-image {
+                border-radius: 10px;
+            }
+            .noir-card:hover {
+                box-shadow: 0 12px 30px alpha(black, 0.8);
+                border-color: alpha(white, 0.15);
+            }
+            .noir-card-meta {
+                background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0) 100%);
+                padding: 40px 16px 16px 16px;
+                border-radius: 0 0 12px 12px;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            }
+            .noir-card:hover .noir-card-meta {
+                opacity: 1;
+            }
+            .noir-card-title {
+                color: white;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            .noir-card-action {
+                background: alpha(white, 0.1);
+                color: white;
+                border: none;
+                border-radius: 50%;
+                padding: 6px;
+                margin-left: 6px;
+                transition: background 0.2s;
+            }
+            .noir-card-action:hover {
+                background: alpha(white, 0.25);
+            }
+            .noir-card-tag {
+                background: alpha(black, 0.5);
+                color: white;
+                border: 1px solid alpha(white, 0.1);
+                padding: 4px 10px;
+                border-radius: 8px;
+                font-size: 11px;
+                font-weight: bold;
+                margin: 12px;
+                backdrop-filter: blur(8px);
+            }
             "#,
         );
         gtk4::style_context_add_provider_for_display(
