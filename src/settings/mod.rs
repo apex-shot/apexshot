@@ -240,6 +240,7 @@ fn build_settings_window(app: &Application) {
     let about = about::build_about_section();
     let annotate = build_annotate_section(&config);
     let shortcuts = shortcuts::build_shortcuts_section(&config);
+    shortcuts::install_shortcut_editors(&shortcuts, &window);
     let quick_access = build_quick_access_section(&config);
     let wallpaper = wallpaper::build_wallpaper_section(&config);
 
@@ -421,10 +422,8 @@ fn build_settings_window(app: &Application) {
         window_screenshot_mode_trans: wallpaper.window_screenshot_mode_trans.clone(),
         window_screenshot_padding: wallpaper.window_screenshot_padding_input.clone(),
         window_screenshot_shadow: wallpaper.window_screenshot_shadow_check.clone(),
-        shortcut_toggle_desktop_icons: shortcuts.toggle_icons_btn.clone(),
         shortcut_open_file: shortcuts.open_file_btn.clone(),
         shortcut_open_from_clipboard: shortcuts.open_clipboard_btn.clone(),
-        shortcut_pin_to_screen: shortcuts.pin_screen_btn.clone(),
         shortcut_restore_recently_closed: shortcuts.restore_file_btn.clone(),
         shortcut_toggle_overlays: shortcuts.toggle_overlays_btn.clone(),
         shortcut_capture_area: shortcuts.capture_area_btn.clone(),
@@ -432,6 +431,12 @@ fn build_settings_window(app: &Application) {
         shortcut_capture_previous_area: shortcuts.capture_prev_btn.clone(),
         shortcut_capture_fullscreen: shortcuts.capture_fullscreen_btn.clone(),
         shortcut_capture_window: shortcuts.capture_window_btn.clone(),
+        shortcut_open_recording_ui: shortcuts.open_recording_ui_btn.clone(),
+        shortcut_record_screen: shortcuts.record_screen_btn.clone(),
+        shortcut_recording_pause_resume: shortcuts.recording_pause_resume_btn.clone(),
+        shortcut_recording_stop_save: shortcuts.recording_stop_save_btn.clone(),
+        shortcut_recording_restart: shortcuts.recording_restart_btn.clone(),
+        shortcut_recording_discard: shortcuts.recording_discard_btn.clone(),
         cloud_screenshot_quality: cloud.cloud_quality_input.clone(),
         cloud_copy_to_clipboard: cloud.cloud_clipboard_input.clone(),
         cloud_show_recently_uploaded: cloud.cloud_show_recent_check.clone(),

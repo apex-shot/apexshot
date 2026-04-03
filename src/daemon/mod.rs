@@ -32,8 +32,8 @@ use crate::{
     capture_overlay::{
         begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
         capture_screen_file_via_cpp, capture_window_file_via_cpp, is_launch_blocked_error,
-        request_existing_overlay_focus, AreaCapturePathResult, CaptureOverlayGuard,
-        LaunchBlockedReason,
+        open_recording_ui_via_cpp, request_existing_overlay_focus, AreaCapturePathResult,
+        CaptureOverlayGuard, LaunchBlockedReason,
     },
     config::load_config,
     hotkeys::{
@@ -49,14 +49,19 @@ use crate::{
 // Daemon action
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DaemonAction {
     CaptureArea,
     CaptureCrosshair,
     CaptureScreen,
     CaptureWindow,
+    OpenFile,
+    OpenFromClipboard,
+    RestoreRecentlyClosed,
+    ToggleOverlays,
     RecordScreen,
     RecordArea,
+    OpenRecordingUi,
     ToggleRecordingPause,
     StopRecordingSave,
     RestartRecording,
@@ -87,8 +92,8 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::CaptureCrosshair => DaemonAction::CaptureCrosshair,
             TrayAction::CaptureScreen => DaemonAction::CaptureScreen,
             TrayAction::CaptureWindow => DaemonAction::CaptureWindow,
+            TrayAction::OpenRecordingUi => DaemonAction::OpenRecordingUi,
             TrayAction::RecordScreen => DaemonAction::RecordScreen,
-            TrayAction::RecordArea => DaemonAction::RecordArea,
             TrayAction::StopRecordingSave => DaemonAction::StopRecordingSave,
             TrayAction::ShowLastPreview => DaemonAction::ShowLastPreview,
             TrayAction::OpenLastCapture => DaemonAction::OpenLastCapture,
@@ -104,6 +109,7 @@ impl From<TrayAction> for DaemonAction {
 
 struct DaemonState {
     last_capture_path: Option<std::path::PathBuf>,
+    preview_child: Option<std::process::Child>,
     /// Channel to send GTK work to the main OS thread. `None` when the daemon
     /// owns the main thread itself (legacy / test mode).
     gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
@@ -442,6 +448,10 @@ fn should_autostart_ydotoold() -> bool {
     false
 }
 
+fn should_quit_on_sigint(recording_active: bool) -> bool {
+    !recording_active
+}
+
 async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> anyhow::Result<()> {
     eprintln!("[daemon] ApexShot daemon starting…");
 
@@ -455,6 +465,7 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
 
     let state = Arc::new(Mutex::new(DaemonState {
         last_capture_path: None,
+        preview_child: None,
         gtk_tx,
     }));
 
@@ -483,6 +494,27 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
             std::thread::sleep(Duration::from_secs(1));
             if tick_tx.send(DaemonAction::RecordingTimerTick).is_err() {
                 break;
+            }
+        });
+    }
+
+    {
+        let signal_tx = action_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                if tokio::signal::ctrl_c().await.is_err() {
+                    break;
+                }
+
+                let recording_active = crate::recording::has_active_recording_control();
+                if should_quit_on_sigint(recording_active) {
+                    eprintln!("[daemon] SIGINT received while idle; quitting daemon.");
+                    if signal_tx.send(DaemonAction::Quit).is_err() {
+                        break;
+                    }
+                } else {
+                    eprintln!("[daemon] SIGINT ignored while recording is active.");
+                }
             }
         });
     }
@@ -557,11 +589,47 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
             DaemonAction::CaptureWindow => {
                 tokio::task::spawn_blocking(move || handle_capture_window(state_clone));
             }
+            DaemonAction::OpenFile => {
+                if let Some(path) = last_capture_target(last_capture_path(&state_clone).as_deref()) {
+                    tokio::task::spawn_blocking(move || open_file(path));
+                } else {
+                    eprintln!("[daemon] No capture yet.");
+                }
+            }
+            DaemonAction::OpenFromClipboard => {
+                tokio::task::spawn_blocking(move || match import_clipboard_image_to_temp_png() {
+                    Ok(path) => save_existing_png_and_open(path, state_clone),
+                    Err(err) => {
+                        eprintln!("[daemon] Clipboard import failed: {err}");
+                        let (summary, body) = clipboard_missing_image_notification();
+                        send_desktop_notification(summary, body);
+                    }
+                });
+            }
+            DaemonAction::RestoreRecentlyClosed => {
+                if let Some(path) = restore_recently_closed_target(last_capture_path(&state_clone).as_deref()) {
+                    tokio::task::spawn_blocking(move || {
+                        let _ = show_preview_for_path(path, &state_clone);
+                    });
+                } else {
+                    eprintln!("[daemon] No capture available to restore.");
+                }
+            }
+            DaemonAction::ToggleOverlays => {
+                tokio::task::spawn_blocking(move || {
+                    if !toggle_preview_overlay(&state_clone) {
+                        eprintln!("[daemon] No preview overlay available to toggle.");
+                    }
+                });
+            }
             DaemonAction::RecordScreen => {
                 tokio::spawn(handle_record_screen(action_tx_clone));
             }
             DaemonAction::RecordArea => {
                 tokio::spawn(handle_record_area(action_tx_clone));
+            }
+            DaemonAction::OpenRecordingUi => {
+                tokio::spawn(handle_open_recording_ui(action_tx_clone));
             }
             DaemonAction::ToggleRecordingPause => {
                 if !crate::recording::toggle_active_recording_pause() {
@@ -593,7 +661,9 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
             DaemonAction::ShowLastPreview => {
                 let path = state.lock().unwrap().last_capture_path.clone();
                 if let Some(p) = path {
-                    tokio::task::spawn_blocking(move || show_preview_subprocess(p));
+                    tokio::task::spawn_blocking(move || {
+                        let _ = show_preview_for_path(p, &state_clone);
+                    });
                 } else {
                     eprintln!("[daemon] No capture yet.");
                 }
@@ -1030,6 +1100,7 @@ impl DaemonIpc {
             "capture_window" => DaemonAction::CaptureWindow,
             "record_screen" => DaemonAction::RecordScreen,
             "record_area" => DaemonAction::RecordArea,
+            "open_recording_ui" => DaemonAction::OpenRecordingUi,
             "recording_pause_resume" => DaemonAction::ToggleRecordingPause,
             "recording_stop_save" => DaemonAction::StopRecordingSave,
             "recording_restart" => DaemonAction::RestartRecording,
@@ -1039,6 +1110,10 @@ impl DaemonIpc {
             "recording_session_resumed" => DaemonAction::RecordingSessionResumed,
             "recording_session_restarted" => DaemonAction::RecordingSessionRestarted,
             "recording_session_ended" => DaemonAction::RecordingSessionEnded,
+            "open_file" => DaemonAction::OpenFile,
+            "open_from_clipboard" => DaemonAction::OpenFromClipboard,
+            "restore_recently_closed" => DaemonAction::RestoreRecentlyClosed,
+            "toggle_overlays" => DaemonAction::ToggleOverlays,
             "show_last_preview" => DaemonAction::ShowLastPreview,
             "open_last" => DaemonAction::OpenLastCapture,
             "settings" => DaemonAction::OpenSettings,
@@ -1871,11 +1946,24 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
             }
             "capture_screen" | "capture-screen" => return Some(DaemonAction::CaptureScreen),
             "capture_window" | "capture-window" => return Some(DaemonAction::CaptureWindow),
+            "open_file" | "open-file" => return Some(DaemonAction::OpenFile),
+            "open_from_clipboard" | "open-from-clipboard" => {
+                return Some(DaemonAction::OpenFromClipboard);
+            }
+            "restore_recently_closed" | "restore-recently-closed" => {
+                return Some(DaemonAction::RestoreRecentlyClosed);
+            }
+            "toggle_overlays" | "toggle-overlays" => {
+                return Some(DaemonAction::ToggleOverlays);
+            }
             "show_last_preview" | "show-last-preview" => {
                 return Some(DaemonAction::ShowLastPreview);
             }
             "record_screen" | "record-screen" => return Some(DaemonAction::RecordScreen),
             "record_area" | "record-area" => return Some(DaemonAction::RecordArea),
+            "open_recording_ui" | "open-recording-ui" => {
+                return Some(DaemonAction::OpenRecordingUi);
+            }
             "recording_pause_resume" | "recording-pause-resume" => {
                 return Some(DaemonAction::ToggleRecordingPause);
             }
@@ -1901,8 +1989,13 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
             Some("window") => Some(DaemonAction::CaptureWindow),
             _ => None,
         },
+        Some("open-file") => Some(DaemonAction::OpenFile),
+        Some("open-from-clipboard") => Some(DaemonAction::OpenFromClipboard),
+        Some("restore-recently-closed") => Some(DaemonAction::RestoreRecentlyClosed),
+        Some("toggle-overlays") => Some(DaemonAction::ToggleOverlays),
         Some("show-last-preview") => Some(DaemonAction::ShowLastPreview),
         Some("record") => match binding.args.get(1).map(|s| s.as_str()) {
+            Some("ui") => Some(DaemonAction::OpenRecordingUi),
             Some("screen") => Some(DaemonAction::RecordScreen),
             Some("area") => Some(DaemonAction::RecordArea),
             _ => None,
@@ -2132,7 +2225,8 @@ fn apply_screenshot_after_capture_actions(
     }
 
     if config.after_capture_show_quick_access {
-        show_preview_subprocess(saved_path);
+        let child = show_preview_subprocess(saved_path);
+        replace_preview_child(&state, child);
     }
 }
 
@@ -2255,6 +2349,126 @@ fn run_ocr_and_report(capture: crate::backend::CaptureData) {
     }
 }
 
+fn last_capture_target(path: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    path.map(std::path::Path::to_path_buf)
+}
+
+fn clipboard_missing_image_notification() -> (&'static str, &'static str) {
+    (
+        "Clipboard image unavailable",
+        "Clipboard does not contain an image to open",
+    )
+}
+
+fn restore_recently_closed_target(path: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    last_capture_target(path)
+}
+
+fn should_show_preview_after_toggle(preview_visible: bool, has_last_capture: bool) -> bool {
+    !preview_visible && has_last_capture
+}
+
+fn refresh_preview_child_state(state: &mut DaemonState) -> bool {
+    match state.preview_child.as_mut() {
+        Some(child) => match child.try_wait() {
+            Ok(Some(_)) => {
+                state.preview_child = None;
+                false
+            }
+            Ok(None) => true,
+            Err(_) => {
+                state.preview_child = None;
+                false
+            }
+        },
+        None => false,
+    }
+}
+
+fn replace_preview_child(state: &Arc<Mutex<DaemonState>>, child: Option<std::process::Child>) {
+    if let Ok(mut guard) = state.lock() {
+        if let Some(mut existing) = guard.preview_child.take() {
+            let _ = existing.kill();
+            let _ = existing.wait();
+        }
+        guard.preview_child = child;
+    }
+}
+
+fn preview_visible(state: &Arc<Mutex<DaemonState>>) -> bool {
+    state
+        .lock()
+        .map(|mut guard| refresh_preview_child_state(&mut guard))
+        .unwrap_or(false)
+}
+
+fn last_capture_path(state: &Arc<Mutex<DaemonState>>) -> Option<std::path::PathBuf> {
+    state.lock().ok().and_then(|guard| guard.last_capture_path.clone())
+}
+
+fn stop_preview_overlay(state: &Arc<Mutex<DaemonState>>) -> bool {
+    let mut guard = match state.lock() {
+        Ok(guard) => guard,
+        Err(_) => return false,
+    };
+
+    if !refresh_preview_child_state(&mut guard) {
+        return false;
+    }
+
+    if let Some(mut child) = guard.preview_child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return true;
+    }
+
+    false
+}
+
+fn show_preview_for_path(path: std::path::PathBuf, state: &Arc<Mutex<DaemonState>>) -> bool {
+    let child = show_preview_subprocess(path);
+    let shown = child.is_some();
+    replace_preview_child(state, child);
+    shown
+}
+
+fn toggle_preview_overlay(state: &Arc<Mutex<DaemonState>>) -> bool {
+    let visible = preview_visible(state);
+    let target = last_capture_path(state);
+
+    if !should_show_preview_after_toggle(visible, target.is_some()) {
+        return stop_preview_overlay(state);
+    }
+
+    target
+        .map(|path| show_preview_for_path(path, state))
+        .unwrap_or(false)
+}
+
+fn import_clipboard_image_to_temp_png() -> anyhow::Result<std::path::PathBuf> {
+    let mut clipboard = arboard::Clipboard::new().context("Failed to access clipboard")?;
+    let image = clipboard
+        .get_image()
+        .context("Clipboard does not contain an image")?;
+
+    let width = u32::try_from(image.width).context("Clipboard image width out of range")?;
+    let height = u32::try_from(image.height).context("Clipboard image height out of range")?;
+    let bytes = image.bytes.into_owned();
+    let rgba = image::RgbaImage::from_raw(width, height, bytes)
+        .context("Clipboard image has invalid RGBA data")?;
+
+    let path = std::env::temp_dir().join(format!(
+        "apexshot_clipboard_{}.png",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    ));
+    rgba.save(&path)
+        .with_context(|| format!("Failed to save clipboard image to {}", path.display()))?;
+    Ok(path)
+}
+
 fn send_desktop_notification(summary: &str, body: &str) {
     let mut cmd = std::process::Command::new("notify-send");
     cmd.arg("-a").arg("ApexShot").arg(summary);
@@ -2268,17 +2482,18 @@ fn send_desktop_notification(summary: &str, body: &str) {
 }
 
 /// Spawn `apexshot preview <path>` as a subprocess so it gets its own GTK context.
-fn show_preview_subprocess(path: std::path::PathBuf) {
+fn show_preview_subprocess(path: std::path::PathBuf) -> Option<std::process::Child> {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
     match std::process::Command::new(&exe)
         .arg("preview")
         .arg(&path)
         .spawn()
     {
-        Ok(_) => {}
+        Ok(child) => Some(child),
         Err(e) => {
             eprintln!("[daemon] Failed to spawn preview subprocess: {e}, falling back to xdg-open");
             open_file(path);
+            None
         }
     }
 }
@@ -2542,6 +2757,27 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     }
 }
 
+async fn handle_open_recording_ui(_tx: std::sync::mpsc::Sender<DaemonAction>) {
+    match tokio::task::spawn_blocking(open_recording_ui_via_cpp).await {
+        Ok(Ok(AreaCapturePathResult::RecordingRequested(request))) => {
+            if let Err(err) = run_overlay_recording_request_with_gtk(request, None) {
+                eprintln!("[daemon] Recording UI failed: {err}");
+            }
+        }
+        Ok(Ok(AreaCapturePathResult::RecordingConfigUpdated)) => {
+            eprintln!("[daemon] Recording UI updated settings only.");
+        }
+        Ok(Ok(AreaCapturePathResult::Cancelled)) => {
+            eprintln!("[daemon] Recording UI cancelled.");
+        }
+        Ok(Ok(other)) => {
+            eprintln!("[daemon] Unexpected recording UI result: {:?}", other);
+        }
+        Ok(Err(err)) => eprintln!("[daemon] Failed to open recording UI: {err}"),
+        Err(err) => eprintln!("[daemon] Recording UI task panicked: {err}"),
+    }
+}
+
 async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::capture_overlay::run_capture_overlay;
     use crate::recording::{
@@ -2609,8 +2845,12 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_autostart_ydotoold, RecordingTrayState};
-    use std::time::{Duration, Instant};
+    use super::{
+        clipboard_missing_image_notification, last_capture_target, restore_recently_closed_target,
+        should_autostart_ydotoold, should_quit_on_sigint, should_show_preview_after_toggle,
+        RecordingTrayState,
+    };
+    use std::{path::Path, time::{Duration, Instant}};
 
     #[test]
     fn daemon_does_not_autostart_ydotoold_by_default() {
@@ -2632,6 +2872,26 @@ mod tests {
         // Unsuppress
         super::HOTKEY_SUPPRESSED.store(false, Ordering::Relaxed);
         assert!(!super::is_hotkey_suppressed());
+    }
+
+    #[test]
+    fn sigint_quits_only_when_no_recording_is_active() {
+        assert!(should_quit_on_sigint(false));
+        assert!(!should_quit_on_sigint(true));
+    }
+
+    #[test]
+    fn binding_to_daemon_action_maps_open_recording_ui_hotkey() {
+        let open_recording_ui = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+R".into(),
+            args: vec!["record".into(), "ui".into()],
+            name: Some("open_recording_ui".into()),
+        };
+
+        assert_eq!(
+            super::binding_to_daemon_action(&open_recording_ui),
+            Some(super::DaemonAction::OpenRecordingUi)
+        );
     }
 
     #[test]
@@ -2672,6 +2932,79 @@ mod tests {
         assert!(matches!(
             super::binding_to_daemon_action(&discard),
             Some(super::DaemonAction::DiscardRecording)
+        ));
+    }
+
+    #[test]
+    fn open_file_targets_last_capture_when_available() {
+        let path = Path::new("/tmp/example.png");
+        assert_eq!(last_capture_target(Some(path)).as_deref(), Some(path));
+        assert_eq!(last_capture_target(None), None);
+    }
+
+    #[test]
+    fn clipboard_missing_image_notification_matches_expected_copy() {
+        assert_eq!(
+            clipboard_missing_image_notification(),
+            (
+                "Clipboard image unavailable",
+                "Clipboard does not contain an image to open"
+            )
+        );
+    }
+
+    #[test]
+    fn restore_recently_closed_reuses_last_capture_target() {
+        let path = Path::new("/tmp/example.png");
+        assert_eq!(restore_recently_closed_target(Some(path)).as_deref(), Some(path));
+        assert_eq!(restore_recently_closed_target(None), None);
+    }
+
+    #[test]
+    fn toggle_preview_policy_only_shows_when_hidden_and_capture_exists() {
+        assert!(should_show_preview_after_toggle(false, true));
+        assert!(!should_show_preview_after_toggle(true, true));
+        assert!(!should_show_preview_after_toggle(false, false));
+    }
+
+    #[test]
+    fn binding_to_daemon_action_maps_general_shortcuts() {
+        let open_file = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+O".into(),
+            args: vec!["open-file".into()],
+            name: Some("open_file".into()),
+        };
+        let open_from_clipboard = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+V".into(),
+            args: vec!["open-from-clipboard".into()],
+            name: Some("open_from_clipboard".into()),
+        };
+        let restore_recently_closed = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+Z".into(),
+            args: vec!["restore-recently-closed".into()],
+            name: Some("restore_recently_closed".into()),
+        };
+        let toggle_overlays = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+H".into(),
+            args: vec!["toggle-overlays".into()],
+            name: Some("toggle_overlays".into()),
+        };
+
+        assert!(matches!(
+            super::binding_to_daemon_action(&open_file),
+            Some(super::DaemonAction::OpenFile)
+        ));
+        assert!(matches!(
+            super::binding_to_daemon_action(&open_from_clipboard),
+            Some(super::DaemonAction::OpenFromClipboard)
+        ));
+        assert!(matches!(
+            super::binding_to_daemon_action(&restore_recently_closed),
+            Some(super::DaemonAction::RestoreRecentlyClosed)
+        ));
+        assert!(matches!(
+            super::binding_to_daemon_action(&toggle_overlays),
+            Some(super::DaemonAction::ToggleOverlays)
         ));
     }
 

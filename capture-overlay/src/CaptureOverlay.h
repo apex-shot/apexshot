@@ -71,6 +71,7 @@ public:
     int captureDelaySeconds() const { return m_captureDelaySeconds; }
     bool countdownHandledInOverlay() const { return true; }
     void focusAndRaiseOverlay();
+    void openRecordingPanelForShortcut();
 
     // Recording accessors
     bool recordRequested() const { return m_captureIntent == CaptureIntent::Record; }

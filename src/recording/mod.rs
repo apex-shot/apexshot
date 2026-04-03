@@ -17,7 +17,8 @@ mod runtime_keystrokes;
 mod stop_overlay;
 use control_session::RecordingControlServer;
 pub use control_session::{
-    send_active_recording_command, toggle_active_recording_pause, RecordingControlCommand,
+    has_active_recording_control, send_active_recording_command, toggle_active_recording_pause,
+    RecordingControlCommand,
 };
 pub use stop_overlay::{
     run_recording_controls, run_recording_countdown_bar, run_recording_stop_overlay,
@@ -56,6 +57,55 @@ pub enum RecordError {
 }
 
 pub type RecordResult<T> = Result<T, RecordError>;
+
+fn reap_child_if_exited(child: &mut Option<std::process::Child>) -> bool {
+    let Some(process) = child.as_mut() else {
+        return true;
+    };
+
+    match process.try_wait() {
+        Ok(Some(_status)) => {
+            *child = None;
+            true
+        }
+        Ok(None) => false,
+        Err(_) => false,
+    }
+}
+
+fn daemon_event_for_terminal_action(action: RecordingTerminalAction) -> Option<&'static str> {
+    match action {
+        RecordingTerminalAction::Restart => Some("recording_session_restarted"),
+        RecordingTerminalAction::Save | RecordingTerminalAction::Discard => {
+            Some("recording_session_ended")
+        }
+    }
+}
+
+fn should_end_recording_ui_for_terminal_action(action: RecordingTerminalAction) -> bool {
+    matches!(action, RecordingTerminalAction::Save | RecordingTerminalAction::Discard)
+}
+
+fn notify_daemon_event(event: &str) {
+    match event {
+        "recording_session_started" => {
+            let _ = crate::daemon::notify_daemon_recording_started();
+        }
+        "recording_session_paused" => {
+            let _ = crate::daemon::notify_daemon_recording_paused();
+        }
+        "recording_session_resumed" => {
+            let _ = crate::daemon::notify_daemon_recording_resumed();
+        }
+        "recording_session_restarted" => {
+            let _ = crate::daemon::notify_daemon_recording_restarted();
+        }
+        "recording_session_ended" => {
+            let _ = crate::daemon::notify_daemon_recording_ended();
+        }
+        _ => {}
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecordingTerminalAction {
@@ -701,31 +751,21 @@ async fn start_recording_with_commands(
         )));
     }
 
-    // 6. Watch for messages and Ctrl+C
+    // 6. Watch for messages and recording control commands
     let bus = pipeline
         .bus()
         .ok_or_else(|| RecordError::GStreamerError("Pipeline has no bus".into()))?;
 
-    println!("Recording... Press Ctrl+C to stop.");
-
-    // Handle Ctrl+C
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
+    println!("Recording...");
 
     let mut command_rx = command_rx;
 
-    // Phase 1: Recording until Ctrl+C or Error
+    // Phase 1: Recording until explicit recording stop/restart/discard or Error
     let mut stopping = false;
     let mut stop_action = RecordingTerminalAction::Save;
     let mut paused = false;
     loop {
         tokio::select! {
-            _ = &mut ctrl_c => {
-                println!("\nStopping recording... Finalizing file...");
-                pipeline.send_event(gst::event::Eos::new());
-                stopping = true;
-                break;
-            }
             command = async {
                 match &mut command_rx {
                     Some(rx) => rx.recv().await,
@@ -743,12 +783,14 @@ async fn start_recording_with_commands(
                             .set_state(gst::State::Paused)
                             .map_err(|e| RecordError::GStreamerError(format!("Failed to pause pipeline: {e}")))?;
                         paused = true;
+                        notify_daemon_event("recording_session_paused");
                     }
                     RecordingControlCommand::Resume if paused => {
                         pipeline
                             .set_state(gst::State::Playing)
                             .map_err(|e| RecordError::GStreamerError(format!("Failed to resume pipeline: {e}")))?;
                         paused = false;
+                        notify_daemon_event("recording_session_resumed");
                     }
                     RecordingControlCommand::Restart => {
                         stop_action = RecordingTerminalAction::Restart;
@@ -1474,11 +1516,7 @@ async fn record_gif_rust_with_commands(
         .set_state(gst::State::Playing)
         .map_err(|e| RecordError::GStreamerError(format!("Failed to start pipeline: {}", e)))?;
 
-    println!("Recording GIF... Press Ctrl+C to stop.");
-
-    // Handle Ctrl+C
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
+    println!("Recording GIF...");
 
     let mut command_rx = command_rx;
 
@@ -1489,10 +1527,6 @@ async fn record_gif_rust_with_commands(
 
     loop {
         tokio::select! {
-            _ = &mut ctrl_c => {
-                println!("\nStopping recording...");
-                stopping = true;
-            }
             command = async {
                 match &mut command_rx {
                     Some(rx) => rx.recv().await,
@@ -1510,12 +1544,14 @@ async fn record_gif_rust_with_commands(
                             .set_state(gst::State::Paused)
                             .map_err(|e| RecordError::GStreamerError(format!("Failed to pause GIF pipeline: {e}")))?;
                         paused = true;
+                        notify_daemon_event("recording_session_paused");
                     }
                     RecordingControlCommand::Resume if paused => {
                         pipeline
                             .set_state(gst::State::Playing)
                             .map_err(|e| RecordError::GStreamerError(format!("Failed to resume GIF pipeline: {e}")))?;
                         paused = false;
+                        notify_daemon_event("recording_session_resumed");
                     }
                     RecordingControlCommand::Restart => {
                         stop_action = RecordingTerminalAction::Restart;
@@ -1915,19 +1951,37 @@ async fn run_recording_with_headless_controls(
     );
     let control_server = RecordingControlServer::start(session_id).await?;
 
+    notify_daemon_event("recording_session_started");
     let final_outcome = loop {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         control_server.set_command_sender(command_tx);
         let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
         control_server.clear_command_sender();
+        let outcome = outcome?;
+        if should_end_recording_ui_for_terminal_action(outcome.1) {
+            control_server.end_recording_ui();
+        }
 
-        match outcome? {
-            (path, RecordingTerminalAction::Restart) => {
+        match outcome {
+            (path, action @ RecordingTerminalAction::Restart) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
                 let _ = std::fs::remove_file(&path);
                 continue;
             }
-            (path, RecordingTerminalAction::Save) => break (path, StopAction::Save),
-            (path, RecordingTerminalAction::Discard) => break (path, StopAction::Discard),
+            (path, action @ RecordingTerminalAction::Save) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
+                break (path, StopAction::Save)
+            }
+            (path, action @ RecordingTerminalAction::Discard) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
+                break (path, StopAction::Discard)
+            }
         }
     };
 
@@ -1946,14 +2000,32 @@ pub async fn run_recording_with_cpp_controls(
     );
     let control_server = RecordingControlServer::start(session_id).await?;
 
-    let controls_child = Arc::new(Mutex::new(
+    let controls_child = Arc::new(Mutex::new(Some(
         crate::capture_overlay::spawn_recording_controls_via_cpp(
             control_server.bus_name(),
             control_server.session_id(),
             params,
         )?,
-    ));
+    )));
 
+    let controls_child_reaper = Arc::clone(&controls_child);
+    let reaper_task = tokio::spawn(async move {
+        loop {
+            let finished = {
+                if let Ok(mut child) = controls_child_reaper.lock() {
+                    reap_child_if_exited(&mut child)
+                } else {
+                    true
+                }
+            };
+            if finished {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    });
+
+    notify_daemon_event("recording_session_started");
     let final_outcome = loop {
         let (recording_command_tx, command_rx) = mpsc::unbounded_channel();
         let (control_command_tx, mut control_command_rx) =
@@ -1963,7 +2035,11 @@ pub async fn run_recording_with_cpp_controls(
             while let Some(command) = control_command_rx.recv().await {
                 if command.ends_session() {
                     if let Ok(mut child) = controls_child_for_task.lock() {
-                        let _ = child.kill();
+                        if let Some(process) = child.as_mut() {
+                            let _ = process.kill();
+                            let _ = process.wait();
+                        }
+                        *child = None;
                     }
                 }
 
@@ -1977,24 +2053,41 @@ pub async fn run_recording_with_cpp_controls(
         let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
         control_server.clear_command_sender();
         forward_commands.abort();
+        let outcome = outcome?;
+        if should_end_recording_ui_for_terminal_action(outcome.1) {
+            control_server.end_recording_ui();
+        }
 
-        match outcome? {
-            (path, RecordingTerminalAction::Restart) => {
+        match outcome {
+            (path, action @ RecordingTerminalAction::Restart) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
                 let _ = std::fs::remove_file(&path);
                 continue;
             }
-            (path, RecordingTerminalAction::Save) => {
+            (path, action @ RecordingTerminalAction::Save) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
                 break (path, StopAction::Save);
             }
-            (path, RecordingTerminalAction::Discard) => {
+            (path, action @ RecordingTerminalAction::Discard) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
                 break (path, StopAction::Discard);
             }
         }
     };
 
+    reaper_task.abort();
     if let Ok(mut child) = controls_child.lock() {
-        let _ = child.kill();
-        let _ = child.wait();
+        if let Some(process) = child.as_mut() {
+            let _ = process.kill();
+            let _ = process.wait();
+        }
+        *child = None;
     }
     drop(control_server);
 
@@ -2044,21 +2137,35 @@ async fn run_recording_with_shell_controls(
             )
         });
 
+    notify_daemon_event("recording_session_started");
     let final_outcome = loop {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         control_server.set_command_sender(command_tx);
         let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
         control_server.clear_command_sender();
+        let outcome = outcome?;
+        if should_end_recording_ui_for_terminal_action(outcome.1) {
+            control_server.end_recording_ui();
+        }
 
-        match outcome? {
-            (path, RecordingTerminalAction::Restart) => {
+        match outcome {
+            (path, action @ RecordingTerminalAction::Restart) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
                 let _ = std::fs::remove_file(&path);
                 continue;
             }
-            (path, RecordingTerminalAction::Save) => {
+            (path, action @ RecordingTerminalAction::Save) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
                 break (path, StopAction::Save);
             }
-            (path, RecordingTerminalAction::Discard) => {
+            (path, action @ RecordingTerminalAction::Discard) => {
+                if let Some(event) = daemon_event_for_terminal_action(action) {
+                    notify_daemon_event(event);
+                }
                 break (path, StopAction::Discard);
             }
         }
@@ -2182,6 +2289,50 @@ mod tests {
     use chrono::TimeZone;
     use pretty_assertions::assert_eq;
     use std::path::Path;
+
+    #[test]
+    fn reap_child_if_exited_clears_completed_child() {
+        let mut child = Some(
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg("exit 0")
+                .spawn()
+                .expect("child should spawn"),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        assert!(reap_child_if_exited(&mut child));
+        assert!(child.is_none());
+    }
+
+    #[test]
+    fn daemon_event_for_terminal_action_keeps_restart_distinct_from_end() {
+        assert_eq!(
+            daemon_event_for_terminal_action(RecordingTerminalAction::Restart),
+            Some("recording_session_restarted")
+        );
+        assert_eq!(
+            daemon_event_for_terminal_action(RecordingTerminalAction::Save),
+            Some("recording_session_ended")
+        );
+        assert_eq!(
+            daemon_event_for_terminal_action(RecordingTerminalAction::Discard),
+            Some("recording_session_ended")
+        );
+    }
+
+    #[test]
+    fn restart_does_not_request_recording_ui_teardown() {
+        assert!(!should_end_recording_ui_for_terminal_action(
+            RecordingTerminalAction::Restart
+        ));
+        assert!(should_end_recording_ui_for_terminal_action(
+            RecordingTerminalAction::Save
+        ));
+        assert!(should_end_recording_ui_for_terminal_action(
+            RecordingTerminalAction::Discard
+        ));
+    }
 
     fn x11_recording_config() -> RecordingConfig {
         RecordingConfig {
