@@ -12,6 +12,8 @@ use crate::qr;
 use image::RgbaImage;
 use thiserror::Error;
 
+pub mod deskew;
+
 /// Tesseract OCR Engine Mode — LSTM only (best accuracy for most text)
 const TESS_OEM: &str = "1";
 
@@ -182,9 +184,10 @@ fn is_dark_mode(image: &RgbaImage) -> bool {
 ///
 /// This performs:
 /// 1. Upscaling to improve effective DPI (Tesseract prefers ~300 DPI)
-/// 2. Auto-detect dark/light mode and invert only if dark-mode
-/// 3. Optional contrast enhancement
-/// 4. Optional adaptive thresholding
+/// 2. Skew detection and correction via projection profile analysis
+/// 3. Auto-detect dark/light mode and invert only if dark-mode
+/// 4. Optional contrast enhancement
+/// 5. Optional adaptive thresholding
 fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
     use image::imageops::{resize, FilterType};
 
@@ -196,32 +199,46 @@ fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
     let resized = resize(image, new_width, new_height, FilterType::Lanczos3);
 
     let dark_mode = is_dark_mode(image);
-    let mut luma_data = Vec::with_capacity((new_width * new_height) as usize);
 
+    // Convert to grayscale (raw, no inversion) for skew detection
+    let mut luma_data = Vec::with_capacity((new_width * new_height) as usize);
     for pixel in resized.pixels() {
         if pixel[3] < 50 {
             luma_data.push(255);
             continue;
         }
-
         let luma = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
+        luma_data.push(luma as u8);
+    }
 
+    // Detect and correct skew
+    let skew_angle = deskew::detect_skew_angle(&luma_data, new_width, new_height);
+    if skew_angle.abs() > 0.5 {
+        luma_data = deskew::rotate_gray(
+            &luma_data,
+            new_width as usize,
+            new_height as usize,
+            skew_angle,
+        );
+    }
+
+    // Apply dark-mode inversion and contrast enhancement
+    for pixel in luma_data.iter_mut() {
         let processed = if dark_mode {
-            let inverted = 255.0 - luma;
+            let inverted = 255.0 - (*pixel as f32);
             if config.contrast > 1.0 {
-                ((inverted - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0)
+                ((inverted - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0) as u8
             } else {
-                inverted
+                inverted as u8
             }
         } else {
             if config.contrast > 1.0 {
-                ((luma - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0)
+                ((*pixel as f32 - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0) as u8
             } else {
-                luma
+                *pixel
             }
         };
-
-        luma_data.push(processed as u8);
+        *pixel = processed;
     }
 
     if config.threshold {
