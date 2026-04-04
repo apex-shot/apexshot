@@ -824,7 +824,6 @@ fn save_capture_to_temp_png(
 }
 
 pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
-    let config = crate::config::load_config().sanitized();
     if builtin_screenshot_overlay_active() {
         return Err(blocked_selection_error(
             LaunchBlockedReason::BuiltinOverlayActive,
@@ -843,8 +842,7 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
     }
 
     eprintln!("[capture_overlay] capture_window_via_cpp: launching --window-capture");
-    let cursor_arg = screenshot_cursor_arg(&config);
-    let output = run_capture_binary(&["--window-capture", cursor_arg], None)?;
+    let output = run_capture_binary(&["--window-capture"], None)?;
     let exit_code = output.status.code();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -875,9 +873,7 @@ pub fn capture_window_via_cpp() -> Result<CaptureData, SelectionError> {
 }
 
 pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
-    let config = crate::config::load_config().sanitized();
-    let cursor_arg = screenshot_cursor_arg(&config);
-    let output = run_capture_binary(&["--capture-screen", cursor_arg], None)?;
+    let output = run_capture_binary(&["--capture-screen"], None)?;
 
     match output.status.code() {
         Some(0) => {
@@ -901,16 +897,8 @@ pub fn capture_screen_via_cpp() -> Result<CaptureData, SelectionError> {
     capture
 }
 
-fn screenshot_cursor_arg(config: &crate::config::AppConfig) -> &'static str {
-    if config.screenshot_show_cursor {
-        "--screenshot-cursor"
-    } else {
-        "--no-screenshot-cursor"
-    }
-}
-
 fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
-    let mut extra_args: Vec<String> = vec!["--area-init".into(), screenshot_cursor_arg(config).into()];
+    let mut extra_args: Vec<String> = vec!["--area-init".into()];
 
     if config.rec_remember_selection {
         if let (Some(x), Some(y), Some(w), Some(h)) = (
@@ -1116,9 +1104,7 @@ pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
 }
 
 pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
-    let config = crate::config::load_config().sanitized();
-    let cursor_arg = screenshot_cursor_arg(&config);
-    let output = run_capture_binary(&["--crosshair-capture", cursor_arg], None)?;
+    let output = run_capture_binary(&["--crosshair-capture"], None)?;
 
     match output.status.code() {
         Some(0) => parse_capture_screen_json(&String::from_utf8_lossy(&output.stdout)),
@@ -1376,7 +1362,7 @@ fn extract_string(json: &str, key: &str) -> Option<String> {
 mod tests {
     use super::{
         build_area_init_args, build_recording_ui_args, classify_overlay_exit_code,
-        execute_builtin_overlay_query, screenshot_cursor_arg,
+        execute_builtin_overlay_query,
         parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
         parse_recording_json, parse_selection_json, should_request_screenshot_lock,
         tracked_overlay_id, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,

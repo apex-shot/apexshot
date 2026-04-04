@@ -6,29 +6,22 @@
 
 namespace ScreenCapture {
 
-bool captureFullscreenToTempPng(QString& outPath,
-                                QSize& outSize,
-                                QString& outError,
-                                bool includeCursor = true);
+bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outError);
 bool captureFullscreenToTempPngViaPortal(QString& outPath,
                                          QSize& outSize,
-                                         QString& outError,
-                                         bool includeCursor = true);
+                                         QString& outError);
 bool captureAreaToTempPng(const QRect& logicalSelection,
                           QString& outPath,
                           QSize& outSize,
-                          QString& outError,
-                          bool includeCursor = true);
+                          QString& outError);
 bool captureAreaToTempPngViaPortal(const QRect& logicalSelection,
                                    QString& outPath,
                                    QSize& outSize,
-                                   QString& outError,
-                                   bool includeCursor = true);
+                                   QString& outError);
 bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
                                           const QRect& overlayGeometry,
                                           QString& outPath,
                                           QSize& outSize,
-                                          QString& outError,
-                                          bool includeCursor = true);
+                                          QString& outError);
 
 }

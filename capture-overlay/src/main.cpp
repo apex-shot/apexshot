@@ -239,7 +239,6 @@ int main(int argc, char* argv[])
     int controlCaptureH = 0;
     bool controlFullscreen = false;
     bool controlShowTimer = true;
-    bool screenshotIncludeCursor = true;
     QRect restoreSel;
     bool initialMic = false;
     bool initialSpeaker = false;
@@ -319,10 +318,6 @@ int main(int argc, char* argv[])
             controlShowTimer = true;
         } else if (std::strcmp(argv[i], "--hide-timer") == 0) {
             controlShowTimer = false;
-        } else if (std::strcmp(argv[i], "--screenshot-cursor") == 0) {
-            screenshotIncludeCursor = true;
-        } else if (std::strcmp(argv[i], "--no-screenshot-cursor") == 0) {
-            screenshotIncludeCursor = false;
         } else if (QString(argv[i]).startsWith("--restore-selection=")) {
             // Format: --restore-selection=x,y,w,h
             QString val = QString(argv[i]).mid(20);
@@ -533,7 +528,7 @@ int main(int argc, char* argv[])
         QString imagePath;
         QSize imageSize;
         QString error;
-        if (!ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error, screenshotIncludeCursor)) {
+        if (!ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error)) {
             std::fprintf(stderr,
                          "apexshot-capture: fullscreen capture failed: %s\n",
                          error.toLocal8Bit().constData());
@@ -591,7 +586,7 @@ int main(int argc, char* argv[])
             QSize imageSize;
             QString error;
             if (ScreenCapture::captureAreaToTempPngViaPortal(
-                  selected.rect, imagePath, imageSize, error, screenshotIncludeCursor)) {
+                  selected.rect, imagePath, imageSize, error)) {
                 printCaptureScreenJson(imagePath, imageSize);
                 return 0;
             }
@@ -619,7 +614,7 @@ int main(int argc, char* argv[])
         QDBusReply<bool> reply = gnomeShot.call(
             QStringLiteral("ScreenshotWindow"),
             true,   // include_frame
-            screenshotIncludeCursor,
+            false,  // include_cursor
             false,  // flash
             tmpPath);
 
@@ -629,7 +624,7 @@ int main(int argc, char* argv[])
             QString imagePath;
             QSize imageSize;
             QString error;
-            if (ScreenCapture::captureAreaToTempPng(selected.rect, imagePath, imageSize, error, screenshotIncludeCursor)) {
+            if (ScreenCapture::captureAreaToTempPng(selected.rect, imagePath, imageSize, error)) {
                 printCaptureScreenJson(imagePath, imageSize);
                 return 0;
             }
@@ -913,25 +908,25 @@ int main(int argc, char* argv[])
         if (crosshairCaptureMode) {
             if (isGnomeWayland) {
                 ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-                  sel, overlay.geometry(), imagePath, imageSize, error, screenshotIncludeCursor);
+                  sel, overlay.geometry(), imagePath, imageSize, error);
             } else {
                 ok =
-                  ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error, screenshotIncludeCursor);
+                  ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
             }
         } else if (fullscreenRequested) {
-            ok = ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error, screenshotIncludeCursor);
+            ok = ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error);
         } else if (isGnomeWayland) {
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-              sel, overlay.geometry(), imagePath, imageSize, error, screenshotIncludeCursor);
+              sel, overlay.geometry(), imagePath, imageSize, error);
         } else {
             ok =
-              ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error, screenshotIncludeCursor);
+              ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
         }
 
         if (!ok && isWayland && !isGnomeWayland) {
             QString fallbackError;
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-              sel, overlay.geometry(), imagePath, imageSize, fallbackError, screenshotIncludeCursor);
+              sel, overlay.geometry(), imagePath, imageSize, fallbackError);
             if (!ok) {
                 error = QStringLiteral("%1; overlay-local fallback failed (%2)")
                           .arg(error, fallbackError);
