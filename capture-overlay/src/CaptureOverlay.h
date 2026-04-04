@@ -163,18 +163,12 @@ public:
     void setInitialRememberSelection(bool v) { m_rememberSelection = v; }
     void setInitialDimScreen(bool v) { m_dimScreen = v; }
     void setInitialShowCountdown(bool v) { m_showCountdown = v; }
-    bool selectionUsesCrosshairCursor() const {
-        return m_selectionCursorMode == QStringLiteral("Crosshair");
-    }
-    Qt::CursorShape defaultSelectionCursorShape() const {
-        return selectionUsesCrosshairCursor() ? Qt::CrossCursor : Qt::ArrowCursor;
-    }
     void setSelectionCursorMode(const QString& mode) {
-        m_selectionCursorMode =
-            (mode == QStringLiteral("Crosshair")) ? QStringLiteral("Crosshair")
-                                                    : QStringLiteral("Default");
+        m_selectionCursorMode = mode;
         if (!isCrosshairMode()) {
-            setCursor(defaultSelectionCursorShape());
+            setCursor(mode == QStringLiteral("Crosshair") || mode == QStringLiteral("Magnifier")
+                          ? Qt::CrossCursor
+                          : Qt::ArrowCursor);
         }
     }
     void setShowZoomPreview(bool enabled) { m_showZoomPreview = enabled; }

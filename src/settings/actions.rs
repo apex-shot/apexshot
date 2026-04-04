@@ -129,7 +129,7 @@ pub fn install_checkbox_behaviors(
     quick_access_auto_close_enabled_check: &CheckButton,
     quick_access_auto_close_action_input: &ComboBoxText,
     quick_access_auto_close_interval_input: &ComboBoxText,
-    _screenshot_crosshair_mode_input: &ComboBoxText,
+    screenshot_crosshair_mode_input: &ComboBoxText,
     screenshot_show_magnifier_check: &CheckButton,
 ) {
     let shutter_sound_input_toggle = shutter_sound_input.clone();
@@ -181,7 +181,15 @@ pub fn install_checkbox_behaviors(
         a2.set_sensitive(active);
     });
 
-    screenshot_show_magnifier_check.set_sensitive(true);
+    let m1 = screenshot_show_magnifier_check.clone();
+    m1.set_sensitive(matches!(
+        screenshot_crosshair_mode_input.active_id().as_deref(),
+        Some("Crosshair") | Some("Magnifier")
+    ));
+    screenshot_crosshair_mode_input.connect_changed(move |combo| {
+        let id = combo.active_id().unwrap_or_default();
+        m1.set_sensitive(id == "Crosshair" || id == "Magnifier");
+    });
 }
 
 pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
@@ -223,7 +231,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
 
     config.screenshot_format = combo_value(&inputs.screenshot_format, "PNG");
     config.screenshot_crosshair_mode =
-        combo_value(&inputs.screenshot_crosshair_mode, "Default");
+        combo_value(&inputs.screenshot_crosshair_mode, "Disabled");
     config.screenshot_show_magnifier = inputs.screenshot_show_magnifier.is_active();
     config.screenshot_freeze_screen = inputs.screenshot_freeze_screen.is_active();
     config.screenshot_timer_interval = inputs

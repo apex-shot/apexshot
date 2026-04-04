@@ -803,7 +803,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             closeCaptureCropMenu();
             m_selection = QRect(pos, pos);
             m_dragStart = pos;
-            setCursor(defaultSelectionCursorShape());
+            setCursor(Qt::CrossCursor);
             update();
             return;
         }
@@ -833,7 +833,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
     m_hasSelection = false;
     m_fullscreenMode = false;
     m_selection = QRect(pos, pos);
-    setCursor(defaultSelectionCursorShape());
+    setCursor(Qt::CrossCursor);
 }
 
 void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
@@ -1434,7 +1434,7 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
         m_hoveredCaptureCropMenuItem = -1;
         m_selection = QRect(pos, pos);
         m_dragStart = pos;
-        setCursor(defaultSelectionCursorShape());
+        setCursor(Qt::CrossCursor);
         update();
     }
 }

@@ -212,7 +212,7 @@ CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoi
 
 void CaptureOverlay::updateCursor(const QPoint& pos)
 {
-    if (!m_hasSelection) { setCursor(defaultSelectionCursorShape()); return; }
+    if (!m_hasSelection) { setCursor(Qt::CrossCursor); return; }
 
     if (m_captureIntent == CaptureIntent::Scroll && m_scrollStage == ScrollStage::Capturing) {
         setCursor(Qt::ArrowCursor);
@@ -296,6 +296,6 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
     case HandlePos::Left:
     case HandlePos::Right:       setCursor(Qt::SizeHorCursor);   break;
     case HandlePos::Inside:      setCursor(Qt::OpenHandCursor);  break;
-    default:                     setCursor(defaultSelectionCursorShape()); break;
+    default:                     setCursor(Qt::CrossCursor);     break;
     }
 }
