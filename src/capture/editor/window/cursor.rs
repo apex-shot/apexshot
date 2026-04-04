@@ -152,8 +152,9 @@ pub fn create_highlighter_cursor_surface(
     height: f64,
     _color: (f64, f64, f64, f64),
 ) -> Option<gtk4::cairo::ImageSurface> {
-    let height = clamp_cursor_size(height) * CURSOR_WIDTH_RATIO;
-    let width = DEFAULT_HIGHLIGHTER_CURSOR_SIZE;
+    let clamped_height = clamp_cursor_size(height);
+    let height = clamped_height;
+    let width = clamped_height * CURSOR_WIDTH_RATIO;
 
     let pad = 6.0;
     let surface_width = (width + pad * 2.0).ceil() as i32;
