@@ -41,6 +41,7 @@ pub type SaveResult<T> = Result<T, SaveError>;
 pub enum ImageFormat {
     Png,
     Jpeg { quality: u8 },
+    WebP,
 }
 
 impl ImageFormat {
@@ -49,6 +50,7 @@ impl ImageFormat {
         match self {
             ImageFormat::Png => "png",
             ImageFormat::Jpeg { .. } => "jpg",
+            ImageFormat::WebP => "webp",
         }
     }
 
@@ -379,6 +381,12 @@ pub fn save_existing_png(source_path: &Path, config: &SaveConfig) -> SaveResult<
             let _ = std::fs::remove_file(source_path);
             Ok(output_path)
         }
+        ImageFormat::WebP => {
+            let image = image::open(source_path)?;
+            image.save_with_format(&output_path, image::ImageFormat::WebP)?;
+            let _ = std::fs::remove_file(source_path);
+            Ok(output_path)
+        }
     }
 }
 
@@ -413,6 +421,9 @@ pub fn save_capture(capture: &CaptureData, config: &SaveConfig) -> SaveResult<Pa
             let rgb_image: RgbImage = image.convert();
             rgb_image.save_with_format(&output_path, image::ImageFormat::Jpeg)?;
         }
+        ImageFormat::WebP => {
+            image.save_with_format(&output_path, image::ImageFormat::WebP)?;
+        }
     }
 
     Ok(output_path)
@@ -435,6 +446,7 @@ mod tests {
     fn test_image_format_extension() {
         assert_eq!(ImageFormat::Png.extension(), "png");
         assert_eq!(ImageFormat::Jpeg { quality: 90 }.extension(), "jpg");
+        assert_eq!(ImageFormat::WebP.extension(), "webp");
     }
 
     #[test]

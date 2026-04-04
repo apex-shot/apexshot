@@ -2135,13 +2135,29 @@ fn crop_capture_data(
     Some(CaptureData::new(pixels, w, h, capture.format))
 }
 
-fn screenshot_save_config() -> SaveConfig {
-    let app_config = load_config().sanitized();
-    let mut save_config = SaveConfig::default();
+fn screenshot_image_format(value: &str) -> crate::capture::ImageFormat {
+    match value {
+        "JPEG" => crate::capture::ImageFormat::Jpeg { quality: 85 },
+        "WebP" => crate::capture::ImageFormat::WebP,
+        _ => crate::capture::ImageFormat::Png,
+    }
+}
+
+fn screenshot_save_config_from(app_config: &crate::config::AppConfig) -> SaveConfig {
+    let mut save_config = SaveConfig::default()
+        .with_format(screenshot_image_format(&app_config.screenshot_format))
+        .with_cursor(app_config.screenshot_show_cursor);
+
     if !app_config.screenshot_export_location.is_empty() {
         save_config = save_config.with_output_dir(&app_config.screenshot_export_location);
     }
+
     save_config
+}
+
+fn screenshot_save_config() -> SaveConfig {
+    let app_config = load_config().sanitized();
+    screenshot_save_config_from(&app_config)
 }
 
 fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
@@ -2870,6 +2886,26 @@ mod tests {
     #[test]
     fn daemon_does_not_autostart_ydotoold_by_default() {
         assert!(!should_autostart_ydotoold());
+    }
+
+    #[test]
+    fn screenshot_save_config_uses_format_and_cursor_settings() {
+        let app_config = crate::config::AppConfig {
+            screenshot_export_location: "/tmp/screens".into(),
+            screenshot_format: "JPEG".into(),
+            screenshot_show_cursor: false,
+            ..crate::config::AppConfig::default()
+        }
+        .sanitized();
+
+        let save_config = super::screenshot_save_config_from(&app_config);
+
+        assert_eq!(
+            save_config.output_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/screens"))
+        );
+        assert_eq!(save_config.format, crate::capture::ImageFormat::Jpeg { quality: 85 });
+        assert!(!save_config.include_cursor);
     }
 
     #[test]
