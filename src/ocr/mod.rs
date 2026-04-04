@@ -144,7 +144,7 @@ impl Default for PreprocessConfig {
         Self {
             scale_factor: 2.0, // Reduced from 3.0 for faster processing (still good for OCR)
             contrast: 1.05,    // Reduced contrast enhancement for speed
-            threshold: false,  // Disabled - adaptive thresholding may hurt UI text OCR
+            threshold: true,   // Otsu's binarization — fast and effective
         }
     }
 }
@@ -225,7 +225,7 @@ fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
     }
 
     if config.threshold {
-        apply_adaptive_threshold(&mut luma_data, new_width, new_height);
+        apply_otsu_threshold(&mut luma_data);
     }
 
     luma_data
@@ -242,51 +242,52 @@ fn rgba_to_luma(image: &RgbaImage) -> Vec<u8> {
     out
 }
 
-/// Apply adaptive thresholding for better text separation
+/// Apply Otsu's method for optimal global thresholding.
 ///
-/// This uses a simplified local threshold approach that works well for UI text
-/// on varying backgrounds. Each pixel is compared to the average of its neighborhood.
-fn apply_adaptive_threshold(data: &mut [u8], width: u32, height: u32) {
-    let w = width as usize;
-    let h = height as usize;
-    let radius = 3usize; // Neighborhood radius
+/// Finds the threshold that minimizes intra-class variance between
+/// foreground (text) and background pixels. O(n) single-pass algorithm.
+fn apply_otsu_threshold(data: &mut [u8]) {
+    let mut histogram = [0u32; 256];
+    let total = data.len() as u32;
 
-    // Create a copy for reading original values
-    let original = data.to_vec();
+    for &pixel in data.iter() {
+        histogram[pixel as usize] += 1;
+    }
 
-    for y in 0..h {
-        for x in 0..w {
-            let idx = y * w + x;
+    let mut sum_all: u64 = 0;
+    for i in 0..256 {
+        sum_all += (i as u64) * (histogram[i] as u64);
+    }
 
-            // Calculate local average in neighborhood
-            let mut sum = 0u32;
-            let mut count = 0u32;
+    let mut sum_background: u64 = 0;
+    let mut weight_background: u64 = 0;
+    let mut max_variance: f64 = 0.0;
+    let mut threshold: u8 = 0;
 
-            let y_start = y.saturating_sub(radius);
-            let y_end = (y + radius + 1).min(h);
-            let x_start = x.saturating_sub(radius);
-            let x_end = (x + radius + 1).min(w);
-
-            for ny in y_start..y_end {
-                for nx in x_start..x_end {
-                    sum += original[ny * w + nx] as u32;
-                    count += 1;
-                }
-            }
-
-            let local_avg = (sum / count) as u8;
-            let pixel = original[idx];
-
-            // Apply threshold with a slight bias toward dark (text)
-            // This helps with anti-aliased text
-            let threshold = if local_avg > 128 {
-                local_avg - 10
-            } else {
-                local_avg + 10
-            };
-
-            data[idx] = if pixel < threshold { 0 } else { 255 };
+    for i in 0..256 {
+        let w_b = weight_background + histogram[i] as u64;
+        if w_b == 0 || w_b >= total as u64 {
+            weight_background += histogram[i] as u64;
+            continue;
         }
+
+        let w_f = (total as u64) - w_b;
+        sum_background += (i as u64) * (histogram[i] as u64);
+        let m_b = sum_background as f64 / w_b as f64;
+        let m_f = (sum_all as f64 - sum_background as f64) / w_f as f64;
+
+        let variance = (w_b as f64) * (w_f as f64) * (m_b - m_f).powi(2);
+
+        if variance > max_variance {
+            max_variance = variance;
+            threshold = i as u8;
+        }
+
+        weight_background += histogram[i] as u64;
+    }
+
+    for pixel in data.iter_mut() {
+        *pixel = if *pixel > threshold { 255 } else { 0 };
     }
 }
 
@@ -707,7 +708,7 @@ fn fast_region_preprocess_config() -> PreprocessConfig {
     PreprocessConfig {
         scale_factor: 2.5, // Higher upscale for small text detection (view counts, channel names)
         contrast: 1.15,    // Mild contrast enhancement to separate text from background
-        threshold: false,  // No adaptive thresholding (hurts anti-aliased text)
+        threshold: true,   // Otsu's for better small text detection
     }
 }
 
@@ -831,5 +832,26 @@ mod tests {
         // Should fail because there's no text
         let result = extract_text(&capture, &config);
         assert!(matches!(result, Err(OcrError::NoTextDetected)));
+    }
+
+    #[test]
+    fn test_otsu_threshold_separates_bimodal_data() {
+        let mut data: Vec<u8> = (0..100)
+            .map(|_| 30u8)
+            .chain((0..100).map(|_| 220u8))
+            .collect();
+        apply_otsu_threshold(&mut data);
+
+        let dark_count = data.iter().filter(|&&p| p == 0).count();
+        let light_count = data.iter().filter(|&&p| p == 255).count();
+        assert_eq!(dark_count, 100);
+        assert_eq!(light_count, 100);
+    }
+
+    #[test]
+    fn test_otsu_threshold_uniform_data() {
+        let mut data: Vec<u8> = vec![128u8; 200];
+        apply_otsu_threshold(&mut data);
+        assert!(data.iter().all(|&p| p == 0 || p == 255));
     }
 }
