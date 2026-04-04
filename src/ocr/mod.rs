@@ -308,6 +308,78 @@ fn apply_otsu_threshold(data: &mut [u8]) {
     }
 }
 
+/// Run Tesseract OCR on an RGBA image.
+///
+/// Handles QR detection, preprocessing, Tesseract setup, and result formatting.
+/// Both `extract_text` and `extract_text_from_path` delegate to this.
+fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOutput> {
+    // Try QR code detection first
+    if let Some(decoded) = qr::detect_and_decode(rgba_image) {
+        let mut copied_to_clipboard = false;
+        if config.clipboard_output {
+            if let Err(e) = copy_to_clipboard(&decoded) {
+                eprintln!("Warning: Failed to copy to clipboard: {}", e);
+            } else {
+                copied_to_clipboard = true;
+            }
+        }
+        return Ok(OcrOutput {
+            text: decoded,
+            source: ContentSource::QrCode,
+            copied_to_clipboard,
+        });
+    }
+
+    let preprocess_config = PreprocessConfig::default();
+    let luma_data = preprocess_image(rgba_image, &preprocess_config);
+    let width = (rgba_image.width() as f32 * preprocess_config.scale_factor) as i32;
+    let height = (rgba_image.height() as f32 * preprocess_config.scale_factor) as i32;
+
+    let datapath = config.datapath.as_deref();
+    let mut tesseract = tesseract::Tesseract::new(datapath, Some(&config.language))
+        .map_err(|e| OcrError::InitializationError(e.to_string()))?
+        .set_variable("tessedit_ocr_engine_mode", TESS_OEM)
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set oem: {}", e)))?
+        .set_variable("tessedit_pageseg_mode", TESS_PSM)
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
+        .set_variable("textord_heavy_nr", "1")
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
+        .set_frame(&luma_data, width, height, 1, width)
+        .map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
+        .recognize()
+        .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
+
+    let text = tesseract
+        .get_text()
+        .map_err(|e| OcrError::RecognitionError(format!("Failed to get text: {}", e)))?;
+
+    let confidence = tesseract.mean_text_conf();
+
+    let trimmed_text = text.trim();
+    if trimmed_text.is_empty() {
+        return Err(OcrError::NoTextDetected);
+    }
+
+    if confidence < config.min_confidence {
+        return Err(OcrError::LowConfidence(confidence, config.min_confidence));
+    }
+
+    let mut copied_to_clipboard = false;
+    if config.clipboard_output {
+        if let Err(e) = copy_to_clipboard(trimmed_text) {
+            eprintln!("Warning: Failed to copy to clipboard: {}", e);
+        } else {
+            copied_to_clipboard = true;
+        }
+    }
+
+    Ok(OcrOutput {
+        text: trimmed_text.to_string(),
+        source: ContentSource::Ocr { confidence },
+        copied_to_clipboard,
+    })
+}
+
 /// Extract text from a CaptureData using Tesseract OCR
 ///
 /// # Arguments
@@ -340,85 +412,9 @@ fn apply_otsu_threshold(data: &mut [u8]) {
 /// }
 /// ```
 pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrOutput> {
-    // Convert CaptureData to RgbaImage
     let rgba_image = capture_to_rgba_image(capture)
         .map_err(|e: SaveError| OcrError::ImageError(e.to_string()))?;
-
-    // Try QR code detection first — fast path, no OCR cost if none found
-    if let Some(decoded) = qr::detect_and_decode(&rgba_image) {
-        let mut copied_to_clipboard = false;
-        if config.clipboard_output {
-            if let Err(e) = copy_to_clipboard(&decoded) {
-                eprintln!("Warning: Failed to copy to clipboard: {}", e);
-            } else {
-                copied_to_clipboard = true;
-            }
-        }
-        return Ok(OcrOutput {
-            text: decoded,
-            source: ContentSource::QrCode,
-            copied_to_clipboard,
-        });
-    }
-
-    // Apply enhanced preprocessing for better OCR accuracy
-    let preprocess_config = PreprocessConfig::default();
-    let luma_data = preprocess_image(&rgba_image, &preprocess_config);
-    let width = (rgba_image.width() as f32 * preprocess_config.scale_factor) as i32;
-    let height = (rgba_image.height() as f32 * preprocess_config.scale_factor) as i32;
-
-    // Initialize Tesseract with optimized parameters for UI text
-    let datapath = config.datapath.as_deref();
-    let mut tesseract = tesseract::Tesseract::new(datapath, Some(&config.language))
-        .map_err(|e| OcrError::InitializationError(e.to_string()))?
-        .set_variable("tessedit_ocr_engine_mode", TESS_OEM)
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set oem: {}", e)))?
-        .set_variable("tessedit_pageseg_mode", TESS_PSM)
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
-        .set_variable("textord_heavy_nr", "1")
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
-        .set_frame(
-            &luma_data, width, height, 1,     // bytes_per_pixel (grayscale)
-            width, // bytes_per_line (no padding)
-        )
-        .map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
-        .recognize()
-        .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
-
-    // Get the extracted text
-    let text = tesseract
-        .get_text()
-        .map_err(|e| OcrError::RecognitionError(format!("Failed to get text: {}", e)))?;
-
-    // Get confidence score
-    let confidence = tesseract.mean_text_conf();
-
-    // Check if any text was detected
-    let trimmed_text = text.trim();
-    if trimmed_text.is_empty() {
-        return Err(OcrError::NoTextDetected);
-    }
-
-    // Check confidence threshold
-    if confidence < config.min_confidence {
-        return Err(OcrError::LowConfidence(confidence, config.min_confidence));
-    }
-
-    // Copy to clipboard if requested
-    let mut copied_to_clipboard = false;
-    if config.clipboard_output {
-        if let Err(e) = copy_to_clipboard(trimmed_text) {
-            eprintln!("Warning: Failed to copy to clipboard: {}", e);
-        } else {
-            copied_to_clipboard = true;
-        }
-    }
-
-    Ok(OcrOutput {
-        text: trimmed_text.to_string(),
-        source: ContentSource::Ocr { confidence },
-        copied_to_clipboard,
-    })
+    run_tesseract(&rgba_image, config)
 }
 
 /// Copy text to the system clipboard
@@ -474,84 +470,8 @@ pub fn extract_text_from_path<P: AsRef<std::path::Path>>(
 ) -> OcrResult<OcrOutput> {
     let image = image::open(path)
         .map_err(|e| OcrError::ImageError(format!("Failed to open image: {}", e)))?;
-
     let rgba_image = image.to_rgba8();
-
-    // Try QR code detection first — fast path, no OCR cost if none found
-    if let Some(decoded) = qr::detect_and_decode(&rgba_image) {
-        let mut copied_to_clipboard = false;
-        if config.clipboard_output {
-            if let Err(e) = copy_to_clipboard(&decoded) {
-                eprintln!("Warning: Failed to copy to clipboard: {}", e);
-            } else {
-                copied_to_clipboard = true;
-            }
-        }
-        return Ok(OcrOutput {
-            text: decoded,
-            source: ContentSource::QrCode,
-            copied_to_clipboard,
-        });
-    }
-
-    // Apply enhanced preprocessing for better OCR accuracy
-    let preprocess_config = PreprocessConfig::default();
-    let luma_data = preprocess_image(&rgba_image, &preprocess_config);
-    let width = (rgba_image.width() as f32 * preprocess_config.scale_factor) as i32;
-    let height = (rgba_image.height() as f32 * preprocess_config.scale_factor) as i32;
-
-    // Initialize Tesseract with optimized parameters for UI text
-    let datapath = config.datapath.as_deref();
-    let mut tesseract = tesseract::Tesseract::new(datapath, Some(&config.language))
-        .map_err(|e| OcrError::InitializationError(e.to_string()))?
-        .set_variable("tessedit_ocr_engine_mode", TESS_OEM)
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set oem: {}", e)))?
-        .set_variable("tessedit_pageseg_mode", TESS_PSM)
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
-        .set_variable("textord_heavy_nr", "1")
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
-        .set_frame(
-            &luma_data, width, height, 1,     // bytes_per_pixel (grayscale)
-            width, // bytes_per_line (no padding)
-        )
-        .map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
-        .recognize()
-        .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
-
-    // Get the extracted text
-    let text = tesseract
-        .get_text()
-        .map_err(|e| OcrError::RecognitionError(format!("Failed to get text: {}", e)))?;
-
-    // Get confidence score
-    let confidence = tesseract.mean_text_conf();
-
-    // Check if any text was detected
-    let trimmed_text = text.trim();
-    if trimmed_text.is_empty() {
-        return Err(OcrError::NoTextDetected);
-    }
-
-    // Check confidence threshold
-    if confidence < config.min_confidence {
-        return Err(OcrError::LowConfidence(confidence, config.min_confidence));
-    }
-
-    // Copy to clipboard if requested
-    let mut copied_to_clipboard = false;
-    if config.clipboard_output {
-        if let Err(e) = copy_to_clipboard(trimmed_text) {
-            eprintln!("Warning: Failed to copy to clipboard: {}", e);
-        } else {
-            copied_to_clipboard = true;
-        }
-    }
-
-    Ok(OcrOutput {
-        text: trimmed_text.to_string(),
-        source: ContentSource::Ocr { confidence },
-        copied_to_clipboard,
-    })
+    run_tesseract(&rgba_image, config)
 }
 
 /// Bounding box for a detected text region
