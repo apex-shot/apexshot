@@ -655,11 +655,11 @@ bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outEr
 
 namespace ScreenCapture {
 
-bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outError)
+bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outError, bool includeCursor)
 {
 #if defined(Q_OS_LINUX)
     QString shellError;
-    if (isGnomeWaylandSession()) {
+    if (includeCursor && isGnomeWaylandSession()) {
         if (captureViaGnomeShellFullscreen(outPath, outSize, shellError)) {
             return true;
         }
@@ -667,7 +667,7 @@ bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outEr
 
     QString portalPath;
     QString portalError;
-    if (captureViaPortal(portalPath, portalError, false)) {
+    if (includeCursor && captureViaPortal(portalPath, portalError, false)) {
         QImage image(portalPath);
         if (image.isNull()) {
             outError = QStringLiteral("Failed to load portal screenshot file: %1")
@@ -717,7 +717,8 @@ bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outEr
 
 bool captureFullscreenToTempPngViaPortal(QString& outPath,
                                          QSize& outSize,
-                                         QString& outError)
+                                         QString& outError,
+                                         bool includeCursor)
 {
 #if defined(Q_OS_LINUX)
     QString portalPath;
@@ -746,14 +747,15 @@ bool captureFullscreenToTempPngViaPortal(QString& outPath,
     outSize = image.size();
     return true;
 #else
-    return captureFullscreenToTempPng(outPath, outSize, outError);
+    return captureFullscreenToTempPng(outPath, outSize, outError, includeCursor);
 #endif
 }
 
 bool captureAreaToTempPng(const QRect& logicalSelection,
                           QString& outPath,
                           QSize& outSize,
-                          QString& outError)
+                          QString& outError,
+                          bool includeCursor)
 {
     QString shellError;
     if (isGnomeWaylandSession()) {
@@ -776,7 +778,7 @@ bool captureAreaToTempPng(const QRect& logicalSelection,
 
     QString fullPath;
     QSize capturedSize;
-    if (!captureFullscreenToTempPng(fullPath, capturedSize, outError)) {
+    if (!captureFullscreenToTempPng(fullPath, capturedSize, outError, includeCursor)) {
         if (!shellError.isEmpty()) {
             outError = QStringLiteral("GNOME Shell area capture failed (%1); fallback failed (%2)")
                          .arg(shellError, outError);
@@ -813,7 +815,8 @@ bool captureAreaToTempPng(const QRect& logicalSelection,
 bool captureAreaToTempPngViaPortal(const QRect& logicalSelection,
                                    QString& outPath,
                                    QSize& outSize,
-                                   QString& outError)
+                                   QString& outError,
+                                   bool includeCursor)
 {
 #if defined(Q_OS_LINUX)
     QRect desktopBounds;
@@ -826,6 +829,10 @@ bool captureAreaToTempPngViaPortal(const QRect& logicalSelection,
     if (selected.width() <= 0 || selected.height() <= 0) {
         outError = QStringLiteral("Selection is outside desktop bounds");
         return false;
+    }
+
+    if (!includeCursor) {
+        return captureAreaToTempPng(logicalSelection, outPath, outSize, outError, false);
     }
 
     QString portalPath;
@@ -856,7 +863,7 @@ bool captureAreaToTempPngViaPortal(const QRect& logicalSelection,
     return saveCroppedToTemp(
       fullImage, QRect(cropX, cropY, cropW, cropH), outPath, outSize, outError);
 #else
-    return captureAreaToTempPng(logicalSelection, outPath, outSize, outError);
+    return captureAreaToTempPng(logicalSelection, outPath, outSize, outError, includeCursor);
 #endif
 }
 
@@ -864,7 +871,8 @@ bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
                                           const QRect& overlayGeometry,
                                           QString& outPath,
                                           QSize& outSize,
-                                          QString& outError)
+                                          QString& outError,
+                                          bool includeCursor)
 {
     QRect selected = localSelection.normalized();
     if (selected.width() <= 0 || selected.height() <= 0) {
@@ -885,7 +893,7 @@ bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
 
     QString fullPath;
     QSize capturedSize;
-    if (!captureFullscreenToTempPng(fullPath, capturedSize, outError)) {
+    if (!captureFullscreenToTempPng(fullPath, capturedSize, outError, includeCursor)) {
         return false;
     }
     if (capturedSize.width() <= 0 || capturedSize.height() <= 0) {
