@@ -4,6 +4,7 @@ mod io_ops;
 mod numbering_style;
 #[allow(dead_code)]
 mod pen_weight;
+pub mod preprocess;
 mod render;
 mod selection;
 mod state;

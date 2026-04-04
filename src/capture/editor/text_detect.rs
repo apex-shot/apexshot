@@ -33,14 +33,6 @@ const GRID_CELL_SIZE: i32 = 50;
 /// pixel-perfect pointer placement.
 const TEXT_GUIDE_MARGIN: i32 = 6;
 
-/// Screenshots often contain very small UI labels (eg. button text).
-/// Upscaling before OCR improves detection of these compact text regions.
-const OCR_INPUT_SCALE: f32 = 2.0;
-
-/// Mild local contrast boost for screenshots with text inside colored buttons,
-/// chips and low-contrast controls.
-const OCR_UI_CONTRAST: f32 = 1.18;
-
 /// Default text detection model URL (ocrs - pure Rust)
 const DEFAULT_DETECTION_MODEL_URL: &str =
     "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten";
@@ -57,38 +49,6 @@ pub fn clamp_cursor_size(size: f64) -> f64 {
 /// Convert a pixel coordinate to a grid cell key
 fn grid_key(x: i32, y: i32) -> (i32, i32) {
     (x / GRID_CELL_SIZE, y / GRID_CELL_SIZE)
-}
-
-/// Apply light screenshot-oriented preprocessing to improve detection of text
-/// inside buttons and other compact UI controls.
-fn preprocess_for_ui_text_detection(image: &RgbaImage) -> RgbaImage {
-    let mut processed = image.clone();
-
-    for pixel in processed.pixels_mut() {
-        let alpha = pixel[3] as f32 / 255.0;
-        if alpha < 0.05 {
-            pixel[0] = 255;
-            pixel[1] = 255;
-            pixel[2] = 255;
-            pixel[3] = 255;
-            continue;
-        }
-
-        let r = pixel[0] as f32;
-        let g = pixel[1] as f32;
-        let b = pixel[2] as f32;
-
-        let luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-        let boosted =
-            |channel: f32| ((channel - luminance) * OCR_UI_CONTRAST + luminance).clamp(0.0, 255.0);
-
-        pixel[0] = boosted(r).round() as u8;
-        pixel[1] = boosted(g).round() as u8;
-        pixel[2] = boosted(b).round() as u8;
-        pixel[3] = 255;
-    }
-
-    processed
 }
 
 /// Load the text detection model from the cache or download it.
@@ -526,6 +486,7 @@ pub fn spawn_text_detection(
 
 /// Detect text regions using ocrs (pure Rust OCR engine)
 fn detect_text_regions_ocrs(image: &RgbaImage) -> Result<Vec<TextRegion>, String> {
+    use super::preprocess::{adaptive_scale_factor, preprocess_for_text_detection};
     use image::imageops::{resize, FilterType};
     use ocrs::{DimOrder, ImageSource, OcrEngine, OcrEngineParams};
     use rten_imageproc::{BoundingRect, RotatedRect};
@@ -543,18 +504,16 @@ fn detect_text_regions_ocrs(image: &RgbaImage) -> Result<Vec<TextRegion>, String
     })
     .map_err(|e| format!("Failed to create OCR engine: {}", e))?;
 
-    let preprocessed = preprocess_for_ui_text_detection(image);
+    let total_scale = adaptive_scale_factor(image.width(), image.height());
+    let (preprocessed, _dark_mode) = preprocess_for_text_detection(image);
 
-    let scaled = if (OCR_INPUT_SCALE - 1.0).abs() > f32::EPSILON {
-        let scaled_width = ((preprocessed.width() as f32 * OCR_INPUT_SCALE).round() as u32).max(1);
-        let scaled_height =
-            ((preprocessed.height() as f32 * OCR_INPUT_SCALE).round() as u32).max(1);
-        resize(
-            &preprocessed,
-            scaled_width,
-            scaled_height,
-            FilterType::CatmullRom,
-        )
+    // preprocess_for_text_detection already applies BASE_SCALE (2.0x).
+    // If adaptive scale differs, do a secondary resize.
+    let effective_scale = total_scale / 2.0;
+    let scaled = if (effective_scale - 1.0).abs() > f32::EPSILON {
+        let w = ((preprocessed.width() as f32 * effective_scale).round() as u32).max(1);
+        let h = ((preprocessed.height() as f32 * effective_scale).round() as u32).max(1);
+        resize(&preprocessed, w, h, FilterType::CatmullRom)
     } else {
         preprocessed
     };
@@ -601,10 +560,10 @@ fn detect_text_regions_ocrs(image: &RgbaImage) -> Result<Vec<TextRegion>, String
         .filter_map(|rotated_rect| {
             let rect = rotated_rect.bounding_rect();
 
-            let x = (rect.left() / OCR_INPUT_SCALE).floor() as i32;
-            let y = (rect.top() / OCR_INPUT_SCALE).floor() as i32;
-            let right = ((rect.left() + rect.width()) / OCR_INPUT_SCALE).ceil() as i32;
-            let bottom = ((rect.top() + rect.height()) / OCR_INPUT_SCALE).ceil() as i32;
+            let x = (rect.left() / total_scale).floor() as i32;
+            let y = (rect.top() / total_scale).floor() as i32;
+            let right = ((rect.left() + rect.width()) / total_scale).ceil() as i32;
+            let bottom = ((rect.top() + rect.height()) / total_scale).ceil() as i32;
 
             let bounds = Rect {
                 x,
