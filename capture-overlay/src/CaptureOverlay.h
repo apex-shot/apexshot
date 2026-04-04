@@ -163,6 +163,16 @@ public:
     void setInitialRememberSelection(bool v) { m_rememberSelection = v; }
     void setInitialDimScreen(bool v) { m_dimScreen = v; }
     void setInitialShowCountdown(bool v) { m_showCountdown = v; }
+    void setSelectionCursorMode(const QString& mode) {
+        m_selectionCursorMode = mode;
+        if (!isCrosshairMode()) {
+            setCursor(mode == QStringLiteral("Crosshair") || mode == QStringLiteral("Magnifier")
+                          ? Qt::CrossCursor
+                          : Qt::ArrowCursor);
+        }
+    }
+    void setShowZoomPreview(bool enabled) { m_showZoomPreview = enabled; }
+    void setFreezeSelectionBackground(bool enabled) { m_freezeSelectionBackground = enabled; }
     void setInitialVideoFormat(int v) { m_videoFormat = std::clamp(v, 0, 1); }
     void setInitialVideoMaxRes(int v) { m_videoMaxRes = v; }
     void setInitialVideoFps(int v) { m_videoFps = v; }
@@ -302,6 +312,9 @@ private:
     bool      m_fullscreenMode;     // true when Fullscreen tool is active
     bool      m_windowMode;         // true when Window tool is active
     bool      m_timerCaptureEnabled;
+    QString   m_selectionCursorMode;
+    bool      m_showZoomPreview;
+    bool      m_freezeSelectionBackground;
     bool      m_timerDelayActive;
     int       m_captureDelaySeconds;
     bool      m_countdownActive;

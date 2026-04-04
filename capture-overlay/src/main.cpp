@@ -268,6 +268,9 @@ int main(int argc, char* argv[])
     bool initialRememberSelection = false;
     bool initialDimScreen = true;
     bool initialShowCountdown = true;
+    QString selectionCursor = QStringLiteral("Disabled");
+    bool showZoomPreview = false;
+    bool freezeSelectionBackground = true;
     int initialVideoFormat = 0;
     int initialVideoMaxRes = 0;
     int initialVideoFps = 2;
@@ -323,6 +326,12 @@ int main(int argc, char* argv[])
                 restoreSel = QRect(parts[0].toInt(), parts[1].toInt(),
                                    parts[2].toInt(), parts[3].toInt());
             }
+        } else if (QString(argv[i]).startsWith("--selection-cursor=")) {
+            selectionCursor = QString(argv[i]).mid(19);
+        } else if (QString(argv[i]).startsWith("--show-zoom-preview=")) {
+            showZoomPreview = QString(argv[i]).mid(20) == QStringLiteral("1");
+        } else if (QString(argv[i]).startsWith("--freeze-selection-bg=")) {
+            freezeSelectionBackground = QString(argv[i]).mid(22) == QStringLiteral("1");
         } else if (std::strcmp(argv[i], "--rec-mic") == 0) {
             initialMic = true;
         } else if (std::strcmp(argv[i], "--rec-speaker") == 0) {
@@ -682,6 +691,9 @@ int main(int argc, char* argv[])
             }
         }
     });
+    overlay.setSelectionCursorMode(selectionCursor);
+    overlay.setShowZoomPreview(showZoomPreview);
+    overlay.setFreezeSelectionBackground(freezeSelectionBackground);
     if (!restoreSel.isNull() && restoreSel.isValid()) {
         overlay.setInitialSelection(restoreSel);
     }

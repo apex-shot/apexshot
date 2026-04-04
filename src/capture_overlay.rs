@@ -911,6 +911,19 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
         }
     }
 
+    extra_args.push(format!(
+        "--selection-cursor={}",
+        config.screenshot_crosshair_mode
+    ));
+    extra_args.push(format!(
+        "--show-zoom-preview={}",
+        if config.screenshot_show_magnifier { 1 } else { 0 }
+    ));
+    extra_args.push(format!(
+        "--freeze-selection-bg={}",
+        if config.screenshot_freeze_screen { 1 } else { 0 }
+    ));
+
     if config.rec_mic {
         extra_args.push("--rec-mic".into());
     }
@@ -1584,6 +1597,23 @@ mod tests {
             tracked_overlay_id("session-123"),
             "capture-overlay-session-123"
         );
+    }
+
+    #[test]
+    fn build_area_init_args_includes_screenshot_selection_settings() {
+        let config = AppConfig {
+            screenshot_freeze_screen: false,
+            screenshot_crosshair_mode: "Crosshair".into(),
+            screenshot_show_magnifier: true,
+            ..AppConfig::default()
+        };
+
+        let args = build_area_init_args(&config);
+
+        assert!(args.iter().any(|arg| arg == "--area-init"));
+        assert!(args.iter().any(|arg| arg == "--selection-cursor=Crosshair"));
+        assert!(args.iter().any(|arg| arg == "--show-zoom-preview=1"));
+        assert!(args.iter().any(|arg| arg == "--freeze-selection-bg=0"));
     }
 
     #[test]
