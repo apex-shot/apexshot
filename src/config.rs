@@ -518,6 +518,46 @@ mod tests {
     }
 
     #[test]
+    fn screenshot_settings_round_trip_preserves_retained_fields() {
+        let original = AppConfig {
+            screenshot_export_location: "/tmp/screens".into(),
+            screenshot_format: "JPEG".into(),
+            screenshot_freeze_screen: false,
+            screenshot_crosshair_mode: "Crosshair".into(),
+            screenshot_show_magnifier: true,
+            screenshot_timer_interval: 3,
+            screenshot_show_cursor: false,
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).expect("config should serialize");
+        let loaded: AppConfig = serde_yml::from_str(&yaml).expect("config should deserialize");
+
+        assert_eq!(
+            loaded.screenshot_export_location,
+            original.screenshot_export_location
+        );
+        assert_eq!(loaded.screenshot_format, original.screenshot_format);
+        assert_eq!(
+            loaded.screenshot_freeze_screen,
+            original.screenshot_freeze_screen
+        );
+        assert_eq!(
+            loaded.screenshot_crosshair_mode,
+            original.screenshot_crosshair_mode
+        );
+        assert_eq!(
+            loaded.screenshot_show_magnifier,
+            original.screenshot_show_magnifier
+        );
+        assert_eq!(
+            loaded.screenshot_timer_interval,
+            original.screenshot_timer_interval
+        );
+        assert_eq!(loaded.screenshot_show_cursor, original.screenshot_show_cursor);
+    }
+
+    #[test]
     fn annotate_settings_round_trip_through_yaml() {
         let original = AppConfig {
             annotate_inverse_arrow: true,
