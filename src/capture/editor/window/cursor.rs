@@ -6,7 +6,7 @@ use gtk4::{prelude::*, ApplicationWindow};
 use super::super::color::{selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale};
 use super::super::pen_weight::HighlighterMode;
 use super::super::state::EditorState;
-use super::super::text_detect::clamp_cursor_size;
+use super::super::text_detect::{clamp_cursor_size, DetectionStatus};
 use super::super::types::{
     cursor_name_for_select_handle, AnnotationAction, Point, Tool, ViewTransform,
 };
@@ -213,6 +213,61 @@ pub fn create_highlighter_cursor_surface(
     Some(surface)
 }
 
+/// Create a cursor that indicates text detection is in progress.
+/// Shows a dashed-outline rounded rectangle at the default size.
+pub fn create_highlighter_detecting_cursor() -> Option<gtk4::cairo::ImageSurface> {
+    let height = DEFAULT_HIGHLIGHTER_CURSOR_SIZE;
+    let width = DEFAULT_HIGHLIGHTER_CURSOR_SIZE * CURSOR_WIDTH_RATIO;
+
+    let pad = 6.0;
+    let surface_width = (width + pad * 2.0).ceil() as i32;
+    let surface_height = (height + pad * 2.0).ceil() as i32;
+
+    let surface = gtk4::cairo::ImageSurface::create(
+        gtk4::cairo::Format::ARgb32,
+        surface_width,
+        surface_height,
+    )
+    .ok()?;
+
+    let context = gtk4::cairo::Context::new(&surface).ok()?;
+
+    let x = pad;
+    let y = pad;
+    let radius = CURSOR_CORNER_RADIUS.min(width / 2.0).min(height / 2.0);
+
+    fn rounded_rect(ctx: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        ctx.new_sub_path();
+        ctx.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+        ctx.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+        ctx.arc(
+            x + r,
+            y + h - r,
+            r,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+        );
+        ctx.arc(
+            x + r,
+            y + r,
+            r,
+            std::f64::consts::PI,
+            -std::f64::consts::FRAC_PI_2,
+        );
+        ctx.close_path();
+    }
+
+    // Dashed gray outline to indicate "loading" state
+    rounded_rect(&context, x, y, width, height, radius);
+    context.set_source_rgba(0.5, 0.5, 0.5, 0.8);
+    context.set_line_width(2.0);
+    context.set_dash(&[4.0, 4.0], 0.0);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    let _ = context.stroke();
+
+    Some(surface)
+}
+
 /// Create a circular pen cursor surface
 pub fn create_pen_cursor_surface(
     size: f64,
@@ -321,10 +376,35 @@ pub fn update_cursor_for_position(
     match state.highlighter_mode {
         HighlighterMode::TextAware => {
             if let Ok(detector) = state.text_detector.lock() {
-                if detector.is_ready() {
-                    if let Some(height) = detector.best_text_height_at_point(image_point) {
-                        set_highlighter_cursor(window, height, color);
+                match detector.status() {
+                    DetectionStatus::Pending => {
+                        // Detection still running — show loading cursor
+                        if let Some(surface) = create_highlighter_detecting_cursor() {
+                            if let Some(texture) = surface_to_texture(surface) {
+                                let hotspot_x =
+                                    ((DEFAULT_HIGHLIGHTER_CURSOR_SIZE * CURSOR_WIDTH_RATIO) / 2.0
+                                        + 6.0) as i32;
+                                let hotspot_y =
+                                    (DEFAULT_HIGHLIGHTER_CURSOR_SIZE / 2.0 + 6.0) as i32;
+                                let cursor =
+                                    Cursor::from_texture(&texture, hotspot_x, hotspot_y, None);
+                                if let Some(w_surface) = window.surface() {
+                                    w_surface.set_cursor(Some(&cursor));
+                                }
+                                return;
+                            }
+                        }
+                    }
+                    DetectionStatus::Failed(_) => {
+                        // Detection failed — show default cursor
+                        set_highlighter_cursor(window, DEFAULT_HIGHLIGHTER_CURSOR_SIZE, color);
                         return;
+                    }
+                    DetectionStatus::Ready => {
+                        if let Some(height) = detector.best_text_height_at_point(image_point) {
+                            set_highlighter_cursor(window, height, color);
+                            return;
+                        }
                     }
                 }
             }
