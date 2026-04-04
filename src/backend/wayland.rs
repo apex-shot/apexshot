@@ -97,6 +97,33 @@ fn is_gnome_wayland_session() -> bool {
                 .unwrap_or(false))
 }
 
+fn gnome_wayland_fast_path(
+    is_gnome_wayland: bool,
+    allow_screencast: bool,
+    allow_screenshot_portal: bool,
+) -> bool {
+    is_gnome_wayland && allow_screencast && allow_screenshot_portal
+}
+
+fn grim_available() -> bool {
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .map(|dir| dir.join("grim"))
+        .any(|path| path.is_file())
+}
+
+fn should_probe_grim_with_env(
+    allow_screenshot_portal: bool,
+    is_gnome_wayland: bool,
+    grim_installed: bool,
+) -> bool {
+    if is_gnome_wayland && allow_screenshot_portal {
+        return false;
+    }
+    grim_installed
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // GStreamer helpers (only used in the ScreenCast fallback)
 // ──────────────────────────────────────────────────────────────────────────────
@@ -474,25 +501,30 @@ impl WaylandBackend {
             ),
         }
 
-        // Tier 1: grim subprocess — wlroots compositors.
-        eprintln!("[capture] Tier 1 (grim): attempting...");
-        let t1_start = std::time::Instant::now();
-        match Self::capture_via_grim() {
-            Ok(capture) => {
-                eprintln!(
-                    "[capture] Tier 1 (grim) succeeded in {:.0}ms — NO portal flash/sound.",
-                    t1_start.elapsed().as_millis()
-                );
-                return Ok(capture);
-            }
-            Err(e) => eprintln!(
-                "[capture] Tier 1 (grim) failed ({:.0}ms): {e}",
-                t1_start.elapsed().as_millis()
-            ),
-        }
-
+        let is_gnome_wayland = is_gnome_wayland_session();
         let prefer_screencast_first =
-            allow_screencast && allow_screenshot_portal && is_gnome_wayland_session();
+            gnome_wayland_fast_path(is_gnome_wayland, allow_screencast, allow_screenshot_portal);
+
+        if should_probe_grim_with_env(allow_screenshot_portal, is_gnome_wayland, grim_available()) {
+            // Tier 1: grim subprocess — wlroots compositors.
+            eprintln!("[capture] Tier 1 (grim): attempting...");
+            let t1_start = std::time::Instant::now();
+            match Self::capture_via_grim() {
+                Ok(capture) => {
+                    eprintln!(
+                        "[capture] Tier 1 (grim) succeeded in {:.0}ms — NO portal flash/sound.",
+                        t1_start.elapsed().as_millis()
+                    );
+                    return Ok(capture);
+                }
+                Err(e) => eprintln!(
+                    "[capture] Tier 1 (grim) failed ({:.0}ms): {e}",
+                    t1_start.elapsed().as_millis()
+                ),
+            }
+        } else {
+            eprintln!("[capture] Tier 1 (grim): SKIPPED for current environment.");
+        }
 
         if prefer_screencast_first {
             eprintln!(
@@ -682,5 +714,22 @@ mod tests {
         let data = CaptureData::new(vec![255; 4 * 4 * 4], 4, 4, PixelFormat::RGBA32);
         let result = crop_capture(data, 3, 3, 3, 3);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn gnome_wayland_fast_path_is_enabled_for_selector_backgrounds() {
+        assert!(gnome_wayland_fast_path(true, true, true));
+        assert!(!gnome_wayland_fast_path(true, false, true));
+        assert!(!gnome_wayland_fast_path(false, true, true));
+        assert!(!gnome_wayland_fast_path(true, true, false));
+    }
+
+    #[test]
+    fn grim_probe_respects_environment_and_binary_presence() {
+        assert!(!should_probe_grim_with_env(true, true, false));
+        assert!(!should_probe_grim_with_env(true, false, false));
+        assert!(should_probe_grim_with_env(true, false, true));
+        assert!(should_probe_grim_with_env(false, false, true));
+        assert!(!should_probe_grim_with_env(false, false, false));
     }
 }
