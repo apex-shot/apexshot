@@ -221,7 +221,7 @@ impl Default for AppConfig {
             screenshot_retina_scale: false,
             screenshot_frame_border: false,
             screenshot_freeze_screen: true,
-            screenshot_crosshair_mode: "Disabled".to_string(),
+            screenshot_crosshair_mode: "Default".to_string(),
             screenshot_show_magnifier: false,
             screenshot_timer_interval: 5,
             screenshot_show_cursor: true,
@@ -334,8 +334,9 @@ impl AppConfig {
             _ => "PNG".to_string(),
         };
         self.screenshot_crosshair_mode = match self.screenshot_crosshair_mode.as_str() {
-            "Disabled" | "Crosshair" | "Magnifier" => self.screenshot_crosshair_mode,
-            _ => "Disabled".to_string(),
+            "Crosshair" => self.screenshot_crosshair_mode,
+            "Default" | "Disabled" | "Magnifier" => "Default".to_string(),
+            _ => "Default".to_string(),
         };
         self.wallpaper_mode = match self.wallpaper_mode.as_str() {
             "Desktop" | "Custom" | "Color" => self.wallpaper_mode,
@@ -515,6 +516,23 @@ mod tests {
 
         assert!(cfg.after_capture_open_annotate);
         assert!(!cfg.after_capture_show_quick_access);
+    }
+
+    #[test]
+    fn sanitize_maps_legacy_selection_cursor_values_to_default() {
+        let disabled = AppConfig {
+            screenshot_crosshair_mode: "Disabled".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(disabled.screenshot_crosshair_mode, "Default");
+
+        let magnifier = AppConfig {
+            screenshot_crosshair_mode: "Magnifier".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(magnifier.screenshot_crosshair_mode, "Default");
     }
 
     #[test]

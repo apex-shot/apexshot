@@ -112,10 +112,10 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     freeze_hbox.append(&freeze_screen_check);
     interface_frame.append(&build_row!(&freeze_hbox, false));
 
-    // Crosshair mode
+    // Selection cursor
     let crosshair_mode_input = ComboBoxText::new();
     crosshair_mode_input.add_css_class("settings-select");
-    for mode in ["Disabled", "Crosshair", "Magnifier"] {
+    for mode in ["Default", "Crosshair"] {
         crosshair_mode_input.append(Some(mode), mode);
     }
     crosshair_mode_input.set_active_id(Some(&config.screenshot_crosshair_mode));

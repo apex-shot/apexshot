@@ -1617,6 +1617,20 @@ mod tests {
     }
 
     #[test]
+    fn build_area_init_args_uses_default_selection_cursor() {
+        let config = AppConfig {
+            screenshot_crosshair_mode: "Default".into(),
+            ..AppConfig::default()
+        };
+
+        let args = build_area_init_args(&config);
+
+        assert!(args.iter().any(|arg| arg == "--selection-cursor=Default"));
+        assert!(!args.iter().any(|arg| arg == "--selection-cursor=Disabled"));
+        assert!(!args.iter().any(|arg| arg == "--selection-cursor=Magnifier"));
+    }
+
+    #[test]
     fn build_recording_ui_args_adds_direct_recording_flag() {
         let args = build_recording_ui_args(&crate::config::AppConfig::default());
         assert!(args.iter().any(|arg| arg == "--area-init"));

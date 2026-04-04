@@ -263,7 +263,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
 
     setAttribute(Qt::WA_DeleteOnClose, false);
     setMouseTracking(true);
-    setCursor(Qt::CrossCursor);
+    setCursor(isCrosshairMode() ? Qt::CrossCursor : defaultSelectionCursorShape());
     focusAndRaiseOverlay();
 
     if (isCrosshairMode()) {

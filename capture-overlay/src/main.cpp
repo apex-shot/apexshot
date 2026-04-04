@@ -268,7 +268,7 @@ int main(int argc, char* argv[])
     bool initialRememberSelection = false;
     bool initialDimScreen = true;
     bool initialShowCountdown = true;
-    QString selectionCursor = QStringLiteral("Disabled");
+    QString selectionCursor = QStringLiteral("Default");
     bool showZoomPreview = false;
     bool freezeSelectionBackground = true;
     int initialVideoFormat = 0;
