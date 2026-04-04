@@ -485,54 +485,6 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
     const double sw = widgetRect.width();
     const double sh = widgetRect.height();
 
-    auto drawZoomPreview = [&](const QPoint& focusPoint) {
-        if (!m_showZoomPreview || m_background.isNull()) {
-            return;
-        }
-
-        const int previewSize = 120;
-        const int sourceRadius = 18;
-        QRect sourceRect(
-            focusPoint.x() - sourceRadius,
-            focusPoint.y() - sourceRadius,
-            sourceRadius * 2,
-            sourceRadius * 2
-        );
-        sourceRect = sourceRect.intersected(widgetRect);
-        if (sourceRect.width() < 4 || sourceRect.height() < 4) {
-            return;
-        }
-
-        int previewX = focusPoint.x() + 20;
-        int previewY = focusPoint.y() + 20;
-        if (previewX + previewSize > widgetRect.width() - 8) {
-            previewX = focusPoint.x() - previewSize - 20;
-        }
-        if (previewY + previewSize > widgetRect.height() - 8) {
-            previewY = focusPoint.y() - previewSize - 20;
-        }
-        previewX = std::clamp(previewX, 8, std::max(8, widgetRect.width() - previewSize - 8));
-        previewY = std::clamp(previewY, 8, std::max(8, widgetRect.height() - previewSize - 8));
-
-        const QRect previewRect(previewX, previewY, previewSize, previewSize);
-        p.save();
-        QPainterPath clipPath;
-        clipPath.addRoundedRect(previewRect, 10, 10);
-        p.setClipPath(clipPath);
-        p.drawPixmap(previewRect, m_background, sourceRect);
-        p.fillRect(previewRect, QColor(0, 0, 0, 22));
-        p.setClipping(false);
-        p.setPen(QPen(QColor(255, 255, 255, 215), 1.5));
-        p.setBrush(Qt::NoBrush);
-        p.drawRoundedRect(previewRect, 10, 10);
-        p.setPen(QPen(QColor(255, 102, 0, 220), 1.0));
-        p.drawLine(previewRect.center().x(), previewRect.top() + 8,
-                   previewRect.center().x(), previewRect.bottom() - 8);
-        p.drawLine(previewRect.left() + 8, previewRect.center().y(),
-                   previewRect.right() - 8, previewRect.center().y());
-        p.restore();
-    };
-
     if (isCrosshairMode()) {
         if (!m_background.isNull()) {
             p.drawPixmap(widgetRect, m_background);
@@ -607,7 +559,6 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         p.drawText(bubbleRect, Qt::AlignCenter, labelText);
 
         p.restore();
-        drawZoomPreview(guidePoint);
         return;
     }
 
@@ -671,7 +622,6 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
     }
 
     if (!m_hasSelection) {
-        drawZoomPreview(m_pointerPos);
         // Hint text
         p.fillRect(widgetRect, QColor(0, 0, 0, 30));
         QFont f; f.setPointSize(13); p.setFont(f);
@@ -772,8 +722,6 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
             p.drawLine(QPointF(sx+selW, sy + selH/2 - half), QPointF(sx+selW, sy + selH/2 + half));
         }
     }
-
-    drawZoomPreview(m_pointerPos);
 
     // ── Toolbar (hide when recording panel is open) ────────────────────────────
     if (!m_recordingPanelOpen) {
