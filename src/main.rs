@@ -1248,14 +1248,25 @@ fn run_capture(args: &[String]) {
 
         match extract_text_from_path(&saved_path, &ocr_config) {
             Ok(result) => {
-                println!("OCR successful!");
-                println!("Confidence: {}%", result.confidence);
-                println!("Extracted text:");
-                println!("{}", "-".repeat(40));
-                println!("{}", result.text);
-                println!("{}", "-".repeat(40));
+                match &result.source {
+                    apexshot::ocr::ContentSource::QrCode => {
+                        println!("QR code detected and decoded!");
+                        println!("Content:");
+                        println!("{}", "-".repeat(40));
+                        println!("{}", result.text);
+                        println!("{}", "-".repeat(40));
+                    }
+                    apexshot::ocr::ContentSource::Ocr { confidence } => {
+                        println!("OCR successful!");
+                        println!("Confidence: {}%", confidence);
+                        println!("Extracted text:");
+                        println!("{}", "-".repeat(40));
+                        println!("{}", result.text);
+                        println!("{}", "-".repeat(40));
+                    }
+                }
                 if result.copied_to_clipboard {
-                    println!("Text copied to clipboard");
+                    println!("Copied to clipboard");
                 }
             }
             Err(e) => {
@@ -1422,14 +1433,25 @@ fn run_ocr(args: &[String]) {
     println!("Running OCR on: {}", image_path);
     match extract_text_from_path(image_path, &ocr_config) {
         Ok(result) => {
-            println!("OCR successful!");
-            println!("Confidence: {}%", result.confidence);
-            println!("Extracted text:");
-            println!("{}", "-".repeat(40));
-            println!("{}", result.text);
-            println!("{}", "-".repeat(40));
+            match &result.source {
+                apexshot::ocr::ContentSource::QrCode => {
+                    println!("QR code detected and decoded!");
+                    println!("Content:");
+                    println!("{}", "-".repeat(40));
+                    println!("{}", result.text);
+                    println!("{}", "-".repeat(40));
+                }
+                apexshot::ocr::ContentSource::Ocr { confidence } => {
+                    println!("OCR successful!");
+                    println!("Confidence: {}%", confidence);
+                    println!("Extracted text:");
+                    println!("{}", "-".repeat(40));
+                    println!("{}", result.text);
+                    println!("{}", "-".repeat(40));
+                }
+            }
             if result.copied_to_clipboard {
-                println!("Text copied to clipboard");
+                println!("Copied to clipboard");
             }
         }
         Err(e) => {

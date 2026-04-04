@@ -2329,17 +2329,32 @@ fn run_ocr_and_report(capture: crate::backend::CaptureData) {
     eprintln!("[daemon] OCR tool selected — extracting text from selected area...");
     match extract_text(&capture, &OcrConfig::default()) {
         Ok(result) => {
-            eprintln!(
-                "[daemon] OCR successful (confidence: {}%)",
-                result.confidence
-            );
-            if result.copied_to_clipboard {
-                send_desktop_notification("OCR complete", "Text copied to clipboard");
-            } else {
-                send_desktop_notification(
-                    "OCR complete",
-                    "Text extracted, but clipboard copy was unavailable",
-                );
+            match &result.source {
+                crate::ocr::ContentSource::QrCode => {
+                    eprintln!("[daemon] QR code decoded");
+                    if result.copied_to_clipboard {
+                        send_desktop_notification("QR code decoded", "URL copied to clipboard");
+                    } else {
+                        send_desktop_notification(
+                            "QR code decoded",
+                            "Content extracted, but clipboard copy was unavailable",
+                        );
+                    }
+                }
+                crate::ocr::ContentSource::Ocr { confidence } => {
+                    eprintln!(
+                        "[daemon] OCR successful (confidence: {}%)",
+                        confidence
+                    );
+                    if result.copied_to_clipboard {
+                        send_desktop_notification("OCR complete", "Text copied to clipboard");
+                    } else {
+                        send_desktop_notification(
+                            "OCR complete",
+                            "Text extracted, but clipboard copy was unavailable",
+                        );
+                    }
+                }
             }
         }
         Err(err) => {

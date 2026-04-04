@@ -2,9 +2,13 @@
 //!
 //! This module provides text extraction from screenshots using Tesseract OCR,
 //! with clipboard integration for easy text copying.
+//!
+//! QR code detection is attempted first — if a QR code is found, it is decoded
+//! and the result is returned instead of running OCR.
 
 use crate::backend::CaptureData;
 use crate::capture::{capture_to_rgba_image, SaveError};
+use crate::qr;
 use image::RgbaImage;
 use thiserror::Error;
 
@@ -93,16 +97,25 @@ impl OcrConfig {
     }
 }
 
+/// Source of the extracted content
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContentSource {
+    /// Text extracted via OCR (Tesseract or ocrs)
+    Ocr { confidence: i32 },
+    /// Content decoded from a QR code
+    QrCode,
+}
+
 /// Result of an OCR operation
 #[derive(Debug, Clone)]
 pub struct OcrOutput {
-    /// The extracted text
+    /// The extracted text or decoded QR content
     pub text: String,
 
-    /// Confidence score (0-100)
-    pub confidence: i32,
+    /// How the content was obtained
+    pub source: ContentSource,
 
-    /// Whether text was copied to clipboard
+    /// Whether content was copied to clipboard
     pub copied_to_clipboard: bool,
 }
 
@@ -272,7 +285,7 @@ fn apply_adaptive_threshold(data: &mut [u8], width: u32, height: u32) {
 ///     .with_min_confidence(60);
 ///
 /// match extract_text(&capture, &config) {
-///     Ok(result) => println!("Extracted: {} (confidence: {}%)", result.text, result.confidence),
+///     Ok(result) => println!("Extracted: {} (source: {:?})", result.text, result.source),
 ///     Err(e) => eprintln!("OCR failed: {}", e),
 /// }
 /// ```
@@ -280,6 +293,23 @@ pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrO
     // Convert CaptureData to RgbaImage
     let rgba_image = capture_to_rgba_image(capture)
         .map_err(|e: SaveError| OcrError::ImageError(e.to_string()))?;
+
+    // Try QR code detection first — fast path, no OCR cost if none found
+    if let Some(decoded) = qr::detect_and_decode(&rgba_image) {
+        let mut copied_to_clipboard = false;
+        if config.clipboard_output {
+            if let Err(e) = copy_to_clipboard(&decoded) {
+                eprintln!("Warning: Failed to copy to clipboard: {}", e);
+            } else {
+                copied_to_clipboard = true;
+            }
+        }
+        return Ok(OcrOutput {
+            text: decoded,
+            source: ContentSource::QrCode,
+            copied_to_clipboard,
+        });
+    }
 
     // Apply enhanced preprocessing for better OCR accuracy
     let preprocess_config = PreprocessConfig::default();
@@ -334,7 +364,7 @@ pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrO
 
     Ok(OcrOutput {
         text: trimmed_text.to_string(),
-        confidence,
+        source: ContentSource::Ocr { confidence },
         copied_to_clipboard,
     })
 }
@@ -395,6 +425,23 @@ pub fn extract_text_from_path<P: AsRef<std::path::Path>>(
 
     let rgba_image = image.to_rgba8();
 
+    // Try QR code detection first — fast path, no OCR cost if none found
+    if let Some(decoded) = qr::detect_and_decode(&rgba_image) {
+        let mut copied_to_clipboard = false;
+        if config.clipboard_output {
+            if let Err(e) = copy_to_clipboard(&decoded) {
+                eprintln!("Warning: Failed to copy to clipboard: {}", e);
+            } else {
+                copied_to_clipboard = true;
+            }
+        }
+        return Ok(OcrOutput {
+            text: decoded,
+            source: ContentSource::QrCode,
+            copied_to_clipboard,
+        });
+    }
+
     // Apply enhanced preprocessing for better OCR accuracy
     let preprocess_config = PreprocessConfig::default();
     let luma_data = preprocess_image(&rgba_image, &preprocess_config);
@@ -448,7 +495,7 @@ pub fn extract_text_from_path<P: AsRef<std::path::Path>>(
 
     Ok(OcrOutput {
         text: trimmed_text.to_string(),
-        confidence,
+        source: ContentSource::Ocr { confidence },
         copied_to_clipboard,
     })
 }
