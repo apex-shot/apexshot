@@ -455,7 +455,7 @@ impl Default for BackgroundTextDetection {
 // Background Detection Functions
 // ============================================================================
 
-/// Run text detection in background thread using ocrs
+/// Run text detection in background thread using ocrs, with Tesseract fallback.
 ///
 /// Returns immediately. Results are set on the provided detector.
 pub fn spawn_text_detection(
@@ -466,22 +466,66 @@ pub fn spawn_text_detection(
     let handle = BackgroundTextDetection::new();
 
     thread::spawn(move || {
-        match detect_text_regions_ocrs(&image) {
-            Ok(regions) => {
-                if let Ok(mut det) = detector.lock() {
-                    det.set_results(regions);
-                }
+        let result = detect_text_regions_ocrs(&image);
+
+        let regions = match result {
+            Ok(regions) if !regions.is_empty() => {
+                eprintln!("[text_detect] ocrs detected {} text regions", regions.len());
+                Some(regions)
+            }
+            Ok(_) => {
+                eprintln!("[text_detect] ocrs found no regions, falling back to Tesseract");
+                fallback_to_tesseract(&image)
             }
             Err(e) => {
-                if let Ok(mut det) = detector.lock() {
-                    det.set_failed(e);
-                }
+                eprintln!("[text_detect] ocrs failed: {e}, falling back to Tesseract");
+                fallback_to_tesseract(&image)
+            }
+        };
+
+        if let Ok(mut det) = detector.lock() {
+            if let Some(regions) = regions {
+                det.set_results(regions);
+            } else {
+                det.set_failed("No text regions detected by ocrs or Tesseract");
             }
         }
         ready_flag.store(true, Ordering::Relaxed);
     });
 
     handle
+}
+
+/// Fall back to Tesseract-based text region detection when ocrs fails.
+fn fallback_to_tesseract(image: &RgbaImage) -> Option<Vec<TextRegion>> {
+    match crate::ocr::extract_text_regions(image) {
+        Ok(tesseract_regions) if !tesseract_regions.is_empty() => {
+            eprintln!(
+                "[text_detect] Tesseract fallback detected {} regions",
+                tesseract_regions.len()
+            );
+            Some(
+                tesseract_regions
+                    .into_iter()
+                    .map(|r| TextRegion {
+                        bounds: Rect {
+                            x: r.bounds.x,
+                            y: r.bounds.y,
+                            width: r.bounds.width,
+                            height: r.bounds.height,
+                        },
+                        text_height: r.bounds.height as f64,
+                        baseline_y: r.bounds.y as f64 + r.bounds.height as f64 / 2.0,
+                        words: Vec::new(),
+                    })
+                    .collect(),
+            )
+        }
+        _ => {
+            eprintln!("[text_detect] Tesseract fallback also failed");
+            None
+        }
+    }
 }
 
 /// Detect text regions using ocrs (pure Rust OCR engine)
