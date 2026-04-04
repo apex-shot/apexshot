@@ -12,6 +12,12 @@ use crate::qr;
 use image::RgbaImage;
 use thiserror::Error;
 
+/// Tesseract OCR Engine Mode — LSTM only (best accuracy for most text)
+const TESS_OEM: &str = "1";
+
+/// Tesseract Page Segmentation Mode — auto with OSD (handles mixed layouts)
+const TESS_PSM: &str = "3";
+
 /// Errors that can occur during OCR operations
 #[derive(Debug, Error)]
 pub enum OcrError {
@@ -347,9 +353,11 @@ pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrO
     let datapath = config.datapath.as_deref();
     let mut tesseract = tesseract::Tesseract::new(datapath, Some(&config.language))
         .map_err(|e| OcrError::InitializationError(e.to_string()))?
-        .set_variable("tessedit_pageseg_mode", "6") // Assume a single uniform block of text
+        .set_variable("tessedit_ocr_engine_mode", TESS_OEM)
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set oem: {}", e)))?
+        .set_variable("tessedit_pageseg_mode", TESS_PSM)
         .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
-        .set_variable("textord_heavy_nr", "1") // Prefer noise removal for cleaner text
+        .set_variable("textord_heavy_nr", "1")
         .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
         .set_frame(
             &luma_data, width, height, 1,     // bytes_per_pixel (grayscale)
@@ -478,9 +486,11 @@ pub fn extract_text_from_path<P: AsRef<std::path::Path>>(
     let datapath = config.datapath.as_deref();
     let mut tesseract = tesseract::Tesseract::new(datapath, Some(&config.language))
         .map_err(|e| OcrError::InitializationError(e.to_string()))?
-        .set_variable("tessedit_pageseg_mode", "6") // Assume a single uniform block of text
+        .set_variable("tessedit_ocr_engine_mode", TESS_OEM)
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set oem: {}", e)))?
+        .set_variable("tessedit_pageseg_mode", TESS_PSM)
         .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
-        .set_variable("textord_heavy_nr", "1") // Prefer noise removal for cleaner text
+        .set_variable("textord_heavy_nr", "1")
         .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
         .set_frame(
             &luma_data, width, height, 1,     // bytes_per_pixel (grayscale)
