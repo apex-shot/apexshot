@@ -2459,6 +2459,17 @@ impl EditorState {
         }
         if self.selected_tool == Tool::Highlighter {
             self.locked_highlighter_stroke_size = Some(self.current_highlighter_stroke_size());
+            // In TextAware mode, also lock the detected text height at the drag start point
+            // so the stroke size matches what the cursor was showing
+            if self.highlighter_mode == HighlighterMode::TextAware {
+                if let Ok(detector) = self.text_detector.lock() {
+                    if detector.is_ready() {
+                        if let Some(text_height) = detector.best_text_height_at_point(point) {
+                            self.locked_highlighter_stroke_size = Some(text_height);
+                        }
+                    }
+                }
+            }
         }
     }
 
