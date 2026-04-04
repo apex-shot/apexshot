@@ -143,56 +143,82 @@ impl Default for PreprocessConfig {
     }
 }
 
+/// Determine if an image is predominantly dark-mode.
+///
+/// Samples pixels and checks if the median luminance is below 100.
+/// Dark-mode UIs typically have median luminance < 100.
+fn is_dark_mode(image: &RgbaImage) -> bool {
+    let mut samples = Vec::new();
+    let step = (image.width() * image.height()).max(1000) / 1000;
+    let step = step.max(1);
+
+    for (i, pixel) in image.pixels().enumerate() {
+        if i % step as usize != 0 {
+            continue;
+        }
+        if pixel[3] < 50 {
+            continue;
+        }
+        let luma = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
+        samples.push(luma);
+    }
+
+    if samples.is_empty() {
+        return false;
+    }
+
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = samples[samples.len() / 2];
+    median < 100.0
+}
+
 /// Enhanced preprocessing for better OCR accuracy on UI screenshots
 ///
 /// This performs:
 /// 1. Upscaling to improve effective DPI (Tesseract prefers ~300 DPI)
-/// 2. Color inversion for dark-mode UIs (Tesseract expects dark-on-light)
+/// 2. Auto-detect dark/light mode and invert only if dark-mode
 /// 3. Optional contrast enhancement
+/// 4. Optional adaptive thresholding
 fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
     use image::imageops::{resize, FilterType};
 
-    // Step 1: Upscale the image for better OCR
     let original_width = image.width();
     let original_height = image.height();
     let new_width = (original_width as f32 * config.scale_factor) as u32;
     let new_height = (original_height as f32 * config.scale_factor) as u32;
 
-    // Use Lanczos3 for high-quality upscaling
     let resized = resize(image, new_width, new_height, FilterType::Lanczos3);
 
-    // Step 2: Convert to grayscale with inversion for dark mode
-    // Tesseract is trained on dark text on light backgrounds (paper)
-    // Most UIs are light text on dark backgrounds, so we invert
+    let dark_mode = is_dark_mode(image);
     let mut luma_data = Vec::with_capacity((new_width * new_height) as usize);
 
     for pixel in resized.pixels() {
-        // Skip fully transparent pixels (background)
         if pixel[3] < 50 {
-            luma_data.push(255); // White background
+            luma_data.push(255);
             continue;
         }
 
-        // Standard ITU-R BT.709 luma calculation
         let luma = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
 
-        // Invert: light text becomes dark, dark background becomes light
-        let inverted = 255.0 - luma;
-
-        // Apply mild contrast enhancement if configured
-        let enhanced = if config.contrast > 1.0 {
-            ((inverted - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0)
+        let processed = if dark_mode {
+            let inverted = 255.0 - luma;
+            if config.contrast > 1.0 {
+                ((inverted - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0)
+            } else {
+                inverted
+            }
         } else {
-            inverted
+            if config.contrast > 1.0 {
+                ((luma - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0)
+            } else {
+                luma
+            }
         };
 
-        luma_data.push(enhanced as u8);
+        luma_data.push(processed as u8);
     }
 
-    // Step 3: Apply adaptive thresholding if enabled
     if config.threshold {
-        // Calculate local threshold using a simple moving average
-        // For better results on UI text with varying backgrounds
         apply_adaptive_threshold(&mut luma_data, new_width, new_height);
     }
 
@@ -749,6 +775,39 @@ mod tests {
         let luma2 = rgba_to_luma(&image2);
 
         assert_eq!(luma1[0], luma2[0]);
+    }
+
+    #[test]
+    fn test_is_dark_mode_detects_dark_image() {
+        let mut pixels = Vec::new();
+        for _ in 0..100 * 100 {
+            pixels.extend_from_slice(&[30, 30, 30, 255]);
+        }
+        let image = RgbaImage::from_raw(100, 100, pixels).unwrap();
+        assert!(is_dark_mode(&image));
+    }
+
+    #[test]
+    fn test_is_dark_mode_detects_light_image() {
+        let mut pixels = Vec::new();
+        for _ in 0..100 * 100 {
+            pixels.extend_from_slice(&[240, 240, 240, 255]);
+        }
+        let image = RgbaImage::from_raw(100, 100, pixels).unwrap();
+        assert!(!is_dark_mode(&image));
+    }
+
+    #[test]
+    fn test_is_dark_mode_mixed_content() {
+        let mut pixels = Vec::new();
+        for _y in 0..100 {
+            for x in 0..100 {
+                let luma = if x < 50 { 40 } else { 220 };
+                pixels.extend_from_slice(&[luma, luma, luma, 255]);
+            }
+        }
+        let image = RgbaImage::from_raw(100, 100, pixels).unwrap();
+        assert!(!is_dark_mode(&image));
     }
 
     #[test]
