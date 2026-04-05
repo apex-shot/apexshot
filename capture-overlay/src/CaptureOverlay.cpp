@@ -153,9 +153,15 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_resizing(HandlePos::None)
     , m_dragStart(0, 0)
     , m_pointerPos(0, 0)
+    , m_lastCursorShape(Qt::ArrowCursor)
+    , m_lastCrosshairPaintPoint(0, 0)
+    , m_lastCrosshairHadSelection(false)
     , m_fullscreenMode(false)
     , m_windowMode(false)
     , m_timerCaptureEnabled(timerCaptureEnabled)
+    , m_selectionCursorMode(QStringLiteral("Disabled"))
+    , m_showZoomPreview(false)
+    , m_freezeSelectionBackground(true)
     , m_timerDelayActive(timerCaptureEnabled)
     , m_captureDelaySeconds(5)
     , m_countdownActive(false)
@@ -261,12 +267,15 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     setAttribute(Qt::WA_DeleteOnClose, false);
     setMouseTracking(true);
     setCursor(Qt::CrossCursor);
+    m_lastCursorShape = Qt::CrossCursor;
     focusAndRaiseOverlay();
 
     if (isCrosshairMode()) {
         m_dimScreen = false;
         m_selection = QRect();
         m_hasSelection = false;
+        m_lastCrosshairSelectionRect = QRect();
+        m_lastCrosshairBubbleRect = crosshairBubbleRectForPoint(m_pointerPos);
     } else {
         const int defaultW = std::max(kMinSize, std::min(DEFAULT_SELECTION_W, width()));
         const int defaultH = std::max(kMinSize, std::min(DEFAULT_SELECTION_H, height()));

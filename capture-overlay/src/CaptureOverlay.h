@@ -23,6 +23,7 @@
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QRegion>
 #include <algorithm>
 
 class QTimer;
@@ -163,6 +164,17 @@ public:
     void setInitialRememberSelection(bool v) { m_rememberSelection = v; }
     void setInitialDimScreen(bool v) { m_dimScreen = v; }
     void setInitialShowCountdown(bool v) { m_showCountdown = v; }
+    void setInitialCaptureDelaySeconds(int seconds) { m_captureDelaySeconds = std::max(0, seconds); }
+    void setSelectionCursorMode(const QString& mode) {
+        m_selectionCursorMode = mode;
+        if (!isCrosshairMode()) {
+            setCursor(mode == QStringLiteral("Crosshair") || mode == QStringLiteral("Magnifier")
+                          ? Qt::CrossCursor
+                          : Qt::ArrowCursor);
+        }
+    }
+    void setShowZoomPreview(bool enabled) { m_showZoomPreview = enabled; }
+    void setFreezeSelectionBackground(bool enabled) { m_freezeSelectionBackground = enabled; }
     void setInitialVideoFormat(int v) { m_videoFormat = std::clamp(v, 0, 1); }
     void setInitialVideoMaxRes(int v) { m_videoMaxRes = v; }
     void setInitialVideoFps(int v) { m_videoFps = v; }
@@ -235,6 +247,13 @@ private:
     void setWebcamPreviewTopLeft(const QPointF& topLeft,
                                  double selX, double selY,
                                  double selW, double selH);
+    QRect crosshairBubbleRectForPoint(const QPoint& point) const;
+    QRegion crosshairDirtyRegion(const QPoint& oldPoint,
+                                 const QPoint& newPoint,
+                                 const QRect& oldSelection,
+                                 const QRect& newSelection,
+                                 bool hadSelection,
+                                 bool hasSelection) const;
 
     // Webcam
     void showWebcamContextMenu(const QPoint& globalPos);
@@ -299,9 +318,17 @@ private:
     QPoint    m_dragStart;
     QPoint    m_pointerPos;
     QRect     m_selectionAtDragStart;
+    Qt::CursorShape m_lastCursorShape;
+    QPoint    m_lastCrosshairPaintPoint;
+    QRect     m_lastCrosshairBubbleRect;
+    QRect     m_lastCrosshairSelectionRect;
+    bool      m_lastCrosshairHadSelection;
     bool      m_fullscreenMode;     // true when Fullscreen tool is active
     bool      m_windowMode;         // true when Window tool is active
     bool      m_timerCaptureEnabled;
+    QString   m_selectionCursorMode;
+    bool      m_showZoomPreview;
+    bool      m_freezeSelectionBackground;
     bool      m_timerDelayActive;
     int       m_captureDelaySeconds;
     bool      m_countdownActive;

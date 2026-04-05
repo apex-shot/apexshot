@@ -9,8 +9,6 @@ pub struct ScreenshotsSettingsWidgets {
     pub export_location_entry: Entry,
     pub export_location_browse: Button,
     pub format_input: ComboBoxText,
-    pub retina_scale_check: CheckButton,
-    pub frame_border_check: CheckButton,
     pub freeze_screen_check: CheckButton,
     pub crosshair_mode_input: ComboBoxText,
     pub show_magnifier_check: CheckButton,
@@ -90,30 +88,6 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     format_hbox.append(&format_input);
     export_frame.append(&build_row!(&format_hbox, true));
 
-    // Retina
-    let retina_scale_check = CheckButton::new();
-    retina_scale_check.set_active(config.screenshot_retina_scale);
-    let retina_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    retina_hbox.set_hexpand(true);
-    let retina_option = Label::new(Some("Scale Retina screenshots to 1x"));
-    retina_option.set_xalign(0.0);
-    retina_option.set_hexpand(true);
-    retina_hbox.append(&retina_option);
-    retina_hbox.append(&retina_scale_check);
-    export_frame.append(&build_row!(&retina_hbox, false));
-
-    // Frame
-    let frame_border_check = CheckButton::new();
-    frame_border_check.set_active(config.screenshot_frame_border);
-    let frame_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    frame_hbox.set_hexpand(true);
-    let frame_option = Label::new(Some("Add 1px border to all screenshots"));
-    frame_option.set_xalign(0.0);
-    frame_option.set_hexpand(true);
-    frame_hbox.append(&frame_option);
-    frame_hbox.append(&frame_border_check);
-    export_frame.append(&build_row!(&frame_hbox, true));
-
     section.append(&export_frame);
 
     // --- Interface Group ---
@@ -131,7 +105,7 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     freeze_screen_check.set_active(config.screenshot_freeze_screen);
     let freeze_hbox = GtkBox::new(Orientation::Horizontal, 12);
     freeze_hbox.set_hexpand(true);
-    let freeze_option = Label::new(Some("Freeze screen when taking a screenshot"));
+    let freeze_option = Label::new(Some("Use frozen background during selection"));
     freeze_option.set_xalign(0.0);
     freeze_option.set_hexpand(true);
     freeze_hbox.append(&freeze_option);
@@ -147,7 +121,7 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     crosshair_mode_input.set_active_id(Some(&config.screenshot_crosshair_mode));
     let cross_hbox = GtkBox::new(Orientation::Horizontal, 12);
     cross_hbox.set_hexpand(true);
-    let cross_label = Label::new(Some("Crosshair mode"));
+    let cross_label = Label::new(Some("Selection cursor"));
     cross_label.set_xalign(0.0);
     cross_label.set_hexpand(true);
     cross_hbox.append(&cross_label);
@@ -159,7 +133,7 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     show_magnifier_check.set_active(config.screenshot_show_magnifier);
     let mag_hbox = GtkBox::new(Orientation::Horizontal, 12);
     mag_hbox.set_hexpand(true);
-    let mag_option = Label::new(Some("Show magnifier"));
+    let mag_option = Label::new(Some("Show zoom preview while selecting"));
     mag_option.set_xalign(0.0);
     mag_option.set_hexpand(true);
     mag_hbox.append(&mag_option);
@@ -208,9 +182,11 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
 
     let cursor_vbox = GtkBox::new(Orientation::Vertical, 4);
     cursor_vbox.set_hexpand(true);
-    let cursor_option = Label::new(Some("Show cursor on screenshots"));
+    let cursor_option = Label::new(Some("Include pointer when available"));
     cursor_option.set_xalign(0.0);
-    let cursor_desc = Label::new(Some("This works in Fullscreen or Self-Timer modes only."));
+    let cursor_desc = Label::new(Some(
+        "ApexShot includes the pointer only when the current capture flow provides cursor data.",
+    ));
     cursor_desc.set_xalign(0.0);
     cursor_desc.add_css_class("settings-sub-option-hint");
     cursor_vbox.append(&cursor_option);
@@ -227,8 +203,6 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
         export_location_entry,
         export_location_browse,
         format_input,
-        retina_scale_check,
-        frame_border_check,
         freeze_screen_check,
         crosshair_mode_input,
         show_magnifier_check,

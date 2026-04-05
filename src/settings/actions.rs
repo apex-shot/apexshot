@@ -41,6 +41,7 @@ pub struct SaveInputs {
     pub shutter_sound: ComboBoxText,
     pub show_menu_bar_icon: CheckButton,
     pub screenshot_export_location: Entry,
+    pub screenshot_format: ComboBoxText,
     pub video_export_location: Entry,
     pub screenshot_quick_access: CheckButton,
     pub screenshot_copy_to_clipboard: CheckButton,
@@ -58,6 +59,7 @@ pub struct SaveInputs {
     pub screenshot_show_magnifier: CheckButton,
     // pub screenshot_selection_color: ColorButton, // Removed missing mapping
     pub screenshot_freeze_screen: CheckButton,
+    pub screenshot_timer_interval: ComboBoxText,
     pub screenshot_capture_cursor: CheckButton,
     pub annotate_inverse_arrow: CheckButton,
     pub annotate_smooth_drawing: CheckButton,
@@ -180,9 +182,13 @@ pub fn install_checkbox_behaviors(
     });
 
     let m1 = screenshot_show_magnifier_check.clone();
+    m1.set_sensitive(matches!(
+        screenshot_crosshair_mode_input.active_id().as_deref(),
+        Some("Crosshair") | Some("Magnifier")
+    ));
     screenshot_crosshair_mode_input.connect_changed(move |combo| {
         let id = combo.active_id().unwrap_or_default();
-        m1.set_sensitive(id == "On");
+        m1.set_sensitive(id == "Crosshair" || id == "Magnifier");
     });
 }
 
@@ -223,9 +229,18 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.quick_access_close_after_uploading =
         inputs.quick_access_close_after_uploading.is_active();
 
-    config.screenshot_crosshair_mode = combo_value(&inputs.screenshot_crosshair_mode, "On");
+    config.screenshot_format = combo_value(&inputs.screenshot_format, "PNG");
+    config.screenshot_crosshair_mode =
+        combo_value(&inputs.screenshot_crosshair_mode, "Disabled");
     config.screenshot_show_magnifier = inputs.screenshot_show_magnifier.is_active();
     config.screenshot_freeze_screen = inputs.screenshot_freeze_screen.is_active();
+    config.screenshot_timer_interval = inputs
+        .screenshot_timer_interval
+        .active_id()
+        .or_else(|| inputs.screenshot_timer_interval.active_text().map(Into::into))
+        .unwrap_or_else(|| "5".into())
+        .parse()
+        .unwrap_or(5);
     config.screenshot_show_cursor = inputs.screenshot_capture_cursor.is_active();
     config.annotate_inverse_arrow = inputs.annotate_inverse_arrow.is_active();
     config.annotate_smooth_drawing = inputs.annotate_smooth_drawing.is_active();

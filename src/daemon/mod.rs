@@ -2135,13 +2135,29 @@ fn crop_capture_data(
     Some(CaptureData::new(pixels, w, h, capture.format))
 }
 
-fn screenshot_save_config() -> SaveConfig {
-    let app_config = load_config().sanitized();
-    let mut save_config = SaveConfig::default();
+fn screenshot_image_format(value: &str) -> crate::capture::ImageFormat {
+    match value {
+        "JPEG" => crate::capture::ImageFormat::Jpeg { quality: 85 },
+        "WebP" => crate::capture::ImageFormat::WebP,
+        _ => crate::capture::ImageFormat::Png,
+    }
+}
+
+fn screenshot_save_config_from(app_config: &crate::config::AppConfig) -> SaveConfig {
+    let mut save_config = SaveConfig::default()
+        .with_format(screenshot_image_format(&app_config.screenshot_format))
+        .with_cursor(app_config.screenshot_show_cursor);
+
     if !app_config.screenshot_export_location.is_empty() {
         save_config = save_config.with_output_dir(&app_config.screenshot_export_location);
     }
+
     save_config
+}
+
+fn screenshot_save_config() -> SaveConfig {
+    let app_config = load_config().sanitized();
+    screenshot_save_config_from(&app_config)
 }
 
 fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
@@ -2586,6 +2602,27 @@ fn save_temp_png_daemon(capture: &crate::backend::CaptureData) -> Option<std::pa
     Some(tmp)
 }
 
+fn screenshot_timer_delay_duration(seconds: u32) -> Option<std::time::Duration> {
+    if seconds == 0 {
+        None
+    } else {
+        Some(std::time::Duration::from_secs(seconds as u64))
+    }
+}
+
+fn screenshot_timer_supported(action: &str) -> bool {
+    matches!(action, "screen" | "window")
+}
+
+fn apply_screenshot_timer_if_needed(action: &str, app_config: &crate::config::AppConfig) {
+    if !screenshot_timer_supported(action) {
+        return;
+    }
+    if let Some(delay) = screenshot_timer_delay_duration(app_config.screenshot_timer_interval) {
+        std::thread::sleep(delay);
+    }
+}
+
 fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
     let Some(_session_guard) = acquire_capture_session_guard("area") else {
         return;
@@ -2601,6 +2638,9 @@ fn handle_capture_crosshair(state: Arc<Mutex<DaemonState>>) {
 }
 
 fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
+    let app_config = load_config().sanitized();
+    apply_screenshot_timer_if_needed("area", &app_config);
+
     let gtk_tx = state.lock().unwrap().gtk_tx.clone();
 
     let cpp_area_init = if let Some(gtk_tx) = gtk_tx.clone() {
@@ -2661,6 +2701,9 @@ fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
 }
 
 fn handle_capture_crosshair_with_active_session(state: Arc<Mutex<DaemonState>>) {
+    let app_config = load_config().sanitized();
+    apply_screenshot_timer_if_needed("crosshair", &app_config);
+
     match capture_crosshair_file_via_cpp() {
         Ok(path) => {
             save_existing_png_and_open(path, state);
@@ -2685,6 +2728,9 @@ fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
 }
 
 fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonState>>) {
+    let app_config = load_config().sanitized();
+    apply_screenshot_timer_if_needed("screen", &app_config);
+
     match capture_screen_file_via_cpp() {
         Ok(path) => {
             save_existing_png_and_open(path, state);
@@ -2708,6 +2754,9 @@ fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
 }
 
 fn handle_capture_window_with_active_session(state: Arc<Mutex<DaemonState>>) {
+    let app_config = load_config().sanitized();
+    apply_screenshot_timer_if_needed("window", &app_config);
+
     eprintln!("[daemon] Window capture requested — using the shared window capture flow");
     match capture_window_file_via_cpp() {
         Ok(path) => {
@@ -2870,6 +2919,44 @@ mod tests {
     #[test]
     fn daemon_does_not_autostart_ydotoold_by_default() {
         assert!(!should_autostart_ydotoold());
+    }
+
+    #[test]
+    fn screenshot_save_config_uses_format_and_cursor_settings() {
+        let app_config = crate::config::AppConfig {
+            screenshot_export_location: "/tmp/screens".into(),
+            screenshot_format: "JPEG".into(),
+            screenshot_show_cursor: false,
+            ..crate::config::AppConfig::default()
+        }
+        .sanitized();
+
+        let save_config = super::screenshot_save_config_from(&app_config);
+
+        assert_eq!(
+            save_config.output_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/screens"))
+        );
+        assert_eq!(save_config.format, crate::capture::ImageFormat::Jpeg { quality: 85 });
+        assert!(!save_config.include_cursor);
+    }
+
+    #[test]
+    fn screenshot_timer_delay_duration_respects_config() {
+        assert_eq!(super::screenshot_timer_delay_duration(0), None);
+        assert_eq!(
+            super::screenshot_timer_delay_duration(3),
+            Some(std::time::Duration::from_secs(3))
+        );
+    }
+
+    #[test]
+    fn screenshot_timer_only_delays_non_interactive_capture_actions() {
+        assert!(!super::screenshot_timer_supported("area"));
+        assert!(!super::screenshot_timer_supported("crosshair"));
+        assert!(super::screenshot_timer_supported("screen"));
+        assert!(super::screenshot_timer_supported("window"));
+        assert!(!super::screenshot_timer_supported("import_web_scroll"));
     }
 
     #[test]
