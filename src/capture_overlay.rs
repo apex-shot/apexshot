@@ -1103,8 +1103,14 @@ pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
     }
 }
 
+fn build_crosshair_args() -> Vec<String> {
+    vec!["--crosshair-capture".into()]
+}
+
 pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
-    let output = run_capture_binary(&["--crosshair-capture"], None)?;
+    let args = build_crosshair_args();
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let output = run_capture_binary(&arg_refs, None)?;
 
     match output.status.code() {
         Some(0) => parse_capture_screen_json(&String::from_utf8_lossy(&output.stdout)),
@@ -1361,14 +1367,18 @@ fn extract_string(json: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_area_init_args, build_recording_ui_args, classify_overlay_exit_code,
-        execute_builtin_overlay_query,
-        parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
-        parse_recording_json, parse_selection_json, should_request_screenshot_lock,
-        tracked_overlay_id, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,
-        RecordingType,
+        build_area_init_args, build_crosshair_args, build_recording_ui_args,
+        classify_overlay_exit_code, execute_builtin_overlay_query, parse_area_capture_output,
+        parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
+        parse_selection_json, should_request_screenshot_lock, tracked_overlay_id,
+        CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, RecordingType,
     };
     use crate::config::AppConfig;
+
+    #[test]
+    fn crosshair_capture_does_not_build_area_init_settings_args() {
+        assert_eq!(build_crosshair_args(), vec!["--crosshair-capture"]);
+    }
 
     #[test]
     fn test_parse_normal() {
