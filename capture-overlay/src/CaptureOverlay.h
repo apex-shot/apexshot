@@ -164,6 +164,7 @@ public:
     void setInitialRememberSelection(bool v) { m_rememberSelection = v; }
     void setInitialDimScreen(bool v) { m_dimScreen = v; }
     void setInitialShowCountdown(bool v) { m_showCountdown = v; }
+    void setInitialCaptureDelaySeconds(int seconds) { m_captureDelaySeconds = std::max(0, seconds); }
     void setSelectionCursorMode(const QString& mode) {
         m_selectionCursorMode = mode;
         if (!isCrosshairMode()) {

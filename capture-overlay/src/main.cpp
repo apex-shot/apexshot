@@ -268,6 +268,7 @@ int main(int argc, char* argv[])
     bool initialRememberSelection = false;
     bool initialDimScreen = true;
     bool initialShowCountdown = true;
+    int initialCaptureDelaySeconds = 5;
     QString selectionCursor = QStringLiteral("Disabled");
     bool showZoomPreview = false;
     bool freezeSelectionBackground = true;
@@ -318,6 +319,8 @@ int main(int argc, char* argv[])
             controlShowTimer = true;
         } else if (std::strcmp(argv[i], "--hide-timer") == 0) {
             controlShowTimer = false;
+        } else if (QString(argv[i]).startsWith("--timer-seconds=")) {
+            initialCaptureDelaySeconds = std::max(0, QString(argv[i]).mid(16).toInt());
         } else if (QString(argv[i]).startsWith("--restore-selection=")) {
             // Format: --restore-selection=x,y,w,h
             QString val = QString(argv[i]).mid(20);
@@ -694,6 +697,7 @@ int main(int argc, char* argv[])
     overlay.setSelectionCursorMode(selectionCursor);
     overlay.setShowZoomPreview(showZoomPreview);
     overlay.setFreezeSelectionBackground(freezeSelectionBackground);
+    overlay.setInitialCaptureDelaySeconds(initialCaptureDelaySeconds);
     if (!restoreSel.isNull() && restoreSel.isValid()) {
         overlay.setInitialSelection(restoreSel);
     }

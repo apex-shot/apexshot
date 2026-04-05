@@ -897,6 +897,15 @@ pub fn capture_screen_via_cpp() -> Result<CaptureData, SelectionError> {
     capture
 }
 
+fn append_screenshot_timer_args(args: &mut Vec<String>, config: &crate::config::AppConfig) {
+    if config.screenshot_timer_interval == 0 {
+        args.push("--hide-timer".into());
+    } else {
+        args.push("--show-timer".into());
+        args.push(format!("--timer-seconds={}", config.screenshot_timer_interval));
+    }
+}
+
 fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut extra_args: Vec<String> = vec!["--area-init".into()];
 
@@ -923,6 +932,7 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
         "--freeze-selection-bg={}",
         if config.screenshot_freeze_screen { 1 } else { 0 }
     ));
+    append_screenshot_timer_args(&mut extra_args, config);
 
     if config.rec_mic {
         extra_args.push("--rec-mic".into());
@@ -1103,12 +1113,15 @@ pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
     }
 }
 
-fn build_crosshair_args() -> Vec<String> {
-    vec!["--crosshair-capture".into()]
+fn build_crosshair_args(config: &crate::config::AppConfig) -> Vec<String> {
+    let mut args = vec!["--crosshair-capture".into()];
+    append_screenshot_timer_args(&mut args, config);
+    args
 }
 
 pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
-    let args = build_crosshair_args();
+    let config = crate::config::load_config();
+    let args = build_crosshair_args(&config);
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let output = run_capture_binary(&arg_refs, None)?;
 
@@ -1367,7 +1380,8 @@ fn extract_string(json: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_area_init_args, build_crosshair_args, build_recording_ui_args,
+        append_screenshot_timer_args, build_area_init_args, build_crosshair_args,
+        build_recording_ui_args,
         classify_overlay_exit_code, execute_builtin_overlay_query, parse_area_capture_output,
         parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
         parse_selection_json, should_request_screenshot_lock, tracked_overlay_id,
@@ -1377,7 +1391,28 @@ mod tests {
 
     #[test]
     fn crosshair_capture_does_not_build_area_init_settings_args() {
-        assert_eq!(build_crosshair_args(), vec!["--crosshair-capture"]);
+        let config = AppConfig {
+            screenshot_timer_interval: 0,
+            ..AppConfig::default()
+        };
+        assert_eq!(build_crosshair_args(&config), vec!["--crosshair-capture", "--hide-timer"]);
+    }
+
+    #[test]
+    fn screenshot_timer_args_follow_setting() {
+        let mut off_args = Vec::new();
+        append_screenshot_timer_args(&mut off_args, &AppConfig {
+            screenshot_timer_interval: 0,
+            ..AppConfig::default()
+        });
+        assert_eq!(off_args, vec!["--hide-timer"]);
+
+        let mut on_args = Vec::new();
+        append_screenshot_timer_args(&mut on_args, &AppConfig {
+            screenshot_timer_interval: 3,
+            ..AppConfig::default()
+        });
+        assert_eq!(on_args, vec!["--show-timer", "--timer-seconds=3"]);
     }
 
     #[test]
