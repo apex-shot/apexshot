@@ -15,6 +15,7 @@
 #include <QCursor>
 #include <QMutexLocker>
 #include <QTimer>
+#include <QRegion>
 #include <algorithm>
 #include <cmath>
 
@@ -475,6 +476,83 @@ static void drawToolbarIcon(QPainter& p, int iconIndex,
     p.restore();
 }
 
+QRect CaptureOverlay::crosshairBubbleRectForPoint(const QPoint& point) const
+{
+    const QRect widgetRect = rect();
+    const QPoint guidePoint = widgetRect.contains(point) ? point : m_pointerPos;
+
+    QString labelText;
+    if (m_dragging || m_hasSelection) {
+        const QRect sel = m_selection.normalized();
+        labelText = QStringLiteral("%1 \u00D7 %2").arg(sel.width()).arg(sel.height());
+    } else {
+        labelText = QStringLiteral("%1, %2").arg(guidePoint.x()).arg(guidePoint.y());
+    }
+
+    QFont font(QStringLiteral("Sans"));
+    font.setPixelSize(12);
+    font.setWeight(QFont::Medium);
+    const QFontMetrics fm(font);
+    const QRect textRect = fm.boundingRect(labelText);
+
+    const int paddingX = 10;
+    const int paddingY = 6;
+    const int bw = textRect.width() + paddingX * 2;
+    const int bh = textRect.height() + paddingY * 2;
+
+    const QRect bubbleRect(
+        std::clamp(guidePoint.x() + 16, 8, widgetRect.width() - bw - 8),
+        std::clamp(guidePoint.y() + 16, 8, widgetRect.height() - bh - 8),
+        bw,
+        bh);
+
+    return bubbleRect.adjusted(-3, -3, 3, 3);
+}
+
+QRegion CaptureOverlay::crosshairDirtyRegion(const QPoint& oldPoint,
+                                             const QPoint& newPoint,
+                                             const QRect& oldSelection,
+                                             const QRect& newSelection,
+                                             bool hadSelection,
+                                             bool hasSelection) const
+{
+    const QRect widgetRect = rect();
+    QRegion dirty;
+    constexpr int guidePad = 3;
+    constexpr int selectionPad = 4;
+
+    auto addGuideRegions = [&](const QPoint& point) {
+        if (!widgetRect.contains(point)) {
+            return;
+        }
+        dirty += QRect(0,
+                       std::max(0, point.y() - guidePad),
+                       widgetRect.width(),
+                       std::min(widgetRect.height(), guidePad * 2 + 1));
+        dirty += QRect(std::max(0, point.x() - guidePad),
+                       0,
+                       std::min(widgetRect.width(), guidePad * 2 + 1),
+                       widgetRect.height());
+    };
+
+    addGuideRegions(oldPoint);
+    addGuideRegions(newPoint);
+
+    if (!m_lastCrosshairBubbleRect.isNull()) {
+        dirty += m_lastCrosshairBubbleRect;
+    }
+    dirty += crosshairBubbleRectForPoint(newPoint);
+
+    if (hadSelection && !oldSelection.isNull()) {
+        dirty += oldSelection.adjusted(-selectionPad, -selectionPad, selectionPad, selectionPad);
+    }
+    if (hasSelection && !newSelection.isNull()) {
+        dirty += newSelection.adjusted(-selectionPad, -selectionPad, selectionPad, selectionPad);
+    }
+
+    return dirty.intersected(widgetRect);
+}
+
 void CaptureOverlay::paintEvent(QPaintEvent*)
 {
     QPainter p(this);
@@ -526,20 +604,7 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         font.setWeight(QFont::Medium);
         p.setFont(font);
 
-        const QFontMetrics fm(font);
-        const QRect textRect = fm.boundingRect(labelText);
-        
-        // Tight padding for a native feel
-        const int paddingX = 10;
-        const int paddingY = 6;
-        const int bw = textRect.width() + paddingX * 2;
-        const int bh = textRect.height() + paddingY * 2;
-        
-        const QRect bubbleRect(
-            std::clamp(guidePoint.x() + 16, 8, widgetRect.width() - bw - 8),
-            std::clamp(guidePoint.y() + 16, 8, widgetRect.height() - bh - 8),
-            bw, bh
-        );
+        const QRect bubbleRect = crosshairBubbleRectForPoint(guidePoint).adjusted(3, 3, -3, -3);
 
         p.save();
         p.setRenderHint(QPainter::Antialiasing);

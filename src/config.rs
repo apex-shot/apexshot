@@ -223,7 +223,7 @@ impl Default for AppConfig {
             screenshot_freeze_screen: true,
             screenshot_crosshair_mode: "Disabled".to_string(),
             screenshot_show_magnifier: false,
-            screenshot_timer_interval: 5,
+            screenshot_timer_interval: 0,
             screenshot_show_cursor: true,
             annotate_inverse_arrow: false,
             annotate_smooth_drawing: true,
@@ -426,6 +426,12 @@ mod tests {
             cfg.preview_auto_close_seconds,
             DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS
         );
+    }
+
+    #[test]
+    fn default_screenshot_timer_is_off() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.screenshot_timer_interval, 0);
     }
 
     #[test]

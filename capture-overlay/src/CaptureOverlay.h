@@ -23,6 +23,7 @@
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QRegion>
 #include <algorithm>
 
 class QTimer;
@@ -245,6 +246,13 @@ private:
     void setWebcamPreviewTopLeft(const QPointF& topLeft,
                                  double selX, double selY,
                                  double selW, double selH);
+    QRect crosshairBubbleRectForPoint(const QPoint& point) const;
+    QRegion crosshairDirtyRegion(const QPoint& oldPoint,
+                                 const QPoint& newPoint,
+                                 const QRect& oldSelection,
+                                 const QRect& newSelection,
+                                 bool hadSelection,
+                                 bool hasSelection) const;
 
     // Webcam
     void showWebcamContextMenu(const QPoint& globalPos);
@@ -309,6 +317,11 @@ private:
     QPoint    m_dragStart;
     QPoint    m_pointerPos;
     QRect     m_selectionAtDragStart;
+    Qt::CursorShape m_lastCursorShape;
+    QPoint    m_lastCrosshairPaintPoint;
+    QRect     m_lastCrosshairBubbleRect;
+    QRect     m_lastCrosshairSelectionRect;
+    bool      m_lastCrosshairHadSelection;
     bool      m_fullscreenMode;     // true when Fullscreen tool is active
     bool      m_windowMode;         // true when Window tool is active
     bool      m_timerCaptureEnabled;

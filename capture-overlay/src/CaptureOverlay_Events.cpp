@@ -101,14 +101,36 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 
     if (isCrosshairMode()) {
         if (event->button() == Qt::LeftButton) {
+            const QPoint oldPoint = m_lastCrosshairPaintPoint;
+            const QRect oldSelection = m_lastCrosshairSelectionRect;
+            const bool oldHadSelection = m_lastCrosshairHadSelection;
+
             m_dragStart = pos;
             m_selection = QRect(pos, pos);
             m_hasSelection = false;
             m_dragging = true;
             m_moving = false;
             m_resizing = HandlePos::None;
-            setCursor(Qt::CrossCursor);
-            update();
+
+            if (m_lastCursorShape != Qt::CrossCursor) {
+                setCursor(Qt::CrossCursor);
+                m_lastCursorShape = Qt::CrossCursor;
+            }
+
+            const QRect newSelection = m_selection.normalized();
+            const QRegion dirty = crosshairDirtyRegion(
+                oldPoint,
+                pos,
+                oldSelection,
+                newSelection,
+                oldHadSelection,
+                true);
+
+            m_lastCrosshairPaintPoint = pos;
+            m_lastCrosshairSelectionRect = newSelection;
+            m_lastCrosshairHadSelection = true;
+            m_lastCrosshairBubbleRect = crosshairBubbleRectForPoint(pos);
+            update(dirty);
         }
         return;
     }
@@ -842,11 +864,34 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
     m_pointerPos = pos;
 
     if (isCrosshairMode()) {
+        const QPoint oldPoint = m_lastCrosshairPaintPoint;
+        const QRect oldSelection = m_lastCrosshairSelectionRect;
+        const bool oldHadSelection = m_lastCrosshairHadSelection;
+
         if (m_dragging) {
             m_selection = QRect(m_dragStart, pos);
         }
-        setCursor(Qt::CrossCursor);
-        update();
+
+        if (m_lastCursorShape != Qt::CrossCursor) {
+            setCursor(Qt::CrossCursor);
+            m_lastCursorShape = Qt::CrossCursor;
+        }
+
+        const QRect newSelection = (m_dragging || m_hasSelection) ? m_selection.normalized() : QRect();
+        const bool newHadSelection = m_dragging || m_hasSelection;
+        const QRegion dirty = crosshairDirtyRegion(
+            oldPoint,
+            pos,
+            oldSelection,
+            newSelection,
+            oldHadSelection,
+            newHadSelection);
+
+        m_lastCrosshairPaintPoint = pos;
+        m_lastCrosshairSelectionRect = newSelection;
+        m_lastCrosshairHadSelection = newHadSelection;
+        m_lastCrosshairBubbleRect = crosshairBubbleRectForPoint(pos);
+        update(dirty);
         return;
     }
 

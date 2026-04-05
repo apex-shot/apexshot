@@ -2611,7 +2611,7 @@ fn screenshot_timer_delay_duration(seconds: u32) -> Option<std::time::Duration> 
 }
 
 fn screenshot_timer_supported(action: &str) -> bool {
-    matches!(action, "area" | "crosshair" | "screen" | "window")
+    matches!(action, "screen" | "window")
 }
 
 fn apply_screenshot_timer_if_needed(action: &str, app_config: &crate::config::AppConfig) {
@@ -2951,9 +2951,9 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_timer_supported_for_standard_capture_actions() {
-        assert!(super::screenshot_timer_supported("area"));
-        assert!(super::screenshot_timer_supported("crosshair"));
+    fn screenshot_timer_only_delays_non_interactive_capture_actions() {
+        assert!(!super::screenshot_timer_supported("area"));
+        assert!(!super::screenshot_timer_supported("crosshair"));
         assert!(super::screenshot_timer_supported("screen"));
         assert!(super::screenshot_timer_supported("window"));
         assert!(!super::screenshot_timer_supported("import_web_scroll"));
