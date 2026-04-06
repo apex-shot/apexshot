@@ -822,51 +822,11 @@ pub fn install_editor_css() {
                 transition: transform 100ms ease;
             }
 
-            .editor-hue-slider slider:hover,
-            .editor-opacity-slider slider:hover {
+            .editor-hue-slider slider:hover {
                 transform: scale(1.08);
             }
 
             .editor-hue-slider highlight {
-                background: transparent;
-            }
-
-            .editor-opacity-slider trough {
-                min-height: 10px;
-                border-radius: 999px;
-                box-shadow: inset 0 1px 2px rgba(0,0,0,0.45);
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                background-image:
-                    linear-gradient(45deg,
-                        rgba(255, 255, 255, 0.14) 25%,
-                        rgba(0, 0, 0, 0.0) 25%,
-                        rgba(0, 0, 0, 0.0) 75%,
-                        rgba(255, 255, 255, 0.14) 75%,
-                        rgba(255, 255, 255, 0.14) 100%),
-                    linear-gradient(45deg,
-                        rgba(0, 0, 0, 0.11) 25%,
-                        rgba(0, 0, 0, 0.0) 25%,
-                        rgba(0, 0, 0, 0.0) 75%,
-                        rgba(0, 0, 0, 0.11) 75%,
-                        rgba(0, 0, 0, 0.11) 100%),
-                    linear-gradient(to right,
-                        rgba(55, 128, 91, 0.0) 0%,
-                        rgba(55, 128, 91, 1.0) 100%);
-                background-size: 8px 8px, 8px 8px, 100% 100%;
-                background-position: 0 0, 4px 4px, 0 0;
-            }
-
-            .editor-opacity-slider slider {
-                min-width: 14px;
-                min-height: 14px;
-                border-radius: 999px;
-                background: white;
-                border: 1px solid rgba(0, 0, 0, 0.18);
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-                transition: transform 100ms ease;
-            }
-
-            .editor-opacity-slider highlight {
                 background: transparent;
             }
 
@@ -1292,85 +1252,13 @@ pub fn install_editor_css() {
             }
 
             .editor-background-padding-slider,
-            .editor-background-compact-slider,
-            .editor-background-padding-slider > contents,
-            .editor-background-compact-slider > contents,
-            .editor-background-padding-slider > contents > trough,
-            .editor-background-compact-slider > contents > trough {
+            .editor-background-compact-slider {
                 min-width: 0;
-                padding: 0;
                 margin: 0;
-            }
-
-            .editor-background-padding-slider trough,
-            .editor-background-compact-slider trough {
-                min-height: 4px;
-                border-radius: 999px;
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.28);
-                background: rgba(203, 213, 225, 0.34);
-                background-image: none;
-            }
-
-            .editor-background-padding-slider highlight,
-            .editor-background-compact-slider highlight {
-                min-height: 4px;
-                min-width: 0;
-                border-radius: 999px;
-                background: #3b82f6;
-                background-image: none;
-            }
-
-            .editor-background-padding-slider slider,
-            .editor-background-compact-slider slider {
-                min-width: 12px;
-                min-height: 12px;
-                border-radius: 999px;
-                background: #f8fafc;
-                border: 1px solid rgba(15, 23, 42, 0.18);
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
-            }
-
-            .editor-background-padding-slider slider:hover,
-            .editor-background-compact-slider slider:hover,
-            .editor-background-padding-slider slider:active,
-            .editor-background-compact-slider slider:active {
-                background: #ffffff;
-                border-color: rgba(59, 130, 246, 0.42);
-                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18), 0 1px 4px rgba(0, 0, 0, 0.24);
             }
 
             .editor-toolbar-size-slider {
                 margin: 0 4px;
-            }
-
-            .editor-toolbar-size-slider trough {
-                min-height: 4px;
-                border-radius: 999px;
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.28);
-                background: rgba(203, 213, 225, 0.22);
-            }
-
-            .editor-toolbar-size-slider highlight {
-                min-height: 4px;
-                border-radius: 999px;
-                background: #3b82f6;
-            }
-
-            .editor-toolbar-size-slider slider {
-                min-width: 12px;
-                min-height: 12px;
-                border-radius: 999px;
-                background: #f8fafc;
-                border: 1px solid rgba(15, 23, 42, 0.18);
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
-            }
-
-            .editor-toolbar-size-slider slider:hover {
-                background: #ffffff;
-                border-color: rgba(59, 130, 246, 0.42);
-                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18), 0 1px 4px rgba(0, 0, 0, 0.24);
             }
 
             .editor-background-compact-controls {
@@ -1447,7 +1335,6 @@ pub fn install_editor_css() {
             .editor-background-checkbox-row {
                 min-height: 30px;
                 margin-top: 0;
-                align-items: center;
             }
 
             checkbutton.editor-background-checkbox {
@@ -2127,6 +2014,51 @@ mod tests {
         assert_eq!(
             custom_toolbar_icon_inset(&EditorToolIcon::Named("fallback".to_owned())),
             0.0
+        );
+    }
+
+    #[test]
+    fn editor_css_avoids_web_only_alignment_properties() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains("align-items:"),
+            "editor CSS still contains unsupported GTK property align-items"
+        );
+    }
+
+    #[test]
+    fn editor_background_slider_css_does_not_override_internal_contents_nodes() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains(".editor-background-padding-slider > contents")
+                && !production_source.contains(".editor-background-compact-slider > contents"),
+            "editor background slider CSS still overrides internal GTK contents nodes"
+        );
+    }
+
+    #[test]
+    fn editor_toolbar_slider_css_does_not_style_internal_slider_nodes() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains(".editor-toolbar-size-slider trough")
+                && !production_source.contains(".editor-toolbar-size-slider highlight")
+                && !production_source.contains(".editor-toolbar-size-slider slider"),
+            "editor toolbar slider CSS still styles internal GTK slider nodes"
+        );
+    }
+
+    #[test]
+    fn editor_opacity_slider_css_does_not_style_internal_slider_nodes() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains(".editor-opacity-slider trough")
+                && !production_source.contains(".editor-opacity-slider highlight")
+                && !production_source.contains(".editor-opacity-slider slider"),
+            "editor opacity slider CSS still styles internal GTK slider nodes"
         );
     }
 }

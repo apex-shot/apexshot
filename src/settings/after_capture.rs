@@ -9,11 +9,12 @@ pub struct AfterCaptureWidgets {
 
 pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     let after_capture_wrapper = GtkBox::new(Orientation::Vertical, 8);
-    after_capture_wrapper.set_halign(Align::Center);
-    after_capture_wrapper.set_size_request(450, -1);
+    after_capture_wrapper.set_halign(Align::Fill);
+    after_capture_wrapper.set_hexpand(true);
 
     let after_capture_section = Grid::new();
-    after_capture_section.set_halign(Align::Center);
+    after_capture_section.set_halign(Align::Fill);
+    after_capture_section.set_hexpand(true);
     after_capture_section.set_row_spacing(8);
     after_capture_section.set_column_spacing(10);
 
@@ -132,7 +133,8 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     after_capture_section.attach(&after_capture_description, 1, 0, 1, 1);
 
     let after_capture_table_row = GtkBox::new(Orientation::Horizontal, 0);
-    after_capture_table_row.set_halign(Align::Center);
+    after_capture_table_row.set_halign(Align::Fill);
+    after_capture_table_row.set_hexpand(true);
     after_capture_table_row.append(&after_capture_table_frame);
 
     after_capture_wrapper.append(&after_capture_section);
@@ -141,5 +143,18 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     AfterCaptureWidgets {
         wrapper: after_capture_wrapper,
         screenshot_after_capture_checks,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn after_capture_wrapper_does_not_force_a_fixed_width() {
+        let source = include_str!("after_capture.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains("set_size_request(450, -1);"),
+            "after capture settings wrapper still hardcodes a 450px width"
+        );
     }
 }
