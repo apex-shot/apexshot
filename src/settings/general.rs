@@ -11,11 +11,11 @@ pub struct GeneralSettingsWidgets {
 
 pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     let section = GtkBox::new(Orientation::Vertical, 14);
-    section.set_halign(Align::Center);
+    section.set_halign(Align::Fill);
     section.set_valign(Align::Start);
+    section.set_hexpand(true);
     section.set_margin_top(20);
     section.set_margin_bottom(8);
-    section.set_size_request(450, -1);
 
     macro_rules! build_row {
         ($content:expr, $is_muted:expr) => {{
@@ -130,5 +130,18 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
         play_sounds_check,
         shutter_sound_input,
         show_icon_check,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn general_section_does_not_force_a_fixed_width() {
+        let source = include_str!("general.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains("set_size_request(450, -1);"),
+            "general settings section still hardcodes a 450px width"
+        );
     }
 }

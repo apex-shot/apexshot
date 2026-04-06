@@ -1,11 +1,7 @@
 use gtk4::gdk;
 use gtk4::{prelude::*, Button, CssProvider};
 
-pub fn install_settings_css() {
-    if let Some(display) = gdk::Display::default() {
-        let provider = CssProvider::new();
-        provider.load_from_data(
-            r#"
+const SETTINGS_CSS: &str = r#"
             /* Main settings window transparency for rounded corners */
             window.editor-window,
             .editor-window {
@@ -795,7 +791,6 @@ pub fn install_settings_css() {
                 font-size: 14px;
                 opacity: 0.7;
                 margin-top: 8px;
-                max-width: 500px;
             }
 
             .recent-captures-primary-button,
@@ -978,7 +973,6 @@ pub fn install_settings_css() {
             }
             .noir-card {
                 border-radius: 10px;
-                overflow: hidden;
                 transition: transform 0.3s ease, box-shadow 0.3s ease;
                 box-shadow: 0 4px 12px alpha(black, 0.3);
                 border: 1px solid alpha(white, 0.10);
@@ -1032,15 +1026,33 @@ pub fn install_settings_css() {
                 font-size: 11px;
                 font-weight: bold;
                 margin: 12px;
-                backdrop-filter: blur(8px);
             }
-            "#,
-        );
+            "#;
+
+pub fn install_settings_css() {
+    if let Some(display) = gdk::Display::default() {
+        let provider = CssProvider::new();
+        provider.load_from_data(SETTINGS_CSS);
         gtk4::style_context_add_provider_for_display(
             &display,
             &provider,
             gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SETTINGS_CSS;
+
+    #[test]
+    fn settings_css_avoids_unsupported_gtk_properties() {
+        for property in ["max-width", "overflow", "backdrop-filter"] {
+            assert!(
+                !SETTINGS_CSS.contains(property),
+                "settings CSS still contains unsupported GTK property: {property}"
+            );
+        }
     }
 }
 
