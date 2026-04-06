@@ -1,6 +1,7 @@
 use gdk4x11::X11Surface;
 use gtk4::{
-    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Orientation, Popover,
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation,
+    Popover,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -51,7 +52,7 @@ impl AnnotateRuntimeConfig {
 }
 use super::ui_support::{
     install_editor_css, prefers_dark_glass_theme, prefers_reduced_transparency,
-    recommended_window_size,
+    recommended_window_size_with_extra_width,
 };
 
 pub mod background_panel;
@@ -86,7 +87,7 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
     Ok(())
 }
 
-#[cfg(test)]
+#[allow(unused_imports)]
 pub(super) use cursor::cursor_name_for_view_point;
 
 fn env_var_contains_case_insensitive(key: &str, needle: &str) -> bool {
@@ -249,7 +250,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     )));
 
     let (default_width, default_height) =
-        recommended_window_size(img_width as i32, img_height as i32);
+        recommended_window_size_with_extra_width(img_width as i32, img_height as i32, 280);
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -664,25 +665,46 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &drawing_area,
         wallpaper_loader_sender,
     );
-    let background_sidebar = background_panel_parts.sidebar;
+    let background_inspector = background_panel_parts.root;
     let start_background_gradient_preview_loading =
         background_panel_parts.start_gradient_preview_loading;
 
-    // Re-parent sidebar into canvas workspace
-    if let Some(canvas_workspace) = canvas
-        .first_child()
-        .and_then(|c| c.downcast::<GtkBox>().ok())
-    {
-        if let Some(placeholder) = canvas_workspace.first_child() {
-            canvas_workspace.remove(&placeholder);
-        }
-        canvas_workspace.prepend(&background_sidebar);
-    }
+    let placeholder_inspector = GtkBox::new(Orientation::Vertical, 12);
+    placeholder_inspector.add_css_class("editor-inspector-placeholder-shell");
+    placeholder_inspector.set_vexpand(true);
+
+    let placeholder_title = Label::new(Some("Inspector"));
+    placeholder_title.add_css_class("editor-inspector-title");
+    placeholder_title.set_xalign(0.0);
+
+    let placeholder = Label::new(Some("Tool options coming soon"));
+    placeholder.add_css_class("editor-inspector-placeholder");
+    placeholder.set_wrap(true);
+    placeholder.set_xalign(0.0);
+
+    placeholder_inspector.append(&placeholder_title);
+    placeholder_inspector.append(&placeholder);
+
+    let inspector = GtkBox::new(Orientation::Vertical, 0);
+    inspector.add_css_class("editor-right-inspector");
+    inspector.set_width_request(280);
+    inspector.set_hexpand(false);
+    inspector.set_vexpand(true);
+    inspector.append(&background_inspector);
+    inspector.append(&placeholder_inspector);
+
+    let workspace = GtkBox::new(Orientation::Horizontal, 0);
+    workspace.set_hexpand(true);
+    workspace.set_vexpand(true);
+    workspace.append(&canvas);
+    workspace.append(&inspector);
+
     *drawing_area_placeholder.borrow_mut() = Some(drawing_area.downgrade());
 
     let update_toolbar_for_tool = toolbar::build_toolbar_tool_updater(
         &toolbar_mode_stack,
-        &background_sidebar,
+        &background_inspector,
+        &placeholder_inspector,
         &text_size_group,
         &font_family_group,
         &obfuscate_method_group,
@@ -692,9 +714,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &stroke_size_group,
         &canvas_scroller,
         start_background_gradient_preview_loading.clone(),
-        &window,
-        img_width as i32,
-        img_height as i32,
     );
 
     let canvas_padding = canvas::CANVAS_PADDING;
@@ -854,7 +873,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     });
 
     root.append(&toolbar);
-    root.append(&canvas);
+    root.append(&workspace);
     root.append(&footer_parts.root);
     window.set_child(Some(&root));
 
@@ -1078,6 +1097,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
     });
     sync_size_control();
+    update_toolbar_for_tool(Tool::Arrow);
 
     let state_draw = state.clone();
     let transform_draw = transform.clone();
@@ -1888,4 +1908,21 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         crate::gnome_integration::emit_tracked_window_closed(&tracked_window_id);
         glib::Propagation::Proceed
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn editor_layout_includes_persistent_right_inspector_shell() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(production_source.contains("editor-right-inspector"));
+    }
+
+    #[test]
+    fn editor_layout_tracks_background_inspector_content() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(production_source.contains("background_inspector"));
+    }
 }

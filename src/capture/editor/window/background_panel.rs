@@ -648,7 +648,7 @@ fn rebuild_wallpaper_preview_grid(
 }
 
 pub(super) struct BackgroundPanelParts {
-    pub sidebar: GtkBox,
+    pub root: GtkBox,
     pub start_gradient_preview_loading: Rc<dyn Fn()>,
 }
 
@@ -1521,7 +1521,7 @@ pub(super) fn build_background_panel(
     background_sidebar.append(&background_sidebar_options);
 
     BackgroundPanelParts {
-        sidebar: background_sidebar,
+        root: background_sidebar,
         start_gradient_preview_loading: start_background_gradient_preview_loading,
     }
 }

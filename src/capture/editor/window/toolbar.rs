@@ -1,6 +1,6 @@
 use gtk4::{
-    prelude::*, ApplicationWindow, Box as GtkBox, Button, CenterBox, Entry, GestureClick, Image,
-    Label, MenuButton, Orientation, Overlay, Popover, Scale, Stack,
+    prelude::*, Box as GtkBox, Button, CenterBox, Entry, GestureClick, Image, Label,
+    MenuButton, Orientation, Overlay, Popover, Scale, Stack,
 };
 use std::rc::Rc;
 
@@ -8,12 +8,10 @@ use super::super::{
     pen_weight::PenWeight,
     types::{ArrowStyle, ObfuscateMethod, Tool},
     ui_support::{
-        arrow_style_toolbar_icon, icon_tool_button, recommended_window_size,
-        recommended_window_size_with_extra_width, tool_icon_widget, toolbar_icon_size,
+        arrow_style_toolbar_icon, icon_tool_button, tool_icon_widget, toolbar_icon_size,
         traffic_light_button,
     },
 };
-use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use super::icon_names;
 
 pub(super) struct ToolbarBaseParts {
@@ -1095,7 +1093,8 @@ pub(super) fn build_toolbar_right_controls(
 
 pub(super) fn build_toolbar_tool_updater(
     toolbar_mode_stack: &Stack,
-    background_sidebar: &GtkBox,
+    background_inspector: &GtkBox,
+    placeholder_inspector: &GtkBox,
     text_size_group: &GtkBox,
     font_family_group: &GtkBox,
     obfuscate_method_group: &GtkBox,
@@ -1105,12 +1104,10 @@ pub(super) fn build_toolbar_tool_updater(
     stroke_size_group: &GtkBox,
     canvas_scroller: &gtk4::ScrolledWindow,
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
-    window: &ApplicationWindow,
-    image_width: i32,
-    image_height: i32,
 ) -> Rc<dyn Fn(Tool)> {
     let toolbar_mode_stack = toolbar_mode_stack.clone();
-    let background_sidebar = background_sidebar.clone();
+    let background_inspector = background_inspector.clone();
+    let placeholder_inspector = placeholder_inspector.clone();
     let text_size_group = text_size_group.clone();
     let font_family_group = font_family_group.clone();
     let obfuscate_method_group = obfuscate_method_group.clone();
@@ -1119,7 +1116,6 @@ pub(super) fn build_toolbar_tool_updater(
     let arrow_style_group = arrow_style_group.clone();
     let stroke_size_group = stroke_size_group.clone();
     let canvas_scroller = canvas_scroller.clone();
-    let window = window.downgrade();
 
     Rc::new(move |tool| {
         toolbar_mode_stack.set_visible_child_name(if matches!(tool, Tool::Crop) {
@@ -1147,7 +1143,6 @@ pub(super) fn build_toolbar_tool_updater(
         arrow_style_group.set_visible(is_arrow_tool);
         stroke_size_group.set_visible(is_arrow_tool || is_line_tool);
 
-        // Only allow vertical scrolling in Crop mode
         if matches!(tool, Tool::Crop) {
             canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
         } else {
@@ -1155,26 +1150,11 @@ pub(super) fn build_toolbar_tool_updater(
         }
 
         let background_mode = matches!(tool, Tool::Background);
-        background_sidebar.set_visible(background_mode);
+        background_inspector.set_visible(background_mode);
+        placeholder_inspector.set_visible(!background_mode);
 
-        if let Some(window) = window.upgrade() {
-            if background_mode {
-                start_background_gradient_preview_loading();
-                let (target_width, target_height) = recommended_window_size_with_extra_width(
-                    image_width,
-                    image_height,
-                    BACKGROUND_SIDEBAR_WIDTH,
-                );
-                window.set_default_size(
-                    window.allocated_width().max(target_width),
-                    window.allocated_height().max(target_height),
-                );
-            } else {
-                // Return window to standard recommended size when sidebar is hidden
-                let (base_width, base_height) = recommended_window_size(image_width, image_height);
-                window.set_default_size(base_width, base_height);
-                window.queue_resize();
-            }
+        if background_mode {
+            start_background_gradient_preview_loading();
         }
     })
 }

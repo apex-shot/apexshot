@@ -1163,13 +1163,35 @@ pub fn install_editor_css() {
                 background-color: transparent;
             }
 
+            .editor-right-inspector {
+                min-width: 280px;
+                background: rgba(20, 20, 20, 0.94);
+                border-left: 1px solid rgba(255,255,255,0.08);
+                padding: 16px;
+            }
+
+            .editor-inspector-title {
+                color: #f5f5f7;
+                font-size: 14px;
+                font-weight: 700;
+            }
+
+            .editor-inspector-placeholder-shell {
+                padding: 2px 0;
+            }
+
+            .editor-inspector-placeholder {
+                opacity: 0.7;
+                color: rgba(241, 241, 243, 0.78);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
-                padding: 18px 16px;
-                background: linear-gradient(to bottom,
-                    rgba(17, 17, 20, 0.96),
-                    rgba(12, 12, 15, 0.96));
-                border-right: 1px solid rgba(255, 255, 255, 0.08);
+                padding: 0;
+                background: transparent;
+                border-right: none;
             }
 
             .editor-background-sidebar-title {
@@ -2055,6 +2077,7 @@ pub fn recommended_window_size_with_extra_width(
     )
 }
 
+#[allow(dead_code)]
 pub fn recommended_window_size(image_width: i32, image_height: i32) -> (i32, i32) {
     recommended_window_size_with_extra_width(image_width, image_height, 0)
 }
