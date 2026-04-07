@@ -1,4 +1,5 @@
 use gtk4::{prelude::*, Box as GtkBox, DrawingArea, Orientation, Overlay, ScrolledWindow};
+use gtk4::cairo::Antialias;
 use image::RgbaImage;
 use std::f64::consts::TAU;
 
@@ -200,6 +201,9 @@ pub(super) fn draw_eyedropper_loupe(
     context.arc(center_x, center_y, radius, 0.0, TAU);
     let _ = context.clip();
 
+    // Disable antialiasing for crisp pixel edges
+    context.set_antialias(Antialias::None);
+
     context.set_source_rgba(0.06, 0.07, 0.09, 0.94);
     let _ = context.paint();
 
@@ -222,41 +226,32 @@ pub(super) fn draw_eyedropper_loupe(
             let dest_x = grid_start_x + col as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
             let dest_y = grid_start_y + row as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
             context.rectangle(
-                dest_x.floor(),
-                dest_y.floor(),
-                EYEDROPPER_LOUPE_PIXEL_SIZE + 0.5,
-                EYEDROPPER_LOUPE_PIXEL_SIZE + 0.5,
+                dest_x,
+                dest_y,
+                EYEDROPPER_LOUPE_PIXEL_SIZE,
+                EYEDROPPER_LOUPE_PIXEL_SIZE,
             );
             let _ = context.fill();
         }
     }
 
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.24);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.28);
     context.set_line_width(1.0);
     for line in 0..=grid_size {
-        let x = grid_start_x + line as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE + 0.5;
+        let x = grid_start_x + line as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
         context.move_to(x, grid_start_y);
         context.line_to(x, grid_start_y + grid_extent);
 
-        let y = grid_start_y + line as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE + 0.5;
+        let y = grid_start_y + line as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
         context.move_to(grid_start_x, y);
         context.line_to(grid_start_x + grid_extent, y);
     }
     let _ = context.stroke();
 
-    let _ = context.restore();
-
-    context.arc(center_x, center_y, radius - 0.5, 0.0, TAU);
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.98);
-    context.set_line_width(2.6);
-    let _ = context.stroke_preserve();
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.74);
-    context.set_line_width(1.2);
-    let _ = context.stroke();
-
-    let target_x = grid_start_x + half_grid as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE + 0.5;
-    let target_y = grid_start_y + half_grid as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE + 0.5;
-    let target_size = EYEDROPPER_LOUPE_PIXEL_SIZE - 1.0;
+    // Draw target pixel highlight (center pixel)
+    let target_x = grid_start_x + half_grid as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+    let target_y = grid_start_y + half_grid as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+    let target_size = EYEDROPPER_LOUPE_PIXEL_SIZE;
 
     context.rectangle(target_x, target_y, target_size, target_size);
     context.set_source_rgba(0.0, 0.0, 0.0, 0.96);
@@ -264,5 +259,16 @@ pub(super) fn draw_eyedropper_loupe(
     let _ = context.stroke_preserve();
     context.set_source_rgba(1.0, 1.0, 1.0, 0.97);
     context.set_line_width(1.0);
+    let _ = context.stroke();
+
+    let _ = context.restore();
+
+    // Draw outer ring with antialiasing for smoothness
+    context.arc(center_x, center_y, radius - 0.5, 0.0, TAU);
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.98);
+    context.set_line_width(2.6);
+    let _ = context.stroke_preserve();
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.74);
+    context.set_line_width(1.2);
     let _ = context.stroke();
 }

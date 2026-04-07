@@ -296,8 +296,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-crop-type-button > arrow {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 opacity: 0;
                 color: transparent;
             }
@@ -312,8 +312,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-crop-type-button image {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 opacity: 0;
             }
 
@@ -457,6 +457,28 @@ pub fn install_editor_css() {
                 margin: 0 2px;
             }
 
+            .editor-toolbar-color-status {
+                min-height: 34px;
+                padding: 0;
+                border: none;
+                background: transparent;
+            }
+
+            .editor-toolbar-color-status-swatch {
+                min-width: 30px;
+                min-height: 30px;
+                border-radius: 6px;
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                background: #121212;
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            }
+
+            .editor-toolbar-color-status-label {
+                color: rgba(245, 245, 247, 0.92);
+                font-size: 14px;
+                font-weight: 700;
+            }
+
             .editor-color-trigger-shell {
                 min-height: 30px;
                 border-radius: 999px;
@@ -490,8 +512,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-color-trigger-menu-button {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 padding: 0;
                 margin: 0;
                 border: none;
@@ -502,8 +524,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-color-trigger-menu-button > arrow {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 opacity: 0;
                 color: transparent;
             }
@@ -518,8 +540,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-color-trigger-menu-button image {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 opacity: 0;
             }
 
@@ -685,12 +707,12 @@ pub fn install_editor_css() {
             }
 
             button.editor-custom-color-remove-button {
-                min-width: 9px;
-                min-height: 9px;
+                min-width: 12px;
+                min-height: 12px;
                 border-radius: 999px;
                 padding: 0;
-                border: 1px solid rgba(255, 255, 255, 0.24);
-                background: #0f0f12;
+                border: 1px solid rgba(232, 17, 35, 0.50);
+                background: #e81123;
                 color: #ffffff;
                 outline: none;
                 box-shadow: 0 1px 3px rgba(0,0,0,0.35);
@@ -701,8 +723,8 @@ pub fn install_editor_css() {
             button.editor-custom-color-remove-button:active,
             button.editor-custom-color-remove-button:focus,
             button.editor-custom-color-remove-button:focus-visible {
-                border: 1px solid rgba(255, 255, 255, 0.34);
-                background: #1a1a20;
+                border: 1px solid rgba(232, 17, 35, 0.70);
+                background: #f02a3b;
                 color: #ffffff;
                 outline: none;
                 box-shadow: 0 2px 5px rgba(0,0,0,0.42);
@@ -712,6 +734,7 @@ pub fn install_editor_css() {
             button.editor-custom-color-remove-button image.editor-custom-color-remove-icon {
                 color: #ffffff;
                 opacity: 0.96;
+                -gtk-icon-size: 10px;
             }
 
             .editor-color-dropdown-footer {
@@ -929,11 +952,11 @@ pub fn install_editor_css() {
                 min-width: 220px;
                 min-height: 36px;
                 border-radius: 8px;
-                background: #326ce8;
+                background: #c97800;
                 color: #ffffff;
                 font-weight: 700;
                 font-size: 12px;
-                border: 1px solid rgba(137, 178, 255, 0.55);
+                border: 1px solid rgba(255, 170, 51, 0.5);
                 padding: 0 16px;
                 outline: none;
                 transition: all 150ms ease;
@@ -943,8 +966,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-add-to-colors-button:hover {
-                background: #3a79ff;
-                border-color: rgba(173, 203, 255, 0.66);
+                background: #db8500;
+                border-color: rgba(255, 193, 92, 0.66);
                 box-shadow:
                     0 4px 10px rgba(0, 0, 0, 0.35),
                     inset 0 1px 0 rgba(255, 255, 255, 0.2);
@@ -952,7 +975,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-add-to-colors-button:active {
-                background: #2c5ec9;
+                background: #b36b00;
                 box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
                 transform: translateY(0);
             }
@@ -1123,13 +1146,60 @@ pub fn install_editor_css() {
                 background-color: transparent;
             }
 
+            .editor-right-inspector {
+                min-width: 280px;
+                background: rgba(20, 20, 20, 0.94);
+                border-left: 1px solid rgba(255,255,255,0.08);
+                padding: 16px;
+            }
+
+            .editor-inspector-title {
+                color: #f5f5f7;
+                font-size: 14px;
+                font-weight: 700;
+            }
+
+            .editor-inspector-tabs {
+                margin-bottom: 12px;
+            }
+
+            button.editor-inspector-tab-button {
+                min-height: 20px;
+                padding: 0;
+                border-radius: 0;
+                border: none;
+                background: transparent;
+                color: rgba(241, 241, 243, 0.82);
+                box-shadow: none;
+            }
+
+            button.editor-inspector-tab-button:hover {
+                background: transparent;
+                color: #ffffff;
+            }
+
+            button.editor-inspector-tab-button.active-inspector-tab {
+                background: transparent;
+                border: none;
+                color: #ff9900;
+            }
+
+            .editor-inspector-placeholder-shell {
+                padding: 2px 0;
+            }
+
+            .editor-inspector-placeholder {
+                opacity: 0.7;
+                color: rgba(241, 241, 243, 0.78);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
-                padding: 18px 16px;
-                background: linear-gradient(to bottom,
-                    rgba(17, 17, 20, 0.96),
-                    rgba(12, 12, 15, 0.96));
-                border-right: 1px solid rgba(255, 255, 255, 0.08);
+                padding: 0;
+                background: transparent;
+                border-right: none;
             }
 
             .editor-background-sidebar-title {
@@ -1146,6 +1216,54 @@ pub fn install_editor_css() {
 
             .editor-background-sidebar-options {
                 margin-top: 4px;
+            }
+
+            .editor-colors-panel {
+                min-width: 210px;
+                padding: 2px 0;
+            }
+
+            .editor-colors-panel-helper {
+                color: rgba(241, 241, 243, 0.72);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+
+            .editor-colors-panel-section {
+                margin-top: 2px;
+            }
+
+            .editor-colors-panel-current-row {
+                min-height: 32px;
+            }
+
+            .editor-colors-panel-current-preview {
+                min-width: 28px;
+                min-height: 28px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                background: rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-colors-panel-current-value {
+                color: rgba(245, 245, 247, 0.92);
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-colors-panel-action-button {
+                min-height: 34px;
+                padding: 0 12px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background: rgba(255, 255, 255, 0.03);
+                color: rgba(245, 245, 247, 0.9);
+                box-shadow: none;
+            }
+
+            .editor-colors-panel-action-button:hover {
+                background: rgba(255, 255, 255, 0.07);
+                color: #ffffff;
             }
 
             .editor-background-gradients-section {
@@ -1282,7 +1400,7 @@ pub fn install_editor_css() {
             }
 
             .editor-background-compact-slider {
-                min-width: 0;
+                min-width: 32px;
             }
 
             .editor-background-compact-control-spacer {
@@ -1299,27 +1417,27 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-alignment-button {
-                min-height: 17px;
-                min-width: 26px;
-                border-radius: 6px;
+                min-height: 24px;
+                min-width: 34px;
+                border-radius: 8px;
                 border: 2px solid rgba(255, 255, 255, 0.3);
                 padding: 0;
                 background: rgba(255, 255, 255, 0.03);
             }
 
             .editor-background-alignment-icon {
-                min-width: 26px;
-                min-height: 17px;
+                min-width: 34px;
+                min-height: 24px;
                 border: none;
-                border-radius: 3px;
+                border-radius: 5px;
             }
 
             .editor-background-alignment-icon-frame {
-                min-width: 6px;
-                min-height: 4px;
+                min-width: 20px;
+                min-height: 20px;
                 background: rgba(241, 241, 243, 0.88);
-                border-radius: 1px;
-                margin: 2px;
+                border-radius: 2px;
+                margin: 3px;
                 border: none;
             }
 
@@ -1339,7 +1457,7 @@ pub fn install_editor_css() {
 
             checkbutton.editor-background-checkbox {
                 color: rgba(241, 241, 243, 0.88);
-                min-width: 0;
+                min-width: 20px;
                 padding: 0;
             }
 
@@ -1351,7 +1469,7 @@ pub fn install_editor_css() {
 
             checkbutton.editor-background-checkbox label {
                 color: rgba(241, 241, 243, 0.88);
-                min-width: 0;
+                min-width: 20px;
             }
 
             .editor-background-ratio-dropdown-row {
@@ -1360,13 +1478,13 @@ pub fn install_editor_css() {
 
             dropdown.editor-background-ratio-dropdown {
                 min-height: 32px;
-                min-width: 0;
+                min-width: 20px;
                 padding: 0;
             }
 
             dropdown.editor-background-ratio-dropdown > button {
                 min-height: 32px;
-                min-width: 0;
+                min-width: 20px;
                 border-radius: 8px;
                 padding: 0 6px;
                 background: rgba(255, 255, 255, 0.03);
@@ -1420,7 +1538,7 @@ pub fn install_editor_css() {
 
             button.editor-background-alignment-button.active-alignment-option {
                 background: rgba(255, 255, 255, 0.15);
-                border: 1px solid #3584e4;
+                border: 1px solid #ff9900;
                 border-radius: 6px;
             }
 
@@ -1942,6 +2060,7 @@ pub fn recommended_window_size_with_extra_width(
     )
 }
 
+#[allow(dead_code)]
 pub fn recommended_window_size(image_width: i32, image_height: i32) -> (i32, i32) {
     recommended_window_size_with_extra_width(image_width, image_height, 0)
 }
@@ -2035,6 +2154,65 @@ mod tests {
             !production_source.contains(".editor-background-padding-slider > contents")
                 && !production_source.contains(".editor-background-compact-slider > contents"),
             "editor background slider CSS still overrides internal GTK contents nodes"
+        );
+    }
+
+    #[test]
+    fn editor_background_alignment_css_uses_larger_button_and_marker_sizes() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("min-height: 24px;")
+                && production_source.contains("min-width: 34px;")
+                && production_source.contains("min-width: 12px;")
+                && production_source.contains("min-height: 9px;"),
+            "alignment CSS should keep the larger button shell and marker sizes",
+        );
+    }
+
+    #[test]
+    fn editor_background_alignment_active_state_uses_orange_accent() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-background-alignment-button.active-alignment-option {\n                background: rgba(255, 255, 255, 0.15);\n                border: 1px solid #ff9900;"),
+            "alignment selected state should use the orange editor accent",
+        );
+    }
+
+    #[test]
+    fn inspector_tabs_use_text_only_active_state_and_colors_panel_matches_background_width() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-inspector-tab-button {\n                min-height: 20px;\n                padding: 0;\n                border-radius: 0;\n                border: none;\n                background: transparent;")
+                && production_source.contains("button.editor-inspector-tab-button.active-inspector-tab {\n                background: transparent;\n                border: none;\n                color: #ff9900;")
+                && production_source.contains(".editor-colors-panel {\n                min-width: 210px;"),
+            "inspector tabs should be text-only with orange active text and colors panel should match background width",
+        );
+    }
+
+    #[test]
+    fn add_to_colors_button_uses_orange_editor_accent() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-add-to-colors-button {\n                min-width: 220px;\n                min-height: 36px;\n                border-radius: 8px;\n                background: #c97800;")
+                && production_source.contains("button.editor-add-to-colors-button:hover {\n                background: #db8500;")
+                && production_source.contains("button.editor-add-to-colors-button:active {\n                background: #b36b00;"),
+            "Add to colors button should use the orange editor accent states",
+        );
+    }
+
+    #[test]
+    fn toolbar_color_status_chip_has_swatch_and_hex_styles() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains(".editor-toolbar-color-status {\n                min-height: 34px;\n                padding: 0;\n                border: none;\n                background: transparent;")
+                && production_source.contains(".editor-toolbar-color-status-swatch {\n                min-width: 30px;\n                min-height: 30px;\n                border-radius: 6px;")
+                && production_source.contains(".editor-toolbar-color-status-label {\n                color: rgba(245, 245, 247, 0.92);\n                font-size: 14px;"),
+            "Toolbar color status chip should have dedicated swatch and label styles",
         );
     }
 

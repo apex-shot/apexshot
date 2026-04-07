@@ -42,6 +42,9 @@ pub struct ColorPickerParts {
     pub sync_picker_from_color: Rc<dyn Fn(DrawColor)>,
     pub apply_picker_color: Rc<dyn Fn(DrawColor)>,
     pub set_picker_panel_visibility: Rc<dyn Fn(bool)>,
+    pub custom_slot_colors: Rc<RefCell<Vec<Option<DrawColor>>>>,
+    pub refresh_custom_color_slots: Rc<dyn Fn()>,
+    pub register_external_sync: Rc<dyn Fn(Rc<dyn Fn()>)>,
 }
 
 pub fn build_color_picker(
@@ -296,6 +299,7 @@ pub fn build_color_picker(
         DRAW_COLORS[DEFAULT_COLOR_INDEX],
     )));
     let picker_update_in_progress = Rc::new(Cell::new(false));
+    let external_sync = Rc::new(RefCell::new(None::<Rc<dyn Fn()>>));
 
     // Gradient area
     let gradient_area = DrawingArea::new();
@@ -642,6 +646,7 @@ pub fn build_color_picker(
         let color_picker_dot_picker = color_picker_dot.clone();
         let color_class_names_picker = color_class_names.clone();
         let drawing_area_picker = drawing_area.clone();
+        let external_sync = external_sync.clone();
         move |color| {
             let has_active_text = {
                 let mut st = state_picker_apply.lock().unwrap();
@@ -678,6 +683,9 @@ pub fn build_color_picker(
                 }
             }
             canvas_queue_draw_signal();
+            if let Some(sync) = external_sync.borrow().as_ref() {
+                sync();
+            }
         }
     });
 
@@ -934,6 +942,7 @@ pub fn build_color_picker(
     let add_color_to_custom_slots: Rc<dyn Fn(super::super::types::DrawColor)> = Rc::new({
         let custom_slot_colors = custom_slot_colors.clone();
         let refresh_custom_color_slots = refresh_custom_color_slots.clone();
+        let external_sync = external_sync.clone();
         move |color_to_add| {
             let mut custom_colors = custom_slot_colors.borrow_mut();
             let Some(slot_index) = custom_colors.iter().position(Option::is_none) else {
@@ -944,6 +953,9 @@ pub fn build_color_picker(
             save_persisted_custom_slot_colors(custom_colors.as_slice());
             drop(custom_colors);
             refresh_custom_color_slots();
+            if let Some(sync) = external_sync.borrow().as_ref() {
+                sync();
+            }
         }
     });
 
@@ -994,6 +1006,7 @@ pub fn build_color_picker(
         let custom_slot_colors_drop = custom_slot_colors.clone();
         let refresh_custom_color_slots_drop = refresh_custom_color_slots.clone();
         let suppress_custom_slot_click_once_drop = suppress_custom_slot_click_once.clone();
+        let external_sync_drop = external_sync.clone();
         drop_target.connect_drop(move |_, value, _, _| {
             let Ok(from_index_raw) = value.get::<u32>() else {
                 return false;
@@ -1012,6 +1025,9 @@ pub fn build_color_picker(
                 refresh_custom_color_slots_drop();
                 save_persisted_custom_slot_colors(custom_slot_colors_drop.borrow().as_slice());
                 suppress_custom_slot_click_once_drop.set(true);
+                if let Some(sync) = external_sync_drop.borrow().as_ref() {
+                    sync();
+                }
             }
 
             moved
@@ -1046,6 +1062,7 @@ pub fn build_color_picker(
     for (index, remove_button) in custom_slot_remove_buttons.iter().enumerate() {
         let custom_slot_colors_remove = custom_slot_colors.clone();
         let refresh_custom_color_slots_remove = refresh_custom_color_slots.clone();
+        let external_sync_remove = external_sync.clone();
         remove_button.connect_clicked(move |_| {
             let mut custom_colors = custom_slot_colors_remove.borrow_mut();
             if custom_colors[index].is_none() {
@@ -1056,8 +1073,18 @@ pub fn build_color_picker(
             save_persisted_custom_slot_colors(custom_colors.as_slice());
             drop(custom_colors);
             refresh_custom_color_slots_remove();
+            if let Some(sync) = external_sync_remove.borrow().as_ref() {
+                sync();
+            }
         });
     }
+
+    let register_external_sync: Rc<dyn Fn(Rc<dyn Fn()>)> = Rc::new({
+        let external_sync = external_sync.clone();
+        move |sync| {
+            *external_sync.borrow_mut() = Some(sync);
+        }
+    });
 
     ColorPickerParts {
         trigger_host: color_picker_trigger_host,
@@ -1070,6 +1097,9 @@ pub fn build_color_picker(
         sync_picker_from_color,
         apply_picker_color: apply_picker_color_to_editor,
         set_picker_panel_visibility,
+        custom_slot_colors,
+        refresh_custom_color_slots,
+        register_external_sync,
     }
 }
 
@@ -1107,6 +1137,27 @@ pub fn set_color_picker_trigger_dot_state(
     }
 }
 
+pub fn activate_eyedropper(
+    color_popover: &Popover,
+    state: Arc<Mutex<EditorState>>,
+    eyedropper_mode: Rc<Cell<bool>>,
+    eyedropper_point: Rc<RefCell<Option<Point>>>,
+    eyedropper_rendered: Rc<RefCell<Option<RgbaImage>>>,
+    canvas_eyedropper_ring: &DrawingArea,
+    drawing_area: &DrawingArea,
+    set_cursor_crosshair: Rc<dyn Fn()>,
+) {
+    color_popover.popdown();
+    eyedropper_mode.set(true);
+    *eyedropper_point.borrow_mut() = None;
+    *eyedropper_rendered.borrow_mut() = state.lock().unwrap().to_rendered_image().ok();
+    canvas_eyedropper_ring.set_visible(false);
+    canvas_eyedropper_ring.queue_draw();
+    set_cursor_crosshair();
+
+    drawing_area.queue_draw();
+}
+
 pub fn connect_eyedropper_activation(
     eyedropper_btn: &Button,
     color_popover: &Popover,
@@ -1120,18 +1171,17 @@ pub fn connect_eyedropper_activation(
 ) {
     let color_popover = color_popover.clone();
     let canvas_eyedropper_ring = canvas_eyedropper_ring.clone();
-    let drawing_area = drawing_area.downgrade();
+    let drawing_area = drawing_area.clone();
     eyedropper_btn.connect_clicked(move |_| {
-        color_popover.popdown();
-        eyedropper_mode.set(true);
-        *eyedropper_point.borrow_mut() = None;
-        *eyedropper_rendered.borrow_mut() = state.lock().unwrap().to_rendered_image().ok();
-        canvas_eyedropper_ring.set_visible(false);
-        canvas_eyedropper_ring.queue_draw();
-        set_cursor_crosshair();
-
-        if let Some(area) = drawing_area.upgrade() {
-            area.queue_draw();
-        }
+        activate_eyedropper(
+            &color_popover,
+            state.clone(),
+            eyedropper_mode.clone(),
+            eyedropper_point.clone(),
+            eyedropper_rendered.clone(),
+            &canvas_eyedropper_ring,
+            &drawing_area,
+            set_cursor_crosshair.clone(),
+        );
     });
 }

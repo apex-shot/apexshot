@@ -1,6 +1,6 @@
 use gtk4::{
-    prelude::*, ApplicationWindow, Box as GtkBox, Button, CenterBox, Entry, GestureClick, Image,
-    Label, MenuButton, Orientation, Overlay, Popover, Scale, Stack,
+    prelude::*, Box as GtkBox, Button, CenterBox, Entry, GestureClick, Image, Label,
+    MenuButton, Orientation, Overlay, Popover, Scale, Stack,
 };
 use std::rc::Rc;
 
@@ -8,12 +8,10 @@ use super::super::{
     pen_weight::PenWeight,
     types::{ArrowStyle, ObfuscateMethod, Tool},
     ui_support::{
-        arrow_style_toolbar_icon, icon_tool_button, recommended_window_size,
-        recommended_window_size_with_extra_width, tool_icon_widget, toolbar_icon_size,
+        arrow_style_toolbar_icon, icon_tool_button, tool_icon_widget, toolbar_icon_size,
         traffic_light_button,
     },
 };
-use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use super::icon_names;
 
 pub(super) struct ToolbarBaseParts {
@@ -73,6 +71,9 @@ pub(super) struct ToolbarRightParts {
 pub(super) struct ToolbarModeParts {
     pub root: GtkBox,
     pub toolbar_mode_stack: Stack,
+    pub color_status: GtkBox,
+    pub color_status_swatch: GtkBox,
+    pub color_status_label: Label,
     pub size_group: GtkBox,
     pub size_slider: gtk4::Scale,
     pub text_size_group: GtkBox,
@@ -578,11 +579,31 @@ pub(super) fn build_toolbar_mode_controls(
     highlighter_btn: &Button,
     sep_1: &GtkBox,
     sep_2: &GtkBox,
-    color_picker_trigger_host: &Overlay,
 ) -> ToolbarModeParts {
     let color_group = GtkBox::new(Orientation::Horizontal, 0);
     color_group.add_css_class("editor-color-group");
-    color_group.append(color_picker_trigger_host);
+
+    let color_status = GtkBox::new(Orientation::Horizontal, 8);
+    color_status.add_css_class("editor-toolbar-color-status");
+    color_status.set_valign(gtk4::Align::Center);
+
+    let color_status_swatch = GtkBox::new(Orientation::Horizontal, 0);
+    color_status_swatch.add_css_class("editor-toolbar-color-status-swatch");
+    color_status_swatch.set_widget_name("editor-toolbar-color-status-swatch");
+    color_status_swatch.set_size_request(30, 30);
+    color_status_swatch.set_halign(gtk4::Align::Center);
+    color_status_swatch.set_valign(gtk4::Align::Center);
+    color_status_swatch.set_hexpand(false);
+    color_status_swatch.set_vexpand(false);
+
+    let color_status_label = Label::new(Some("#121212"));
+    color_status_label.add_css_class("editor-toolbar-color-status-label");
+    color_status_label.set_xalign(0.0);
+    color_status_label.set_valign(gtk4::Align::Center);
+
+    color_status.append(&color_status_swatch);
+    color_status.append(&color_status_label);
+    color_group.append(&color_status);
 
     let size_slider = Scale::with_range(Orientation::Horizontal, 1.0, 24.0, 1.0);
     size_slider.add_css_class("editor-toolbar-size-slider");
@@ -990,11 +1011,12 @@ pub(super) fn build_toolbar_mode_controls(
     root.append(&toolbar_mode_stack);
     root.append(&text_size_group);
     root.append(&font_family_group);
-    root.append(&color_group);
-
     ToolbarModeParts {
         root,
         toolbar_mode_stack,
+        color_status,
+        color_status_swatch,
+        color_status_label,
         size_group,
         size_slider,
         text_size_group,
@@ -1037,6 +1059,7 @@ pub(super) fn build_toolbar_mode_controls(
 }
 
 pub(super) fn build_toolbar_right_controls(
+    color_status: &GtkBox,
     undo_icon_name: &str,
     redo_icon_name: &str,
     delete_icon_name: &str,
@@ -1057,6 +1080,7 @@ pub(super) fn build_toolbar_right_controls(
     let right_tools = GtkBox::new(Orientation::Horizontal, 12);
     right_tools.add_css_class("editor-toolbar-right-tools");
     right_tools.append(&history_group);
+    right_tools.append(color_status);
 
     let save_btn = Button::with_label("Done");
     save_btn.set_has_frame(false);
@@ -1095,7 +1119,12 @@ pub(super) fn build_toolbar_right_controls(
 
 pub(super) fn build_toolbar_tool_updater(
     toolbar_mode_stack: &Stack,
-    background_sidebar: &GtkBox,
+    background_inspector: &GtkBox,
+    colors_inspector: &GtkBox,
+    placeholder_inspector: &GtkBox,
+    inspector_tabs: &GtkBox,
+    background_tab_btn: &Button,
+    colors_tab_btn: &Button,
     text_size_group: &GtkBox,
     font_family_group: &GtkBox,
     obfuscate_method_group: &GtkBox,
@@ -1105,12 +1134,14 @@ pub(super) fn build_toolbar_tool_updater(
     stroke_size_group: &GtkBox,
     canvas_scroller: &gtk4::ScrolledWindow,
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
-    window: &ApplicationWindow,
-    image_width: i32,
-    image_height: i32,
 ) -> Rc<dyn Fn(Tool)> {
     let toolbar_mode_stack = toolbar_mode_stack.clone();
-    let background_sidebar = background_sidebar.clone();
+    let background_inspector = background_inspector.clone();
+    let colors_inspector = colors_inspector.clone();
+    let placeholder_inspector = placeholder_inspector.clone();
+    let inspector_tabs = inspector_tabs.clone();
+    let background_tab_btn = background_tab_btn.clone();
+    let colors_tab_btn = colors_tab_btn.clone();
     let text_size_group = text_size_group.clone();
     let font_family_group = font_family_group.clone();
     let obfuscate_method_group = obfuscate_method_group.clone();
@@ -1119,7 +1150,6 @@ pub(super) fn build_toolbar_tool_updater(
     let arrow_style_group = arrow_style_group.clone();
     let stroke_size_group = stroke_size_group.clone();
     let canvas_scroller = canvas_scroller.clone();
-    let window = window.downgrade();
 
     Rc::new(move |tool| {
         toolbar_mode_stack.set_visible_child_name(if matches!(tool, Tool::Crop) {
@@ -1147,7 +1177,6 @@ pub(super) fn build_toolbar_tool_updater(
         arrow_style_group.set_visible(is_arrow_tool);
         stroke_size_group.set_visible(is_arrow_tool || is_line_tool);
 
-        // Only allow vertical scrolling in Crop mode
         if matches!(tool, Tool::Crop) {
             canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
         } else {
@@ -1155,26 +1184,121 @@ pub(super) fn build_toolbar_tool_updater(
         }
 
         let background_mode = matches!(tool, Tool::Background);
-        background_sidebar.set_visible(background_mode);
+        let colors_mode = matches!(
+            tool,
+            Tool::Background
+                | Tool::Pen
+                | Tool::Arrow
+                | Tool::Line
+                | Tool::Box
+                | Tool::Circle
+                | Tool::Text
+                | Tool::Number
+                | Tool::Highlighter
+                | Tool::Obfuscate
+                | Tool::Focus
+        );
+        background_tab_btn.set_label("Background");
+        colors_tab_btn.set_label("Colors");
+        inspector_tabs.set_visible(background_mode || colors_mode);
+        background_tab_btn.set_visible(background_mode);
+        colors_tab_btn.set_visible(colors_mode);
 
-        if let Some(window) = window.upgrade() {
-            if background_mode {
-                start_background_gradient_preview_loading();
-                let (target_width, target_height) = recommended_window_size_with_extra_width(
-                    image_width,
-                    image_height,
-                    BACKGROUND_SIDEBAR_WIDTH,
-                );
-                window.set_default_size(
-                    window.allocated_width().max(target_width),
-                    window.allocated_height().max(target_height),
-                );
-            } else {
-                // Return window to standard recommended size when sidebar is hidden
-                let (base_width, base_height) = recommended_window_size(image_width, image_height);
-                window.set_default_size(base_width, base_height);
-                window.queue_resize();
-            }
+        background_inspector.set_visible(false);
+        colors_inspector.set_visible(colors_mode);
+        placeholder_inspector.set_visible(!background_mode && !colors_mode);
+
+        if background_mode || colors_mode {
+            colors_inspector.set_visible(true);
+            colors_tab_btn.add_css_class("active-inspector-tab");
+            background_tab_btn.remove_css_class("active-inspector-tab");
+        } else {
+            background_tab_btn.remove_css_class("active-inspector-tab");
+            colors_tab_btn.remove_css_class("active-inspector-tab");
+        }
+
+        if background_mode {
+            start_background_gradient_preview_loading();
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn toolbar_uses_read_only_color_status_chip_instead_of_picker_trigger() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("editor-toolbar-color-status")
+                && production_source.contains("editor-toolbar-color-status-swatch")
+                && production_source.contains("editor-toolbar-color-status-label")
+                && !production_source.contains("color_picker_trigger_host"),
+            "Toolbar should use a read-only color status chip instead of the picker trigger host",
+        );
+    }
+
+    #[test]
+    fn toolbar_color_status_swatch_is_fixed_to_square_allocation() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("color_status_swatch.set_size_request(30, 30);")
+                && production_source.contains("color_status_swatch.set_halign(gtk4::Align::Center);")
+                && production_source.contains("color_status_swatch.set_valign(gtk4::Align::Center);")
+                && production_source.contains("color_status_swatch.set_hexpand(false);")
+                && production_source.contains("color_status_swatch.set_vexpand(false);"),
+            "Toolbar color swatch should keep a fixed boxed allocation so the shape is not stretched",
+        );
+    }
+
+    #[test]
+    fn toolbar_color_status_label_is_center_aligned_with_swatch() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("color_status.set_valign(gtk4::Align::Center);")
+                && production_source.contains("color_status_label.set_valign(gtk4::Align::Center);"),
+            "Toolbar color status label should align vertically with the swatch",
+        );
+    }
+
+    #[test]
+    fn toolbar_places_color_status_before_done_button_in_right_controls() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("pub(super) fn build_toolbar_right_controls(\n    color_status: &GtkBox,")
+                && production_source.contains("right_tools.append(color_status);")
+                && production_source.contains("root.append(&save_btn);"),
+            "Toolbar should place the color status in the right controls before the Done button",
+        );
+    }
+
+    #[test]
+    fn color_capable_tools_default_to_colors_inspector_surface() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("background_inspector.set_visible(false);")
+                && production_source.contains("colors_inspector.set_visible(colors_mode);")
+                && production_source.contains("Tool::Background")
+                && production_source.contains("Tool::Pen")
+                && production_source.contains("Tool::Focus"),
+            "Color-capable tools should switch the right inspector to the Colors surface",
+        );
+    }
+
+    #[test]
+    fn background_and_color_tools_route_into_shared_colors_inspector() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("Tool::Background")
+                && production_source.contains("Tool::Pen")
+                && production_source.contains("Tool::Highlighter")
+                && production_source.contains("\"Colors\""),
+            "Toolbar inspector routing should include Background and color-capable tools in the shared Colors flow",
+        );
+    }
 }
