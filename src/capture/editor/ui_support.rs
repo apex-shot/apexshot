@@ -1201,6 +1201,29 @@ pub fn install_editor_css() {
                 line-height: 1.45;
             }
 
+            .editor-inspector-section {
+                margin-bottom: 12px;
+            }
+
+            .editor-inspector-section-body {
+                background: #000000;
+                border: 1px solid rgba(255, 255, 255, 0.11);
+                border-radius: 6px;
+                overflow: hidden;
+            }
+
+            .editor-inspector-option-list {
+                background: transparent;
+            }
+
+            .editor-inspector-toggle-row {
+                padding: 10px 12px;
+            }
+
+            .editor-inspector-toggle-row checkbutton {
+                color: rgba(241, 241, 243, 0.9);
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
                 padding: 16px;

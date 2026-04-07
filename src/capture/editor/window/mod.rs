@@ -1,8 +1,8 @@
 use gdk4x11::X11Surface;
 use gtk4::gdk;
 use gtk4::{
-    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation,
-    Popover, Stack,
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry,
+    Image, Label, Orientation, Popover, Stack,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -24,7 +24,7 @@ use super::render::{
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
 use super::types::{
-    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
+    AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
     EditorError, Point, Rect, Tool, ViewTransform,
 };
 
@@ -53,8 +53,9 @@ impl AnnotateRuntimeConfig {
     }
 }
 use super::ui_support::{
-    install_editor_css, prefers_dark_glass_theme, prefers_reduced_transparency,
-    recommended_window_size_with_extra_width,
+    arrow_style_toolbar_icon, install_editor_css, prefers_dark_glass_theme,
+    prefers_reduced_transparency, recommended_window_size_with_extra_width, tool_icon_widget,
+    toolbar_icon_size,
 };
 
 pub mod background_panel;
@@ -354,10 +355,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         size_slider,
         text_size_group,
         text_size_label,
-        text_size_list,
+        text_size_list: _toolbar_text_size_list,
         font_family_group,
         font_family_label,
-        font_family_list,
+        font_family_list: _toolbar_font_family_list,
         crop_type_label,
         crop_type_popover,
         crop_type_list,
@@ -372,18 +373,18 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         pen_weight_list,
         pen_weight_group,
         number_options_popover: _,
-        number_options_list,
-        number_start_entry,
-        number_inc_btn,
-        number_dec_btn,
+        number_options_list: _toolbar_number_options_list,
+        number_start_entry: _toolbar_number_start_entry,
+        number_inc_btn: _toolbar_number_inc_btn,
+        number_dec_btn: _toolbar_number_dec_btn,
         number_size_button,
         number_size_popover: _,
-        number_size_list,
+        number_size_list: _toolbar_number_size_list,
         number_options_group,
         arrow_style_group,
         arrow_style_button,
         arrow_style_popover: _,
-        arrow_style_list,
+        arrow_style_list: _toolbar_arrow_style_list,
         stroke_size_group,
         stroke_size_button,
         stroke_size_popover: _,
@@ -420,6 +421,124 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let save_btn = toolbar_right_parts.save_btn;
     let apply_crop_btn = toolbar_right_parts.apply_crop_btn;
     toolbar.set_end_widget(Some(&toolbar_right_parts.root));
+
+    let arrow_style_list = GtkBox::new(Orientation::Vertical, 0);
+    for style in ArrowStyle::ALL {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let style_icon = arrow_style_toolbar_icon(style);
+        let icon = tool_icon_widget(
+            style_icon.clone(),
+            toolbar_icon_size(&style_icon),
+        );
+        let label_widget = Label::new(Some(style.display_name()));
+
+        btn_box.append(&icon);
+        btn_box.append(&label_widget);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .child(&btn_box)
+            .build();
+
+        arrow_style_list.append(&btn);
+    }
+
+    let arrow_thickness_list = GtkBox::new(Orientation::Vertical, 0);
+    for (label, _size, weight) in [
+        ("Thin", 2.0_f64, super::pen_weight::PenWeight::Small),
+        ("Medium", 4.0_f64, super::pen_weight::PenWeight::Medium),
+        ("Thick", 7.0_f64, super::pen_weight::PenWeight::Large),
+        ("Very Thick", 12.0_f64, super::pen_weight::PenWeight::ExtraLarge),
+    ] {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let icon = Image::from_icon_name(weight.icon_name());
+        icon.set_pixel_size(weight.icon_pixel_size());
+        let label_widget = Label::new(Some(label));
+
+        btn_box.append(&icon);
+        btn_box.append(&label_widget);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes(["editor-popover-list-item", "flat"])
+            .child(&btn_box)
+            .build();
+
+        arrow_thickness_list.append(&btn);
+    }
+
+    let arrow_behavior_group = GtkBox::new(Orientation::Vertical, 0);
+    arrow_behavior_group.add_css_class("editor-inspector-toggle-row");
+    let inverse_direction_toggle = CheckButton::with_label("Reverse direction");
+    arrow_behavior_group.append(&inverse_direction_toggle);
+
+    let text_size_list = GtkBox::new(Orientation::Vertical, 0);
+    let font_family_list = GtkBox::new(Orientation::Vertical, 0);
+
+    let number_options_list = GtkBox::new(Orientation::Vertical, 4);
+    number_options_list.set_margin_start(4);
+    number_options_list.set_margin_end(4);
+    number_options_list.set_margin_top(4);
+    number_options_list.set_margin_bottom(4);
+    for style in super::numbering_style::NumberingStyle::ALL {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        let check_icon = Image::from_icon_name(icon_names::SELECT);
+        check_icon.set_pixel_size(12);
+        check_icon.set_visible(style == super::numbering_style::NumberingStyle::default());
+        check_icon.add_css_class("editor-number-style-check");
+
+        let label = Label::new(Some(style.label()));
+        label.set_hexpand(true);
+        label.set_halign(gtk4::Align::Start);
+
+        btn_box.append(&check_icon);
+        btn_box.append(&label);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-number-style-option",
+            ])
+            .child(&btn_box)
+            .build();
+        number_options_list.append(&btn);
+    }
+
+    let number_start_entry = Entry::new();
+    number_start_entry.set_width_chars(5);
+    number_start_entry.set_max_width_chars(5);
+    number_start_entry.set_text("1");
+    number_start_entry.set_editable(false);
+    number_start_entry.add_css_class("editor-number-start-entry");
+    let number_inc_btn = Button::with_label("+");
+    let number_dec_btn = Button::with_label("-");
+
+    let number_size_list = GtkBox::new(Orientation::Vertical, 0);
+    for size in super::numbering_style::NumberSize::ALL {
+        let btn = Button::builder()
+            .label(size.label())
+            .has_frame(false)
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-number-size-option",
+            ])
+            .build();
+        number_size_list.append(&btn);
+    }
 
     let footer_parts = footer::build_footer(
         icon_names::VIEW_PIN,
@@ -762,6 +881,105 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     placeholder_inspector.append(&placeholder_title);
     placeholder_inspector.append(&placeholder);
 
+    if let Some(parent) = text_size_list.parent() {
+        if let Ok(popover) = parent.downcast::<Popover>() {
+            popover.set_child(Option::<&gtk4::Widget>::None);
+        }
+    }
+    if let Some(parent) = font_family_list.parent() {
+        if let Ok(popover) = parent.downcast::<Popover>() {
+            popover.set_child(Option::<&gtk4::Widget>::None);
+        }
+    }
+    if let Some(parent) = arrow_style_list.parent() {
+        if let Ok(popover) = parent.downcast::<Popover>() {
+            popover.set_child(Option::<&gtk4::Widget>::None);
+        }
+    }
+    if let Some(parent) = number_options_list.parent() {
+        if let Ok(popover) = parent.downcast::<Popover>() {
+            popover.set_child(Option::<&gtk4::Widget>::None);
+        }
+    }
+    if let Some(parent) = number_size_list.parent() {
+        if let Ok(popover) = parent.downcast::<Popover>() {
+            popover.set_child(Option::<&gtk4::Widget>::None);
+        }
+    }
+    if let Some(parent) = number_size_button.parent() {
+        if let Ok(container) = parent.downcast::<GtkBox>() {
+            container.remove(&number_size_button);
+        }
+    }
+
+    text_size_group.set_visible(false);
+    font_family_group.set_visible(false);
+    number_options_group.set_visible(false);
+    arrow_style_group.set_visible(false);
+
+    let build_tool_inspector = || {
+        let root = GtkBox::new(Orientation::Vertical, 12);
+        root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
+        root.set_hexpand(false);
+        root.set_halign(gtk4::Align::Fill);
+        root.set_vexpand(true);
+
+        let content = GtkBox::new(Orientation::Vertical, 10);
+        content.set_margin_top(4);
+        content.set_margin_bottom(12);
+        content.set_margin_start(12);
+        content.set_margin_end(12);
+        content.set_hexpand(false);
+        content.set_halign(gtk4::Align::Fill);
+
+        root.append(&content);
+        (root, content)
+    };
+
+    let append_inspector_section = |content: &GtkBox, title: &str, widget: &gtk4::Widget| {
+            let section = GtkBox::new(Orientation::Vertical, 8);
+            section.add_css_class("editor-inspector-section");
+
+            let section_title = Label::new(Some(title));
+            section_title.add_css_class("editor-background-section-title");
+            section_title.set_xalign(0.0);
+
+            let section_body = GtkBox::new(Orientation::Vertical, 0);
+            section_body.add_css_class("editor-inspector-section-body");
+            section_body.append(widget);
+
+            section.append(&section_title);
+            section.append(&section_body);
+            content.append(&section);
+        };
+
+    let (arrow_inspector, arrow_inspector_content) = build_tool_inspector();
+    arrow_style_list.add_css_class("editor-inspector-option-list");
+    arrow_thickness_list.add_css_class("editor-inspector-option-list");
+    append_inspector_section(&arrow_inspector_content, "Style", arrow_style_list.upcast_ref());
+    append_inspector_section(
+        &arrow_inspector_content,
+        "Thickness",
+        arrow_thickness_list.upcast_ref(),
+    );
+    append_inspector_section(
+        &arrow_inspector_content,
+        "Behavior",
+        arrow_behavior_group.upcast_ref(),
+    );
+
+    let (text_inspector, text_inspector_content) = build_tool_inspector();
+    text_size_list.add_css_class("editor-inspector-option-list");
+    font_family_list.add_css_class("editor-inspector-option-list");
+    append_inspector_section(&text_inspector_content, "Size", text_size_list.upcast_ref());
+    append_inspector_section(&text_inspector_content, "Font", font_family_list.upcast_ref());
+
+    let (number_inspector, number_inspector_content) = build_tool_inspector();
+    number_options_list.add_css_class("editor-inspector-option-list");
+    number_size_list.add_css_class("editor-inspector-option-list");
+    append_inspector_section(&number_inspector_content, "Style", number_options_list.upcast_ref());
+    append_inspector_section(&number_inspector_content, "Size", number_size_list.upcast_ref());
+
     let inspector_tabs = GtkBox::new(Orientation::Horizontal, 8);
     inspector_tabs.add_css_class("editor-inspector-tabs");
     inspector_tabs.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
@@ -793,9 +1011,15 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     inspector_stack.set_hexpand(false);
     inspector_stack.set_vexpand(true);
     background_inspector.set_visible(true);
+    arrow_inspector.set_visible(true);
+    text_inspector.set_visible(true);
+    number_inspector.set_visible(true);
     colors_inspector.set_visible(true);
     placeholder_inspector.set_visible(true);
     inspector_stack.add_named(&background_inspector, Some("background"));
+    inspector_stack.add_named(&arrow_inspector, Some("arrow"));
+    inspector_stack.add_named(&text_inspector, Some("text"));
+    inspector_stack.add_named(&number_inspector, Some("number"));
     inspector_stack.add_named(&colors_inspector, Some("colors"));
     inspector_stack.add_named(&placeholder_inspector, Some("placeholder"));
     inspector_stack.set_visible_child_name("placeholder");
@@ -809,7 +1033,16 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     *drawing_area_placeholder.borrow_mut() = Some(drawing_area.downgrade());
 
-    let update_toolbar_for_tool = toolbar::build_toolbar_tool_updater(
+    let sync_arrow_behavior_controls: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let inverse_direction_toggle = inverse_direction_toggle.clone();
+        move || {
+            let st = state.lock().unwrap();
+            inverse_direction_toggle.set_active(st.inverse_arrow_direction);
+        }
+    });
+
+    let update_toolbar_for_tool_base = toolbar::build_toolbar_tool_updater(
         &toolbar_mode_stack,
         &inspector_stack,
         &inspector_tabs,
@@ -825,13 +1058,23 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &canvas_scroller,
         start_background_gradient_preview_loading.clone(),
     );
+    let update_toolbar_for_tool: Rc<dyn Fn(Tool)> = Rc::new({
+        let update_toolbar_for_tool_base = update_toolbar_for_tool_base.clone();
+        let sync_arrow_behavior_controls = sync_arrow_behavior_controls.clone();
+        move |tool| {
+            update_toolbar_for_tool_base(tool);
+            if matches!(tool, Tool::Arrow) {
+                sync_arrow_behavior_controls();
+            }
+        }
+    });
 
     let set_active_inspector_surface: Rc<dyn Fn(&str)> = Rc::new({
         let inspector_stack = inspector_stack.clone();
         let background_tab_btn = background_tab_btn.clone();
         let colors_tab_btn = colors_tab_btn.clone();
         move |surface| {
-            let show_background = surface == "background";
+            let show_background = matches!(surface, "background" | "arrow" | "text" | "number");
             let show_colors = surface == "colors";
             inspector_stack.set_visible_child_name(surface);
             if show_background {
@@ -851,8 +1094,15 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let state = state.clone();
         let set_active_inspector_surface = set_active_inspector_surface.clone();
         move |_| {
-            if state.lock().unwrap().selected_tool == Tool::Background {
-                set_active_inspector_surface("background");
+            let surface = match state.lock().unwrap().selected_tool {
+                Tool::Background => Some("background"),
+                Tool::Arrow => Some("arrow"),
+                Tool::Text => Some("text"),
+                Tool::Number => Some("number"),
+                _ => None,
+            };
+            if let Some(surface) = surface {
+                set_active_inspector_surface(surface);
             }
         }
     });
@@ -2105,6 +2355,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         number_size_list: number_size_list.clone(),
         arrow_style_button: arrow_style_button.clone(),
         arrow_style_list: arrow_style_list.clone(),
+        arrow_thickness_list: arrow_thickness_list.clone(),
+        inverse_direction_toggle: inverse_direction_toggle.clone(),
         stroke_size_button: stroke_size_button.clone(),
         stroke_size_list: stroke_size_list.clone(),
     });
@@ -2178,9 +2430,15 @@ mod tests {
             production_source.contains("let inspector_stack = Stack::new();")
                 && production_source.contains("inspector_stack.set_hhomogeneous(true);")
                 && production_source.contains("background_inspector.set_visible(true);")
+                && production_source.contains("arrow_inspector.set_visible(true);")
+                && production_source.contains("text_inspector.set_visible(true);")
+                && production_source.contains("number_inspector.set_visible(true);")
                 && production_source.contains("colors_inspector.set_visible(true);")
                 && production_source.contains("placeholder_inspector.set_visible(true);")
                 && production_source.contains("inspector_stack.add_named(&background_inspector, Some(\"background\"));")
+                && production_source.contains("inspector_stack.add_named(&arrow_inspector, Some(\"arrow\"));")
+                && production_source.contains("inspector_stack.add_named(&text_inspector, Some(\"text\"));")
+                && production_source.contains("inspector_stack.add_named(&number_inspector, Some(\"number\"));")
                 && production_source.contains("inspector_stack.add_named(&colors_inspector, Some(\"colors\"));")
                 && production_source.contains("inspector_stack.add_named(&placeholder_inspector, Some(\"placeholder\"));")
                 && production_source.contains("inspector_stack.set_visible_child_name(surface);"),
@@ -2197,6 +2455,46 @@ mod tests {
                 && production_source.contains("update_toolbar_for_tool(initial_tool);")
                 && !production_source.contains("update_toolbar_for_tool(Tool::Arrow);"),
             "Editor startup should route the inspector from the selected startup tool instead of forcing Arrow",
+        );
+    }
+
+    #[test]
+    fn arrow_text_and_number_route_to_tool_specific_inspector_tabs() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("Tool::Arrow")
+                && production_source.contains("Tool::Text")
+                && production_source.contains("Tool::Number")
+                && production_source.contains("\"arrow\"")
+                && production_source.contains("\"text\"")
+                && production_source.contains("\"number\"")
+                && production_source.contains("\"colors\""),
+            "Inspector routing should expose Arrow, Text, and Number primary panels alongside the shared Colors surface",
+        );
+    }
+
+    #[test]
+    fn arrow_inspector_includes_style_thickness_and_behavior_sections() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let (arrow_inspector, arrow_inspector_content) = build_tool_inspector();")
+                && production_source.contains("\"Style\"")
+                && production_source.contains("\"Thickness\"")
+                && production_source.contains("\"Behavior\""),
+            "Arrow inspector should render Style, Thickness, and Behavior sections",
+        );
+    }
+
+    #[test]
+    fn arrow_inspector_reuses_existing_fixed_sidebar_width() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source.contains("ARROW_SIDEBAR_WIDTH"),
+            "Arrow inspector should reuse the shared fixed sidebar width instead of introducing a new width path",
         );
     }
 }
