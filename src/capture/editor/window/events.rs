@@ -86,6 +86,7 @@ pub(super) struct EventContext {
     pub delete_selected_btn: Button,
     pub save_btn: Button,
     pub eyedropper_mode: Rc<Cell<bool>>,
+    pub eyedropper_from_sidebar: Rc<Cell<bool>>,
     pub eyedropper_point: Rc<RefCell<Option<Point>>>,
     pub eyedropper_rendered: Rc<RefCell<Option<RgbaImage>>>,
     pub canvas_eyedropper_ring: DrawingArea,
@@ -95,6 +96,7 @@ pub(super) struct EventContext {
     pub sync_picker_for_active_tool: Rc<dyn Fn()>,
     pub sync_picker_from_color: Rc<dyn Fn(DrawColor)>,
     pub apply_picker_color_to_editor: Rc<dyn Fn(DrawColor)>,
+    pub add_color_to_custom_slots: Rc<dyn Fn(DrawColor)>,
     pub set_picker_panel_visibility: Rc<dyn Fn(bool)>,
     pub sync_size_control: Rc<dyn Fn()>,
     pub rebuild_effects_async: Rc<dyn Fn()>,
@@ -159,6 +161,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         delete_selected_btn,
         save_btn,
         eyedropper_mode,
+        eyedropper_from_sidebar,
         eyedropper_point,
         eyedropper_rendered,
         canvas_eyedropper_ring,
@@ -168,6 +171,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         sync_picker_for_active_tool,
         sync_picker_from_color,
         apply_picker_color_to_editor,
+        add_color_to_custom_slots,
         set_picker_panel_visibility,
         sync_size_control,
         rebuild_effects_async,
@@ -1882,6 +1886,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let color_picker_dot_click = color_picker_dot.clone();
     let color_class_names_click = color_class_names.clone();
     let eyedropper_mode_click = eyedropper_mode.clone();
+    let eyedropper_from_sidebar_click = eyedropper_from_sidebar.clone();
     let eyedropper_point_click = eyedropper_point.clone();
     let eyedropper_rendered_click = eyedropper_rendered.clone();
     let color_popover_canvas_click = color_popover.clone();
@@ -1889,6 +1894,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let canvas_eyedropper_ring_click = canvas_eyedropper_ring.clone();
     let apply_picker_color_to_editor_canvas_click = apply_picker_color_to_editor.clone();
     let sync_picker_from_color_canvas_click = sync_picker_from_color.clone();
+    let add_color_to_custom_slots_click = add_color_to_custom_slots.clone();
     let sync_size_control_canvas_click = sync_size_control.clone();
     let text_size_label_click = text_size_label.clone();
     let font_family_label_click = font_family_label.clone();
@@ -2016,13 +2022,20 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             };
 
             let mut reopen_color_popover = false;
+            let from_sidebar = eyedropper_from_sidebar_click.get();
             if let Some(color) = picked_color {
-                apply_picker_color_to_editor_canvas_click(color);
-                sync_picker_from_color_canvas_click(color);
-                reopen_color_popover = true;
+                // Only add to custom colors when picked from sidebar
+                add_color_to_custom_slots_click(color);
+                if !from_sidebar {
+                    // Only apply to editor and sync picker if not from sidebar
+                    apply_picker_color_to_editor_canvas_click(color);
+                    sync_picker_from_color_canvas_click(color);
+                    reopen_color_popover = true;
+                }
             }
 
             eyedropper_mode_click.set(false);
+            eyedropper_from_sidebar_click.set(false);
             *eyedropper_point_click.borrow_mut() = None;
             *eyedropper_rendered_click.borrow_mut() = None;
             canvas_eyedropper_ring_click.set_visible(false);

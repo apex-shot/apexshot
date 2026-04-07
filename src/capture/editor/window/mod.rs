@@ -23,8 +23,8 @@ use super::render::{
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
 use super::types::{
-    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, EditorError, Point,
-    Rect, Tool, ViewTransform,
+    AnnotationAction, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
+    EditorError, Point, Rect, Tool, ViewTransform,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -694,6 +694,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     );
     let colors_inspector = colors_panel_parts.root;
     let sync_colors_panel_for_active_tool = colors_panel_parts.sync_for_active_tool;
+    let refresh_colors_panel_custom_slots = colors_panel_parts.refresh_custom_slots;
     let toolbar_color_css_provider = gtk4::CssProvider::new();
     if let Some(display) = gdk::Display::default() {
         gtk4::style_context_add_provider_for_display(
@@ -985,6 +986,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     }
 
     let eyedropper_mode = Rc::new(Cell::new(false));
+    let eyedropper_from_sidebar = Rc::new(Cell::new(false));
     let eyedropper_point = Rc::new(RefCell::new(None::<Point>));
     let eyedropper_rendered = Rc::new(RefCell::new(None::<RgbaImage>));
 
@@ -992,12 +994,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let color_popover = color_popover.clone();
         let state = state.clone();
         let eyedropper_mode = eyedropper_mode.clone();
+        let eyedropper_from_sidebar = eyedropper_from_sidebar.clone();
         let eyedropper_point = eyedropper_point.clone();
         let eyedropper_rendered = eyedropper_rendered.clone();
         let canvas_eyedropper_ring = canvas_eyedropper_ring.clone();
         let drawing_area = drawing_area.clone();
         let window = window.downgrade();
         move || {
+            eyedropper_from_sidebar.set(true);
             color_picker::activate_eyedropper(
                 &color_popover,
                 state.clone(),
@@ -2049,6 +2053,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         delete_selected_btn: delete_selected_btn.clone(),
         save_btn: save_btn.clone(),
         eyedropper_mode: eyedropper_mode.clone(),
+        eyedropper_from_sidebar: eyedropper_from_sidebar.clone(),
         eyedropper_point: eyedropper_point.clone(),
         eyedropper_rendered: eyedropper_rendered.clone(),
         canvas_eyedropper_ring: canvas_eyedropper_ring.clone(),
@@ -2058,6 +2063,21 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         sync_picker_for_active_tool: sync_shared_colors_for_active_tool.clone(),
         sync_picker_from_color: sync_picker_from_color.clone(),
         apply_picker_color_to_editor: apply_picker_color_to_editor.clone(),
+        add_color_to_custom_slots: Rc::new({
+            let custom_slot_colors = custom_slot_colors.clone();
+            let refresh_custom_color_slots = refresh_custom_color_slots.clone();
+            let refresh_colors_panel_custom_slots = refresh_colors_panel_custom_slots.clone();
+            move |color: DrawColor| {
+                let mut custom_colors = custom_slot_colors.borrow_mut();
+                if let Some(slot_index) = custom_colors.iter().position(Option::is_none) {
+                    custom_colors[slot_index] = Some(color);
+                    super::color::save_persisted_custom_slot_colors(custom_colors.as_slice());
+                    drop(custom_colors);
+                    refresh_custom_color_slots();
+                    refresh_colors_panel_custom_slots();
+                }
+            }
+        }),
         set_picker_panel_visibility: set_picker_panel_visibility.clone(),
         sync_size_control: sync_size_control.clone(),
         rebuild_effects_async: rebuild_effects_async.clone(),

@@ -37,6 +37,7 @@ const SIDEBAR_PALETTE_SPECS: [(&str, &str); 12] = [
 pub struct ColorsPanelParts {
     pub root: GtkBox,
     pub sync_for_active_tool: Rc<dyn Fn()>,
+    pub refresh_custom_slots: Rc<dyn Fn()>,
 }
 
 pub fn build_colors_panel(
@@ -307,6 +308,9 @@ pub fn build_colors_panel(
     let mut custom_slot_placeholders = Vec::new();
     let mut custom_slot_remove_buttons = Vec::new();
 
+    // Placeholder for local refresh function, populated after refresh_custom_slots is created
+    let local_refresh: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+
     for row_index in 0..2 {
         let row = GtkBox::new(Orientation::Horizontal, 6);
         row.add_css_class("editor-colors-panel-custom-row");
@@ -360,6 +364,21 @@ pub fn build_colors_panel(
             overlay.set_halign(gtk4::Align::Fill);
             overlay.set_child(Some(&slot_button));
             overlay.add_overlay(&remove_btn);
+
+            let hover_controller = EventControllerMotion::new();
+            let remove_btn_enter = remove_btn.clone();
+            let custom_slot_colors_enter = custom_slot_colors.clone();
+            hover_controller.connect_enter(move |_, _, _| {
+                if custom_slot_colors_enter.borrow()[index].is_some() {
+                    remove_btn_enter.set_visible(true);
+                }
+            });
+            let remove_btn_leave = remove_btn.clone();
+            hover_controller.connect_leave(move |_| {
+                remove_btn_leave.set_visible(false);
+            });
+            overlay.add_controller(hover_controller);
+
             row.append(&overlay);
 
             let custom_slot_colors_click = custom_slot_colors.clone();
@@ -372,6 +391,7 @@ pub fn build_colors_panel(
 
             let custom_slot_colors_remove = custom_slot_colors.clone();
             let refresh_shared_custom_color_slots_remove = refresh_shared_custom_color_slots.clone();
+            let local_refresh_remove = local_refresh.clone();
             remove_btn.connect_clicked(move |_| {
                 let mut custom_colors = custom_slot_colors_remove.borrow_mut();
                 if custom_colors[index].is_none() {
@@ -382,6 +402,9 @@ pub fn build_colors_panel(
                 save_persisted_custom_slot_colors(custom_colors.as_slice());
                 drop(custom_colors);
                 refresh_shared_custom_color_slots_remove();
+                if let Some(refresh) = local_refresh_remove.borrow().as_ref() {
+                    refresh();
+                }
             });
 
             custom_slot_buttons.push(slot_button);
@@ -438,7 +461,7 @@ pub fn build_colors_panel(
                 if let Some(color) = custom_colors[index] {
                     slot_button.add_css_class("has-custom-color");
                     slot_button.set_child(Some(&custom_slot_dots[index]));
-                    custom_slot_remove_buttons[index].set_visible(true);
+                    custom_slot_remove_buttons[index].set_visible(false);
 
                     let (r, g, b, _) = draw_color_to_rgba_u8(color);
                     let alpha = color.a.clamp(0.0, 1.0);
@@ -454,6 +477,9 @@ pub fn build_colors_panel(
             custom_css_provider.load_from_data(&css);
         }
     });
+
+    // Populate the local refresh placeholder so remove buttons can call it
+    *local_refresh.borrow_mut() = Some(refresh_custom_slots.clone());
 
     let apply_picker_state_color: Rc<dyn Fn()> = Rc::new({
         let picker_state = picker_state.clone();
@@ -479,9 +505,14 @@ pub fn build_colors_panel(
         let a_entry = a_entry.clone();
         let picker_css_provider = picker_css_provider.clone();
         move |picker| {
+            let was_in_progress = picker_update_in_progress.get();
             picker_update_in_progress.set(true);
-            hue_slider.set_value(picker.hue);
-            opacity_slider.set_value((picker.alpha * 100.0).clamp(0.0, 100.0));
+            // Only set slider values if not already in a user interaction
+            // (sliders are already at the correct position during user interaction)
+            if !was_in_progress {
+                hue_slider.set_value(picker.hue);
+                opacity_slider.set_value((picker.alpha * 100.0).clamp(0.0, 100.0));
+            }
             let color = picker.to_color();
             let (r, g, b, _): (u8, u8, u8, u8) = draw_color_to_rgba_u8(color);
             hex_entry.set_text(&draw_color_to_hex(color));
@@ -493,7 +524,7 @@ pub fn build_colors_panel(
             let css = picker_dynamic_css(color)
                 .replace("#editor-picker-opacity-slider", "#editor-sidebar-picker-opacity-slider");
             picker_css_provider.load_from_data(&css);
-            picker_update_in_progress.set(false);
+            picker_update_in_progress.set(was_in_progress);
         }
     });
 
@@ -516,8 +547,10 @@ pub fn build_colors_panel(
             if picker_update_in_progress.get() {
                 return;
             }
+            picker_update_in_progress.set(true);
             picker_state.borrow_mut().hue = super::super::types::normalize_hue(slider.value());
             commit_picker_state();
+            picker_update_in_progress.set(false);
         }
     });
 
@@ -529,8 +562,10 @@ pub fn build_colors_panel(
             if picker_update_in_progress.get() {
                 return;
             }
+            picker_update_in_progress.set(true);
             picker_state.borrow_mut().alpha = (slider.value() / 100.0).clamp(0.0, 1.0);
             commit_picker_state();
+            picker_update_in_progress.set(false);
         }
     });
 
@@ -549,6 +584,7 @@ pub fn build_colors_panel(
             };
             let (hue, saturation, value) =
                 super::super::types::rgb_to_hsv(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
+            picker_update_in_progress.set(true);
             {
                 let mut picker = picker_state.borrow_mut();
                 picker.hue = hue;
@@ -556,11 +592,13 @@ pub fn build_colors_panel(
                 picker.value = value;
             }
             commit_picker_state();
+            picker_update_in_progress.set(false);
         }
     });
 
     let update_picker_from_rgba_entries: Rc<dyn Fn()> = Rc::new({
         let picker_state = picker_state.clone();
+        let picker_update_in_progress = picker_update_in_progress.clone();
         let r_entry = r_entry.clone();
         let g_entry = g_entry.clone();
         let b_entry = b_entry.clone();
@@ -581,6 +619,7 @@ pub fn build_colors_panel(
             };
             let (hue, saturation, value) =
                 super::super::types::rgb_to_hsv(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
+            picker_update_in_progress.set(true);
             {
                 let mut picker = picker_state.borrow_mut();
                 picker.hue = hue;
@@ -589,6 +628,7 @@ pub fn build_colors_panel(
                 picker.alpha = alpha;
             }
             commit_picker_state();
+            picker_update_in_progress.set(false);
         }
     });
 
@@ -606,18 +646,21 @@ pub fn build_colors_panel(
     let update_sv_from_position: Rc<dyn Fn(f64, f64)> = Rc::new({
         let gradient_area = gradient_area.clone();
         let picker_state = picker_state.clone();
+        let picker_update_in_progress = picker_update_in_progress.clone();
         let commit_picker_state = commit_picker_state.clone();
         move |x, y| {
             let width = gradient_area.allocated_width().max(1) as f64;
             let height = gradient_area.allocated_height().max(1) as f64;
             let saturation = (x / width).clamp(0.0, 1.0);
             let value = (1.0 - (y / height)).clamp(0.0, 1.0);
+            picker_update_in_progress.set(true);
             {
                 let mut picker = picker_state.borrow_mut();
                 picker.saturation = saturation;
                 picker.value = value;
             }
             commit_picker_state();
+            picker_update_in_progress.set(false);
         }
     });
 
@@ -657,8 +700,15 @@ pub fn build_colors_panel(
         let palette_buttons = palette_buttons.clone();
         let refresh_custom_slots = refresh_custom_slots.clone();
         let picker_state = picker_state.clone();
+        let picker_update_in_progress = picker_update_in_progress.clone();
         let update_picker_ui = update_picker_ui.clone();
         move || {
+            // Don't reset picker state while we're in the middle of an update
+            // (e.g., dragging on the gradient area)
+            if picker_update_in_progress.get() {
+                return;
+            }
+
             let (selected_tool, active_color) = {
                 let st = state.lock().unwrap();
                 let selected_tool = st.selected_tool;
@@ -726,6 +776,7 @@ pub fn build_colors_panel(
     ColorsPanelParts {
         root,
         sync_for_active_tool,
+        refresh_custom_slots,
     }
 }
 

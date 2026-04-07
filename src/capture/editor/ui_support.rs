@@ -296,8 +296,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-crop-type-button > arrow {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 opacity: 0;
                 color: transparent;
             }
@@ -312,8 +312,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-crop-type-button image {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 opacity: 0;
             }
 
@@ -512,8 +512,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-color-trigger-menu-button {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 padding: 0;
                 margin: 0;
                 border: none;
@@ -524,8 +524,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-color-trigger-menu-button > arrow {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 opacity: 0;
                 color: transparent;
             }
@@ -540,8 +540,8 @@ pub fn install_editor_css() {
             }
 
             button.editor-color-trigger-menu-button image {
-                min-width: 0;
-                min-height: 0;
+                min-width: 20px;
+                min-height: 20px;
                 opacity: 0;
             }
 
@@ -707,12 +707,12 @@ pub fn install_editor_css() {
             }
 
             button.editor-custom-color-remove-button {
-                min-width: 9px;
-                min-height: 9px;
+                min-width: 12px;
+                min-height: 12px;
                 border-radius: 999px;
                 padding: 0;
-                border: 1px solid rgba(255, 255, 255, 0.24);
-                background: #0f0f12;
+                border: 1px solid rgba(232, 17, 35, 0.50);
+                background: #e81123;
                 color: #ffffff;
                 outline: none;
                 box-shadow: 0 1px 3px rgba(0,0,0,0.35);
@@ -723,8 +723,8 @@ pub fn install_editor_css() {
             button.editor-custom-color-remove-button:active,
             button.editor-custom-color-remove-button:focus,
             button.editor-custom-color-remove-button:focus-visible {
-                border: 1px solid rgba(255, 255, 255, 0.34);
-                background: #1a1a20;
+                border: 1px solid rgba(232, 17, 35, 0.70);
+                background: #f02a3b;
                 color: #ffffff;
                 outline: none;
                 box-shadow: 0 2px 5px rgba(0,0,0,0.42);
@@ -734,6 +734,7 @@ pub fn install_editor_css() {
             button.editor-custom-color-remove-button image.editor-custom-color-remove-icon {
                 color: #ffffff;
                 opacity: 0.96;
+                -gtk-icon-size: 10px;
             }
 
             .editor-color-dropdown-footer {
@@ -1163,7 +1164,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-inspector-tab-button {
-                min-height: 0;
+                min-height: 20px;
                 padding: 0;
                 border-radius: 0;
                 border: none;
@@ -1399,7 +1400,7 @@ pub fn install_editor_css() {
             }
 
             .editor-background-compact-slider {
-                min-width: 0;
+                min-width: 32px;
             }
 
             .editor-background-compact-control-spacer {
@@ -1432,8 +1433,8 @@ pub fn install_editor_css() {
             }
 
             .editor-background-alignment-icon-frame {
-                min-width: 12px;
-                min-height: 9px;
+                min-width: 20px;
+                min-height: 20px;
                 background: rgba(241, 241, 243, 0.88);
                 border-radius: 2px;
                 margin: 3px;
@@ -1456,7 +1457,7 @@ pub fn install_editor_css() {
 
             checkbutton.editor-background-checkbox {
                 color: rgba(241, 241, 243, 0.88);
-                min-width: 0;
+                min-width: 20px;
                 padding: 0;
             }
 
@@ -1468,7 +1469,7 @@ pub fn install_editor_css() {
 
             checkbutton.editor-background-checkbox label {
                 color: rgba(241, 241, 243, 0.88);
-                min-width: 0;
+                min-width: 20px;
             }
 
             .editor-background-ratio-dropdown-row {
@@ -1477,13 +1478,13 @@ pub fn install_editor_css() {
 
             dropdown.editor-background-ratio-dropdown {
                 min-height: 32px;
-                min-width: 0;
+                min-width: 20px;
                 padding: 0;
             }
 
             dropdown.editor-background-ratio-dropdown > button {
                 min-height: 32px;
-                min-width: 0;
+                min-width: 20px;
                 border-radius: 8px;
                 padding: 0 6px;
                 background: rgba(255, 255, 255, 0.03);
@@ -2184,7 +2185,7 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-inspector-tab-button {\n                min-height: 0;\n                padding: 0;\n                border-radius: 0;\n                border: none;\n                background: transparent;")
+            production_source.contains("button.editor-inspector-tab-button {\n                min-height: 20px;\n                padding: 0;\n                border-radius: 0;\n                border: none;\n                background: transparent;")
                 && production_source.contains("button.editor-inspector-tab-button.active-inspector-tab {\n                background: transparent;\n                border: none;\n                color: #ff9900;")
                 && production_source.contains(".editor-colors-panel {\n                min-width: 210px;"),
             "inspector tabs should be text-only with orange active text and colors panel should match background width",
