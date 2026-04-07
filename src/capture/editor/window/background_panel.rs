@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use super::super::render::rgba_image_to_surface;
 use super::super::state::EditorState;
-use super::super::types::{BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor};
+use super::super::types::{BackgroundAlignment, BackgroundStyle, CropAspectRatio};
 
 pub(super) const BACKGROUND_SIDEBAR_WIDTH: i32 = 210;
 pub(super) const BACKGROUND_GRADIENT_PREVIEW_SIZE: u32 = 96;
@@ -35,8 +35,6 @@ pub(super) struct BackgroundSidebarDensity {
     wide_slider_width: i32,
     compact_slider_width: i32,
     none_button_width: i32,
-    plain_color_row_width: i32,
-    plain_color_button_size: i32,
     preview_size_class: &'static str,
 }
 
@@ -55,8 +53,6 @@ impl BackgroundSidebarDensity {
                 wide_slider_width: width,
                 compact_slider_width: (width - 24) / 2,
                 none_button_width: width,
-                plain_color_row_width: width,
-                plain_color_button_size: 18,
                 preview_size_class: "editor-background-preview-size-compact",
             }
         } else if gradient_count >= 10 {
@@ -72,8 +68,6 @@ impl BackgroundSidebarDensity {
                 wide_slider_width: width,
                 compact_slider_width: (width - 24) / 2,
                 none_button_width: width,
-                plain_color_row_width: width,
-                plain_color_button_size: 21,
                 preview_size_class: "editor-background-preview-size-medium",
             }
         } else {
@@ -89,8 +83,6 @@ impl BackgroundSidebarDensity {
                 wide_slider_width: width,
                 compact_slider_width: (width - 24) / 2,
                 none_button_width: width,
-                plain_color_row_width: width,
-                plain_color_button_size: 24,
                 preview_size_class: "editor-background-preview-size-regular",
             }
         }
@@ -141,48 +133,6 @@ const BACKGROUND_GRADIENT_PREVIEW_CLASSES: [&str; 20] = [
     "editor-background-gradient-preview-19",
     "editor-background-gradient-preview-20",
 ];
-const BACKGROUND_PLAIN_COLOR_CLASSES: [&str; 18] = [
-    "editor-background-plain-color-1",
-    "editor-background-plain-color-2",
-    "editor-background-plain-color-3",
-    "editor-background-plain-color-4",
-    "editor-background-plain-color-5",
-    "editor-background-plain-color-6",
-    "editor-background-plain-color-7",
-    "editor-background-plain-color-8",
-    "editor-background-plain-color-9",
-    "editor-background-plain-color-10",
-    "editor-background-plain-color-11",
-    "editor-background-plain-color-12",
-    "editor-background-plain-color-13",
-    "editor-background-plain-color-14",
-    "editor-background-plain-color-15",
-    "editor-background-plain-color-16",
-    "editor-background-plain-color-17",
-    "editor-background-plain-color-18",
-];
-
-const BACKGROUND_PLAIN_COLOR_VALUES: [DrawColor; 18] = [
-    DrawColor::new(1.0, 1.0, 1.0, 1.0),
-    DrawColor::new(0.898, 0.906, 0.922, 1.0),
-    DrawColor::new(0.612, 0.639, 0.686, 1.0),
-    DrawColor::new(0.067, 0.094, 0.153, 1.0),
-    DrawColor::new(0.937, 0.267, 0.267, 1.0),
-    DrawColor::new(0.976, 0.451, 0.086, 1.0),
-    DrawColor::new(0.98, 0.8, 0.082, 1.0),
-    DrawColor::new(0.133, 0.773, 0.369, 1.0),
-    DrawColor::new(0.078, 0.722, 0.651, 1.0),
-    DrawColor::new(0.024, 0.714, 0.831, 1.0),
-    DrawColor::new(0.231, 0.51, 0.965, 1.0),
-    DrawColor::new(0.388, 0.4, 0.945, 1.0),
-    DrawColor::new(0.545, 0.361, 0.965, 1.0),
-    DrawColor::new(0.659, 0.333, 0.969, 1.0),
-    DrawColor::new(0.925, 0.282, 0.6, 1.0),
-    DrawColor::new(0.957, 0.247, 0.369, 1.0),
-    DrawColor::new(0.573, 0.251, 0.055, 1.0),
-    DrawColor::new(0.059, 0.463, 0.431, 1.0),
-];
-
 pub fn background_gradient_asset_path(file_name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src/capture/editor/background-images")
@@ -493,24 +443,6 @@ fn build_background_blurred_preview_button(
     button
 }
 
-fn build_background_plain_color_button(index: usize, density: BackgroundSidebarDensity) -> Button {
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_focusable(false);
-    button.set_hexpand(false);
-    button.set_vexpand(false);
-    button.set_halign(gtk4::Align::Center);
-    button.set_valign(gtk4::Align::Center);
-    button.set_size_request(
-        density.plain_color_button_size,
-        density.plain_color_button_size,
-    );
-    button.add_css_class("editor-background-plain-color-button");
-    button.add_css_class(BACKGROUND_PLAIN_COLOR_CLASSES[index]);
-    button.set_tooltip_text(Some(&format!("Plain color {}", index + 1)));
-    button
-}
-
 fn clear_active_alignment_classes(widget: &gtk4::Widget) {
     if let Some(btn) = widget.downcast_ref::<Button>() {
         btn.remove_css_class("active-alignment-option");
@@ -521,19 +453,6 @@ fn clear_active_alignment_classes(widget: &gtk4::Widget) {
         clear_active_alignment_classes(&c);
         child = c.next_sibling();
     }
-}
-
-pub(super) fn build_background_plain_color_cell(
-    index: usize,
-    density: BackgroundSidebarDensity,
-) -> GtkBox {
-    let cell = GtkBox::new(Orientation::Vertical, 0);
-    cell.add_css_class("editor-background-plain-color-cell");
-    cell.set_hexpand(false);
-    cell.set_halign(gtk4::Align::Fill);
-    cell.set_valign(gtk4::Align::Center);
-    cell.append(&build_background_plain_color_button(index, density));
-    cell
 }
 
 fn clear_active_background_classes(widget: &gtk4::Widget) {
@@ -1030,65 +949,6 @@ pub(super) fn build_background_panel(
     blurred_section.append(&blurred_title);
     blurred_section.append(&blurred_row);
 
-    let plain_color_section = GtkBox::new(Orientation::Vertical, density.section_spacing);
-    plain_color_section.add_css_class("editor-background-plain-color-section");
-
-    let plain_color_title = Label::new(Some("Plain color"));
-    plain_color_title.add_css_class("editor-background-section-title");
-    plain_color_title.set_xalign(0.0);
-
-    let plain_color_grid = GtkBox::new(Orientation::Vertical, density.preview_row_spacing);
-    plain_color_grid.add_css_class("editor-background-plain-color-grid");
-
-    for row_index in 0..2 {
-        let plain_color_row = GtkBox::new(Orientation::Horizontal, density.preview_row_spacing);
-        plain_color_row.add_css_class("editor-background-plain-color-row");
-        plain_color_row.set_hexpand(false);
-        plain_color_row.set_halign(gtk4::Align::Fill);
-        plain_color_row.set_homogeneous(true);
-        plain_color_row.set_size_request(density.plain_color_row_width, -1);
-
-        for column_index in 0..9 {
-            let color_index = row_index * 9 + column_index;
-            let color_cell = build_background_plain_color_cell(color_index, density);
-            if let Some(btn) = color_cell
-                .first_child()
-                .and_then(|c| c.downcast::<Button>().ok())
-            {
-                {
-                    let st = state.lock().unwrap();
-                    if let BackgroundStyle::PlainColor(color) = st.background_style {
-                        if color == BACKGROUND_PLAIN_COLOR_VALUES[color_index] {
-                            btn.add_css_class("active-background-option");
-                        }
-                    }
-                }
-
-                btn.connect_clicked({
-                    let state = state.clone();
-                    let sidebar = background_sidebar.clone();
-                    let btn = btn.clone();
-                    let color = BACKGROUND_PLAIN_COLOR_VALUES[color_index];
-                    let drawing_area = drawing_area.clone();
-                    move |_| {
-                        let mut st = state.lock().unwrap();
-                        st.background_style = BackgroundStyle::PlainColor(color);
-                        clear_active_background_classes(sidebar.upcast_ref());
-                        btn.add_css_class("active-background-option");
-                        st.mark_working_image_dirty();
-                        drawing_area.queue_draw();
-                    }
-                });
-            }
-            plain_color_row.append(&color_cell);
-        }
-
-        plain_color_grid.append(&plain_color_row);
-    }
-
-    plain_color_section.append(&plain_color_title);
-    plain_color_section.append(&plain_color_grid);
-
     let background_padding_divider_row = GtkBox::new(Orientation::Horizontal, 0);
     background_padding_divider_row.add_css_class("editor-background-divider-row");
     let background_padding_divider = GtkBox::new(Orientation::Horizontal, 0);
@@ -1291,6 +1151,9 @@ pub(super) fn build_background_panel(
 
     let alignment_section = GtkBox::new(Orientation::Vertical, 4);
     alignment_section.add_css_class("editor-background-compact-slider-section");
+    alignment_section.set_size_request(density.none_button_width, -1);
+    alignment_section.set_halign(gtk4::Align::Fill);
+    alignment_section.set_hexpand(false);
 
     let alignment_title = Label::new(Some("Alignment"));
     alignment_title.add_css_class("editor-background-section-title");
@@ -1298,7 +1161,9 @@ pub(super) fn build_background_panel(
 
     let alignment_grid = GtkBox::new(Orientation::Vertical, 4);
     alignment_grid.add_css_class("editor-background-alignment-grid");
-    alignment_grid.set_halign(gtk4::Align::Start);
+    alignment_grid.set_size_request(density.none_button_width, -1);
+    alignment_grid.set_halign(gtk4::Align::Fill);
+    alignment_grid.set_hexpand(false);
 
     let alignment_positions = [
         [
@@ -1322,12 +1187,15 @@ pub(super) fn build_background_panel(
         let alignment_row = GtkBox::new(Orientation::Horizontal, 4);
         alignment_row.add_css_class("editor-background-alignment-row");
         alignment_row.set_homogeneous(true);
+        alignment_row.set_size_request(density.none_button_width, -1);
+        alignment_row.set_halign(gtk4::Align::Fill);
+        alignment_row.set_hexpand(false);
 
         for (position_class, tooltip) in row_items {
             let alignment_frame = GtkBox::new(Orientation::Horizontal, 0);
             alignment_frame.add_css_class("editor-background-alignment-icon-frame");
             alignment_frame.add_css_class(position_class);
-            alignment_frame.set_size_request(6, 4);
+            alignment_frame.set_size_request(12, 9);
 
             match position_class {
                 "top-left" => {
@@ -1371,7 +1239,7 @@ pub(super) fn build_background_panel(
 
             let alignment_icon = gtk4::Overlay::new();
             alignment_icon.add_css_class("editor-background-alignment-icon");
-            alignment_icon.set_size_request(26, 17);
+            alignment_icon.set_size_request(34, 24);
             alignment_icon.set_child(Some(&alignment_frame));
 
             let alignment_button = Button::new();
@@ -1424,7 +1292,6 @@ pub(super) fn build_background_panel(
 
     alignment_section.append(&alignment_title);
     alignment_section.append(&alignment_grid);
-    shadow_section.append(&alignment_section);
 
     let corners_section = GtkBox::new(Orientation::Vertical, 4);
     corners_section.add_css_class("editor-background-compact-slider-section");
@@ -1433,6 +1300,9 @@ pub(super) fn build_background_panel(
 
     let ratio_section = GtkBox::new(Orientation::Vertical, 4);
     ratio_section.add_css_class("editor-background-compact-slider-section");
+    ratio_section.set_size_request(density.wide_slider_width, -1);
+    ratio_section.set_halign(gtk4::Align::Fill);
+    ratio_section.set_hexpand(false);
 
     let ratio_title = Label::new(Some("Ratio"));
     ratio_title.add_css_class("editor-background-section-title");
@@ -1440,9 +1310,12 @@ pub(super) fn build_background_panel(
 
     let ratio_dropdown_row = GtkBox::new(Orientation::Horizontal, 0);
     ratio_dropdown_row.add_css_class("editor-background-ratio-dropdown-row");
+    ratio_dropdown_row.set_size_request(density.wide_slider_width, -1);
+    ratio_dropdown_row.set_halign(gtk4::Align::Fill);
+    ratio_dropdown_row.set_hexpand(false);
     let ratio_dropdown = gtk4::DropDown::from_strings(&["Original", "1:1", "4:3", "16:9", "21:9"]);
     ratio_dropdown.add_css_class("editor-background-ratio-dropdown");
-    ratio_dropdown.set_size_request(density.compact_slider_width, -1);
+    ratio_dropdown.set_size_request(density.wide_slider_width, -1);
     ratio_dropdown.set_halign(gtk4::Align::Fill);
     ratio_dropdown.set_hexpand(true);
     ratio_dropdown.set_selected(0);
@@ -1501,7 +1374,6 @@ pub(super) fn build_background_panel(
 
     corners_section.append(&corners_title);
     corners_section.append(&corners_slider_row);
-    corners_section.append(&ratio_section);
 
     shadow_corners_row.append(&shadow_section);
     shadow_corners_row.append(&corners_section);
@@ -1510,12 +1382,13 @@ pub(super) fn build_background_panel(
     compact_controls.append(&shadow_corners_row);
 
     background_sidebar_options.append(&background_none_btn);
+    background_sidebar_options.append(&alignment_section);
     background_sidebar_options.append(&gradients_section);
     background_sidebar_options.append(&wallpaper_section);
     background_sidebar_options.append(&blurred_section);
-    background_sidebar_options.append(&plain_color_section);
     background_sidebar_options.append(&background_padding_divider_row);
     background_sidebar_options.append(&padding_section);
+    background_sidebar_options.append(&ratio_section);
     background_sidebar_options.append(&compact_controls);
 
     background_sidebar.append(&background_sidebar_options);
@@ -1523,5 +1396,84 @@ pub(super) fn build_background_panel(
     BackgroundPanelParts {
         root: background_sidebar,
         start_gradient_preview_loading: start_background_gradient_preview_loading,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn alignment_section_is_placed_below_none_button_and_before_gradients() {
+        let source = include_str!("background_panel.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+
+        let none_append = production_source
+            .find("background_sidebar_options.append(&background_none_btn);")
+            .expect("expected None button to be appended to background sidebar options");
+        let alignment_append = production_source
+            .find("background_sidebar_options.append(&alignment_section);")
+            .expect("expected alignment section to be appended to background sidebar options");
+        let gradients_append = production_source
+            .find("background_sidebar_options.append(&gradients_section);")
+            .expect("expected gradients section to be appended to background sidebar options");
+
+        assert!(
+            none_append < alignment_append && alignment_append < gradients_append,
+            "alignment section should render between the None button and gradients section",
+        );
+        assert!(
+            !production_source.contains("shadow_section.append(&alignment_section);"),
+            "alignment section should no longer be nested under the shadow section",
+        );
+    }
+
+    #[test]
+    fn alignment_preview_widgets_use_larger_full_width_sizes() {
+        let source = include_str!("background_panel.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+
+        assert!(
+            production_source.contains("alignment_frame.set_size_request(12, 9);"),
+            "alignment marker should use the enlarged preview marker size",
+        );
+        assert!(
+            production_source.contains("alignment_icon.set_size_request(34, 24);"),
+            "alignment icon should use the enlarged full-width button preview size",
+        );
+    }
+
+    #[test]
+    fn ratio_section_is_placed_below_padding_and_not_nested_under_corners() {
+        let source = include_str!("background_panel.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+
+        let padding_append = production_source
+            .find("background_sidebar_options.append(&padding_section);")
+            .expect("expected padding section to be appended to background sidebar options");
+        let ratio_append = production_source
+            .find("background_sidebar_options.append(&ratio_section);")
+            .expect("expected ratio section to be appended to background sidebar options");
+        let compact_append = production_source
+            .find("background_sidebar_options.append(&compact_controls);")
+            .expect("expected compact controls to be appended to background sidebar options");
+
+        assert!(
+            padding_append < ratio_append && ratio_append < compact_append,
+            "ratio section should render between padding and compact controls",
+        );
+        assert!(
+            !production_source.contains("corners_section.append(&ratio_section);"),
+            "ratio section should no longer be nested under the corners section",
+        );
+    }
+
+    #[test]
+    fn background_panel_no_longer_appends_plain_color_section() {
+        let source = include_str!("background_panel.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains("plain_color_section.append(&plain_color_title);")
+                && !production_source.contains("background_sidebar_options.append(&plain_color_section);"),
+            "Background panel should no longer render the embedded plain-color section",
+        );
     }
 }

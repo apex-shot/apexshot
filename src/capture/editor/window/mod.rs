@@ -1,4 +1,5 @@
 use gdk4x11::X11Surface;
+use gtk4::gdk;
 use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation,
     Popover,
@@ -11,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use x11rb::{connection::Connection, protocol::xproto, protocol::xproto::ConnectionExt};
 
-use super::color::selection_hit_padding_for_scale;
+use super::color::{draw_color_to_hex, draw_color_to_rgba_u8, selection_hit_padding_for_scale};
 use super::render::{
     draw_active_text_input, draw_annotation_action, draw_arrow_control_handles,
     draw_arrow_selection_outline, draw_canvas_checkerboard_background, draw_crop_overlay,
@@ -57,6 +58,7 @@ use super::ui_support::{
 
 pub mod background_panel;
 mod canvas;
+pub mod colors_panel;
 pub mod color_picker;
 #[allow(dead_code)]
 mod cursor;
@@ -326,7 +328,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         drawing_area_placeholder.clone(),
         annotate_config.show_color_names,
     );
-    let color_picker_trigger_host = color_picker_parts.trigger_host;
+    let _color_picker_trigger_host = color_picker_parts.trigger_host;
     let color_popover = color_picker_parts.popover;
     let color_buttons = color_picker_parts.color_buttons;
     let color_picker_dot = color_picker_parts.color_picker_dot;
@@ -336,10 +338,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let sync_picker_from_color = color_picker_parts.sync_picker_from_color;
     let apply_picker_color_to_editor = color_picker_parts.apply_picker_color;
     let set_picker_panel_visibility = color_picker_parts.set_picker_panel_visibility;
+    let custom_slot_colors = color_picker_parts.custom_slot_colors;
+    let refresh_custom_color_slots = color_picker_parts.refresh_custom_color_slots;
+    let register_color_panel_sync = color_picker_parts.register_external_sync;
+    let sidebar_eyedropper_activation = Rc::new(RefCell::new(None::<Rc<dyn Fn()>>));
 
     let toolbar::ToolbarModeParts {
         root: center_group,
         toolbar_mode_stack,
+        color_status,
+        color_status_swatch,
+        color_status_label,
         size_group,
         size_slider,
         text_size_group,
@@ -395,11 +404,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &highlighter_btn,
         &sep_1,
         &sep_2,
-        &color_picker_trigger_host,
     );
     toolbar.set_center_widget(Some(&center_group));
 
     let toolbar_right_parts = toolbar::build_toolbar_right_controls(
+        &color_status,
         icon_names::ARROW_UNDO_REGULAR,
         icon_names::ARROW_REDO_REGULAR,
         icon_names::DELETE_REGULAR,
@@ -669,6 +678,70 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let start_background_gradient_preview_loading =
         background_panel_parts.start_gradient_preview_loading;
 
+    let colors_panel_parts = colors_panel::build_colors_panel(
+        state.clone(),
+        apply_picker_color_to_editor.clone(),
+        custom_slot_colors.clone(),
+        refresh_custom_color_slots.clone(),
+        Rc::new({
+            let sidebar_eyedropper_activation = sidebar_eyedropper_activation.clone();
+            move || {
+                if let Some(activate) = sidebar_eyedropper_activation.borrow().as_ref() {
+                    activate();
+                }
+            }
+        }),
+    );
+    let colors_inspector = colors_panel_parts.root;
+    let sync_colors_panel_for_active_tool = colors_panel_parts.sync_for_active_tool;
+    let toolbar_color_css_provider = gtk4::CssProvider::new();
+    if let Some(display) = gdk::Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &toolbar_color_css_provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_USER,
+        );
+    }
+    let sync_toolbar_color_status: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let color_status_label = color_status_label.clone();
+        let _color_status_swatch = color_status_swatch.clone();
+        let toolbar_color_css_provider = toolbar_color_css_provider.clone();
+        move || {
+            let active_color = {
+                let st = state.lock().unwrap();
+                if st.selected_tool == Tool::Background {
+                    if let BackgroundStyle::PlainColor(color) = st.background_style {
+                        color
+                    } else {
+                        st.selected_color
+                    }
+                } else {
+                    st.selected_color
+                }
+            };
+
+            color_status_label.set_label(&format!("#{}", draw_color_to_hex(active_color)));
+            let (r, g, b, _) = draw_color_to_rgba_u8(active_color);
+            let alpha = active_color.a.clamp(0.0, 1.0);
+            let css = format!(
+                "#editor-toolbar-color-status-swatch {{ background: rgba({r}, {g}, {b}, {alpha:.3}); }}"
+            );
+            toolbar_color_css_provider.load_from_data(&css);
+        }
+    });
+    let sync_shared_colors_for_active_tool: Rc<dyn Fn()> = Rc::new({
+        let sync_toolbar_color_status = sync_toolbar_color_status.clone();
+        let sync_picker_for_active_tool = sync_picker_for_active_tool.clone();
+        let sync_colors_panel_for_active_tool = sync_colors_panel_for_active_tool.clone();
+        move || {
+            sync_toolbar_color_status();
+            sync_picker_for_active_tool();
+            sync_colors_panel_for_active_tool();
+        }
+    });
+    register_color_panel_sync(sync_shared_colors_for_active_tool.clone());
+
     let placeholder_inspector = GtkBox::new(Orientation::Vertical, 12);
     placeholder_inspector.add_css_class("editor-inspector-placeholder-shell");
     placeholder_inspector.set_vexpand(true);
@@ -685,12 +758,28 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     placeholder_inspector.append(&placeholder_title);
     placeholder_inspector.append(&placeholder);
 
+    let inspector_tabs = GtkBox::new(Orientation::Horizontal, 8);
+    inspector_tabs.add_css_class("editor-inspector-tabs");
+
+    let background_tab_btn = Button::with_label("Background");
+    background_tab_btn.set_has_frame(false);
+    background_tab_btn.add_css_class("editor-inspector-tab-button");
+
+    let colors_tab_btn = Button::with_label("Colors");
+    colors_tab_btn.set_has_frame(false);
+    colors_tab_btn.add_css_class("editor-inspector-tab-button");
+
+    inspector_tabs.append(&background_tab_btn);
+    inspector_tabs.append(&colors_tab_btn);
+
     let inspector = GtkBox::new(Orientation::Vertical, 0);
     inspector.add_css_class("editor-right-inspector");
     inspector.set_width_request(280);
     inspector.set_hexpand(false);
     inspector.set_vexpand(true);
+    inspector.append(&inspector_tabs);
     inspector.append(&background_inspector);
+    inspector.append(&colors_inspector);
     inspector.append(&placeholder_inspector);
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
@@ -704,7 +793,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let update_toolbar_for_tool = toolbar::build_toolbar_tool_updater(
         &toolbar_mode_stack,
         &background_inspector,
+        &colors_inspector,
         &placeholder_inspector,
+        &inspector_tabs,
+        &background_tab_btn,
+        &colors_tab_btn,
         &text_size_group,
         &font_family_group,
         &obfuscate_method_group,
@@ -715,6 +808,68 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &canvas_scroller,
         start_background_gradient_preview_loading.clone(),
     );
+
+    let set_active_inspector_surface: Rc<dyn Fn(&str)> = Rc::new({
+        let background_inspector = background_inspector.clone();
+        let colors_inspector = colors_inspector.clone();
+        let placeholder_inspector = placeholder_inspector.clone();
+        let background_tab_btn = background_tab_btn.clone();
+        let colors_tab_btn = colors_tab_btn.clone();
+        move |surface| {
+            let show_background = surface == "background";
+            let show_colors = surface == "colors";
+            let show_placeholder = surface == "placeholder";
+            background_inspector.set_visible(show_background);
+            colors_inspector.set_visible(show_colors);
+            placeholder_inspector.set_visible(show_placeholder);
+            if show_background {
+                background_tab_btn.add_css_class("active-inspector-tab");
+            } else {
+                background_tab_btn.remove_css_class("active-inspector-tab");
+            }
+            if show_colors {
+                colors_tab_btn.add_css_class("active-inspector-tab");
+            } else {
+                colors_tab_btn.remove_css_class("active-inspector-tab");
+            }
+        }
+    });
+
+    background_tab_btn.connect_clicked({
+        let state = state.clone();
+        let set_active_inspector_surface = set_active_inspector_surface.clone();
+        move |_| {
+            if state.lock().unwrap().selected_tool == Tool::Background {
+                set_active_inspector_surface("background");
+            }
+        }
+    });
+
+    colors_tab_btn.connect_clicked({
+        let state = state.clone();
+        let set_active_inspector_surface = set_active_inspector_surface.clone();
+        let sync_colors_panel_for_active_tool = sync_colors_panel_for_active_tool.clone();
+        move |_| {
+            let selected_tool = state.lock().unwrap().selected_tool;
+            if matches!(
+                selected_tool,
+                Tool::Background
+                    | Tool::Pen
+                    | Tool::Arrow
+                    | Tool::Line
+                    | Tool::Box
+                    | Tool::Circle
+                    | Tool::Text
+                    | Tool::Number
+                    | Tool::Highlighter
+                    | Tool::Obfuscate
+                    | Tool::Focus
+            ) {
+                sync_colors_panel_for_active_tool();
+                set_active_inspector_surface("colors");
+            }
+        }
+    });
 
     let canvas_padding = canvas::CANVAS_PADDING;
 
@@ -832,6 +987,36 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let eyedropper_mode = Rc::new(Cell::new(false));
     let eyedropper_point = Rc::new(RefCell::new(None::<Point>));
     let eyedropper_rendered = Rc::new(RefCell::new(None::<RgbaImage>));
+
+    *sidebar_eyedropper_activation.borrow_mut() = Some(Rc::new({
+        let color_popover = color_popover.clone();
+        let state = state.clone();
+        let eyedropper_mode = eyedropper_mode.clone();
+        let eyedropper_point = eyedropper_point.clone();
+        let eyedropper_rendered = eyedropper_rendered.clone();
+        let canvas_eyedropper_ring = canvas_eyedropper_ring.clone();
+        let drawing_area = drawing_area.clone();
+        let window = window.downgrade();
+        move || {
+            color_picker::activate_eyedropper(
+                &color_popover,
+                state.clone(),
+                eyedropper_mode.clone(),
+                eyedropper_point.clone(),
+                eyedropper_rendered.clone(),
+                &canvas_eyedropper_ring,
+                &drawing_area,
+                Rc::new({
+                    let window = window.clone();
+                    move || {
+                        if let Some(window) = window.upgrade() {
+                            cursor::set_window_cursor_name(&window, Some("crosshair"));
+                        }
+                    }
+                }),
+            );
+        }
+    }));
 
     {
         let state_text_blink = state.clone();
@@ -1870,7 +2055,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         update_toolbar_for_tool: update_toolbar_for_tool.clone(),
         update_crop_size_fields: update_crop_size_fields.clone(),
         update_canvas_content_size: update_canvas_content_size.clone(),
-        sync_picker_for_active_tool: sync_picker_for_active_tool.clone(),
+        sync_picker_for_active_tool: sync_shared_colors_for_active_tool.clone(),
         sync_picker_from_color: sync_picker_from_color.clone(),
         apply_picker_color_to_editor: apply_picker_color_to_editor.clone(),
         set_picker_panel_visibility: set_picker_panel_visibility.clone(),
@@ -1912,6 +2097,33 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn toolbar_color_status_syncs_from_shared_active_color() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("editor-toolbar-color-status-swatch")
+                && production_source.contains("color_status_label.set_label")
+                && production_source.contains("BackgroundStyle::PlainColor")
+                && production_source.contains("draw_color_to_hex(active_color)"),
+            "Toolbar color status should mirror the shared active color, including Background plain color",
+        );
+    }
+
+    #[test]
+    fn toolbar_color_status_follows_colors_panel_palette_and_custom_color_updates() {
+        let mod_source = include_str!("mod.rs");
+        let mod_production_source = mod_source.split("#[cfg(test)]").next().unwrap_or(mod_source);
+        let colors_source = include_str!("colors_panel.rs");
+        let colors_production_source = colors_source.split("#[cfg(test)]").next().unwrap_or(colors_source);
+        assert!(
+            mod_production_source.contains("sync_toolbar_color_status();")
+                && colors_production_source.contains("apply_picker_color(DRAW_COLORS[index]);")
+                && colors_production_source.contains("apply_picker_color_click(color);"),
+            "Toolbar color status should follow palette and My colors selections from the Colors panel",
+        );
+    }
+
     #[test]
     fn editor_layout_includes_persistent_right_inspector_shell() {
         let source = include_str!("mod.rs");
