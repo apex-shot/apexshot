@@ -1147,10 +1147,12 @@ pub fn install_editor_css() {
             }
 
             .editor-right-inspector {
-                min-width: 280px;
+                min-width: 210px;
+                width: 210px;
+                max-width: 210px;
                 background: rgba(20, 20, 20, 0.94);
                 border-left: 1px solid rgba(255,255,255,0.08);
-                padding: 16px;
+                padding: 0;
             }
 
             .editor-inspector-title {
@@ -1160,7 +1162,10 @@ pub fn install_editor_css() {
             }
 
             .editor-inspector-tabs {
+                margin-top: 16px;
                 margin-bottom: 12px;
+                margin-left: 16px;
+                margin-right: 16px;
             }
 
             button.editor-inspector-tab-button {
@@ -1185,7 +1190,8 @@ pub fn install_editor_css() {
             }
 
             .editor-inspector-placeholder-shell {
-                padding: 2px 0;
+                min-width: 210px;
+                padding: 16px;
             }
 
             .editor-inspector-placeholder {
@@ -1195,9 +1201,32 @@ pub fn install_editor_css() {
                 line-height: 1.45;
             }
 
+            .editor-inspector-section {
+                margin-bottom: 12px;
+            }
+
+            .editor-inspector-section-body {
+                background: #000000;
+                border: 1px solid rgba(255, 255, 255, 0.11);
+                border-radius: 6px;
+                overflow: hidden;
+            }
+
+            .editor-inspector-option-list {
+                background: transparent;
+            }
+
+            .editor-inspector-toggle-row {
+                padding: 10px 12px;
+            }
+
+            .editor-inspector-toggle-row checkbutton {
+                color: rgba(241, 241, 243, 0.9);
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
-                padding: 0;
+                padding: 16px;
                 background: transparent;
                 border-right: none;
             }
@@ -1220,7 +1249,7 @@ pub fn install_editor_css() {
 
             .editor-colors-panel {
                 min-width: 210px;
-                padding: 2px 0;
+                padding: 16px;
             }
 
             .editor-colors-panel-helper {
@@ -1433,10 +1462,10 @@ pub fn install_editor_css() {
             }
 
             .editor-background-alignment-icon-frame {
-                min-width: 20px;
-                min-height: 20px;
+                min-width: 10px;
+                min-height: 6px;
                 background: rgba(241, 241, 243, 0.88);
-                border-radius: 2px;
+                border-radius: 1px;
                 margin: 3px;
                 border: none;
             }
@@ -2187,8 +2216,14 @@ mod tests {
         assert!(
             production_source.contains("button.editor-inspector-tab-button {\n                min-height: 20px;\n                padding: 0;\n                border-radius: 0;\n                border: none;\n                background: transparent;")
                 && production_source.contains("button.editor-inspector-tab-button.active-inspector-tab {\n                background: transparent;\n                border: none;\n                color: #ff9900;")
-                && production_source.contains(".editor-colors-panel {\n                min-width: 210px;"),
-            "inspector tabs should be text-only with orange active text and colors panel should match background width",
+                && production_source.contains(".editor-inspector-tabs {\n                margin-top: 16px;\n                margin-bottom: 12px;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && production_source.contains(".editor-inspector-placeholder-shell {\n                min-width: 210px;")
+                && production_source.contains(".editor-background-sidebar {\n                min-width: 210px;")
+                && production_source.contains(".editor-colors-panel {\n                min-width: 210px;")
+                && !production_source.contains(".editor-background-sidebar {\n                min-width: 210px;\n                width: 210px;")
+                && !production_source.contains(".editor-colors-panel {\n                min-width: 210px;\n                width: 210px;"),
+            "inspector tabs should be text-only, with a fixed shell width but flexible inner panel surfaces",
         );
     }
 

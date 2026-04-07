@@ -992,8 +992,6 @@ pub(super) fn build_toolbar_mode_controls(
     standard_mode_group.append(&obfuscate_method_group);
     standard_mode_group.append(&pen_weight_group);
     standard_mode_group.append(&stroke_size_group);
-    standard_mode_group.append(&arrow_style_group);
-    standard_mode_group.append(&number_options_group);
     standard_mode_group.append(&size_group);
 
     let toolbar_mode_stack = Stack::new();
@@ -1009,8 +1007,6 @@ pub(super) fn build_toolbar_mode_controls(
     root.append(&crop_tools_group);
     root.append(&background_tools_group);
     root.append(&toolbar_mode_stack);
-    root.append(&text_size_group);
-    root.append(&font_family_group);
     ToolbarModeParts {
         root,
         toolbar_mode_stack,
@@ -1117,11 +1113,9 @@ pub(super) fn build_toolbar_right_controls(
     }
 }
 
-pub(super) fn build_toolbar_tool_updater(
+    pub(super) fn build_toolbar_tool_updater(
     toolbar_mode_stack: &Stack,
-    background_inspector: &GtkBox,
-    colors_inspector: &GtkBox,
-    placeholder_inspector: &GtkBox,
+    inspector_stack: &Stack,
     inspector_tabs: &GtkBox,
     background_tab_btn: &Button,
     colors_tab_btn: &Button,
@@ -1136,9 +1130,7 @@ pub(super) fn build_toolbar_tool_updater(
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
 ) -> Rc<dyn Fn(Tool)> {
     let toolbar_mode_stack = toolbar_mode_stack.clone();
-    let background_inspector = background_inspector.clone();
-    let colors_inspector = colors_inspector.clone();
-    let placeholder_inspector = placeholder_inspector.clone();
+    let inspector_stack = inspector_stack.clone();
     let inspector_tabs = inspector_tabs.clone();
     let background_tab_btn = background_tab_btn.clone();
     let colors_tab_btn = colors_tab_btn.clone();
@@ -1183,6 +1175,13 @@ pub(super) fn build_toolbar_tool_updater(
             canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Never);
         }
 
+        let primary_surface = match tool {
+            Tool::Background => Some(("Background", "background")),
+            Tool::Arrow => Some(("Arrow", "arrow")),
+            Tool::Text => Some(("Text", "text")),
+            Tool::Number => Some(("Number", "number")),
+            _ => None,
+        };
         let background_mode = matches!(tool, Tool::Background);
         let colors_mode = matches!(
             tool,
@@ -1198,21 +1197,22 @@ pub(super) fn build_toolbar_tool_updater(
                 | Tool::Obfuscate
                 | Tool::Focus
         );
-        background_tab_btn.set_label("Background");
+        background_tab_btn.set_label(primary_surface.map(|(label, _)| label).unwrap_or("Background"));
         colors_tab_btn.set_label("Colors");
-        inspector_tabs.set_visible(background_mode || colors_mode);
-        background_tab_btn.set_visible(background_mode);
+        inspector_tabs.set_visible(primary_surface.is_some() || colors_mode);
+        background_tab_btn.set_visible(primary_surface.is_some());
         colors_tab_btn.set_visible(colors_mode);
 
-        background_inspector.set_visible(false);
-        colors_inspector.set_visible(colors_mode);
-        placeholder_inspector.set_visible(!background_mode && !colors_mode);
-
-        if background_mode || colors_mode {
-            colors_inspector.set_visible(true);
+        if let Some((_, surface)) = primary_surface {
+            inspector_stack.set_visible_child_name(surface);
+            background_tab_btn.add_css_class("active-inspector-tab");
+            colors_tab_btn.remove_css_class("active-inspector-tab");
+        } else if colors_mode {
+            inspector_stack.set_visible_child_name("colors");
             colors_tab_btn.add_css_class("active-inspector-tab");
             background_tab_btn.remove_css_class("active-inspector-tab");
         } else {
+            inspector_stack.set_visible_child_name("placeholder");
             background_tab_btn.remove_css_class("active-inspector-tab");
             colors_tab_btn.remove_css_class("active-inspector-tab");
         }
@@ -1253,6 +1253,21 @@ mod tests {
     }
 
     #[test]
+    fn background_tool_defaults_to_background_inspector_surface() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let primary_surface = match tool {")
+                && production_source.contains("Tool::Background => Some((\"Background\", \"background\"))")
+                && production_source.contains("if let Some((_, surface)) = primary_surface {")
+                && production_source.contains("inspector_stack.set_visible_child_name(surface);")
+                && production_source.contains("background_tab_btn.add_css_class(\"active-inspector-tab\");")
+                && production_source.contains("colors_tab_btn.remove_css_class(\"active-inspector-tab\");"),
+            "Background mode should open on the Background inspector surface instead of the Colors surface",
+        );
+    }
+
+    #[test]
     fn toolbar_color_status_label_is_center_aligned_with_swatch() {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
@@ -1276,16 +1291,19 @@ mod tests {
     }
 
     #[test]
-    fn color_capable_tools_default_to_colors_inspector_surface() {
+    fn non_migrated_color_tools_default_to_colors_inspector_surface() {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("background_inspector.set_visible(false);")
-                && production_source.contains("colors_inspector.set_visible(colors_mode);")
-                && production_source.contains("Tool::Background")
+            production_source.contains("inspector_stack.set_visible_child_name(\"colors\");")
+                && production_source.contains("} else if colors_mode {")
                 && production_source.contains("Tool::Pen")
-                && production_source.contains("Tool::Focus"),
-            "Color-capable tools should switch the right inspector to the Colors surface",
+                && production_source.contains("Tool::Line")
+                && production_source.contains("Tool::Obfuscate")
+                && !production_source.contains("Tool::Arrow => Some((\"Arrow\", \"colors\"))")
+                && !production_source.contains("Tool::Text => Some((\"Text\", \"colors\"))")
+                && !production_source.contains("Tool::Number => Some((\"Number\", \"colors\"))"),
+            "Non-migrated color-capable tools should still switch the right inspector to the Colors surface",
         );
     }
 
@@ -1299,6 +1317,19 @@ mod tests {
                 && production_source.contains("Tool::Highlighter")
                 && production_source.contains("\"Colors\""),
             "Toolbar inspector routing should include Background and color-capable tools in the shared Colors flow",
+        );
+    }
+
+    #[test]
+    fn toolbar_no_longer_exposes_arrow_text_and_number_detail_groups() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains("standard_mode_group.append(&arrow_style_group);")
+                && !production_source.contains("standard_mode_group.append(&number_options_group);")
+                && !production_source.contains("root.append(&text_size_group);")
+                && !production_source.contains("root.append(&font_family_group);"),
+            "Toolbar layout should stop mounting Arrow, Text, and Number detail groups after the inspector migration",
         );
     }
 }

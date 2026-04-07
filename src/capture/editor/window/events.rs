@@ -1,7 +1,7 @@
 use gtk4::{
     gdk, glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
-    EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Image, Label, Popover,
-    Scale,
+    EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Image, Label,
+    Popover, Scale, CheckButton,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -112,6 +112,8 @@ pub(super) struct EventContext {
     pub number_size_list: gtk4::Box,
     pub arrow_style_button: Button,
     pub arrow_style_list: gtk4::Box,
+    pub arrow_thickness_list: gtk4::Box,
+    pub inverse_direction_toggle: CheckButton,
     pub stroke_size_button: Button,
     pub stroke_size_list: gtk4::Box,
 }
@@ -187,6 +189,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         number_size_list,
         arrow_style_button,
         arrow_style_list,
+        arrow_thickness_list,
+        inverse_direction_toggle,
         stroke_size_button,
         stroke_size_list,
     } = ctx;
@@ -897,6 +901,62 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             }
         });
     }
+
+    let arrow_thickness_sizes: [(f64, PenWeight); 4] = [
+        (2.0, PenWeight::Small),
+        (4.0, PenWeight::Medium),
+        (7.0, PenWeight::Large),
+        (12.0, PenWeight::ExtraLarge),
+    ];
+
+    let mut thickness_idx = 0usize;
+    let mut child_opt = arrow_thickness_list.first_child();
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.clone().downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&(size, weight)) = arrow_thickness_sizes.get(thickness_idx) else {
+            break;
+        };
+        thickness_idx += 1;
+
+        let state_stroke = state.clone();
+        let drawing_area_stroke = drawing_area.downgrade();
+        let stroke_size_button_clone = stroke_size_button.clone();
+
+        button.connect_clicked(move |_| {
+            {
+                let mut st = state_stroke.lock().unwrap();
+                st.set_stroke_size(size);
+            }
+
+            let icon = gtk4::Image::from_icon_name(weight.icon_name());
+            icon.set_pixel_size(weight.icon_pixel_size());
+            stroke_size_button_clone.set_child(Some(&icon));
+
+            if let Some(area) = drawing_area_stroke.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+
+    inverse_direction_toggle.connect_toggled({
+        let state = state.clone();
+        let drawing_area = drawing_area.downgrade();
+        move |toggle| {
+            {
+                let mut st = state.lock().unwrap();
+                st.inverse_arrow_direction = toggle.is_active();
+            }
+
+            if let Some(area) = drawing_area.upgrade() {
+                area.queue_draw();
+            }
+        }
+    });
 
     let refresh_number_start_display: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
