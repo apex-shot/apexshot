@@ -1117,11 +1117,9 @@ pub(super) fn build_toolbar_right_controls(
     }
 }
 
-pub(super) fn build_toolbar_tool_updater(
+    pub(super) fn build_toolbar_tool_updater(
     toolbar_mode_stack: &Stack,
-    background_inspector: &GtkBox,
-    colors_inspector: &GtkBox,
-    placeholder_inspector: &GtkBox,
+    inspector_stack: &Stack,
     inspector_tabs: &GtkBox,
     background_tab_btn: &Button,
     colors_tab_btn: &Button,
@@ -1136,9 +1134,7 @@ pub(super) fn build_toolbar_tool_updater(
     start_background_gradient_preview_loading: Rc<dyn Fn()>,
 ) -> Rc<dyn Fn(Tool)> {
     let toolbar_mode_stack = toolbar_mode_stack.clone();
-    let background_inspector = background_inspector.clone();
-    let colors_inspector = colors_inspector.clone();
-    let placeholder_inspector = placeholder_inspector.clone();
+    let inspector_stack = inspector_stack.clone();
     let inspector_tabs = inspector_tabs.clone();
     let background_tab_btn = background_tab_btn.clone();
     let colors_tab_btn = colors_tab_btn.clone();
@@ -1204,15 +1200,16 @@ pub(super) fn build_toolbar_tool_updater(
         background_tab_btn.set_visible(background_mode);
         colors_tab_btn.set_visible(colors_mode);
 
-        background_inspector.set_visible(false);
-        colors_inspector.set_visible(colors_mode);
-        placeholder_inspector.set_visible(!background_mode && !colors_mode);
-
-        if background_mode || colors_mode {
-            colors_inspector.set_visible(true);
+        if background_mode {
+            inspector_stack.set_visible_child_name("background");
+            background_tab_btn.add_css_class("active-inspector-tab");
+            colors_tab_btn.remove_css_class("active-inspector-tab");
+        } else if colors_mode {
+            inspector_stack.set_visible_child_name("colors");
             colors_tab_btn.add_css_class("active-inspector-tab");
             background_tab_btn.remove_css_class("active-inspector-tab");
         } else {
+            inspector_stack.set_visible_child_name("placeholder");
             background_tab_btn.remove_css_class("active-inspector-tab");
             colors_tab_btn.remove_css_class("active-inspector-tab");
         }
@@ -1253,6 +1250,19 @@ mod tests {
     }
 
     #[test]
+    fn background_tool_defaults_to_background_inspector_surface() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("inspector_stack.set_visible_child_name(\"background\");")
+                && production_source.contains("if background_mode {")
+                && production_source.contains("background_tab_btn.add_css_class(\"active-inspector-tab\");")
+                && production_source.contains("colors_tab_btn.remove_css_class(\"active-inspector-tab\");"),
+            "Background mode should open on the Background inspector surface instead of the Colors surface",
+        );
+    }
+
+    #[test]
     fn toolbar_color_status_label_is_center_aligned_with_swatch() {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
@@ -1276,16 +1286,16 @@ mod tests {
     }
 
     #[test]
-    fn color_capable_tools_default_to_colors_inspector_surface() {
+    fn non_background_color_tools_default_to_colors_inspector_surface() {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("background_inspector.set_visible(false);")
-                && production_source.contains("colors_inspector.set_visible(colors_mode);")
+            production_source.contains("inspector_stack.set_visible_child_name(\"colors\");")
+                && production_source.contains("} else if colors_mode {")
                 && production_source.contains("Tool::Background")
                 && production_source.contains("Tool::Pen")
                 && production_source.contains("Tool::Focus"),
-            "Color-capable tools should switch the right inspector to the Colors surface",
+            "Non-background color-capable tools should switch the right inspector to the Colors surface",
         );
     }
 

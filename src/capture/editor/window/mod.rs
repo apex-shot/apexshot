@@ -2,7 +2,7 @@ use gdk4x11::X11Surface;
 use gtk4::gdk;
 use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation,
-    Popover,
+    Popover, Stack,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use x11rb::{connection::Connection, protocol::xproto, protocol::xproto::ConnectionExt};
 
+use self::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use super::color::{draw_color_to_hex, draw_color_to_rgba_u8, selection_hit_padding_for_scale};
 use super::render::{
     draw_active_text_input, draw_annotation_action, draw_arrow_control_handles,
@@ -745,6 +746,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let placeholder_inspector = GtkBox::new(Orientation::Vertical, 12);
     placeholder_inspector.add_css_class("editor-inspector-placeholder-shell");
+    placeholder_inspector.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
+    placeholder_inspector.set_hexpand(false);
     placeholder_inspector.set_vexpand(true);
 
     let placeholder_title = Label::new(Some("Inspector"));
@@ -761,6 +764,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let inspector_tabs = GtkBox::new(Orientation::Horizontal, 8);
     inspector_tabs.add_css_class("editor-inspector-tabs");
+    inspector_tabs.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
+    inspector_tabs.set_hexpand(false);
+    inspector_tabs.set_halign(gtk4::Align::Fill);
 
     let background_tab_btn = Button::with_label("Background");
     background_tab_btn.set_has_frame(false);
@@ -775,13 +781,25 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let inspector = GtkBox::new(Orientation::Vertical, 0);
     inspector.add_css_class("editor-right-inspector");
-    inspector.set_width_request(280);
+    inspector.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
     inspector.set_hexpand(false);
     inspector.set_vexpand(true);
     inspector.append(&inspector_tabs);
-    inspector.append(&background_inspector);
-    inspector.append(&colors_inspector);
-    inspector.append(&placeholder_inspector);
+
+    let inspector_stack = Stack::new();
+    inspector_stack.set_hhomogeneous(true);
+    inspector_stack.set_vhomogeneous(false);
+    inspector_stack.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
+    inspector_stack.set_hexpand(false);
+    inspector_stack.set_vexpand(true);
+    background_inspector.set_visible(true);
+    colors_inspector.set_visible(true);
+    placeholder_inspector.set_visible(true);
+    inspector_stack.add_named(&background_inspector, Some("background"));
+    inspector_stack.add_named(&colors_inspector, Some("colors"));
+    inspector_stack.add_named(&placeholder_inspector, Some("placeholder"));
+    inspector_stack.set_visible_child_name("placeholder");
+    inspector.append(&inspector_stack);
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.set_hexpand(true);
@@ -793,9 +811,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let update_toolbar_for_tool = toolbar::build_toolbar_tool_updater(
         &toolbar_mode_stack,
-        &background_inspector,
-        &colors_inspector,
-        &placeholder_inspector,
+        &inspector_stack,
         &inspector_tabs,
         &background_tab_btn,
         &colors_tab_btn,
@@ -811,18 +827,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     );
 
     let set_active_inspector_surface: Rc<dyn Fn(&str)> = Rc::new({
-        let background_inspector = background_inspector.clone();
-        let colors_inspector = colors_inspector.clone();
-        let placeholder_inspector = placeholder_inspector.clone();
+        let inspector_stack = inspector_stack.clone();
         let background_tab_btn = background_tab_btn.clone();
         let colors_tab_btn = colors_tab_btn.clone();
         move |surface| {
             let show_background = surface == "background";
             let show_colors = surface == "colors";
-            let show_placeholder = surface == "placeholder";
-            background_inspector.set_visible(show_background);
-            colors_inspector.set_visible(show_colors);
-            placeholder_inspector.set_visible(show_placeholder);
+            inspector_stack.set_visible_child_name(surface);
             if show_background {
                 background_tab_btn.add_css_class("active-inspector-tab");
             } else {
@@ -1286,7 +1297,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
     });
     sync_size_control();
-    update_toolbar_for_tool(Tool::Arrow);
+    let initial_tool = state.lock().unwrap().selected_tool;
+    update_toolbar_for_tool(initial_tool);
 
     let state_draw = state.clone();
     let transform_draw = transform.clone();
@@ -2156,5 +2168,35 @@ mod tests {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(production_source.contains("background_inspector"));
+    }
+
+    #[test]
+    fn editor_layout_uses_stack_for_inspector_surface_switching() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let inspector_stack = Stack::new();")
+                && production_source.contains("inspector_stack.set_hhomogeneous(true);")
+                && production_source.contains("background_inspector.set_visible(true);")
+                && production_source.contains("colors_inspector.set_visible(true);")
+                && production_source.contains("placeholder_inspector.set_visible(true);")
+                && production_source.contains("inspector_stack.add_named(&background_inspector, Some(\"background\"));")
+                && production_source.contains("inspector_stack.add_named(&colors_inspector, Some(\"colors\"));")
+                && production_source.contains("inspector_stack.add_named(&placeholder_inspector, Some(\"placeholder\"));")
+                && production_source.contains("inspector_stack.set_visible_child_name(surface);"),
+            "Inspector surfaces should switch through a dedicated stack so tab changes keep one stable container",
+        );
+    }
+
+    #[test]
+    fn editor_startup_uses_selected_tool_instead_of_hardcoded_arrow() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let initial_tool = state.lock().unwrap().selected_tool;")
+                && production_source.contains("update_toolbar_for_tool(initial_tool);")
+                && !production_source.contains("update_toolbar_for_tool(Tool::Arrow);"),
+            "Editor startup should route the inspector from the selected startup tool instead of forcing Arrow",
+        );
     }
 }

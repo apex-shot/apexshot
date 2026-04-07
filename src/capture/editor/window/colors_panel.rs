@@ -50,18 +50,19 @@ pub fn build_colors_panel(
     let root = GtkBox::new(Orientation::Vertical, 12);
     root.add_css_class("editor-colors-panel");
     root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
-    root.set_hexpand(true);
+    root.set_hexpand(false);
     root.set_halign(gtk4::Align::Fill);
     root.set_vexpand(true);
 
     let content = GtkBox::new(Orientation::Vertical, 12);
-    content.set_hexpand(true);
+    content.set_hexpand(false);
     content.set_halign(gtk4::Align::Fill);
 
     let helper = Label::new(Some("Choose a color for the active tool"));
     helper.add_css_class("editor-colors-panel-helper");
     helper.set_wrap(true);
     helper.set_max_width_chars(26);
+    helper.set_halign(gtk4::Align::Fill);
     helper.set_xalign(0.0);
 
     let picker_state = Rc::new(RefCell::new(PickerColorState::from_color(DRAW_COLORS[0])));
@@ -85,7 +86,7 @@ pub fn build_colors_panel(
     gradient_area.set_content_height(140);
     gradient_area.set_size_request(BACKGROUND_SIDEBAR_WIDTH, 140);
     gradient_area.set_halign(gtk4::Align::Fill);
-    gradient_area.set_hexpand(true);
+    gradient_area.set_hexpand(false);
     gradient_area.add_css_class("editor-gradient-area");
     let picker_state_draw = picker_state.clone();
     gradient_area.set_draw_func(move |_area, cr: &gtk4::cairo::Context, width, height| {
@@ -852,9 +853,9 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
-                && production_source.contains("root.set_hexpand(true);")
+                && production_source.contains("root.set_hexpand(false);")
                 && production_source.contains("root.set_halign(gtk4::Align::Fill);")
-                && production_source.contains("content.set_hexpand(true);")
+                && production_source.contains("content.set_hexpand(false);")
                 && production_source.contains("content.set_halign(gtk4::Align::Fill);")
                 && production_source.contains("palette_section.set_hexpand(true);")
                 && production_source.contains("palette_section.set_halign(gtk4::Align::Fill);")
@@ -874,6 +875,9 @@ mod tests {
                 && production_source.contains("actions.set_hexpand(true);")
                 && production_source.contains("add_current_color_btn.set_hexpand(true);")
                 && production_source.contains("pick_from_screen_btn.set_hexpand(true);")
+                && production_source.contains("helper.set_halign(gtk4::Align::Fill);")
+                && !production_source.contains("helper.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source.contains("content.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
                 && !production_source.contains("palette_grid.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
                 && !production_source.contains("custom_grid.set_width_request(BACKGROUND_SIDEBAR_WIDTH);"),
             "Colors panel should use the same content width as the Background panel",

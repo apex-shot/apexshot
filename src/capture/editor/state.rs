@@ -342,7 +342,7 @@ impl EditorState {
             crop_background_color_explicit: false,
             actions: Vec::new(),
             redo_actions: Vec::new(),
-            selected_tool: Tool::Arrow,
+            selected_tool: Tool::Background,
             selected_action_index: None,
             selected_color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
             stroke_size: STROKE_WIDTH,
@@ -2209,6 +2209,19 @@ impl EditorState {
         self.active_text_is_dragging = false;
         self.active_text_drag_handle = None;
         self.active_text_drag_start = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn editor_state_defaults_to_background_tool() {
+        let source = include_str!("state.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("selected_tool: Tool::Background,"),
+            "Editor state should default to the Background tool so startup inspector width matches the initial tool surface",
+        );
     }
 }
 
