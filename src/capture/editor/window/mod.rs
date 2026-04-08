@@ -82,6 +82,9 @@ use super::ui_support::{
     toolbar_icon_size,
 };
 
+const TEXT_SIZE_OPTIONS: [i32; 12] = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
+const TEXT_FONT_FAMILIES: [&str; 5] = ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"];
+
 fn sync_arrow_option_selection(list: &GtkBox, selected_index: usize) {
     let mut child_opt = list.first_child();
     let mut index = 0usize;
@@ -131,6 +134,36 @@ fn sync_crop_option_selection(list: &GtkBox, selected_index: usize) {
                 if let Some(check_icon) = row.last_child() {
                     if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
                         widget.set_visible(index == selected_index);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
+fn sync_text_option_selection(list: &GtkBox, selected_index: Option<usize>) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        let is_active = selected_index == Some(index);
+        if is_active {
+            button.add_css_class("editor-text-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-text-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(is_active);
                     }
                 }
             }
@@ -1435,18 +1468,52 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         });
     }
 
+    let (selected_text_size, selected_font_family) = {
+        let st = state.lock().unwrap();
+        (
+            st.selected_text_action_size().map(|size| size as i32).unwrap_or(st.text_size as i32),
+            st.selected_text_font_family()
+                .unwrap_or_else(|| st.text_font_family.clone()),
+        )
+    };
+
     while let Some(child) = text_size_list.first_child() {
         text_size_list.remove(&child);
     }
-    for size in [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72] {
+    for size in TEXT_SIZE_OPTIONS {
         let label = format!("{}pt", size);
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let label_widget = Label::new(Some(&label));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(size == selected_text_size);
+        check_icon.add_css_class("editor-text-inspector-check");
+
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
+
         let btn = Button::builder()
-            .label(&label)
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-text-inspector-option",
+            ])
+            .child(&btn_box)
             .build();
+        if size == selected_text_size {
+            btn.add_css_class("editor-text-inspector-option-active");
+        }
         let state = state.clone();
         let text_size_label = text_size_label.clone();
+        let text_size_list_sync = text_size_list.clone();
         let drawing_area = drawing_area.clone();
         btn.connect_clicked(move |b| {
             if let Some(popover) = b.ancestor(Popover::static_type()) {
@@ -1460,6 +1527,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 st.text_size = size as f64;
             }
             drop(st);
+            sync_text_option_selection(
+                &text_size_list_sync,
+                TEXT_SIZE_OPTIONS.iter().position(|candidate| *candidate == size),
+            );
             if has_active_text {
                 drawing_area.grab_focus();
             }
@@ -1471,14 +1542,39 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     while let Some(child) = font_family_list.first_child() {
         font_family_list.remove(&child);
     }
-    for family in ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"] {
+    for family in TEXT_FONT_FAMILIES {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let label_widget = Label::new(Some(family));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(family == selected_font_family);
+        check_icon.add_css_class("editor-text-inspector-check");
+
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
+
         let btn = Button::builder()
-            .label(family)
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-text-inspector-option",
+            ])
+            .child(&btn_box)
             .build();
+        if family == selected_font_family {
+            btn.add_css_class("editor-text-inspector-option-active");
+        }
         let state = state.clone();
         let font_family_label = font_family_label.clone();
+        let font_family_list_sync = font_family_list.clone();
         let drawing_area = drawing_area.clone();
         let family_str = family.to_string();
         btn.connect_clicked(move |b| {
@@ -1495,6 +1591,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 st.text_font_family = family_str.clone();
             }
             drop(st);
+            sync_text_option_selection(
+                &font_family_list_sync,
+                TEXT_FONT_FAMILIES
+                    .iter()
+                    .position(|candidate| *candidate == family_str.as_str()),
+            );
             if has_active_text {
                 drawing_area.grab_focus();
             }
@@ -1765,6 +1867,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let size_slider = size_slider.clone();
         let text_size_label = text_size_label.clone();
         let font_family_label = font_family_label.clone();
+        let text_size_list = text_size_list.clone();
+        let font_family_list = font_family_list.clone();
         move || {
             // Extract all needed data BEFORE any GTK operations to avoid deadlock
             let (selected_tool, mode, value, text_size, font_family) = {
@@ -1780,6 +1884,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             text_size_label.set_label(&format!("{}pt", text_size as i32));
             font_family_label.set_label(&font_family);
+            sync_text_option_selection(&text_size_list, TEXT_SIZE_OPTIONS.iter().position(|candidate| *candidate == text_size as i32));
+            sync_text_option_selection(&font_family_list, TEXT_FONT_FAMILIES.iter().position(|candidate| *candidate == font_family.as_str()));
 
             // Now perform GTK operations WITHOUT holding the lock
             if selected_tool == Tool::Highlighter {
@@ -2598,6 +2704,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         size_slider: size_slider.clone(),
         text_size_label: text_size_label.clone(),
         font_family_label: font_family_label.clone(),
+        text_size_list: text_size_list.clone(),
+        font_family_list: font_family_list.clone(),
         apply_crop_btn: crop_apply_btn.clone(),
         crop_reset_btn: crop_reset_btn.clone(),
         undo_btn: undo_btn.clone(),
@@ -2850,6 +2958,21 @@ mod tests {
                 && production_source.contains("sync_arrow_option_selection(&arrow_style_list, selected_style);")
                 && production_source.contains("sync_arrow_option_selection(&arrow_thickness_list, selected_thickness);"),
             "Arrow inspector rows should expose a visible selected tick for style and thickness options",
+        );
+    }
+
+    #[test]
+    fn text_inspector_rows_use_label_plus_tick_layout_and_shared_sidebar_width() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("check_icon.add_css_class(\"editor-text-inspector-check\");")
+                && production_source.contains("btn.add_css_class(\"editor-text-inspector-option-active\");")
+                && production_source.contains("sync_text_option_selection(&text_size_list")
+                && production_source.contains("sync_text_option_selection(&font_family_list")
+                && production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source.contains("TEXT_SIDEBAR_WIDTH"),
+            "Text inspector rows should use explicit selected ticks while reusing the existing fixed sidebar width",
         );
     }
 }

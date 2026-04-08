@@ -1342,6 +1342,27 @@ pub fn install_editor_css() {
                 font-weight: 700;
             }
 
+            button.editor-text-inspector-option {
+                border-radius: 8px;
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-text-inspector-option:hover {
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+            }
+
+            button.editor-text-inspector-option.editor-text-inspector-option-active {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-text-inspector-check {
+                color: #ff9900;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
                 padding: 16px;
@@ -2353,6 +2374,19 @@ mod tests {
             production_source.contains("button.editor-arrow-inspector-option.editor-arrow-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
                 && production_source.contains(".editor-arrow-inspector-check {\n                color: #ff9900;"),
             "Arrow inspector selection should use a subtle row surface plus an orange tick indicator",
+        );
+    }
+
+    #[test]
+    fn text_inspector_option_rows_match_arrow_visual_language_without_changing_panel_width() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-text-inspector-option.editor-text-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains(".editor-text-inspector-check {\n                color: #ff9900;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && !production_source.contains("TEXT_SIDEBAR_WIDTH"),
+            "Text inspector rows should mirror Arrow selection styling without introducing a new sidepanel width path",
         );
     }
 
