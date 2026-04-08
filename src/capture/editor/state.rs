@@ -122,49 +122,76 @@ fn resize_crop_rect_with_handle(
     handle: SelectHandle,
     dx: f64,
     dy: f64,
-    _image_width: i32,
-    _image_height: i32,
+    image_width: i32,
+    image_height: i32,
 ) -> bool {
-    let left = rect.x as f64;
-    let top = rect.y as f64;
-    let right = left + rect.width as f64;
-    let bottom = top + rect.height as f64;
+    let mut left = rect.x as f64;
+    let mut top = rect.y as f64;
+    let mut right = left + rect.width as f64;
+    let mut bottom = top + rect.height as f64;
 
-    let updated = match handle {
-        SelectHandle::Left | SelectHandle::Right => {
-            let width = right - left;
-            let expansion = if handle == SelectHandle::Right {
-                dx
-            } else {
-                -dx
-            };
-            let clamped_expansion = expansion.max((SELECT_MIN_RESIZE_SIZE - width) / 2.0);
-            Rect::from_bounds(
-                left - clamped_expansion,
-                top,
-                right + clamped_expansion,
-                bottom,
-            )
-        }
-        SelectHandle::Top | SelectHandle::Bottom => {
-            let height = bottom - top;
-            let expansion = if handle == SelectHandle::Bottom {
-                dy
-            } else {
-                -dy
-            };
-            let clamped_expansion = expansion.max((SELECT_MIN_RESIZE_SIZE - height) / 2.0);
-            Rect::from_bounds(
-                left,
-                top - clamped_expansion,
-                right,
-                bottom + clamped_expansion,
-            )
-        }
-        _ => return false,
-    };
+    let move_left = matches!(
+        handle,
+        SelectHandle::TopLeft | SelectHandle::Left | SelectHandle::BottomLeft
+    );
+    let move_right = matches!(
+        handle,
+        SelectHandle::TopRight | SelectHandle::Right | SelectHandle::BottomRight
+    );
+    let move_top = matches!(
+        handle,
+        SelectHandle::TopLeft | SelectHandle::Top | SelectHandle::TopRight
+    );
+    let move_bottom = matches!(
+        handle,
+        SelectHandle::BottomLeft | SelectHandle::Bottom | SelectHandle::BottomRight
+    );
 
-    let Some(updated) = updated else {
+    if !move_left && !move_right && !move_top && !move_bottom {
+        return false;
+    }
+
+    if move_left {
+        left += dx;
+    }
+    if move_right {
+        right += dx;
+    }
+    if move_top {
+        top += dy;
+    }
+    if move_bottom {
+        bottom += dy;
+    }
+
+    // Enforce maximum expansion limits (sanity check to prevent runaway/freeze)
+    // We allow up to 5000px of padding beyond the image on any side.
+    let max_exp = 5000.0;
+    left = left.max(-max_exp);
+    top = top.max(-max_exp);
+    right = right.min(image_width as f64 + max_exp);
+    bottom = bottom.min(image_height as f64 + max_exp);
+
+    // Enforce minimum size constraints
+    if move_left && right - left < SELECT_MIN_RESIZE_SIZE {
+        left = right - SELECT_MIN_RESIZE_SIZE;
+    }
+    if move_right && right - left < SELECT_MIN_RESIZE_SIZE {
+        right = left + SELECT_MIN_RESIZE_SIZE;
+    }
+    if move_top && bottom - top < SELECT_MIN_RESIZE_SIZE {
+        top = bottom - SELECT_MIN_RESIZE_SIZE;
+    }
+    if move_bottom && bottom - top < SELECT_MIN_RESIZE_SIZE {
+        bottom = top + SELECT_MIN_RESIZE_SIZE;
+    }
+
+    let Some(updated) = Rect::from_bounds(
+        left.min(right),
+        top.min(bottom),
+        left.max(right),
+        top.max(bottom),
+    ) else {
         return false;
     };
 
@@ -285,7 +312,7 @@ fn resize_crop_rect_with_fixed_aspect(
     rect: &mut Rect,
     handle: SelectHandle,
     point: Point,
-    _image_width: i32,
+    image_width: i32,
     _image_height: i32,
     aspect_ratio: f64,
 ) -> bool {
@@ -299,7 +326,7 @@ fn resize_crop_rect_with_fixed_aspect(
     };
     let min_half_width = SELECT_MIN_RESIZE_SIZE / 2.0;
     let min_half_height = min_half_width / aspect_ratio;
-    let half_width = match handle {
+    let mut half_width = match handle {
         SelectHandle::Left | SelectHandle::Right => (point.x - center.x).abs().max(min_half_width),
         SelectHandle::Top | SelectHandle::Bottom => {
             ((point.y - center.y).abs().max(min_half_height)) * aspect_ratio
@@ -309,6 +336,12 @@ fn resize_crop_rect_with_fixed_aspect(
             .max((point.y - center.y).abs() * aspect_ratio)
             .max(min_half_width),
     };
+
+    // Sanity check: cap half_width to avoid infinite expansion
+    let max_exp = 5000.0;
+    let max_half_width = (image_width as f64 + max_exp * 2.0) / 2.0;
+    half_width = half_width.min(max_half_width);
+
     let half_height = half_width / aspect_ratio;
 
     let Some(updated) = Rect::from_bounds(
@@ -2009,6 +2042,11 @@ impl EditorState {
         self.crop_selection.is_some()
     }
 
+    pub fn reset_crop_interaction(&mut self) {
+        self.crop_selection = None;
+        self.clear_drag_without_rebuild();
+    }
+
     pub fn begin_crop_drag_with_scale(&mut self, point: Point, view_scale: f64) -> bool {
         let Some(crop_rect) = self.crop_selection else {
             return false;
@@ -2279,7 +2317,9 @@ impl EditorState {
 mod tests {
     use image::RgbaImage;
 
-    use crate::capture::editor::types::{AnnotationAction, ArrowStyle, DrawColor, Point};
+    use crate::capture::editor::types::{
+        AnnotationAction, ArrowStyle, DrawColor, Point, Rect, SelectHandle,
+    };
 
     use super::EditorState;
 
@@ -2351,6 +2391,31 @@ mod tests {
             }
             other => panic!("expected selected arrow after reverse, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reset_crop_interaction_clears_crop_selection_and_drag_handles() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.crop_selection = Some(Rect {
+            x: 2,
+            y: 3,
+            width: 12,
+            height: 14,
+        });
+        state.drag_start = Some(Point { x: 2.0, y: 3.0 });
+        state.drag_current = Some(Point { x: 15.0, y: 18.0 });
+        state.drag_start_view = Some(Point { x: 4.0, y: 5.0 });
+        state.select_drag_anchor = Some(Point { x: 8.0, y: 9.0 });
+        state.select_resize_handle = Some(SelectHandle::BottomRight);
+
+        state.reset_crop_interaction();
+
+        assert!(state.crop_selection.is_none());
+        assert!(state.drag_start.is_none());
+        assert!(state.drag_current.is_none());
+        assert!(state.drag_start_view.is_none());
+        assert!(state.select_drag_anchor.is_none());
+        assert!(state.select_resize_handle.is_none());
     }
 }
 

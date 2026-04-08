@@ -1087,7 +1087,7 @@ mod tests {
     }
 
     #[test]
-    fn crop_edge_drag_resizes_selection_symmetrically() {
+    fn crop_edge_drag_resizes_selection_by_moving_single_edge() {
         let mut state = EditorState::new(RgbaImage::new(160, 100));
         state.set_tool(Tool::Crop);
         state.crop_selection = Some(Rect {
@@ -1097,14 +1097,18 @@ mod tests {
             height: 48,
         });
 
+        // Click on right edge (at x=100 which is 20+80)
         assert!(state.begin_crop_drag_with_scale(Point { x: 100.0, y: 42.0 }, 1.0));
+        // Drag left by 8 pixels
         assert!(state.update_crop_drag(Point { x: 92.0, y: 42.0 }));
         state.end_crop_drag();
 
         let crop = state.crop_selection.unwrap();
-        assert_eq!(crop.x, 28);
+        // Left edge should stay at 20, right edge should move to 92
+        // Width = 92 - 20 = 72
+        assert_eq!(crop.x, 20);
         assert_eq!(crop.y, 18);
-        assert_eq!(crop.width, 64);
+        assert_eq!(crop.width, 72);
         assert_eq!(crop.height, 48);
     }
 

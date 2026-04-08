@@ -110,6 +110,7 @@ pub(super) struct EventContext {
     pub text_size_label: Label,
     pub font_family_label: Label,
     pub apply_crop_btn: Button,
+    pub crop_reset_btn: Button,
 
     pub undo_btn: Button,
     pub redo_btn: Button,
@@ -188,6 +189,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         text_size_label,
         font_family_label,
         apply_crop_btn,
+        crop_reset_btn,
         undo_btn,
         redo_btn,
         delete_selected_btn,
@@ -224,6 +226,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         stroke_size_button,
         stroke_size_list,
     } = ctx;
+
+    let drag_start_transform = Rc::new(RefCell::new(None::<ViewTransform>));
 
     let state_select = state.clone();
     let drawing_area_select = drawing_area.downgrade();
@@ -1253,6 +1257,22 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         }
     });
 
+    let state_reset_crop = state.clone();
+    let drawing_area_reset_crop = drawing_area.downgrade();
+    let update_crop_size_fields_reset_crop = update_crop_size_fields.clone();
+    let apply_crop_btn_reset = apply_crop_btn.clone();
+    crop_reset_btn.connect_clicked(move |_| {
+        {
+            let mut st = state_reset_crop.lock().unwrap();
+            st.reset_crop_interaction();
+        }
+        set_crop_apply_button_state(&apply_crop_btn_reset, true, false);
+        update_crop_size_fields_reset_crop();
+        if let Some(area) = drawing_area_reset_crop.upgrade() {
+            area.queue_draw();
+        }
+    });
+
     let state_undo = state.clone();
     let drawing_area_undo = drawing_area.downgrade();
     let sync_size_control_undo = sync_size_control.clone();
@@ -1344,12 +1364,14 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let drag_last_redraw_begin = drag_last_redraw.clone();
     let apply_crop_btn_drag_begin = apply_crop_btn.clone();
     let update_crop_size_fields_drag_begin = update_crop_size_fields.clone();
+    let drag_start_transform_begin = drag_start_transform.clone();
     drag.connect_drag_begin(move |gesture, x, y| {
         if eyedropper_mode_drag_begin.get() {
             return;
         }
 
         let t = *transform_drag_begin.lock().unwrap();
+        drag_start_transform_begin.borrow_mut().replace(t);
         let view_point = Point { x, y };
 
         let selected_tool = {
@@ -1699,12 +1721,15 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let drag_last_redraw_update = drag_last_redraw.clone();
     let update_crop_size_fields_drag_update = update_crop_size_fields.clone();
     let rebuild_effects_async_drag_update = rebuild_effects_async.clone();
+    let drag_start_transform_update = drag_start_transform.clone();
     drag.connect_drag_update(move |gesture, offset_x, offset_y| {
         if eyedropper_mode_drag_update.get() {
             return;
         }
 
-        let t = *transform_drag_update.lock().unwrap();
+        let t = drag_start_transform_update
+            .borrow()
+            .unwrap_or_else(|| *transform_drag_update.lock().unwrap());
         let mut st = state_drag_update.lock().unwrap();
 
         // Arrow control point dragging
@@ -1919,6 +1944,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     crop_selection_ready = Some(st.crop_selection.is_some());
                     st.clear_drag();
                 }
+                drop(st);
             } else if let Some(action) = st.finalize_drag_action() {
                 // Check if this action requires async effect rebuild
                 let needs_async_rebuild = EditorState::action_requires_effect_rebuild(&action);
