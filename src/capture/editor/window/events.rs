@@ -41,6 +41,36 @@ use super::{
     icon_names,
 };
 
+fn sync_arrow_option_selection(list: &GtkBox, selected_index: usize) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        if index == selected_index {
+            button.add_css_class("editor-arrow-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-arrow-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(index == selected_index);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
 pub(super) struct EventContext {
     pub app: Application,
     pub window: ApplicationWindow,
@@ -80,6 +110,7 @@ pub(super) struct EventContext {
     pub text_size_label: Label,
     pub font_family_label: Label,
     pub apply_crop_btn: Button,
+    pub crop_reset_btn: Button,
 
     pub undo_btn: Button,
     pub redo_btn: Button,
@@ -158,6 +189,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         text_size_label,
         font_family_label,
         apply_crop_btn,
+        crop_reset_btn,
         undo_btn,
         redo_btn,
         delete_selected_btn,
@@ -194,6 +226,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         stroke_size_button,
         stroke_size_list,
     } = ctx;
+
+    let drag_start_transform = Rc::new(RefCell::new(None::<ViewTransform>));
 
     let state_select = state.clone();
     let drawing_area_select = drawing_area.downgrade();
@@ -816,6 +850,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let styles = ArrowStyle::ALL;
 
     let arrow_style_button = arrow_style_button.clone();
+    let arrow_style_list_for_sync = arrow_style_list.clone();
 
     let mut style_idx = 0usize;
     let mut child_opt = arrow_style_list.first_child();
@@ -829,20 +864,24 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let Some(&style) = styles.get(style_idx) else {
             break;
         };
+        let selected_index = style_idx;
         style_idx += 1;
 
         let state_arrow_style = state.clone();
         let drawing_area_arrow_style = drawing_area.downgrade();
         let arrow_style_button = arrow_style_button.clone();
+        let arrow_style_list = arrow_style_list_for_sync.clone();
 
         button.connect_clicked(move |b| {
             {
                 let mut st = state_arrow_style.lock().unwrap();
                 st.set_arrow_style(style);
+                let _ = st.set_selected_arrow_style(style);
             }
 
             let icon = arrow_style_toolbar_icon(style);
             set_button_tool_icon(&arrow_style_button, icon.clone(), toolbar_icon_size(&icon));
+            sync_arrow_option_selection(&arrow_style_list, selected_index);
 
             if let Some(popover) = b.ancestor(Popover::static_type()) {
                 popover.downcast::<Popover>().unwrap().popdown();
@@ -860,6 +899,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         (7.0, PenWeight::Large),
         (12.0, PenWeight::ExtraLarge),
     ];
+
+    let arrow_thickness_list_for_sync = arrow_thickness_list.clone();
 
     let stroke_size_button_for_closure = stroke_size_button.clone();
     let drawing_area_for_stroke = drawing_area.downgrade();
@@ -921,11 +962,13 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let Some(&(size, weight)) = arrow_thickness_sizes.get(thickness_idx) else {
             break;
         };
+        let selected_index = thickness_idx;
         thickness_idx += 1;
 
         let state_stroke = state.clone();
         let drawing_area_stroke = drawing_area.downgrade();
         let stroke_size_button_clone = stroke_size_button.clone();
+        let arrow_thickness_list = arrow_thickness_list_for_sync.clone();
 
         button.connect_clicked(move |_| {
             {
@@ -936,6 +979,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let icon = gtk4::Image::from_icon_name(weight.icon_name());
             icon.set_pixel_size(weight.icon_pixel_size());
             stroke_size_button_clone.set_child(Some(&icon));
+            sync_arrow_option_selection(&arrow_thickness_list, selected_index);
 
             if let Some(area) = drawing_area_stroke.upgrade() {
                 area.queue_draw();
@@ -949,7 +993,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         move |toggle| {
             {
                 let mut st = state.lock().unwrap();
-                st.inverse_arrow_direction = toggle.is_active();
+                let next = toggle.is_active();
+                if st.inverse_arrow_direction != next {
+                    st.inverse_arrow_direction = next;
+                    let _ = st.reverse_selected_arrow_action();
+                }
             }
 
             if let Some(area) = drawing_area.upgrade() {
@@ -1181,19 +1229,13 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let apply_result = {
             let mut st = state_apply_crop.lock().unwrap();
             let result = st.apply_crop_selection();
-            if result.as_ref().is_ok_and(|applied| *applied) {
-                st.set_tool(Tool::Arrow);
-            }
             result
         };
 
         match apply_result {
             Ok(true) => {
                 update_canvas_content_size_apply();
-                set_active_tool_button(&buttons_apply_crop, 6);
-                update_toolbar_for_tool_apply_crop(Tool::Arrow);
-                sync_picker_for_active_tool_apply_crop();
-                set_crop_apply_button_state(&apply_crop_btn_click, false, false);
+                set_crop_apply_button_state(&apply_crop_btn_click, true, false);
                 update_crop_size_fields_apply_crop();
                 if let Some(area) = drawing_area_apply_crop.upgrade() {
                     area.queue_draw();
@@ -1206,6 +1248,22 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             Err(e) => {
                 eprintln!("Failed to apply crop: {e}");
             }
+        }
+    });
+
+    let state_reset_crop = state.clone();
+    let drawing_area_reset_crop = drawing_area.downgrade();
+    let update_crop_size_fields_reset_crop = update_crop_size_fields.clone();
+    let apply_crop_btn_reset = apply_crop_btn.clone();
+    crop_reset_btn.connect_clicked(move |_| {
+        {
+            let mut st = state_reset_crop.lock().unwrap();
+            st.reset_crop_interaction();
+        }
+        set_crop_apply_button_state(&apply_crop_btn_reset, true, false);
+        update_crop_size_fields_reset_crop();
+        if let Some(area) = drawing_area_reset_crop.upgrade() {
+            area.queue_draw();
         }
     });
 
@@ -1300,12 +1358,14 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let drag_last_redraw_begin = drag_last_redraw.clone();
     let apply_crop_btn_drag_begin = apply_crop_btn.clone();
     let update_crop_size_fields_drag_begin = update_crop_size_fields.clone();
+    let drag_start_transform_begin = drag_start_transform.clone();
     drag.connect_drag_begin(move |gesture, x, y| {
         if eyedropper_mode_drag_begin.get() {
             return;
         }
 
         let t = *transform_drag_begin.lock().unwrap();
+        drag_start_transform_begin.borrow_mut().replace(t);
         let view_point = Point { x, y };
 
         let selected_tool = {
@@ -1655,12 +1715,15 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let drag_last_redraw_update = drag_last_redraw.clone();
     let update_crop_size_fields_drag_update = update_crop_size_fields.clone();
     let rebuild_effects_async_drag_update = rebuild_effects_async.clone();
+    let drag_start_transform_update = drag_start_transform.clone();
     drag.connect_drag_update(move |gesture, offset_x, offset_y| {
         if eyedropper_mode_drag_update.get() {
             return;
         }
 
-        let t = *transform_drag_update.lock().unwrap();
+        let t = drag_start_transform_update
+            .borrow()
+            .unwrap_or_else(|| *transform_drag_update.lock().unwrap());
         let mut st = state_drag_update.lock().unwrap();
 
         // Arrow control point dragging
@@ -1875,6 +1938,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     crop_selection_ready = Some(st.crop_selection.is_some());
                     st.clear_drag();
                 }
+                drop(st);
             } else if let Some(action) = st.finalize_drag_action() {
                 // Check if this action requires async effect rebuild
                 let needs_async_rebuild = EditorState::action_requires_effect_rebuild(&action);

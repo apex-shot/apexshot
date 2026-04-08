@@ -98,28 +98,97 @@ pub(super) fn crop_canvas_overflow(
     scale: f64,
     crop_mode_active: bool,
 ) -> (f64, f64, f64, f64) {
-    let (left, top, right, bottom) = if let Some(rect) = crop_rect {
-        (
-            (-rect.x).max(0) as f64 * scale,
-            (-rect.y).max(0) as f64 * scale,
-            ((rect.x + rect.width) as f64 - image_width).max(0.0) * scale,
-            ((rect.y + rect.height) as f64 - image_height).max(0.0) * scale,
-        )
-    } else {
-        (0.0, 0.0, 0.0, 0.0)
-    };
-
     if !crop_mode_active {
+        // Outside of crop mode: report the actual pixel overflow for any
+        // committed crop_selection that extends outside the image, so the
+        // user can see the expanded region even when a different tool is
+        // selected.
+        let (left, top, right, bottom) = if let Some(rect) = crop_rect {
+            (
+                (-rect.x).max(0) as f64 * scale,
+                (-rect.y).max(0) as f64 * scale,
+                ((rect.x + rect.width) as f64 - image_width).max(0.0) * scale,
+                ((rect.y + rect.height) as f64 - image_height).max(0.0) * scale,
+            )
+        } else {
+            (0.0, 0.0, 0.0, 0.0)
+        };
         return (left.ceil(), top.ceil(), right.ceil(), bottom.ceil());
     }
 
+    // Crop mode active: return a CONSTANT fixed gutter on every side.
+    //
+    // This is the key invariant that prevents GTK layout churn:
+    //  - The canvas size is computed once when crop mode is entered.
+    //  - It never changes while the crop handle is dragged, no matter how
+    //    far outside the image the rect moves.
+    //  - The draw function uses these same offsets to centre the image
+    //    inside the gutter and draws handles at their true positions.
     let reserve = 180.0;
-    (
-        left.max(reserve).ceil(),
-        top.max(reserve).ceil(),
-        right.max(reserve).ceil(),
-        bottom.max(reserve).ceil(),
-    )
+    (reserve, reserve, reserve, reserve)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::crop_canvas_overflow;
+    use crate::capture::editor::types::Rect;
+
+    #[test]
+    fn crop_canvas_overflow_is_constant_in_crop_mode_huge_rect() {
+        // Canvas size must not change just because the crop handle went far outside.
+        let overflow = crop_canvas_overflow(
+            Some(Rect {
+                x: -20_000,
+                y: -15_000,
+                width: 40_500,
+                height: 30_500,
+            }),
+            500.0,
+            500.0,
+            1.0,
+            true,
+        );
+        assert_eq!(overflow, (180.0, 180.0, 180.0, 180.0));
+    }
+
+    #[test]
+    fn crop_canvas_overflow_is_constant_in_crop_mode_small_rect() {
+        // Even with a modest out-of-bounds crop, the return is the same constant.
+        let overflow = crop_canvas_overflow(
+            Some(Rect {
+                x: -20,
+                y: -12,
+                width: 540,
+                height: 524,
+            }),
+            500.0,
+            500.0,
+            1.0,
+            true,
+        );
+        assert_eq!(overflow, (180.0, 180.0, 180.0, 180.0));
+    }
+
+    #[test]
+    fn crop_canvas_overflow_is_constant_in_crop_mode_no_rect() {
+        // Even with no crop rect at all, crop mode returns the fixed gutter.
+        let overflow = crop_canvas_overflow(None, 500.0, 500.0, 1.0, true);
+        assert_eq!(overflow, (180.0, 180.0, 180.0, 180.0));
+    }
+
+    #[test]
+    fn crop_canvas_overflow_huge_and_small_both_cap_at_reserve() {
+        // All crop-mode calls return the same tuple — they are identical.
+        let huge = crop_canvas_overflow(
+            Some(Rect { x: -20_000, y: -15_000, width: 40_500, height: 30_500 }),
+            500.0, 500.0, 1.0, true,
+        );
+        let small = crop_canvas_overflow(
+            Some(Rect { x: -20, y: -12, width: 540, height: 524 }),
+            500.0, 500.0, 1.0, true,
+        );
+        assert_eq!(huge, small);
+    }
 }
 
 pub(super) fn sample_rendered_color_at_point(

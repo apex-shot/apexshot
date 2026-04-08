@@ -122,49 +122,76 @@ fn resize_crop_rect_with_handle(
     handle: SelectHandle,
     dx: f64,
     dy: f64,
-    _image_width: i32,
-    _image_height: i32,
+    image_width: i32,
+    image_height: i32,
 ) -> bool {
-    let left = rect.x as f64;
-    let top = rect.y as f64;
-    let right = left + rect.width as f64;
-    let bottom = top + rect.height as f64;
+    let mut left = rect.x as f64;
+    let mut top = rect.y as f64;
+    let mut right = left + rect.width as f64;
+    let mut bottom = top + rect.height as f64;
 
-    let updated = match handle {
-        SelectHandle::Left | SelectHandle::Right => {
-            let width = right - left;
-            let expansion = if handle == SelectHandle::Right {
-                dx
-            } else {
-                -dx
-            };
-            let clamped_expansion = expansion.max((SELECT_MIN_RESIZE_SIZE - width) / 2.0);
-            Rect::from_bounds(
-                left - clamped_expansion,
-                top,
-                right + clamped_expansion,
-                bottom,
-            )
-        }
-        SelectHandle::Top | SelectHandle::Bottom => {
-            let height = bottom - top;
-            let expansion = if handle == SelectHandle::Bottom {
-                dy
-            } else {
-                -dy
-            };
-            let clamped_expansion = expansion.max((SELECT_MIN_RESIZE_SIZE - height) / 2.0);
-            Rect::from_bounds(
-                left,
-                top - clamped_expansion,
-                right,
-                bottom + clamped_expansion,
-            )
-        }
-        _ => return false,
-    };
+    let move_left = matches!(
+        handle,
+        SelectHandle::TopLeft | SelectHandle::Left | SelectHandle::BottomLeft
+    );
+    let move_right = matches!(
+        handle,
+        SelectHandle::TopRight | SelectHandle::Right | SelectHandle::BottomRight
+    );
+    let move_top = matches!(
+        handle,
+        SelectHandle::TopLeft | SelectHandle::Top | SelectHandle::TopRight
+    );
+    let move_bottom = matches!(
+        handle,
+        SelectHandle::BottomLeft | SelectHandle::Bottom | SelectHandle::BottomRight
+    );
 
-    let Some(updated) = updated else {
+    if !move_left && !move_right && !move_top && !move_bottom {
+        return false;
+    }
+
+    if move_left {
+        left += dx;
+    }
+    if move_right {
+        right += dx;
+    }
+    if move_top {
+        top += dy;
+    }
+    if move_bottom {
+        bottom += dy;
+    }
+
+    // Enforce maximum expansion limits (sanity check to prevent runaway/freeze)
+    // We allow up to 5000px of padding beyond the image on any side.
+    let max_exp = 5000.0;
+    left = left.max(-max_exp);
+    top = top.max(-max_exp);
+    right = right.min(image_width as f64 + max_exp);
+    bottom = bottom.min(image_height as f64 + max_exp);
+
+    // Enforce minimum size constraints
+    if move_left && right - left < SELECT_MIN_RESIZE_SIZE {
+        left = right - SELECT_MIN_RESIZE_SIZE;
+    }
+    if move_right && right - left < SELECT_MIN_RESIZE_SIZE {
+        right = left + SELECT_MIN_RESIZE_SIZE;
+    }
+    if move_top && bottom - top < SELECT_MIN_RESIZE_SIZE {
+        top = bottom - SELECT_MIN_RESIZE_SIZE;
+    }
+    if move_bottom && bottom - top < SELECT_MIN_RESIZE_SIZE {
+        bottom = top + SELECT_MIN_RESIZE_SIZE;
+    }
+
+    let Some(updated) = Rect::from_bounds(
+        left.min(right),
+        top.min(bottom),
+        left.max(right),
+        top.max(bottom),
+    ) else {
         return false;
     };
 
@@ -285,7 +312,7 @@ fn resize_crop_rect_with_fixed_aspect(
     rect: &mut Rect,
     handle: SelectHandle,
     point: Point,
-    _image_width: i32,
+    image_width: i32,
     _image_height: i32,
     aspect_ratio: f64,
 ) -> bool {
@@ -299,7 +326,7 @@ fn resize_crop_rect_with_fixed_aspect(
     };
     let min_half_width = SELECT_MIN_RESIZE_SIZE / 2.0;
     let min_half_height = min_half_width / aspect_ratio;
-    let half_width = match handle {
+    let mut half_width = match handle {
         SelectHandle::Left | SelectHandle::Right => (point.x - center.x).abs().max(min_half_width),
         SelectHandle::Top | SelectHandle::Bottom => {
             ((point.y - center.y).abs().max(min_half_height)) * aspect_ratio
@@ -309,6 +336,12 @@ fn resize_crop_rect_with_fixed_aspect(
             .max((point.y - center.y).abs() * aspect_ratio)
             .max(min_half_width),
     };
+
+    // Sanity check: cap half_width to avoid infinite expansion
+    let max_exp = 5000.0;
+    let max_half_width = (image_width as f64 + max_exp * 2.0) / 2.0;
+    half_width = half_width.min(max_half_width);
+
     let half_height = half_width / aspect_ratio;
 
     let Some(updated) = Rect::from_bounds(
@@ -1039,6 +1072,69 @@ impl EditorState {
 
     pub fn set_arrow_style(&mut self, style: ArrowStyle) {
         self.arrow_style = style;
+    }
+
+    pub fn selected_arrow_style(&self) -> Option<ArrowStyle> {
+        let AnnotationAction::Arrow { style, .. } = self.selected_action()? else {
+            return None;
+        };
+
+        Some(*style)
+    }
+
+    pub fn set_selected_arrow_style(&mut self, style: ArrowStyle) -> bool {
+        let Some(index) = self.selected_action_index else {
+            return false;
+        };
+
+        let Some(action) = self.actions.get_mut(index) else {
+            self.selected_action_index = None;
+            return false;
+        };
+
+        let AnnotationAction::Arrow {
+            style: current_style,
+            ..
+        } = action
+        else {
+            return false;
+        };
+
+        if *current_style == style {
+            return false;
+        }
+
+        *current_style = style;
+        self.redo_actions.clear();
+        true
+    }
+
+    pub fn reverse_selected_arrow_action(&mut self) -> bool {
+        let Some(index) = self.selected_action_index else {
+            return false;
+        };
+
+        let Some(action) = self.actions.get_mut(index) else {
+            self.selected_action_index = None;
+            return false;
+        };
+
+        let AnnotationAction::Arrow {
+            start,
+            end,
+            control_points,
+            ..
+        } = action
+        else {
+            return false;
+        };
+
+        std::mem::swap(start, end);
+        if let Some(points) = control_points.as_mut() {
+            points.reverse();
+        }
+        self.redo_actions.clear();
+        true
     }
 
     const CONTROL_HANDLE_HIT_RADIUS: f64 = 10.0;
@@ -1946,6 +2042,11 @@ impl EditorState {
         self.crop_selection.is_some()
     }
 
+    pub fn reset_crop_interaction(&mut self) {
+        self.crop_selection = None;
+        self.clear_drag_without_rebuild();
+    }
+
     pub fn begin_crop_drag_with_scale(&mut self, point: Point, view_scale: f64) -> bool {
         let Some(crop_rect) = self.crop_selection else {
             return false;
@@ -2214,6 +2315,14 @@ impl EditorState {
 
 #[cfg(test)]
 mod tests {
+    use image::RgbaImage;
+
+    use crate::capture::editor::types::{
+        AnnotationAction, ArrowStyle, DrawColor, Point, Rect, SelectHandle,
+    };
+
+    use super::EditorState;
+
     #[test]
     fn editor_state_defaults_to_background_tool() {
         let source = include_str!("state.rs");
@@ -2222,6 +2331,91 @@ mod tests {
             production_source.contains("selected_tool: Tool::Background,"),
             "Editor state should default to the Background tool so startup inspector width matches the initial tool surface",
         );
+    }
+
+    #[test]
+    fn selected_arrow_style_updates_selected_arrow_immediately() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.actions.push(AnnotationAction::Arrow {
+            start: Point { x: 2.0, y: 3.0 },
+            end: Point { x: 24.0, y: 26.0 },
+            color: DrawColor::new(1.0, 0.5, 0.0, 1.0),
+            stroke_size: 4.0,
+            style: ArrowStyle::Standard,
+            control_points: Some(vec![
+                Point { x: 2.0, y: 3.0 },
+                Point { x: 13.0, y: 14.0 },
+                Point { x: 24.0, y: 26.0 },
+            ]),
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+
+        assert!(state.set_selected_arrow_style(ArrowStyle::Curved));
+        assert_eq!(state.selected_arrow_style(), Some(ArrowStyle::Curved));
+        assert!(!state.set_selected_arrow_style(ArrowStyle::Curved));
+    }
+
+    #[test]
+    fn reverse_selected_arrow_action_swaps_endpoints_and_control_points() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.actions.push(AnnotationAction::Arrow {
+            start: Point { x: 1.0, y: 2.0 },
+            end: Point { x: 20.0, y: 22.0 },
+            color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+            stroke_size: 4.0,
+            style: ArrowStyle::Curved,
+            control_points: Some(vec![
+                Point { x: 1.0, y: 2.0 },
+                Point { x: 10.0, y: 18.0 },
+                Point { x: 20.0, y: 22.0 },
+            ]),
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+
+        assert!(state.reverse_selected_arrow_action());
+
+        match state.selected_action() {
+            Some(AnnotationAction::Arrow {
+                start,
+                end,
+                control_points: Some(points),
+                ..
+            }) => {
+                assert_eq!(*start, Point { x: 20.0, y: 22.0 });
+                assert_eq!(*end, Point { x: 1.0, y: 2.0 });
+                assert_eq!(points[0], Point { x: 20.0, y: 22.0 });
+                assert_eq!(points[1], Point { x: 10.0, y: 18.0 });
+                assert_eq!(points[2], Point { x: 1.0, y: 2.0 });
+            }
+            other => panic!("expected selected arrow after reverse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reset_crop_interaction_clears_crop_selection_and_drag_handles() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.crop_selection = Some(Rect {
+            x: 2,
+            y: 3,
+            width: 12,
+            height: 14,
+        });
+        state.drag_start = Some(Point { x: 2.0, y: 3.0 });
+        state.drag_current = Some(Point { x: 15.0, y: 18.0 });
+        state.drag_start_view = Some(Point { x: 4.0, y: 5.0 });
+        state.select_drag_anchor = Some(Point { x: 8.0, y: 9.0 });
+        state.select_resize_handle = Some(SelectHandle::BottomRight);
+
+        state.reset_crop_interaction();
+
+        assert!(state.crop_selection.is_none());
+        assert!(state.drag_start.is_none());
+        assert!(state.drag_current.is_none());
+        assert!(state.drag_start_view.is_none());
+        assert!(state.select_drag_anchor.is_none());
+        assert!(state.select_resize_handle.is_none());
     }
 }
 

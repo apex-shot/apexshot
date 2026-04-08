@@ -1,6 +1,6 @@
 use gtk4::{
-    prelude::*, Box as GtkBox, Button, CenterBox, Entry, GestureClick, Image, Label,
-    MenuButton, Orientation, Overlay, Popover, Scale, Stack,
+    prelude::*, Box as GtkBox, Button, CenterBox, Entry, Image, Label, Orientation, Popover,
+    Scale, Stack,
 };
 use std::rc::Rc;
 
@@ -65,7 +65,6 @@ pub(super) struct ToolbarRightParts {
     pub redo_btn: Button,
     pub delete_selected_btn: Button,
     pub save_btn: Button,
-    pub apply_crop_btn: Button,
 }
 
 pub(super) struct ToolbarModeParts {
@@ -82,11 +81,6 @@ pub(super) struct ToolbarModeParts {
     pub font_family_group: GtkBox,
     pub font_family_label: Label,
     pub font_family_list: GtkBox,
-    pub crop_type_label: Label,
-    pub crop_type_popover: Popover,
-    pub crop_type_list: GtkBox,
-    pub crop_width_entry: Entry,
-    pub crop_height_entry: Entry,
     pub obfuscate_method_group: GtkBox,
     #[allow(dead_code)]
     pub obfuscate_method_button: Button,
@@ -724,90 +718,6 @@ pub(super) fn build_toolbar_mode_controls(
     background_tools_group.add_css_class("editor-tools-group");
     background_tools_group.append(background_btn);
 
-    let crop_type_button = MenuButton::new();
-    crop_type_button.set_has_frame(false);
-    crop_type_button.set_focusable(false);
-    crop_type_button.set_icon_name("");
-    crop_type_button.add_css_class("editor-crop-type-button");
-    crop_type_button.add_css_class("editor-tool-button");
-    crop_type_button.add_css_class("flat");
-    crop_type_button.set_tooltip_text(Some("Crop type"));
-
-    let crop_type_label = Label::new(Some("Freeform"));
-    crop_type_label.add_css_class("editor-crop-type-label");
-    crop_type_label.set_xalign(0.0);
-
-    let crop_type_arrow_box = GtkBox::new(Orientation::Horizontal, 0);
-    crop_type_arrow_box.add_css_class("editor-crop-type-arrow-box");
-    crop_type_arrow_box.set_halign(gtk4::Align::Center);
-    crop_type_arrow_box.set_valign(gtk4::Align::Center);
-    let crop_type_arrow = Image::from_icon_name(icon_names::CHEVRON_DOWN_REGULAR);
-    crop_type_arrow.set_pixel_size(10);
-    crop_type_arrow.add_css_class("editor-crop-type-arrow");
-    crop_type_arrow_box.append(&crop_type_arrow);
-
-    let crop_type_shell = GtkBox::new(Orientation::Horizontal, 8);
-    crop_type_shell.add_css_class("editor-crop-type-shell");
-    crop_type_shell.set_valign(gtk4::Align::Fill);
-    crop_type_shell.append(&crop_type_label);
-    crop_type_shell.append(&crop_type_arrow_box);
-
-    let crop_type_host = Overlay::new();
-    crop_type_host.set_size_request(68, 30);
-    crop_type_host.set_valign(gtk4::Align::Center);
-    crop_type_host.set_child(Some(&crop_type_shell));
-    crop_type_host.add_overlay(&crop_type_button);
-    crop_type_button.set_valign(gtk4::Align::Fill);
-    crop_type_button.set_halign(gtk4::Align::Fill);
-
-    let crop_type_popover = Popover::new();
-    crop_type_popover.set_has_arrow(false);
-    crop_type_popover.set_autohide(true);
-    crop_type_popover.set_position(gtk4::PositionType::Bottom);
-    crop_type_popover.set_offset(0, 4);
-    crop_type_popover.add_css_class("editor-crop-type-popover");
-
-    let crop_type_list = GtkBox::new(Orientation::Vertical, 4);
-    crop_type_list.add_css_class("editor-crop-type-popover-body");
-
-    crop_type_popover.set_child(Some(&crop_type_list));
-    crop_type_button.set_popover(Some(&crop_type_popover));
-
-    let crop_type_group = GtkBox::new(Orientation::Horizontal, 0);
-    crop_type_group.add_css_class("editor-tools-group");
-    crop_type_group.add_css_class("editor-crop-type-group");
-    crop_type_group.append(&crop_type_host);
-
-    let crop_type_shell_click = GestureClick::new();
-    let crop_type_button_popup = crop_type_button.clone();
-    crop_type_shell_click.connect_pressed(move |_, _, _, _| {
-        crop_type_button_popup.popup();
-    });
-    crop_type_shell.add_controller(crop_type_shell_click);
-
-    let crop_width_entry = Entry::new();
-    crop_width_entry.set_editable(false);
-    crop_width_entry.set_focusable(false);
-    crop_width_entry.set_width_chars(5);
-    crop_width_entry.set_max_width_chars(6);
-    crop_width_entry.set_width_request(68);
-    crop_width_entry.set_hexpand(false);
-    gtk4::prelude::EditableExt::set_alignment(&crop_width_entry, 0.5);
-    crop_width_entry.add_css_class("editor-crop-size-entry");
-
-    let crop_size_separator = Label::new(Some("×"));
-    crop_size_separator.add_css_class("editor-crop-size-separator");
-
-    let crop_height_entry = Entry::new();
-    crop_height_entry.set_editable(false);
-    crop_height_entry.set_focusable(false);
-    crop_height_entry.set_width_chars(5);
-    crop_height_entry.set_max_width_chars(6);
-    crop_height_entry.set_width_request(68);
-    crop_height_entry.set_hexpand(false);
-    gtk4::prelude::EditableExt::set_alignment(&crop_height_entry, 0.5);
-    crop_height_entry.add_css_class("editor-crop-size-entry");
-
     // Build obfuscate method selector
     let (
         obfuscate_method_group,
@@ -957,18 +867,6 @@ pub(super) fn build_toolbar_mode_controls(
         number_size_list,
     ) = build_number_options_dropdown();
 
-    let crop_size_group = GtkBox::new(Orientation::Horizontal, 4);
-    crop_size_group.add_css_class("editor-tools-group");
-    crop_size_group.add_css_class("editor-crop-size-group");
-    crop_size_group.append(&crop_width_entry);
-    crop_size_group.append(&crop_size_separator);
-    crop_size_group.append(&crop_height_entry);
-
-    let crop_mode_group = GtkBox::new(Orientation::Horizontal, 8);
-    crop_mode_group.add_css_class("editor-crop-mode-group");
-    crop_mode_group.append(&crop_type_group);
-    crop_mode_group.append(&crop_size_group);
-
     let primary_tools_group = GtkBox::new(Orientation::Horizontal, 2);
     primary_tools_group.add_css_class("editor-tools-group");
     primary_tools_group.add_css_class("editor-primary-tools-group");
@@ -999,7 +897,6 @@ pub(super) fn build_toolbar_mode_controls(
     toolbar_mode_stack.set_hhomogeneous(false);
     toolbar_mode_stack.set_vhomogeneous(false);
     toolbar_mode_stack.add_named(&standard_mode_group, Some("standard"));
-    toolbar_mode_stack.add_named(&crop_mode_group, Some("crop"));
     toolbar_mode_stack.set_visible_child_name("standard");
 
     let root = GtkBox::new(Orientation::Horizontal, 10);
@@ -1021,11 +918,6 @@ pub(super) fn build_toolbar_mode_controls(
         font_family_group,
         font_family_label,
         font_family_list,
-        crop_type_label,
-        crop_type_popover,
-        crop_type_list,
-        crop_width_entry,
-        crop_height_entry,
         obfuscate_method_group,
         obfuscate_method_button,
         obfuscate_method_popover,
@@ -1084,23 +976,9 @@ pub(super) fn build_toolbar_right_controls(
     save_btn.add_css_class("body");
     save_btn.set_valign(gtk4::Align::Center);
 
-    let apply_crop_btn = Button::with_label("Apply");
-    apply_crop_btn.set_has_frame(false);
-    apply_crop_btn.add_css_class("editor-done-button");
-    apply_crop_btn.add_css_class("body");
-    apply_crop_btn.set_valign(gtk4::Align::Center);
-    apply_crop_btn.set_visible(false);
-    apply_crop_btn.set_sensitive(false);
-
-    let apply_crop_slot = GtkBox::new(Orientation::Horizontal, 0);
-    apply_crop_slot.add_css_class("crop-apply-slot");
-    apply_crop_slot.append(&apply_crop_btn);
-    apply_crop_slot.set_visible(false);
-
     let root = GtkBox::new(Orientation::Horizontal, 16);
     root.add_css_class("editor-toolbar-right");
     root.append(&right_tools);
-    root.append(&apply_crop_slot);
     root.append(&save_btn);
 
     ToolbarRightParts {
@@ -1109,7 +987,6 @@ pub(super) fn build_toolbar_right_controls(
         redo_btn,
         delete_selected_btn,
         save_btn,
-        apply_crop_btn,
     }
 }
 
@@ -1144,11 +1021,7 @@ pub(super) fn build_toolbar_right_controls(
     let canvas_scroller = canvas_scroller.clone();
 
     Rc::new(move |tool| {
-        toolbar_mode_stack.set_visible_child_name(if matches!(tool, Tool::Crop) {
-            "crop"
-        } else {
-            "standard"
-        });
+        toolbar_mode_stack.set_visible_child_name("standard");
 
         let is_text_tool = matches!(tool, Tool::Text);
         text_size_group.set_visible(is_text_tool);
@@ -1177,6 +1050,7 @@ pub(super) fn build_toolbar_right_controls(
 
         let primary_surface = match tool {
             Tool::Background => Some(("Background", "background")),
+            Tool::Crop => Some(("Crop", "crop")),
             Tool::Arrow => Some(("Arrow", "arrow")),
             Tool::Text => Some(("Text", "text")),
             Tool::Number => Some(("Number", "number")),
@@ -1185,7 +1059,8 @@ pub(super) fn build_toolbar_right_controls(
         let background_mode = matches!(tool, Tool::Background);
         let colors_mode = matches!(
             tool,
-            Tool::Background
+            Tool::Crop
+                | Tool::Background
                 | Tool::Pen
                 | Tool::Arrow
                 | Tool::Line
@@ -1330,6 +1205,18 @@ mod tests {
                 && !production_source.contains("root.append(&text_size_group);")
                 && !production_source.contains("root.append(&font_family_group);"),
             "Toolbar layout should stop mounting Arrow, Text, and Number detail groups after the inspector migration",
+        );
+    }
+
+    #[test]
+    fn toolbar_keeps_crop_tool_button_but_not_crop_mode_stack_controls() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("crop_tools_group.append(crop_btn);")
+                && !production_source.contains("toolbar_mode_stack.add_named(&crop_mode_group, Some(\"crop\"));")
+                && production_source.contains("Tool::Crop => Some((\"Crop\", \"crop\"))"),
+            "Toolbar should keep the Crop tool button while routing Crop through the inspector instead of a toolbar mode stack",
         );
     }
 }

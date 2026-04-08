@@ -1,8 +1,8 @@
 use gdk4x11::X11Surface;
 use gtk4::gdk;
 use gtk4::{
-    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry,
-    Image, Label, Orientation, Popover, Stack,
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
+    DrawingArea, Entry, Image, Label, Orientation, Popover, Stack,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -23,6 +23,7 @@ use super::render::{
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
+use super::pen_weight::PenWeight;
 use super::types::{
     AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
     EditorError, Point, Rect, Tool, ViewTransform,
@@ -52,11 +53,92 @@ impl AnnotateRuntimeConfig {
         }
     }
 }
+
+fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight) -> DrawingArea {
+    let preview = DrawingArea::new();
+    preview.set_content_width(22);
+    preview.set_content_height(16);
+    preview.set_draw_func(move |_, context, width, height| {
+        let stroke_width = match weight {
+            PenWeight::Small => 2.0,
+            PenWeight::Medium => 4.0,
+            PenWeight::Large => 7.0,
+            PenWeight::ExtraLarge => 10.0,
+        };
+        context.set_source_rgba(241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 0.92);
+        context.set_line_cap(gtk4::cairo::LineCap::Round);
+        context.set_line_width(stroke_width);
+        let center_y = f64::from(height) / 2.0;
+        context.move_to(3.0, center_y);
+        context.line_to(f64::from(width) - 3.0, center_y);
+        let _ = context.stroke();
+    });
+    preview
+}
+
 use super::ui_support::{
     arrow_style_toolbar_icon, install_editor_css, prefers_dark_glass_theme,
     prefers_reduced_transparency, recommended_window_size_with_extra_width, tool_icon_widget,
     toolbar_icon_size,
 };
+
+fn sync_arrow_option_selection(list: &GtkBox, selected_index: usize) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        if index == selected_index {
+            button.add_css_class("editor-arrow-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-arrow-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(index == selected_index);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
+fn sync_crop_option_selection(list: &GtkBox, selected_index: usize) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        if index == selected_index {
+            button.add_css_class("editor-crop-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-crop-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(index == selected_index);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
 
 pub mod background_panel;
 mod canvas;
@@ -359,11 +441,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         font_family_group,
         font_family_label,
         font_family_list: _toolbar_font_family_list,
-        crop_type_label,
-        crop_type_popover,
-        crop_type_list,
-        crop_width_entry,
-        crop_height_entry,
         obfuscate_method_group,
         obfuscate_method_button,
         obfuscate_method_popover: _,
@@ -419,8 +496,103 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let redo_btn = toolbar_right_parts.redo_btn;
     let delete_selected_btn = toolbar_right_parts.delete_selected_btn;
     let save_btn = toolbar_right_parts.save_btn;
-    let apply_crop_btn = toolbar_right_parts.apply_crop_btn;
     toolbar.set_end_widget(Some(&toolbar_right_parts.root));
+
+    let crop_ratio_list = GtkBox::new(Orientation::Vertical, 0);
+    for crop_type in CropAspectRatio::ALL {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let label_widget = Label::new(Some(crop_type.label()));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(crop_type == CropAspectRatio::Freeform);
+        check_icon.add_css_class("editor-crop-inspector-check");
+
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-crop-inspector-option",
+            ])
+            .child(&btn_box)
+            .build();
+        if crop_type == CropAspectRatio::Freeform {
+            btn.add_css_class("editor-crop-inspector-option-active");
+        }
+
+        crop_ratio_list.append(&btn);
+    }
+
+    let crop_dimensions_group = GtkBox::new(Orientation::Vertical, 0);
+    crop_dimensions_group.set_halign(gtk4::Align::Fill);
+    crop_dimensions_group.set_hexpand(true);
+
+    let crop_dimensions_row = GtkBox::new(Orientation::Horizontal, 8);
+    crop_dimensions_row.add_css_class("editor-crop-dimensions-row");
+    crop_dimensions_row.set_halign(gtk4::Align::Center);
+
+    // Width box
+    let w_box = GtkBox::new(Orientation::Vertical, 0);
+    w_box.set_halign(gtk4::Align::Fill);
+    w_box.set_hexpand(true);
+    w_box.add_css_class("editor-dimension-box");
+    let crop_width_value = Label::new(Some("—"));
+    crop_width_value.add_css_class("editor-crop-dimensions-value");
+    let w_sub_label = Label::new(Some("WIDTH"));
+    w_sub_label.add_css_class("editor-dimension-label");
+    w_box.append(&crop_width_value);
+    w_box.append(&w_sub_label);
+
+    let crop_size_separator = Label::new(Some("×"));
+    crop_size_separator.add_css_class("editor-crop-dimensions-separator");
+    crop_size_separator.set_valign(gtk4::Align::Center);
+
+    // Height box
+    let h_box = GtkBox::new(Orientation::Vertical, 0);
+    h_box.set_halign(gtk4::Align::Fill);
+    h_box.set_hexpand(true);
+    h_box.add_css_class("editor-dimension-box");
+    let crop_height_value = Label::new(Some("—"));
+    crop_height_value.add_css_class("editor-crop-dimensions-value");
+    let h_sub_label = Label::new(Some("HEIGHT"));
+    h_sub_label.add_css_class("editor-dimension-label");
+    h_box.append(&crop_height_value);
+    h_box.append(&h_sub_label);
+
+    crop_dimensions_row.append(&w_box);
+    crop_dimensions_row.append(&crop_size_separator);
+    crop_dimensions_row.append(&h_box);
+    crop_dimensions_group.append(&crop_dimensions_row);
+
+    let crop_actions_group = GtkBox::new(Orientation::Vertical, 8);
+    crop_actions_group.set_halign(gtk4::Align::Fill);
+    crop_actions_group.set_hexpand(true);
+
+    let crop_apply_btn = Button::with_label("Apply selection");
+    crop_apply_btn.set_has_frame(false);
+    crop_apply_btn.set_halign(gtk4::Align::Fill);
+    crop_apply_btn.set_hexpand(true);
+    crop_apply_btn.add_css_class("editor-add-to-colors-button");
+    crop_apply_btn.add_css_class("editor-colors-panel-action-button");
+    crop_apply_btn.set_sensitive(false);
+
+    let crop_reset_btn = Button::with_label("Reset");
+    crop_reset_btn.set_has_frame(false);
+    crop_reset_btn.set_halign(gtk4::Align::Fill);
+    crop_reset_btn.set_hexpand(true);
+    crop_reset_btn.add_css_class("editor-colors-panel-action-button");
+
+    crop_actions_group.append(&crop_apply_btn);
+    crop_actions_group.append(&crop_reset_btn);
 
     let arrow_style_list = GtkBox::new(Orientation::Vertical, 0);
     for style in ArrowStyle::ALL {
@@ -436,25 +608,38 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             toolbar_icon_size(&style_icon),
         );
         let label_widget = Label::new(Some(style.display_name()));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(style == ArrowStyle::Standard);
+        check_icon.add_css_class("editor-arrow-inspector-check");
 
         btn_box.append(&icon);
         btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
 
         let btn = Button::builder()
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-arrow-inspector-option",
+            ])
             .child(&btn_box)
             .build();
+        if style == ArrowStyle::Standard {
+            btn.add_css_class("editor-arrow-inspector-option-active");
+        }
 
         arrow_style_list.append(&btn);
     }
 
     let arrow_thickness_list = GtkBox::new(Orientation::Vertical, 0);
     for (label, _size, weight) in [
-        ("Thin", 2.0_f64, super::pen_weight::PenWeight::Small),
-        ("Medium", 4.0_f64, super::pen_weight::PenWeight::Medium),
-        ("Thick", 7.0_f64, super::pen_weight::PenWeight::Large),
-        ("Very Thick", 12.0_f64, super::pen_weight::PenWeight::ExtraLarge),
+        ("Thin", 2.0_f64, PenWeight::Small),
+        ("Medium", 4.0_f64, PenWeight::Medium),
+        ("Thick", 7.0_f64, PenWeight::Large),
+        ("Very Thick", 12.0_f64, PenWeight::ExtraLarge),
     ] {
         let btn_box = GtkBox::new(Orientation::Horizontal, 8);
         btn_box.set_margin_start(8);
@@ -462,18 +647,30 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let icon = Image::from_icon_name(weight.icon_name());
-        icon.set_pixel_size(weight.icon_pixel_size());
+        let icon = build_arrow_thickness_preview(weight);
         let label_widget = Label::new(Some(label));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(weight == PenWeight::Medium);
+        check_icon.add_css_class("editor-arrow-inspector-check");
 
         btn_box.append(&icon);
         btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
 
         let btn = Button::builder()
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-arrow-inspector-option",
+            ])
             .child(&btn_box)
             .build();
+        if weight == PenWeight::Medium {
+            btn.add_css_class("editor-arrow-inspector-option-active");
+        }
 
         arrow_thickness_list.append(&btn);
     }
@@ -945,13 +1142,26 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             section_title.set_xalign(0.0);
 
             let section_body = GtkBox::new(Orientation::Vertical, 0);
-            section_body.add_css_class("editor-inspector-section-body");
             section_body.append(widget);
 
             section.append(&section_title);
             section.append(&section_body);
             content.append(&section);
         };
+
+    let (crop_inspector, crop_inspector_content) = build_tool_inspector();
+    crop_ratio_list.add_css_class("editor-inspector-option-list");
+    append_inspector_section(
+        &crop_inspector_content,
+        "Dimensions",
+        crop_dimensions_group.upcast_ref(),
+    );
+    append_inspector_section(&crop_inspector_content, "Aspect Ratio", crop_ratio_list.upcast_ref());
+    append_inspector_section(
+        &crop_inspector_content,
+        "Actions",
+        crop_actions_group.upcast_ref(),
+    );
 
     let (arrow_inspector, arrow_inspector_content) = build_tool_inspector();
     arrow_style_list.add_css_class("editor-inspector-option-list");
@@ -1011,12 +1221,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     inspector_stack.set_hexpand(false);
     inspector_stack.set_vexpand(true);
     background_inspector.set_visible(true);
+    crop_inspector.set_visible(true);
     arrow_inspector.set_visible(true);
     text_inspector.set_visible(true);
     number_inspector.set_visible(true);
     colors_inspector.set_visible(true);
     placeholder_inspector.set_visible(true);
     inspector_stack.add_named(&background_inspector, Some("background"));
+    inspector_stack.add_named(&crop_inspector, Some("crop"));
     inspector_stack.add_named(&arrow_inspector, Some("arrow"));
     inspector_stack.add_named(&text_inspector, Some("text"));
     inspector_stack.add_named(&number_inspector, Some("number"));
@@ -1035,9 +1247,43 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let sync_arrow_behavior_controls: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
+        let crop_ratio_list = crop_ratio_list.clone();
+        let crop_apply_btn = crop_apply_btn.clone();
+        let crop_width_value = crop_width_value.clone();
+        let crop_height_value = crop_height_value.clone();
+        let arrow_style_list = arrow_style_list.clone();
+        let arrow_thickness_list = arrow_thickness_list.clone();
         let inverse_direction_toggle = inverse_direction_toggle.clone();
         move || {
             let st = state.lock().unwrap();
+            let selected_ratio = CropAspectRatio::ALL
+                .iter()
+                .position(|ratio| *ratio == st.crop_aspect_ratio)
+                .unwrap_or(0);
+            sync_crop_option_selection(&crop_ratio_list, selected_ratio);
+            if let Some(rect) = st.draft_crop_rect().or(st.crop_selection) {
+                crop_width_value.set_label(&rect.width.max(0).to_string());
+                crop_height_value.set_label(&rect.height.max(0).to_string());
+            } else {
+                crop_width_value.set_label("—");
+                crop_height_value.set_label("—");
+            }
+            crop_apply_btn.set_sensitive(st.draft_crop_rect().is_some() || st.crop_selection.is_some());
+            let selected_style_value = st.selected_arrow_style().unwrap_or(st.arrow_style);
+            let selected_style = ArrowStyle::ALL
+                .iter()
+                .position(|style| *style == selected_style_value)
+                .unwrap_or(0);
+            let selected_stroke_size = st.selected_action_stroke_size().unwrap_or(st.stroke_size);
+            let selected_thickness = match selected_stroke_size.round() as i32 {
+                2 => 0,
+                4 => 1,
+                7 => 2,
+                12 => 3,
+                _ => 1,
+            };
+            sync_arrow_option_selection(&arrow_style_list, selected_style);
+            sync_arrow_option_selection(&arrow_thickness_list, selected_thickness);
             inverse_direction_toggle.set_active(st.inverse_arrow_direction);
         }
     });
@@ -1063,7 +1309,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let sync_arrow_behavior_controls = sync_arrow_behavior_controls.clone();
         move |tool| {
             update_toolbar_for_tool_base(tool);
-            if matches!(tool, Tool::Arrow) {
+            if matches!(tool, Tool::Crop | Tool::Arrow) {
                 sync_arrow_behavior_controls();
             }
         }
@@ -1074,7 +1320,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let background_tab_btn = background_tab_btn.clone();
         let colors_tab_btn = colors_tab_btn.clone();
         move |surface| {
-            let show_background = matches!(surface, "background" | "arrow" | "text" | "number");
+            let show_background = matches!(surface, "background" | "crop" | "arrow" | "text" | "number");
             let show_colors = surface == "colors";
             inspector_stack.set_visible_child_name(surface);
             if show_background {
@@ -1096,6 +1342,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         move |_| {
             let surface = match state.lock().unwrap().selected_tool {
                 Tool::Background => Some("background"),
+                Tool::Crop => Some("crop"),
                 Tool::Arrow => Some("arrow"),
                 Tool::Text => Some("text"),
                 Tool::Number => Some("number"),
@@ -1116,6 +1363,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             if matches!(
                 selected_tool,
                 Tool::Background
+                    | Tool::Crop
                     | Tool::Pen
                     | Tool::Arrow
                     | Tool::Line
@@ -1137,45 +1385,54 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let update_crop_size_fields: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
-        let crop_width_entry = crop_width_entry.clone();
-        let crop_height_entry = crop_height_entry.clone();
+        let crop_width_value = crop_width_value.clone();
+        let crop_height_value = crop_height_value.clone();
         move || {
             let st = state.lock().unwrap();
             if let Some(rect) = st.draft_crop_rect().or(st.crop_selection) {
-                crop_width_entry.set_text(&rect.width.max(0).to_string());
-                crop_height_entry.set_text(&rect.height.max(0).to_string());
+                crop_width_value.set_label(&rect.width.max(0).to_string());
+                crop_height_value.set_label(&rect.height.max(0).to_string());
             } else {
-                crop_width_entry.set_text("");
-                crop_height_entry.set_text("");
+                crop_width_value.set_label("—");
+                crop_height_value.set_label("—");
             }
         }
     });
 
-    for crop_type in CropAspectRatio::ALL {
-        let option_button = Button::with_label(crop_type.label());
-        option_button.set_has_frame(false);
-        option_button.add_css_class("editor-crop-type-option");
-        let crop_type_label_option = crop_type_label.clone();
-        let crop_type_popover_option = crop_type_popover.clone();
+    let mut crop_type_index = 0usize;
+    let mut crop_child_opt = crop_ratio_list.first_child();
+    while let Some(child) = crop_child_opt {
+        crop_child_opt = child.next_sibling();
+        let Ok(option_button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        let Some(&crop_type) = CropAspectRatio::ALL.get(crop_type_index) else {
+            break;
+        };
+        let selected_index = crop_type_index;
+        crop_type_index += 1;
+
+        let crop_ratio_list_option = crop_ratio_list.clone();
         let state_crop_type_option = state.clone();
         let drawing_area_crop_type_option = drawing_area.downgrade();
         let update_crop_size_fields_option = update_crop_size_fields.clone();
+        let crop_apply_btn_option = crop_apply_btn.clone();
         option_button.connect_clicked(move |_| {
-            crop_type_label_option.set_label(crop_type.label());
             {
                 let mut st = state_crop_type_option.lock().unwrap();
                 st.set_crop_aspect_ratio(crop_type);
                 if st.selected_tool == Tool::Crop {
                     st.ensure_crop_selection_initialized();
                 }
+                crop_apply_btn_option.set_sensitive(st.draft_crop_rect().is_some() || st.crop_selection.is_some());
             }
+            sync_crop_option_selection(&crop_ratio_list_option, selected_index);
             update_crop_size_fields_option();
-            crop_type_popover_option.popdown();
             if let Some(area) = drawing_area_crop_type_option.upgrade() {
                 area.queue_draw();
             }
         });
-        crop_type_list.append(&option_button);
     }
 
     while let Some(child) = text_size_list.first_child() {
@@ -1415,27 +1672,59 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     {
         let update_canvas_content_size_tick = update_canvas_content_size.clone();
         let state_canvas_tick = state.clone();
+        // Signature tracks the quantities that actually change the *visible* canvas size.
+        // Crucially, raw crop-rect coordinates are NOT included here.  Instead we compute
+        // the capped overflow bucket that crop_canvas_overflow() would return and store
+        // only that.  Because the function caps every side to 180 px, the bucket stays
+        // constant throughout an outside-image drag gesture — no relayout churn occurs.
         let last_canvas_signature = Rc::new(Cell::new((
-            0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, 0_i32, false,
+            0_i32,  // scroller width
+            0_i32,  // image width
+            0_i32,  // image height
+            0_i32,  // overflow left (px, capped)
+            0_i32,  // overflow top  (px, capped)
+            0_i32,  // overflow right (px, capped)
+            0_i32,  // overflow bottom (px, capped)
+            false,  // crop mode active
         )));
         let last_canvas_signature_tick = last_canvas_signature.clone();
         canvas_scroller.add_tick_callback(move |scroller, _| {
             let width = scroller.allocated_width();
             let signature = {
                 let st = state_canvas_tick.lock().unwrap();
+                let img_w = st.working_image.width().max(1) as i32;
+                let img_h = st.working_image.height().max(1) as i32;
+                let crop_mode_active = st.selected_tool == Tool::Crop;
                 let crop_rect = st.draft_crop_rect().or(st.crop_selection);
-                let (crop_x, crop_y, crop_w, crop_h) = crop_rect
-                    .map(|rect| (rect.x, rect.y, rect.width, rect.height))
-                    .unwrap_or((0, 0, 0, 0));
+                let has_background = st.background_style != BackgroundStyle::None;
+
+                // Compute the same scale the layout function uses so we get the
+                // same overflow values without duplicating the full layout calculation.
+                let virtual_w = img_w as f64;
+                let available_w = (width as f64 - (canvas_padding * 2 + 2) as f64).max(1.0);
+                let scale = (available_w / virtual_w.max(1.0)).min(1.0);
+
+                let (ol, ot, or_, ob) = if has_background {
+                    (0.0, 0.0, 0.0, 0.0)
+                } else {
+                    canvas::crop_canvas_overflow(
+                        crop_rect,
+                        img_w as f64,
+                        img_h as f64,
+                        scale,
+                        crop_mode_active,
+                    )
+                };
+
                 (
                     width,
-                    st.working_image.width().max(1) as i32,
-                    st.working_image.height().max(1) as i32,
-                    crop_x,
-                    crop_y,
-                    crop_w,
-                    crop_h,
-                    st.selected_tool == Tool::Crop,
+                    img_w,
+                    img_h,
+                    ol.round() as i32,
+                    ot.round() as i32,
+                    or_.round() as i32,
+                    ob.round() as i32,
+                    crop_mode_active,
                 )
             };
             if width > 0 && signature != last_canvas_signature_tick.get() {
@@ -2309,7 +2598,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         size_slider: size_slider.clone(),
         text_size_label: text_size_label.clone(),
         font_family_label: font_family_label.clone(),
-        apply_crop_btn: apply_crop_btn.clone(),
+        apply_crop_btn: crop_apply_btn.clone(),
+        crop_reset_btn: crop_reset_btn.clone(),
         undo_btn: undo_btn.clone(),
         redo_btn: redo_btn.clone(),
         delete_selected_btn: delete_selected_btn.clone(),
@@ -2430,12 +2720,14 @@ mod tests {
             production_source.contains("let inspector_stack = Stack::new();")
                 && production_source.contains("inspector_stack.set_hhomogeneous(true);")
                 && production_source.contains("background_inspector.set_visible(true);")
+                && production_source.contains("crop_inspector.set_visible(true);")
                 && production_source.contains("arrow_inspector.set_visible(true);")
                 && production_source.contains("text_inspector.set_visible(true);")
                 && production_source.contains("number_inspector.set_visible(true);")
                 && production_source.contains("colors_inspector.set_visible(true);")
                 && production_source.contains("placeholder_inspector.set_visible(true);")
                 && production_source.contains("inspector_stack.add_named(&background_inspector, Some(\"background\"));")
+                && production_source.contains("inspector_stack.add_named(&crop_inspector, Some(\"crop\"));")
                 && production_source.contains("inspector_stack.add_named(&arrow_inspector, Some(\"arrow\"));")
                 && production_source.contains("inspector_stack.add_named(&text_inspector, Some(\"text\"));")
                 && production_source.contains("inspector_stack.add_named(&number_inspector, Some(\"number\"));")
@@ -2459,11 +2751,13 @@ mod tests {
     }
 
     #[test]
-    fn arrow_text_and_number_route_to_tool_specific_inspector_tabs() {
+    fn crop_arrow_text_and_number_route_to_tool_specific_inspector_tabs() {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("Tool::Arrow")
+            production_source.contains("Tool::Crop")
+                && production_source.contains("\"crop\"")
+                && production_source.contains("Tool::Arrow")
                 && production_source.contains("Tool::Text")
                 && production_source.contains("Tool::Number")
                 && production_source.contains("\"arrow\"")
@@ -2471,6 +2765,42 @@ mod tests {
                 && production_source.contains("\"number\"")
                 && production_source.contains("\"colors\""),
             "Inspector routing should expose Arrow, Text, and Number primary panels alongside the shared Colors surface",
+        );
+    }
+
+    #[test]
+    fn crop_inspector_includes_aspect_ratio_dimensions_and_actions_sections() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let (crop_inspector, crop_inspector_content) = build_tool_inspector();")
+                && production_source.contains("\"Aspect Ratio\"")
+                && production_source.contains("\"Dimensions\"")
+                && production_source.contains("\"Actions\""),
+            "Crop inspector should render Aspect Ratio, Dimensions, and Actions sections",
+        );
+    }
+
+    #[test]
+    fn crop_inspector_reuses_existing_fixed_sidebar_width() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source.contains("CROP_SIDEBAR_WIDTH"),
+            "Crop inspector should reuse the shared fixed sidebar width instead of introducing a new width path",
+        );
+    }
+
+    #[test]
+    fn crop_dimensions_use_active_crop_rect_in_the_inspector() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("st.draft_crop_rect().or(st.crop_selection)")
+                && production_source.contains("crop_width_value.set_label")
+                && production_source.contains("crop_height_value.set_label"),
+            "Crop dimensions should mirror the active draft or committed crop rect in the side inspector",
         );
     }
 
@@ -2495,6 +2825,31 @@ mod tests {
             production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
                 && !production_source.contains("ARROW_SIDEBAR_WIDTH"),
             "Arrow inspector should reuse the shared fixed sidebar width instead of introducing a new width path",
+        );
+    }
+
+    #[test]
+    fn arrow_thickness_options_use_custom_stroke_previews() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight) -> DrawingArea")
+                && production_source.contains("let icon = build_arrow_thickness_preview(weight);")
+                && !production_source.contains("let icon = Image::from_icon_name(weight.icon_name());\n        icon.set_pixel_size(weight.icon_pixel_size());\n        let label_widget = Label::new(Some(label));"),
+            "Arrow thickness inspector options should use dedicated stroke previews instead of stock symbolic icons",
+        );
+    }
+
+    #[test]
+    fn arrow_inspector_style_and_thickness_rows_include_tick_indicators() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("check_icon.add_css_class(\"editor-arrow-inspector-check\");")
+                && production_source.contains("btn.add_css_class(\"editor-arrow-inspector-option-active\");")
+                && production_source.contains("sync_arrow_option_selection(&arrow_style_list, selected_style);")
+                && production_source.contains("sync_arrow_option_selection(&arrow_thickness_list, selected_thickness);"),
+            "Arrow inspector rows should expose a visible selected tick for style and thickness options",
         );
     }
 }

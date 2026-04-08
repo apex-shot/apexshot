@@ -1224,6 +1224,124 @@ pub fn install_editor_css() {
                 color: rgba(241, 241, 243, 0.9);
             }
 
+            button.editor-crop-inspector-option {
+                border-radius: 8px;
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-crop-inspector-option:hover {
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+            }
+
+            button.editor-crop-inspector-option.editor-crop-inspector-option-active {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-crop-inspector-check {
+                color: #ff9900;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            .editor-crop-dimensions-row {
+                padding: 12px 0;
+            }
+
+            .editor-dimension-box {
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                padding: 8px 12px;
+                min-width: 72px;
+                transition: background 120ms ease;
+            }
+
+            .editor-crop-dimensions-value {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 800;
+                font-family: monospace;
+            }
+
+            .editor-crop-dimensions-separator {
+                color: rgba(241, 241, 243, 0.4);
+                font-size: 14px;
+                font-weight: 600;
+                margin: 0 4px;
+            }
+
+            .editor-dimension-label {
+                color: rgba(241, 241, 243, 0.45);
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.05em;
+                margin-top: 2px;
+            }
+
+            button.editor-crop-action-button {
+                min-height: 34px;
+                padding: 0 12px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 700;
+                box-shadow: none;
+            }
+
+            button.editor-crop-action-button-secondary {
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background: rgba(255, 255, 255, 0.03);
+                color: rgba(245, 245, 247, 0.9);
+            }
+
+            button.editor-crop-action-button-secondary:hover {
+                background: rgba(255, 255, 255, 0.07);
+                color: #ffffff;
+            }
+
+            button.editor-crop-action-button-primary {
+                border: 1px solid #f5f5f7;
+                background: #f5f5f7;
+                color: #080808;
+            }
+
+            button.editor-crop-action-button-primary:hover {
+                background: #ffffff;
+                border-color: #ffffff;
+                color: #050505;
+            }
+
+            button.editor-crop-action-button-primary:active {
+                background: #dfdfe2;
+                border-color: #dfdfe2;
+            }
+
+            button.editor-crop-action-button:disabled {
+                opacity: 0.55;
+            }
+
+            button.editor-arrow-inspector-option {
+                border-radius: 8px;
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-arrow-inspector-option:hover {
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+            }
+
+            button.editor-arrow-inspector-option.editor-arrow-inspector-option-active {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-arrow-inspector-check {
+                color: #ff9900;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
                 padding: 16px;
@@ -2224,6 +2342,29 @@ mod tests {
                 && !production_source.contains(".editor-background-sidebar {\n                min-width: 210px;\n                width: 210px;")
                 && !production_source.contains(".editor-colors-panel {\n                min-width: 210px;\n                width: 210px;"),
             "inspector tabs should be text-only, with a fixed shell width but flexible inner panel surfaces",
+        );
+    }
+
+    #[test]
+    fn arrow_inspector_active_option_uses_subtle_surface_and_orange_tick() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-arrow-inspector-option.editor-arrow-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains(".editor-arrow-inspector-check {\n                color: #ff9900;"),
+            "Arrow inspector selection should use a subtle row surface plus an orange tick indicator",
+        );
+    }
+
+    #[test]
+    fn crop_inspector_option_and_dimensions_styles_use_existing_inspector_surface_language() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-crop-inspector-option.editor-crop-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains(".editor-crop-inspector-check {\n                color: #ff9900;")
+                && production_source.contains(".editor-crop-dimensions-row {\n                padding: 10px 12px;"),
+            "Crop inspector should use the same restrained inspector surface language as the other side-panel tools",
         );
     }
 
