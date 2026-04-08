@@ -41,6 +41,36 @@ use super::{
     icon_names,
 };
 
+fn sync_arrow_option_selection(list: &GtkBox, selected_index: usize) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        if index == selected_index {
+            button.add_css_class("editor-arrow-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-arrow-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(index == selected_index);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
 pub(super) struct EventContext {
     pub app: Application,
     pub window: ApplicationWindow,
@@ -816,6 +846,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let styles = ArrowStyle::ALL;
 
     let arrow_style_button = arrow_style_button.clone();
+    let arrow_style_list_for_sync = arrow_style_list.clone();
 
     let mut style_idx = 0usize;
     let mut child_opt = arrow_style_list.first_child();
@@ -829,20 +860,24 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let Some(&style) = styles.get(style_idx) else {
             break;
         };
+        let selected_index = style_idx;
         style_idx += 1;
 
         let state_arrow_style = state.clone();
         let drawing_area_arrow_style = drawing_area.downgrade();
         let arrow_style_button = arrow_style_button.clone();
+        let arrow_style_list = arrow_style_list_for_sync.clone();
 
         button.connect_clicked(move |b| {
             {
                 let mut st = state_arrow_style.lock().unwrap();
                 st.set_arrow_style(style);
+                let _ = st.set_selected_arrow_style(style);
             }
 
             let icon = arrow_style_toolbar_icon(style);
             set_button_tool_icon(&arrow_style_button, icon.clone(), toolbar_icon_size(&icon));
+            sync_arrow_option_selection(&arrow_style_list, selected_index);
 
             if let Some(popover) = b.ancestor(Popover::static_type()) {
                 popover.downcast::<Popover>().unwrap().popdown();
@@ -860,6 +895,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         (7.0, PenWeight::Large),
         (12.0, PenWeight::ExtraLarge),
     ];
+
+    let arrow_thickness_list_for_sync = arrow_thickness_list.clone();
 
     let stroke_size_button_for_closure = stroke_size_button.clone();
     let drawing_area_for_stroke = drawing_area.downgrade();
@@ -921,11 +958,13 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let Some(&(size, weight)) = arrow_thickness_sizes.get(thickness_idx) else {
             break;
         };
+        let selected_index = thickness_idx;
         thickness_idx += 1;
 
         let state_stroke = state.clone();
         let drawing_area_stroke = drawing_area.downgrade();
         let stroke_size_button_clone = stroke_size_button.clone();
+        let arrow_thickness_list = arrow_thickness_list_for_sync.clone();
 
         button.connect_clicked(move |_| {
             {
@@ -936,6 +975,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let icon = gtk4::Image::from_icon_name(weight.icon_name());
             icon.set_pixel_size(weight.icon_pixel_size());
             stroke_size_button_clone.set_child(Some(&icon));
+            sync_arrow_option_selection(&arrow_thickness_list, selected_index);
 
             if let Some(area) = drawing_area_stroke.upgrade() {
                 area.queue_draw();
@@ -949,7 +989,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         move |toggle| {
             {
                 let mut st = state.lock().unwrap();
-                st.inverse_arrow_direction = toggle.is_active();
+                let next = toggle.is_active();
+                if st.inverse_arrow_direction != next {
+                    st.inverse_arrow_direction = next;
+                    let _ = st.reverse_selected_arrow_action();
+                }
             }
 
             if let Some(area) = drawing_area.upgrade() {

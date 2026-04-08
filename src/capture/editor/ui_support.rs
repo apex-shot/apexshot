@@ -1224,6 +1224,27 @@ pub fn install_editor_css() {
                 color: rgba(241, 241, 243, 0.9);
             }
 
+            button.editor-arrow-inspector-option {
+                border-radius: 8px;
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-arrow-inspector-option:hover {
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+            }
+
+            button.editor-arrow-inspector-option.editor-arrow-inspector-option-active {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-arrow-inspector-check {
+                color: #ff9900;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
                 padding: 16px;
@@ -2224,6 +2245,17 @@ mod tests {
                 && !production_source.contains(".editor-background-sidebar {\n                min-width: 210px;\n                width: 210px;")
                 && !production_source.contains(".editor-colors-panel {\n                min-width: 210px;\n                width: 210px;"),
             "inspector tabs should be text-only, with a fixed shell width but flexible inner panel surfaces",
+        );
+    }
+
+    #[test]
+    fn arrow_inspector_active_option_uses_subtle_surface_and_orange_tick() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-arrow-inspector-option.editor-arrow-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains(".editor-arrow-inspector-check {\n                color: #ff9900;"),
+            "Arrow inspector selection should use a subtle row surface plus an orange tick indicator",
         );
     }
 

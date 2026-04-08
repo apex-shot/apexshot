@@ -1,8 +1,8 @@
 use gdk4x11::X11Surface;
 use gtk4::gdk;
 use gtk4::{
-    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry,
-    Image, Label, Orientation, Popover, Stack,
+    glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
+    DrawingArea, Entry, Image, Label, Orientation, Popover, Stack,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -23,6 +23,7 @@ use super::render::{
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
+use super::pen_weight::PenWeight;
 use super::types::{
     AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
     EditorError, Point, Rect, Tool, ViewTransform,
@@ -52,11 +53,63 @@ impl AnnotateRuntimeConfig {
         }
     }
 }
+
+fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight) -> DrawingArea {
+    let preview = DrawingArea::new();
+    preview.set_content_width(22);
+    preview.set_content_height(16);
+    preview.set_draw_func(move |_, context, width, height| {
+        let stroke_width = match weight {
+            PenWeight::Small => 2.0,
+            PenWeight::Medium => 4.0,
+            PenWeight::Large => 7.0,
+            PenWeight::ExtraLarge => 10.0,
+        };
+        context.set_source_rgba(241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 0.92);
+        context.set_line_cap(gtk4::cairo::LineCap::Round);
+        context.set_line_width(stroke_width);
+        let center_y = f64::from(height) / 2.0;
+        context.move_to(3.0, center_y);
+        context.line_to(f64::from(width) - 3.0, center_y);
+        let _ = context.stroke();
+    });
+    preview
+}
+
 use super::ui_support::{
     arrow_style_toolbar_icon, install_editor_css, prefers_dark_glass_theme,
     prefers_reduced_transparency, recommended_window_size_with_extra_width, tool_icon_widget,
     toolbar_icon_size,
 };
+
+fn sync_arrow_option_selection(list: &GtkBox, selected_index: usize) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        if index == selected_index {
+            button.add_css_class("editor-arrow-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-arrow-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(index == selected_index);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
 
 pub mod background_panel;
 mod canvas;
@@ -436,25 +489,38 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             toolbar_icon_size(&style_icon),
         );
         let label_widget = Label::new(Some(style.display_name()));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(style == ArrowStyle::Standard);
+        check_icon.add_css_class("editor-arrow-inspector-check");
 
         btn_box.append(&icon);
         btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
 
         let btn = Button::builder()
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-arrow-inspector-option",
+            ])
             .child(&btn_box)
             .build();
+        if style == ArrowStyle::Standard {
+            btn.add_css_class("editor-arrow-inspector-option-active");
+        }
 
         arrow_style_list.append(&btn);
     }
 
     let arrow_thickness_list = GtkBox::new(Orientation::Vertical, 0);
     for (label, _size, weight) in [
-        ("Thin", 2.0_f64, super::pen_weight::PenWeight::Small),
-        ("Medium", 4.0_f64, super::pen_weight::PenWeight::Medium),
-        ("Thick", 7.0_f64, super::pen_weight::PenWeight::Large),
-        ("Very Thick", 12.0_f64, super::pen_weight::PenWeight::ExtraLarge),
+        ("Thin", 2.0_f64, PenWeight::Small),
+        ("Medium", 4.0_f64, PenWeight::Medium),
+        ("Thick", 7.0_f64, PenWeight::Large),
+        ("Very Thick", 12.0_f64, PenWeight::ExtraLarge),
     ] {
         let btn_box = GtkBox::new(Orientation::Horizontal, 8);
         btn_box.set_margin_start(8);
@@ -462,18 +528,30 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let icon = Image::from_icon_name(weight.icon_name());
-        icon.set_pixel_size(weight.icon_pixel_size());
+        let icon = build_arrow_thickness_preview(weight);
         let label_widget = Label::new(Some(label));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(weight == PenWeight::Medium);
+        check_icon.add_css_class("editor-arrow-inspector-check");
 
         btn_box.append(&icon);
         btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
 
         let btn = Button::builder()
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-arrow-inspector-option",
+            ])
             .child(&btn_box)
             .build();
+        if weight == PenWeight::Medium {
+            btn.add_css_class("editor-arrow-inspector-option-active");
+        }
 
         arrow_thickness_list.append(&btn);
     }
@@ -1035,9 +1113,26 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let sync_arrow_behavior_controls: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
+        let arrow_style_list = arrow_style_list.clone();
+        let arrow_thickness_list = arrow_thickness_list.clone();
         let inverse_direction_toggle = inverse_direction_toggle.clone();
         move || {
             let st = state.lock().unwrap();
+            let selected_style_value = st.selected_arrow_style().unwrap_or(st.arrow_style);
+            let selected_style = ArrowStyle::ALL
+                .iter()
+                .position(|style| *style == selected_style_value)
+                .unwrap_or(0);
+            let selected_stroke_size = st.selected_action_stroke_size().unwrap_or(st.stroke_size);
+            let selected_thickness = match selected_stroke_size.round() as i32 {
+                2 => 0,
+                4 => 1,
+                7 => 2,
+                12 => 3,
+                _ => 1,
+            };
+            sync_arrow_option_selection(&arrow_style_list, selected_style);
+            sync_arrow_option_selection(&arrow_thickness_list, selected_thickness);
             inverse_direction_toggle.set_active(st.inverse_arrow_direction);
         }
     });
@@ -2495,6 +2590,31 @@ mod tests {
             production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
                 && !production_source.contains("ARROW_SIDEBAR_WIDTH"),
             "Arrow inspector should reuse the shared fixed sidebar width instead of introducing a new width path",
+        );
+    }
+
+    #[test]
+    fn arrow_thickness_options_use_custom_stroke_previews() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight) -> DrawingArea")
+                && production_source.contains("let icon = build_arrow_thickness_preview(weight);")
+                && !production_source.contains("let icon = Image::from_icon_name(weight.icon_name());\n        icon.set_pixel_size(weight.icon_pixel_size());\n        let label_widget = Label::new(Some(label));"),
+            "Arrow thickness inspector options should use dedicated stroke previews instead of stock symbolic icons",
+        );
+    }
+
+    #[test]
+    fn arrow_inspector_style_and_thickness_rows_include_tick_indicators() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("check_icon.add_css_class(\"editor-arrow-inspector-check\");")
+                && production_source.contains("btn.add_css_class(\"editor-arrow-inspector-option-active\");")
+                && production_source.contains("sync_arrow_option_selection(&arrow_style_list, selected_style);")
+                && production_source.contains("sync_arrow_option_selection(&arrow_thickness_list, selected_thickness);"),
+            "Arrow inspector rows should expose a visible selected tick for style and thickness options",
         );
     }
 }

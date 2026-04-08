@@ -1041,6 +1041,69 @@ impl EditorState {
         self.arrow_style = style;
     }
 
+    pub fn selected_arrow_style(&self) -> Option<ArrowStyle> {
+        let AnnotationAction::Arrow { style, .. } = self.selected_action()? else {
+            return None;
+        };
+
+        Some(*style)
+    }
+
+    pub fn set_selected_arrow_style(&mut self, style: ArrowStyle) -> bool {
+        let Some(index) = self.selected_action_index else {
+            return false;
+        };
+
+        let Some(action) = self.actions.get_mut(index) else {
+            self.selected_action_index = None;
+            return false;
+        };
+
+        let AnnotationAction::Arrow {
+            style: current_style,
+            ..
+        } = action
+        else {
+            return false;
+        };
+
+        if *current_style == style {
+            return false;
+        }
+
+        *current_style = style;
+        self.redo_actions.clear();
+        true
+    }
+
+    pub fn reverse_selected_arrow_action(&mut self) -> bool {
+        let Some(index) = self.selected_action_index else {
+            return false;
+        };
+
+        let Some(action) = self.actions.get_mut(index) else {
+            self.selected_action_index = None;
+            return false;
+        };
+
+        let AnnotationAction::Arrow {
+            start,
+            end,
+            control_points,
+            ..
+        } = action
+        else {
+            return false;
+        };
+
+        std::mem::swap(start, end);
+        if let Some(points) = control_points.as_mut() {
+            points.reverse();
+        }
+        self.redo_actions.clear();
+        true
+    }
+
     const CONTROL_HANDLE_HIT_RADIUS: f64 = 10.0;
 
     pub fn arrow_control_handle_at(&self, point: Point) -> Option<usize> {
@@ -2214,6 +2277,12 @@ impl EditorState {
 
 #[cfg(test)]
 mod tests {
+    use image::RgbaImage;
+
+    use crate::capture::editor::types::{AnnotationAction, ArrowStyle, DrawColor, Point};
+
+    use super::EditorState;
+
     #[test]
     fn editor_state_defaults_to_background_tool() {
         let source = include_str!("state.rs");
@@ -2222,6 +2291,66 @@ mod tests {
             production_source.contains("selected_tool: Tool::Background,"),
             "Editor state should default to the Background tool so startup inspector width matches the initial tool surface",
         );
+    }
+
+    #[test]
+    fn selected_arrow_style_updates_selected_arrow_immediately() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.actions.push(AnnotationAction::Arrow {
+            start: Point { x: 2.0, y: 3.0 },
+            end: Point { x: 24.0, y: 26.0 },
+            color: DrawColor::new(1.0, 0.5, 0.0, 1.0),
+            stroke_size: 4.0,
+            style: ArrowStyle::Standard,
+            control_points: Some(vec![
+                Point { x: 2.0, y: 3.0 },
+                Point { x: 13.0, y: 14.0 },
+                Point { x: 24.0, y: 26.0 },
+            ]),
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+
+        assert!(state.set_selected_arrow_style(ArrowStyle::Curved));
+        assert_eq!(state.selected_arrow_style(), Some(ArrowStyle::Curved));
+        assert!(!state.set_selected_arrow_style(ArrowStyle::Curved));
+    }
+
+    #[test]
+    fn reverse_selected_arrow_action_swaps_endpoints_and_control_points() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.actions.push(AnnotationAction::Arrow {
+            start: Point { x: 1.0, y: 2.0 },
+            end: Point { x: 20.0, y: 22.0 },
+            color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+            stroke_size: 4.0,
+            style: ArrowStyle::Curved,
+            control_points: Some(vec![
+                Point { x: 1.0, y: 2.0 },
+                Point { x: 10.0, y: 18.0 },
+                Point { x: 20.0, y: 22.0 },
+            ]),
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+
+        assert!(state.reverse_selected_arrow_action());
+
+        match state.selected_action() {
+            Some(AnnotationAction::Arrow {
+                start,
+                end,
+                control_points: Some(points),
+                ..
+            }) => {
+                assert_eq!(*start, Point { x: 20.0, y: 22.0 });
+                assert_eq!(*end, Point { x: 1.0, y: 2.0 });
+                assert_eq!(points[0], Point { x: 20.0, y: 22.0 });
+                assert_eq!(points[1], Point { x: 10.0, y: 18.0 });
+                assert_eq!(points[2], Point { x: 1.0, y: 2.0 });
+            }
+            other => panic!("expected selected arrow after reverse, got {other:?}"),
+        }
     }
 }
 
