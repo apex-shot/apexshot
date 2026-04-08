@@ -1229,19 +1229,13 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let apply_result = {
             let mut st = state_apply_crop.lock().unwrap();
             let result = st.apply_crop_selection();
-            if result.as_ref().is_ok_and(|applied| *applied) {
-                st.set_tool(Tool::Arrow);
-            }
             result
         };
 
         match apply_result {
             Ok(true) => {
                 update_canvas_content_size_apply();
-                set_active_tool_button(&buttons_apply_crop, 6);
-                update_toolbar_for_tool_apply_crop(Tool::Arrow);
-                sync_picker_for_active_tool_apply_crop();
-                set_crop_apply_button_state(&apply_crop_btn_click, false, false);
+                set_crop_apply_button_state(&apply_crop_btn_click, true, false);
                 update_crop_size_fields_apply_crop();
                 if let Some(area) = drawing_area_apply_crop.upgrade() {
                     area.queue_draw();

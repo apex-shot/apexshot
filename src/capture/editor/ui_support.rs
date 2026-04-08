@@ -1246,19 +1246,38 @@ pub fn install_editor_css() {
             }
 
             .editor-crop-dimensions-row {
-                padding: 10px 12px;
-                min-height: 32px;
+                padding: 12px 0;
+            }
+
+            .editor-dimension-box {
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                padding: 8px 12px;
+                min-width: 72px;
+                transition: background 120ms ease;
             }
 
             .editor-crop-dimensions-value {
-                color: rgba(245, 245, 247, 0.92);
-                font-size: 12px;
-                font-weight: 600;
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 800;
+                font-family: monospace;
             }
 
             .editor-crop-dimensions-separator {
-                color: rgba(241, 241, 243, 0.58);
-                font-size: 12px;
+                color: rgba(241, 241, 243, 0.4);
+                font-size: 14px;
+                font-weight: 600;
+                margin: 0 4px;
+            }
+
+            .editor-dimension-label {
+                color: rgba(241, 241, 243, 0.45);
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.05em;
+                margin-top: 2px;
             }
 
             button.editor-crop-action-button {

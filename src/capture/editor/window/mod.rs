@@ -533,36 +533,66 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     }
 
     let crop_dimensions_group = GtkBox::new(Orientation::Vertical, 0);
-    crop_dimensions_group.set_halign(gtk4::Align::Center);
+    crop_dimensions_group.set_halign(gtk4::Align::Fill);
+    crop_dimensions_group.set_hexpand(true);
+
     let crop_dimensions_row = GtkBox::new(Orientation::Horizontal, 8);
     crop_dimensions_row.add_css_class("editor-crop-dimensions-row");
     crop_dimensions_row.set_halign(gtk4::Align::Center);
+
+    // Width box
+    let w_box = GtkBox::new(Orientation::Vertical, 0);
+    w_box.set_halign(gtk4::Align::Fill);
+    w_box.set_hexpand(true);
+    w_box.add_css_class("editor-dimension-box");
     let crop_width_value = Label::new(Some("—"));
     crop_width_value.add_css_class("editor-crop-dimensions-value");
+    let w_sub_label = Label::new(Some("WIDTH"));
+    w_sub_label.add_css_class("editor-dimension-label");
+    w_box.append(&crop_width_value);
+    w_box.append(&w_sub_label);
+
     let crop_size_separator = Label::new(Some("×"));
     crop_size_separator.add_css_class("editor-crop-dimensions-separator");
+    crop_size_separator.set_valign(gtk4::Align::Center);
+
+    // Height box
+    let h_box = GtkBox::new(Orientation::Vertical, 0);
+    h_box.set_halign(gtk4::Align::Fill);
+    h_box.set_hexpand(true);
+    h_box.add_css_class("editor-dimension-box");
     let crop_height_value = Label::new(Some("—"));
     crop_height_value.add_css_class("editor-crop-dimensions-value");
-    crop_dimensions_row.append(&crop_width_value);
+    let h_sub_label = Label::new(Some("HEIGHT"));
+    h_sub_label.add_css_class("editor-dimension-label");
+    h_box.append(&crop_height_value);
+    h_box.append(&h_sub_label);
+
+    crop_dimensions_row.append(&w_box);
     crop_dimensions_row.append(&crop_size_separator);
-    crop_dimensions_row.append(&crop_height_value);
+    crop_dimensions_row.append(&h_box);
     crop_dimensions_group.append(&crop_dimensions_row);
 
-    let crop_actions_group = GtkBox::new(Orientation::Horizontal, 8);
-    crop_actions_group.set_homogeneous(true);
+    let crop_actions_group = GtkBox::new(Orientation::Vertical, 8);
+    crop_actions_group.set_halign(gtk4::Align::Fill);
+    crop_actions_group.set_hexpand(true);
+
+    let crop_apply_btn = Button::with_label("Apply selection");
+    crop_apply_btn.set_has_frame(false);
+    crop_apply_btn.set_halign(gtk4::Align::Fill);
+    crop_apply_btn.set_hexpand(true);
+    crop_apply_btn.add_css_class("editor-add-to-colors-button");
+    crop_apply_btn.add_css_class("editor-colors-panel-action-button");
+    crop_apply_btn.set_sensitive(false);
+
     let crop_reset_btn = Button::with_label("Reset");
     crop_reset_btn.set_has_frame(false);
-    crop_reset_btn.add_css_class("editor-crop-action-button");
-    crop_reset_btn.add_css_class("editor-crop-action-button-secondary");
+    crop_reset_btn.set_halign(gtk4::Align::Fill);
     crop_reset_btn.set_hexpand(true);
-    let crop_apply_btn = Button::with_label("Apply");
-    crop_apply_btn.set_has_frame(false);
-    crop_apply_btn.add_css_class("editor-crop-action-button");
-    crop_apply_btn.add_css_class("editor-crop-action-button-primary");
-    crop_apply_btn.set_hexpand(true);
-    crop_apply_btn.set_sensitive(false);
-    crop_actions_group.append(&crop_reset_btn);
+    crop_reset_btn.add_css_class("editor-colors-panel-action-button");
+
     crop_actions_group.append(&crop_apply_btn);
+    crop_actions_group.append(&crop_reset_btn);
 
     let arrow_style_list = GtkBox::new(Orientation::Vertical, 0);
     for style in ArrowStyle::ALL {
@@ -1112,7 +1142,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             section_title.set_xalign(0.0);
 
             let section_body = GtkBox::new(Orientation::Vertical, 0);
-            section_body.add_css_class("editor-inspector-section-body");
             section_body.append(widget);
 
             section.append(&section_title);
