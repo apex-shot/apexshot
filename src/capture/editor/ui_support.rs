@@ -1413,6 +1413,51 @@ pub fn install_editor_css() {
                 font-weight: 700;
             }
 
+            .editor-number-start-row {
+                spacing: 8px;
+            }
+
+            .editor-number-start-label {
+                color: rgba(241, 241, 243, 0.9);
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-number-start-entry {
+                min-height: 34px;
+                min-width: 48px;
+                padding: 0 10px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 700;
+                box-shadow: none;
+            }
+
+            button.editor-number-start-stepper {
+                min-width: 30px;
+                min-height: 34px;
+                padding: 0;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background: rgba(255, 255, 255, 0.03);
+                color: rgba(245, 245, 247, 0.92);
+                font-size: 14px;
+                font-weight: 700;
+                box-shadow: none;
+            }
+
+            button.editor-number-start-stepper:hover {
+                background: rgba(255, 255, 255, 0.07);
+                color: #ffffff;
+            }
+
+            button.editor-number-start-stepper:active {
+                background: rgba(255, 255, 255, 0.12);
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
                 padding: 16px;
@@ -2464,6 +2509,19 @@ mod tests {
                 && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
                 && !production_source.contains("NUMBER_SIDEBAR_WIDTH"),
             "Number inspector rows should match the migrated sidepanel surface language without introducing a new width path",
+        );
+    }
+
+    #[test]
+    fn number_inspector_start_controls_use_sidebar_field_styling() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains(".editor-number-start-row {\n                spacing: 8px;")
+                && production_source.contains(".editor-number-start-label {\n                color: rgba(241, 241, 243, 0.9);")
+                && production_source.contains(".editor-number-start-entry {\n                min-height: 34px;")
+                && production_source.contains("button.editor-number-start-stepper {\n                min-width: 30px;"),
+            "Number inspector start controls should be styled as inspector-native sidebar fields",
         );
     }
 

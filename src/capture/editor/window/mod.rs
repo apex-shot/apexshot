@@ -797,7 +797,20 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     number_start_entry.set_editable(false);
     number_start_entry.add_css_class("editor-number-start-entry");
     let number_inc_btn = Button::with_label("+");
+    number_inc_btn.add_css_class("editor-number-start-stepper");
     let number_dec_btn = Button::with_label("-");
+    number_dec_btn.add_css_class("editor-number-start-stepper");
+
+    let number_start_row = GtkBox::new(Orientation::Horizontal, 8);
+    number_start_row.add_css_class("editor-number-start-row");
+    let number_start_label = Label::new(Some("Start with:"));
+    number_start_label.add_css_class("editor-number-start-label");
+    number_start_label.set_hexpand(true);
+    number_start_label.set_xalign(0.0);
+    number_start_row.append(&number_start_label);
+    number_start_row.append(&number_dec_btn);
+    number_start_row.append(&number_start_entry);
+    number_start_row.append(&number_inc_btn);
 
     let number_size_list = GtkBox::new(Orientation::Vertical, 0);
     for size in super::numbering_style::NumberSize::ALL {
@@ -1292,6 +1305,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     number_options_list.add_css_class("editor-inspector-option-list");
     number_size_list.add_css_class("editor-inspector-option-list");
     append_inspector_section(&number_inspector_content, "Style", number_options_list.upcast_ref());
+    append_inspector_section(&number_inspector_content, "Start", number_start_row.upcast_ref());
     append_inspector_section(&number_inspector_content, "Size", number_size_list.upcast_ref());
 
     let inspector_tabs = GtkBox::new(Orientation::Horizontal, 8);
@@ -3148,6 +3162,21 @@ mod tests {
                 && production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
                 && !production_source.contains("NUMBER_SIDEBAR_WIDTH"),
             "Number Style and Size rows should share the same inspector-native composition while reusing the shared sidebar width",
+        );
+    }
+
+    #[test]
+    fn number_inspector_includes_start_controls_in_the_sidebar() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let number_start_row = GtkBox::new(Orientation::Horizontal, 8);")
+                && production_source.contains("let number_start_label = Label::new(Some(\"Start with:\"));")
+                && production_source.contains("number_start_row.append(&number_dec_btn);")
+                && production_source.contains("number_start_row.append(&number_start_entry);")
+                && production_source.contains("number_start_row.append(&number_inc_btn);")
+                && production_source.contains("append_inspector_section(&number_inspector_content, \"Start\", number_start_row.upcast_ref());"),
+            "Number inspector should expose the starting number controls inside the sidebar",
         );
     }
 
