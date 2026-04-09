@@ -1472,7 +1472,8 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             !production_source.contains("plain_color_section.append(&plain_color_title);")
-                && !production_source.contains("background_sidebar_options.append(&plain_color_section);"),
+                && !production_source
+                    .contains("background_sidebar_options.append(&plain_color_section);"),
             "Background panel should no longer render the embedded plain-color section",
         );
     }

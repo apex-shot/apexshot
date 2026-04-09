@@ -83,7 +83,10 @@ fn daemon_event_for_terminal_action(action: RecordingTerminalAction) -> Option<&
 }
 
 fn should_end_recording_ui_for_terminal_action(action: RecordingTerminalAction) -> bool {
-    matches!(action, RecordingTerminalAction::Save | RecordingTerminalAction::Discard)
+    matches!(
+        action,
+        RecordingTerminalAction::Save | RecordingTerminalAction::Discard
+    )
 }
 
 fn notify_daemon_event(event: &str) {
@@ -1974,13 +1977,13 @@ async fn run_recording_with_headless_controls(
                 if let Some(event) = daemon_event_for_terminal_action(action) {
                     notify_daemon_event(event);
                 }
-                break (path, StopAction::Save)
+                break (path, StopAction::Save);
             }
             (path, action @ RecordingTerminalAction::Discard) => {
                 if let Some(event) = daemon_event_for_terminal_action(action) {
                     notify_daemon_event(event);
                 }
-                break (path, StopAction::Discard)
+                break (path, StopAction::Discard);
             }
         }
     };

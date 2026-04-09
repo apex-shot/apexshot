@@ -8,7 +8,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use super::super::color::{
     draw_color_to_hex, draw_color_to_rgba_u8, palette_index_for_color, parse_alpha_percent,
     parse_channel_u8, parse_hex_rgb, picker_dynamic_css, save_persisted_custom_slot_colors,
@@ -17,6 +16,7 @@ use super::super::color::{
 use super::super::state::EditorState;
 use super::super::types::{BackgroundStyle, DrawColor, PickerColorState, Tool};
 use super::super::ui_support::{color_swatch_button, set_active_color_button};
+use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use super::icon_names;
 
 const SIDEBAR_PALETTE_SPECS: [(&str, &str); 12] = [
@@ -391,7 +391,8 @@ pub fn build_colors_panel(
             });
 
             let custom_slot_colors_remove = custom_slot_colors.clone();
-            let refresh_shared_custom_color_slots_remove = refresh_shared_custom_color_slots.clone();
+            let refresh_shared_custom_color_slots_remove =
+                refresh_shared_custom_color_slots.clone();
             let local_refresh_remove = local_refresh.clone();
             remove_btn.connect_clicked(move |_| {
                 let mut custom_colors = custom_slot_colors_remove.borrow_mut();
@@ -522,8 +523,10 @@ pub fn build_colors_panel(
             b_entry.set_text(&b.to_string());
             a_entry.set_text(&(picker.alpha * 100.0).round().to_string());
             gradient_area.queue_draw();
-            let css = picker_dynamic_css(color)
-                .replace("#editor-picker-opacity-slider", "#editor-sidebar-picker-opacity-slider");
+            let css = picker_dynamic_css(color).replace(
+                "#editor-picker-opacity-slider",
+                "#editor-sidebar-picker-opacity-slider",
+            );
             picker_css_provider.load_from_data(&css);
             picker_update_in_progress.set(was_in_progress);
         }
@@ -583,8 +586,11 @@ pub fn build_colors_panel(
             let Some((r, g, b)) = parse_hex_rgb(text.as_str()) else {
                 return;
             };
-            let (hue, saturation, value) =
-                super::super::types::rgb_to_hsv(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
+            let (hue, saturation, value) = super::super::types::rgb_to_hsv(
+                r as f64 / 255.0,
+                g as f64 / 255.0,
+                b as f64 / 255.0,
+            );
             picker_update_in_progress.set(true);
             {
                 let mut picker = picker_state.borrow_mut();
@@ -618,8 +624,11 @@ pub fn build_colors_panel(
             let Some(alpha) = parse_alpha_percent(a_entry.text().as_str()) else {
                 return;
             };
-            let (hue, saturation, value) =
-                super::super::types::rgb_to_hsv(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
+            let (hue, saturation, value) = super::super::types::rgb_to_hsv(
+                r as f64 / 255.0,
+                g as f64 / 255.0,
+                b as f64 / 255.0,
+            );
             picker_update_in_progress.set(true);
             {
                 let mut picker = picker_state.borrow_mut();
@@ -802,7 +811,8 @@ mod tests {
             production_source.contains("My colors")
                 && production_source.contains("+ Add current color")
                 && production_source.contains("Pick from screen")
-                && production_source.contains("let spectrum_section = GtkBox::new(Orientation::Vertical, 8);")
+                && production_source
+                    .contains("let spectrum_section = GtkBox::new(Orientation::Vertical, 8);")
                 && production_source.contains("content.append(&spectrum_section);"),
             "Colors panel should expose shared color management controls",
         );
@@ -813,9 +823,11 @@ mod tests {
         let source = include_str!("colors_panel.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            !production_source.contains("let hue_preview = GtkBox::new(Orientation::Horizontal, 0);")
+            !production_source
+                .contains("let hue_preview = GtkBox::new(Orientation::Horizontal, 0);")
                 && production_source.contains("let hex_entry = gtk4::Entry::new();")
-                && production_source.contains("let rgba_row = GtkBox::new(Orientation::Horizontal, 6);")
+                && production_source
+                    .contains("let rgba_row = GtkBox::new(Orientation::Horizontal, 6);")
                 && production_source.contains("let r_entry = gtk4::Entry::new();")
                 && production_source.contains("let g_entry = gtk4::Entry::new();")
                 && production_source.contains("let b_entry = gtk4::Entry::new();")
@@ -830,7 +842,8 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             !production_source.contains("cr.push_group();")
-                && !production_source.contains("cr.paint_with_alpha(picker.alpha.clamp(0.0, 1.0));"),
+                && !production_source
+                    .contains("cr.paint_with_alpha(picker.alpha.clamp(0.0, 1.0));"),
             "Colors panel gradient area should use the reverted opaque rendering path",
         );
     }
@@ -871,15 +884,20 @@ mod tests {
                 && production_source.contains("slot_button.set_halign(gtk4::Align::Fill);")
                 && production_source.contains("overlay.set_hexpand(true);")
                 && production_source.contains("overlay.set_halign(gtk4::Align::Fill);")
-                && production_source.contains("let actions = GtkBox::new(Orientation::Vertical, 8);")
+                && production_source
+                    .contains("let actions = GtkBox::new(Orientation::Vertical, 8);")
                 && production_source.contains("actions.set_hexpand(true);")
                 && production_source.contains("add_current_color_btn.set_hexpand(true);")
                 && production_source.contains("pick_from_screen_btn.set_hexpand(true);")
                 && production_source.contains("helper.set_halign(gtk4::Align::Fill);")
-                && !production_source.contains("helper.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
-                && !production_source.contains("content.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
-                && !production_source.contains("palette_grid.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
-                && !production_source.contains("custom_grid.set_width_request(BACKGROUND_SIDEBAR_WIDTH);"),
+                && !production_source
+                    .contains("helper.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source
+                    .contains("content.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source
+                    .contains("palette_grid.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source
+                    .contains("custom_grid.set_width_request(BACKGROUND_SIDEBAR_WIDTH);"),
             "Colors panel should use the same content width as the Background panel",
         );
     }

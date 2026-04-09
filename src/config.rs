@@ -560,7 +560,10 @@ mod tests {
             loaded.screenshot_timer_interval,
             original.screenshot_timer_interval
         );
-        assert_eq!(loaded.screenshot_show_cursor, original.screenshot_show_cursor);
+        assert_eq!(
+            loaded.screenshot_show_cursor,
+            original.screenshot_show_cursor
+        );
     }
 
     #[test]
@@ -870,8 +873,14 @@ quick_access_overlay_size: 0.5
         let yaml = serde_yml::to_string(&original).unwrap();
         let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
 
-        assert_eq!(loaded.shortcut_open_recording_ui, original.shortcut_open_recording_ui);
-        assert_eq!(loaded.shortcut_record_screen, original.shortcut_record_screen);
+        assert_eq!(
+            loaded.shortcut_open_recording_ui,
+            original.shortcut_open_recording_ui
+        );
+        assert_eq!(
+            loaded.shortcut_record_screen,
+            original.shortcut_record_screen
+        );
         assert_eq!(
             loaded.shortcut_recording_pause_resume,
             original.shortcut_recording_pause_resume
@@ -880,7 +889,13 @@ quick_access_overlay_size: 0.5
             loaded.shortcut_recording_stop_save,
             original.shortcut_recording_stop_save
         );
-        assert_eq!(loaded.shortcut_recording_restart, original.shortcut_recording_restart);
-        assert_eq!(loaded.shortcut_recording_discard, original.shortcut_recording_discard);
+        assert_eq!(
+            loaded.shortcut_recording_restart,
+            original.shortcut_recording_restart
+        );
+        assert_eq!(
+            loaded.shortcut_recording_discard,
+            original.shortcut_recording_discard
+        );
     }
 }

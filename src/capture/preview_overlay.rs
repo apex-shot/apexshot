@@ -183,10 +183,22 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     image_frame.set_size_request(preview_width, preview_height);
     image_frame.append(&preview_area);
 
-    let (edit_btn, _) = icon_button(crate::capture::editor::window::icon_names::PEN_REGULAR, "Edit");
-    let (copy_btn, _) = icon_button(crate::capture::editor::window::icon_names::COPY_REGULAR, "Copy");
-    let (save_btn, _) = icon_button(crate::capture::editor::window::icon_names::SAVE_REGULAR, "Save");
-    let (upload_btn, _) = icon_button(crate::capture::editor::window::icon_names::CLOUD_ARROW_UP_REGULAR, "Upload");
+    let (edit_btn, _) = icon_button(
+        crate::capture::editor::window::icon_names::PEN_REGULAR,
+        "Edit",
+    );
+    let (copy_btn, _) = icon_button(
+        crate::capture::editor::window::icon_names::COPY_REGULAR,
+        "Copy",
+    );
+    let (save_btn, _) = icon_button(
+        crate::capture::editor::window::icon_names::SAVE_REGULAR,
+        "Save",
+    );
+    let (upload_btn, _) = icon_button(
+        crate::capture::editor::window::icon_names::CLOUD_ARROW_UP_REGULAR,
+        "Upload",
+    );
     let (pin_btn, pin_icon) = icon_button("view-pin-symbolic", "Pin");
 
     // Floating close button – centered, revealed on hover over the image
@@ -436,7 +448,6 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
             window.close();
         }
     });
-
 
     let pin_state = pinned.clone();
     let auto_close_anchor_pin = auto_close_anchor.clone();
@@ -1053,7 +1064,12 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
 
         let snapshot = gtk4::Snapshot::new();
         // Clip to drawing area bounds to hide cropped overflow
-        snapshot.push_clip(&gtk4::graphene::Rect::new(0.0, 0.0, width as f32, height as f32));
+        snapshot.push_clip(&gtk4::graphene::Rect::new(
+            0.0,
+            0.0,
+            width as f32,
+            height as f32,
+        ));
         snapshot.translate(&gtk4::graphene::Point::new(ox as f32, oy as f32));
         tex.snapshot(&snapshot, sw, sh);
         snapshot.pop();
@@ -1076,9 +1092,7 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
 
 fn preview_texture(path: &Path, _preview_width: i32, _preview_height: i32) -> Option<gdk::Texture> {
     // Load full image to allow the draw_func to 'cover' without distortion
-    let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file(
-        path,
-    ) {
+    let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file(path) {
         Ok(pixbuf) => pixbuf,
         Err(err) => {
             eprintln!(

@@ -1,7 +1,7 @@
 use crate::{config::AppConfig, daemon::set_daemon_hotkey_suppressed};
 use gtk4::{
-    gdk, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Dialog,
-    EventControllerKey, Image, Label, Orientation, ResponseType,
+    gdk, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Dialog, EventControllerKey,
+    Image, Label, Orientation, ResponseType,
 };
 
 fn normalize_shortcut_key_name(key_name: &str) -> Option<String> {
@@ -639,7 +639,10 @@ mod tests {
             compose_shortcut_label("F5", false, false, false, false).as_deref(),
             Some("F5")
         );
-        assert_eq!(compose_shortcut_label("Shift_L", false, false, true, false), None);
+        assert_eq!(
+            compose_shortcut_label("Shift_L", false, false, true, false),
+            None
+        );
     }
 
     #[test]
@@ -685,13 +688,17 @@ mod tests {
             child = widget.next_sibling();
         }
 
-        assert!(!labels.iter().any(|label| label == "Use System Default Shortcuts..."));
+        assert!(!labels
+            .iter()
+            .any(|label| label == "Use System Default Shortcuts..."));
         assert!(!labels.iter().any(|label| label == "Restore Defaults"));
         assert!(!labels.iter().any(|label| label == "Toggle Desktop Icons:"));
         assert!(!labels.iter().any(|label| label == "Pin to the Screen:"));
         assert!(labels.iter().any(|label| label == "Open File:"));
         assert!(labels.iter().any(|label| label == "Open From Clipboard:"));
-        assert!(labels.iter().any(|label| label == "Restore Recently Closed File:"));
+        assert!(labels
+            .iter()
+            .any(|label| label == "Restore Recently Closed File:"));
         assert!(labels.iter().any(|label| label == "Hide/Show Overlays:"));
     }
 

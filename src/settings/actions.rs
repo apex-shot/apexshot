@@ -230,14 +230,18 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         inputs.quick_access_close_after_uploading.is_active();
 
     config.screenshot_format = combo_value(&inputs.screenshot_format, "PNG");
-    config.screenshot_crosshair_mode =
-        combo_value(&inputs.screenshot_crosshair_mode, "Disabled");
+    config.screenshot_crosshair_mode = combo_value(&inputs.screenshot_crosshair_mode, "Disabled");
     config.screenshot_show_magnifier = inputs.screenshot_show_magnifier.is_active();
     config.screenshot_freeze_screen = inputs.screenshot_freeze_screen.is_active();
     config.screenshot_timer_interval = inputs
         .screenshot_timer_interval
         .active_id()
-        .or_else(|| inputs.screenshot_timer_interval.active_text().map(Into::into))
+        .or_else(|| {
+            inputs
+                .screenshot_timer_interval
+                .active_text()
+                .map(Into::into)
+        })
         .unwrap_or_else(|| "5".into())
         .parse()
         .unwrap_or(5);
@@ -289,8 +293,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);
     config.shortcut_recording_pause_resume =
         button_label_value(&inputs.shortcut_recording_pause_resume);
-    config.shortcut_recording_stop_save =
-        button_label_value(&inputs.shortcut_recording_stop_save);
+    config.shortcut_recording_stop_save = button_label_value(&inputs.shortcut_recording_stop_save);
     config.shortcut_recording_restart = button_label_value(&inputs.shortcut_recording_restart);
     config.shortcut_recording_discard = button_label_value(&inputs.shortcut_recording_discard);
 
@@ -396,12 +399,15 @@ pub fn close_window(window: &gtk4::ApplicationWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_auto_respawn_daemon_for_save_with_env, shortcut_label_value};
+    use super::{shortcut_label_value, should_auto_respawn_daemon_for_save_with_env};
 
     #[test]
     fn button_label_value_treats_placeholder_as_empty() {
         assert_eq!(shortcut_label_value(Some("Record shortcut".into())), "");
-        assert_eq!(shortcut_label_value(Some("Ctrl+Alt+R".into())), "Ctrl+Alt+R");
+        assert_eq!(
+            shortcut_label_value(Some("Ctrl+Alt+R".into())),
+            "Ctrl+Alt+R"
+        );
     }
 
     #[test]

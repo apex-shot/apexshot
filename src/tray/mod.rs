@@ -284,7 +284,6 @@ impl ksni::Tray for ApexShotTray {
             .into(),
             // ── Separator ────────────────────────────────────────────────
             MenuItem::Separator,
-
             StandardItem {
                 label: ltr("Open Last Capture"),
                 activate: Box::new(|tray: &mut Self| tray.send(TrayAction::OpenLastCapture)),

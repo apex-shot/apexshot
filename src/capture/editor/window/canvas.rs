@@ -1,5 +1,5 @@
-use gtk4::{prelude::*, Box as GtkBox, DrawingArea, Orientation, Overlay, ScrolledWindow};
 use gtk4::cairo::Antialias;
+use gtk4::{prelude::*, Box as GtkBox, DrawingArea, Orientation, Overlay, ScrolledWindow};
 use image::RgbaImage;
 use std::f64::consts::TAU;
 
@@ -180,12 +180,28 @@ mod tests {
     fn crop_canvas_overflow_huge_and_small_both_cap_at_reserve() {
         // All crop-mode calls return the same tuple — they are identical.
         let huge = crop_canvas_overflow(
-            Some(Rect { x: -20_000, y: -15_000, width: 40_500, height: 30_500 }),
-            500.0, 500.0, 1.0, true,
+            Some(Rect {
+                x: -20_000,
+                y: -15_000,
+                width: 40_500,
+                height: 30_500,
+            }),
+            500.0,
+            500.0,
+            1.0,
+            true,
         );
         let small = crop_canvas_overflow(
-            Some(Rect { x: -20, y: -12, width: 540, height: 524 }),
-            500.0, 500.0, 1.0, true,
+            Some(Rect {
+                x: -20,
+                y: -12,
+                width: 540,
+                height: 524,
+            }),
+            500.0,
+            500.0,
+            1.0,
+            true,
         );
         assert_eq!(huge, small);
     }
