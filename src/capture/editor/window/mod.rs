@@ -14,6 +14,7 @@ use x11rb::{connection::Connection, protocol::xproto, protocol::xproto::Connecti
 
 use self::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use super::color::{draw_color_to_hex, draw_color_to_rgba_u8, selection_hit_padding_for_scale};
+use super::pen_weight::PenWeight;
 use super::render::{
     draw_active_text_input, draw_annotation_action, draw_arrow_control_handles,
     draw_arrow_selection_outline, draw_canvas_checkerboard_background, draw_crop_overlay,
@@ -23,7 +24,6 @@ use super::render::{
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, EditorState};
-use super::pen_weight::PenWeight;
 use super::types::{
     AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
     EditorError, Point, Rect, Tool, ViewTransform,
@@ -74,6 +74,26 @@ fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight) -> Drawin
         let _ = context.stroke();
     });
     preview
+}
+
+fn stroke_size_option_index(stroke_size: f64) -> usize {
+    match stroke_size.round() as i32 {
+        2 => 0,
+        4 => 1,
+        7 => 2,
+        12 => 3,
+        _ => 1,
+    }
+}
+
+fn pen_weight_option_index(stroke_size: f64) -> usize {
+    match stroke_size.round() as i32 {
+        8 => 0,
+        16 => 1,
+        24 => 2,
+        32 => 3,
+        _ => 1,
+    }
 }
 
 use super::ui_support::{
@@ -210,8 +230,8 @@ fn sync_obfuscate_option_selection(list: &GtkBox, selected_index: usize) {
 
 pub mod background_panel;
 mod canvas;
-pub mod colors_panel;
 pub mod color_picker;
+pub mod colors_panel;
 #[allow(dead_code)]
 mod cursor;
 mod events;
@@ -515,7 +535,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         obfuscate_method_list: _toolbar_obfuscate_method_list,
         pen_weight_button,
         pen_weight_popover: _,
-        pen_weight_list,
+        pen_weight_list: _toolbar_pen_weight_list,
         pen_weight_group,
         number_options_popover: _,
         number_options_list: _toolbar_number_options_list,
@@ -533,7 +553,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         stroke_size_group,
         stroke_size_button,
         stroke_size_popover: _,
-        stroke_size_list,
+        stroke_size_list: _toolbar_stroke_size_list,
     } = toolbar::build_toolbar_mode_controls(
         &crop_btn,
         &background_btn,
@@ -671,10 +691,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         btn_box.set_margin_bottom(4);
 
         let style_icon = arrow_style_toolbar_icon(style);
-        let icon = tool_icon_widget(
-            style_icon.clone(),
-            toolbar_icon_size(&style_icon),
-        );
+        let icon = tool_icon_widget(style_icon.clone(), toolbar_icon_size(&style_icon));
         let label_widget = Label::new(Some(style.display_name()));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
@@ -747,6 +764,87 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     arrow_behavior_group.add_css_class("editor-inspector-toggle-row");
     let inverse_direction_toggle = CheckButton::with_label("Reverse direction");
     arrow_behavior_group.append(&inverse_direction_toggle);
+
+    let pen_inspector_list = GtkBox::new(Orientation::Vertical, 0);
+    let line_inspector_list = GtkBox::new(Orientation::Vertical, 0);
+    let highlighter_inspector_list = GtkBox::new(Orientation::Vertical, 0);
+    for weight in PenWeight::ALL {
+        let make_button = || {
+            let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+            btn_box.set_margin_start(8);
+            btn_box.set_margin_end(8);
+            btn_box.set_margin_top(4);
+            btn_box.set_margin_bottom(4);
+
+            let icon = build_arrow_thickness_preview(weight);
+            let label_widget = Label::new(Some(weight.label()));
+            label_widget.set_hexpand(true);
+            label_widget.set_xalign(0.0);
+            let check_icon = Label::new(Some("✓"));
+            check_icon.set_visible(weight == PenWeight::Medium);
+            check_icon.add_css_class("editor-arrow-inspector-check");
+
+            btn_box.append(&icon);
+            btn_box.append(&label_widget);
+            btn_box.append(&check_icon);
+
+            let btn = Button::builder()
+                .has_frame(false)
+                .css_classes([
+                    "editor-popover-list-item",
+                    "flat",
+                    "editor-arrow-inspector-option",
+                ])
+                .child(&btn_box)
+                .build();
+            if weight == PenWeight::Medium {
+                btn.add_css_class("editor-arrow-inspector-option-active");
+            }
+            btn
+        };
+
+        pen_inspector_list.append(&make_button());
+        highlighter_inspector_list.append(&make_button());
+    }
+    for (label, _size, weight) in [
+        ("Thin", 2.0_f64, PenWeight::Small),
+        ("Medium", 4.0_f64, PenWeight::Medium),
+        ("Thick", 7.0_f64, PenWeight::Large),
+        ("Very Thick", 12.0_f64, PenWeight::ExtraLarge),
+    ] {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let icon = build_arrow_thickness_preview(weight);
+        let label_widget = Label::new(Some(label));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(weight == PenWeight::Medium);
+        check_icon.add_css_class("editor-arrow-inspector-check");
+
+        btn_box.append(&icon);
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-arrow-inspector-option",
+            ])
+            .child(&btn_box)
+            .build();
+        if weight == PenWeight::Medium {
+            btn.add_css_class("editor-arrow-inspector-option-active");
+        }
+
+        line_inspector_list.append(&btn);
+    }
 
     let text_size_list = GtkBox::new(Orientation::Vertical, 0);
     let font_family_list = GtkBox::new(Orientation::Vertical, 0);
@@ -1243,20 +1341,20 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     };
 
     let append_inspector_section = |content: &GtkBox, title: &str, widget: &gtk4::Widget| {
-            let section = GtkBox::new(Orientation::Vertical, 8);
-            section.add_css_class("editor-inspector-section");
+        let section = GtkBox::new(Orientation::Vertical, 8);
+        section.add_css_class("editor-inspector-section");
 
-            let section_title = Label::new(Some(title));
-            section_title.add_css_class("editor-background-section-title");
-            section_title.set_xalign(0.0);
+        let section_title = Label::new(Some(title));
+        section_title.add_css_class("editor-background-section-title");
+        section_title.set_xalign(0.0);
 
-            let section_body = GtkBox::new(Orientation::Vertical, 0);
-            section_body.append(widget);
+        let section_body = GtkBox::new(Orientation::Vertical, 0);
+        section_body.append(widget);
 
-            section.append(&section_title);
-            section.append(&section_body);
-            content.append(&section);
-        };
+        section.append(&section_title);
+        section.append(&section_body);
+        content.append(&section);
+    };
 
     let (crop_inspector, crop_inspector_content) = build_tool_inspector();
     crop_ratio_list.add_css_class("editor-inspector-option-list");
@@ -1265,17 +1363,33 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         "Dimensions",
         crop_dimensions_group.upcast_ref(),
     );
-    append_inspector_section(&crop_inspector_content, "Aspect Ratio", crop_ratio_list.upcast_ref());
+    append_inspector_section(
+        &crop_inspector_content,
+        "Aspect Ratio",
+        crop_ratio_list.upcast_ref(),
+    );
     append_inspector_section(
         &crop_inspector_content,
         "Actions",
         crop_actions_group.upcast_ref(),
     );
 
+    let (pen_inspector, pen_inspector_content) = build_tool_inspector();
+    pen_inspector_list.add_css_class("editor-inspector-option-list");
+    append_inspector_section(
+        &pen_inspector_content,
+        "Thickness",
+        pen_inspector_list.upcast_ref(),
+    );
+
     let (arrow_inspector, arrow_inspector_content) = build_tool_inspector();
     arrow_style_list.add_css_class("editor-inspector-option-list");
     arrow_thickness_list.add_css_class("editor-inspector-option-list");
-    append_inspector_section(&arrow_inspector_content, "Style", arrow_style_list.upcast_ref());
+    append_inspector_section(
+        &arrow_inspector_content,
+        "Style",
+        arrow_style_list.upcast_ref(),
+    );
     append_inspector_section(
         &arrow_inspector_content,
         "Thickness",
@@ -1287,11 +1401,23 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         arrow_behavior_group.upcast_ref(),
     );
 
+    let (line_inspector, line_inspector_content) = build_tool_inspector();
+    line_inspector_list.add_css_class("editor-inspector-option-list");
+    append_inspector_section(
+        &line_inspector_content,
+        "Thickness",
+        line_inspector_list.upcast_ref(),
+    );
+
     let (text_inspector, text_inspector_content) = build_tool_inspector();
     text_size_list.add_css_class("editor-inspector-option-list");
     font_family_list.add_css_class("editor-inspector-option-list");
     append_inspector_section(&text_inspector_content, "Size", text_size_list.upcast_ref());
-    append_inspector_section(&text_inspector_content, "Font", font_family_list.upcast_ref());
+    append_inspector_section(
+        &text_inspector_content,
+        "Font",
+        font_family_list.upcast_ref(),
+    );
 
     let (obfuscate_inspector, obfuscate_inspector_content) = build_tool_inspector();
     obfuscate_method_list.add_css_class("editor-inspector-option-list");
@@ -1304,9 +1430,29 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let (number_inspector, number_inspector_content) = build_tool_inspector();
     number_options_list.add_css_class("editor-inspector-option-list");
     number_size_list.add_css_class("editor-inspector-option-list");
-    append_inspector_section(&number_inspector_content, "Style", number_options_list.upcast_ref());
-    append_inspector_section(&number_inspector_content, "Start", number_start_row.upcast_ref());
-    append_inspector_section(&number_inspector_content, "Size", number_size_list.upcast_ref());
+    append_inspector_section(
+        &number_inspector_content,
+        "Style",
+        number_options_list.upcast_ref(),
+    );
+    append_inspector_section(
+        &number_inspector_content,
+        "Start",
+        number_start_row.upcast_ref(),
+    );
+    append_inspector_section(
+        &number_inspector_content,
+        "Size",
+        number_size_list.upcast_ref(),
+    );
+
+    let (highlighter_inspector, highlighter_inspector_content) = build_tool_inspector();
+    highlighter_inspector_list.add_css_class("editor-inspector-option-list");
+    append_inspector_section(
+        &highlighter_inspector_content,
+        "Thickness",
+        highlighter_inspector_list.upcast_ref(),
+    );
 
     let inspector_tabs = GtkBox::new(Orientation::Horizontal, 8);
     inspector_tabs.add_css_class("editor-inspector-tabs");
@@ -1340,16 +1486,22 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     inspector_stack.set_vexpand(true);
     background_inspector.set_visible(true);
     crop_inspector.set_visible(true);
+    pen_inspector.set_visible(true);
     arrow_inspector.set_visible(true);
+    line_inspector.set_visible(true);
     text_inspector.set_visible(true);
+    highlighter_inspector.set_visible(true);
     obfuscate_inspector.set_visible(true);
     number_inspector.set_visible(true);
     colors_inspector.set_visible(true);
     placeholder_inspector.set_visible(true);
     inspector_stack.add_named(&background_inspector, Some("background"));
     inspector_stack.add_named(&crop_inspector, Some("crop"));
+    inspector_stack.add_named(&pen_inspector, Some("pen"));
     inspector_stack.add_named(&arrow_inspector, Some("arrow"));
+    inspector_stack.add_named(&line_inspector, Some("line"));
     inspector_stack.add_named(&text_inspector, Some("text"));
+    inspector_stack.add_named(&highlighter_inspector, Some("highlighter"));
     inspector_stack.add_named(&obfuscate_inspector, Some("obfuscate"));
     inspector_stack.add_named(&number_inspector, Some("number"));
     inspector_stack.add_named(&colors_inspector, Some("colors"));
@@ -1365,14 +1517,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     *drawing_area_placeholder.borrow_mut() = Some(drawing_area.downgrade());
 
-    let sync_arrow_behavior_controls: Rc<dyn Fn()> = Rc::new({
+    let sync_inspector_thickness_controls: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
         let crop_ratio_list = crop_ratio_list.clone();
         let crop_apply_btn = crop_apply_btn.clone();
         let crop_width_value = crop_width_value.clone();
         let crop_height_value = crop_height_value.clone();
+        let pen_inspector_list = pen_inspector_list.clone();
         let arrow_style_list = arrow_style_list.clone();
         let arrow_thickness_list = arrow_thickness_list.clone();
+        let line_inspector_list = line_inspector_list.clone();
+        let highlighter_inspector_list = highlighter_inspector_list.clone();
         let inverse_direction_toggle = inverse_direction_toggle.clone();
         move || {
             let st = state.lock().unwrap();
@@ -1388,22 +1543,21 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 crop_width_value.set_label("—");
                 crop_height_value.set_label("—");
             }
-            crop_apply_btn.set_sensitive(st.draft_crop_rect().is_some() || st.crop_selection.is_some());
+            crop_apply_btn
+                .set_sensitive(st.draft_crop_rect().is_some() || st.crop_selection.is_some());
             let selected_style_value = st.selected_arrow_style().unwrap_or(st.arrow_style);
             let selected_style = ArrowStyle::ALL
                 .iter()
                 .position(|style| *style == selected_style_value)
                 .unwrap_or(0);
             let selected_stroke_size = st.selected_action_stroke_size().unwrap_or(st.stroke_size);
-            let selected_thickness = match selected_stroke_size.round() as i32 {
-                2 => 0,
-                4 => 1,
-                7 => 2,
-                12 => 3,
-                _ => 1,
-            };
+            let selected_thickness = stroke_size_option_index(selected_stroke_size);
+            let selected_pen_thickness = pen_weight_option_index(selected_stroke_size);
+            sync_arrow_option_selection(&pen_inspector_list, selected_pen_thickness);
             sync_arrow_option_selection(&arrow_style_list, selected_style);
             sync_arrow_option_selection(&arrow_thickness_list, selected_thickness);
+            sync_arrow_option_selection(&line_inspector_list, selected_thickness);
+            sync_arrow_option_selection(&highlighter_inspector_list, selected_pen_thickness);
             inverse_direction_toggle.set_active(st.inverse_arrow_direction);
         }
     });
@@ -1426,11 +1580,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     );
     let update_toolbar_for_tool: Rc<dyn Fn(Tool)> = Rc::new({
         let update_toolbar_for_tool_base = update_toolbar_for_tool_base.clone();
-        let sync_arrow_behavior_controls = sync_arrow_behavior_controls.clone();
+        let sync_inspector_thickness_controls = sync_inspector_thickness_controls.clone();
         move |tool| {
             update_toolbar_for_tool_base(tool);
-            if matches!(tool, Tool::Crop | Tool::Arrow) {
-                sync_arrow_behavior_controls();
+            if matches!(
+                tool,
+                Tool::Crop | Tool::Pen | Tool::Arrow | Tool::Line | Tool::Highlighter
+            ) {
+                sync_inspector_thickness_controls();
             }
         }
     });
@@ -1440,7 +1597,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let background_tab_btn = background_tab_btn.clone();
         let colors_tab_btn = colors_tab_btn.clone();
         move |surface| {
-            let show_background = matches!(surface, "background" | "crop" | "arrow" | "text" | "number");
+            let show_background = !matches!(surface, "colors" | "placeholder");
             let show_colors = surface == "colors";
             inspector_stack.set_visible_child_name(surface);
             if show_background {
@@ -1463,9 +1620,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             let surface = match state.lock().unwrap().selected_tool {
                 Tool::Background => Some("background"),
                 Tool::Crop => Some("crop"),
+                Tool::Pen => Some("pen"),
                 Tool::Arrow => Some("arrow"),
+                Tool::Line => Some("line"),
                 Tool::Text => Some("text"),
                 Tool::Number => Some("number"),
+                Tool::Highlighter => Some("highlighter"),
                 _ => None,
             };
             if let Some(surface) = surface {
@@ -1545,7 +1705,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 if st.selected_tool == Tool::Crop {
                     st.ensure_crop_selection_initialized();
                 }
-                crop_apply_btn_option.set_sensitive(st.draft_crop_rect().is_some() || st.crop_selection.is_some());
+                crop_apply_btn_option
+                    .set_sensitive(st.draft_crop_rect().is_some() || st.crop_selection.is_some());
             }
             sync_crop_option_selection(&crop_ratio_list_option, selected_index);
             update_crop_size_fields_option();
@@ -1558,7 +1719,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let (selected_text_size, selected_font_family) = {
         let st = state.lock().unwrap();
         (
-            st.selected_text_action_size().map(|size| size as i32).unwrap_or(st.text_size as i32),
+            st.selected_text_action_size()
+                .map(|size| size as i32)
+                .unwrap_or(st.text_size as i32),
             st.selected_text_font_family()
                 .unwrap_or_else(|| st.text_font_family.clone()),
         )
@@ -1616,7 +1779,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             drop(st);
             sync_text_option_selection(
                 &text_size_list_sync,
-                TEXT_SIZE_OPTIONS.iter().position(|candidate| *candidate == size),
+                TEXT_SIZE_OPTIONS
+                    .iter()
+                    .position(|candidate| *candidate == size),
             );
             if has_active_text {
                 drawing_area.grab_focus();
@@ -1920,14 +2085,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         // only that.  Because the function caps every side to 180 px, the bucket stays
         // constant throughout an outside-image drag gesture — no relayout churn occurs.
         let last_canvas_signature = Rc::new(Cell::new((
-            0_i32,  // scroller width
-            0_i32,  // image width
-            0_i32,  // image height
-            0_i32,  // overflow left (px, capped)
-            0_i32,  // overflow top  (px, capped)
-            0_i32,  // overflow right (px, capped)
-            0_i32,  // overflow bottom (px, capped)
-            false,  // crop mode active
+            0_i32, // scroller width
+            0_i32, // image width
+            0_i32, // image height
+            0_i32, // overflow left (px, capped)
+            0_i32, // overflow top  (px, capped)
+            0_i32, // overflow right (px, capped)
+            0_i32, // overflow bottom (px, capped)
+            false, // crop mode active
         )));
         let last_canvas_signature_tick = last_canvas_signature.clone();
         canvas_scroller.add_tick_callback(move |scroller, _| {
@@ -2026,8 +2191,18 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             text_size_label.set_label(&format!("{}pt", text_size as i32));
             font_family_label.set_label(&font_family);
-            sync_text_option_selection(&text_size_list, TEXT_SIZE_OPTIONS.iter().position(|candidate| *candidate == text_size as i32));
-            sync_text_option_selection(&font_family_list, TEXT_FONT_FAMILIES.iter().position(|candidate| *candidate == font_family.as_str()));
+            sync_text_option_selection(
+                &text_size_list,
+                TEXT_SIZE_OPTIONS
+                    .iter()
+                    .position(|candidate| *candidate == text_size as i32),
+            );
+            sync_text_option_selection(
+                &font_family_list,
+                TEXT_FONT_FAMILIES
+                    .iter()
+                    .position(|candidate| *candidate == font_family.as_str()),
+            );
             if let Some(selected_method) = OBFUSCATE_METHOD_OPTIONS
                 .iter()
                 .position(|(method, _)| *method == obfuscate_method)
@@ -2892,7 +3067,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         obfuscate_method_button: obfuscate_method_button.clone(),
         obfuscate_method_list: obfuscate_method_list.clone(),
         pen_weight_button: pen_weight_button.clone(),
-        pen_weight_list: pen_weight_list.clone(),
+        pen_weight_list: pen_inspector_list.clone(),
+        highlighter_weight_list: highlighter_inspector_list.clone(),
         number_options_list: number_options_list.clone(),
         number_start_entry: number_start_entry.clone(),
         number_inc_btn: number_inc_btn.clone(),
@@ -2904,7 +3080,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         arrow_thickness_list: arrow_thickness_list.clone(),
         inverse_direction_toggle: inverse_direction_toggle.clone(),
         stroke_size_button: stroke_size_button.clone(),
-        stroke_size_list: stroke_size_list.clone(),
+        stroke_size_list: line_inspector_list.clone(),
     });
 
     window.present();
@@ -2943,9 +3119,15 @@ mod tests {
     #[test]
     fn toolbar_color_status_follows_colors_panel_palette_and_custom_color_updates() {
         let mod_source = include_str!("mod.rs");
-        let mod_production_source = mod_source.split("#[cfg(test)]").next().unwrap_or(mod_source);
+        let mod_production_source = mod_source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(mod_source);
         let colors_source = include_str!("colors_panel.rs");
-        let colors_production_source = colors_source.split("#[cfg(test)]").next().unwrap_or(colors_source);
+        let colors_production_source = colors_source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(colors_source);
         assert!(
             mod_production_source.contains("sync_toolbar_color_status();")
                 && colors_production_source.contains("apply_picker_color(DRAW_COLORS[index]);")
@@ -2977,15 +3159,21 @@ mod tests {
                 && production_source.contains("inspector_stack.set_hhomogeneous(true);")
                 && production_source.contains("background_inspector.set_visible(true);")
                 && production_source.contains("crop_inspector.set_visible(true);")
+                && production_source.contains("pen_inspector.set_visible(true);")
                 && production_source.contains("arrow_inspector.set_visible(true);")
+                && production_source.contains("line_inspector.set_visible(true);")
                 && production_source.contains("text_inspector.set_visible(true);")
+                && production_source.contains("highlighter_inspector.set_visible(true);")
                 && production_source.contains("number_inspector.set_visible(true);")
                 && production_source.contains("colors_inspector.set_visible(true);")
                 && production_source.contains("placeholder_inspector.set_visible(true);")
                 && production_source.contains("inspector_stack.add_named(&background_inspector, Some(\"background\"));")
                 && production_source.contains("inspector_stack.add_named(&crop_inspector, Some(\"crop\"));")
+                && production_source.contains("inspector_stack.add_named(&pen_inspector, Some(\"pen\"));")
                 && production_source.contains("inspector_stack.add_named(&arrow_inspector, Some(\"arrow\"));")
+                && production_source.contains("inspector_stack.add_named(&line_inspector, Some(\"line\"));")
                 && production_source.contains("inspector_stack.add_named(&text_inspector, Some(\"text\"));")
+                && production_source.contains("inspector_stack.add_named(&highlighter_inspector, Some(\"highlighter\"));")
                 && production_source.contains("inspector_stack.add_named(&number_inspector, Some(\"number\"));")
                 && production_source.contains("inspector_stack.add_named(&colors_inspector, Some(\"colors\"));")
                 && production_source.contains("inspector_stack.add_named(&placeholder_inspector, Some(\"placeholder\"));")
@@ -3007,20 +3195,26 @@ mod tests {
     }
 
     #[test]
-    fn crop_arrow_text_and_number_route_to_tool_specific_inspector_tabs() {
+    fn crop_pen_arrow_line_text_number_and_highlighter_route_to_tool_specific_inspector_tabs() {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("Tool::Crop")
+                && production_source.contains("Tool::Pen")
                 && production_source.contains("\"crop\"")
+                && production_source.contains("\"pen\"")
                 && production_source.contains("Tool::Arrow")
+                && production_source.contains("Tool::Line")
                 && production_source.contains("Tool::Text")
                 && production_source.contains("Tool::Number")
+                && production_source.contains("Tool::Highlighter")
                 && production_source.contains("\"arrow\"")
+                && production_source.contains("\"line\"")
                 && production_source.contains("\"text\"")
                 && production_source.contains("\"number\"")
+                && production_source.contains("\"highlighter\"")
                 && production_source.contains("\"colors\""),
-            "Inspector routing should expose Arrow, Text, and Number primary panels alongside the shared Colors surface",
+            "Inspector routing should expose Pen, Arrow, Line, Text, Number, and Highlighter primary panels alongside the shared Colors surface",
         );
     }
 
@@ -3029,7 +3223,8 @@ mod tests {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("let (crop_inspector, crop_inspector_content) = build_tool_inspector();")
+            production_source
+                .contains("let (crop_inspector, crop_inspector_content) = build_tool_inspector();")
                 && production_source.contains("\"Aspect Ratio\"")
                 && production_source.contains("\"Dimensions\"")
                 && production_source.contains("\"Actions\""),
@@ -3065,8 +3260,9 @@ mod tests {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("let (arrow_inspector, arrow_inspector_content) = build_tool_inspector();")
-                && production_source.contains("\"Style\"")
+            production_source.contains(
+                "let (arrow_inspector, arrow_inspector_content) = build_tool_inspector();"
+            ) && production_source.contains("\"Style\"")
                 && production_source.contains("\"Thickness\"")
                 && production_source.contains("\"Behavior\""),
             "Arrow inspector should render Style, Thickness, and Behavior sections",
@@ -3110,6 +3306,29 @@ mod tests {
     }
 
     #[test]
+    fn pen_line_and_highlighter_inspectors_use_thickness_sections_with_arrow_row_styles() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let (pen_inspector, pen_inspector_content) = build_tool_inspector();")
+                && production_source.contains("let (line_inspector, line_inspector_content) = build_tool_inspector();")
+                && production_source.contains("let (highlighter_inspector, highlighter_inspector_content) = build_tool_inspector();")
+                && production_source.contains("&pen_inspector_content")
+                && production_source.contains("&line_inspector_content")
+                && production_source.contains("&highlighter_inspector_content")
+                && production_source.contains("\"Thickness\"")
+                && production_source.contains("pen_inspector_list.upcast_ref()")
+                && production_source.contains("line_inspector_list.upcast_ref()")
+                && production_source.contains("highlighter_inspector_list.upcast_ref()")
+                && production_source.contains("\"editor-arrow-inspector-option\"")
+                && production_source.contains("sync_arrow_option_selection(&pen_inspector_list, selected_pen_thickness);")
+                && production_source.contains("sync_arrow_option_selection(&line_inspector_list, selected_thickness);")
+                && production_source.contains("sync_arrow_option_selection(&highlighter_inspector_list, selected_pen_thickness);"),
+            "Pen, Line, and Highlighter inspectors should expose thickness sections using the same active row styling as the Arrow inspector",
+        );
+    }
+
+    #[test]
     fn text_inspector_rows_use_label_plus_tick_layout_and_shared_sidebar_width() {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
@@ -3129,9 +3348,11 @@ mod tests {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("let (obfuscate_inspector, obfuscate_inspector_content) = build_tool_inspector();")
-                && production_source.contains("\"Method\"")
-                && production_source.contains("sync_obfuscate_option_selection(&obfuscate_method_list")
+            production_source.contains(
+                "let (obfuscate_inspector, obfuscate_inspector_content) = build_tool_inspector();"
+            ) && production_source.contains("\"Method\"")
+                && production_source
+                    .contains("sync_obfuscate_option_selection(&obfuscate_method_list")
                 && production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
                 && !production_source.contains("OBFUSCATE_SIDEBAR_WIDTH"),
             "Obfuscate should render a Method section while reusing the shared fixed sidebar width",
@@ -3179,5 +3400,4 @@ mod tests {
             "Number inspector should expose the starting number controls inside the sidebar",
         );
     }
-
 }

@@ -2985,24 +2985,32 @@ pub fn draw_canvas_checkerboard_background(
 
     // Use a pattern fill for the checkerboard instead of a loop of rectangles.
     // This is much more efficient, especially for large areas.
-    let surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::Rgb24, (tile_size * 2.0) as i32, (tile_size * 2.0) as i32)
-        .expect("failed to create checkerboard surface");
-    let pattern_ctx = gtk4::cairo::Context::new(&surface).expect("failed to create pattern context");
-    
+    let surface = gtk4::cairo::ImageSurface::create(
+        gtk4::cairo::Format::Rgb24,
+        (tile_size * 2.0) as i32,
+        (tile_size * 2.0) as i32,
+    )
+    .expect("failed to create checkerboard surface");
+    let pattern_ctx =
+        gtk4::cairo::Context::new(&surface).expect("failed to create pattern context");
+
     // Fill background
     pattern_ctx.set_source_rgb(base_r, base_g, base_b);
-    pattern_ctx.paint().expect("failed to paint pattern background");
-    
+    pattern_ctx
+        .paint()
+        .expect("failed to paint pattern background");
+
     // Draw two tiles
     pattern_ctx.set_source_rgb(tile_r, tile_g, tile_b);
     pattern_ctx.rectangle(0.0, 0.0, tile_size, tile_size);
     pattern_ctx.rectangle(tile_size, tile_size, tile_size, tile_size);
     pattern_ctx.fill().expect("failed to fill pattern tiles");
-    
+
     let pattern = gtk4::cairo::SurfacePattern::create(&surface);
     pattern.set_extend(gtk4::cairo::Extend::Repeat);
-    
-    context.set_source(&pattern)
+
+    context
+        .set_source(&pattern)
         .expect("failed to set checkerboard pattern");
     context.rectangle(0.0, 0.0, width, height);
     let _ = context.fill();

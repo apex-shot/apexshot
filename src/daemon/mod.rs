@@ -25,7 +25,7 @@ use ashpd::desktop::{
 
 use crate::{
     backend::DisplayBackend,
-    capture::{ 
+    capture::{
         copy_capture_uri_to_clipboard, open_image_editor, save_capture, save_existing_png,
         SaveConfig,
     },
@@ -590,7 +590,8 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
                 tokio::task::spawn_blocking(move || handle_capture_window(state_clone));
             }
             DaemonAction::OpenFile => {
-                if let Some(path) = last_capture_target(last_capture_path(&state_clone).as_deref()) {
+                if let Some(path) = last_capture_target(last_capture_path(&state_clone).as_deref())
+                {
                     tokio::task::spawn_blocking(move || open_file(path));
                 } else {
                     eprintln!("[daemon] No capture yet.");
@@ -607,7 +608,9 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
                 });
             }
             DaemonAction::RestoreRecentlyClosed => {
-                if let Some(path) = restore_recently_closed_target(last_capture_path(&state_clone).as_deref()) {
+                if let Some(path) =
+                    restore_recently_closed_target(last_capture_path(&state_clone).as_deref())
+                {
                     tokio::task::spawn_blocking(move || {
                         let _ = show_preview_for_path(path, &state_clone);
                     });
@@ -2344,35 +2347,30 @@ fn handle_import_web_scroll_capture(
 fn run_ocr_and_report(capture: crate::backend::CaptureData) {
     eprintln!("[daemon] OCR tool selected — extracting text from selected area...");
     match extract_text(&capture, &OcrConfig::default()) {
-        Ok(result) => {
-            match &result.source {
-                crate::ocr::ContentSource::QrCode => {
-                    eprintln!("[daemon] QR code decoded");
-                    if result.copied_to_clipboard {
-                        send_desktop_notification("QR code decoded", "URL copied to clipboard");
-                    } else {
-                        send_desktop_notification(
-                            "QR code decoded",
-                            "Content extracted, but clipboard copy was unavailable",
-                        );
-                    }
-                }
-                crate::ocr::ContentSource::Ocr { confidence } => {
-                    eprintln!(
-                        "[daemon] OCR successful (confidence: {}%)",
-                        confidence
+        Ok(result) => match &result.source {
+            crate::ocr::ContentSource::QrCode => {
+                eprintln!("[daemon] QR code decoded");
+                if result.copied_to_clipboard {
+                    send_desktop_notification("QR code decoded", "URL copied to clipboard");
+                } else {
+                    send_desktop_notification(
+                        "QR code decoded",
+                        "Content extracted, but clipboard copy was unavailable",
                     );
-                    if result.copied_to_clipboard {
-                        send_desktop_notification("OCR complete", "Text copied to clipboard");
-                    } else {
-                        send_desktop_notification(
-                            "OCR complete",
-                            "Text extracted, but clipboard copy was unavailable",
-                        );
-                    }
                 }
             }
-        }
+            crate::ocr::ContentSource::Ocr { confidence } => {
+                eprintln!("[daemon] OCR successful (confidence: {}%)", confidence);
+                if result.copied_to_clipboard {
+                    send_desktop_notification("OCR complete", "Text copied to clipboard");
+                } else {
+                    send_desktop_notification(
+                        "OCR complete",
+                        "Text extracted, but clipboard copy was unavailable",
+                    );
+                }
+            }
+        },
         Err(err) => {
             eprintln!("[daemon] OCR failed: {err}");
             send_desktop_notification("OCR failed", &err.to_string());
@@ -2434,7 +2432,10 @@ fn preview_visible(state: &Arc<Mutex<DaemonState>>) -> bool {
 }
 
 fn last_capture_path(state: &Arc<Mutex<DaemonState>>) -> Option<std::path::PathBuf> {
-    state.lock().ok().and_then(|guard| guard.last_capture_path.clone())
+    state
+        .lock()
+        .ok()
+        .and_then(|guard| guard.last_capture_path.clone())
 }
 
 fn stop_preview_overlay(state: &Arc<Mutex<DaemonState>>) -> bool {
@@ -2536,7 +2537,6 @@ fn show_settings_subprocess() {
         eprintln!("[daemon] Failed to spawn settings window: {e}");
     }
 }
-
 
 fn open_file(path: std::path::PathBuf) {
     let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
@@ -2914,7 +2914,10 @@ mod tests {
         should_autostart_ydotoold, should_quit_on_sigint, should_show_preview_after_toggle,
         RecordingTrayState,
     };
-    use std::{path::Path, time::{Duration, Instant}};
+    use std::{
+        path::Path,
+        time::{Duration, Instant},
+    };
 
     #[test]
     fn daemon_does_not_autostart_ydotoold_by_default() {
@@ -2937,7 +2940,10 @@ mod tests {
             save_config.output_dir.as_deref(),
             Some(std::path::Path::new("/tmp/screens"))
         );
-        assert_eq!(save_config.format, crate::capture::ImageFormat::Jpeg { quality: 85 });
+        assert_eq!(
+            save_config.format,
+            crate::capture::ImageFormat::Jpeg { quality: 85 }
+        );
         assert!(!save_config.include_cursor);
     }
 
@@ -3058,7 +3064,10 @@ mod tests {
     #[test]
     fn restore_recently_closed_reuses_last_capture_target() {
         let path = Path::new("/tmp/example.png");
-        assert_eq!(restore_recently_closed_target(Some(path)).as_deref(), Some(path));
+        assert_eq!(
+            restore_recently_closed_target(Some(path)).as_deref(),
+            Some(path)
+        );
         assert_eq!(restore_recently_closed_target(None), None);
     }
 

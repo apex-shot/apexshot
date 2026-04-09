@@ -457,9 +457,12 @@ fn should_request_screenshot_lock(extra_args: &[&str]) -> bool {
         return true;
     }
 
-    extra_args
-        .iter()
-        .any(|arg| matches!(*arg, "--area-init" | "--window-capture" | "--crosshair-capture"))
+    extra_args.iter().any(|arg| {
+        matches!(
+            *arg,
+            "--area-init" | "--window-capture" | "--crosshair-capture"
+        )
+    })
 }
 
 fn next_screenshot_lock_session_id() -> String {
@@ -902,7 +905,10 @@ fn append_screenshot_timer_args(args: &mut Vec<String>, config: &crate::config::
         args.push("--hide-timer".into());
     } else {
         args.push("--show-timer".into());
-        args.push(format!("--timer-seconds={}", config.screenshot_timer_interval));
+        args.push(format!(
+            "--timer-seconds={}",
+            config.screenshot_timer_interval
+        ));
     }
 }
 
@@ -926,11 +932,19 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     ));
     extra_args.push(format!(
         "--show-zoom-preview={}",
-        if config.screenshot_show_magnifier { 1 } else { 0 }
+        if config.screenshot_show_magnifier {
+            1
+        } else {
+            0
+        }
     ));
     extra_args.push(format!(
         "--freeze-selection-bg={}",
-        if config.screenshot_freeze_screen { 1 } else { 0 }
+        if config.screenshot_freeze_screen {
+            1
+        } else {
+            0
+        }
     ));
     append_screenshot_timer_args(&mut extra_args, config);
 
@@ -1381,11 +1395,11 @@ fn extract_string(json: &str, key: &str) -> Option<String> {
 mod tests {
     use super::{
         append_screenshot_timer_args, build_area_init_args, build_crosshair_args,
-        build_recording_ui_args,
-        classify_overlay_exit_code, execute_builtin_overlay_query, parse_area_capture_output,
-        parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
-        parse_selection_json, should_request_screenshot_lock, tracked_overlay_id,
-        CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, RecordingType,
+        build_recording_ui_args, classify_overlay_exit_code, execute_builtin_overlay_query,
+        parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
+        parse_recording_json, parse_selection_json, should_request_screenshot_lock,
+        tracked_overlay_id, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,
+        RecordingType,
     };
     use crate::config::AppConfig;
 
@@ -1395,23 +1409,32 @@ mod tests {
             screenshot_timer_interval: 0,
             ..AppConfig::default()
         };
-        assert_eq!(build_crosshair_args(&config), vec!["--crosshair-capture", "--hide-timer"]);
+        assert_eq!(
+            build_crosshair_args(&config),
+            vec!["--crosshair-capture", "--hide-timer"]
+        );
     }
 
     #[test]
     fn screenshot_timer_args_follow_setting() {
         let mut off_args = Vec::new();
-        append_screenshot_timer_args(&mut off_args, &AppConfig {
-            screenshot_timer_interval: 0,
-            ..AppConfig::default()
-        });
+        append_screenshot_timer_args(
+            &mut off_args,
+            &AppConfig {
+                screenshot_timer_interval: 0,
+                ..AppConfig::default()
+            },
+        );
         assert_eq!(off_args, vec!["--hide-timer"]);
 
         let mut on_args = Vec::new();
-        append_screenshot_timer_args(&mut on_args, &AppConfig {
-            screenshot_timer_interval: 3,
-            ..AppConfig::default()
-        });
+        append_screenshot_timer_args(
+            &mut on_args,
+            &AppConfig {
+                screenshot_timer_interval: 3,
+                ..AppConfig::default()
+            },
+        );
         assert_eq!(on_args, vec!["--show-timer", "--timer-seconds=3"]);
     }
 

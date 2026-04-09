@@ -1,6 +1,6 @@
 use gtk4::{
-    prelude::*, Box as GtkBox, Button, CenterBox, Entry, Image, Label, Orientation, Popover,
-    Scale, Stack,
+    prelude::*, Box as GtkBox, Button, CenterBox, Entry, Image, Label, Orientation, Popover, Scale,
+    Stack,
 };
 use std::rc::Rc;
 
@@ -889,7 +889,6 @@ pub(super) fn build_toolbar_mode_controls(
     standard_mode_group.append(&primary_tools_group);
     standard_mode_group.append(&obfuscate_method_group);
     standard_mode_group.append(&pen_weight_group);
-    standard_mode_group.append(&stroke_size_group);
     standard_mode_group.append(&size_group);
 
     let toolbar_mode_stack = Stack::new();
@@ -990,7 +989,7 @@ pub(super) fn build_toolbar_right_controls(
     }
 }
 
-    pub(super) fn build_toolbar_tool_updater(
+pub(super) fn build_toolbar_tool_updater(
     toolbar_mode_stack: &Stack,
     inspector_stack: &Stack,
     inspector_tabs: &GtkBox,
@@ -1029,17 +1028,14 @@ pub(super) fn build_toolbar_right_controls(
 
         obfuscate_method_group.set_visible(false);
 
-        let is_highlighter_tool = matches!(tool, Tool::Highlighter);
-        let is_pen_tool = matches!(tool, Tool::Pen);
-        pen_weight_group.set_visible(is_highlighter_tool || is_pen_tool);
+        pen_weight_group.set_visible(false);
 
         let is_number_tool = matches!(tool, Tool::Number);
         number_options_group.set_visible(is_number_tool);
 
         let is_arrow_tool = matches!(tool, Tool::Arrow);
-        let is_line_tool = matches!(tool, Tool::Line);
         arrow_style_group.set_visible(is_arrow_tool);
-        stroke_size_group.set_visible(is_arrow_tool || is_line_tool);
+        stroke_size_group.set_visible(false);
 
         if matches!(tool, Tool::Crop) {
             canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
@@ -1050,8 +1046,11 @@ pub(super) fn build_toolbar_right_controls(
         let primary_surface = match tool {
             Tool::Background => Some(("Background", "background")),
             Tool::Crop => Some(("Crop", "crop")),
+            Tool::Pen => Some(("Pen", "pen")),
             Tool::Arrow => Some(("Arrow", "arrow")),
+            Tool::Line => Some(("Line", "line")),
             Tool::Text => Some(("Text", "text")),
+            Tool::Highlighter => Some(("Highlighter", "highlighter")),
             Tool::Obfuscate => Some(("Obfuscate", "obfuscate")),
             Tool::Number => Some(("Number", "number")),
             _ => None,
@@ -1071,7 +1070,11 @@ pub(super) fn build_toolbar_right_controls(
                 | Tool::Highlighter
                 | Tool::Focus
         );
-        background_tab_btn.set_label(primary_surface.map(|(label, _)| label).unwrap_or("Background"));
+        background_tab_btn.set_label(
+            primary_surface
+                .map(|(label, _)| label)
+                .unwrap_or("Background"),
+        );
         colors_tab_btn.set_label("Colors");
         inspector_tabs.set_visible(primary_surface.is_some() || colors_mode);
         background_tab_btn.set_visible(primary_surface.is_some());
@@ -1147,7 +1150,8 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("color_status.set_valign(gtk4::Align::Center);")
-                && production_source.contains("color_status_label.set_valign(gtk4::Align::Center);"),
+                && production_source
+                    .contains("color_status_label.set_valign(gtk4::Align::Center);"),
             "Toolbar color status label should align vertically with the swatch",
         );
     }
@@ -1157,27 +1161,31 @@ mod tests {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("pub(super) fn build_toolbar_right_controls(\n    color_status: &GtkBox,")
-                && production_source.contains("right_tools.append(color_status);")
+            production_source.contains(
+                "pub(super) fn build_toolbar_right_controls(\n    color_status: &GtkBox,"
+            ) && production_source.contains("right_tools.append(color_status);")
                 && production_source.contains("root.append(&save_btn);"),
             "Toolbar should place the color status in the right controls before the Done button",
         );
     }
 
     #[test]
-    fn non_migrated_color_tools_default_to_colors_inspector_surface() {
+    fn line_and_shape_tools_without_primary_tabs_still_default_to_colors_inspector_surface() {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("inspector_stack.set_visible_child_name(\"colors\");")
                 && production_source.contains("} else if colors_mode {")
-                && production_source.contains("Tool::Pen")
-                && production_source.contains("Tool::Line")
+                && production_source.contains("Tool::Box")
+                && production_source.contains("Tool::Circle")
                 && !production_source.contains("Tool::Arrow => Some((\"Arrow\", \"colors\"))")
                 && !production_source.contains("Tool::Text => Some((\"Text\", \"colors\"))")
                 && !production_source.contains("Tool::Number => Some((\"Number\", \"colors\"))")
+                && !production_source.contains("Tool::Pen => Some((\"Pen\", \"colors\"))")
+                && !production_source.contains("Tool::Line => Some((\"Line\", \"colors\"))")
+                && !production_source.contains("Tool::Highlighter => Some((\"Highlighter\", \"colors\"))")
                 && !production_source.contains("| Tool::Obfuscate"),
-            "Non-migrated color-capable tools should still switch the right inspector to the Colors surface",
+            "Color-capable tools without dedicated primary tabs should still switch the right inspector to the Colors surface",
         );
     }
 
@@ -1193,15 +1201,15 @@ mod tests {
     }
 
     #[test]
-    fn background_and_color_tools_route_into_shared_colors_inspector() {
+    fn pen_line_and_highlighter_route_to_dedicated_primary_tabs_before_colors() {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("Tool::Background")
-                && production_source.contains("Tool::Pen")
-                && production_source.contains("Tool::Highlighter")
+            production_source.contains("Tool::Pen => Some((\"Pen\", \"pen\"))")
+                && production_source.contains("Tool::Line => Some((\"Line\", \"line\"))")
+                && production_source.contains("Tool::Highlighter => Some((\"Highlighter\", \"highlighter\"))")
                 && production_source.contains("\"Colors\""),
-            "Toolbar inspector routing should include Background and color-capable tools in the shared Colors flow",
+            "Pen, Line, and Highlighter should route to dedicated primary inspector tabs alongside the shared Colors tab",
         );
     }
 
@@ -1211,11 +1219,12 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             !production_source.contains("standard_mode_group.append(&arrow_style_group);")
+                && !production_source.contains("standard_mode_group.append(&stroke_size_group);")
                 && !production_source.contains("standard_mode_group.append(&number_options_group);")
                 && !production_source.contains("root.append(&text_size_group);")
                 && !production_source.contains("root.append(&font_family_group);")
                 && !production_source.contains("obfuscate_method_group.set_visible(is_obfuscate_tool);"),
-            "Toolbar layout should stop mounting Arrow, Text, Number, and Obfuscate detail groups after the inspector migration",
+            "Toolbar layout should stop mounting Arrow thickness, Text, Number, and Obfuscate detail groups after the inspector migration",
         );
     }
 

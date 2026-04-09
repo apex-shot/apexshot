@@ -1298,7 +1298,10 @@ mod tests {
     use crate::capture_daemon_action;
     #[test]
     fn crosshair_capture_type_delegates_to_daemon() {
-        assert_eq!(capture_daemon_action("crosshair"), Some("capture_crosshair"));
+        assert_eq!(
+            capture_daemon_action("crosshair"),
+            Some("capture_crosshair")
+        );
     }
 
     #[test]

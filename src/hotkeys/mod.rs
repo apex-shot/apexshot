@@ -564,20 +564,18 @@ fn normalize_settings_accel(value: &str) -> String {
 pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> HotkeyConfig {
     let mut bindings = Vec::new();
 
-    let push_binding = |bindings: &mut Vec<HotkeyBinding>,
-                        name: &str,
-                        accel: &str,
-                        args: &[&str]| {
-        let trimmed = accel.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        bindings.push(HotkeyBinding {
-            name: Some(name.to_string()),
-            accelerator: normalize_settings_accel(trimmed),
-            args: args.iter().map(|s| s.to_string()).collect(),
-        });
-    };
+    let push_binding =
+        |bindings: &mut Vec<HotkeyBinding>, name: &str, accel: &str, args: &[&str]| {
+            let trimmed = accel.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            bindings.push(HotkeyBinding {
+                name: Some(name.to_string()),
+                accelerator: normalize_settings_accel(trimmed),
+                args: args.iter().map(|s| s.to_string()).collect(),
+            });
+        };
 
     push_binding(
         &mut bindings,
@@ -1971,9 +1969,10 @@ mod tests {
             binding.name.as_deref() == Some("record_screen")
                 || binding.name.as_deref() == Some("record_area")
         }));
-        assert!(hotkeys.bindings.iter().any(|binding| {
-            binding.name.as_deref() == Some("open_recording_ui")
-        }));
+        assert!(hotkeys
+            .bindings
+            .iter()
+            .any(|binding| { binding.name.as_deref() == Some("open_recording_ui") }));
     }
 
     #[test]
