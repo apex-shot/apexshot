@@ -1,7 +1,7 @@
 use gtk4::{
-    gdk, glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
-    EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Image, Label,
-    Popover, Scale, CheckButton,
+    gdk, glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
+    DrawingArea, EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Image,
+    Label, Popover, Scale,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -201,6 +201,7 @@ pub(super) struct EventContext {
     pub obfuscate_method_list: gtk4::Box,
     pub pen_weight_button: Button,
     pub pen_weight_list: gtk4::Box,
+    pub highlighter_weight_list: gtk4::Box,
     pub number_options_list: gtk4::Box,
     pub number_start_entry: gtk4::Entry,
     pub number_inc_btn: Button,
@@ -281,6 +282,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         obfuscate_method_list,
         pen_weight_button,
         pen_weight_list,
+        highlighter_weight_list,
         number_options_list,
         number_start_entry,
         number_inc_btn,
@@ -794,56 +796,61 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let drawing_area_for_weight = drawing_area.downgrade();
     let window_pen_weight = window.clone();
 
-    let mut weight_idx = 0usize;
-    let mut child_opt = pen_weight_list.first_child();
-    while let Some(child) = child_opt {
-        // Grab next sibling before we do anything else
-        child_opt = child.next_sibling();
+    for weight_list in [pen_weight_list.clone(), highlighter_weight_list.clone()] {
+        let mut weight_idx = 0usize;
+        let mut child_opt = weight_list.first_child();
+        while let Some(child) = child_opt {
+            // Grab next sibling before we do anything else
+            child_opt = child.next_sibling();
 
-        let Ok(button) = child.clone().downcast::<Button>() else {
-            continue;
-        };
+            let Ok(button) = child.clone().downcast::<Button>() else {
+                continue;
+            };
 
-        let Some(&weight) = weights.get(weight_idx) else {
-            break;
-        };
-        weight_idx += 1;
+            let Some(&weight) = weights.get(weight_idx) else {
+                break;
+            };
+            weight_idx += 1;
 
-        let state_for_weight = state.clone();
-        let drawing_area_weight = drawing_area_for_weight.clone();
-        let pen_weight_button_clone = pen_weight_button_for_closure.clone();
-        let window_for_weight = window_pen_weight.clone();
+            let selected_index = weight_idx - 1;
+            let state_for_weight = state.clone();
+            let drawing_area_weight = drawing_area_for_weight.clone();
+            let pen_weight_button_clone = pen_weight_button_for_closure.clone();
+            let window_for_weight = window_pen_weight.clone();
+            let weight_list_for_sync = weight_list.clone();
 
-        button.connect_clicked(move |b| {
-            {
-                let mut st = state_for_weight.lock().unwrap();
-                st.set_pen_weight(weight);
-                let is_highlighter = st.selected_tool == Tool::Highlighter;
-                let is_pen = st.selected_tool == Tool::Pen;
-                if is_highlighter {
-                    st.set_highlighter_mode(HighlighterMode::Freehand);
+            button.connect_clicked(move |b| {
+                {
+                    let mut st = state_for_weight.lock().unwrap();
+                    st.set_pen_weight(weight);
+                    let is_highlighter = st.selected_tool == Tool::Highlighter;
+                    let is_pen = st.selected_tool == Tool::Pen;
+                    if is_highlighter {
+                        st.set_highlighter_mode(HighlighterMode::Freehand);
+                    }
+                    drop(st);
+
+                    if is_pen || is_highlighter {
+                        let st = state_for_weight.lock().unwrap();
+                        super::cursor::update_pen_cursor(&window_for_weight, &st);
+                    }
                 }
-                drop(st);
 
-                if is_pen || is_highlighter {
-                    let st = state_for_weight.lock().unwrap();
-                    super::cursor::update_pen_cursor(&window_for_weight, &st);
+                let icon = gtk4::Image::from_icon_name(weight.icon_name());
+                icon.set_pixel_size(weight.icon_pixel_size());
+                pen_weight_button_clone.set_child(Some(&icon));
+                sync_arrow_option_selection(&weight_list_for_sync, selected_index);
+
+                // Close the popover
+                if let Some(popover) = b.ancestor(Popover::static_type()) {
+                    popover.downcast::<Popover>().unwrap().popdown();
                 }
-            }
 
-            let icon = gtk4::Image::from_icon_name(weight.icon_name());
-            icon.set_pixel_size(weight.icon_pixel_size());
-            pen_weight_button_clone.set_child(Some(&icon));
-
-            // Close the popover
-            if let Some(popover) = b.ancestor(Popover::static_type()) {
-                popover.downcast::<Popover>().unwrap().popdown();
-            }
-
-            if let Some(area) = drawing_area_weight.upgrade() {
-                area.queue_draw();
-            }
-        });
+                if let Some(area) = drawing_area_weight.upgrade() {
+                    area.queue_draw();
+                }
+            });
+        }
     }
 
     // Wire up obfuscate method list items
@@ -987,9 +994,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         };
         stroke_idx += 1;
 
+        let selected_index = stroke_idx - 1;
         let state_stroke = state.clone();
         let drawing_area_stroke = drawing_area_for_stroke.clone();
         let stroke_size_button_clone = stroke_size_button_for_closure.clone();
+        let stroke_size_list_for_sync = stroke_size_list.clone();
 
         button.connect_clicked(move |b| {
             {
@@ -1001,6 +1010,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let icon = gtk4::Image::from_icon_name(weight.icon_name());
             icon.set_pixel_size(weight.icon_pixel_size());
             stroke_size_button_clone.set_child(Some(&icon));
+            sync_arrow_option_selection(&stroke_size_list_for_sync, selected_index);
 
             if let Some(popover) = b.ancestor(Popover::static_type()) {
                 popover.downcast::<Popover>().unwrap().popdown();
