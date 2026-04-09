@@ -1027,8 +1027,7 @@ pub(super) fn build_toolbar_right_controls(
         text_size_group.set_visible(is_text_tool);
         font_family_group.set_visible(is_text_tool);
 
-        let is_obfuscate_tool = matches!(tool, Tool::Obfuscate);
-        obfuscate_method_group.set_visible(is_obfuscate_tool);
+        obfuscate_method_group.set_visible(false);
 
         let is_highlighter_tool = matches!(tool, Tool::Highlighter);
         let is_pen_tool = matches!(tool, Tool::Pen);
@@ -1053,6 +1052,7 @@ pub(super) fn build_toolbar_right_controls(
             Tool::Crop => Some(("Crop", "crop")),
             Tool::Arrow => Some(("Arrow", "arrow")),
             Tool::Text => Some(("Text", "text")),
+            Tool::Obfuscate => Some(("Obfuscate", "obfuscate")),
             Tool::Number => Some(("Number", "number")),
             _ => None,
         };
@@ -1069,7 +1069,6 @@ pub(super) fn build_toolbar_right_controls(
                 | Tool::Text
                 | Tool::Number
                 | Tool::Highlighter
-                | Tool::Obfuscate
                 | Tool::Focus
         );
         background_tab_btn.set_label(primary_surface.map(|(label, _)| label).unwrap_or("Background"));
@@ -1174,11 +1173,22 @@ mod tests {
                 && production_source.contains("} else if colors_mode {")
                 && production_source.contains("Tool::Pen")
                 && production_source.contains("Tool::Line")
-                && production_source.contains("Tool::Obfuscate")
                 && !production_source.contains("Tool::Arrow => Some((\"Arrow\", \"colors\"))")
                 && !production_source.contains("Tool::Text => Some((\"Text\", \"colors\"))")
-                && !production_source.contains("Tool::Number => Some((\"Number\", \"colors\"))"),
+                && !production_source.contains("Tool::Number => Some((\"Number\", \"colors\"))")
+                && !production_source.contains("| Tool::Obfuscate"),
             "Non-migrated color-capable tools should still switch the right inspector to the Colors surface",
+        );
+    }
+
+    #[test]
+    fn obfuscate_routes_to_a_dedicated_primary_tab_instead_of_shared_colors() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("Tool::Obfuscate => Some((\"Obfuscate\", \"obfuscate\"))")
+                && !production_source.contains("| Tool::Obfuscate"),
+            "Obfuscate should stop using the shared Colors inspector flow and route to its own primary tab",
         );
     }
 
@@ -1203,8 +1213,9 @@ mod tests {
             !production_source.contains("standard_mode_group.append(&arrow_style_group);")
                 && !production_source.contains("standard_mode_group.append(&number_options_group);")
                 && !production_source.contains("root.append(&text_size_group);")
-                && !production_source.contains("root.append(&font_family_group);"),
-            "Toolbar layout should stop mounting Arrow, Text, and Number detail groups after the inspector migration",
+                && !production_source.contains("root.append(&font_family_group);")
+                && !production_source.contains("obfuscate_method_group.set_visible(is_obfuscate_tool);"),
+            "Toolbar layout should stop mounting Arrow, Text, Number, and Obfuscate detail groups after the inspector migration",
         );
     }
 

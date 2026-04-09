@@ -104,6 +104,37 @@ fn sync_text_option_selection(list: &GtkBox, selected_index: Option<usize>) {
     }
 }
 
+fn sync_number_option_selection(list: &GtkBox, selected_index: usize, active_class: &str) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        let is_active = index == selected_index;
+        if is_active {
+            button.add_css_class(active_class);
+        } else {
+            button.remove_css_class(active_class);
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(is_active);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
 pub(super) struct EventContext {
     pub app: Application,
     pub window: ApplicationWindow,
@@ -1083,32 +1114,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let state_style = state_number_style.clone();
         let drawing_area_style = drawing_area_number_style.clone();
         let refresh_display = refresh_number_start_display_style.clone();
+        let number_options_list_sync = number_options_list.clone();
 
-        button.connect_clicked(move |b| {
+        button.connect_clicked(move |_| {
             {
                 let mut st = state_style.lock().unwrap();
                 st.numbering_style = style;
                 st.next_number = st.numbering_start;
             }
-
-            if let Some(list) = b.parent() {
-                let mut child = list.first_child();
-                while let Some(c) = child {
-                    child = c.next_sibling();
-                    if let Ok(btn) = c.downcast::<Button>() {
-                        if let Some(box_child) = btn.child() {
-                            if let Ok(hbox) = box_child.downcast::<GtkBox>() {
-                                if let Some(icon) = hbox.first_child() {
-                                    if let Ok(img) = icon.downcast::<Image>() {
-                                        img.set_visible(btn == *b);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
+            sync_number_option_selection(
+                &number_options_list_sync,
+                style_idx - 1,
+                "editor-number-style-option-active",
+            );
             refresh_display();
 
             if let Some(area) = drawing_area_style.upgrade() {
@@ -1171,12 +1189,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let state_size = state_number_size.clone();
         let drawing_area_size = drawing_area_number_size.clone();
         let number_size_btn = number_size_button.clone();
+        let number_size_list_sync = number_size_list.clone();
 
         button.connect_clicked(move |b| {
             {
                 let mut st = state_size.lock().unwrap();
                 st.number_size = size;
             }
+
+            sync_number_option_selection(
+                &number_size_list_sync,
+                size_idx - 1,
+                "editor-number-size-option-active",
+            );
 
             // Close the size popover
             if let Some(popover) = b.ancestor(Popover::static_type()) {
