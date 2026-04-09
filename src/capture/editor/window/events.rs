@@ -31,6 +31,8 @@ use super::super::{
 const MOVE_HANDLE_DRAG_RADIUS: f64 = 10.0;
 const RESIZE_HANDLE_DRAG_SIZE: f64 = 18.0;
 const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
+const TEXT_SIZE_OPTIONS: [i32; 12] = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
+const TEXT_FONT_FAMILIES: [&str; 5] = ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"];
 use super::super::pen_weight::{HighlighterMode, PenWeight};
 use super::{
     canvas::{
@@ -62,6 +64,68 @@ fn sync_arrow_option_selection(list: &GtkBox, selected_index: usize) {
                 if let Some(check_icon) = row.last_child() {
                     if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
                         widget.set_visible(index == selected_index);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
+fn sync_text_option_selection(list: &GtkBox, selected_index: Option<usize>) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        let is_active = selected_index == Some(index);
+        if is_active {
+            button.add_css_class("editor-text-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-text-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(is_active);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
+fn sync_number_option_selection(list: &GtkBox, selected_index: usize, active_class: &str) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        let is_active = index == selected_index;
+        if is_active {
+            button.add_css_class(active_class);
+        } else {
+            button.remove_css_class(active_class);
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(is_active);
                     }
                 }
             }
@@ -109,6 +173,8 @@ pub(super) struct EventContext {
     pub size_slider: Scale,
     pub text_size_label: Label,
     pub font_family_label: Label,
+    pub text_size_list: gtk4::Box,
+    pub font_family_list: gtk4::Box,
     pub apply_crop_btn: Button,
     pub crop_reset_btn: Button,
 
@@ -188,6 +254,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         size_slider,
         text_size_label,
         font_family_label,
+        text_size_list,
+        font_family_list,
         apply_crop_btn,
         crop_reset_btn,
         undo_btn,
@@ -1046,32 +1114,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let state_style = state_number_style.clone();
         let drawing_area_style = drawing_area_number_style.clone();
         let refresh_display = refresh_number_start_display_style.clone();
+        let number_options_list_sync = number_options_list.clone();
 
-        button.connect_clicked(move |b| {
+        button.connect_clicked(move |_| {
             {
                 let mut st = state_style.lock().unwrap();
                 st.numbering_style = style;
                 st.next_number = st.numbering_start;
             }
-
-            if let Some(list) = b.parent() {
-                let mut child = list.first_child();
-                while let Some(c) = child {
-                    child = c.next_sibling();
-                    if let Ok(btn) = c.downcast::<Button>() {
-                        if let Some(box_child) = btn.child() {
-                            if let Ok(hbox) = box_child.downcast::<GtkBox>() {
-                                if let Some(icon) = hbox.first_child() {
-                                    if let Ok(img) = icon.downcast::<Image>() {
-                                        img.set_visible(btn == *b);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
+            sync_number_option_selection(
+                &number_options_list_sync,
+                style_idx - 1,
+                "editor-number-style-option-active",
+            );
             refresh_display();
 
             if let Some(area) = drawing_area_style.upgrade() {
@@ -1134,12 +1189,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let state_size = state_number_size.clone();
         let drawing_area_size = drawing_area_number_size.clone();
         let number_size_btn = number_size_button.clone();
+        let number_size_list_sync = number_size_list.clone();
 
         button.connect_clicked(move |b| {
             {
                 let mut st = state_size.lock().unwrap();
                 st.number_size = size;
             }
+
+            sync_number_option_selection(
+                &number_size_list_sync,
+                size_idx - 1,
+                "editor-number-size-option-active",
+            );
 
             // Close the size popover
             if let Some(popover) = b.ancestor(Popover::static_type()) {
@@ -1219,12 +1281,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
     let state_apply_crop = state.clone();
     let drawing_area_apply_crop = drawing_area.downgrade();
-    let buttons_apply_crop = tool_buttons.clone();
     let apply_crop_btn_click = apply_crop_btn.clone();
     let update_canvas_content_size_apply = update_canvas_content_size.clone();
-    let update_toolbar_for_tool_apply_crop = update_toolbar_for_tool.clone();
     let update_crop_size_fields_apply_crop = update_crop_size_fields.clone();
-    let sync_picker_for_active_tool_apply_crop = sync_picker_for_active_tool.clone();
     apply_crop_btn.connect_clicked(move |_| {
         let apply_result = {
             let mut st = state_apply_crop.lock().unwrap();
@@ -2022,6 +2081,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_canvas_click = sync_size_control.clone();
     let text_size_label_click = text_size_label.clone();
     let font_family_label_click = font_family_label.clone();
+    let text_size_list_click = text_size_list.clone();
+    let font_family_list_click = font_family_list.clone();
     click.connect_pressed(move |_gesture, n_press, x, y| {
         let t = *transform_click.lock().unwrap();
         let view_point = Point { x, y };
@@ -2253,9 +2314,21 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 sync_size_control_canvas_click();
                 if let Some(size) = selected_text_size {
                     text_size_label_click.set_label(&format!("{}pt", size as i32));
+                    sync_text_option_selection(
+                        &text_size_list_click,
+                        TEXT_SIZE_OPTIONS
+                            .iter()
+                            .position(|candidate| *candidate == size as i32),
+                    );
                 }
                 if let Some(family) = selected_font_family {
                     font_family_label_click.set_label(&family);
+                    sync_text_option_selection(
+                        &font_family_list_click,
+                        TEXT_FONT_FAMILIES
+                            .iter()
+                            .position(|candidate| *candidate == family.as_str()),
+                    );
                 }
 
                 if let Some(index) = selected_color_index {
@@ -2393,6 +2466,18 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
                 text_size_label_click.set_label(&format!("{}pt", text_size as i32));
                 font_family_label_click.set_label(&font_family);
+                sync_text_option_selection(
+                    &text_size_list_click,
+                    TEXT_SIZE_OPTIONS
+                        .iter()
+                        .position(|candidate| *candidate == text_size as i32),
+                );
+                sync_text_option_selection(
+                    &font_family_list_click,
+                    TEXT_FONT_FAMILIES
+                        .iter()
+                        .position(|candidate| *candidate == font_family.as_str()),
+                );
 
                 if let Some(area) = drawing_area_click.upgrade() {
                     area.grab_focus();

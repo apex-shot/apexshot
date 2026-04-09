@@ -2,7 +2,7 @@ use gdk4x11::X11Surface;
 use gtk4::gdk;
 use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, Entry, Image, Label, Orientation, Popover, Stack,
+    DrawingArea, Entry, Label, Orientation, Popover, Stack,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -82,6 +82,15 @@ use super::ui_support::{
     toolbar_icon_size,
 };
 
+const TEXT_SIZE_OPTIONS: [i32; 12] = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
+const TEXT_FONT_FAMILIES: [&str; 5] = ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"];
+const OBFUSCATE_METHOD_OPTIONS: [(super::types::ObfuscateMethod, &str); 4] = [
+    (super::types::ObfuscateMethod::Pixelate, "Pixelate"),
+    (super::types::ObfuscateMethod::BlurSecure, "Blur (Secure)"),
+    (super::types::ObfuscateMethod::BlurSmooth, "Blur (Smooth)"),
+    (super::types::ObfuscateMethod::Blackout, "Blackout"),
+];
+
 fn sync_arrow_option_selection(list: &GtkBox, selected_index: usize) {
     let mut child_opt = list.first_child();
     let mut index = 0usize;
@@ -124,6 +133,65 @@ fn sync_crop_option_selection(list: &GtkBox, selected_index: usize) {
             button.add_css_class("editor-crop-inspector-option-active");
         } else {
             button.remove_css_class("editor-crop-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(index == selected_index);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
+fn sync_text_option_selection(list: &GtkBox, selected_index: Option<usize>) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        let is_active = selected_index == Some(index);
+        if is_active {
+            button.add_css_class("editor-text-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-text-inspector-option-active");
+        }
+
+        if let Some(content) = button.child() {
+            if let Ok(row) = content.downcast::<GtkBox>() {
+                if let Some(check_icon) = row.last_child() {
+                    if let Ok(widget) = check_icon.downcast::<gtk4::Widget>() {
+                        widget.set_visible(is_active);
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+}
+
+fn sync_obfuscate_option_selection(list: &GtkBox, selected_index: usize) {
+    let mut child_opt = list.first_child();
+    let mut index = 0usize;
+    while let Some(child) = child_opt {
+        child_opt = child.next_sibling();
+        let Ok(button) = child.downcast::<Button>() else {
+            continue;
+        };
+
+        if index == selected_index {
+            button.add_css_class("editor-obfuscate-inspector-option-active");
+        } else {
+            button.remove_css_class("editor-obfuscate-inspector-option-active");
         }
 
         if let Some(content) = button.child() {
@@ -444,7 +512,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         obfuscate_method_group,
         obfuscate_method_button,
         obfuscate_method_popover: _,
-        obfuscate_method_list,
+        obfuscate_method_list: _toolbar_obfuscate_method_list,
         pen_weight_button,
         pen_weight_popover: _,
         pen_weight_list,
@@ -682,25 +750,30 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let text_size_list = GtkBox::new(Orientation::Vertical, 0);
     let font_family_list = GtkBox::new(Orientation::Vertical, 0);
+    let obfuscate_method_list = GtkBox::new(Orientation::Vertical, 0);
 
-    let number_options_list = GtkBox::new(Orientation::Vertical, 4);
+    let number_options_list = GtkBox::new(Orientation::Vertical, 0);
     number_options_list.set_margin_start(4);
     number_options_list.set_margin_end(4);
     number_options_list.set_margin_top(4);
     number_options_list.set_margin_bottom(4);
     for style in super::numbering_style::NumberingStyle::ALL {
         let btn_box = GtkBox::new(Orientation::Horizontal, 8);
-        let check_icon = Image::from_icon_name(icon_names::SELECT);
-        check_icon.set_pixel_size(12);
-        check_icon.set_visible(style == super::numbering_style::NumberingStyle::default());
-        check_icon.add_css_class("editor-number-style-check");
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
 
         let label = Label::new(Some(style.label()));
         label.set_hexpand(true);
-        label.set_halign(gtk4::Align::Start);
+        label.set_xalign(0.0);
 
-        btn_box.append(&check_icon);
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(style == super::numbering_style::NumberingStyle::default());
+        check_icon.add_css_class("editor-number-style-check");
+
         btn_box.append(&label);
+        btn_box.append(&check_icon);
 
         let btn = Button::builder()
             .has_frame(false)
@@ -711,6 +784,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             ])
             .child(&btn_box)
             .build();
+        if style == super::numbering_style::NumberingStyle::default() {
+            btn.add_css_class("editor-number-style-option-active");
+        }
         number_options_list.append(&btn);
     }
 
@@ -721,19 +797,52 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     number_start_entry.set_editable(false);
     number_start_entry.add_css_class("editor-number-start-entry");
     let number_inc_btn = Button::with_label("+");
+    number_inc_btn.add_css_class("editor-number-start-stepper");
     let number_dec_btn = Button::with_label("-");
+    number_dec_btn.add_css_class("editor-number-start-stepper");
+
+    let number_start_row = GtkBox::new(Orientation::Horizontal, 8);
+    number_start_row.add_css_class("editor-number-start-row");
+    let number_start_label = Label::new(Some("Start with:"));
+    number_start_label.add_css_class("editor-number-start-label");
+    number_start_label.set_hexpand(true);
+    number_start_label.set_xalign(0.0);
+    number_start_row.append(&number_start_label);
+    number_start_row.append(&number_dec_btn);
+    number_start_row.append(&number_start_entry);
+    number_start_row.append(&number_inc_btn);
 
     let number_size_list = GtkBox::new(Orientation::Vertical, 0);
     for size in super::numbering_style::NumberSize::ALL {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let label = Label::new(Some(size.label()));
+        label.set_hexpand(true);
+        label.set_xalign(0.0);
+
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(size == super::numbering_style::NumberSize::default());
+        check_icon.add_css_class("editor-number-size-check");
+
+        btn_box.append(&label);
+        btn_box.append(&check_icon);
+
         let btn = Button::builder()
-            .label(size.label())
             .has_frame(false)
             .css_classes([
                 "editor-popover-list-item",
                 "flat",
                 "editor-number-size-option",
             ])
+            .child(&btn_box)
             .build();
+        if size == super::numbering_style::NumberSize::default() {
+            btn.add_css_class("editor-number-size-option-active");
+        }
         number_size_list.append(&btn);
     }
 
@@ -1184,10 +1293,19 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     append_inspector_section(&text_inspector_content, "Size", text_size_list.upcast_ref());
     append_inspector_section(&text_inspector_content, "Font", font_family_list.upcast_ref());
 
+    let (obfuscate_inspector, obfuscate_inspector_content) = build_tool_inspector();
+    obfuscate_method_list.add_css_class("editor-inspector-option-list");
+    append_inspector_section(
+        &obfuscate_inspector_content,
+        "Method",
+        obfuscate_method_list.upcast_ref(),
+    );
+
     let (number_inspector, number_inspector_content) = build_tool_inspector();
     number_options_list.add_css_class("editor-inspector-option-list");
     number_size_list.add_css_class("editor-inspector-option-list");
     append_inspector_section(&number_inspector_content, "Style", number_options_list.upcast_ref());
+    append_inspector_section(&number_inspector_content, "Start", number_start_row.upcast_ref());
     append_inspector_section(&number_inspector_content, "Size", number_size_list.upcast_ref());
 
     let inspector_tabs = GtkBox::new(Orientation::Horizontal, 8);
@@ -1224,6 +1342,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     crop_inspector.set_visible(true);
     arrow_inspector.set_visible(true);
     text_inspector.set_visible(true);
+    obfuscate_inspector.set_visible(true);
     number_inspector.set_visible(true);
     colors_inspector.set_visible(true);
     placeholder_inspector.set_visible(true);
@@ -1231,6 +1350,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     inspector_stack.add_named(&crop_inspector, Some("crop"));
     inspector_stack.add_named(&arrow_inspector, Some("arrow"));
     inspector_stack.add_named(&text_inspector, Some("text"));
+    inspector_stack.add_named(&obfuscate_inspector, Some("obfuscate"));
     inspector_stack.add_named(&number_inspector, Some("number"));
     inspector_stack.add_named(&colors_inspector, Some("colors"));
     inspector_stack.add_named(&placeholder_inspector, Some("placeholder"));
@@ -1435,18 +1555,52 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         });
     }
 
+    let (selected_text_size, selected_font_family) = {
+        let st = state.lock().unwrap();
+        (
+            st.selected_text_action_size().map(|size| size as i32).unwrap_or(st.text_size as i32),
+            st.selected_text_font_family()
+                .unwrap_or_else(|| st.text_font_family.clone()),
+        )
+    };
+
     while let Some(child) = text_size_list.first_child() {
         text_size_list.remove(&child);
     }
-    for size in [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72] {
+    for size in TEXT_SIZE_OPTIONS {
         let label = format!("{}pt", size);
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let label_widget = Label::new(Some(&label));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(size == selected_text_size);
+        check_icon.add_css_class("editor-text-inspector-check");
+
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
+
         let btn = Button::builder()
-            .label(&label)
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-text-inspector-option",
+            ])
+            .child(&btn_box)
             .build();
+        if size == selected_text_size {
+            btn.add_css_class("editor-text-inspector-option-active");
+        }
         let state = state.clone();
         let text_size_label = text_size_label.clone();
+        let text_size_list_sync = text_size_list.clone();
         let drawing_area = drawing_area.clone();
         btn.connect_clicked(move |b| {
             if let Some(popover) = b.ancestor(Popover::static_type()) {
@@ -1460,6 +1614,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 st.text_size = size as f64;
             }
             drop(st);
+            sync_text_option_selection(
+                &text_size_list_sync,
+                TEXT_SIZE_OPTIONS.iter().position(|candidate| *candidate == size),
+            );
             if has_active_text {
                 drawing_area.grab_focus();
             }
@@ -1471,14 +1629,39 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     while let Some(child) = font_family_list.first_child() {
         font_family_list.remove(&child);
     }
-    for family in ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"] {
+    for family in TEXT_FONT_FAMILIES {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let label_widget = Label::new(Some(family));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(family == selected_font_family);
+        check_icon.add_css_class("editor-text-inspector-check");
+
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
+
         let btn = Button::builder()
-            .label(family)
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-text-inspector-option",
+            ])
+            .child(&btn_box)
             .build();
+        if family == selected_font_family {
+            btn.add_css_class("editor-text-inspector-option-active");
+        }
         let state = state.clone();
         let font_family_label = font_family_label.clone();
+        let font_family_list_sync = font_family_list.clone();
         let drawing_area = drawing_area.clone();
         let family_str = family.to_string();
         btn.connect_clicked(move |b| {
@@ -1495,12 +1678,71 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 st.text_font_family = family_str.clone();
             }
             drop(st);
+            sync_text_option_selection(
+                &font_family_list_sync,
+                TEXT_FONT_FAMILIES
+                    .iter()
+                    .position(|candidate| *candidate == family_str.as_str()),
+            );
             if has_active_text {
                 drawing_area.grab_focus();
             }
             drawing_area.queue_draw();
         });
         font_family_list.append(&btn);
+    }
+
+    while let Some(child) = obfuscate_method_list.first_child() {
+        obfuscate_method_list.remove(&child);
+    }
+    let selected_obfuscate_method = {
+        let st = state.lock().unwrap();
+        st.obfuscate_method()
+    };
+    for (index, (method, label)) in OBFUSCATE_METHOD_OPTIONS.iter().enumerate() {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        btn_box.set_margin_start(8);
+        btn_box.set_margin_end(8);
+        btn_box.set_margin_top(4);
+        btn_box.set_margin_bottom(4);
+
+        let label_widget = Label::new(Some(label));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+
+        let check_icon = Label::new(Some("✓"));
+        check_icon.set_visible(*method == selected_obfuscate_method);
+        check_icon.add_css_class("editor-obfuscate-inspector-check");
+
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
+
+        let btn = Button::builder()
+            .has_frame(false)
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-obfuscate-inspector-option",
+            ])
+            .child(&btn_box)
+            .build();
+        if *method == selected_obfuscate_method {
+            btn.add_css_class("editor-obfuscate-inspector-option-active");
+        }
+
+        let state = state.clone();
+        let drawing_area = drawing_area.clone();
+        let obfuscate_method_list_sync = obfuscate_method_list.clone();
+        btn.connect_clicked(move |_| {
+            {
+                let mut st = state.lock().unwrap();
+                st.set_obfuscate_method(*method);
+            }
+            sync_obfuscate_option_selection(&obfuscate_method_list_sync, index);
+            drawing_area.queue_draw();
+        });
+
+        obfuscate_method_list.append(&btn);
     }
 
     let eyedropper_mode = Rc::new(Cell::new(false));
@@ -1765,9 +2007,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let size_slider = size_slider.clone();
         let text_size_label = text_size_label.clone();
         let font_family_label = font_family_label.clone();
+        let text_size_list = text_size_list.clone();
+        let font_family_list = font_family_list.clone();
+        let obfuscate_method_list = obfuscate_method_list.clone();
         move || {
             // Extract all needed data BEFORE any GTK operations to avoid deadlock
-            let (selected_tool, mode, value, text_size, font_family) = {
+            let (selected_tool, mode, value, text_size, font_family, obfuscate_method) = {
                 let st = state.lock().unwrap();
                 (
                     st.selected_tool,
@@ -1775,11 +2020,20 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     st.active_size_value().unwrap_or_default(),
                     st.text_size,
                     st.text_font_family.clone(),
+                    st.obfuscate_method(),
                 )
             };
 
             text_size_label.set_label(&format!("{}pt", text_size as i32));
             font_family_label.set_label(&font_family);
+            sync_text_option_selection(&text_size_list, TEXT_SIZE_OPTIONS.iter().position(|candidate| *candidate == text_size as i32));
+            sync_text_option_selection(&font_family_list, TEXT_FONT_FAMILIES.iter().position(|candidate| *candidate == font_family.as_str()));
+            if let Some(selected_method) = OBFUSCATE_METHOD_OPTIONS
+                .iter()
+                .position(|(method, _)| *method == obfuscate_method)
+            {
+                sync_obfuscate_option_selection(&obfuscate_method_list, selected_method);
+            }
 
             // Now perform GTK operations WITHOUT holding the lock
             if selected_tool == Tool::Highlighter {
@@ -2598,6 +2852,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         size_slider: size_slider.clone(),
         text_size_label: text_size_label.clone(),
         font_family_label: font_family_label.clone(),
+        text_size_list: text_size_list.clone(),
+        font_family_list: font_family_list.clone(),
         apply_crop_btn: crop_apply_btn.clone(),
         crop_reset_btn: crop_reset_btn.clone(),
         undo_btn: undo_btn.clone(),
@@ -2852,4 +3108,76 @@ mod tests {
             "Arrow inspector rows should expose a visible selected tick for style and thickness options",
         );
     }
+
+    #[test]
+    fn text_inspector_rows_use_label_plus_tick_layout_and_shared_sidebar_width() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("check_icon.add_css_class(\"editor-text-inspector-check\");")
+                && production_source.contains("btn.add_css_class(\"editor-text-inspector-option-active\");")
+                && production_source.contains("sync_text_option_selection(&text_size_list")
+                && production_source.contains("sync_text_option_selection(&font_family_list")
+                && production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source.contains("TEXT_SIDEBAR_WIDTH"),
+            "Text inspector rows should use explicit selected ticks while reusing the existing fixed sidebar width",
+        );
+    }
+
+    #[test]
+    fn obfuscate_inspector_renders_method_section_and_reuses_shared_sidebar_width() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let (obfuscate_inspector, obfuscate_inspector_content) = build_tool_inspector();")
+                && production_source.contains("\"Method\"")
+                && production_source.contains("sync_obfuscate_option_selection(&obfuscate_method_list")
+                && production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source.contains("OBFUSCATE_SIDEBAR_WIDTH"),
+            "Obfuscate should render a Method section while reusing the shared fixed sidebar width",
+        );
+    }
+
+    #[test]
+    fn obfuscate_inspector_uses_a_fresh_list_instead_of_reusing_toolbar_popover_state() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let obfuscate_method_list = GtkBox::new(Orientation::Vertical, 0);")
+                && !production_source.contains("if let Some(parent) = obfuscate_method_list.parent() {"),
+            "Obfuscate should follow the migrated tool pattern and build a fresh inspector-owned list instead of reusing toolbar popover state",
+        );
+    }
+
+    #[test]
+    fn number_inspector_style_and_size_rows_use_matching_row_composition() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("editor-number-style-check")
+                && production_source.contains("editor-number-size-check")
+                && production_source.contains("editor-number-style-option-active")
+                && production_source.contains("editor-number-size-option-active")
+                && production_source.contains("sync_number_option_selection(")
+                && production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
+                && !production_source.contains("NUMBER_SIDEBAR_WIDTH"),
+            "Number Style and Size rows should share the same inspector-native composition while reusing the shared sidebar width",
+        );
+    }
+
+    #[test]
+    fn number_inspector_includes_start_controls_in_the_sidebar() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let number_start_row = GtkBox::new(Orientation::Horizontal, 8);")
+                && production_source.contains("let number_start_label = Label::new(Some(\"Start with:\"));")
+                && production_source.contains("number_start_row.append(&number_dec_btn);")
+                && production_source.contains("number_start_row.append(&number_start_entry);")
+                && production_source.contains("number_start_row.append(&number_inc_btn);")
+                && production_source.contains("append_inspector_section(&number_inspector_content, \"Start\", number_start_row.upcast_ref());"),
+            "Number inspector should expose the starting number controls inside the sidebar",
+        );
+    }
+
 }

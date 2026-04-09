@@ -1342,6 +1342,122 @@ pub fn install_editor_css() {
                 font-weight: 700;
             }
 
+            button.editor-text-inspector-option {
+                border-radius: 8px;
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-text-inspector-option:hover {
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+            }
+
+            button.editor-text-inspector-option.editor-text-inspector-option-active {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-text-inspector-check {
+                color: #ff9900;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            button.editor-obfuscate-inspector-option {
+                border-radius: 8px;
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-obfuscate-inspector-option:hover {
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+            }
+
+            button.editor-obfuscate-inspector-option.editor-obfuscate-inspector-option-active {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-obfuscate-inspector-check {
+                color: #ff9900;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            button.editor-number-style-option,
+            button.editor-number-size-option {
+                border-radius: 8px;
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-number-style-option:hover,
+            button.editor-number-size-option:hover {
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+            }
+
+            button.editor-number-style-option.editor-number-style-option-active {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            button.editor-number-size-option.editor-number-size-option-active {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-number-style-check,
+            .editor-number-size-check {
+                color: #ff9900;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            .editor-number-start-row {
+                spacing: 8px;
+            }
+
+            .editor-number-start-label {
+                color: rgba(241, 241, 243, 0.9);
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-number-start-entry {
+                min-height: 34px;
+                min-width: 48px;
+                padding: 0 10px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background: rgba(255, 255, 255, 0.04);
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 700;
+                box-shadow: none;
+            }
+
+            button.editor-number-start-stepper {
+                min-width: 30px;
+                min-height: 34px;
+                padding: 0;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background: rgba(255, 255, 255, 0.03);
+                color: rgba(245, 245, 247, 0.92);
+                font-size: 14px;
+                font-weight: 700;
+                box-shadow: none;
+            }
+
+            button.editor-number-start-stepper:hover {
+                background: rgba(255, 255, 255, 0.07);
+                color: #ffffff;
+            }
+
+            button.editor-number-start-stepper:active {
+                background: rgba(255, 255, 255, 0.12);
+            }
+
             .editor-background-sidebar {
                 min-width: 210px;
                 padding: 16px;
@@ -2353,6 +2469,59 @@ mod tests {
             production_source.contains("button.editor-arrow-inspector-option.editor-arrow-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
                 && production_source.contains(".editor-arrow-inspector-check {\n                color: #ff9900;"),
             "Arrow inspector selection should use a subtle row surface plus an orange tick indicator",
+        );
+    }
+
+    #[test]
+    fn text_inspector_option_rows_match_arrow_visual_language_without_changing_panel_width() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-text-inspector-option.editor-text-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains(".editor-text-inspector-check {\n                color: #ff9900;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && !production_source.contains("TEXT_SIDEBAR_WIDTH"),
+            "Text inspector rows should mirror Arrow selection styling without introducing a new sidepanel width path",
+        );
+    }
+
+    #[test]
+    fn obfuscate_inspector_option_rows_match_migrated_tool_panels_without_new_width_path() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-obfuscate-inspector-option.editor-obfuscate-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains(".editor-obfuscate-inspector-check {\n                color: #ff9900;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && !production_source.contains("OBFUSCATE_SIDEBAR_WIDTH"),
+            "Obfuscate inspector rows should use the shared sidepanel language without introducing a new width path",
+        );
+    }
+
+    #[test]
+    fn number_inspector_rows_match_migrated_sidepanel_surface_language_without_new_width_path() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-number-style-option.editor-number-style-option-active {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains("button.editor-number-size-option.editor-number-size-option-active {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains(".editor-number-style-check,\n            .editor-number-size-check {\n                color: #ff9900;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && !production_source.contains("NUMBER_SIDEBAR_WIDTH"),
+            "Number inspector rows should match the migrated sidepanel surface language without introducing a new width path",
+        );
+    }
+
+    #[test]
+    fn number_inspector_start_controls_use_sidebar_field_styling() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains(".editor-number-start-row {\n                spacing: 8px;")
+                && production_source.contains(".editor-number-start-label {\n                color: rgba(241, 241, 243, 0.9);")
+                && production_source.contains(".editor-number-start-entry {\n                min-height: 34px;")
+                && production_source.contains("button.editor-number-start-stepper {\n                min-width: 30px;"),
+            "Number inspector start controls should be styled as inspector-native sidebar fields",
         );
     }
 
