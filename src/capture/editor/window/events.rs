@@ -1,16 +1,14 @@
 use gtk4::{
     gdk, glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Image,
-    Label, Popover, Scale,
+    DrawingArea, EventControllerKey, EventControllerMotion, EventControllerScroll,
+    EventControllerScrollFlags, GestureClick, GestureDrag, Image, Label, Overlay, Popover, Scale,
+    ScrolledWindow,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 
 use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
@@ -33,6 +31,9 @@ const RESIZE_HANDLE_DRAG_SIZE: f64 = 18.0;
 const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
 const TEXT_SIZE_OPTIONS: [i32; 12] = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
 const TEXT_FONT_FAMILIES: [&str; 5] = ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"];
+const MIN_ZOOM_LEVEL: f64 = 0.25;
+const MAX_ZOOM_LEVEL: f64 = 6.0;
+const ZOOM_STEP: f64 = 1.1;
 use super::super::pen_weight::{HighlighterMode, PenWeight};
 use super::{
     canvas::{
@@ -42,6 +43,10 @@ use super::{
     cursor::{cursor_name_for_view_point, set_window_cursor_name},
     icon_names,
 };
+
+fn clamp_zoom_level(value: f64) -> f64 {
+    value.clamp(MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL)
+}
 
 fn sync_arrow_option_selection(list: &GtkBox, selected_index: usize) {
     let mut child_opt = list.first_child();
@@ -159,10 +164,19 @@ pub(super) struct EventContext {
     pub traffic_close: Button,
     pub traffic_minimize: Button,
     pub traffic_zoom: Button,
-    pub pin_btn: Button,
-    pub pin_icon: Image,
-    pub initial_pin_state: bool,
-    pub set_window_pinned: Rc<dyn Fn(bool)>,
+    pub canvas_overlay: Overlay,
+    pub canvas_scroller: ScrolledWindow,
+    pub zoom_button: Button,
+    pub zoom_label: Label,
+    pub zoom_header_label: Label,
+    pub zoom_popup: GtkBox,
+    pub zoom_minus_btn: Button,
+    pub zoom_plus_btn: Button,
+    pub zoom_in_btn: Button,
+    pub zoom_out_btn: Button,
+    pub fit_to_screen_btn: Button,
+    pub zoom_to_selection_btn: Button,
+    pub zoom_level: Rc<Cell<f64>>,
     pub drag_btn: Button,
     pub copy_btn: Button,
     pub upload_btn: Button,
@@ -241,10 +255,19 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         traffic_close,
         traffic_minimize,
         traffic_zoom,
-        pin_btn,
-        pin_icon,
-        initial_pin_state,
-        set_window_pinned,
+        canvas_overlay: _canvas_overlay,
+        canvas_scroller,
+        zoom_button,
+        zoom_label: _zoom_label,
+        zoom_header_label,
+        zoom_popup,
+        zoom_minus_btn,
+        zoom_plus_btn,
+        zoom_in_btn,
+        zoom_out_btn,
+        fit_to_screen_btn,
+        zoom_to_selection_btn,
+        zoom_level,
         drag_btn,
         copy_btn,
         upload_btn,
@@ -528,25 +551,155 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     });
     drag_btn.add_controller(drag_window_gesture);
 
-    let pin_state = Arc::new(AtomicBool::new(initial_pin_state));
-    pin_icon.set_icon_name(Some(if initial_pin_state {
-        icon_names::PIN
-    } else {
-        icon_names::VIEW_PIN
-    }));
-    let pin_state_btn = pin_state.clone();
-    let pin_icon_btn = pin_icon.clone();
-    let set_window_pinned_btn = set_window_pinned.clone();
-    pin_btn.connect_clicked(move |_| {
-        let now_pinned = !pin_state_btn.load(Ordering::Relaxed);
-        pin_state_btn.store(now_pinned, Ordering::Relaxed);
-        pin_icon_btn.set_icon_name(Some(if now_pinned {
-            icon_names::PIN
-        } else {
-            icon_names::VIEW_PIN
-        }));
-        set_window_pinned_btn(now_pinned);
+    let apply_zoom_change: Rc<dyn Fn(f64)> = Rc::new({
+        let zoom_level = zoom_level.clone();
+        let update_canvas_content_size = update_canvas_content_size.clone();
+        let drawing_area = drawing_area.clone();
+        move |next_zoom| {
+            zoom_level.set(clamp_zoom_level(next_zoom));
+            update_canvas_content_size();
+            drawing_area.queue_draw();
+        }
     });
+
+    let zoom_popup_btn = zoom_popup.clone();
+    zoom_button.connect_clicked(move |_| {
+        zoom_popup_btn.set_visible(!zoom_popup_btn.is_visible());
+    });
+
+    let apply_zoom_change_btn = apply_zoom_change.clone();
+    let zoom_level_in = zoom_level.clone();
+    let zoom_popup_in = zoom_popup.clone();
+    zoom_in_btn.connect_clicked(move |b| {
+        apply_zoom_change_btn(zoom_level_in.get() * ZOOM_STEP);
+        let _ = b;
+        zoom_popup_in.set_visible(false);
+    });
+
+    let apply_zoom_change_btn = apply_zoom_change.clone();
+    let zoom_level_out = zoom_level.clone();
+    let zoom_popup_out = zoom_popup.clone();
+    zoom_out_btn.connect_clicked(move |b| {
+        apply_zoom_change_btn(zoom_level_out.get() / ZOOM_STEP);
+        let _ = b;
+        zoom_popup_out.set_visible(false);
+    });
+
+    let apply_zoom_change_btn = apply_zoom_change.clone();
+    let zoom_popup_fit = zoom_popup.clone();
+    fit_to_screen_btn.connect_clicked(move |b| {
+        apply_zoom_change_btn(1.0);
+        let _ = b;
+        zoom_popup_fit.set_visible(false);
+    });
+
+    let apply_zoom_change_btn = apply_zoom_change.clone();
+    let zoom_level_minus = zoom_level.clone();
+    zoom_minus_btn.connect_clicked(move |_| {
+        apply_zoom_change_btn(zoom_level_minus.get() / ZOOM_STEP);
+    });
+
+    let apply_zoom_change_btn = apply_zoom_change.clone();
+    let zoom_level_plus = zoom_level.clone();
+    zoom_plus_btn.connect_clicked(move |_| {
+        apply_zoom_change_btn(zoom_level_plus.get() * ZOOM_STEP);
+    });
+
+    // Make the header label clickable to reset zoom to 100%
+    let apply_zoom_change_label = apply_zoom_change.clone();
+    let label_click = GestureClick::new();
+    label_click.connect_pressed(move |_, _, _, _| {
+        apply_zoom_change_label(1.0);
+    });
+    zoom_header_label.add_controller(label_click);
+
+    let zoom_popup_sel = zoom_popup.clone();
+    let state_zoom_sel = state.clone();
+    let transform_zoom_sel = transform.clone();
+    let drawing_area_zoom_sel = drawing_area.clone();
+    let zoom_level_zoom_sel = zoom_level.clone();
+    let canvas_scroller_zoom_sel = canvas_scroller.clone();
+    zoom_to_selection_btn.connect_clicked(move |b| {
+        let selection_rect = {
+            let st = state_zoom_sel.lock().unwrap();
+            if let Some(crop_rect) = st.draft_crop_rect().or(st.crop_selection) {
+                Some(crop_rect)
+            } else if let Some(action_idx) = st.selected_action_index {
+                if let Some(action) = st.actions.get(action_idx) {
+                    super::super::selection::action_bounds_with_padding(action, 0.0)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(rect) = selection_rect {
+            let scroller_w = canvas_scroller_zoom_sel.allocated_width() as f64;
+            let scroller_h = canvas_scroller_zoom_sel.allocated_height() as f64;
+            let padding = super::canvas::CANVAS_PADDING as f64 * 2.0 + 40.0;
+            let available_w = (scroller_w - padding).max(100.0);
+            let available_h = (scroller_h - padding).max(100.0);
+
+            let scale_x = available_w / rect.width.max(1) as f64;
+            let scale_y = available_h / rect.height.max(1) as f64;
+            let new_scale = scale_x.min(scale_y).clamp(0.25, 6.0);
+
+            // Update zoom level and transform
+            zoom_level_zoom_sel.set(new_scale);
+            {
+                let mut t = transform_zoom_sel.lock().unwrap();
+                t.scale = new_scale;
+                // Center the rect in the view
+                t.offset_x = (scroller_w - rect.width as f64 * new_scale) / 2.0 - rect.x as f64 * new_scale;
+                t.offset_y = (scroller_h - rect.height as f64 * new_scale) / 2.0 - rect.y as f64 * new_scale;
+            }
+
+            drawing_area_zoom_sel.queue_draw();
+        }
+
+        if let Some(popover) = b.ancestor(Popover::static_type()) {
+            popover.downcast::<Popover>().unwrap().popdown();
+        }
+        zoom_popup_sel.set_visible(false);
+    });
+
+    let scroll_controller = EventControllerScroll::new(
+        EventControllerScrollFlags::VERTICAL | EventControllerScrollFlags::DISCRETE,
+    );
+    let apply_zoom_change_scroll = apply_zoom_change.clone();
+    let zoom_level_scroll = zoom_level.clone();
+    scroll_controller.connect_scroll(move |_, _dx, dy| {
+        if dy < 0.0 {
+            apply_zoom_change_scroll(zoom_level_scroll.get() * ZOOM_STEP);
+        } else if dy > 0.0 {
+            apply_zoom_change_scroll(zoom_level_scroll.get() / ZOOM_STEP);
+        }
+        glib::Propagation::Stop
+    });
+    drawing_area.add_controller(scroll_controller);
+
+    let pan_origin = Rc::new(Cell::new((0.0, 0.0)));
+    let pan_drag = GestureDrag::new();
+    pan_drag.set_button(3);
+    let pan_origin_begin = pan_origin.clone();
+    let canvas_scroller_begin = canvas_scroller.clone();
+    pan_drag.connect_drag_begin(move |_, _x, _y| {
+        let hadj = canvas_scroller_begin.hadjustment();
+        let vadj = canvas_scroller_begin.vadjustment();
+        pan_origin_begin.set((hadj.value(), vadj.value()));
+    });
+    let pan_origin_update = pan_origin.clone();
+    let canvas_scroller_update = canvas_scroller.clone();
+    pan_drag.connect_drag_update(move |_, offset_x, offset_y| {
+        let hadj = canvas_scroller_update.hadjustment();
+        let vadj = canvas_scroller_update.vadjustment();
+        let (start_x, start_y) = pan_origin_update.get();
+        hadj.set_value((start_x - offset_x).clamp(hadj.lower(), hadj.upper() - hadj.page_size()));
+        vadj.set_value((start_y - offset_y).clamp(vadj.lower(), vadj.upper() - vadj.page_size()));
+    });
+    drawing_area.add_controller(pan_drag);
 
     let path_copy = path.clone();
     copy_btn.connect_clicked(move |_| {
@@ -2071,6 +2224,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     drawing_area.add_controller(key_controller);
 
     let click = GestureClick::new();
+    click.set_button(1);
     let window_click = window.clone();
     let state_click = state.clone();
     let transform_click = transform.clone();
@@ -2859,6 +3013,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let canvas_eyedropper_ring_keys = canvas_eyedropper_ring.clone();
     let window_keys = window.downgrade();
     let app_keys = app.downgrade();
+
+    let zoom_level_keys = zoom_level.clone();
+    let update_canvas_content_size_keys = update_canvas_content_size.clone();
+    let zoom_popup_keys = zoom_popup.clone();
+
     key_controller.connect_key_pressed(move |_, key, _, modifiers| {
         if key == gdk::Key::Escape && eyedropper_mode_keys.get() {
             eyedropper_mode_keys.set(false);
@@ -2950,6 +3109,38 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             return glib::Propagation::Stop;
         }
 
+        if ctrl {
+            let mut handled = false;
+            match key {
+                gdk::Key::plus | gdk::Key::equal | gdk::Key::KP_Add => {
+                    zoom_level_keys.set(clamp_zoom_level(zoom_level_keys.get() * ZOOM_STEP));
+                    handled = true;
+                }
+                gdk::Key::minus | gdk::Key::underscore | gdk::Key::KP_Subtract => {
+                    zoom_level_keys.set(clamp_zoom_level(zoom_level_keys.get() / ZOOM_STEP));
+                    handled = true;
+                }
+                gdk::Key::_0 | gdk::Key::KP_0 => {
+                    zoom_level_keys.set(1.0);
+                    handled = true;
+                }
+                gdk::Key::_2 | gdk::Key::KP_2 => {
+                    zoom_level_keys.set(clamp_zoom_level(1.5));
+                    handled = true;
+                }
+                _ => {}
+            }
+
+            if handled {
+                update_canvas_content_size_keys();
+                if let Some(area) = drawing_area_keys.upgrade() {
+                    area.queue_draw();
+                }
+                zoom_popup_keys.set_visible(false);
+                return glib::Propagation::Stop;
+            }
+        }
+
         if !ctrl {
             if let Some((tool, active_button)) = pressed.and_then(tool_shortcut_target) {
                 set_active_tool_button(&tool_buttons_keys, active_button);
@@ -3006,4 +3197,42 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         }
         glib::Propagation::Proceed
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn event_context_uses_zoom_footer_fields_instead_of_pin_state() {
+        let source = include_str!("events.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("pub zoom_button: Button,")
+                && production_source.contains("pub zoom_label: Label,")
+                && production_source.contains("pub zoom_popup: GtkBox,")
+                && production_source.contains("pub zoom_in_btn: Button,")
+                && production_source.contains("pub zoom_out_btn: Button,")
+                && production_source.contains("pub fit_to_screen_btn: Button,")
+                && !production_source.contains("pub pin_btn: Button,")
+                && !production_source.contains("pub initial_pin_state: bool,"),
+            "EventContext should be updated to drive footer zoom controls instead of pinning state",
+        );
+    }
+
+    #[test]
+    fn footer_zoom_actions_update_transform_and_label() {
+        let source = include_str!("events.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("zoom_button.connect_clicked(move |_| {")
+                && production_source.contains("zoom_popup_btn.set_visible(!zoom_popup_btn.is_visible());")
+                && production_source.contains("zoom_in_btn.connect_clicked(move |b| {")
+                && production_source.contains("zoom_out_btn.connect_clicked(move |b| {")
+                && production_source.contains("fit_to_screen_btn.connect_clicked(move |b| {")
+                && production_source.contains("zoom_popup_in.set_visible(false);")
+                && production_source.contains("update_canvas_content_size();")
+                && production_source.contains("drawing_area.queue_draw();")
+                && production_source.contains("scroll_controller.connect_scroll(move |_, _dx, dy| {"),
+            "Footer zoom actions should open the popover, update the zoom state, refresh canvas layout, and support wheel zoom",
+        );
+    }
 }

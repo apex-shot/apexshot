@@ -1097,6 +1097,134 @@ pub fn install_editor_css() {
                 border-color: rgba(255, 255, 255, 0.2);
             }
 
+            button.editor-footer-zoom-button {
+                min-height: 30px;
+                padding: 0 10px;
+                border-radius: 8px;
+                border: 1px solid transparent;
+                background: transparent;
+                color: rgba(245, 245, 247, 0.92);
+                box-shadow: none;
+            }
+
+            button.editor-footer-zoom-button:hover {
+                background: rgba(255, 255, 255, 0.06);
+                border-color: rgba(255, 255, 255, 0.1);
+                color: #ffffff;
+            }
+
+            .editor-footer-zoom-label {
+                color: inherit;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            .editor-footer-zoom-popup {
+                padding: 0;
+                background: rgba(20, 20, 20, 0.94);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                min-width: 220px;
+                box-shadow: none;
+            }
+
+            .editor-footer-zoom-header {
+                padding: 12px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            }
+
+            button.editor-footer-zoom-header-btn {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 0;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.05);
+                border: none;
+                color: #ffffff;
+                transition: all 120ms ease;
+            }
+
+            button.editor-footer-zoom-header-btn:hover {
+                background: rgba(255, 255, 255, 0.1);
+            }
+
+            button.editor-footer-zoom-header-btn.orange-btn {
+                background: #ff9900;
+                color: #ffffff;
+            }
+
+            button.editor-footer-zoom-header-btn.orange-btn:hover {
+                background: #ffaa33;
+            }
+
+            .editor-footer-zoom-header-label {
+                font-weight: 600;
+                font-size: 16px;
+                color: #ffffff;
+            }
+
+            .editor-footer-zoom-list {
+                padding: 8px 0;
+            }
+
+            button.editor-footer-zoom-action-btn {
+                padding: 0;
+                margin: 0 4px;
+                border-radius: 8px;
+                border: none;
+                background: transparent;
+                transition: all 120ms ease;
+            }
+
+            button.editor-footer-zoom-action-btn:hover {
+                background: rgba(255, 255, 255, 0.04);
+            }
+
+            .editor-footer-zoom-row {
+                padding: 6px 12px;
+                min-height: 36px;
+                color: #e0e0e0;
+                font-size: 13px;
+            }
+
+            .editor-footer-zoom-shortcut-box {
+                margin-left: 12px;
+            }
+
+            .editor-footer-zoom-shortcut-part {
+                font-size: 11px;
+                color: #a0a0a0;
+                font-weight: 600;
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 4px;
+                padding: 2px 6px;
+                min-width: 20px;
+                text-align: center;
+            }
+
+            .editor-footer-zoom-separator {
+                height: 1px;
+                background: rgba(255, 255, 255, 0.05);
+                margin: 4px 12px;
+            }
+
+            .editor-footer-zoom-mouse-hints {
+                padding: 16px 12px;
+            }
+
+            .editor-footer-zoom-mouse-hint-text {
+                font-size: 11px;
+                color: #808080;
+                line-height: 1.3;
+            }
+
+            .editor-footer-zoom-mouse-drawing {
+                min-width: 60px;
+                min-height: 60px;
+                margin: 0 8px;
+            }
+
             .editor-root.editor-theme-dark,
             .editor-root.editor-theme-light {
                 background-color: #141414;
@@ -2534,6 +2662,33 @@ mod tests {
                 && production_source.contains(".editor-crop-inspector-check {\n                color: #ff9900;")
                 && production_source.contains(".editor-crop-dimensions-row {\n                padding: 10px 12px;"),
             "Crop inspector should use the same restrained inspector surface language as the other side-panel tools",
+        );
+    }
+
+    #[test]
+    fn footer_zoom_popover_reuses_inspector_surface_language_without_sidebar_dimensions() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains(".editor-footer-zoom-popup {\n                padding: 8px;")
+                && production_source.contains("background: rgba(20, 20, 22, 0.96);")
+                && production_source.contains("border: 1px solid rgba(255, 255, 255, 0.08);")
+                && production_source.contains("border-radius: 12px;")
+                && !production_source.contains(".editor-footer-zoom-popup {\n                min-height: 100%;")
+                && !production_source.contains(".editor-footer-zoom-popup {\n                width: 210px;"),
+            "Footer zoom popover should borrow inspector surface styling without becoming a full-height or fixed-width sidebar",
+        );
+    }
+
+    #[test]
+    fn footer_zoom_rows_distinguish_actions_from_instructional_rows() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-footer-zoom-action {\n                min-width: 180px;\n                min-height: 32px;")
+                && production_source.contains("button.editor-footer-zoom-action:hover {\n                background: rgba(255, 255, 255, 0.08);")
+                && production_source.contains(".editor-footer-zoom-hint {\n                margin: 2px 2px 0 2px;\n                color: rgba(241, 241, 243, 0.68);"),
+            "Footer zoom styling should keep action rows interactive and hint rows clearly non-interactive",
         );
     }
 
