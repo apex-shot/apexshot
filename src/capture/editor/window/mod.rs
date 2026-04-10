@@ -2050,11 +2050,15 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             let scroller_height = canvas_scroller.allocated_height().max(1) as f64;
             let available_width = (scroller_width - (canvas_padding * 2 + 2) as f64).max(1.0);
             let available_height = (scroller_height - (canvas_padding * 2 + 2) as f64).max(1.0);
-            
+
             // Use the minimum of width and height to maintain aspect ratio and prevent asymmetric growth
             let available_size = available_width.min(available_height);
-            let scale = (available_size / virtual_w.min(virtual_h)).min(1.0_f64) * zoom_level.get().max(0.1_f64);
-            
+
+            // Layout scale without zoom - used for content size (prevents window from growing on zoom)
+            let layout_scale = (available_size / virtual_w.min(virtual_h)).min(1.0_f64);
+            // Rendering scale includes zoom for visual display
+            let scale = layout_scale * zoom_level.get().max(0.1_f64);
+
             let fitted_w = (virtual_w * scale).round().max(1.0) as i32;
             let fitted_h = (virtual_h * scale).round().max(1.0) as i32;
 
@@ -2128,9 +2132,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 let virtual_h = img_h as f64;
                 let available_w = (width as f64 - (canvas_padding * 2 + 2) as f64).max(1.0);
                 let available_h = (height as f64 - (canvas_padding * 2 + 2) as f64).max(1.0);
-                
+
                 let available_size = available_w.min(available_h);
-                let scale = (available_size / virtual_w.min(virtual_h)).min(1.0_f64) * zoom_level_tick.get().max(0.1_f64);
+                let layout_scale = (available_size / virtual_w.min(virtual_h)).min(1.0_f64);
+                let _scale = layout_scale * zoom_level_tick.get().max(0.1_f64);
 
                 let (ol, ot, or_, ob) = if has_background {
                     (0.0, 0.0, 0.0, 0.0)
@@ -2139,7 +2144,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                         crop_rect,
                         img_w as f64,
                         img_h as f64,
-                        scale,
+                        layout_scale,
                         crop_mode_active,
                     )
                 };

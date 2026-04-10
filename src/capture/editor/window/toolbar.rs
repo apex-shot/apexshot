@@ -1037,11 +1037,7 @@ pub(super) fn build_toolbar_tool_updater(
         arrow_style_group.set_visible(is_arrow_tool);
         stroke_size_group.set_visible(false);
 
-        if matches!(tool, Tool::Crop) {
-            canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-        } else {
-            canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Never);
-        }
+        canvas_scroller.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Automatic);
 
         let primary_surface = match tool {
             Tool::Background => Some(("Background", "background")),

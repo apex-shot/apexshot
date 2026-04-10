@@ -75,8 +75,20 @@ fn build_mouse_hints() -> GtkBox {
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.1);
         cr.set_line_width(1.0);
         cr.new_sub_path();
-        cr.arc(mouse_x + radius, mouse_y + radius, radius, 180.0 * std::f64::consts::PI / 180.0, 270.0 * std::f64::consts::PI / 180.0);
-        cr.arc(mouse_x + mouse_w - radius, mouse_y + radius, radius, 270.0 * std::f64::consts::PI / 180.0, 360.0 * std::f64::consts::PI / 180.0);
+        cr.arc(
+            mouse_x + radius,
+            mouse_y + radius,
+            radius,
+            180.0 * std::f64::consts::PI / 180.0,
+            270.0 * std::f64::consts::PI / 180.0,
+        );
+        cr.arc(
+            mouse_x + mouse_w - radius,
+            mouse_y + radius,
+            radius,
+            270.0 * std::f64::consts::PI / 180.0,
+            360.0 * std::f64::consts::PI / 180.0,
+        );
         cr.line_to(mouse_x + mouse_w, mouse_y + mouse_h);
         cr.line_to(mouse_x, mouse_y + mouse_h);
         cr.close_path();
@@ -94,8 +106,20 @@ fn build_mouse_hints() -> GtkBox {
         let wheel_y = mouse_y + 8.0;
         cr.set_source_rgba(0.0, 0.5, 1.0, 0.8);
         cr.new_sub_path();
-        cr.arc(wheel_x + wheel_w / 2.0, wheel_y + wheel_w / 2.0, wheel_w / 2.0, 180.0 * std::f64::consts::PI / 180.0, 360.0 * std::f64::consts::PI / 180.0);
-        cr.arc(wheel_x + wheel_w / 2.0, wheel_y + wheel_h - wheel_w / 2.0, wheel_w / 2.0, 0.0, 180.0 * std::f64::consts::PI / 180.0);
+        cr.arc(
+            wheel_x + wheel_w / 2.0,
+            wheel_y + wheel_w / 2.0,
+            wheel_w / 2.0,
+            180.0 * std::f64::consts::PI / 180.0,
+            360.0 * std::f64::consts::PI / 180.0,
+        );
+        cr.arc(
+            wheel_x + wheel_w / 2.0,
+            wheel_y + wheel_h - wheel_w / 2.0,
+            wheel_w / 2.0,
+            0.0,
+            180.0 * std::f64::consts::PI / 180.0,
+        );
         cr.close_path();
         let _ = cr.fill();
 
@@ -105,12 +129,26 @@ fn build_mouse_hints() -> GtkBox {
 
         // To scroll wheel
         cr.move_to(mouse_x - 5.0, wheel_y + wheel_h / 2.0);
-        cr.curve_to(mouse_x - 15.0, wheel_y + wheel_h / 2.0, wheel_x - 5.0, wheel_y + wheel_h / 2.0, wheel_x - 2.0, wheel_y + wheel_h / 2.0);
+        cr.curve_to(
+            mouse_x - 15.0,
+            wheel_y + wheel_h / 2.0,
+            wheel_x - 5.0,
+            wheel_y + wheel_h / 2.0,
+            wheel_x - 2.0,
+            wheel_y + wheel_h / 2.0,
+        );
         let _ = cr.stroke();
 
         // To right button
         cr.move_to(w - (mouse_x - 5.0), wheel_y + wheel_h / 2.0);
-        cr.curve_to(w - (mouse_x - 15.0), wheel_y + wheel_h / 2.0, wheel_x + wheel_w + 5.0, wheel_y + wheel_h / 2.0, wheel_x + wheel_w + 2.0, wheel_y + wheel_h / 2.0);
+        cr.curve_to(
+            w - (mouse_x - 15.0),
+            wheel_y + wheel_h / 2.0,
+            wheel_x + wheel_w + 5.0,
+            wheel_y + wheel_h / 2.0,
+            wheel_x + wheel_w + 2.0,
+            wheel_y + wheel_h / 2.0,
+        );
         let _ = cr.stroke();
     });
 

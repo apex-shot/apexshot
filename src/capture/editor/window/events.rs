@@ -652,8 +652,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 let mut t = transform_zoom_sel.lock().unwrap();
                 t.scale = new_scale;
                 // Center the rect in the view
-                t.offset_x = (scroller_w - rect.width as f64 * new_scale) / 2.0 - rect.x as f64 * new_scale;
-                t.offset_y = (scroller_h - rect.height as f64 * new_scale) / 2.0 - rect.y as f64 * new_scale;
+                t.offset_x =
+                    (scroller_w - rect.width as f64 * new_scale) / 2.0 - rect.x as f64 * new_scale;
+                t.offset_y =
+                    (scroller_h - rect.height as f64 * new_scale) / 2.0 - rect.y as f64 * new_scale;
             }
 
             drawing_area_zoom_sel.queue_draw();
