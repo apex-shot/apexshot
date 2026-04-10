@@ -1,6 +1,6 @@
 use gtk4::{
     gdk, glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, EventControllerKey, EventControllerMotion, EventControllerScroll,
+    DrawingArea, EventControllerFocus, EventControllerKey, EventControllerMotion, EventControllerScroll,
     EventControllerScrollFlags, GestureClick, GestureDrag, Image, Label, Overlay, Popover, Scale,
     ScrolledWindow,
 };
@@ -562,10 +562,57 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         }
     });
 
+    // Make popup focusable and close on focus loss (click outside)
+    zoom_popup.set_can_focus(true);
+    let zoom_popup_focus = zoom_popup.clone();
+    let focus_controller = EventControllerFocus::new();
+    focus_controller.connect_leave(move |_| {
+        zoom_popup_focus.set_visible(false);
+    });
+    zoom_popup.add_controller(focus_controller);
+
     let zoom_popup_btn = zoom_popup.clone();
     zoom_button.connect_clicked(move |_| {
-        zoom_popup_btn.set_visible(!zoom_popup_btn.is_visible());
+        let becoming_visible = !zoom_popup_btn.is_visible();
+        zoom_popup_btn.set_visible(becoming_visible);
+        if becoming_visible {
+            zoom_popup_btn.grab_focus();
+        }
     });
+
+    // Close popup when clicking outside of it (on the window)
+    let zoom_popup_window_click = zoom_popup.clone();
+    let zoom_button_for_click = zoom_button.clone();
+    let window_for_click = window.clone();
+    let window_click = GestureClick::new();
+    window_click.set_button(0); // Listen for all buttons
+    window_click.connect_pressed(move |_, _, click_x, click_y| {
+        if !zoom_popup_window_click.is_visible() {
+            return;
+        }
+
+        // Get popup position relative to window
+        let (popup_win_x, popup_win_y) = zoom_popup_window_click.translate_coordinates(&window_for_click, 0.0, 0.0).unwrap_or((0.0, 0.0));
+        let popup_alloc = zoom_popup_window_click.allocation();
+        
+        let in_popup = click_x >= popup_win_x
+            && click_x <= popup_win_x + popup_alloc.width() as f64
+            && click_y >= popup_win_y
+            && click_y <= popup_win_y + popup_alloc.height() as f64;
+
+        // Check if click is on the zoom button (toggle button)
+        let (btn_x, btn_y) = zoom_button_for_click.translate_coordinates(&window_for_click, 0.0, 0.0).unwrap_or((0.0, 0.0));
+        let btn_alloc = zoom_button_for_click.allocation();
+        let in_button = click_x >= btn_x
+            && click_x <= btn_x + btn_alloc.width() as f64
+            && click_y >= btn_y
+            && click_y <= btn_y + btn_alloc.height() as f64;
+
+        if !in_popup && !in_button {
+            zoom_popup_window_click.set_visible(false);
+        }
+    });
+    window.add_controller(window_click);
 
     let apply_zoom_change_btn = apply_zoom_change.clone();
     let zoom_level_in = zoom_level.clone();

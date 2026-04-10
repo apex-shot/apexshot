@@ -2,7 +2,7 @@ use gdk4x11::X11Surface;
 use gtk4::gdk;
 use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, Entry, Label, Orientation, Popover, Stack,
+    DrawingArea, Entry, Label, Orientation, Overlay, Popover, Stack,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -977,7 +977,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &GtkBox::new(Orientation::Vertical, 0), // Placeholder, will be replaced
         canvas::EYEDROPPER_LOUPE_SIZE,
     );
-    canvas_overlay.add_overlay(&zoom_popup);
+    // Note: zoom_popup is NOT added to canvas_overlay here - it will be added
+    // to a root-level overlay later to stay fixed during zoom/scroll.
 
     // Background style cache
     let cached_background_surface =
@@ -1990,7 +1991,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     root.append(&toolbar);
     root.append(&workspace);
     root.append(&footer_parts.root);
-    window.set_child(Some(&root));
+
+    // Wrap root in an overlay so zoom_popup can be positioned on top
+    // without being affected by canvas zoom/scroll transformations
+    let root_overlay = Overlay::new();
+    root_overlay.set_child(Some(&root));
+    root_overlay.add_overlay(&zoom_popup);
+    window.set_child(Some(&root_overlay));
 
     let update_canvas_content_size: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
