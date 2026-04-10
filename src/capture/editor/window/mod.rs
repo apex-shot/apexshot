@@ -422,6 +422,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         img_width as f64,
         img_height as f64,
     )));
+    let zoom_level = Rc::new(Cell::new(1.0_f64));
 
     let (default_width, default_height) =
         recommended_window_size_with_extra_width(img_width as i32, img_height as i32, 280);
@@ -944,13 +945,18 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         number_size_list.append(&btn);
     }
 
-    let footer_parts = footer::build_footer(
-        icon_names::VIEW_PIN,
-        icon_names::COPY_REGULAR,
-        icon_names::CLOUD_ARROW_UP_REGULAR,
-    );
-    let pin_btn = footer_parts.pin_btn;
-    let pin_icon = footer_parts.pin_icon;
+    let footer_parts =
+        footer::build_footer(icon_names::COPY_REGULAR, icon_names::CLOUD_ARROW_UP_REGULAR);
+    let zoom_button = footer_parts.zoom_button;
+    let zoom_label = footer_parts.zoom_label;
+    let zoom_header_label = footer_parts.zoom_header_label;
+    let zoom_popup = footer_parts.zoom_popup;
+    let zoom_minus_btn = footer_parts.zoom_minus_btn;
+    let zoom_plus_btn = footer_parts.zoom_plus_btn;
+    let zoom_in_btn = footer_parts.zoom_in_btn;
+    let zoom_out_btn = footer_parts.zoom_out_btn;
+    let fit_to_screen_btn = footer_parts.fit_to_screen_btn;
+    let zoom_to_selection_btn = footer_parts.zoom_to_selection_btn;
     let drag_btn = footer_parts.drag_btn;
     let copy_btn = footer_parts.copy_btn;
     let upload_btn = footer_parts.upload_btn;
@@ -958,12 +964,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let tracked_window_id = next_tracked_window_id("annotate-editor");
     let window_title = "Screenshot Editor";
     let window_namespace = "apexshot-annotate-editor";
-
-    pin_icon.set_icon_name(Some(if annotate_config.always_on_top {
-        icon_names::PIN
-    } else {
-        icon_names::VIEW_PIN
-    }));
 
     let canvas::CanvasShellParts {
         root: canvas,
@@ -977,6 +977,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &GtkBox::new(Orientation::Vertical, 0), // Placeholder, will be replaced
         canvas::EYEDROPPER_LOUPE_SIZE,
     );
+    canvas_overlay.add_overlay(&zoom_popup);
 
     // Background style cache
     let cached_background_surface =
@@ -1993,9 +1994,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let update_canvas_content_size: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
+        let zoom_level = zoom_level.clone();
+        let zoom_label = zoom_label.clone();
+        let zoom_header_label = zoom_header_label.clone();
         let drawing_area = drawing_area.clone();
-        let canvas_overlay = canvas_overlay.clone();
+        let _canvas_overlay = canvas_overlay.clone();
         let canvas_scroller = canvas_scroller.clone();
+        let _window = window.downgrade();
         let canvas_padding = canvas_padding;
         move || {
             let (
@@ -2042,8 +2047,18 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
 
             let scroller_width = canvas_scroller.allocated_width().max(1) as f64;
+            let scroller_height = canvas_scroller.allocated_height().max(1) as f64;
             let available_width = (scroller_width - (canvas_padding * 2 + 2) as f64).max(1.0);
-            let scale = (available_width / virtual_w).min(1.0);
+            let available_height = (scroller_height - (canvas_padding * 2 + 2) as f64).max(1.0);
+
+            // Use the minimum of width and height to maintain aspect ratio and prevent asymmetric growth
+            let available_size = available_width.min(available_height);
+
+            // Layout scale without zoom - used for content size (prevents window from growing on zoom)
+            let layout_scale = (available_size / virtual_w.min(virtual_h)).min(1.0_f64);
+            // Rendering scale includes zoom for visual display
+            let scale = layout_scale * zoom_level.get().max(0.1_f64);
+
             let fitted_w = (virtual_w * scale).round().max(1.0) as i32;
             let fitted_h = (virtual_h * scale).round().max(1.0) as i32;
 
@@ -2070,8 +2085,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             drawing_area.set_content_width(canvas_w);
             drawing_area.set_content_height(canvas_h);
-            drawing_area.set_size_request(canvas_w, canvas_h);
-            canvas_overlay.set_size_request(canvas_w, canvas_h);
+            let percent_str = format!("{}%", (scale * 100.0).round().max(1.0) as i32);
+            zoom_label.set_label(&percent_str);
+            zoom_header_label.set_label(&percent_str);
         }
     });
     update_canvas_content_size();
@@ -2079,6 +2095,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     {
         let update_canvas_content_size_tick = update_canvas_content_size.clone();
         let state_canvas_tick = state.clone();
+        let zoom_level_tick = zoom_level.clone();
         // Signature tracks the quantities that actually change the *visible* canvas size.
         // Crucially, raw crop-rect coordinates are NOT included here.  Instead we compute
         // the capped overflow bucket that crop_canvas_overflow() would return and store
@@ -2086,6 +2103,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         // constant throughout an outside-image drag gesture — no relayout churn occurs.
         let last_canvas_signature = Rc::new(Cell::new((
             0_i32, // scroller width
+            0_i32, // scroller height
             0_i32, // image width
             0_i32, // image height
             0_i32, // overflow left (px, capped)
@@ -2093,10 +2111,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             0_i32, // overflow right (px, capped)
             0_i32, // overflow bottom (px, capped)
             false, // crop mode active
+            0_i32, // zoom percentage
         )));
         let last_canvas_signature_tick = last_canvas_signature.clone();
         canvas_scroller.add_tick_callback(move |scroller, _| {
             let width = scroller.allocated_width();
+            let height = scroller.allocated_height();
             let signature = {
                 let st = state_canvas_tick.lock().unwrap();
                 let img_w = st.working_image.width().max(1) as i32;
@@ -2104,12 +2124,18 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 let crop_mode_active = st.selected_tool == Tool::Crop;
                 let crop_rect = st.draft_crop_rect().or(st.crop_selection);
                 let has_background = st.background_style != BackgroundStyle::None;
+                let zoom_percentage = (zoom_level_tick.get() * 100.0_f64).round() as i32;
 
                 // Compute the same scale the layout function uses so we get the
                 // same overflow values without duplicating the full layout calculation.
                 let virtual_w = img_w as f64;
+                let virtual_h = img_h as f64;
                 let available_w = (width as f64 - (canvas_padding * 2 + 2) as f64).max(1.0);
-                let scale = (available_w / virtual_w.max(1.0)).min(1.0);
+                let available_h = (height as f64 - (canvas_padding * 2 + 2) as f64).max(1.0);
+
+                let available_size = available_w.min(available_h);
+                let layout_scale = (available_size / virtual_w.min(virtual_h)).min(1.0_f64);
+                let _scale = layout_scale * zoom_level_tick.get().max(0.1_f64);
 
                 let (ol, ot, or_, ob) = if has_background {
                     (0.0, 0.0, 0.0, 0.0)
@@ -2118,13 +2144,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                         crop_rect,
                         img_w as f64,
                         img_h as f64,
-                        scale,
+                        layout_scale,
                         crop_mode_active,
                     )
                 };
 
                 (
                     width,
+                    height,
                     img_w,
                     img_h,
                     ol.round() as i32,
@@ -2132,6 +2159,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     or_.round() as i32,
                     ob.round() as i32,
                     crop_mode_active,
+                    zoom_percentage,
                 )
             };
             if width > 0 && signature != last_canvas_signature_tick.get() {
@@ -2270,6 +2298,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let state_draw = state.clone();
     let transform_draw = transform.clone();
+    let zoom_level_draw = zoom_level.clone();
     let undo_btn_draw = undo_btn.clone();
     let redo_btn_draw = redo_btn.clone();
     let delete_selected_btn_draw = delete_selected_btn.clone();
@@ -2411,9 +2440,19 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let view_height =
             (height as f64 - canvas_padding_draw * 2.0 - overflow_top - overflow_bottom).max(1.0);
 
-        let mut t = ViewTransform::fit(virtual_w, virtual_h, view_width, view_height);
-        t.offset_x += canvas_padding_draw + overflow_left;
-        t.offset_y += canvas_padding_draw + overflow_top;
+        let scale = (view_width / virtual_w)
+            .min(view_height / virtual_h)
+            .min(1.0_f64)
+            * zoom_level_draw.get().max(0.1_f64);
+        let draw_width = virtual_w * scale;
+        let draw_height = virtual_h * scale;
+        let mut t = ViewTransform {
+            scale,
+            offset_x: (view_width - draw_width) / 2.0 + canvas_padding_draw + overflow_left,
+            offset_y: (view_height - draw_height) / 2.0 + canvas_padding_draw + overflow_top,
+            image_width: virtual_w,
+            image_height: virtual_h,
+        };
 
         let canvas_t = t.clone();
 
@@ -3001,22 +3040,19 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         traffic_close: traffic_close.clone(),
         traffic_minimize: traffic_minimize.clone(),
         traffic_zoom: traffic_zoom.clone(),
-        pin_btn: pin_btn.clone(),
-        pin_icon: pin_icon.clone(),
-        initial_pin_state: annotate_config.always_on_top,
-        set_window_pinned: Rc::new({
-            let window = window.clone();
-            let tracked_window_id = tracked_window_id.clone();
-            move |enabled| {
-                set_window_always_on_top(
-                    &window,
-                    &tracked_window_id,
-                    enabled,
-                    window_title,
-                    window_namespace,
-                );
-            }
-        }),
+        canvas_overlay: canvas_overlay.clone(),
+        canvas_scroller: canvas_scroller.clone(),
+        zoom_button: zoom_button.clone(),
+        zoom_label: zoom_label.clone(),
+        zoom_header_label: zoom_header_label.clone(),
+        zoom_popup: zoom_popup.clone(),
+        zoom_minus_btn: zoom_minus_btn.clone(),
+        zoom_plus_btn: zoom_plus_btn.clone(),
+        zoom_in_btn: zoom_in_btn.clone(),
+        zoom_out_btn: zoom_out_btn.clone(),
+        fit_to_screen_btn: fit_to_screen_btn.clone(),
+        zoom_to_selection_btn: zoom_to_selection_btn.clone(),
+        zoom_level: zoom_level.clone(),
         drag_btn: drag_btn.clone(),
         copy_btn: copy_btn.clone(),
         upload_btn: upload_btn.clone(),

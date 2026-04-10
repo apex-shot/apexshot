@@ -29,25 +29,28 @@ pub(super) fn build_canvas_shell(
 ) -> CanvasShellParts {
     let drawing_area = DrawingArea::new();
     drawing_area.set_hexpand(true);
-    drawing_area.set_vexpand(false);
+    drawing_area.set_vexpand(true);
+    drawing_area.set_halign(gtk4::Align::Fill);
+    drawing_area.set_valign(gtk4::Align::Fill);
     drawing_area.set_focusable(true);
     drawing_area.set_focus_on_click(true);
     drawing_area.set_content_width(img_width);
     drawing_area.set_content_height(img_height);
-    drawing_area.set_size_request(img_width, img_height);
     drawing_area.add_css_class("editor-canvas");
 
     let canvas_overlay = Overlay::new();
     canvas_overlay.set_hexpand(true);
-    canvas_overlay.set_vexpand(false);
-    canvas_overlay.set_size_request(img_width, img_height);
+    canvas_overlay.set_vexpand(true);
+    canvas_overlay.set_halign(gtk4::Align::Fill);
+    canvas_overlay.set_valign(gtk4::Align::Fill);
     canvas_overlay.set_child(Some(&drawing_area));
 
     let canvas_scroller = ScrolledWindow::new();
     canvas_scroller.set_hexpand(true);
     canvas_scroller.set_vexpand(true);
     canvas_scroller.set_has_frame(false);
-    canvas_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    canvas_scroller.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Automatic);
+    canvas_scroller.set_overlay_scrolling(false);
     canvas_scroller.set_child(Some(&canvas_overlay));
 
     let canvas_eyedropper_ring = DrawingArea::new();
