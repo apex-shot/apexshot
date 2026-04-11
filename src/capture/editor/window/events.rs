@@ -177,7 +177,6 @@ pub(super) struct EventContext {
     pub fit_to_screen_btn: Button,
     pub zoom_to_selection_btn: Button,
     pub zoom_level: Rc<Cell<f64>>,
-    pub drag_btn: Button,
     pub copy_btn: Button,
     pub upload_btn: Button,
     pub color_buttons: Vec<Button>,
@@ -268,7 +267,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         fit_to_screen_btn,
         zoom_to_selection_btn,
         zoom_level,
-        drag_btn,
         copy_btn,
         upload_btn,
         color_buttons,
@@ -524,32 +522,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             area.queue_draw();
         }
     });
-
-    let drag_window_gesture = GestureClick::new();
-    drag_window_gesture.set_button(1);
-    let window_drag = window.downgrade();
-    drag_window_gesture.connect_pressed(move |gesture, _, x, y| {
-        let Some(window) = window_drag.upgrade() else {
-            return;
-        };
-        let Some(event) = gesture.current_event() else {
-            return;
-        };
-        let Some(device) = event.device() else {
-            return;
-        };
-
-        let Some(surface) = window.surface() else {
-            return;
-        };
-
-        let Ok(toplevel) = surface.downcast::<gdk::Toplevel>() else {
-            return;
-        };
-
-        toplevel.begin_move(&device, gesture.current_button() as i32, x, y, event.time());
-    });
-    drag_btn.add_controller(drag_window_gesture);
 
     let apply_zoom_change: Rc<dyn Fn(f64)> = Rc::new({
         let zoom_level = zoom_level.clone();

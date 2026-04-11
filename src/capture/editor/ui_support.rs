@@ -1,7 +1,7 @@
 use super::types::ArrowStyle;
 use gtk4::gdk;
 use gtk4::{
-    prelude::*, Box as GtkBox, Button, CssProvider, DrawingArea, Image, Label, Orientation, Widget,
+    prelude::*, Box as GtkBox, Button, CssProvider, DrawingArea, Image, Orientation, Widget,
 };
 use std::process::Command;
 
@@ -175,72 +175,23 @@ pub fn install_editor_css() {
                 margin-right: 10px;
             }
 
-            button.traffic-light {
-                min-width: 14px;
-                min-height: 14px;
-                padding: 0;
-                margin: 0;
-                border: none;
-                border-radius: 0;
+            .recent-captures-wm-btn {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 4px;
+                border-radius: 6px;
                 background: transparent;
-                background-image: none;
-                box-shadow: none;
+                color: alpha(white, 0.65);
+                transition: background 0.15s, color 0.15s;
             }
-
-            button.traffic-light:hover,
-            button.traffic-light:active,
-            button.traffic-light:focus {
-                background: transparent;
-                box-shadow: none;
-                outline: none;
+            .recent-captures-wm-btn:hover {
+                background: alpha(white, 0.1);
+                color: white;
             }
-
-            .traffic-light-dot {
-                min-width: 12px;
-                min-height: 12px;
-                border-radius: 999px;
-                transition: all 140ms ease;
-                border: 1px solid rgba(0, 0, 0, 0.45);
+            .recent-captures-wm-close:hover {
+                background: alpha(#e34a4a, 0.75);
+                color: white;
             }
-
-            .traffic-light-symbol {
-                font-size: 8px;
-                font-weight: 700;
-                line-height: 1;
-                color: rgba(0, 0, 0, 0.62);
-                margin: 0;
-                padding: 0;
-                min-width: 12px;
-                min-height: 12px;
-                opacity: 0;
-                transition: opacity 120ms ease;
-            }
-
-            button.traffic-light:hover .traffic-light-symbol,
-            button.traffic-light:active .traffic-light-symbol {
-                opacity: 1;
-            }
-
-            button.traffic-light:hover .traffic-light-dot {
-                filter: brightness(1.08);
-            }
-
-            .traffic-light-dot.traffic-light-red {
-                background: #ff5f57;
-                border-color: #d8463f;
-            }
-            .traffic-light-dot.traffic-light-yellow {
-                background: #febc2f;
-                border-color: #d39a25;
-            }
-            .traffic-light-dot.traffic-light-green {
-                background: #28c840;
-                border-color: #20a736;
-            }
-
-            .traffic-light-dot.traffic-light-red .traffic-light-symbol { color: #5f1f1b; }
-            .traffic-light-dot.traffic-light-yellow .traffic-light-symbol { color: #6d4f13; }
-            .traffic-light-dot.traffic-light-green .traffic-light-symbol { color: #1a5f27; }
 
             .editor-tools-group {
                 padding: 3px;
@@ -448,7 +399,7 @@ pub fn install_editor_css() {
             button.editor-tool-button.active-tool {
                 background-color: #2a2a2a;
                 color: #ffffff;
-                border: 1px solid rgba(255, 255, 255, 0.15);
+                border: 1px solid #ff9900;
                 box-shadow: none;
             }
 
@@ -1076,25 +1027,6 @@ pub fn install_editor_css() {
                 background: #1a1a1d;
                 color: #ffffff;
                 border-color: rgba(255, 255, 255, 0.11);
-            }
-
-            button.editor-footer-drag-button {
-                min-width: 112px;
-                min-height: 30px;
-                border-radius: 6px;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                background: #121214;
-                color: #d2d2d7;
-                font-size: 13px;
-                font-weight: 600;
-                transition: all 120ms ease;
-                box-shadow: none;
-            }
-
-            button.editor-footer-drag-button:hover {
-                background: #1a1a1d;
-                color: #ffffff;
-                border-color: rgba(255, 255, 255, 0.2);
             }
 
             button.editor-footer-zoom-button {
@@ -1899,6 +1831,11 @@ pub fn install_editor_css() {
                 border-color: rgba(255, 255, 255, 0.20);
             }
 
+            /* Hide the tick/checkmark in dropdown popover */
+            dropdown.editor-background-ratio-dropdown popover > contents listview row image {
+                opacity: 0;
+            }
+
             button.editor-background-option-button {
                 min-height: 36px;
                 border-radius: 8px;
@@ -1922,7 +1859,7 @@ pub fn install_editor_css() {
 
             button.editor-background-option-button.active-background-option {
                 background: rgba(255, 255, 255, 0.12);
-                border-color: #3584e4;
+                border-color: #ff9900;
                 color: #ffffff;
                 border-width: 2px;
             }
@@ -1941,7 +1878,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-gradient-button.active-background-option {
-                border-color: #3584e4;
+                border-color: #ff9900;
                 border-width: 2px;
                 background-color: rgba(255, 255, 255, 0.08);
             }
@@ -2039,7 +1976,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-blurred-button.active-background-option {
-                border-color: #3584e4;
+                border-color: #ff9900;
                 border-width: 2px;
                 background-color: rgba(255, 255, 255, 0.12);
             }
@@ -2062,7 +1999,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-plain-color-button.active-background-option {
-                border-color: #3584e4;
+                border-color: #ff9900;
                 border-width: 2px;
                 background-color: rgba(255, 255, 255, 0.12);
             }
@@ -2353,7 +2290,7 @@ pub fn color_swatch_button(color_class: &str, tooltip: &str) -> Button {
 
 pub fn footer_icon_button(icon_name: &str, tooltip: &str) -> (Button, Image) {
     let image = Image::from_icon_name(icon_name);
-    image.set_pixel_size(14);
+    image.set_pixel_size(18);
 
     let button = Button::new();
     button.set_child(Some(&image));
@@ -2365,35 +2302,25 @@ pub fn footer_icon_button(icon_name: &str, tooltip: &str) -> (Button, Image) {
 }
 
 pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
-    let dot = GtkBox::new(Orientation::Horizontal, 0);
-    dot.set_size_request(12, 12);
-    dot.set_halign(gtk4::Align::Center);
-    dot.set_valign(gtk4::Align::Center);
-    dot.add_css_class("traffic-light-dot");
-    dot.add_css_class(color_class);
-
-    let symbol = match color_class {
-        "traffic-light-red" => "x",
-        "traffic-light-yellow" => "-",
-        "traffic-light-green" => "+",
-        _ => "",
+    let icon_name = match color_class {
+        "traffic-light-red" => "window-close-symbolic",
+        "traffic-light-yellow" => "window-minimize-symbolic",
+        "traffic-light-green" => "window-maximize-symbolic",
+        _ => "window-close-symbolic",
     };
-    let symbol_label = Label::new(Some(symbol));
-    symbol_label.add_css_class("traffic-light-symbol");
-    symbol_label.set_halign(gtk4::Align::Center);
-    symbol_label.set_valign(gtk4::Align::Center);
-    symbol_label.set_xalign(0.5);
-    symbol_label.set_yalign(0.5);
-    dot.append(&symbol_label);
 
-    let button = Button::new();
-    button.set_size_request(14, 14);
-    button.set_child(Some(&dot));
-    button.set_has_frame(false);
-    button.set_focusable(false);
-    button.set_tooltip_text(Some(tooltip));
-    button.add_css_class("traffic-light");
-    button.add_css_class("flat");
+    let button = Button::builder()
+        .icon_name(icon_name)
+        .has_frame(false)
+        .focusable(false)
+        .tooltip_text(tooltip)
+        .build();
+
+    button.add_css_class("recent-captures-wm-btn");
+    if color_class == "traffic-light-red" {
+        button.add_css_class("recent-captures-wm-close");
+    }
+
     button
 }
 
@@ -2487,6 +2414,173 @@ pub fn set_crop_apply_button_state(button: &Button, crop_mode: bool, has_selecti
     }
     button.set_visible(crop_mode);
     button.set_sensitive(crop_mode && has_selection);
+}
+
+const EDITOR_EDGE_RESIZE_MARGIN: f64 = 8.0;
+
+fn edge_cursor_name(x: f64, y: f64, width: f64, height: f64) -> Option<&'static str> {
+    let left = x <= EDITOR_EDGE_RESIZE_MARGIN;
+    let right = x >= width - EDITOR_EDGE_RESIZE_MARGIN;
+    let top = y <= EDITOR_EDGE_RESIZE_MARGIN;
+    let bottom = y >= height - EDITOR_EDGE_RESIZE_MARGIN;
+
+    match (left, right, top, bottom) {
+        (true, false, true, false) => Some("nw-resize"),
+        (false, true, true, false) => Some("ne-resize"),
+        (true, false, false, true) => Some("sw-resize"),
+        (false, true, false, true) => Some("se-resize"),
+        (false, false, true, false) => Some("n-resize"),
+        (false, false, false, true) => Some("s-resize"),
+        (true, false, false, false) => Some("w-resize"),
+        (false, true, false, false) => Some("e-resize"),
+        _ => None,
+    }
+}
+
+fn edge_for_resize(x: f64, y: f64, width: f64, height: f64) -> Option<gdk::SurfaceEdge> {
+    let left = x <= EDITOR_EDGE_RESIZE_MARGIN;
+    let right = x >= width - EDITOR_EDGE_RESIZE_MARGIN;
+    let top = y <= EDITOR_EDGE_RESIZE_MARGIN;
+    let bottom = y >= height - EDITOR_EDGE_RESIZE_MARGIN;
+
+    match (left, right, top, bottom) {
+        (true, false, true, false) => Some(gdk::SurfaceEdge::NorthWest),
+        (false, true, true, false) => Some(gdk::SurfaceEdge::NorthEast),
+        (true, false, false, true) => Some(gdk::SurfaceEdge::SouthWest),
+        (false, true, false, true) => Some(gdk::SurfaceEdge::SouthEast),
+        (false, false, true, false) => Some(gdk::SurfaceEdge::North),
+        (false, false, false, true) => Some(gdk::SurfaceEdge::South),
+        (true, false, false, false) => Some(gdk::SurfaceEdge::West),
+        (false, true, false, false) => Some(gdk::SurfaceEdge::East),
+        _ => None,
+    }
+}
+
+pub fn install_edge_resize(root: &impl IsA<gtk4::Widget>, window: &gtk4::ApplicationWindow) {
+    use gtk4::{EventControllerMotion, GestureClick};
+
+    let resize_motion = EventControllerMotion::new();
+    let window_resize_motion = window.downgrade();
+    resize_motion.connect_motion(move |controller, x, y| {
+        let Some(widget) = controller.widget() else {
+            return;
+        };
+        let width = widget.allocated_width() as f64;
+        let height = widget.allocated_height() as f64;
+        let cursor = edge_cursor_name(x, y, width, height)
+            .and_then(|name| gdk::Cursor::from_name(name, None));
+        widget.set_cursor(cursor.as_ref());
+        if cursor.is_none() {
+            if let Some(window) = window_resize_motion.upgrade() {
+                window.set_cursor(None);
+            }
+        }
+    });
+
+    let resize_motion_leave = EventControllerMotion::new();
+    resize_motion_leave.connect_leave(move |controller| {
+        if let Some(widget) = controller.widget() {
+            widget.set_cursor(None);
+        }
+    });
+
+    let resize_click = GestureClick::new();
+    resize_click.set_button(1);
+    let window_resize = window.downgrade();
+    resize_click.connect_pressed(move |gesture, _, x, y| {
+        let Some(window) = window_resize.upgrade() else {
+            return;
+        };
+        let Some(event) = gesture.current_event() else {
+            return;
+        };
+        let Some(device) = event.device() else {
+            return;
+        };
+        let width = window.allocated_width() as f64;
+        let height = window.allocated_height() as f64;
+        let Some(edge) = edge_for_resize(x, y, width, height) else {
+            return;
+        };
+        let Some(surface) = window.surface() else {
+            return;
+        };
+        let Ok(toplevel) = surface.downcast::<gdk::Toplevel>() else {
+            return;
+        };
+        toplevel.begin_resize(
+            edge,
+            Some(&device),
+            gesture.current_button() as i32,
+            x,
+            y,
+            event.time(),
+        );
+    });
+
+    root.add_controller(resize_motion);
+    root.add_controller(resize_motion_leave);
+    root.add_controller(resize_click);
+}
+
+pub fn install_window_drag(toolbar: &impl IsA<gtk4::Widget>, window: &gtk4::ApplicationWindow) {
+    use gtk4::GestureClick;
+
+    let drag_window_gesture = GestureClick::new();
+    drag_window_gesture.set_button(0); // Accept any button
+    let window_drag = window.downgrade();
+    drag_window_gesture.connect_pressed(move |gesture, _, x, y| {
+        // Check if the click was on an interactive widget (button, entry, etc.)
+        let Some(widget) = gesture.widget() else {
+            return;
+        };
+
+        // Get the widget at the click position
+        let picked = widget.pick(x, y, gtk4::PickFlags::DEFAULT);
+
+        // Only drag if clicked on empty space (not on buttons or other interactive widgets)
+        if let Some(picked) = picked {
+            let type_name = picked.type_().name();
+            if type_name == "GtkButton"
+                || type_name == "GtkToggleButton"
+                || type_name == "GtkMenuButton"
+                || type_name == "GtkEntry"
+                || type_name == "GtkScale"
+                || type_name == "GtkPopover"
+            {
+                return; // Don't drag if clicked on interactive widget
+            }
+
+            // Also check for buttons inside boxes
+            if let Some(parent) = picked.parent() {
+                let parent_type = parent.type_().name();
+                if parent_type == "GtkButton"
+                    || parent_type == "GtkToggleButton"
+                    || parent_type == "GtkMenuButton"
+                {
+                    return;
+                }
+            }
+        }
+
+        let Some(window) = window_drag.upgrade() else {
+            return;
+        };
+        let Some(event) = gesture.current_event() else {
+            return;
+        };
+        let Some(device) = event.device() else {
+            return;
+        };
+        let Some(surface) = window.surface() else {
+            return;
+        };
+        let Ok(toplevel) = surface.downcast::<gdk::Toplevel>() else {
+            return;
+        };
+        toplevel.begin_move(&device, gesture.current_button() as i32, x, y, event.time());
+    });
+    toolbar.add_controller(drag_window_gesture);
 }
 
 #[cfg(test)]

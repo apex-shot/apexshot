@@ -97,9 +97,9 @@ fn pen_weight_option_index(stroke_size: f64) -> usize {
 }
 
 use super::ui_support::{
-    arrow_style_toolbar_icon, install_editor_css, prefers_dark_glass_theme,
-    prefers_reduced_transparency, recommended_window_size_with_extra_width, tool_icon_widget,
-    toolbar_icon_size,
+    arrow_style_toolbar_icon, install_edge_resize, install_editor_css, install_window_drag,
+    prefers_dark_glass_theme, prefers_reduced_transparency,
+    recommended_window_size_with_extra_width, tool_icon_widget, toolbar_icon_size,
 };
 
 const TEXT_SIZE_OPTIONS: [i32; 12] = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
@@ -957,7 +957,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let zoom_out_btn = footer_parts.zoom_out_btn;
     let fit_to_screen_btn = footer_parts.fit_to_screen_btn;
     let zoom_to_selection_btn = footer_parts.zoom_to_selection_btn;
-    let drag_btn = footer_parts.drag_btn;
     let copy_btn = footer_parts.copy_btn;
     let upload_btn = footer_parts.upload_btn;
 
@@ -1999,6 +1998,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     root_overlay.add_overlay(&zoom_popup);
     window.set_child(Some(&root_overlay));
 
+    // Enable window drag from toolbar (empty areas only) and edge resize
+    install_window_drag(&toolbar, &window);
+    install_edge_resize(&root_overlay, &window);
+
     let update_canvas_content_size: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
         let zoom_level = zoom_level.clone();
@@ -2247,7 +2250,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             // Now perform GTK operations WITHOUT holding the lock
             if selected_tool == Tool::Highlighter {
-                size_group.set_visible(false);
+                size_group.set_visible(true);
+                size_group.add_css_class("size-group-inactive");
+                size_slider.set_tooltip_text(Some("Use the Thickness panel for highlighter"));
+                size_slider.set_sensitive(false);
                 return;
             }
 
@@ -3023,6 +3029,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         focus_btn.clone(),
     ];
 
+    // Set initial active tool button (Background is default)
+    background_btn.add_css_class("active-tool");
+
     events::wire_editor_events(events::EventContext {
         app: app.clone(),
         window: window.clone(),
@@ -3060,7 +3069,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         fit_to_screen_btn: fit_to_screen_btn.clone(),
         zoom_to_selection_btn: zoom_to_selection_btn.clone(),
         zoom_level: zoom_level.clone(),
-        drag_btn: drag_btn.clone(),
         copy_btn: copy_btn.clone(),
         upload_btn: upload_btn.clone(),
         color_buttons: color_buttons.clone(),

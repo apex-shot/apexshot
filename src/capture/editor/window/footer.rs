@@ -14,7 +14,6 @@ pub(super) struct FooterParts {
     pub zoom_out_btn: Button,
     pub fit_to_screen_btn: Button,
     pub zoom_to_selection_btn: Button,
-    pub drag_btn: Button,
     pub copy_btn: Button,
     pub upload_btn: Button,
 }
@@ -229,11 +228,6 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     zoom_popup.append(&sep2);
     zoom_popup.append(&mouse_hints);
 
-    let drag_btn = Button::with_label("Drag me");
-    drag_btn.set_has_frame(false);
-    drag_btn.set_tooltip_text(Some("Drag to move editor window"));
-    drag_btn.add_css_class("editor-footer-drag-button");
-    drag_btn.add_css_class("body");
     let (copy_btn, _) = footer_icon_button(copy_icon_name, "Copy file URI");
     let (upload_btn, _) = footer_icon_button(upload_icon_name, "Upload");
 
@@ -245,11 +239,6 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     footer_left.set_halign(gtk4::Align::Start);
     footer_left.append(&zoom_button);
 
-    let footer_center = GtkBox::new(Orientation::Horizontal, 0);
-    footer_center.set_hexpand(true);
-    footer_center.set_halign(gtk4::Align::Center);
-    footer_center.append(&drag_btn);
-
     let footer_right = GtkBox::new(Orientation::Horizontal, 6);
     footer_right.set_hexpand(true);
     footer_right.set_halign(gtk4::Align::End);
@@ -257,7 +246,6 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     footer_right.append(&upload_btn);
 
     root.append(&footer_left);
-    root.append(&footer_center);
     root.append(&footer_right);
 
     FooterParts {
@@ -272,7 +260,6 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
         zoom_out_btn,
         fit_to_screen_btn,
         zoom_to_selection_btn,
-        drag_btn,
         copy_btn,
         upload_btn,
     }

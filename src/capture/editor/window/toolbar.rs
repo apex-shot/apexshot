@@ -141,9 +141,7 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
 
     let select_btn = icon_tool_button(icon_names::POINTER_PRIMARY_CLICK, "Select");
     let crop_btn = icon_tool_button(icon_names.crop, "Crop");
-    crop_btn.add_css_class("standalone-tool");
     let background_btn = icon_tool_button(icon_names::IMAGE_REGULAR, "Background");
-    background_btn.add_css_class("standalone-tool");
     let draw_btn = icon_tool_button(icon_names.draw, "Pen");
 
     let left_group = GtkBox::new(Orientation::Horizontal, 16);
@@ -710,14 +708,6 @@ pub(super) fn build_toolbar_mode_controls(
     font_family_group.append(&font_family_button);
     font_family_group.set_visible(false);
 
-    let crop_tools_group = GtkBox::new(Orientation::Horizontal, 2);
-    crop_tools_group.add_css_class("editor-tools-group");
-    crop_tools_group.append(crop_btn);
-
-    let background_tools_group = GtkBox::new(Orientation::Horizontal, 2);
-    background_tools_group.add_css_class("editor-tools-group");
-    background_tools_group.append(background_btn);
-
     // Build obfuscate method selector
     let (
         obfuscate_method_group,
@@ -871,6 +861,8 @@ pub(super) fn build_toolbar_mode_controls(
     primary_tools_group.add_css_class("editor-tools-group");
     primary_tools_group.add_css_class("editor-primary-tools-group");
     primary_tools_group.append(select_btn);
+    primary_tools_group.append(crop_btn);
+    primary_tools_group.append(background_btn);
     primary_tools_group.append(draw_btn);
     primary_tools_group.append(sep_1);
     primary_tools_group.append(box_btn);
@@ -900,8 +892,6 @@ pub(super) fn build_toolbar_mode_controls(
 
     let root = GtkBox::new(Orientation::Horizontal, 10);
     root.add_css_class("editor-toolbar-center");
-    root.append(&crop_tools_group);
-    root.append(&background_tools_group);
     root.append(&toolbar_mode_stack);
     ToolbarModeParts {
         root,
@@ -1028,6 +1018,7 @@ pub(super) fn build_toolbar_tool_updater(
 
         obfuscate_method_group.set_visible(false);
 
+        // Pen weight is handled in the inspector panel for highlighter
         pen_weight_group.set_visible(false);
 
         let is_number_tool = matches!(tool, Tool::Number);
@@ -1229,10 +1220,10 @@ mod tests {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("crop_tools_group.append(crop_btn);")
+            production_source.contains("primary_tools_group.append(crop_btn);")
                 && !production_source.contains("toolbar_mode_stack.add_named(&crop_mode_group, Some(\"crop\"));")
                 && production_source.contains("Tool::Crop => Some((\"Crop\", \"crop\"))"),
-            "Toolbar should keep the Crop tool button while routing Crop through the inspector instead of a toolbar mode stack",
+            "Toolbar should keep the Crop tool button in primary_tools_group while routing Crop through the inspector instead of a toolbar mode stack",
         );
     }
 }

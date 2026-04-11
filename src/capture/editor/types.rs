@@ -303,6 +303,7 @@ impl ViewTransform {
         }
     }
 
+    #[allow(dead_code)]
     pub fn fit(image_width: f64, image_height: f64, view_width: f64, view_height: f64) -> Self {
         if image_width <= 0.0 || image_height <= 0.0 || view_width <= 1.0 || view_height <= 1.0 {
             return Self::for_image(image_width.max(1.0), image_height.max(1.0));
