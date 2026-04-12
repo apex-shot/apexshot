@@ -1981,6 +1981,26 @@ pub fn install_editor_css() {
                 background-color: rgba(255, 255, 255, 0.12);
             }
 
+            /* Blur intensity visual indicators */
+            button.editor-background-blurred-button.blur-light {
+                background: linear-gradient(135deg, rgba(220, 220, 220, 0.5) 0%, rgba(200, 200, 200, 0.3) 100%);
+            }
+
+            button.editor-background-blurred-button.blur-medium {
+                background: linear-gradient(135deg, rgba(160, 160, 160, 0.6) 0%, rgba(130, 130, 130, 0.5) 100%);
+            }
+
+            button.editor-background-blurred-button.blur-heavy {
+                background: linear-gradient(135deg, rgba(90, 90, 90, 0.7) 0%, rgba(60, 60, 60, 0.6) 100%);
+            }
+
+            .editor-blur-intensity-label {
+                font-size: 14px;
+                font-weight: bold;
+                color: rgba(255, 255, 255, 0.9);
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+            }
+
             button.editor-background-plain-color-button {
                 min-width: 18px;
                 min-height: 18px;

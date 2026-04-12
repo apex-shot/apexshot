@@ -430,16 +430,23 @@ fn build_background_blurred_preview_button(
     button.add_css_class("editor-background-gradient-button");
     button.add_css_class(density.preview_size_class);
     button.add_css_class("editor-background-blurred-button");
-    button.set_tooltip_text(Some(&format!("Blurred {}", index + 1)));
 
-    let preview_area = DrawingArea::new();
-    preview_area.add_css_class("editor-background-gradient-preview-area");
-    preview_area.set_content_width(density.preview_draw_size);
-    preview_area.set_content_height(density.preview_draw_size);
-    preview_area.set_hexpand(false);
-    preview_area.set_vexpand(false);
+    // Add intensity-specific class, label, and tooltip
+    let (intensity_class, label, tooltip) = match index {
+        0 => ("blur-light", "L", "Light Blur"),
+        1 => ("blur-medium", "M", "Medium Blur"),
+        2 => ("blur-heavy", "H", "Heavy Blur"),
+        _ => ("", "", "Blurred"),
+    };
+    button.add_css_class(intensity_class);
+    button.set_tooltip_text(Some(tooltip));
 
-    button.set_child(Some(&preview_area));
+    let label_widget = Label::new(Some(label));
+    label_widget.add_css_class("editor-blur-intensity-label");
+    label_widget.set_halign(gtk4::Align::Center);
+    label_widget.set_valign(gtk4::Align::Center);
+
+    button.set_child(Some(&label_widget));
     button
 }
 

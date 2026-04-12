@@ -2520,7 +2520,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     }
                 } else if let BackgroundStyle::PlainColor(_color) = &current_style {
                     *bg_cache = None;
-                } else if let BackgroundStyle::Blurred(_idx) = &current_style {
+                } else if let BackgroundStyle::Blurred(blur_idx) = &current_style {
                     // Only recompute blur if the working image has changed
                     let current_revision = working_image_revision;
                     let needs_recompute = cached_blurred_revision_draw.get() != current_revision
@@ -2542,6 +2542,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                             );
                         }
 
+                        // Different blur intensities for each tile
+                        let blur_radius = match blur_idx {
+                            0 => 10.0,  // Light blur
+                            1 => 35.0,  // Medium blur
+                            2 => 80.0,  // Heavy blur
+                            _ => 20.0,  // Default
+                        };
+
                         let (nbw, nbh) = blurred_bg.dimensions();
                         super::render::apply_blur_rect(
                             &mut blurred_bg,
@@ -2551,7 +2559,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                                 width: nbw as i32,
                                 height: nbh as i32,
                             },
-                            20.0,
+                            blur_radius,
                         );
                         *bg_cache = rgba_image_to_surface(&blurred_bg);
                         cached_blurred_revision_draw.set(current_revision);

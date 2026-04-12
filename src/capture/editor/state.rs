@@ -3247,7 +3247,13 @@ impl EditorState {
             BackgroundStyle::Wallpaper(path) => {
                 self.load_and_resize_background(path, canvas_w as u32, canvas_h as u32)?
             }
-            BackgroundStyle::Blurred(_idx) => {
+            BackgroundStyle::Blurred(blur_idx) => {
+                let blur_radius = match blur_idx {
+                    0 => 10.0,  // Light blur
+                    1 => 35.0,  // Medium blur
+                    2 => 80.0,  // Heavy blur
+                    _ => 20.0,  // Default
+                };
                 let mut blurred = screenshot.clone();
                 apply_blur_rect(
                     &mut blurred,
@@ -3257,7 +3263,7 @@ impl EditorState {
                         width: screenshot_w as i32,
                         height: screenshot_h as i32,
                     },
-                    30.0,
+                    blur_radius,
                 );
                 image::imageops::resize(
                     &blurred,
