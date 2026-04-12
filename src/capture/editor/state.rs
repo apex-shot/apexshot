@@ -416,7 +416,7 @@ impl EditorState {
             background_padding: 24.0,
             background_shadow: 15.0,
             background_insert: 20.0,
-            auto_balance: true,
+            auto_balance: false,
             background_alignment: BackgroundAlignment::Center,
             background_corner_radius: 18.0,
             background_aspect_ratio: CropAspectRatio::Original,
@@ -3276,24 +3276,20 @@ impl EditorState {
         };
 
         // Draw screenshot onto background with alignment
-        // (Alignment is calculated based on the available space in the canvas)
+        // Calculate available space and position based on alignment
+        let available_w = canvas_w - draw_w;
+        let available_h = canvas_h - draw_h;
+
         let (dest_x, dest_y) = match self.background_alignment {
-            BackgroundAlignment::TopLeft => (padding_px, padding_px),
-            BackgroundAlignment::TopCenter => ((canvas_w - draw_w) / 2.0, padding_px),
-            BackgroundAlignment::TopRight => (canvas_w - draw_w - padding_px, padding_px),
-            BackgroundAlignment::CenterLeft => (padding_px, (canvas_h - draw_h) / 2.0),
-            BackgroundAlignment::Center => ((canvas_w - draw_w) / 2.0, (canvas_h - draw_h) / 2.0),
-            BackgroundAlignment::CenterRight => {
-                (canvas_w - draw_w - padding_px, (canvas_h - draw_h) / 2.0)
-            }
-            BackgroundAlignment::BottomLeft => (padding_px, canvas_h - draw_h - padding_px),
-            BackgroundAlignment::BottomCenter => {
-                ((canvas_w - draw_w) / 2.0, canvas_h - draw_h - padding_px)
-            }
-            BackgroundAlignment::BottomRight => (
-                canvas_w - draw_w - padding_px,
-                canvas_h - draw_h - padding_px,
-            ),
+            BackgroundAlignment::TopLeft => (0.0, 0.0),
+            BackgroundAlignment::TopCenter => (available_w / 2.0, 0.0),
+            BackgroundAlignment::TopRight => (available_w, 0.0),
+            BackgroundAlignment::CenterLeft => (0.0, available_h / 2.0),
+            BackgroundAlignment::Center => (available_w / 2.0, available_h / 2.0),
+            BackgroundAlignment::CenterRight => (available_w, available_h / 2.0),
+            BackgroundAlignment::BottomLeft => (0.0, available_h),
+            BackgroundAlignment::BottomCenter => (available_w / 2.0, available_h),
+            BackgroundAlignment::BottomRight => (available_w, available_h),
         };
 
         // Scale and handle corner radius
@@ -3316,20 +3312,40 @@ impl EditorState {
 
         // Draw shadow if requested
         if self.background_shadow > 0.0 {
-            let shadow_color = image::Rgba([0, 0, 0, 100]);
-            let shadow_offset = (self.background_shadow * 0.15 * scale_factor * draw_scale) as i64;
+            let shadow_strength = self.background_shadow / 100.0;
+            // Very minimal offset - shadow mostly behind image
+            let shadow_offset_x = (0.5 + self.background_shadow * 0.01) * scale_factor * draw_scale;
+            let shadow_offset_y = (1.0 + self.background_shadow * 0.02) * scale_factor * draw_scale;
+            let shadow_blur = (8.0 + self.background_shadow * 0.25) * scale_factor * draw_scale;
+            let shadow_opacity = (0.25 + 0.2 * shadow_strength) as f64;
 
-            let mut shadow_layer =
-                RgbaImage::from_pixel(draw_w as u32, draw_h as u32, shadow_color);
+            // Create shadow layer with extra space for blur
+            let blur_px = shadow_blur.ceil() as u32;
+            let shadow_w = final_screenshot.width() + blur_px * 2;
+            let shadow_h = final_screenshot.height() + blur_px * 2;
+            let shadow_alpha = ((shadow_opacity * 255.0).min(255.0)) as u8;
+            let mut shadow_layer = RgbaImage::from_pixel(shadow_w, shadow_h, image::Rgba([0, 0, 0, shadow_alpha]));
+
+            // Apply corner radius to shadow
             if self.background_corner_radius > 0.0 {
                 let radius = self.background_corner_radius * scale_factor * draw_scale;
                 apply_corner_radius(&mut shadow_layer, radius);
             }
+
+            // Apply blur for soft shadow edges
+            if shadow_blur > 0.0 {
+                apply_blur_rect(
+                    &mut shadow_layer,
+                    Rect { x: 0, y: 0, width: shadow_w as i32, height: shadow_h as i32 },
+                    shadow_blur,
+                );
+            }
+
             image::imageops::overlay(
                 &mut canvas,
                 &shadow_layer,
-                dest_x as i64,
-                (dest_y + shadow_offset as f64) as i64,
+                dest_x as i64 + shadow_offset_x as i64 - blur_px as i64,
+                dest_y as i64 + shadow_offset_y as i64 - blur_px as i64,
             );
         }
 

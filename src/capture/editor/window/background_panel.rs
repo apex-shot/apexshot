@@ -1092,6 +1092,10 @@ pub(super) fn build_background_panel(
     let auto_balance_check = CheckButton::with_label("");
     auto_balance_check.add_css_class("editor-background-checkbox");
     auto_balance_check.set_halign(gtk4::Align::Start);
+    {
+        let st = state.lock().unwrap();
+        auto_balance_check.set_active(st.auto_balance);
+    }
     auto_balance_check_row.append(&auto_balance_check);
 
     auto_balance_check.connect_toggled({

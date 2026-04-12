@@ -2407,14 +2407,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
         let mut virtual_w = image_width;
         let mut virtual_h = image_height;
-        let mut padding_px = 0.0;
         let mut draw_scale_factor = 1.0;
 
         let has_background = background_style != BackgroundStyle::None;
         if has_background {
             let ref_size = image_width.max(image_height);
             let scale_factor = ref_size / 400.0;
-            padding_px = background_padding * scale_factor;
+            let padding_px = background_padding * scale_factor;
 
             virtual_w = image_width + padding_px * 2.0;
             virtual_h = image_height + padding_px * 2.0;
@@ -2593,42 +2592,23 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             let draw_w = image_width * draw_scale_factor;
             let draw_h = image_height * draw_scale_factor;
-            let padding_px_scaled = padding_px * canvas_t.scale;
 
+            // Calculate available space (canvas minus the drawn image)
+            let available_w = virtual_w * canvas_t.scale - draw_w * canvas_t.scale;
+            let available_h = virtual_h * canvas_t.scale - draw_h * canvas_t.scale;
+
+            // Alignment positions the image within the available space
+            // TopLeft = 0%, Center = 50%, BottomRight = 100%
             let (sc_off_x, sc_off_y) = match background_alignment {
-                BackgroundAlignment::TopLeft => (padding_px_scaled, padding_px_scaled),
-                BackgroundAlignment::TopCenter => (
-                    (virtual_w * canvas_t.scale - draw_w * canvas_t.scale) / 2.0,
-                    padding_px_scaled,
-                ),
-                BackgroundAlignment::TopRight => (
-                    virtual_w * canvas_t.scale - draw_w * canvas_t.scale - padding_px_scaled,
-                    padding_px_scaled,
-                ),
-                BackgroundAlignment::CenterLeft => (
-                    padding_px_scaled,
-                    (virtual_h * canvas_t.scale - draw_h * canvas_t.scale) / 2.0,
-                ),
-                BackgroundAlignment::Center => (
-                    (virtual_w * canvas_t.scale - draw_w * canvas_t.scale) / 2.0,
-                    (virtual_h * canvas_t.scale - draw_h * canvas_t.scale) / 2.0,
-                ),
-                BackgroundAlignment::CenterRight => (
-                    virtual_w * canvas_t.scale - draw_w * canvas_t.scale - padding_px_scaled,
-                    (virtual_h * canvas_t.scale - draw_h * canvas_t.scale) / 2.0,
-                ),
-                BackgroundAlignment::BottomLeft => (
-                    padding_px_scaled,
-                    virtual_h * canvas_t.scale - draw_h * canvas_t.scale - padding_px_scaled,
-                ),
-                BackgroundAlignment::BottomCenter => (
-                    (virtual_w * canvas_t.scale - draw_w * canvas_t.scale) / 2.0,
-                    virtual_h * canvas_t.scale - draw_h * canvas_t.scale - padding_px_scaled,
-                ),
-                BackgroundAlignment::BottomRight => (
-                    virtual_w * canvas_t.scale - draw_w * canvas_t.scale - padding_px_scaled,
-                    virtual_h * canvas_t.scale - draw_h * canvas_t.scale - padding_px_scaled,
-                ),
+                BackgroundAlignment::TopLeft => (0.0, 0.0),
+                BackgroundAlignment::TopCenter => (available_w / 2.0, 0.0),
+                BackgroundAlignment::TopRight => (available_w, 0.0),
+                BackgroundAlignment::CenterLeft => (0.0, available_h / 2.0),
+                BackgroundAlignment::Center => (available_w / 2.0, available_h / 2.0),
+                BackgroundAlignment::CenterRight => (available_w, available_h / 2.0),
+                BackgroundAlignment::BottomLeft => (0.0, available_h),
+                BackgroundAlignment::BottomCenter => (available_w / 2.0, available_h),
+                BackgroundAlignment::BottomRight => (available_w, available_h),
             };
 
             t.offset_x = canvas_t.offset_x + sc_off_x;
@@ -2636,53 +2616,36 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             t.scale = canvas_t.scale * draw_scale_factor;
 
             if background_shadow > 0.0 {
-                let shadow_radius = background_shadow * t.scale * 0.5;
-                let shadow_opacity = 0.4;
-                let _ = context.save();
-                context.set_source_rgba(0.0, 0.0, 0.0, shadow_opacity);
-                context.translate(t.offset_x, t.offset_y + shadow_radius * 0.3);
+                let shadow_strength = background_shadow / 100.0;
+                // Very minimal offset - shadow is mostly behind the image
+                let shadow_offset_x = (0.5 + background_shadow * 0.01) * t.scale;
+                let shadow_offset_y = (1.0 + background_shadow * 0.02) * t.scale;
+                // Shadow blur/softness
+                let shadow_blur = (8.0 + background_shadow * 0.25) * t.scale;
+                // Shadow opacity
+                let shadow_opacity = 0.25 + 0.2 * shadow_strength;
 
                 let rect_w = image_width * t.scale;
                 let rect_h = image_height * t.scale;
                 let corner_r = background_corner_radius * t.scale;
 
-                context.new_sub_path();
-                context.arc(
-                    rect_w - corner_r,
-                    corner_r,
-                    corner_r,
-                    -std::f64::consts::FRAC_PI_2,
-                    0.0,
-                );
-                context.arc(
-                    rect_w - corner_r,
-                    rect_h - corner_r,
-                    corner_r,
-                    0.0,
-                    std::f64::consts::FRAC_PI_2,
-                );
-                context.arc(
-                    corner_r,
-                    rect_h - corner_r,
-                    corner_r,
-                    std::f64::consts::FRAC_PI_2,
-                    std::f64::consts::PI,
-                );
-                context.arc(
-                    corner_r,
-                    corner_r,
-                    corner_r,
-                    std::f64::consts::PI,
-                    std::f64::consts::PI * 1.5,
-                );
-                context.close_path();
+                let _ = context.save();
+                context.translate(t.offset_x + shadow_offset_x, t.offset_y + shadow_offset_y);
 
-                for i in 1..=5 {
-                    context.set_line_width(shadow_radius * (i as f64 / 5.0));
-                    context.set_source_rgba(0.0, 0.0, 0.0, shadow_opacity / (i as f64));
-                    let _ = context.stroke_preserve();
+                // Draw shadow as a soft rectangle using strokes from outside in
+                let total_layers = 8;
+                for i in 0..total_layers {
+                    let layer_factor = i as f64 / total_layers as f64;
+                    // Stroke from outside (larger) to inside (smaller)
+                    let stroke_radius = shadow_blur * (1.0 - layer_factor);
+                    let layer_opacity = shadow_opacity * (1.0 - layer_factor * 0.9);
+
+                    context.set_source_rgba(0.0, 0.0, 0.0, layer_opacity);
+                    context.set_line_width(stroke_radius);
+                    draw_rounded_rect_path(&context, rect_w, rect_h, corner_r, 0.0);
+                    let _ = context.stroke();
                 }
-                let _ = context.fill();
+
                 let _ = context.restore();
             }
 
@@ -2692,36 +2655,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             let _ = context.save();
             context.translate(t.offset_x, t.offset_y);
-            context.new_sub_path();
-            context.arc(
-                rect_w - corner_r,
-                corner_r,
-                corner_r,
-                -std::f64::consts::FRAC_PI_2,
-                0.0,
-            );
-            context.arc(
-                rect_w - corner_r,
-                rect_h - corner_r,
-                corner_r,
-                0.0,
-                std::f64::consts::FRAC_PI_2,
-            );
-            context.arc(
-                corner_r,
-                rect_h - corner_r,
-                corner_r,
-                std::f64::consts::FRAC_PI_2,
-                std::f64::consts::PI,
-            );
-            context.arc(
-                corner_r,
-                corner_r,
-                corner_r,
-                std::f64::consts::PI,
-                std::f64::consts::PI * 1.5,
-            );
-            context.close_path();
+            draw_rounded_rect_path(&context, rect_w, rect_h, corner_r, 0.0);
             context.clip();
             context.translate(-t.offset_x, -t.offset_y);
         }
@@ -3158,6 +3092,28 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         crate::gnome_integration::emit_tracked_window_closed(&tracked_window_id);
         glib::Propagation::Proceed
     });
+}
+
+/// Draw a rounded rectangle path with optional expansion for blur effect
+fn draw_rounded_rect_path(
+    context: &gtk4::cairo::Context,
+    width: f64,
+    height: f64,
+    corner_radius: f64,
+    expansion: f64,
+) {
+    let r = corner_radius + expansion;
+    let x = -expansion;
+    let y = -expansion;
+    let w = width + expansion * 2.0;
+    let h = height + expansion * 2.0;
+
+    context.new_sub_path();
+    context.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+    context.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+    context.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+    context.arc(x + r, y + r, r, std::f64::consts::PI, std::f64::consts::PI * 1.5);
+    context.close_path();
 }
 
 #[cfg(test)]
