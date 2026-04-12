@@ -1012,12 +1012,10 @@ pub(super) fn build_background_panel(
     let compact_controls = GtkBox::new(Orientation::Vertical, 4);
     compact_controls.add_css_class("editor-background-compact-controls");
 
-    let insert_shadow_row = GtkBox::new(Orientation::Horizontal, 24);
+    let insert_shadow_row = GtkBox::new(Orientation::Horizontal, 8);
     insert_shadow_row.add_css_class("editor-background-compact-controls-row");
-    insert_shadow_row.set_homogeneous(true);
-    insert_shadow_row.set_size_request(density.wide_slider_width, -1);
-    insert_shadow_row.set_halign(gtk4::Align::Start);
-    insert_shadow_row.set_hexpand(false);
+    insert_shadow_row.set_halign(gtk4::Align::Fill);
+    insert_shadow_row.set_hexpand(true);
 
     let insert_section = GtkBox::new(Orientation::Vertical, 4);
     insert_section.add_css_class("editor-background-compact-slider-section");
@@ -1074,7 +1072,8 @@ pub(super) fn build_background_panel(
 
     let auto_balance_section = GtkBox::new(Orientation::Vertical, 2);
     auto_balance_section.add_css_class("editor-background-compact-slider-section");
-    auto_balance_section.set_size_request(density.compact_slider_width, -1);
+    auto_balance_section.set_hexpand(true);
+    auto_balance_section.set_halign(gtk4::Align::Fill);
     right_column_group.add_widget(&auto_balance_section);
 
     let auto_balance_title = Label::new(Some("Auto-balance"));
@@ -1105,12 +1104,10 @@ pub(super) fn build_background_panel(
     insert_shadow_row.append(&insert_section);
     insert_shadow_row.append(&auto_balance_section);
 
-    let shadow_corners_row = GtkBox::new(Orientation::Horizontal, 24);
+    let shadow_corners_row = GtkBox::new(Orientation::Horizontal, 8);
     shadow_corners_row.add_css_class("editor-background-compact-controls-row");
-    shadow_corners_row.set_homogeneous(true);
-    shadow_corners_row.set_size_request(density.wide_slider_width, -1);
-    shadow_corners_row.set_halign(gtk4::Align::Start);
-    shadow_corners_row.set_hexpand(false);
+    shadow_corners_row.set_halign(gtk4::Align::Fill);
+    shadow_corners_row.set_hexpand(true);
 
     let shadow_section = GtkBox::new(Orientation::Vertical, 4);
     shadow_section.add_css_class("editor-background-compact-slider-section");
@@ -1295,7 +1292,8 @@ pub(super) fn build_background_panel(
 
     let corners_section = GtkBox::new(Orientation::Vertical, 4);
     corners_section.add_css_class("editor-background-compact-slider-section");
-    corners_section.set_size_request(density.compact_slider_width, -1);
+    corners_section.set_hexpand(true);
+    corners_section.set_halign(gtk4::Align::Fill);
     right_column_group.add_widget(&corners_section);
 
     let ratio_section = GtkBox::new(Orientation::Vertical, 4);
