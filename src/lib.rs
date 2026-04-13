@@ -1,3 +1,4 @@
+pub mod annotations;
 pub mod backend;
 pub mod capture;
 pub mod capture_overlay;

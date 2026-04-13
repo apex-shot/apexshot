@@ -7,9 +7,11 @@ use gtk4::{
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::annotations::save_annotations;
 use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
     io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
@@ -1561,18 +1563,39 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let window_save = window.downgrade();
     let app_save = app.downgrade();
     save_btn.connect_clicked(move |_| {
-        let save_result = {
+        // Get the state data we need
+        let (image_result, annotation_data) = {
             let st = state_save.lock().unwrap();
-            save_edited_image(&path_save, &st)
+            let save_result = save_edited_image(&path_save, &st);
+            let annotation_result = save_annotations(
+                &path_save,
+                st.base_image.width(),
+                st.base_image.height(),
+                &st.actions,
+                &st.base_image,
+            );
+            (save_result, annotation_result)
         };
 
-        match save_result {
+        // Log annotation errors but don't fail the save
+        if let Err(e) = annotation_data {
+            eprintln!("[editor] Warning: Failed to save annotations: {e}");
+        }
+
+        match image_result {
             Ok(()) => {
+                // Close editor window
                 if let Some(window) = window_save.upgrade() {
                     window.close();
                 }
                 if let Some(app) = app_save.upgrade() {
                     app.quit();
+                }
+
+                // Spawn preview overlay with the edited image
+                let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+                if let Err(e) = Command::new(&exe).arg("preview").arg(&path_save).spawn() {
+                    eprintln!("[editor] Failed to open preview: {e}");
                 }
             }
             Err(e) => {

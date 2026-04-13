@@ -395,12 +395,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         None::<glib::object::WeakRef<gtk4::DrawingArea>>,
     ));
 
-    let image = match image::open(&path) {
-        Ok(img) => img.to_rgba8(),
-        Err(e) => {
-            eprintln!("Failed to load image for editing: {e}");
-            app.quit();
-            return;
+    // Check if we have a saved original (for non-destructive re-editing)
+    let image = if let Ok(Some(original)) = crate::annotations::load_original_image(&path) {
+        original
+    } else {
+        match image::open(&path) {
+            Ok(img) => img.to_rgba8(),
+            Err(e) => {
+                eprintln!("Failed to load image for editing: {e}");
+                app.quit();
+                return;
+            }
         }
     };
 
@@ -412,6 +417,39 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         st.smooth_drawing_enabled = annotate_config.smooth_drawing;
         st.draw_object_shadow = annotate_config.draw_object_shadow;
         st.auto_expand_canvas = annotate_config.auto_expand_canvas;
+        
+        // Load existing annotations if available
+        match crate::annotations::load_annotations(&path) {
+            Ok(Some(annotation_file)) => {
+                // Load annotations into state
+                for ann in &annotation_file.annotations {
+                    let action = crate::annotations::serializable_to_action(ann);
+                    st.actions.push(action);
+                }
+                // Update next_number based on existing number annotations
+                let max_number = st.actions.iter()
+                    .filter_map(|a| match a {
+                        AnnotationAction::Number { number, .. } => Some(*number),
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0);
+                st.next_number = max_number + 1;
+                
+                // Rebuild effect layer to render loaded annotations
+                st.rebuild_effect_layer();
+            }
+            Ok(None) => {
+                // No existing annotations, start fresh
+            }
+            Err(crate::annotations::AnnotationError::HashMismatch) => {
+                eprintln!("[editor] Warning: Image was modified externally, annotations may not align");
+            }
+            Err(e) => {
+                eprintln!("[editor] Warning: Failed to load annotations: {e}");
+            }
+        }
+        
         let detector = st.text_detector.clone();
         let ready_flag = st.text_detection_ready.clone();
         st.text_detection_handle = Some(super::text_detect::spawn_text_detection(

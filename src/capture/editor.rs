@@ -1,7 +1,7 @@
 mod color;
 mod io_ops;
 #[allow(dead_code)]
-mod numbering_style;
+pub mod numbering_style;
 #[allow(dead_code)]
 mod pen_weight;
 pub mod preprocess;
@@ -10,7 +10,7 @@ mod selection;
 mod state;
 #[allow(dead_code)]
 mod text_detect;
-mod types;
+pub mod types;
 mod ui_support;
 #[path = "editor/window/mod.rs"]
 pub mod window;
