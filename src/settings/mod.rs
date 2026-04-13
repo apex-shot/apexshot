@@ -38,10 +38,20 @@ use self::{
 pub fn show_settings_window() -> anyhow::Result<()> {
     let app = Application::builder()
         .application_id("com.apexshot.settings")
-        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
-    app.connect_activate(build_settings_window);
+    app.connect_activate(|application| {
+        // Check if a window already exists (single-instance behavior)
+        // If yes, just present it instead of creating a new one
+        let windows = application.windows();
+        if let Some(existing_window) = windows.first() {
+            existing_window.present();
+            return;
+        }
+        
+        build_settings_window(application);
+    });
+    
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }

@@ -414,7 +414,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
     if (m_settingsOpen) {
         if (m_settingsPanelRect.contains(pos)) {
             // Check in reverse order so the latest clickable rects win when rows overlap.
-            for (int i = m_settingsClickableRects.size() - 1; i >= 0; --i) {
+            for (int i = static_cast<int>(m_settingsClickableRects.size()) - 1; i >= 0; --i) {
                 if (m_settingsClickableRects[i].contains(pos)) {
                     if (i < 3) { // Tab clicks (indices 0, 1, 2)
                         m_settingsTab = i;
@@ -1014,7 +1014,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         // Click Options sub-panel hover
         if (m_clickOptionsOpen && m_clickOptionsPanelRect.contains(pos)) {
             int newHover = -1;
-            for (int i = m_clickOptionsClickableRects.size() - 1; i >= 0; --i) {
+            for (int i = static_cast<int>(m_clickOptionsClickableRects.size()) - 1; i >= 0; --i) {
                 if (m_clickOptionsClickableRects[i].contains(pos)) {
                     newHover = i;
                     break;
@@ -1027,7 +1027,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         // Keystroke Options sub-panel hover
         if (m_keystrokeOptionsOpen && m_keystrokeOptionsPanelRect.contains(pos)) {
             int newHover = -1;
-            for (int i = m_keystrokeOptionsClickableRects.size() - 1; i >= 0; --i) {
+            for (int i = static_cast<int>(m_keystrokeOptionsClickableRects.size()) - 1; i >= 0; --i) {
                 if (m_keystrokeOptionsClickableRects[i].contains(pos)) {
                     newHover = i;
                     break;
@@ -1040,7 +1040,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         // Settings menu hover
         if (m_settingsOpen && m_settingsPanelRect.contains(pos)) {
             int newHover = -1;
-            for (int i = m_settingsClickableRects.size() - 1; i >= 0; --i) {
+            for (int i = static_cast<int>(m_settingsClickableRects.size()) - 1; i >= 0; --i) {
                 if (m_settingsClickableRects[i].contains(pos)) {
                     newHover = i;
                     break;

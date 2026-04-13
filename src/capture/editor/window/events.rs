@@ -1592,10 +1592,13 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     app.quit();
                 }
 
-                // Spawn preview overlay with the edited image
-                let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-                if let Err(e) = Command::new(&exe).arg("preview").arg(&path_save).spawn() {
-                    eprintln!("[editor] Failed to open preview: {e}");
+                // Show preview via daemon for single-instance coordination
+                // If daemon not running, fall back to spawning directly
+                if !crate::daemon::show_preview_via_daemon(&path_save) {
+                    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+                    if let Err(e) = Command::new(&exe).arg("preview").arg(&path_save).spawn() {
+                        eprintln!("[editor] Failed to open preview: {e}");
+                    }
                 }
             }
             Err(e) => {

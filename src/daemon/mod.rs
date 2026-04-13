@@ -67,6 +67,7 @@ pub enum DaemonAction {
     RestartRecording,
     DiscardRecording,
     ShowLastPreview,
+    ShowPreviewForPath(std::path::PathBuf),
     OpenLastCapture,
     OpenSettings,
     SetTrayVisible(bool),
@@ -307,6 +308,29 @@ pub fn notify_daemon_recording_restarted() -> bool {
 
 pub fn notify_daemon_recording_ended() -> bool {
     trigger_daemon_action_blocking("recording_session_ended")
+}
+
+/// Tell the daemon to show preview for a specific path.
+/// This ensures single-instance behavior (daemon will close existing preview first).
+/// Returns true if the daemon was successfully notified.
+pub fn show_preview_via_daemon(path: &std::path::Path) -> bool {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let proxy = match zbus::blocking::Proxy::new(
+        &conn,
+        DAEMON_BUS_NAME,
+        DAEMON_OBJECT_PATH,
+        DAEMON_INTERFACE,
+    ) {
+        Ok(proxy) => proxy,
+        Err(_) => return false,
+    };
+
+    let path_str = path.to_string_lossy().to_string();
+    proxy
+        .call::<_, _, ()>("show_preview_for_path", &(path_str,))
+        .is_ok()
 }
 
 pub fn stop_daemon_via_dbus() -> bool {
@@ -670,6 +694,11 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
                 } else {
                     eprintln!("[daemon] No capture yet.");
                 }
+            }
+            DaemonAction::ShowPreviewForPath(path) => {
+                tokio::task::spawn_blocking(move || {
+                    let _ = show_preview_for_path(path, &state_clone);
+                });
             }
             DaemonAction::OpenLastCapture => {
                 let path = state.lock().unwrap().last_capture_path.clone();
@@ -1270,6 +1299,18 @@ impl DaemonIpc {
                 zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
             })?;
         Ok(true)
+    }
+
+    /// Show preview for a specific path (used by editor to coordinate single-instance)
+    fn show_preview_for_path(&self, path: String) -> zbus::fdo::Result<()> {
+        eprintln!("[daemon] D-Bus show_preview_for_path: {}", path);
+        let path = std::path::PathBuf::from(path);
+        self.tx
+            .send(DaemonAction::ShowPreviewForPath(path))
+            .map_err(|e| {
+                zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
+            })?;
+        Ok(())
     }
 }
 
@@ -2627,6 +2668,8 @@ fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
     let Some(_session_guard) = acquire_capture_session_guard("area") else {
         return;
     };
+    // Close any existing preview before starting capture (single-instance behavior)
+    let _ = stop_preview_overlay(&state);
     handle_capture_area_with_active_session(state);
 }
 
@@ -2634,6 +2677,8 @@ fn handle_capture_crosshair(state: Arc<Mutex<DaemonState>>) {
     let Some(_session_guard) = acquire_capture_session_guard("crosshair") else {
         return;
     };
+    // Close any existing preview before starting capture
+    let _ = stop_preview_overlay(&state);
     handle_capture_crosshair_with_active_session(state);
 }
 
@@ -2724,6 +2769,8 @@ fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
     let Some(_session_guard) = acquire_capture_session_guard("screen") else {
         return;
     };
+    // Close any existing preview before starting capture
+    let _ = stop_preview_overlay(&state);
     handle_capture_screen_with_active_session(state);
 }
 
@@ -2750,6 +2797,8 @@ fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
     let Some(_session_guard) = acquire_capture_session_guard("window") else {
         return;
     };
+    // Close any existing preview before starting capture
+    let _ = stop_preview_overlay(&state);
     handle_capture_window_with_active_session(state);
 }
 

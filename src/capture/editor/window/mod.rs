@@ -251,6 +251,7 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
 
     let app = Application::builder()
         .application_id("com.apexshot.capture.editor")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     app.connect_activate(move |application| {

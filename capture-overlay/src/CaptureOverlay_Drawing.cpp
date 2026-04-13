@@ -2432,7 +2432,7 @@ void CaptureOverlay::drawKeystrokePreview(QPainter& p, double sx, double sy, dou
     QList<double> keyAlphas; // per-key fade alpha
     if (!m_keyPreviews.isEmpty()) {
         // Show live key presses (most recent up to 5)
-        int start = std::max(0, m_keyPreviews.size() - 5);
+        int start = std::max(0, static_cast<int>(m_keyPreviews.size()) - 5);
         for (int i = start; i < m_keyPreviews.size(); ++i) {
             displayKeys.append(m_keyPreviews[i].text);
             double age = (double)(now - m_keyPreviews[i].birthMs) / KEY_LIFETIME_MS;
