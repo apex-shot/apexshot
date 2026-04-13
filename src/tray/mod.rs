@@ -69,67 +69,48 @@ impl ApexShotTray {
 /// This provides razor-sharp, pixel-perfect lines by drawing the logo
 /// directly using geometric primitives at the desired resolution.
 fn apex_icon(size: i32) -> ksni::Icon {
-    use gtk4::cairo::{Context, Format, ImageSurface, LineCap, LineJoin};
+    use gtk4::cairo::{Context, Format, ImageSurface};
     let mut surface = ImageSurface::create(Format::ARgb32, size, size)
         .expect("Failed to create tray icon surface");
     let cr = Context::new(&surface).expect("Failed to create context");
-
-    let cx = size as f64 / 2.0;
-    let cy = size as f64 / 2.0;
 
     // Transparent background for system tray
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
     cr.paint()
         .expect("Failed to clear tray transparent background");
 
-    // Viewfinder / Crop Corners
+    // Scale from 24x24 viewBox to current size
+    let s = size as f64 / 24.0;
+    cr.scale(s, s);
+
+    // Left Wing - Apex Energy (#E95420)
+    cr.set_source_rgba(0.913, 0.329, 0.125, 1.0);
+    cr.move_to(12.0, 2.0);
+    cr.line_to(2.0, 22.0);
+    cr.line_to(4.0, 22.0);
+    cr.line_to(12.0, 18.0);
+    cr.line_to(12.0, 14.0);
+    cr.line_to(8.0, 14.0);
+    cr.line_to(12.0, 6.0);
+    cr.close_path();
+    cr.fill().expect("Failed to draw tray icon left wing");
+
+    // Right Wing - Tech Structure (White)
     cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-    cr.set_line_width(size as f64 * 0.08);
-    cr.set_line_cap(LineCap::Square);
-    cr.set_line_join(LineJoin::Miter);
-
-    let crn_dist = size as f64 * 0.40;
-    let crn_len = size as f64 * 0.20;
-
-    // Top Left
-    cr.move_to(cx - crn_dist, cy - crn_dist + crn_len);
-    cr.line_to(cx - crn_dist, cy - crn_dist);
-    cr.line_to(cx - crn_dist + crn_len, cy - crn_dist);
-    cr.stroke().expect("Failed to draw tray icon");
-    // Top Right
-    cr.move_to(cx + crn_dist - crn_len, cy - crn_dist);
-    cr.line_to(cx + crn_dist, cy - crn_dist);
-    cr.line_to(cx + crn_dist, cy - crn_dist + crn_len);
-    cr.stroke().expect("Failed to draw tray icon");
-    // Bottom Right
-    cr.move_to(cx + crn_dist, cy + crn_dist - crn_len);
-    cr.line_to(cx + crn_dist, cy + crn_dist);
-    cr.line_to(cx + crn_dist - crn_len, cy + crn_dist);
-    cr.stroke().expect("Failed to draw tray icon");
-    // Bottom Left
-    cr.move_to(cx - crn_dist + crn_len, cy + crn_dist);
-    cr.line_to(cx - crn_dist, cy + crn_dist);
-    cr.line_to(cx - crn_dist, cy + crn_dist - crn_len);
-    cr.stroke().expect("Failed to draw tray icon");
-
-    // The Peak / Apex
-    let peak_y = cy - size as f64 * 0.12;
-    let base_y = cy + size as f64 * 0.22;
-    let peak_half_w = size as f64 * 0.26;
-
-    cr.move_to(cx, peak_y);
-    cr.line_to(cx + peak_half_w, base_y);
-    cr.line_to(cx - peak_half_w, base_y);
+    cr.move_to(12.0, 2.0);
+    cr.line_to(22.0, 22.0);
+    cr.line_to(20.0, 22.0);
+    cr.line_to(12.0, 18.0);
+    cr.line_to(12.0, 14.0);
+    cr.line_to(16.0, 14.0);
+    cr.line_to(12.0, 6.0);
     cr.close_path();
-    cr.fill().expect("Failed to draw tray icon");
+    cr.fill().expect("Failed to draw tray icon right wing");
 
-    // Theme Orange (#b05c38) Shadow / Slice on the peak
-    cr.set_source_rgba(0.69, 0.36, 0.22, 1.0);
-    cr.move_to(cx, peak_y);
-    cr.line_to(cx + peak_half_w, base_y);
-    cr.line_to(cx, base_y);
-    cr.close_path();
-    cr.fill().expect("Failed to draw tray icon");
+    // Lens Focus Dot (#E95420)
+    cr.set_source_rgba(0.913, 0.329, 0.125, 1.0);
+    cr.arc(12.0, 10.5, 1.5, 0.0, 2.0 * std::f64::consts::PI);
+    cr.fill().expect("Failed to draw tray icon focus dot");
 
     drop(cr);
     surface.flush();

@@ -28,9 +28,9 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         let s = width as f64 / 128.0;
 
         // Background Rounded Rectangle
-        cr.set_source_rgba(0.05, 0.05, 0.05, 1.0); // Pitch black/Noir
-        let size_half = 56.0 * s;
-        let radius = 16.0 * s;
+        cr.set_source_rgba(0.08, 0.08, 0.08, 1.0); // Soft Charcoal
+        let size_half = 48.0 * s;
+        let radius = 14.0 * s;
         cr.arc(
             cx + size_half - radius,
             cy - size_half + radius,
@@ -62,57 +62,44 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         cr.close_path();
         cr.fill().expect("Failed to render logo background");
 
-        // Viewfinder / Crop Corners
+        // Scale and Center the 24x24 SVG logo
+        // We want the logo to be about 64x64 in the 128x128 area
+        let logo_scale = 2.66 * s; // 64 / 24 = 2.66
+        cr.translate(cx - 12.0 * logo_scale, cy - 12.0 * logo_scale);
+        cr.scale(logo_scale, logo_scale);
+
+        // Left Wing - Apex Energy (#E95420)
+        cr.set_source_rgba(0.913, 0.329, 0.125, 1.0);
+        cr.move_to(12.0, 2.0);
+        cr.line_to(2.0, 22.0);
+        cr.line_to(4.0, 22.0);
+        cr.line_to(12.0, 18.0);
+        cr.line_to(12.0, 14.0);
+        cr.line_to(8.0, 14.0);
+        cr.line_to(12.0, 6.0);
+        cr.close_path();
+        cr.fill().expect("Failed to draw logo left wing");
+
+        // Right Wing - Tech Structure (White)
         cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-        cr.set_line_width(8.0 * s);
-        cr.set_line_cap(gtk4::cairo::LineCap::Square);
-        cr.set_line_join(gtk4::cairo::LineJoin::Miter);
-
-        let crn_dist = 36.0 * s;
-        let crn_len = 16.0 * s;
-
-        // Top Left
-        cr.move_to(cx - crn_dist, cy - crn_dist + crn_len);
-        cr.line_to(cx - crn_dist, cy - crn_dist);
-        cr.line_to(cx - crn_dist + crn_len, cy - crn_dist);
-        cr.stroke().expect("Failed to render logo");
-        // Top Right
-        cr.move_to(cx + crn_dist - crn_len, cy - crn_dist);
-        cr.line_to(cx + crn_dist, cy - crn_dist);
-        cr.line_to(cx + crn_dist, cy - crn_dist + crn_len);
-        cr.stroke().expect("Failed to render logo");
-        // Bottom Right
-        cr.move_to(cx + crn_dist, cy + crn_dist - crn_len);
-        cr.line_to(cx + crn_dist, cy + crn_dist);
-        cr.line_to(cx + crn_dist - crn_len, cy + crn_dist);
-        cr.stroke().expect("Failed to render logo");
-        // Bottom Left
-        cr.move_to(cx - crn_dist + crn_len, cy + crn_dist);
-        cr.line_to(cx - crn_dist, cy + crn_dist);
-        cr.line_to(cx - crn_dist, cy + crn_dist - crn_len);
-        cr.stroke().expect("Failed to render logo");
-
-        // The Peak / Apex
-        let peak_y = cy - 14.0 * s;
-        let base_y = cy + 18.0 * s;
-        let peak_half_w = 22.0 * s;
-
-        cr.move_to(cx, peak_y);
-        cr.line_to(cx + peak_half_w, base_y);
-        cr.line_to(cx - peak_half_w, base_y);
+        cr.move_to(12.0, 2.0);
+        cr.line_to(22.0, 22.0);
+        cr.line_to(20.0, 22.0);
+        cr.line_to(12.0, 18.0);
+        cr.line_to(12.0, 14.0);
+        cr.line_to(16.0, 14.0);
+        cr.line_to(12.0, 6.0);
         cr.close_path();
-        cr.fill().expect("Failed to render logo");
+        cr.fill().expect("Failed to draw logo right wing");
 
-        // Theme Orange (#b05c38) Shadow / Slice on the peak
-        cr.set_source_rgba(0.69, 0.36, 0.22, 1.0);
-        cr.move_to(cx, peak_y);
-        cr.line_to(cx + peak_half_w, base_y);
-        cr.line_to(cx, base_y);
-        cr.close_path();
-        cr.fill().expect("Failed to render logo");
+        // Lens Focus Dot (#E95420)
+        cr.set_source_rgba(0.913, 0.329, 0.125, 1.0);
+        cr.arc(12.0, 10.5, 1.5, 0.0, 2.0 * std::f64::consts::PI);
+        cr.fill().expect("Failed to draw logo focus dot");
     });
 
-    let title = Label::new(Some("ApexShot"));
+    let title = Label::new(None);
+    title.set_markup("Apex<span weight='light' alpha='50%'>s h o t</span>");
     title.add_css_class("about-app-name");
 
     let version = Label::new(Some("Version 1.2.3 (789)"));
