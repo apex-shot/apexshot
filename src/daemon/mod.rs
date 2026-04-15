@@ -2387,7 +2387,12 @@ fn handle_import_web_scroll_capture(
 
 fn run_ocr_and_report(capture: crate::backend::CaptureData) {
     eprintln!("[daemon] OCR tool selected — extracting text from selected area...");
-    match extract_text(&capture, &OcrConfig::default()) {
+
+    let config = load_config().sanitized();
+    let ocr_config = OcrConfig::default()
+        .with_language(&config.adv_ocr_language);
+
+    match extract_text(&capture, &ocr_config) {
         Ok(result) => match &result.source {
             crate::ocr::ContentSource::QrCode => {
                 eprintln!("[daemon] QR code decoded");
