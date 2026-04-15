@@ -833,6 +833,9 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
         ));
     }
 
+    // Use ScreenCast portal for window capture on Wayland
+    // The C++ window picker requires a GNOME Shell extension that provides
+    // org.apexshot.WindowList which is not currently implemented.
     if WaylandBackend::is_supported() {
         eprintln!("[capture_overlay] capture_window_file: using Wayland ScreenCast window capture");
         let backend = WaylandBackend::new().map_err(|e| {
@@ -844,6 +847,7 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
         return save_capture_to_temp_png(&capture, "window_");
     }
 
+    // Fallback to C++ window picker on X11
     eprintln!("[capture_overlay] capture_window_via_cpp: launching --window-capture");
     let output = run_capture_binary(&["--window-capture"], None)?;
     let exit_code = output.status.code();

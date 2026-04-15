@@ -33,7 +33,7 @@ pub struct WaylandBackend;
 // ScreenCast restore-token helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum CaptureTarget {
     Monitor,
     Window,
@@ -434,13 +434,19 @@ impl WaylandBackend {
             .response()
             .map_err(|e| DisplayError::PortalError(format!("ScreenCast start failed: {e}")))?;
 
-        let node_id = response
+        let stream = response
             .streams()
             .first()
             .ok_or_else(|| {
                 DisplayError::PortalError("No streams returned by ScreenCast portal".into())
-            })?
-            .pipe_wire_node_id();
+            })?;
+        let node_id = stream.pipe_wire_node_id();
+
+        // Get the actual window size and position within the stream
+        // For window captures, the stream may be at monitor resolution with the window
+        // content at a specific position and size
+        let stream_size = stream.size();
+        let stream_position = stream.position();
 
         if !interactive {
             if let Some(token) = response.restore_token() {
@@ -452,7 +458,108 @@ impl WaylandBackend {
 
         let capture = capture_single_frame_from_pipewire(node_id);
         let _ = session.close().await;
+
+        // For window captures, crop to the actual window dimensions if provided
+        if target == CaptureTarget::Window {
+            eprintln!(
+                "[capture] Window capture: stream_size={:?}, stream_position={:?}",
+                stream_size, stream_position
+            );
+            if let (Some((win_width, win_height)), Some((win_x, win_y))) = (stream_size, stream_position) {
+                if win_width > 0 && win_height > 0 && win_x >= 0 && win_y >= 0 {
+                    let data = capture?;
+                    eprintln!(
+                        "[capture] Window capture: cropping from {}x{} to {}x{} at ({}, {})",
+                        data.width, data.height, win_width, win_height, win_x, win_y
+                    );
+                    return crop_capture(
+                        data,
+                        win_x,
+                        win_y,
+                        win_width as i32,
+                        win_height as i32,
+                    );
+                }
+            }
+
+            // If stream_position is None (common on GNOME), try to detect content bounds
+            // by finding non-transparent/non-black pixels
+            let data = capture?;
+            if let Some((x, y, w, h)) = Self::detect_content_bounds(&data) {
+                eprintln!(
+                    "[capture] Window capture: auto-detected content bounds {}x{} at ({}, {}) from {}x{}",
+                    w, h, x, y, data.width, data.height
+                );
+                return crop_capture(data, x, y, w, h);
+            }
+            eprintln!(
+                "[capture] Window capture: no content bounds detected, returning full frame {}x{}",
+                data.width, data.height
+            );
+            return Ok(data);
+        }
+
         capture
+    }
+
+    /// Detect the bounding box of actual content in a captured frame.
+    /// Looks for non-transparent and non-black pixels to find the window content.
+    fn detect_content_bounds(data: &CaptureData) -> Option<(i32, i32, i32, i32)> {
+        if data.format != PixelFormat::RGBA32 {
+            return None;
+        }
+
+        let width = data.width as usize;
+        let height = data.height as usize;
+        let pixels = &data.pixels;
+
+        let mut min_x = width;
+        let mut min_y = height;
+        let mut max_x = 0;
+        let mut max_y = 0;
+        let mut found_content = false;
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = (y * width + x) * 4;
+                if idx + 3 >= pixels.len() {
+                    break;
+                }
+                let r = pixels[idx];
+                let g = pixels[idx + 1];
+                let b = pixels[idx + 2];
+                let a = pixels[idx + 3];
+
+                // Check if pixel is non-transparent and not pure black
+                // (window content should have some visible pixels)
+                if a > 0 && (r > 0 || g > 0 || b > 0) {
+                    min_x = min_x.min(x);
+                    min_y = min_y.min(y);
+                    max_x = max_x.max(x);
+                    max_y = max_y.max(y);
+                    found_content = true;
+                }
+            }
+        }
+
+        if !found_content || min_x >= max_x || min_y >= max_y {
+            return None;
+        }
+
+        // Add small padding to avoid cutting off edge pixels
+        let pad = 2;
+        let x = (min_x.saturating_sub(pad)) as i32;
+        let y = (min_y.saturating_sub(pad)) as i32;
+        let w = ((max_x - min_x + 1).min(width - min_x) + pad * 2) as i32;
+        let h = ((max_y - min_y + 1).min(height - min_y) + pad * 2) as i32;
+
+        // Only crop if the detected bounds are significantly smaller than the frame
+        // (at least 10% smaller in at least one dimension)
+        if w < (width as i32 * 90 / 100) || h < (height as i32 * 90 / 100) {
+            Some((x, y, w, h))
+        } else {
+            None
+        }
     }
 
     fn capture_monitor_via_screencast() -> DisplayResult<CaptureData> {

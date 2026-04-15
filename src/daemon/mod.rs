@@ -26,7 +26,7 @@ use ashpd::desktop::{
 use crate::{
     backend::DisplayBackend,
     capture::{
-        copy_capture_uri_to_clipboard, open_image_editor, save_capture, save_existing_png,
+        copy_capture_uri_to_clipboard, save_capture, save_existing_png,
         SaveConfig,
     },
     capture_overlay::{
@@ -2279,9 +2279,9 @@ fn apply_screenshot_after_capture_actions(
     }
 
     if config.after_capture_open_annotate {
-        if let Err(e) = open_image_editor(saved_path.clone()) {
-            eprintln!("[daemon] Failed to open annotate editor: {e}");
-        }
+        // Spawn editor as subprocess to avoid tokio runtime conflicts
+        // The editor runs its own GTK main loop which doesn't work inside tokio
+        spawn_editor_subprocess(saved_path.clone());
     }
 
     if config.after_capture_show_quick_access {
@@ -2576,6 +2576,16 @@ fn show_settings_subprocess() {
 
     if let Err(e) = std::process::Command::new(&exe).arg("settings").spawn() {
         eprintln!("[daemon] Failed to spawn settings window: {e}");
+    }
+}
+
+/// Spawn `apexshot edit <path>` as a subprocess so it gets its own process
+/// and doesn't conflict with the tokio runtime in the daemon.
+fn spawn_editor_subprocess(path: std::path::PathBuf) {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+
+    if let Err(e) = std::process::Command::new(&exe).arg("edit").arg(&path).spawn() {
+        eprintln!("[daemon] Failed to spawn editor subprocess: {e}");
     }
 }
 

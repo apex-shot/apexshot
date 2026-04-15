@@ -48,8 +48,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
@@ -57,6 +56,50 @@ async fn main() {
         std::process::exit(1);
     }
 
+    // Handle GTK-only commands BEFORE entering tokio runtime
+    // These commands run their own GTK main loop and don't need tokio
+    match args[1].as_str() {
+        "edit-internal" => {
+            if args.len() < 3 {
+                eprintln!("Error: missing image path");
+                std::process::exit(1);
+            }
+            let image_path = PathBuf::from(&args[2]);
+            if let Err(e) = open_image_editor(image_path) {
+                eprintln!("Editor failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "settings-internal" => {
+            if let Err(e) = show_settings_window() {
+                eprintln!("Failed to open settings window: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "preview" => {
+            if args.len() < 3 {
+                eprintln!("Error: preview requires a file path");
+                std::process::exit(1);
+            }
+            let path = std::path::PathBuf::from(&args[2]);
+            if let Err(e) = show_capture_preview_overlay(path) {
+                eprintln!("Preview failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    // For all other commands, run inside tokio runtime
+    tokio::runtime::Runtime::new()
+        .expect("Failed to create tokio runtime")
+        .block_on(async_main(args));
+}
+
+async fn async_main(args: Vec<String>) {
     match args[1].as_str() {
         "daemon" => {
             apexshot::gnome_shell::hide_recording_controls_best_effort();
@@ -111,20 +154,6 @@ async fn main() {
                 eprintln!("Hotkeys command failed: {e}");
                 std::process::exit(1);
             }
-        }
-        "preview" => {
-            // Show the capture preview overlay for a given file path.
-            // Spawned as a subprocess by the daemon to avoid GTK thread conflicts.
-            if args.len() < 3 {
-                eprintln!("Error: preview requires a file path");
-                std::process::exit(1);
-            }
-            let path = std::path::PathBuf::from(&args[2]);
-            if let Err(e) = show_capture_preview_overlay(path) {
-                eprintln!("Preview failed: {e}");
-                std::process::exit(1);
-            }
-            return;
         }
         "show-last-preview" => {
             if !trigger_daemon_action("show_last_preview").await {
@@ -239,12 +268,28 @@ async fn main() {
                 print_usage();
                 std::process::exit(1);
             }
-            run_edit(&args);
+            // Run editor as a subprocess to avoid tokio runtime conflicts
+            // The editor runs its own GTK main loop which doesn't play well with tokio
+            let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+            let status = std::process::Command::new(&exe)
+                .arg("edit-internal")
+                .arg(&args[2])
+                .status()
+                .expect("Failed to spawn editor");
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+            return;
         }
         "settings" => {
-            if let Err(e) = show_settings_window() {
-                eprintln!("Failed to open settings window: {e}");
-                std::process::exit(1);
+            // Run settings as a subprocess to avoid tokio runtime conflicts
+            let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+            let status = std::process::Command::new(&exe)
+                .arg("settings-internal")
+                .status()
+                .expect("Failed to spawn settings");
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
             }
             return;
         }
@@ -1461,14 +1506,6 @@ fn run_ocr(args: &[String]) {
             eprintln!("OCR failed: {}", e);
             std::process::exit(1);
         }
-    }
-}
-
-fn run_edit(args: &[String]) {
-    let image_path = PathBuf::from(&args[2]);
-    if let Err(e) = open_image_editor(image_path) {
-        eprintln!("Editor failed: {e}");
-        std::process::exit(1);
     }
 }
 

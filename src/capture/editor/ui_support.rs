@@ -399,7 +399,7 @@ pub fn install_editor_css() {
             button.editor-tool-button.active-tool {
                 background-color: #2a2a2a;
                 color: #ffffff;
-                border: 1px solid #ff9900;
+                border: 1px solid rgba(255, 255, 255, 0.18);
                 box-shadow: none;
             }
 
