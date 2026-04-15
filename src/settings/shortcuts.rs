@@ -516,28 +516,28 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         "Crosshair Capture:",
         None,
         &config.shortcut_capture_crosshair,
-        false,
+        true,
     );
     let capture_prev_btn = create_row(
         &screenshots_frame,
         "Capture Previous Area:",
         None,
         &config.shortcut_capture_previous_area,
-        true,
+        false,
     );
     let capture_fullscreen_btn = create_row(
         &screenshots_frame,
         "Capture Full Screen:",
         None,
         &config.shortcut_capture_fullscreen,
-        false,
+        true,
     );
     let capture_window_btn = create_row(
         &screenshots_frame,
         "Capture Window:",
         None,
         &config.shortcut_capture_window,
-        true,
+        false,
     );
     section.append(&screenshots_frame);
 
@@ -562,28 +562,28 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         "Pause/Resume Recording:",
         Some("Only during recording"),
         &config.shortcut_recording_pause_resume,
-        true,
+        false,
     );
     let recording_stop_save_btn = create_row(
         &recording_frame,
         "Stop and Save Recording:",
         Some("Only during recording"),
         &config.shortcut_recording_stop_save,
-        false,
+        true,
     );
     let recording_restart_btn = create_row(
         &recording_frame,
         "Restart Recording:",
         Some("Only during recording"),
         &config.shortcut_recording_restart,
-        true,
+        false,
     );
     let recording_discard_btn = create_row(
         &recording_frame,
         "Discard Recording:",
         Some("Only during recording"),
         &config.shortcut_recording_discard,
-        false,
+        true,
     );
     section.append(&recording_frame);
 

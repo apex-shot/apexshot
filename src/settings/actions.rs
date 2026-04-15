@@ -68,18 +68,10 @@ pub struct SaveInputs {
     pub annotate_show_color_names: CheckButton,
     pub annotate_always_on_top: CheckButton,
     pub annotate_show_dock_icon: CheckButton,
-    pub rec_controls: CheckButton,
-    pub rec_display_time: CheckButton,
-    pub rec_hidpi: CheckButton,
     pub rec_notifications: CheckButton,
-    pub rec_cursor: CheckButton,
-    pub rec_clicks: CheckButton,
-    pub rec_keystrokes: CheckButton,
-    pub rec_key_filter: ComboBoxText,
-    pub rec_video_max_res: ComboBoxText,
-    pub rec_video_fps: ComboBoxText,
-    pub rec_video_mono: CheckButton,
-    pub rec_video_open_editor: CheckButton,
+    pub rec_countdown: CheckButton,
+    pub rec_remember_selection: CheckButton,
+    pub rec_display_time: CheckButton,
     pub wallpaper_mode_desktop: CheckButton,
     pub wallpaper_dont_change_on_space: CheckButton,
     pub wallpaper_mode_custom: CheckButton,
@@ -254,25 +246,10 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.annotate_always_on_top = inputs.annotate_always_on_top.is_active();
     config.annotate_show_dock_icon = inputs.annotate_show_dock_icon.is_active();
 
-    config.rec_controls = inputs.rec_controls.is_active();
-    config.rec_display_time = inputs.rec_display_time.is_active();
-    config.rec_hidpi = inputs.rec_hidpi.is_active();
     config.rec_notifications = inputs.rec_notifications.is_active();
-    config.rec_cursor = inputs.rec_cursor.is_active();
-    config.rec_clicks = inputs.rec_clicks.is_active();
-    config.rec_keystrokes = inputs.rec_keystrokes.is_active();
-    config.rec_key_filter = combo_value(&inputs.rec_key_filter, "0")
-        .parse::<u8>()
-        .unwrap_or(0);
-    config.rec_video_format = 0;
-    config.rec_video_max_res = combo_value(&inputs.rec_video_max_res, "0")
-        .parse::<u8>()
-        .unwrap_or(0);
-    config.rec_video_fps = combo_value(&inputs.rec_video_fps, "1")
-        .parse::<u8>()
-        .unwrap_or(1);
-    config.rec_video_mono = inputs.rec_video_mono.is_active();
-    config.rec_video_open_editor = inputs.rec_video_open_editor.is_active();
+    config.rec_countdown = inputs.rec_countdown.is_active();
+    config.rec_remember_selection = inputs.rec_remember_selection.is_active();
+    config.rec_display_time = inputs.rec_display_time.is_active();
 
     config.wallpaper_dont_change_on_space = inputs.wallpaper_dont_change_on_space.is_active();
     config.window_screenshot_padding = inputs.window_screenshot_padding.value();
