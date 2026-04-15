@@ -18,7 +18,6 @@ mod recording;
 mod screenshots;
 mod shortcuts;
 pub(crate) mod ui_support;
-mod wallpaper;
 pub(crate) mod windowing;
 
 use self::{
@@ -157,7 +156,6 @@ fn build_settings_window(app: &Application) {
 
     let labels = [
         ("General", "preferences-system-symbolic"),
-        ("Wallpaper", "image-x-generic-symbolic"),
         ("Shortcuts", "input-keyboard-symbolic"),
         ("Quick Access", "starred-symbolic"),
         ("Recording", "camera-video-symbolic"),
@@ -252,7 +250,6 @@ fn build_settings_window(app: &Application) {
     let shortcuts = shortcuts::build_shortcuts_section(&config);
     shortcuts::install_shortcut_editors(&shortcuts, &window);
     let quick_access = build_quick_access_section(&config);
-    let wallpaper = wallpaper::build_wallpaper_section(&config);
 
     let after_capture_separator = Separator::new(Orientation::Horizontal);
     after_capture_separator.set_margin_top(8);
@@ -342,15 +339,14 @@ fn build_settings_window(app: &Application) {
     }
 
     add_section(&stack, &general_tab_section, "0", "General");
-    add_section(&stack, &wallpaper.section, "1", "Wallpaper");
-    add_section(&stack, &shortcuts.section, "2", "Shortcuts");
-    add_section(&stack, &quick_access.section, "3", "Quick Access");
-    add_section(&stack, &recordings.section, "4", "Recording");
-    add_section(&stack, &screenshots.section, "5", "Screenshots");
-    add_section(&stack, &annotate.section, "6", "Annotate");
-    add_section(&stack, &cloud.section, "7", "Cloud");
-    add_section(&stack, &advanced.section, "8", "Advanced");
-    add_section(&stack, &about.section, "9", "About");
+    add_section(&stack, &shortcuts.section, "1", "Shortcuts");
+    add_section(&stack, &quick_access.section, "2", "Quick Access");
+    add_section(&stack, &recordings.section, "3", "Recording");
+    add_section(&stack, &screenshots.section, "4", "Screenshots");
+    add_section(&stack, &annotate.section, "5", "Annotate");
+    add_section(&stack, &cloud.section, "6", "Cloud");
+    add_section(&stack, &advanced.section, "7", "Advanced");
+    add_section(&stack, &about.section, "8", "About");
 
     body_frame.append(&stack);
 
@@ -416,16 +412,6 @@ fn build_settings_window(app: &Application) {
         rec_countdown: recordings.rec_countdown_check.clone(),
         rec_remember_selection: recordings.rec_remember_selection_check.clone(),
         rec_display_time: recordings.rec_display_time_check.clone(),
-        wallpaper_mode_desktop: wallpaper.wallpaper_mode_desktop.clone(),
-        wallpaper_dont_change_on_space: wallpaper.wallpaper_dont_change_check.clone(),
-        wallpaper_mode_custom: wallpaper.wallpaper_mode_custom.clone(),
-        wallpaper_custom_path_btn: wallpaper.wallpaper_custom_path_btn.clone(),
-        wallpaper_mode_color: wallpaper.wallpaper_mode_color.clone(),
-        wallpaper_color_btn: wallpaper.wallpaper_color_btn.clone(),
-        window_screenshot_mode_full: wallpaper.window_screenshot_mode_full.clone(),
-        window_screenshot_mode_trans: wallpaper.window_screenshot_mode_trans.clone(),
-        window_screenshot_padding: wallpaper.window_screenshot_padding_input.clone(),
-        window_screenshot_shadow: wallpaper.window_screenshot_shadow_check.clone(),
         shortcut_open_file: shortcuts.open_file_btn.clone(),
         shortcut_open_from_clipboard: shortcuts.open_clipboard_btn.clone(),
         shortcut_restore_recently_closed: shortcuts.restore_file_btn.clone(),

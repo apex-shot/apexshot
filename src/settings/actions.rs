@@ -3,7 +3,7 @@ use crate::{
     daemon::{set_daemon_tray_visibility, start_daemon_subprocess, stop_daemon_via_dbus},
 };
 use gtk4::prelude::*;
-use gtk4::{Button, CheckButton, ColorButton, ComboBoxText, Entry, Scale};
+use gtk4::{Button, CheckButton, ComboBoxText, Entry, Scale};
 
 use super::windowing::{install_autostart_entry_for_current_exe, uninstall_autostart_entry};
 
@@ -72,16 +72,6 @@ pub struct SaveInputs {
     pub rec_countdown: CheckButton,
     pub rec_remember_selection: CheckButton,
     pub rec_display_time: CheckButton,
-    pub wallpaper_mode_desktop: CheckButton,
-    pub wallpaper_dont_change_on_space: CheckButton,
-    pub wallpaper_mode_custom: CheckButton,
-    pub wallpaper_custom_path_btn: Button,
-    pub wallpaper_mode_color: CheckButton,
-    pub wallpaper_color_btn: ColorButton,
-    pub window_screenshot_mode_full: CheckButton,
-    pub window_screenshot_mode_trans: CheckButton,
-    pub window_screenshot_padding: Scale,
-    pub window_screenshot_shadow: CheckButton,
     pub shortcut_open_file: Button,
     pub shortcut_open_from_clipboard: Button,
     pub shortcut_restore_recently_closed: Button,
@@ -250,10 +240,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.rec_countdown = inputs.rec_countdown.is_active();
     config.rec_remember_selection = inputs.rec_remember_selection.is_active();
     config.rec_display_time = inputs.rec_display_time.is_active();
-
-    config.wallpaper_dont_change_on_space = inputs.wallpaper_dont_change_on_space.is_active();
-    config.window_screenshot_padding = inputs.window_screenshot_padding.value();
-    config.window_screenshot_shadow = inputs.window_screenshot_shadow.is_active();
 
     config.shortcut_open_file = button_label_value(&inputs.shortcut_open_file);
     config.shortcut_open_from_clipboard = button_label_value(&inputs.shortcut_open_from_clipboard);
