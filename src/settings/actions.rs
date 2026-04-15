@@ -91,7 +91,6 @@ pub struct SaveInputs {
     pub cloud_copy_to_clipboard: ComboBoxText,
     pub cloud_show_recently_uploaded: CheckButton,
     pub cloud_ask_name_tags: CheckButton,
-    pub adv_ask_name_after_capture: CheckButton,
     pub adv_retina_suffix: CheckButton,
     pub adv_clipboard_mode: ComboBoxText,
     pub adv_ocr_language: ComboBoxText,
@@ -264,7 +263,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.cloud_show_recently_uploaded = inputs.cloud_show_recently_uploaded.is_active();
     config.cloud_ask_name_tags = inputs.cloud_ask_name_tags.is_active();
 
-    config.adv_ask_name_after_capture = inputs.adv_ask_name_after_capture.is_active();
     config.adv_retina_suffix = inputs.adv_retina_suffix.is_active();
     config.adv_clipboard_mode = combo_value(&inputs.adv_clipboard_mode, "File & Image (default)");
 

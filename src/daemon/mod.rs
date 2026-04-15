@@ -2204,39 +2204,6 @@ fn screenshot_save_config() -> SaveConfig {
     screenshot_save_config_from(&app_config)
 }
 
-fn screenshot_save_config_with_prefix(prefix: &str) -> SaveConfig {
-    let app_config = load_config().sanitized();
-    let mut save_config = screenshot_save_config_from(&app_config);
-    save_config = save_config.with_prefix(prefix);
-    save_config
-}
-
-fn prompt_for_filename() -> Option<String> {
-    use std::process::Command;
-    
-    let output = Command::new("zenity")
-        .args([
-            "--entry",
-            "--title=Save Screenshot",
-            "--text=Enter filename:",
-            "--entry-text=ApexShot",
-        ])
-        .output()
-        .ok()?;
-    
-    if output.status.success() {
-        let name = String::from_utf8_lossy(&output.stdout);
-        let name = name.trim();
-        if name.is_empty() {
-            None
-        } else {
-            Some(name.to_string())
-        }
-    } else {
-        None
-    }
-}
-
 fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
     let file_name = match sound_name {
         "Camera" => "camera.ogg",
@@ -2336,19 +2303,7 @@ fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonSt
         return;
     }
 
-    let save_config = if config.adv_ask_name_after_capture {
-        match prompt_for_filename() {
-            Some(name) => screenshot_save_config_with_prefix(&name),
-            None => {
-                eprintln!("[daemon] Filename prompt cancelled, using default");
-                screenshot_save_config()
-            }
-        }
-    } else {
-        screenshot_save_config()
-    };
-
-    match save_capture(&capture, &save_config) {
+    match save_capture(&capture, &screenshot_save_config()) {
         Ok(path) => {
             let path: std::path::PathBuf = path;
             eprintln!("[daemon] Saved: {}", path.display());

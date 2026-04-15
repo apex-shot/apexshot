@@ -431,7 +431,6 @@ fn build_settings_window(app: &Application) {
         cloud_copy_to_clipboard: cloud.cloud_clipboard_input.clone(),
         cloud_show_recently_uploaded: cloud.cloud_show_recent_check.clone(),
         cloud_ask_name_tags: cloud.cloud_ask_tags_check.clone(),
-        adv_ask_name_after_capture: advanced.ask_name_check.clone(),
         adv_retina_suffix: advanced.retina_suffix_check.clone(),
         adv_clipboard_mode: advanced.clipboard_mode_input.clone(),
         adv_ocr_language: advanced.ocr_lang_input.clone(),

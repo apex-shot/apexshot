@@ -6,7 +6,6 @@ use gtk4::{
 #[allow(dead_code)]
 pub struct AdvancedSettingsWidgets {
     pub section: GtkBox,
-    pub ask_name_check: CheckButton,
     pub retina_suffix_check: CheckButton,
     pub clipboard_mode_input: ComboBoxText,
     pub ocr_lang_input: ComboBoxText,
@@ -67,18 +66,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     format_vbox.append(&format_hint);
     format_hbox.append(&format_vbox);
     filename_frame.append(&build_row!(&format_hbox, false));
-
-    // Ask name after capture
-    let ask_name_check = CheckButton::new();
-    ask_name_check.set_active(config.adv_ask_name_after_capture);
-    let ask_name_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    ask_name_hbox.set_hexpand(true);
-    let lbl_ask_name = Label::new(Some("Ask for name after capture"));
-    lbl_ask_name.set_xalign(0.0);
-    lbl_ask_name.set_hexpand(true);
-    ask_name_hbox.append(&lbl_ask_name);
-    ask_name_hbox.append(&ask_name_check);
-    filename_frame.append(&build_row!(&ask_name_hbox, true));
 
     // HiDPI/Retina suffix
     let retina_suffix_check = CheckButton::new();
@@ -177,7 +164,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
 
     AdvancedSettingsWidgets {
         section,
-        ask_name_check,
         retina_suffix_check,
         clipboard_mode_input,
         ocr_lang_input,
