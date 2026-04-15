@@ -144,7 +144,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     // Clipboard
     let cloud_clipboard_input = ComboBoxText::new();
     cloud_clipboard_input.add_css_class("settings-select");
-    cloud_clipboard_input.append(Some("CleanShot Cloud link"), "CleanShot Cloud link");
+    cloud_clipboard_input.append(Some("ApexShot Cloud link"), "ApexShot Cloud link");
     cloud_clipboard_input.append(Some("Direct image link"), "Direct image link");
     cloud_clipboard_input.set_active_id(Some(&config.cloud_copy_to_clipboard));
     let clipboard_hbox = GtkBox::new(Orientation::Horizontal, 12);

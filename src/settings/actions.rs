@@ -94,9 +94,6 @@ pub struct SaveInputs {
     pub adv_ask_name_after_capture: CheckButton,
     pub adv_retina_suffix: CheckButton,
     pub adv_clipboard_mode: ComboBoxText,
-    pub adv_pinned_rounded_corners: CheckButton,
-    pub adv_pinned_shadow: CheckButton,
-    pub adv_pinned_border: CheckButton,
     pub adv_ocr_language: ComboBoxText,
     pub adv_ocr_keep_line_breaks: CheckButton,
 }
@@ -263,17 +260,15 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.cloud_screenshot_quality =
         combo_value(&inputs.cloud_screenshot_quality, "Optimized for sharing");
     config.cloud_copy_to_clipboard =
-        combo_value(&inputs.cloud_copy_to_clipboard, "CleanShot Cloud link");
+        combo_value(&inputs.cloud_copy_to_clipboard, "ApexShot Cloud link");
     config.cloud_show_recently_uploaded = inputs.cloud_show_recently_uploaded.is_active();
     config.cloud_ask_name_tags = inputs.cloud_ask_name_tags.is_active();
 
     config.adv_ask_name_after_capture = inputs.adv_ask_name_after_capture.is_active();
     config.adv_retina_suffix = inputs.adv_retina_suffix.is_active();
     config.adv_clipboard_mode = combo_value(&inputs.adv_clipboard_mode, "File & Image (default)");
-    config.adv_pinned_rounded_corners = inputs.adv_pinned_rounded_corners.is_active();
-    config.adv_pinned_shadow = inputs.adv_pinned_shadow.is_active();
-    config.adv_pinned_border = inputs.adv_pinned_border.is_active();
-    config.adv_ocr_language = combo_value(&inputs.adv_ocr_language, "English");
+
+    config.adv_ocr_language = combo_value(&inputs.adv_ocr_language, "eng");
     config.adv_ocr_keep_line_breaks = inputs.adv_ocr_keep_line_breaks.is_active();
 
     let config = config.sanitized();
