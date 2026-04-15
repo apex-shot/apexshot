@@ -353,7 +353,7 @@ fn generate_filename(config: &SaveConfig) -> String {
         datetime.format("%Y-%m-%d_%H-%M-%S").to_string()
     };
 
-    let prefix = config.filename_prefix.as_deref().unwrap_or("screenshot");
+    let prefix = config.filename_prefix.as_deref().unwrap_or("ApexShot");
     format!("{}{}.{}", prefix, timestamp, config.format.extension())
 }
 

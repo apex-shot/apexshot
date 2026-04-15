@@ -438,15 +438,6 @@ fn build_settings_window(app: &Application) {
         adv_ocr_keep_line_breaks: advanced.ocr_line_breaks_check.clone(),
     });
 
-    let edit_btn = advanced.filename_edit_btn.clone();
-    let win_weak = window.downgrade();
-    let config_clone = config.clone();
-    edit_btn.connect_clicked(move |_| {
-        if let Some(win) = win_weak.upgrade() {
-            advanced::show_filename_format_modal(&win, &config_clone);
-        }
-    });
-
     let trigger_save: Rc<dyn Fn()> = {
         let save_inputs = Rc::clone(&save_inputs);
         let toast = toast.clone();
