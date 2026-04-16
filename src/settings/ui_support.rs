@@ -597,14 +597,18 @@ const SETTINGS_CSS: &str = r#"
             .about-link-button {
                 background: transparent;
                 border: none;
-                color: @link_color;
+                color: #b05c38;
                 font-size: 13px;
-                box-shadow: none;
+                padding: 4px 8px;
+                border-radius: 4px;
+                transition: all 0.15s ease;
             }
             .about-link-button:hover {
-                background: transparent;
+                background: alpha(#b05c38, 0.08);
                 text-decoration: underline;
-                color: shade(@link_color, 0.8);
+            }
+            .editor-root.editor-theme-light .about-link-button {
+                color: #9a4c2c;
             }
 
             .cloud-avatar {

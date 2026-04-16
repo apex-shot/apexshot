@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Background Rounded Rectangle -->
+  <rect x="16" y="16" width="96" height="96" rx="14" ry="14" fill="#141414"/>
+
+  <!-- Left Wing - Apex Energy (#E95420) -->
+  <path d="M64 16 L16 112 L32 112 L64 88 L64 72 L48 72 L64 40 Z" fill="#E95420"/>
+
+  <!-- Right Wing - White -->
+  <path d="M64 16 L112 112 L96 112 L64 88 L64 72 L80 72 L64 40 Z" fill="#FFFFFF"/>
+
+  <!-- Lens Focus Dot (#E95420) -->
+  <circle cx="64" cy="56" r="4" fill="#E95420"/>
+</svg>

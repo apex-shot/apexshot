@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Align, Box as GtkBox, Button, Label, Orientation, Separator};
+use gtk4::{prelude::*, Align, Box as GtkBox, Button, Label, Orientation, Separator, show_uri};
 
 pub struct AboutSettingsWidgets {
     pub section: GtkBox,
@@ -102,7 +102,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     title.set_markup("Apex<span weight='light' alpha='50%'>s h o t</span>");
     title.add_css_class("about-app-name");
 
-    let version = Label::new(Some("Version 1.2.3 (789)"));
+    let version = Label::new(Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))));
     version.add_css_class("about-version-label");
 
     header_vbox.append(&drawing_area);
@@ -118,11 +118,17 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     check_btn.add_css_class("primary-settings-button");
     check_btn.set_width_request(200);
     check_btn.set_halign(Align::Center);
+    check_btn.connect_clicked(|_| {
+        let _ = show_uri(None::<&gtk4::Window>, "https://github.com/apex-shot/apexshot/releases", 0);
+    });
 
     let whats_new_btn = Button::with_label("What's New");
     whats_new_btn.add_css_class("secondary-settings-button");
     whats_new_btn.set_width_request(200);
     whats_new_btn.set_halign(Align::Center);
+    whats_new_btn.connect_clicked(|_| {
+        let _ = show_uri(None::<&gtk4::Window>, "https://github.com/apex-shot/apexshot/releases/latest", 0);
+    });
 
     update_vbox.append(&check_btn);
     update_vbox.append(&whats_new_btn);

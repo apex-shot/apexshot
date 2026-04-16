@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=ApexShot
+Comment=Screenshot and screen recording tool for Linux
+Exec=apexshot
+Icon=apexshot
+Type=Application
+Categories=Graphics;AudioVideo;
+Keywords=screenshot;capture;recording;screen;video;
+StartupNotify=true
+Terminal=false
