@@ -31,6 +31,17 @@ A premium, open-source Linux screen capture tool with annotation, recording, and
 | **System Tray** | ksni (KDE System Tray Integration) |
 | **Webcam** | GStreamer + v4l2 |
 
+## Download
+
+Download the latest `.deb` package from [GitHub Releases](https://github.com/apex-shot/apexshot/releases).
+
+```bash
+# Install the downloaded package
+sudo apt install ./apexshot_*.deb
+```
+
+Dependencies are automatically installed from your system's package manager.
+
 ## Installation
 
 ### System Dependencies (Ubuntu/Debian)
