@@ -43,6 +43,8 @@ use apexshot::{
         RecordingControlsParams, StopAction,
     },
     show_settings_window,
+    is_onboarding_complete,
+    show_onboarding_window,
 };
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -52,8 +54,13 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        print_usage();
-        std::process::exit(1);
+        // No arguments - show onboarding or settings based on completion
+        if is_onboarding_complete() {
+            let _ = show_settings_window();
+        } else {
+            let _ = show_onboarding_window();
+        }
+        return;
     }
 
     // Handle GTK-only commands BEFORE entering tokio runtime

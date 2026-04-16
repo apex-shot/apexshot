@@ -8,6 +8,7 @@ pub mod gnome_integration;
 pub mod gnome_shell;
 pub mod hotkeys;
 pub mod ocr;
+pub mod onboarding;
 pub mod overlay;
 pub mod qr;
 pub mod recording;
@@ -33,3 +34,4 @@ pub use overlay::{
 
 pub use recording::{start_recording, RecordError, RecordResult, RecordingConfig};
 pub use settings::show_settings_window;
+pub use onboarding::{is_onboarding_complete, show_onboarding_window};
