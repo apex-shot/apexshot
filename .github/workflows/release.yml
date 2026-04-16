@@ -50,6 +50,7 @@ jobs:
             gobject-introspection \
             valac \
             qtbase5-dev \
+            qt5x11extras-dev \
             pkg-config
 
       - name: Build gtk4-layer-shell from source
@@ -106,6 +107,7 @@ jobs:
             gobject-introspection \
             valac \
             qtbase5-dev \
+            qt5x11extras-dev \
             pkg-config
 
       - name: Build gtk4-layer-shell from source
