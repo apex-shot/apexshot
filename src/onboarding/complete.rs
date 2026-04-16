@@ -78,7 +78,7 @@ pub fn build(content: &gtk4::Box) {
     tip_box.set_margin_top(32);
     tip_box.set_halign(Align::Center);
 
-    let tip_title = Label::new(Some("💡 Tip"));
+    let tip_title = Label::new(Some("Pro Tip"));
     tip_title.add_css_class("settings-group-title");
     tip_title.set_halign(Align::Center);
     tip_box.append(&tip_title);

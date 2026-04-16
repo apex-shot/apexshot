@@ -61,7 +61,7 @@ pub fn build(content: &GtkBox) {
     content.append(&drawing_area);
 
     // Title
-    let title = Label::new(Some("Welcome to ApexShot!"));
+    let title = Label::new(Some("Welcome to ApexShot"));
     title.add_css_class("settings-page-title");
     title.set_halign(Align::Center);
     content.append(&title);
@@ -81,10 +81,10 @@ pub fn build(content: &GtkBox) {
     features_box.set_halign(Align::Center);
 
     let features = [
-        "✦ Area & fullscreen capture",
-        "✦ Built-in annotation editor",
-        "✦ Screen recording with audio",
-        "✦ OCR text extraction",
+        "Area & fullscreen capture",
+        "Built-in annotation editor",
+        "Screen recording with audio",
+        "OCR text extraction",
     ];
 
     for feature in features {

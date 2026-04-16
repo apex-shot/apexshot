@@ -91,8 +91,8 @@ fn build_onboarding_window(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Setup")
-        .default_width(480)
-        .default_height(520)
+        .default_width(1020)
+        .default_height(840)
         .decorated(false)
         .build();
 

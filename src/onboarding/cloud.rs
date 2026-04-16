@@ -7,15 +7,9 @@ fn open_url(url: &str) {
 }
 
 pub fn build(content: &gtk4::Box) {
-    // Icon
-    let icon = Label::new(Some("☁️"));
-    icon.set_halign(Align::Center);
-    icon.add_css_class("onboarding-step-icon");
-    content.append(&icon);
-
     // Title
     let title = Label::new(Some("Cloud Sync"));
-    let subtitle = Label::new(Some("(Coming Soon)"));
+    let subtitle = Label::new(Some("Coming Soon"));
     subtitle.add_css_class("settings-sub-option-hint");
     subtitle.set_margin_start(8);
 
@@ -38,9 +32,9 @@ pub fn build(content: &gtk4::Box) {
     features_box.set_halign(Align::Center);
 
     let features = [
-        "✦ Sync captures across devices",
-        "✦ Instant share links",
-        "✦ Cloud storage integration",
+        "Sync captures across devices",
+        "Instant share links",
+        "Cloud storage integration",
     ];
 
     for feature in features {

@@ -9,12 +9,6 @@ fn open_url(url: &str) {
 }
 
 pub fn build_gnome(content: &gtk4::Box) {
-    // Icon
-    let icon = Label::new(Some("🖥️"));
-    icon.set_halign(Align::Center);
-    icon.add_css_class("onboarding-step-icon");
-    content.append(&icon);
-
     // Title
     let title = Label::new(Some("GNOME Shell Extension"));
     title.add_css_class("settings-page-title");
@@ -36,9 +30,9 @@ pub fn build_gnome(content: &gtk4::Box) {
     features_box.set_halign(Align::Center);
 
     let features = [
-        "✦ Floating preview windows",
-        "✦ Quick access overlay",
-        "✦ Recording status indicator",
+        "Floating preview windows",
+        "Quick access overlay",
+        "Recording status indicator",
     ];
 
     for feature in features {
@@ -60,12 +54,6 @@ pub fn build_gnome(content: &gtk4::Box) {
 }
 
 pub fn build_chrome(content: &gtk4::Box) {
-    // Icon
-    let icon = Label::new(Some("🌐"));
-    icon.set_halign(Align::Center);
-    icon.add_css_class("onboarding-step-icon");
-    content.append(&icon);
-
     // Title
     let title = Label::new(Some("Browser Extension"));
     title.add_css_class("settings-page-title");
@@ -87,8 +75,8 @@ pub fn build_chrome(content: &gtk4::Box) {
     features_box.set_halign(Align::Center);
 
     let features = [
-        "✦ Full-page scroll capture",
-        "✦ Sends directly to ApexShot",
+        "Full-page scroll capture",
+        "Sends directly to ApexShot",
     ];
 
     for feature in features {
