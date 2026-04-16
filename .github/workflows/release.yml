@@ -49,6 +49,7 @@ jobs:
             ninja-build \
             gobject-introspection \
             valac \
+            qtbase5-dev \
             pkg-config
 
       - name: Build gtk4-layer-shell from source
@@ -104,6 +105,7 @@ jobs:
             ninja-build \
             gobject-introspection \
             valac \
+            qtbase5-dev \
             pkg-config
 
       - name: Build gtk4-layer-shell from source
