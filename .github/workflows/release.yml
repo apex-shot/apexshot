@@ -48,6 +48,7 @@ jobs:
             meson \
             ninja-build \
             gobject-introspection \
+            valac \
             pkg-config
 
       - name: Build gtk4-layer-shell from source
@@ -102,6 +103,7 @@ jobs:
             meson \
             ninja-build \
             gobject-introspection \
+            valac \
             pkg-config
 
       - name: Build gtk4-layer-shell from source
