@@ -45,6 +45,7 @@ jobs:
             libx11-dev \
             libwayland-dev \
             libdbus-1-dev \
+            libgtk4-layer-shell-dev \
             pkg-config
 
       - name: Build
@@ -88,6 +89,7 @@ jobs:
             libx11-dev \
             libwayland-dev \
             libdbus-1-dev \
+            libgtk4-layer-shell-dev \
             pkg-config
 
       - name: Install cargo-deb
