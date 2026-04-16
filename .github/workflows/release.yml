@@ -47,6 +47,7 @@ jobs:
             libdbus-1-dev \
             meson \
             ninja-build \
+            gobject-introspection \
             pkg-config
 
       - name: Build gtk4-layer-shell from source
@@ -100,6 +101,7 @@ jobs:
             libdbus-1-dev \
             meson \
             ninja-build \
+            gobject-introspection \
             pkg-config
 
       - name: Build gtk4-layer-shell from source
