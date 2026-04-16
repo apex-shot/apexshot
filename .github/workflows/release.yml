@@ -43,6 +43,7 @@ jobs:
             libtesseract-dev \
             libxkbcommon-dev \
             libx11-dev \
+            libxtst-dev \
             libwayland-dev \
             libdbus-1-dev \
             meson \
@@ -100,6 +101,7 @@ jobs:
             libtesseract-dev \
             libxkbcommon-dev \
             libx11-dev \
+            libxtst-dev \
             libwayland-dev \
             libdbus-1-dev \
             meson \
