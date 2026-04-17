@@ -52,6 +52,12 @@ fn deb_package_includes_capture_helper_binary() {
     );
 
     assert!(
+        release_section.contains("clang")
+            && release_section.contains("libclang-dev"),
+        "containerized release job should install clang and libclang-dev for bindgen build scripts"
+    );
+
+    assert!(
         release_section.contains("ninja -C build install")
             && release_section.contains("ldconfig")
             && !release_section.contains("sudo ninja -C build install"),

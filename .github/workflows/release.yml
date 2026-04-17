@@ -98,7 +98,9 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
+            clang \
             libgtk-4-dev \
+            libclang-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
             libgstreamer-plugins-bad1.0-dev \
