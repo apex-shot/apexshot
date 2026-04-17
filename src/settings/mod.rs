@@ -36,7 +36,7 @@ use self::{
 
 pub fn show_settings_window() -> anyhow::Result<()> {
     let app = Application::builder()
-        .application_id("com.apexshot.settings")
+        .application_id("io.github.codegoddy.apexshot")
         .build();
 
     app.connect_activate(|application| {
