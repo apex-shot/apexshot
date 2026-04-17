@@ -123,8 +123,13 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb
 
+      - name: Stage capture helper for Debian packaging
+        run: |
+          mkdir -p packaging/deb
+          cp target/release/apexshot-capture packaging/deb/apexshot-capture
+
       - name: Build .deb package
-        run: cargo deb --verbose
+        run: cargo deb --no-build --verbose
 
       - name: Get version from tag
         id: get_version
