@@ -83,34 +83,15 @@ fn apex_icon(size: i32) -> ksni::Icon {
     let s = size as f64 / 24.0;
     cr.scale(s, s);
 
-    // Left Wing - Apex Energy (#E95420)
-    cr.set_source_rgba(0.913, 0.329, 0.125, 1.0);
-    cr.move_to(12.0, 2.0);
-    cr.line_to(2.0, 22.0);
-    cr.line_to(4.0, 22.0);
-    cr.line_to(12.0, 18.0);
-    cr.line_to(12.0, 14.0);
-    cr.line_to(8.0, 14.0);
-    cr.line_to(12.0, 6.0);
-    cr.close_path();
-    cr.fill().expect("Failed to draw tray icon left wing");
-
-    // Right Wing - Tech Structure (White)
-    cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-    cr.move_to(12.0, 2.0);
-    cr.line_to(22.0, 22.0);
-    cr.line_to(20.0, 22.0);
-    cr.line_to(12.0, 18.0);
-    cr.line_to(12.0, 14.0);
-    cr.line_to(16.0, 14.0);
-    cr.line_to(12.0, 6.0);
-    cr.close_path();
-    cr.fill().expect("Failed to draw tray icon right wing");
-
-    // Lens Focus Dot (#E95420)
-    cr.set_source_rgba(0.913, 0.329, 0.125, 1.0);
-    cr.arc(12.0, 10.5, 1.5, 0.0, 2.0 * std::f64::consts::PI);
-    cr.fill().expect("Failed to draw tray icon focus dot");
+    // Draw the new logo: curved arch shape
+    // Path: M 2 21 C 6 21, 8 2, 12 2 C 16 2, 18 21, 22 21
+    cr.set_source_rgba(0.913, 0.329, 0.125, 1.0); // #E95420
+    cr.set_line_width(2.5);
+    cr.set_line_cap(gtk4::cairo::LineCap::Round);
+    cr.move_to(2.0, 21.0);
+    cr.curve_to(6.0, 21.0, 8.0, 2.0, 12.0, 2.0);
+    cr.curve_to(16.0, 2.0, 18.0, 21.0, 22.0, 21.0);
+    cr.stroke().expect("Failed to draw tray icon logo");
 
     drop(cr);
     surface.flush();
