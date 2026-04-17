@@ -123,6 +123,9 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb
 
+      - name: Build release binaries
+        run: cargo build --release --verbose
+
       - name: Stage capture helper for Debian packaging
         run: |
           mkdir -p packaging/deb

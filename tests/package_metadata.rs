@@ -17,4 +17,10 @@ fn deb_package_includes_capture_helper_binary() {
         workflow.contains("cargo deb --no-build --verbose"),
         "release workflow must package the already-built binaries with cargo deb --no-build"
     );
+
+    assert!(
+        workflow.contains("- name: Build release binaries")
+            && workflow.contains("cargo build --release --verbose"),
+        "release workflow must build release binaries before staging apexshot-capture"
+    );
 }
