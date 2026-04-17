@@ -53,8 +53,9 @@ fn deb_package_includes_capture_helper_binary() {
 
     assert!(
         release_section.contains("clang")
+            && release_section.contains("cmake")
             && release_section.contains("libclang-dev"),
-        "containerized release job should install clang and libclang-dev for bindgen build scripts"
+        "containerized release job should install clang, cmake, and libclang-dev for native helper and bindgen build scripts"
     );
 
     assert!(
