@@ -2,6 +2,10 @@
 fn deb_package_includes_capture_helper_binary() {
     let cargo_toml = include_str!("../Cargo.toml");
     let workflow = include_str!("../.github/workflows/release.yml");
+    let release_section = workflow
+        .split("  release:\n")
+        .nth(1)
+        .expect("workflow should contain a release job");
 
     assert!(
         cargo_toml.contains("[\"packaging/deb/apexshot-capture\", \"usr/bin/\", \"755\"]"),
@@ -14,29 +18,43 @@ fn deb_package_includes_capture_helper_binary() {
     );
 
     assert!(
-        workflow.contains("cp target/release/apexshot-capture packaging/deb/apexshot-capture"),
+        release_section.contains("cp target/release/apexshot-capture packaging/deb/apexshot-capture"),
         "release workflow must stage apexshot-capture into packaging/deb before running cargo-deb"
     );
 
     assert!(
-        workflow.contains("cargo deb --no-build --verbose"),
+        release_section.contains("cargo deb --no-build --verbose"),
         "release workflow must package the already-built binaries with cargo deb --no-build"
     );
 
     assert!(
-        workflow.contains("- name: Build release binaries")
-            && workflow.contains("cargo build --release --verbose"),
+        release_section.contains("- name: Build release binaries")
+            && release_section.contains("cargo build --release --verbose"),
         "release workflow must build release binaries before staging apexshot-capture"
     );
 
     assert!(
-        workflow.contains("image: ubuntu:25.10"),
+        release_section.contains("image: ubuntu:25.10"),
         "release workflow must build release artifacts in an Ubuntu 25.10 container to match the target OCR ABI"
     );
 
     assert!(
-        workflow.contains("- name: Bootstrap container tooling")
-            && workflow.contains("apt-get install -y curl ca-certificates git"),
+        release_section.contains("- name: Bootstrap container tooling")
+            && release_section.contains("apt-get install -y curl ca-certificates git"),
         "release workflow container must install curl, certificates, and git before invoking the Rust toolchain action"
+    );
+
+    assert!(
+        release_section.contains("apt-get update")
+            && release_section.contains("apt-get install -y")
+            && !release_section.contains("sudo apt-get update"),
+        "containerized release job should install packages without sudo"
+    );
+
+    assert!(
+        release_section.contains("ninja -C build install")
+            && release_section.contains("ldconfig")
+            && !release_section.contains("sudo ninja -C build install"),
+        "containerized release job should install gtk4-layer-shell without sudo"
     );
 }
