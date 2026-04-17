@@ -1,6 +1,6 @@
 [package]
 name = "apexshot"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 description = "Screenshot and screen recording tool for Linux"
 license = "GPL-3.0"

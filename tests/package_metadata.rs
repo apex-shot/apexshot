@@ -33,4 +33,10 @@ fn deb_package_includes_capture_helper_binary() {
         workflow.contains("image: ubuntu:25.10"),
         "release workflow must build release artifacts in an Ubuntu 25.10 container to match the target OCR ABI"
     );
+
+    assert!(
+        workflow.contains("- name: Bootstrap container tooling")
+            && workflow.contains("apt-get install -y curl ca-certificates git"),
+        "release workflow container must install curl, certificates, and git before invoking the Rust toolchain action"
+    );
 }
