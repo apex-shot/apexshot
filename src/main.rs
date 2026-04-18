@@ -104,9 +104,14 @@ fn main() {
         }
         // Check if daemon D-Bus name is already registered (another instance starting)
         if is_daemon_dbus_name_registered() {
-            // Daemon is starting up, wait and try to call settings
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            let _ = trigger_daemon_action_blocking("settings");
+            // Daemon is starting up, retry a few times with increasing delay
+            for delay in [100, 200, 400, 800] {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                if trigger_daemon_action_blocking("settings") {
+                    return;
+                }
+            }
+            eprintln!("Warning: Daemon D-Bus name registered but not responding");
             return;
         }
         // No daemon running - start one
@@ -114,8 +119,14 @@ fn main() {
         let _ = std::process::Command::new(&exe)
             .arg("daemon")
             .spawn();
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let _ = trigger_daemon_action_blocking("settings");
+        // Retry with exponential backoff to wait for daemon to initialize
+        for delay in [200, 400, 800, 1600] {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            if trigger_daemon_action_blocking("settings") {
+                return;
+            }
+        }
+        eprintln!("Warning: Daemon started but not responding to settings action");
         return;
     }
 
@@ -367,6 +378,7 @@ async fn async_main(args: Vec<String>) {
             }
             return;
         }
+        "--version" | "-V" => println!("apexshot {}", env!("CARGO_PKG_VERSION")),
         "--help" | "-h" => print_usage(),
         "install" => {
             run_install(&args);
@@ -386,6 +398,7 @@ async fn async_main(args: Vec<String>) {
 fn run_install(args: &[String]) {
     let mut no_autostart = false;
     let mut no_binary = false;
+    let mut force = false;
     let mut extension_id: Option<String> = None;
 
     let mut i = 2;
@@ -397,6 +410,10 @@ fn run_install(args: &[String]) {
             }
             "--no-binary" => {
                 no_binary = true;
+                i += 1;
+            }
+            "--force" => {
+                force = true;
                 i += 1;
             }
             "--extension-id" => {
@@ -415,7 +432,7 @@ fn run_install(args: &[String]) {
     }
 
     if !no_binary {
-        install_binary();
+        install_binary(force);
     }
 
     if !no_autostart {
@@ -457,7 +474,25 @@ fn run_uninstall(args: &[String]) {
     }
 }
 
-fn install_binary() {
+/// Query an installed apexshot binary for its version string.
+/// Returns `None` if the binary cannot be executed or the version cannot be parsed.
+fn get_installed_version(binary: &std::path::Path) -> Option<String> {
+    let output = std::process::Command::new(binary)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Expected format: "apexshot 0.2.14"
+    stdout
+        .trim()
+        .strip_prefix("apexshot ")
+        .map(|v| v.to_string())
+}
+
+fn install_binary(force: bool) {
     use std::os::unix::fs::PermissionsExt;
 
     let dest = std::path::Path::new("/usr/local/bin/apexshot");
@@ -465,6 +500,26 @@ fn install_binary() {
 
     let src = std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("target/release/apexshot"));
+
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    // Check if an existing installation is present and compare versions.
+    if dest.exists() && !force {
+        let installed_version = get_installed_version(dest);
+        match installed_version {
+            Some(ref v) if v == current_version => {
+                println!("ApexShot {} is already installed at {}. Use --force to reinstall.", current_version, dest.display());
+                return;
+            }
+            Some(ref v) => {
+                println!("Updating ApexShot {} → {}", v, current_version);
+            }
+            None => {
+                // Could not determine version — proceed with install (likely a dev build or corrupted).
+                println!("Existing installation found at {}. Updating to {}.", dest.display(), current_version);
+            }
+        }
+    }
 
     println!("Installing binary: {} → {}", src.display(), dest.display());
 
@@ -970,6 +1025,7 @@ fn print_usage() {
     println!("  settings          Open settings window");
     println!("  native-host <sub> Install/uninstall native messaging host");
     println!("  install           Install binary to /usr/local/bin/ and set up autostart");
+    println!("  --version / -V    Print version");
     println!("  uninstall         Remove autostart entry (and native host manifests by default)");
     println!();
 
@@ -1008,6 +1064,7 @@ fn print_usage() {
     println!("Install options:");
     println!("  --no-autostart            Skip autostart desktop file");
     println!("  --no-binary               Skip binary copy to /usr/local/bin");
+    println!("  --force                   Reinstall even if the same version is already installed");
     println!("  --extension-id <id>       Also install native host manifest for extension");
     println!();
     println!("Native host subcommands:");
