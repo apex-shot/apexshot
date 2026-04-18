@@ -1,6 +1,6 @@
 [package]
 name = "apexshot"
-version = "0.2.11"
+version = "0.2.12"
 edition = "2021"
 description = "Screenshot and screen recording tool for Linux"
 license = "GPL-3.0"
@@ -81,5 +81,5 @@ assets = [
     ["target/release/apexshot", "usr/bin/", "755"],
     ["packaging/deb/apexshot-capture", "usr/bin/", "755"],
     ["packaging/apexshot.desktop", "usr/share/applications/io.github.codegoddy.apexshot.desktop", "644"],
-    ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/apexshot.svg", "644"],
 ]

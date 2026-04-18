@@ -50,16 +50,45 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
+fn trigger_daemon_action_blocking(action: &str) -> bool {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let proxy = match zbus::blocking::Proxy::new(
+        &conn,
+        "org.apexshot.Daemon",
+        "/org/apexshot/Daemon",
+        "org.apexshot.Daemon",
+    ) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    proxy
+        .call::<_, _, ()>("Trigger", &(action.to_string(),))
+        .is_ok()
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        // No arguments - show onboarding or settings based on completion
-        if is_onboarding_complete() {
-            let _ = show_settings_window();
-        } else {
-            let _ = show_onboarding_window();
+        // No arguments - try to delegate to daemon if running
+        // This ensures single-instance behavior and proper tray init
+        if trigger_daemon_action_blocking("settings") {
+            return;
         }
+        // Daemon not running - if onboarding not complete, show that first
+        // Otherwise start daemon (initializes tray) then show settings
+        if !is_onboarding_complete() {
+            let _ = show_onboarding_window();
+            return;
+        }
+        let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+        let _ = std::process::Command::new(&exe)
+            .arg("daemon")
+            .spawn();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let _ = trigger_daemon_action_blocking("settings");
         return;
     }
 
