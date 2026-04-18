@@ -263,10 +263,31 @@ fn ensure_desktop_entry(app_id: &str) -> anyhow::Result<PathBuf> {
 
     // Minimal desktop entry: GlobalShortcuts uses this to associate the app_id with the caller.
     // Exec must reference a resolvable binary; otherwise GLib may ignore the app info.
-    let content = format!(
-        "[Desktop Entry]\nType=Application\nName=ApexShot\nExec={}\nTerminal=false\nCategories=Utility;\n",
-        desktop_exec_value()
-    );
+    let is_daemon = app_id.ends_with(".daemon");
+    let content = if is_daemon {
+        // desktop_exec_value() already includes "daemon" suffix
+        format!(
+            "[Desktop Entry]\nType=Application\nName=ApexShot Daemon\nExec={}\nTerminal=false\nCategories=Utility;\nNoDisplay=true\n",
+            desktop_exec_value()
+        )
+    } else {
+        // For the main app, Exec should just be the binary (no daemon)
+        let exe = if std::path::Path::new("/usr/bin/apexshot").exists() {
+            "/usr/bin/apexshot".to_string()
+        } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
+            "/usr/local/bin/apexshot".to_string()
+        } else {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "apexshot".to_string())
+        };
+        let escaped_exe = exe.replace('\\', "\\\\").replace(' ', "\\ ");
+        format!(
+            "[Desktop Entry]\nType=Application\nName=ApexShot\nExec={}\nTerminal=false\nCategories=Utility;\n",
+            escaped_exe
+        )
+    };
 
     if let Ok(existing) = std::fs::read_to_string(&path) {
         if existing == content {

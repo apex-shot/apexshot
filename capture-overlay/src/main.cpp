@@ -4,6 +4,7 @@
 #include "ScreenCapture.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QPixmap>
 #include <QSize>
 #include <QScreen>
@@ -218,6 +219,8 @@ int main(int argc, char* argv[])
 
     QApplication app(argc, argv);
     app.setApplicationName("ApexShot Capture");
+    app.setDesktopFileName("io.github.codegoddy.apexshot");
+    app.setWindowIcon(QIcon::fromTheme("io.github.codegoddy.apexshot"));
 
     if (!QDBusConnection::sessionBus().isConnected()) {
         std::fprintf(stderr, "apexshot-capture: session bus not connected: %s\n", 

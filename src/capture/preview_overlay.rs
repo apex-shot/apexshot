@@ -5,7 +5,7 @@ use gtk4::{
     gdk,
     glib::{self, ControlFlow},
     prelude::*,
-    Align, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea, EventControllerKey,
+    Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea, EventControllerKey,
     EventControllerMotion, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -110,46 +110,51 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
         return Err(CapturePreviewError::MissingFile(path));
     }
 
-    if let Err(err) = gtk4::init() {
-        eprintln!("Preview GTK init warning: {err}");
-    }
-
-    // Ensure GNOME Shell can associate this process with our desktop entry
-    // so the window is recognized as "ApexShot" instead of "GTK Application"
-    let app_id = std::env::var("APEXSHOT_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
-    if let Ok(desktop_path) = crate::hotkeys::ensure_desktop_entry_pub(&app_id) {
-        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
+    // Force-set GIO_LAUNCHED_DESKTOP_FILE to the main app's desktop entry.
+    // This process may have been spawned by the daemon, which sets its own
+    // GIO_LAUNCHED_DESKTOP_FILE pointing to the autostart daemon desktop file.
+    // We MUST override it so GNOME Shell shows "ApexShot" with the correct icon
+    // instead of "GTK Application" or "ApexShot Daemon".
+    let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
+    if std::path::Path::new(system_desktop).exists() {
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
+    } else {
+        let app_id = std::env::var("APEXSHOT_APP_ID")
+            .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
+        if let Ok(desktop_path) = crate::hotkeys::ensure_desktop_entry_pub(&app_id) {
             std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
-        }
-        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
-            std::env::set_var(
-                "GIO_LAUNCHED_DESKTOP_FILE_PID",
-                std::process::id().to_string(),
-            );
+            std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
         }
     }
 
-    // Initialize relm4-icons to use the same icons as the main editor
-    relm4_icons::initialize_icons(
-        crate::capture::editor::window::icon_names::GRESOURCE_BYTES,
-        crate::capture::editor::window::icon_names::RESOURCE_PREFIX,
-    );
+    // Use the main app ID so GNOME Shell can find the desktop file and icon.
+    // G_APPLICATION_NON_UNIQUE allows multiple processes with the same ID
+    // (e.g. settings + preview running simultaneously).
+    let app = gtk4::Application::builder()
+        .application_id("io.github.codegoddy.apexshot")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
 
-    unsafe {
-        std::env::set_var("DESKTOP_STARTUP_ID", "");
-    }
+    let path_clone = path.clone();
+    app.connect_activate(move |app| {
+        // Initialize relm4-icons to use the same icons as the main editor
+        relm4_icons::initialize_icons(
+            crate::capture::editor::window::icon_names::GRESOURCE_BYTES,
+            crate::capture::editor::window::icon_names::RESOURCE_PREFIX,
+        );
 
-    let pid = std::process::id();
-    let preview_id = generate_preview_id(pid);
+        let pid = std::process::id();
+        let preview_id = generate_preview_id(pid);
 
-    let main_loop = glib::MainLoop::new(None, false);
-    setup_preview_window(&main_loop, path, preview_id);
-    main_loop.run();
+        setup_preview_window(app, &path_clone, preview_id);
+    });
+
+    app.run_with_args(&[""]);
     Ok(())
 }
 
-fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: String) {
+fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: String) {
     install_preview_css();
     let config = load_config();
     let side = preview_side(&config.quick_access_position);
@@ -160,13 +165,17 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     let start_pinned = initial_preview_pinned(config.quick_access_auto_close_enabled);
     let auto_close_seconds = config.quick_access_auto_close_interval as u64;
 
-    let window = Window::builder()
+    let appwin = ApplicationWindow::builder()
+        .application(app)
         .title("ApexShot Preview")
+        .icon_name("io.github.codegoddy.apexshot")
         .default_width(preview_width)
         .default_height(preview_height)
         .resizable(false)
         .decorated(false)
         .build();
+    // Upcast to Window for all the helper functions that expect &Window
+    let window: Window = appwin.upcast();
     window.add_css_class("capture-preview-window");
     let layer_shell_active = configure_window_positioning(&window, side, preview_width);
     // Intentionally silent when layer-shell is unavailable — the fallback
@@ -606,12 +615,12 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
         ControlFlow::Continue
     });
 
-    let main_loop_close = main_loop.clone();
+    let app_close = app.clone();
     let edit_opened_close = edit_opened.clone();
     let preview_id_close = preview_id.clone();
     window.connect_close_request(move |_| {
         if !edit_opened_close.load(Ordering::Relaxed) {
-            main_loop_close.quit();
+            app_close.quit();
         }
         if emit_extension_events {
             crate::gnome_integration::emit_tracked_window_closed(&preview_id_close);

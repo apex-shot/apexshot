@@ -1063,6 +1063,14 @@ fn run_hotkeys_command(args: &[String]) -> anyhow::Result<()> {
 }
 
 fn ensure_gio_desktop_env_for_capture() {
+    // Force-set to the main app's desktop file so GNOME shows correct icon/name
+    let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
+    if std::path::Path::new(system_desktop).exists() {
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
+        return;
+    }
+
     if std::env::var_os("WAYLAND_DISPLAY").is_none() {
         return;
     }
@@ -1071,15 +1079,8 @@ fn ensure_gio_desktop_env_for_capture() {
         .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
 
     if let Ok(desktop_path) = ensure_desktop_entry_pub(&app_id) {
-        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
-            std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
-        }
-        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
-            std::env::set_var(
-                "GIO_LAUNCHED_DESKTOP_FILE_PID",
-                std::process::id().to_string(),
-            );
-        }
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
     }
 }
 

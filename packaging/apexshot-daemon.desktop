@@ -11,3 +11,4 @@ X-GNOME-Autostart-enabled=true
 X-GNOME-Autostart-Delay=2
 Hidden=false
 NoDisplay=true
+X-GNOME-Autostart-Phase=Application

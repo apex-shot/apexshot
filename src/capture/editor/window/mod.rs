@@ -469,6 +469,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Editor")
+        .icon_name("io.github.codegoddy.apexshot")
         .default_width(default_width)
         .default_height(default_height)
         .decorated(false)

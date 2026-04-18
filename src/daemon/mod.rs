@@ -519,10 +519,6 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
         gtk_tx,
     }));
 
-    // Ensure GNOME Shell can associate this process with our desktop entry
-    // even when the daemon is launched from a terminal.
-    ensure_gio_desktop_env();
-
     // ── Early exit if tray icon is disabled ─────────────────────────────────
     // The daemon is primarily needed for the tray icon and hotkey listening.
     // If the user has disabled the tray icon, exit early to avoid wasting resources.
@@ -1626,24 +1622,36 @@ async fn run_hotkey_listener(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyho
     run_hotkey_listener_portal(&cfg, tx).await
 }
 
-/// Set GIO_LAUNCHED_DESKTOP_FILE env vars if not already set, so GNOME Shell
-/// treats this process as a trusted desktop-launched application.
+/// Set GIO_LAUNCHED_DESKTOP_FILE env vars so the hotkey portal can identify us.
+///
+/// IMPORTANT: We point to the system autostart desktop file (NoDisplay=true) so
+/// GNOME Shell does NOT associate the daemon with the main app's icon. If we used
+/// the main app's desktop file, GNOME would route app-icon clicks to the daemon
+/// instead of launching the settings window.
 fn ensure_gio_desktop_env() {
-    let app_id = std::env::var("APEXSHOT_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
+    // Use the system autostart daemon desktop file if it exists
+    let system_daemon_desktop = std::path::Path::new("/etc/xdg/autostart/apexshot.desktop");
+    let desktop_path = if system_daemon_desktop.exists() {
+        system_daemon_desktop.to_path_buf()
+    } else {
+        // Fallback: create a minimal daemon desktop entry in user dir
+        let app_id = "io.github.codegoddy.apexshot.daemon";
+        match ensure_desktop_entry_pub(app_id) {
+            Ok(path) => path,
+            Err(_) => return,
+        }
+    };
 
-    if let Ok(desktop_path) = ensure_desktop_entry_pub(&app_id) {
-        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
-            std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
-        }
-        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
-            std::env::set_var(
-                "GIO_LAUNCHED_DESKTOP_FILE_PID",
-                std::process::id().to_string(),
-            );
-        }
-        eprintln!("[daemon] GIO desktop env set ({})", desktop_path.display());
+    if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
     }
+    if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
+        std::env::set_var(
+            "GIO_LAUNCHED_DESKTOP_FILE_PID",
+            std::process::id().to_string(),
+        );
+    }
+    eprintln!("[daemon] GIO desktop env set ({})", desktop_path.display());
 }
 
 fn is_gnome_desktop() -> bool {

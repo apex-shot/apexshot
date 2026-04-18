@@ -35,23 +35,16 @@ use self::{
 };
 
 pub fn show_settings_window() -> anyhow::Result<()> {
-    // Ensure GNOME Shell can associate this process with our desktop entry
-    let app_id = std::env::var("APEXSHOT_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
-    if let Ok(desktop_path) = crate::hotkeys::ensure_desktop_entry_pub(&app_id) {
-        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
-            std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
-        }
-        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
-            std::env::set_var(
-                "GIO_LAUNCHED_DESKTOP_FILE_PID",
-                std::process::id().to_string(),
-            );
-        }
+    // Force-set GIO_LAUNCHED_DESKTOP_FILE to the main app's desktop entry
+    // so GNOME Shell shows the correct icon and name.
+    let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
+    if std::path::Path::new(system_desktop).exists() {
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
     }
 
     let app = Application::builder()
-        .application_id(&app_id)
+        .application_id("io.github.codegoddy.apexshot")
         .build();
 
     app.connect_activate(|application| {
@@ -80,6 +73,7 @@ fn build_settings_window(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Settings")
+        .icon_name("io.github.codegoddy.apexshot")
         .default_width(1020)
         .default_height(840)
         .build();
