@@ -487,6 +487,26 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
         return Ok(());
     }
 
+    // ── SINGLE-INSTANCE CHECK ─────────────────────────────────────────────────
+    // Try to register D-Bus name BEFORE any other initialization.
+    // This prevents multiple daemons from running simultaneously.
+    let dbus_conn = match zbus::Connection::session().await {
+        Ok(conn) => conn,
+        Err(e) => {
+            anyhow::bail!("Failed to connect to session bus: {}", e);
+        }
+    };
+
+    // Try to request the name - if another daemon is running, this will fail
+    let name_result = dbus_conn.request_name(DAEMON_BUS_NAME).await;
+    match name_result {
+        Ok(_) => eprintln!("[daemon] D-Bus name '{}' registered.", DAEMON_BUS_NAME),
+        Err(e) => {
+            eprintln!("[daemon] Another daemon is already running (D-Bus name taken): {}", e);
+            return Ok(()); // Exit gracefully, another instance is running
+        }
+    }
+
     let state = Arc::new(Mutex::new(DaemonState {
         last_capture_path: None,
         preview_child: None,
@@ -545,8 +565,9 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
 
     // ── D-Bus IPC server ─────────────────────────────────────────────────────
     let dbus_tx = action_tx.clone();
+    let dbus_conn_clone = dbus_conn.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_dbus_server(dbus_tx).await {
+        if let Err(e) = run_dbus_server(dbus_conn_clone, dbus_tx).await {
             eprintln!("[daemon] D-Bus server error: {e}");
         }
     });
@@ -1527,23 +1548,17 @@ fn start_audio_level_stream(
     });
 }
 
-async fn run_dbus_server(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyhow::Result<()> {
-    use zbus::connection::Builder;
-
+async fn run_dbus_server(
+    conn: zbus::Connection,
+    tx: std::sync::mpsc::Sender<DaemonAction>,
+) -> anyhow::Result<()> {
     let ipc = DaemonIpc {
         tx,
         scroll_injector: tokio::sync::Mutex::new(ScrollInjector::default()),
     };
 
-    let _conn = Builder::session()
-        .context("Failed to get session D-Bus")?
-        .name(DAEMON_BUS_NAME)
-        .context("Failed to request D-Bus name")?
-        .serve_at(DAEMON_OBJECT_PATH, ipc)
-        .context("Failed to serve D-Bus object")?
-        .build()
-        .await
-        .context("Failed to build D-Bus connection")?;
+    // Serve the IPC object on the existing connection (name already registered)
+    conn.object_server().at(DAEMON_OBJECT_PATH, ipc).await?;
 
     // Mic: explicitly target physical input device to avoid picking up system audio
     // Falls back to default input if specific device not found

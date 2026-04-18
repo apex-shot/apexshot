@@ -1,8 +1,10 @@
-<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="128" width="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Curved arch shape (scaled from 24x24 to 128x128) -->
   <path
-    d="M 2 21 C 6 21, 8 2, 12 2 C 16 2, 18 21, 22 21"
+    d="M 10.67 112 C 32 112, 42.67 10.67, 64 10.67 C 85.33 10.67, 96 112, 117.33 112"
     stroke="#E95420"
-    stroke-width="2.5"
+    stroke-width="13.33"
     stroke-linecap="round"
     fill="none"
   />
