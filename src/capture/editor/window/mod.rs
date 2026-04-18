@@ -250,7 +250,7 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
     }
 
     let app = Application::builder()
-        .application_id("com.apexshot.capture.editor")
+        .application_id("io.github.codegoddy.apexshot")
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
@@ -468,7 +468,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("Screenshot Editor")
+        .title("ApexShot Editor")
         .default_width(default_width)
         .default_height(default_height)
         .decorated(false)
@@ -1000,7 +1000,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let upload_btn = footer_parts.upload_btn;
 
     let tracked_window_id = next_tracked_window_id("annotate-editor");
-    let window_title = "Screenshot Editor";
+    let window_title = "ApexShot Editor";
     let window_namespace = "apexshot-annotate-editor";
 
     let canvas::CanvasShellParts {

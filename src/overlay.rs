@@ -1280,7 +1280,7 @@ impl AreaSelector {
         // NON_UNIQUE: skip the single-instance check so the overlay can be
         // launched multiple times without GApplication refusing to activate.
         let app = Application::builder()
-            .application_id("com.apexshot.screenshot")
+            .application_id("io.github.codegoddy.apexshot")
             .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
             .build();
 

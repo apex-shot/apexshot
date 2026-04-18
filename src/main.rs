@@ -37,96 +37,33 @@ use apexshot::{
         setup_hotkeys_for_current_desktop, uninstall_hotkeys_for_current_desktop,
     },
     ocr::{extract_text_from_path, OcrConfig},
+    onboarding::{
+        is_onboarding_complete,
+        show_onboarding_window,
+    },
     recording::{
-        copy_to_clipboard as copy_recording_to_clipboard, run_overlay_recording_request,
-        run_recording_countdown_bar, run_recording_with_controls, start_recording, RecordingConfig,
+        run_overlay_recording_request,
+        run_recording_with_controls, run_recording_countdown_bar,
+        start_recording, RecordingConfig,
         RecordingControlsParams, StopAction,
     },
-    show_settings_window,
-    is_onboarding_complete,
-    show_onboarding_window,
+    settings::show_settings_window,
 };
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-fn trigger_daemon_action_blocking(action: &str) -> bool {
-    let Ok(conn) = zbus::blocking::Connection::session() else {
-        return false;
-    };
-    let proxy = match zbus::blocking::Proxy::new(
-        &conn,
-        "org.apexshot.Daemon",
-        "/org/apexshot/Daemon",
-        "org.apexshot.Daemon",
-    ) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    proxy
-        .call::<_, _, ()>("Trigger", &(action.to_string(),))
-        .is_ok()
-}
-
-/// Check if the daemon D-Bus name is already registered.
-fn is_daemon_dbus_name_registered() -> bool {
-    let Ok(conn) = zbus::blocking::Connection::session() else {
-        return false;
-    };
-    let Ok(proxy) = zbus::blocking::Proxy::new(
-        &conn,
-        "org.freedesktop.DBus",
-        "/org/freedesktop/DBus",
-        "org.freedesktop.DBus",
-    ) else {
-        return false;
-    };
-    let Ok(owner): Result<String, _> = proxy.call("GetNameOwner", &("org.apexshot.Daemon",)) else {
-        return false;
-    };
-    !owner.is_empty()
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        // No arguments - try to delegate to daemon if running
-        // This ensures single-instance behavior and proper tray init
-        if trigger_daemon_action_blocking("settings") {
-            return;
-        }
-        // Daemon not running - if onboarding not complete, show that first
-        // Otherwise start daemon (initializes tray) then show settings
+        // No arguments - just open settings or onboarding
+        // The tray daemon runs independently based on settings
         if !is_onboarding_complete() {
             let _ = show_onboarding_window();
             return;
         }
-        // Check if daemon D-Bus name is already registered (another instance starting)
-        if is_daemon_dbus_name_registered() {
-            // Daemon is starting up, retry a few times with increasing delay
-            for delay in [100, 200, 400, 800] {
-                std::thread::sleep(std::time::Duration::from_millis(delay));
-                if trigger_daemon_action_blocking("settings") {
-                    return;
-                }
-            }
-            eprintln!("Warning: Daemon D-Bus name registered but not responding");
-            return;
-        }
-        // No daemon running - start one
-        let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-        let _ = std::process::Command::new(&exe)
-            .arg("daemon")
-            .spawn();
-        // Retry with exponential backoff to wait for daemon to initialize
-        for delay in [200, 400, 800, 1600] {
-            std::thread::sleep(std::time::Duration::from_millis(delay));
-            if trigger_daemon_action_blocking("settings") {
-                return;
-            }
-        }
-        eprintln!("Warning: Daemon started but not responding to settings action");
+        let _ = show_settings_window();
         return;
     }
 
@@ -599,8 +536,10 @@ fn install_autostart() {
         std::process::exit(1);
     }
 
-    // The binary path to launch — prefer the installed system path.
-    let binary_path = if std::path::Path::new("/usr/local/bin/apexshot").exists() {
+    // The binary path to launch — prefer installed system paths
+    let binary_path = if std::path::Path::new("/usr/bin/apexshot").exists() {
+        "/usr/bin/apexshot".to_string()
+    } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
         "/usr/local/bin/apexshot".to_string()
     } else {
         std::env::current_exe()
@@ -1763,7 +1702,7 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ext) = final_path.extension() {
         if ext == "gif" {
             // For GIFs, we default to copying to clipboard (feature requested)
-            if let Err(e) = copy_recording_to_clipboard(&final_path) {
+            if let Err(e) = apexshot::recording::copy_to_clipboard(&final_path) {
                 eprintln!("Warning: Failed to copy GIF to clipboard: {}", e);
             }
         }

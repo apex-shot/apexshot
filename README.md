@@ -4,7 +4,7 @@ A premium, open-source Linux screen capture tool with annotation, recording, and
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)
+![Version](https://img.shields.io/badge/version-0.2.15-orange.svg)
 
 ## Features
 
@@ -73,6 +73,7 @@ The C++ Qt5 overlay is automatically compiled via CMake during the Rust build.
 ```bash
 sudo apexshot install                          # Binary + autostart
 sudo apexshot install --extension-id <id>      # + browser native messaging host
+sudo apexshot install --force                  # Reinstall even if same version
 ```
 
 ## Usage
@@ -105,6 +106,9 @@ apexshot edit <image-path>       # Open image in annotation editor
 
 # Settings
 apexshot settings                # Open settings window
+
+# Version
+apexshot --version               # Print version
 ```
 
 ### Keyboard Shortcuts
@@ -124,15 +128,9 @@ apexshot/
 ├── gnome-extension/        # GNOME Shell extension (preview windows, recording mask)
 ├── web-scroll-extension/   # Chrome/Chromium extension (full-page scroll capture)
 ├── native-host/            # Native messaging host for browser integration
+├── packaging/              # Package assets (desktop files, icons, deb helper)
 └── docs/                   # Architecture, data flow, and implementation docs
 ```
-
-## Documentation
-
-- [Architecture](docs/Architecture.md) — Module map, threading model, FFI bridge
-- [Data Flow](docs/Data_Flow.md) — Capture pipeline, IPC protocol, memory management
-- [Implementation Details](docs/Implementation_Details.md) — Editor pipeline, debugging guide
-- [Linux Interactions](docs/Linux_Interactions.md) — X11/Wayland support, permissions, dependencies
 
 ## License
 

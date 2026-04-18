@@ -75,7 +75,7 @@ pub fn run_recording_countdown_bar(
     seconds: u32,
 ) -> Result<(), StopOverlayError> {
     let app = Application::builder()
-        .application_id("com.apexshot.recording.countdown")
+        .application_id("io.github.codegoddy.apexshot")
         .build();
 
     app.connect_activate(move |application| {

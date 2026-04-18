@@ -145,7 +145,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
     let auto_close_seconds = config.quick_access_auto_close_interval as u64;
 
     let window = Window::builder()
-        .title("Screenshot")
+        .title("ApexShot Preview")
         .default_width(preview_width)
         .default_height(preview_height)
         .resizable(false)
@@ -636,7 +636,7 @@ fn setup_preview_window(main_loop: &glib::MainLoop, path: PathBuf, preview_id: S
         crate::gnome_integration::emit_tracked_window_opened(
             &preview_id,
             pid,
-            "Screenshot",
+            "ApexShot Preview",
             "preview",
             "apexshot-capture-preview",
         );

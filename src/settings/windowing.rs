@@ -120,9 +120,16 @@ pub fn install_autostart_entry_for_current_exe() -> anyhow::Result<std::path::Pa
     let autostart_dir = autostart_dir()?;
     std::fs::create_dir_all(&autostart_dir)?;
 
-    let binary_path = std::env::current_exe()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "apexshot".to_string());
+    // Prefer installed system paths over current_exe() for reliable autostart
+    let binary_path = if std::path::Path::new("/usr/bin/apexshot").exists() {
+        "/usr/bin/apexshot".to_string()
+    } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
+        "/usr/local/bin/apexshot".to_string()
+    } else {
+        std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "apexshot".to_string())
+    };
 
     let desktop_content = format!(
         "[Desktop Entry]\n\
@@ -146,13 +153,56 @@ pub fn install_autostart_entry_for_current_exe() -> anyhow::Result<std::path::Pa
 }
 
 #[allow(dead_code)]
+pub fn install_autostart_entry_smart() -> anyhow::Result<std::path::PathBuf> {
+    let autostart_dir = autostart_dir()?;
+    std::fs::create_dir_all(&autostart_dir)?;
+
+    // Prefer installed system paths over current_exe() for reliable autostart
+    let binary_path = if std::path::Path::new("/usr/bin/apexshot").exists() {
+        "/usr/bin/apexshot".to_string()
+    } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
+        "/usr/local/bin/apexshot".to_string()
+    } else {
+        std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "apexshot".to_string())
+    };
+
+    // Use a wrapper script that checks config before starting daemon
+    let desktop_content = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=ApexShot\n\
+         Comment=ApexShot screenshot tool\n\
+         Exec=sh -c 'if [ -f ~/.config/apexshot/config.yaml ] && grep -q \"show_menu_bar_icon: true\" ~/.config/apexshot/config.yaml 2>/dev/null; then {binary_path} daemon; fi'\n\
+         Icon=camera-photo\n\
+         Categories=Utility;\n\
+         Keywords=screenshot;capture;record;\n\
+         StartupNotify=false\n\
+         X-GNOME-Autostart-enabled=true\n\
+         X-GNOME-Autostart-Delay=2\n\
+         Hidden=false\n\
+         NoDisplay=true\n"
+    );
+
+    let desktop_path = autostart_dir.join("apexshot.desktop");
+    std::fs::write(&desktop_path, desktop_content)?;
+    Ok(desktop_path)
+}
+
+#[allow(dead_code)]
 pub fn uninstall_autostart_entry() -> anyhow::Result<()> {
-    let desktop_path = autostart_dir()?.join("apexshot-daemon.desktop");
-    match std::fs::remove_file(&desktop_path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
+    let autostart_dir = autostart_dir()?;
+    // Remove both possible autostart files
+    for name in ["apexshot-daemon.desktop", "apexshot.desktop"] {
+        let desktop_path = autostart_dir.join(name);
+        match std::fs::remove_file(&desktop_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
     }
+    Ok(())
 }
 
 fn edge_cursor_name(x: f64, y: f64, width: f64, height: f64) -> Option<&'static str> {

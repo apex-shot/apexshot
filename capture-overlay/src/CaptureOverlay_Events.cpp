@@ -39,7 +39,7 @@ double aspectRatioForIndex(int index)
 static void showWebScrollCaptureInfo(QWidget* parent)
 {
     QMessageBox messageBox(parent);
-    messageBox.setWindowTitle(QStringLiteral("Webpage scroll capture"));
+    messageBox.setWindowTitle(QStringLiteral("ApexShot - Webpage scroll capture"));
     messageBox.setIcon(QMessageBox::Information);
     messageBox.setText(QStringLiteral("Scroll capture is available on webpages through the browser extension."));
     messageBox.setInformativeText(QStringLiteral("Use the ApexShot browser extension on the page you want to capture. After the extension sends the capture to the app, it will open in the normal screenshot preview overlay."));

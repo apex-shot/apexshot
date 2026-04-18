@@ -258,10 +258,11 @@ fn synthetic_output(status_code: i32) -> Output {
 ///
 /// Search order:
 /// 1. `APEXSHOT_CAPTURE_BIN` env variable (manual override).
-/// 2. Same directory as the currently-running executable.
-/// 3. Build-time output directory embedded by build.rs via `APEXSHOT_CAPTURE_BIN_DIR`.
-/// 4. Common target profile directories relative to the exe (handles `cargo run` edge cases).
-/// 5. PATH lookup.
+/// 2. Installed system paths (/usr/bin, /usr/local/bin).
+/// 3. Same directory as the currently-running executable.
+/// 4. Build-time output directory embedded by build.rs via `APEXSHOT_CAPTURE_BIN_DIR`.
+/// 5. Common target profile directories relative to the exe (handles `cargo run` edge cases).
+/// 6. PATH lookup.
 fn find_capture_binary() -> Option<PathBuf> {
     // 1. Env override — highest priority for manual testing
     if let Some(p) = std::env::var_os("APEXSHOT_CAPTURE_BIN") {
@@ -275,7 +276,17 @@ fn find_capture_binary() -> Option<PathBuf> {
         }
     }
 
-    // 2. Same directory as the running executable — useful for installed bundles.
+    // 2. Installed system paths — for .deb and manual installations
+    if PathBuf::from("/usr/bin/apexshot-capture").exists() {
+        eprintln!("[capture_overlay] Found apexshot-capture at /usr/bin/apexshot-capture");
+        return Some(PathBuf::from("/usr/bin/apexshot-capture"));
+    }
+    if PathBuf::from("/usr/local/bin/apexshot-capture").exists() {
+        eprintln!("[capture_overlay] Found apexshot-capture at /usr/local/bin/apexshot-capture");
+        return Some(PathBuf::from("/usr/local/bin/apexshot-capture"));
+    }
+
+    // 3. Same directory as the running executable — useful for installed bundles.
     if let Ok(exe) = std::env::current_exe() {
         let candidate = exe.with_file_name("apexshot-capture");
         if candidate.exists() {

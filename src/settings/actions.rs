@@ -5,7 +5,7 @@ use crate::{
 use gtk4::prelude::*;
 use gtk4::{Button, CheckButton, ComboBoxText, Entry, Scale};
 
-use super::windowing::{install_autostart_entry_for_current_exe, uninstall_autostart_entry};
+use super::windowing::{install_autostart_entry_smart, uninstall_autostart_entry};
 
 fn shortcut_label_value(label: Option<gtk4::glib::GString>) -> String {
     let label = label.unwrap_or_default();
@@ -308,12 +308,21 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     let _ = crate::hotkeys::sync_gnome_hotkeys_for_current_desktop(None);
 
     if config.start_at_login {
-        install_autostart_entry_for_current_exe()?;
+        install_autostart_entry_smart()?;
     } else {
         uninstall_autostart_entry()?;
     }
 
+    // Start or stop daemon based on tray icon setting
     let tray_visible = config.show_menu_bar_icon;
+    std::thread::spawn(move || {
+        if tray_visible {
+            let _ = start_daemon_subprocess();
+        } else {
+            let _ = stop_daemon_via_dbus();
+        }
+    });
+
     let allow_auto_respawn = should_auto_respawn_daemon_for_save();
     std::thread::spawn(move || {
         if quick_access_runtime_changed || shortcuts_runtime_changed {

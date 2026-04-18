@@ -15,10 +15,17 @@ fn portal_app_id() -> String {
 }
 
 fn desktop_exec_value() -> String {
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "apexshot".to_string());
+    // Prefer installed system paths over current_exe() for reliable hotkey bindings
+    let exe = if std::path::Path::new("/usr/bin/apexshot").exists() {
+        "/usr/bin/apexshot".to_string()
+    } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
+        "/usr/local/bin/apexshot".to_string()
+    } else {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "apexshot".to_string())
+    };
 
     // Desktop entry Exec is not shell-parsed; spaces must be escaped per spec.
     let escaped_exe = exe.replace('\\', "\\\\").replace(' ', "\\ ");
@@ -78,6 +85,14 @@ fn strip_deleted_suffix(path: &std::path::Path) -> PathBuf {
 }
 
 fn resolve_action_exe() -> anyhow::Result<PathBuf> {
+    // Prefer installed system paths for reliable hotkey actions
+    if std::path::Path::new("/usr/bin/apexshot").exists() {
+        return Ok(PathBuf::from("/usr/bin/apexshot"));
+    }
+    if std::path::Path::new("/usr/local/bin/apexshot").exists() {
+        return Ok(PathBuf::from("/usr/local/bin/apexshot"));
+    }
+
     if let Some(arg0) = std::env::args_os().next() {
         let p = strip_deleted_suffix(std::path::Path::new(&arg0));
         if p.is_absolute() && p.exists() {

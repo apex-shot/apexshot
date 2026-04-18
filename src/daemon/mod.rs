@@ -498,7 +498,13 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     };
 
     // Try to request the name - if another daemon is running, this will fail
-    let name_result = dbus_conn.request_name(DAEMON_BUS_NAME).await;
+    let name_result = dbus_conn
+        .request_name_with_flags(
+            DAEMON_BUS_NAME,
+            zbus::fdo::RequestNameFlags::DoNotQueue
+                | zbus::fdo::RequestNameFlags::ReplaceExisting,
+        )
+        .await;
     match name_result {
         Ok(_) => eprintln!("[daemon] D-Bus name '{}' registered.", DAEMON_BUS_NAME),
         Err(e) => {
