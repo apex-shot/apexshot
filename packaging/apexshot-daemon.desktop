@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=ApexShot Daemon
+Comment=ApexShot screenshot daemon — tray icon and hotkey listener
+Exec=/usr/bin/apexshot daemon
+Icon=io.github.codegoddy.apexshot
+Categories=Utility;
+Keywords=screenshot;capture;record;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=2
+Hidden=false
+NoDisplay=true

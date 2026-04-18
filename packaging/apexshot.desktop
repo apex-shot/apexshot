@@ -2,7 +2,7 @@
 Name=ApexShot
 Comment=Screenshot and screen recording tool for Linux
 Exec=/usr/bin/apexshot
-Icon=apexshot
+Icon=io.github.codegoddy.apexshot
 Type=Application
 Categories=Graphics;AudioVideo;
 Keywords=screenshot;capture;recording;screen;video;

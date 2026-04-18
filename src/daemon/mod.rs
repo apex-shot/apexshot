@@ -523,6 +523,15 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     // even when the daemon is launched from a terminal.
     ensure_gio_desktop_env();
 
+    // ── Early exit if tray icon is disabled ─────────────────────────────────
+    // The daemon is primarily needed for the tray icon and hotkey listening.
+    // If the user has disabled the tray icon, exit early to avoid wasting resources.
+    let initial_config = load_config().sanitized();
+    if !initial_config.show_menu_bar_icon {
+        eprintln!("[daemon] Tray icon disabled by settings — exiting.");
+        return Ok(());
+    }
+
     // Main action channel — both tray and hotkeys send here.
     let (action_tx, action_rx) = std::sync::mpsc::channel::<DaemonAction>();
 

@@ -137,7 +137,7 @@ pub fn install_autostart_entry_for_current_exe() -> anyhow::Result<std::path::Pa
          Name=ApexShot Daemon\n\
          Comment=ApexShot screenshot daemon — tray icon and hotkey listener\n\
          Exec={binary_path} daemon\n\
-         Icon=camera-photo\n\
+         Icon=io.github.codegoddy.apexshot\n\
          Categories=Utility;\n\
          Keywords=screenshot;capture;record;\n\
          StartupNotify=false\n\
@@ -168,14 +168,15 @@ pub fn install_autostart_entry_smart() -> anyhow::Result<std::path::PathBuf> {
             .unwrap_or_else(|_| "apexshot".to_string())
     };
 
-    // Use a wrapper script that checks config before starting daemon
+    // The daemon itself reads config and decides whether to show the tray icon.
+    // We always start the daemon — it exits immediately if show_menu_bar_icon is false.
     let desktop_content = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=ApexShot\n\
-         Comment=ApexShot screenshot tool\n\
-         Exec=sh -c 'if [ -f ~/.config/apexshot/config.yaml ] && grep -q \"show_menu_bar_icon: true\" ~/.config/apexshot/config.yaml 2>/dev/null; then {binary_path} daemon; fi'\n\
-         Icon=camera-photo\n\
+         Name=ApexShot Daemon\n\
+         Comment=ApexShot screenshot daemon — tray icon and hotkey listener\n\
+         Exec={binary_path} daemon\n\
+         Icon=io.github.codegoddy.apexshot\n\
          Categories=Utility;\n\
          Keywords=screenshot;capture;record;\n\
          StartupNotify=false\n\

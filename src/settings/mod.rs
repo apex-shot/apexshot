@@ -35,8 +35,23 @@ use self::{
 };
 
 pub fn show_settings_window() -> anyhow::Result<()> {
+    // Ensure GNOME Shell can associate this process with our desktop entry
+    let app_id = std::env::var("APEXSHOT_APP_ID")
+        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
+    if let Ok(desktop_path) = crate::hotkeys::ensure_desktop_entry_pub(&app_id) {
+        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
+            std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
+        }
+        if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
+            std::env::set_var(
+                "GIO_LAUNCHED_DESKTOP_FILE_PID",
+                std::process::id().to_string(),
+            );
+        }
+    }
+
     let app = Application::builder()
-        .application_id("io.github.codegoddy.apexshot")
+        .application_id(&app_id)
         .build();
 
     app.connect_activate(|application| {
@@ -47,10 +62,10 @@ pub fn show_settings_window() -> anyhow::Result<()> {
             existing_window.present();
             return;
         }
-        
+
         build_settings_window(application);
     });
-    
+
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }
