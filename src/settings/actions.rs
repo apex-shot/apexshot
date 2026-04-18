@@ -87,10 +87,6 @@ pub struct SaveInputs {
     pub shortcut_recording_stop_save: Button,
     pub shortcut_recording_restart: Button,
     pub shortcut_recording_discard: Button,
-    pub cloud_screenshot_quality: ComboBoxText,
-    pub cloud_copy_to_clipboard: ComboBoxText,
-    pub cloud_show_recently_uploaded: CheckButton,
-    pub cloud_ask_name_tags: CheckButton,
     pub adv_retina_suffix: CheckButton,
     pub adv_clipboard_mode: ComboBoxText,
     pub adv_ocr_language: ComboBoxText,
@@ -255,13 +251,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.shortcut_recording_stop_save = button_label_value(&inputs.shortcut_recording_stop_save);
     config.shortcut_recording_restart = button_label_value(&inputs.shortcut_recording_restart);
     config.shortcut_recording_discard = button_label_value(&inputs.shortcut_recording_discard);
-
-    config.cloud_screenshot_quality =
-        combo_value(&inputs.cloud_screenshot_quality, "Optimized for sharing");
-    config.cloud_copy_to_clipboard =
-        combo_value(&inputs.cloud_copy_to_clipboard, "ApexShot Cloud link");
-    config.cloud_show_recently_uploaded = inputs.cloud_show_recently_uploaded.is_active();
-    config.cloud_ask_name_tags = inputs.cloud_ask_name_tags.is_active();
 
     config.adv_retina_suffix = inputs.adv_retina_suffix.is_active();
     config.adv_clipboard_mode = combo_value(&inputs.adv_clipboard_mode, "File & Image (default)");

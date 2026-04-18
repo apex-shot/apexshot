@@ -544,8 +544,8 @@ const SETTINGS_CSS: &str = r#"
                 transition: all 0.2s;
             }
 
-            .secondary-settings-button:hover { background: #e5e5e5; }
-            .secondary-settings-button:active { background: #d5d5d5; }
+            .secondary-settings-button:hover { background: #e5e5e5; color: #1d2129; }
+            .secondary-settings-button:active { background: #d5d5d5; color: #1d2129; }
 
             /* FILENAME TAG PILLS */
             .filename-tag-pill {
@@ -605,10 +605,20 @@ const SETTINGS_CSS: &str = r#"
             }
             .about-link-button:hover {
                 background: alpha(#b05c38, 0.08);
+                color: #b05c38;
                 text-decoration: underline;
             }
             .editor-root.editor-theme-light .about-link-button {
                 color: #9a4c2c;
+            }
+            .editor-root.editor-theme-light .about-link-button:hover {
+                color: #9a4c2c;
+            }
+
+            /* Onboarding back button - same size as primary button with secondary styling */
+            .onboarding-back-button {
+                padding: 6px 20px;
+                min-height: 28px;
             }
 
             .cloud-avatar {

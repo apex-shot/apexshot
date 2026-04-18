@@ -88,13 +88,15 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     let create_link = |label: &str| -> Button {
         let btn = Button::with_label(label);
         btn.add_css_class("about-link-button");
+        btn.connect_clicked(|_| {
+            let _ = show_uri(None::<&gtk4::Window>, "https://apexshot.org/", 0);
+        });
         btn
     };
 
     links_grid.attach(&create_link("Help Center"), 0, 0, 1, 1);
     links_grid.attach(&create_link("Send Feedback"), 1, 0, 1, 1);
-    links_grid.attach(&create_link("Follow on Twitter"), 0, 1, 1, 1);
-    links_grid.attach(&create_link("Website"), 1, 1, 1, 1);
+    links_grid.attach(&create_link("Website"), 0, 1, 1, 1);
     section.append(&links_grid);
 
     // --- 4. FOOTER ---

@@ -56,6 +56,12 @@ pub fn show_settings_window() -> anyhow::Result<()> {
             return;
         }
 
+        // Start daemon if config shows tray should be visible
+        let config = load_config();
+        if config.show_menu_bar_icon {
+            let _ = crate::daemon::start_daemon_subprocess();
+        }
+
         build_settings_window(application);
     });
 
@@ -436,10 +442,6 @@ fn build_settings_window(app: &Application) {
         shortcut_recording_stop_save: shortcuts.recording_stop_save_btn.clone(),
         shortcut_recording_restart: shortcuts.recording_restart_btn.clone(),
         shortcut_recording_discard: shortcuts.recording_discard_btn.clone(),
-        cloud_screenshot_quality: cloud.cloud_quality_input.clone(),
-        cloud_copy_to_clipboard: cloud.cloud_clipboard_input.clone(),
-        cloud_show_recently_uploaded: cloud.cloud_show_recent_check.clone(),
-        cloud_ask_name_tags: cloud.cloud_ask_tags_check.clone(),
         adv_retina_suffix: advanced.retina_suffix_check.clone(),
         adv_clipboard_mode: advanced.clipboard_mode_input.clone(),
         adv_ocr_language: advanced.ocr_lang_input.clone(),

@@ -120,7 +120,11 @@ fn request_hotkey_suppressed(suppressed: bool) {
 fn request_hotkey_suppressed_before_present() -> std::sync::mpsc::Receiver<bool> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(set_daemon_hotkey_suppressed(true));
+        let success = set_daemon_hotkey_suppressed(true);
+        if !success {
+            eprintln!("[shortcuts] Failed to suppress daemon hotkeys - daemon may not be running");
+        }
+        let _ = tx.send(success);
     });
     rx
 }

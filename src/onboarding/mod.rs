@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Orientation};
+use gtk4::{prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation};
 use std::fs;
 use std::path::PathBuf;
 
@@ -64,6 +64,8 @@ pub struct OnboardingWidgets {
     pub window: ApplicationWindow,
     content_box: GtkBox,
     nav_box: GtkBox,
+    top_nav_box: GtkBox,
+    progress_box: GtkBox,
 }
 
 pub fn show_onboarding_window() -> anyhow::Result<()> {
@@ -100,10 +102,23 @@ fn build_onboarding_window(app: &Application) {
 
     let root_box = GtkBox::new(Orientation::Vertical, 0);
     root_box.add_css_class("editor-root");
-    root_box.set_margin_top(24);
-    root_box.set_margin_bottom(24);
-    root_box.set_margin_start(32);
-    root_box.set_margin_end(32);
+    root_box.set_margin_top(32);
+    root_box.set_margin_bottom(32);
+    root_box.set_margin_start(48);
+    root_box.set_margin_end(48);
+
+    // Top navigation (skip button + progress indicator)
+    let top_nav_box = GtkBox::new(Orientation::Horizontal, 12);
+    top_nav_box.set_halign(Align::Start);
+    top_nav_box.set_margin_top(24);
+    top_nav_box.set_margin_bottom(24);
+    top_nav_box.set_margin_start(24);
+
+    // Progress indicator
+    let progress_box = GtkBox::new(Orientation::Horizontal, 8);
+    progress_box.set_halign(Align::Center);
+    progress_box.set_margin_top(24);
+    progress_box.set_margin_bottom(24);
 
     // Content area (will be swapped per step)
     let content_box = GtkBox::new(Orientation::Vertical, 16);
@@ -111,11 +126,15 @@ fn build_onboarding_window(app: &Application) {
     content_box.set_halign(Align::Center);
     content_box.set_valign(Align::Center);
 
-    // Navigation buttons
-    let nav_box = GtkBox::new(Orientation::Horizontal, 12);
+    // Bottom navigation buttons
+    let nav_box = GtkBox::new(Orientation::Horizontal, 16);
     nav_box.set_halign(Align::End);
-    nav_box.set_margin_top(24);
+    nav_box.set_margin_top(32);
+    nav_box.set_margin_bottom(16);
+    nav_box.set_margin_end(16);
 
+    root_box.append(&top_nav_box);
+    root_box.append(&progress_box);
     root_box.append(&content_box);
     root_box.append(&nav_box);
     window.set_child(Some(&root_box));
@@ -125,6 +144,8 @@ fn build_onboarding_window(app: &Application) {
         window: window.clone(),
         content_box: content_box.clone(),
         nav_box: nav_box.clone(),
+        top_nav_box: top_nav_box.clone(),
+        progress_box: progress_box.clone(),
     };
 
     show_step(&widgets, OnboardingStep::Welcome);
@@ -138,9 +159,15 @@ fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
         widgets.content_box.remove(&child);
     }
 
-    // Clear nav
+    // Clear nav boxes
     while let Some(child) = widgets.nav_box.first_child() {
         widgets.nav_box.remove(&child);
+    }
+    while let Some(child) = widgets.top_nav_box.first_child() {
+        widgets.top_nav_box.remove(&child);
+    }
+    while let Some(child) = widgets.progress_box.first_child() {
+        widgets.progress_box.remove(&child);
     }
 
     // Build step content
@@ -167,46 +194,52 @@ fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
 }
 
 fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
-    // Skip button (only on welcome step)
-    if step == OnboardingStep::Welcome {
-        let skip_btn = Button::with_label("Skip Setup");
-        skip_btn.add_css_class("secondary-settings-button");
-        let window = widgets.window.clone();
-        skip_btn.connect_clicked(move |_| {
-            let _ = mark_onboarding_complete();
-            window.close();
-        });
-        widgets.nav_box.append(&skip_btn);
+    // Build progress dots
+    let steps = [OnboardingStep::Welcome, OnboardingStep::GnomeExtension, OnboardingStep::ChromeExtension, OnboardingStep::Cloud, OnboardingStep::Complete];
+    let current_idx = steps.iter().position(|s| *s == step).unwrap_or(0);
+
+    for (idx, _) in steps.iter().enumerate() {
+        let dot = Label::new(Some(if idx == current_idx { "●" } else { "○" }));
+        dot.set_halign(Align::Center);
+        dot.add_css_class(if idx == current_idx { "settings-group-title" } else { "settings-sub-option" });
+        widgets.progress_box.append(&dot);
     }
 
-    // Spacer
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    widgets.nav_box.append(&spacer);
-
-    // Back button
+    // Top navigation - Back button (left side)
     if let Some(prev_step) = step.prev() {
         let back_btn = Button::with_label("← Back");
         back_btn.add_css_class("secondary-settings-button");
+        back_btn.add_css_class("onboarding-back-button");
+        back_btn.set_margin_start(16);
         let widgets_clone = OnboardingWidgets {
             window: widgets.window.clone(),
             content_box: widgets.content_box.clone(),
             nav_box: widgets.nav_box.clone(),
+            top_nav_box: widgets.top_nav_box.clone(),
+            progress_box: widgets.progress_box.clone(),
         };
         back_btn.connect_clicked(move |_| {
             show_step(&widgets_clone, prev_step);
         });
-        widgets.nav_box.append(&back_btn);
+        widgets.top_nav_box.append(&back_btn);
     }
 
-    // Next/Finish button
+    // Bottom navigation - Spacer
+    let spacer_bottom = GtkBox::new(Orientation::Horizontal, 0);
+    spacer_bottom.set_hexpand(true);
+    widgets.nav_box.append(&spacer_bottom);
+
+    // Next/Finish button (bottom right)
     if let Some(next_step) = step.next() {
         let next_btn = Button::with_label("Next →");
         next_btn.add_css_class("settings-primary-btn");
+        next_btn.set_margin_end(16);
         let widgets_clone = OnboardingWidgets {
             window: widgets.window.clone(),
             content_box: widgets.content_box.clone(),
             nav_box: widgets.nav_box.clone(),
+            top_nav_box: widgets.top_nav_box.clone(),
+            progress_box: widgets.progress_box.clone(),
         };
         next_btn.connect_clicked(move |_| {
             show_step(&widgets_clone, next_step);
@@ -216,6 +249,7 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
         // Final step - "Start Using ApexShot"
         let finish_btn = Button::with_label("Start Using ApexShot");
         finish_btn.add_css_class("settings-primary-btn");
+        finish_btn.set_margin_end(16);
         let window = widgets.window.clone();
         finish_btn.connect_clicked(move |_| {
             let _ = mark_onboarding_complete();

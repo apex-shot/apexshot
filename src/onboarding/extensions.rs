@@ -10,23 +10,25 @@ fn open_url(url: &str) {
 
 pub fn build_gnome(content: &gtk4::Box) {
     // Title
-    let title = Label::new(Some("GNOME Shell Extension"));
-    title.add_css_class("settings-page-title");
+    let title = Label::new(None);
+    title.set_markup("<span size='x-large' weight='bold'>GNOME Shell Extension</span>");
     title.set_halign(Align::Center);
+    title.set_margin_bottom(8);
     content.append(&title);
 
     // Description
     let desc = Label::new(Some(
         "Unlock the full ApexShot experience with the GNOME extension:",
     ));
-    desc.add_css_class("settings-sub-option-hint");
     desc.set_halign(Align::Center);
-    desc.set_margin_top(8);
+    desc.set_wrap(true);
+    desc.set_width_request(500);
+    desc.add_css_class("settings-sub-option");
     content.append(&desc);
 
     // Features
-    let features_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-    features_box.set_margin_top(16);
+    let features_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    features_box.set_margin_top(32);
     features_box.set_halign(Align::Center);
 
     let features = [
@@ -38,6 +40,8 @@ pub fn build_gnome(content: &gtk4::Box) {
     for feature in features {
         let label = Label::new(Some(feature));
         label.set_halign(Align::Start);
+        label.set_margin_start(40);
+        label.set_margin_end(40);
         features_box.append(&label);
     }
     content.append(&features_box);
@@ -46,7 +50,7 @@ pub fn build_gnome(content: &gtk4::Box) {
     let install_btn = Button::with_label("Install GNOME Extension");
     install_btn.add_css_class("settings-primary-btn");
     install_btn.set_halign(Align::Center);
-    install_btn.set_margin_top(24);
+    install_btn.set_margin_top(32);
     install_btn.connect_clicked(|_| {
         open_url(GNOME_EXTENSION_URL);
     });
@@ -55,23 +59,25 @@ pub fn build_gnome(content: &gtk4::Box) {
 
 pub fn build_chrome(content: &gtk4::Box) {
     // Title
-    let title = Label::new(Some("Browser Extension"));
-    title.add_css_class("settings-page-title");
+    let title = Label::new(None);
+    title.set_markup("<span size='x-large' weight='bold'>Browser Extension</span>");
     title.set_halign(Align::Center);
+    title.set_margin_bottom(8);
     content.append(&title);
 
     // Description
     let desc = Label::new(Some(
         "Capture full-page screenshots from any website with our Chrome/Chromium extension:",
     ));
-    desc.add_css_class("settings-sub-option-hint");
     desc.set_halign(Align::Center);
-    desc.set_margin_top(8);
+    desc.set_wrap(true);
+    desc.set_width_request(500);
+    desc.add_css_class("settings-sub-option");
     content.append(&desc);
 
     // Features
-    let features_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-    features_box.set_margin_top(16);
+    let features_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    features_box.set_margin_top(32);
     features_box.set_halign(Align::Center);
 
     let features = [
@@ -82,6 +88,8 @@ pub fn build_chrome(content: &gtk4::Box) {
     for feature in features {
         let label = Label::new(Some(feature));
         label.set_halign(Align::Start);
+        label.set_margin_start(40);
+        label.set_margin_end(40);
         features_box.append(&label);
     }
     content.append(&features_box);
@@ -90,7 +98,7 @@ pub fn build_chrome(content: &gtk4::Box) {
     let install_btn = Button::with_label("Get Chrome Extension");
     install_btn.add_css_class("settings-primary-btn");
     install_btn.set_halign(Align::Center);
-    install_btn.set_margin_top(24);
+    install_btn.set_margin_top(32);
     install_btn.connect_clicked(|_| {
         open_url(CHROME_EXTENSION_URL);
     });
