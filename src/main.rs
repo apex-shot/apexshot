@@ -68,6 +68,25 @@ fn trigger_daemon_action_blocking(action: &str) -> bool {
         .is_ok()
 }
 
+/// Check if the daemon D-Bus name is already registered.
+fn is_daemon_dbus_name_registered() -> bool {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let Ok(proxy) = zbus::blocking::Proxy::new(
+        &conn,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+    ) else {
+        return false;
+    };
+    let Ok(owner): Result<String, _> = proxy.call("GetNameOwner", &("org.apexshot.Daemon",)) else {
+        return false;
+    };
+    !owner.is_empty()
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -83,6 +102,14 @@ fn main() {
             let _ = show_onboarding_window();
             return;
         }
+        // Check if daemon D-Bus name is already registered (another instance starting)
+        if is_daemon_dbus_name_registered() {
+            // Daemon is starting up, wait and try to call settings
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let _ = trigger_daemon_action_blocking("settings");
+            return;
+        }
+        // No daemon running - start one
         let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
         let _ = std::process::Command::new(&exe)
             .arg("daemon")
