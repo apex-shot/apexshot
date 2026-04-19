@@ -4,6 +4,7 @@ Cargo.lock
 *.rs.bk
 
 # Build artifacts
+*.deb
 capture-overlay/build/
 capture-overlay/dist/
 capture-overlay/out/
