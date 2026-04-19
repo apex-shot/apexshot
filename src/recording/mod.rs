@@ -896,67 +896,12 @@ async fn start_recording_with_commands(
 }
 
 pub fn copy_to_clipboard(path: &PathBuf) -> RecordResult<()> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
     println!("Copying to clipboard...");
 
-    // Convert path to file:// URI for better compatibility with chat apps (Discord, Slack, etc.)
-    // They often fail to handle raw image/gif bytes but handle text/uri-list correctly.
-    let uri = url::Url::from_file_path(path)
-        .map_err(|_| RecordError::GStreamerError("Failed to convert path to URI".into()))?
-        .to_string();
+    crate::utils::clipboard::copy_uri_to_clipboard(path)
+        .map_err(|e| RecordError::GStreamerError(e))?;
 
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        // Wayland: use wl-copy with text/uri-list
-        let mut child = Command::new("wl-copy")
-            .arg("--type")
-            .arg("text/uri-list")
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|_| {
-                RecordError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "wl-copy not found. Install wl-clipboard.",
-                ))
-            })?;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(uri.as_bytes())?;
-        }
-
-        let status = child.wait()?;
-        if !status.success() {
-            return Err(RecordError::GStreamerError("wl-copy failed".into()));
-        }
-    } else {
-        // X11: use xclip with text/uri-list
-        let mut child = Command::new("xclip")
-            .arg("-selection")
-            .arg("clipboard")
-            .arg("-t")
-            .arg("text/uri-list")
-            .arg("-i")
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|_| {
-                RecordError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "xclip not found. Install xclip.",
-                ))
-            })?;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(uri.as_bytes())?;
-        }
-
-        let status = child.wait()?;
-        if !status.success() {
-            return Err(RecordError::GStreamerError("xclip failed".into()));
-        }
-    }
-
-    println!("Copied GIF URI to clipboard!");
+    println!("Copied to clipboard!");
     Ok(())
 }
 

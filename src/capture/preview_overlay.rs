@@ -10,9 +10,8 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::RefCell;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -890,71 +889,13 @@ fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
 }
 
 fn copy_uri_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> {
-    let uri = file_uri(path)?;
-    let payload = format!("{uri}\r\n");
-
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        let mut child = Command::new("wl-copy")
-            .arg("--type")
-            .arg("text/uri-list")
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    CapturePreviewError::ClipboardToolNotFound
-                } else {
-                    CapturePreviewError::ClipboardCommandFailed
-                }
-            })?;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(payload.as_bytes())
-                .map_err(|_| CapturePreviewError::ClipboardCommandFailed)?;
+    crate::utils::clipboard::copy_uri_to_clipboard(path).map_err(|e| {
+        if e.contains("not found") {
+            CapturePreviewError::ClipboardToolNotFound
+        } else {
+            CapturePreviewError::ClipboardCommandFailed
         }
-
-        if child
-            .wait()
-            .map_err(|_| CapturePreviewError::ClipboardCommandFailed)?
-            .success()
-        {
-            return Ok(());
-        }
-
-        return Err(CapturePreviewError::ClipboardCommandFailed);
-    }
-
-    let mut child = Command::new("xclip")
-        .arg("-selection")
-        .arg("clipboard")
-        .arg("-t")
-        .arg("text/uri-list")
-        .arg("-i")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                CapturePreviewError::ClipboardToolNotFound
-            } else {
-                CapturePreviewError::ClipboardCommandFailed
-            }
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(payload.as_bytes())
-            .map_err(|_| CapturePreviewError::ClipboardCommandFailed)?;
-    }
-
-    if child
-        .wait()
-        .map_err(|_| CapturePreviewError::ClipboardCommandFailed)?
-        .success()
-    {
-        Ok(())
-    } else {
-        Err(CapturePreviewError::ClipboardCommandFailed)
-    }
+    })
 }
 
 fn open_target(path: &Path) -> Result<(), CapturePreviewError> {

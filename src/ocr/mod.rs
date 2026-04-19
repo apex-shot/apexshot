@@ -430,28 +430,8 @@ pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrO
 /// * `Ok(())` if successful
 /// * `Err(OcrError)` if clipboard operation failed
 pub fn copy_to_clipboard(text: &str) -> OcrResult<()> {
-    // Check if we're on Wayland
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        // Use wl-copy for Wayland (more reliable than arboard for this use case)
-        // Use spawn() instead of output() to avoid waiting for the background process
-        match std::process::Command::new("wl-copy").arg(text).spawn() {
-            Ok(_) => return Ok(()),
-            Err(e) => {
-                // Fall through to arboard if wl-copy fails
-                eprintln!("Warning: wl-copy failed, trying arboard: {}", e);
-            }
-        }
-    }
-
-    // Try arboard (works on X11 and as fallback on Wayland)
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| OcrError::ClipboardError(format!("Failed to access clipboard: {}", e)))?;
-
-    clipboard
-        .set_text(text)
-        .map_err(|e| OcrError::ClipboardError(format!("Failed to set clipboard text: {}", e)))?;
-
-    Ok(())
+    crate::utils::clipboard::copy_text_to_clipboard(text)
+        .map_err(|e| OcrError::ClipboardError(e))
 }
 
 /// Extract text from an image file path
