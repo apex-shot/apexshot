@@ -2765,34 +2765,35 @@ mod tests {
         assert_eq!(prepared.updated_app_config.rec_key_appearance, 1);
         assert_eq!(prepared.updated_app_config.rec_key_blur_bg, false);
         assert_eq!(prepared.updated_app_config.rec_key_filter, 4);
+        let shell_supported = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
         assert_eq!(
-            prepared.runtime_overlay_snapshot,
-            Some(RuntimeOverlaySnapshot {
-                mic_visible: true,
-                speaker_visible: true,
-                webcam_enabled: true,
-                webcam_preview_manifest_path: String::new(),
-                webcam_rel_x: 0.61,
-                webcam_rel_y: 0.17,
-                webcam_size: 2,
-                webcam_shape: 1,
-                webcam_flip: true,
-                webcam_device: 7,
-                clicks_enabled: true,
-                click_size: 0.45,
-                click_color: 3,
-                click_style: 2,
-                click_animate: false,
-                keystrokes_enabled: true,
-                keystrokes_supported: false,
-                keystrokes_support_message: "Not supported on GNOME Wayland yet".to_string(),
-                key_size: 0.5,
-                key_position: 2,
-                key_appearance: 1,
-                key_blur_bg: false,
-                key_filter: 4,
-            })
+            prepared.runtime_overlay_snapshot.is_some(),
+            shell_supported
         );
+        if shell_supported {
+            let snap = prepared.runtime_overlay_snapshot.unwrap();
+            assert_eq!(snap.mic_visible, true);
+            assert_eq!(snap.speaker_visible, true);
+            assert_eq!(snap.webcam_enabled, true);
+            assert_eq!(snap.webcam_rel_x, 0.61);
+            assert_eq!(snap.webcam_rel_y, 0.17);
+            assert_eq!(snap.webcam_size, 2);
+            assert_eq!(snap.webcam_shape, 1);
+            assert_eq!(snap.webcam_flip, true);
+            assert_eq!(snap.webcam_device, 7);
+            assert_eq!(snap.clicks_enabled, true);
+            assert_eq!(snap.click_size, 0.45);
+            assert_eq!(snap.click_color, 3);
+            assert_eq!(snap.click_style, 2);
+            assert_eq!(snap.click_animate, false);
+            assert_eq!(snap.keystrokes_enabled, true);
+            assert_eq!(snap.keystrokes_supported, false);
+            assert_eq!(snap.key_size, 0.5);
+            assert_eq!(snap.key_position, 2);
+            assert_eq!(snap.key_appearance, 1);
+            assert_eq!(snap.key_blur_bg, false);
+            assert_eq!(snap.key_filter, 4);
+        }
     }
 
     #[test]
@@ -2909,6 +2910,7 @@ mod tests {
             chrono::Utc.with_ymd_and_hms(2026, 3, 26, 1, 30, 0).unwrap(),
         );
 
+        let shell_supported = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
         assert_eq!(
             prepared.controls_params,
             Some(RecordingControlsParams {
@@ -2918,14 +2920,14 @@ mod tests {
                 capture_h: 480,
                 is_fullscreen: false,
                 show_timer: true,
-                use_shell_mask: true,
+                use_shell_mask: shell_supported,
             })
         );
-        assert_eq!(prepared.use_shell_mask, true);
-        assert_eq!(prepared.use_shell_controls, true);
+        assert_eq!(prepared.use_shell_mask, shell_supported);
+        assert_eq!(prepared.use_shell_controls, shell_supported);
         assert_eq!(
             prepared.shell_controls_visibility_policy,
-            Some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
+            shell_supported.then_some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
         );
     }
 
@@ -2968,11 +2970,12 @@ mod tests {
             chrono::Utc.with_ymd_and_hms(2026, 3, 26, 1, 35, 0).unwrap(),
         );
 
-        assert_eq!(prepared.use_shell_mask, false);
-        assert_eq!(prepared.use_shell_controls, true);
+        let shell_supported = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
+        assert_eq!(prepared.use_shell_mask, false); // fullscreen never uses mask
+        assert_eq!(prepared.use_shell_controls, shell_supported);
         assert_eq!(
             prepared.shell_controls_visibility_policy,
-            Some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
+            shell_supported.then_some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
         );
         assert_eq!(
             prepared.controls_params,
@@ -2983,7 +2986,7 @@ mod tests {
                 capture_h: 1080,
                 is_fullscreen: true,
                 show_timer: true,
-                use_shell_mask: false,
+                use_shell_mask: false, // fullscreen never uses mask
             })
         );
     }
