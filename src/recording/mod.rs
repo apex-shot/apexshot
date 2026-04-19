@@ -1869,75 +1869,15 @@ async fn run_recording_with_controls_with_runtime_overlay(
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     visibility_policy: Option<crate::gnome_shell::RecordingControlsVisibilityPolicy>,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
-        match run_recording_with_shell_controls(
-            config.clone(),
-            params,
-            runtime_overlay_snapshot,
-            visibility_policy
-                .unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
-        )
-        .await
-        {
-            Ok(outcome) => return Ok(outcome),
-            Err(err) => {
-                eprintln!(
-                    "[recording] Failed to show GNOME shell recording controls ({err}); falling back to Qt controls."
-                );
-            }
-        }
-    }
-
-    run_recording_with_headless_controls(config, params).await
-}
-
-async fn run_recording_with_headless_controls(
-    config: RecordingConfig,
-    _params: RecordingControlsParams,
-) -> anyhow::Result<(PathBuf, StopAction)> {
-    let session_id = format!(
-        "recording-{}-{}",
-        std::process::id(),
-        chrono::Utc::now().timestamp_millis()
-    );
-    let control_server = RecordingControlServer::start(session_id).await?;
-
-    notify_daemon_event("recording_session_started");
-    let final_outcome = loop {
-        let (command_tx, command_rx) = mpsc::unbounded_channel();
-        control_server.set_command_sender(command_tx);
-        let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
-        control_server.clear_command_sender();
-        let outcome = outcome?;
-        if should_end_recording_ui_for_terminal_action(outcome.1) {
-            control_server.end_recording_ui();
-        }
-
-        match outcome {
-            (path, action @ RecordingTerminalAction::Restart) => {
-                if let Some(event) = daemon_event_for_terminal_action(action) {
-                    notify_daemon_event(event);
-                }
-                let _ = std::fs::remove_file(&path);
-                continue;
-            }
-            (path, action @ RecordingTerminalAction::Save) => {
-                if let Some(event) = daemon_event_for_terminal_action(action) {
-                    notify_daemon_event(event);
-                }
-                break (path, StopAction::Save);
-            }
-            (path, action @ RecordingTerminalAction::Discard) => {
-                if let Some(event) = daemon_event_for_terminal_action(action) {
-                    notify_daemon_event(event);
-                }
-                break (path, StopAction::Discard);
-            }
-        }
-    };
-
-    drop(control_server);
-    Ok(final_outcome)
+    // Always use GNOME Shell recording controls (no fallback to headless)
+    run_recording_with_shell_controls(
+        config,
+        params,
+        runtime_overlay_snapshot,
+        visibility_policy
+            .unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
+    )
+    .await
 }
 
 pub async fn run_recording_with_cpp_controls(

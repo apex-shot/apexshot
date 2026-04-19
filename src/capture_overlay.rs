@@ -21,8 +21,7 @@ use std::{
 };
 
 use crate::{
-    backend::{CaptureData, DisplayBackend, PixelFormat, WaylandBackend},
-    capture::{save_capture, ImageFormat, SaveConfig},
+    backend::{CaptureData, PixelFormat},
     gnome_integration::{emit_tracked_window_closed, emit_tracked_window_opened},
     overlay::{SelectionArea, SelectionError, SelectionResult},
 };
@@ -823,20 +822,6 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
     }
 }
 
-fn save_capture_to_temp_png(
-    capture: &CaptureData,
-    prefix: &str,
-) -> Result<PathBuf, SelectionError> {
-    save_capture(
-        capture,
-        &SaveConfig::default()
-            .with_output_dir(std::env::temp_dir())
-            .with_format(ImageFormat::Png)
-            .with_prefix(prefix),
-    )
-    .map_err(|e| SelectionError::InitError(format!("Failed to save temporary capture: {e}")))
-}
-
 pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
     if builtin_screenshot_overlay_active() {
         return Err(blocked_selection_error(
@@ -844,21 +829,7 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
         ));
     }
 
-    // Use ScreenCast portal for window capture on Wayland
-    // The C++ window picker requires a GNOME Shell extension that provides
-    // org.apexshot.WindowList which is not currently implemented.
-    if WaylandBackend::is_supported() {
-        eprintln!("[capture_overlay] capture_window_file: using Wayland ScreenCast window capture");
-        let backend = WaylandBackend::new().map_err(|e| {
-            SelectionError::InitError(format!("Failed to initialize Wayland backend: {e}"))
-        })?;
-        let capture = backend.capture_window(0).map_err(|e| {
-            SelectionError::InitError(format!("Wayland window capture failed: {e}"))
-        })?;
-        return save_capture_to_temp_png(&capture, "window_");
-    }
-
-    // Fallback to C++ window picker on X11
+    // Always use C++ window picker (requires GNOME Shell extension)
     eprintln!("[capture_overlay] capture_window_via_cpp: launching --window-capture");
     let output = run_capture_binary(&["--window-capture"], None)?;
     let exit_code = output.status.code();
