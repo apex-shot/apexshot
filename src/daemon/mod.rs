@@ -2814,6 +2814,13 @@ fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
         Ok(AreaCapturePathResult::RecordingRequested(request)) => {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
                 eprintln!("[daemon] Recording failed: {err}");
+                // Show notification for GNOME extension not installed
+                if err.to_string().contains("GNOME Shell extension is not installed") {
+                    send_desktop_notification(
+                        "Recording failed",
+                        "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
+                    );
+                }
             }
             return;
         }
@@ -2960,6 +2967,13 @@ async fn handle_open_recording_ui(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         Ok(Ok(AreaCapturePathResult::RecordingRequested(request))) => {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, None) {
                 eprintln!("[daemon] Recording UI failed: {err}");
+                // Show notification for GNOME extension not installed
+                if err.to_string().contains("GNOME Shell extension is not installed") {
+                    send_desktop_notification(
+                        "Recording failed",
+                        "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
+                    );
+                }
             }
         }
         Ok(Ok(AreaCapturePathResult::RecordingConfigUpdated)) => {

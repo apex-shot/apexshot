@@ -1869,6 +1869,15 @@ async fn run_recording_with_controls_with_runtime_overlay(
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     visibility_policy: Option<crate::gnome_shell::RecordingControlsVisibilityPolicy>,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
+    // Check if GNOME Shell extension is available before starting recording
+    if !crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
+        return Err(anyhow::anyhow!(
+            "GNOME Shell extension is not installed. Please install the ApexShot GNOME Shell extension first.\n\n\
+            You can install it from the onboarding window or by running:\n\
+            gnome-extensions install apexshot-gnome-integration@apexshot.github.io"
+        ));
+    }
+
     // Always use GNOME Shell recording controls (no fallback to headless)
     run_recording_with_shell_controls(
         config,
