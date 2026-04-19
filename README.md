@@ -149,17 +149,14 @@ apexshot capture window          # Window capture
 apexshot record screen           # Full screen recording
 apexshot record area --gif       # Area recording as GIF
 
-# OCR
+# OCR (requires image path)
 apexshot ocr <image-path>        # Extract text from image
 
-# Editor
+# Editor (requires image path)
 apexshot edit <image-path>       # Open image in annotation editor
 
 # Settings
 apexshot settings                # Open settings window
-
-# Version
-apexshot --version               # Print version
 ```
 
 ### Keyboard Shortcuts
