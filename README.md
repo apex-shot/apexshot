@@ -163,7 +163,7 @@ apexshot settings                # Open settings window
 
 Configure global hotkeys in Settings > Shortcuts. The daemon supports:
 
-- **Capture shortcuts** — Full screen, area, window, last region
+- **Capture shortcuts** — Full screen, area, window, last capture
 - **Recording shortcuts** — Start/stop/pause recording
 - **Custom shortcuts** — Record and assign any key combination per action
 
