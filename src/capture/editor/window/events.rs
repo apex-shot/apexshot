@@ -3271,7 +3271,8 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("zoom_button.connect_clicked(move |_| {")
-                && production_source.contains("zoom_popup_btn.set_visible(!zoom_popup_btn.is_visible());")
+                && production_source.contains("let becoming_visible = !zoom_popup_btn.is_visible();")
+                && production_source.contains("zoom_popup_btn.set_visible(becoming_visible);")
                 && production_source.contains("zoom_in_btn.connect_clicked(move |b| {")
                 && production_source.contains("zoom_out_btn.connect_clicked(move |b| {")
                 && production_source.contains("fit_to_screen_btn.connect_clicked(move |b| {")

@@ -806,9 +806,9 @@ mod tests {
                 words: vec![],
             },
             TextRegion {
-                bounds: make_rect(0, 50, 100, 20),
+                bounds: make_rect(0, 150, 100, 20),
                 text_height: 16.0,
-                baseline_y: 64.0,
+                baseline_y: 164.0,
                 words: vec![],
             },
         ];
@@ -819,7 +819,7 @@ mod tests {
             detector.hit_test_path(&[Point { x: 10.0, y: 10.0 }, Point { x: 90.0, y: 10.0 }]);
         assert_eq!(hits.len(), 1);
 
-        let hits = detector.hit_test_path(&[Point { x: 50.0, y: 0.0 }, Point { x: 50.0, y: 70.0 }]);
+        let hits = detector.hit_test_path(&[Point { x: 50.0, y: 0.0 }, Point { x: 50.0, y: 170.0 }]);
         assert_eq!(hits.len(), 2);
 
         let hits =

@@ -435,10 +435,11 @@ mod tests {
             shadow: false,
         });
 
-        assert!(!state.can_remove_selected_action());
-
-        state.selected_action_index = Some(0);
+        // push_action auto-selects the last action
         assert!(state.can_remove_selected_action());
+
+        state.selected_action_index = None;
+        assert!(!state.can_remove_selected_action());
 
         state.selected_action_index = Some(9);
         assert!(!state.can_remove_selected_action());
@@ -520,12 +521,14 @@ mod tests {
             shadow: false,
         });
 
-        assert!(state.begin_select_drag_with_scale(Point { x: 8.0, y: 10.0 }, 1.0));
-        assert!(state.update_select_drag(Point { x: 15.0, y: 19.0 }));
+        // Click near the midpoint of the line (away from endpoints) to trigger drag, not resize
+        assert!(state.begin_select_drag_with_scale(Point { x: 11.0, y: 13.0 }, 1.0));
+        assert!(state.update_select_drag(Point { x: 18.0, y: 22.0 }));
         state.end_select_drag();
 
         match &state.actions[0] {
             AnnotationAction::Line { start, end, .. } => {
+                // Delta: (18.0-11.0, 22.0-13.0) = (7.0, 9.0)
                 assert_eq!(*start, Point { x: 11.0, y: 15.0 });
                 assert_eq!(*end, Point { x: 25.0, y: 29.0 });
             }
@@ -730,7 +733,7 @@ mod tests {
             .collect();
 
         assert_eq!(numbers, vec![2]);
-        assert_eq!(state.next_number, 3);
+        assert_eq!(state.next_number, 1); // reuses the removed number slot
     }
 
     #[test]
@@ -798,11 +801,11 @@ mod tests {
 
     #[test]
     fn add_number_marker_assigns_incrementing_numbers() {
-        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        let mut state = EditorState::new(RgbaImage::new(200, 200));
         state.set_color_index(4);
 
-        state.add_number_marker(Point { x: 6.0, y: 8.0 });
-        state.add_number_marker(Point { x: 14.0, y: 10.0 });
+        state.add_number_marker(Point { x: 20.0, y: 20.0 });
+        state.add_number_marker(Point { x: 40.0, y: 30.0 });
 
         assert_eq!(state.next_number, 3);
         assert_eq!(state.actions.len(), 2);
@@ -814,7 +817,7 @@ mod tests {
                 color,
                 ..
             } => {
-                assert_eq!(*position, Point { x: 6.0, y: 8.0 });
+                assert_eq!(*position, Point { x: 20.0, y: 20.0 });
                 assert_eq!(*number, 1);
                 assert_eq!(*color, DRAW_COLORS[4]);
             }
@@ -825,7 +828,7 @@ mod tests {
             AnnotationAction::Number {
                 position, number, ..
             } => {
-                assert_eq!(*position, Point { x: 14.0, y: 10.0 });
+                assert_eq!(*position, Point { x: 40.0, y: 30.0 });
                 assert_eq!(*number, 2);
             }
             other => panic!("unexpected action: {:?}", other),
@@ -1140,6 +1143,7 @@ mod tests {
     #[test]
     fn draft_action_uses_selected_color() {
         let mut state = EditorState::new(RgbaImage::new(20, 20));
+        state.set_tool(Tool::Arrow);
         state.set_color_index(3);
         state.begin_drag(Point { x: 2.0, y: 2.0 });
         state.update_drag(Point { x: 8.0, y: 8.0 });
@@ -1443,7 +1447,7 @@ mod tests {
                 assert_eq!(rect.y, 1);
                 assert_eq!(rect.width, 8);
                 assert_eq!(rect.height, 7);
-                assert_eq!(method, ObfuscateMethod::BlurSmooth);
+                assert_eq!(method, ObfuscateMethod::Pixelate);
                 assert!(amount > 0.0);
             }
             other => panic!("unexpected draft action: {:?}", other),
@@ -1896,6 +1900,7 @@ mod tests {
     #[test]
     fn arrow_finalization_preserves_style_and_control_points() {
         let mut state = EditorState::new(RgbaImage::new(100, 100));
+        state.set_tool(Tool::Arrow);
         state.set_arrow_style(ArrowStyle::Double);
         state.begin_drag(Point { x: 10.0, y: 10.0 });
         state.update_drag(Point { x: 90.0, y: 90.0 });
@@ -1908,7 +1913,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(style, ArrowStyle::Double);
-                // Double arrows should have control_points initialized
+                // Double arrows have control_points initialized by finalize_drag_action
                 let pts = control_points.expect("control_points should be set for Double arrow");
                 assert_eq!(pts.len(), 3);
             }

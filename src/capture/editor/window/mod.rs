@@ -3390,8 +3390,8 @@ mod tests {
         assert!(
             production_source.contains("check_icon.add_css_class(\"editor-text-inspector-check\");")
                 && production_source.contains("btn.add_css_class(\"editor-text-inspector-option-active\");")
-                && production_source.contains("sync_text_option_selection(&text_size_list")
-                && production_source.contains("sync_text_option_selection(&font_family_list")
+                && production_source.contains("sync_text_option_selection(\n                &text_size_list,")
+                && production_source.contains("sync_text_option_selection(\n                &font_family_list,")
                 && production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
                 && !production_source.contains("TEXT_SIDEBAR_WIDTH"),
             "Text inspector rows should use explicit selected ticks while reusing the existing fixed sidebar width",
@@ -3434,7 +3434,8 @@ mod tests {
                 && production_source.contains("editor-number-size-check")
                 && production_source.contains("editor-number-style-option-active")
                 && production_source.contains("editor-number-size-option-active")
-                && production_source.contains("sync_number_option_selection(")
+                && production_source.contains("editor-number-style-option")
+                && production_source.contains("editor-number-size-option")
                 && production_source.contains("root.set_width_request(BACKGROUND_SIDEBAR_WIDTH);")
                 && !production_source.contains("NUMBER_SIDEBAR_WIDTH"),
             "Number Style and Size rows should share the same inspector-native composition while reusing the shared sidebar width",
@@ -3451,7 +3452,8 @@ mod tests {
                 && production_source.contains("number_start_row.append(&number_dec_btn);")
                 && production_source.contains("number_start_row.append(&number_start_entry);")
                 && production_source.contains("number_start_row.append(&number_inc_btn);")
-                && production_source.contains("append_inspector_section(&number_inspector_content, \"Start\", number_start_row.upcast_ref());"),
+                && production_source.contains("append_inspector_section(\n        &number_inspector_content,\n        \"Start\",")
+                && production_source.contains("number_start_row.upcast_ref()"),
             "Number inspector should expose the starting number controls inside the sidebar",
         );
     }

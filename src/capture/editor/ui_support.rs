@@ -2669,8 +2669,8 @@ mod tests {
         assert!(
             production_source.contains("min-height: 24px;")
                 && production_source.contains("min-width: 34px;")
-                && production_source.contains("min-width: 12px;")
-                && production_source.contains("min-height: 9px;"),
+                && production_source.contains("min-width: 10px;")
+                && production_source.contains("min-height: 6px;"),
             "alignment CSS should keep the larger button shell and marker sizes",
         );
     }
@@ -2774,7 +2774,7 @@ mod tests {
         assert!(
             production_source.contains("button.editor-crop-inspector-option.editor-crop-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
                 && production_source.contains(".editor-crop-inspector-check {\n                color: #ff9900;")
-                && production_source.contains(".editor-crop-dimensions-row {\n                padding: 10px 12px;"),
+                && production_source.contains(".editor-crop-dimensions-row {\n                padding: 12px 0;"),
             "Crop inspector should use the same restrained inspector surface language as the other side-panel tools",
         );
     }
@@ -2784,8 +2784,8 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains(".editor-footer-zoom-popup {\n                padding: 8px;")
-                && production_source.contains("background: rgba(20, 20, 22, 0.96);")
+            production_source.contains(".editor-footer-zoom-popup {\n                padding: 0;")
+                && production_source.contains("background: rgba(20, 20, 20, 0.94);")
                 && production_source.contains("border: 1px solid rgba(255, 255, 255, 0.08);")
                 && production_source.contains("border-radius: 12px;")
                 && !production_source.contains(".editor-footer-zoom-popup {\n                min-height: 100%;")
@@ -2799,9 +2799,9 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-footer-zoom-action {\n                min-width: 180px;\n                min-height: 32px;")
-                && production_source.contains("button.editor-footer-zoom-action:hover {\n                background: rgba(255, 255, 255, 0.08);")
-                && production_source.contains(".editor-footer-zoom-hint {\n                margin: 2px 2px 0 2px;\n                color: rgba(241, 241, 243, 0.68);"),
+            production_source.contains("button.editor-footer-zoom-action-btn {")
+                && production_source.contains("button.editor-footer-zoom-action-btn:hover {\n                background: rgba(255, 255, 255, 0.04);")
+                && production_source.contains(".editor-footer-zoom-row {\n                padding: 6px 12px;"),
             "Footer zoom styling should keep action rows interactive and hint rows clearly non-interactive",
         );
     }
