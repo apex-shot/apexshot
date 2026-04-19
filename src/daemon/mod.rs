@@ -2252,9 +2252,11 @@ fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
     };
 
     let asset_paths = [
+        // Development: relative to project manifest
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("assets/sounds")
             .join(file_name),
+        // Installed: relative to binary location
         std::env::current_exe()
             .ok()
             .and_then(|exe| {
@@ -2262,6 +2264,9 @@ fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
                     .map(|dir| dir.join("assets/sounds").join(file_name))
             })
             .unwrap_or_default(),
+        // System-wide install
+        PathBuf::from("/usr/share/apexshot/sounds").join(file_name),
+        PathBuf::from("/usr/local/share/apexshot/sounds").join(file_name),
     ];
 
     asset_paths

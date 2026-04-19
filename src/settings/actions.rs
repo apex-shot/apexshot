@@ -166,7 +166,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     let mut config = previous_config.clone();
     config.start_at_login = inputs.start_at_login.is_active();
     config.play_sounds = inputs.play_sounds.is_active();
-    config.shutter_sound = combo_value(&inputs.shutter_sound, "Default");
+    config.shutter_sound = combo_value(&inputs.shutter_sound, crate::config::DEFAULT_SHUTTER_SOUND);
     config.show_menu_bar_icon = inputs.show_menu_bar_icon.is_active();
     config.export_location.clear();
     config.screenshot_export_location = inputs.screenshot_export_location.text().to_string();
