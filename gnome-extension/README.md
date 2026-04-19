@@ -21,17 +21,17 @@ For recording, ApexShot cannot reliably keep a live dimmed fullscreen mask above
 ### Method 2: Manual (Terminal)
 ```bash
 # Create extension directory
-mkdir -p ~/.local/share/gnome-shell/extensions/apexshot-preview-helper@apexshot.github.io
+mkdir -p ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io
 
 # Copy extension files
-cp -r . ~/.local/share/gnome-shell/extensions/apexshot-preview-helper@apexshot.github.io/
+cp -r . ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/
 
 # Restart GNOME Shell (Alt+F2, type "r", Enter) or log out/in
 ```
 
 ### Enable the Extension
 ```bash
-gnome-extensions enable apexshot-preview-helper@apexshot.github.io
+gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ```
 
 ## Requirements
@@ -58,8 +58,8 @@ gnome-extensions enable apexshot-preview-helper@apexshot.github.io
 
 ## Uninstall
 ```bash
-gnome-extensions disable apexshot-preview-helper@apexshot.github.io
-rm -rf ~/.local/share/gnome-shell/extensions/apexshot-preview-helper@apexshot.github.io
+gnome-extensions disable apexshot-gnome-integration@apexshot.github.io
+rm -rf ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io
 ```
 
 ## How It Works

@@ -2,20 +2,34 @@
 
 A premium, open-source Linux screen capture tool with annotation, recording, and OCR.
 
+> **Note:** Currently tested on GNOME Ubuntu (Wayland). Support for other distributions and desktop environments will be added as the project grows.
+
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-0.2.15-orange.svg)
+![Version](https://img.shields.io/badge/version-0.2.19-orange.svg)
+![Status](https://img.shields.io/badge/status-Alpha-yellow.svg)
 
 ## Features
 
-- **Screenshot Capture** — Full screen, area selection, window capture, and crosshair mode
+### Screenshots
+- **Multiple Capture Modes** — Full screen, area selection, window capture, and crosshair mode
 - **Image Editor** — Annotate with arrows, shapes, text, blur, pixelate, highlighter, and more
-- **Screen Recording** — Area or full-screen recording with MP4/GIF output, audio monitoring, and webcam PiP
 - **OCR** — Extract text from images using Tesseract and ocrs dual-engine OCR
+- **QR Code Detection** — Automatically detect and copy QR codes from screenshots
+
+### Screen Recording
+- **Flexible Recording** — Area or full-screen recording with MP4/GIF output
+- **Audio Monitoring** — Real-time mic and speaker level monitoring via PipeWire
+- **Webcam PiP** — Picture-in-picture webcam overlay during recording
+- **Recording Controls** — Pause, resume, and stop recording with on-screen controls
+- **Runtime Overlays** — Display keystrokes and click events during recording (GNOME extension)
+
+### Integration
 - **Daemon Mode** — Background service with system tray and global hotkeys for instant capture
 - **Dual Display Support** — Works on both X11 and Wayland (including GNOME)
 - **Browser Integration** — Full-page scroll capture via Chrome/Chromium extension
 - **GNOME Integration** — Always-on-top previews and shell-managed recording overlays
+- **Smart Clipboard** — Automatic clipboard integration for quick sharing
 
 ## Tech Stack
 
@@ -33,14 +47,25 @@ A premium, open-source Linux screen capture tool with annotation, recording, and
 
 ## Download
 
+### Debian/Ubuntu (.deb)
+
 Download the latest `.deb` package from [GitHub Releases](https://github.com/apex-shot/apexshot/releases).
 
 ```bash
 # Install the downloaded package
-sudo apt install ./apexshot_*.deb
+sudo dpkg -i apexshot_*.deb
+sudo apt install -f  # Install any missing dependencies
 ```
 
-Dependencies are automatically installed from your system's package manager.
+### Build from Source
+
+```bash
+git clone https://github.com/apex-shot/apexshot.git
+cd apexshot
+cargo build --release
+```
+
+The C++ Qt5 overlay is automatically compiled via CMake during the Rust build.
 
 ## Installation
 
@@ -58,23 +83,45 @@ sudo apt install \
   libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
 ```
 
-### Build from Source
+### First-Time Setup
 
-```bash
-git clone https://github.com/apex-shot/apexshot.git
-cd apexshot
-cargo build --release
-```
+After installation, ApexShot will launch an onboarding wizard to help you:
 
-The C++ Qt5 overlay is automatically compiled via CMake during the Rust build.
+1. **GNOME Extension** (required) — Install the GNOME Shell extension for full functionality
+2. **Browser Extension** (optional) — Set up Chrome/Chromium extension for full-page capture
+3. **Cloud Sync** (coming soon) — Configure cloud storage for automatic backup
 
-### Install
+### Manual Install
 
 ```bash
 sudo apexshot install                          # Binary + autostart
 sudo apexshot install --extension-id <id>      # + browser native messaging host
 sudo apexshot install --force                  # Reinstall even if same version
 ```
+
+### GNOME Extension (Required)
+
+ApexShot requires the GNOME Shell extension for full functionality on GNOME:
+
+```bash
+# Download from GitHub releases
+wget https://github.com/apex-shot/apexshot/releases/download/gnome-extension-v2/apexshot-gnome-integration.zip
+
+# Install using gnome-extensions
+gnome-extensions install apexshot-gnome-integration.zip
+gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
+```
+
+The extension provides:
+- Always-on-top preview windows during drag operations
+- Shell-managed recording masks
+- Runtime overlays (click display)
+
+**Known Limitations:**
+- Keystroke display is not currently functional on GNOME due to platform constraints. Only click display is supported during recording.
+- Capture overlay is tied to the window where it was initiated. Moving to another application window will hide the overlay until you return to the original window.
+
+**Note:** The onboarding wizard will automatically guide you through installing the GNOME extension.
 
 ## Usage
 
@@ -124,6 +171,12 @@ Configure global hotkeys in Settings > Shortcuts. The daemon supports:
 ```
 apexshot/
 ├── src/                    # Rust core (capture, editor, recording, settings, daemon)
+│   ├── capture/            # Screen capture logic
+│   ├── editor/             # Image annotation editor
+│   ├── recording/          # Screen recording with GStreamer
+│   ├── settings/           # Settings UI and management
+│   ├── onboarding/         # First-time setup wizard
+│   └── gnome_integration/  # GNOME Shell integration
 ├── capture-overlay/        # C++ Qt5 native overlay (region selection, drawing)
 ├── gnome-extension/        # GNOME Shell extension (preview windows, recording mask)
 ├── web-scroll-extension/   # Chrome/Chromium extension (full-page scroll capture)
@@ -131,6 +184,44 @@ apexshot/
 ├── packaging/              # Package assets (desktop files, icons, deb helper)
 └── docs/                   # Architecture, data flow, and implementation docs
 ```
+
+## Development
+
+### Building
+
+```bash
+cargo build --release
+```
+
+### Testing
+
+```bash
+cargo test
+```
+
+### Building Debian Package
+
+```bash
+cargo deb
+```
+
+The package will be created in `target/debian/`.
+
+### Running from Source
+
+```bash
+cargo run -- daemon
+```
+
+### Code Style
+
+- Use `cargo fmt` for formatting
+- Use `cargo clippy` for linting
+- Follow Rust best practices and idioms
+
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 

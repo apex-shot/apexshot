@@ -85,3 +85,4 @@ assets = [
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/apexshot.svg", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg", "644"],
 ]
+maintainer-scripts = "packaging/debian"

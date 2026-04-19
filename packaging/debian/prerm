@@ -1,0 +1,7 @@
+#!/bin/bash
+set -e
+
+# Stop apexshot process before removal
+killall -9 apexshot 2>/dev/null || true
+
+exit 0

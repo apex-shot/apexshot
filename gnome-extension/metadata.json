@@ -1,8 +1,10 @@
 {
-  "name": "ApexShot GNOME Helper",
-  "description": "Supports ApexShot preview stacking and GNOME Wayland recording masks",
-  "uuid": "apexshot-preview-helper@apexshot.github.io",
+  "name": "ApexShot GNOME Integration",
+  "description": "Enhances ApexShot with GNOME Shell integration for window stacking, recording masks, and runtime overlays",
+  "uuid": "apexshot-gnome-integration@apexshot.github.io",
   "shell-version": ["45", "46", "47", "48", "49"],
-  "url": "https://github.com/codegoddy/apexshot",
-  "version": 2
+  "url": "https://github.com/apex-shot/apexshot",
+  "version": 2,
+  "gettext-domain": "apexshot-gnome-integration",
+  "settings-schema": "org.gnome.shell.extensions.apexshot-gnome-integration"
 }
