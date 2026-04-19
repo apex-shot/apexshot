@@ -1790,11 +1790,14 @@ pub fn prepare_overlay_recording_request(
         RecordingType::Gif => "gif",
     };
     let output_dir = overlay_recording_output_dir(&app_config);
-    let output_path = output_dir.join(format!(
-        "apexshot_recording_{}.{}",
-        now.format("%Y%m%d_%H%M%S"),
-        extension
-    ));
+
+    // Generate filename using pattern from config
+    let date_str = now.format("%Y-%m-%d").to_string();
+    let time_str = now.format("%H-%M-%S").to_string();
+    let filename = app_config.rec_filename_pattern
+        .replace("{Date}", &date_str)
+        .replace("{Time}", &time_str);
+    let output_path = output_dir.join(format!("{}.{}", filename, extension));
 
     let max_resolution = match request.video_max_res {
         0 => None,
@@ -2410,7 +2413,7 @@ mod tests {
 
         assert_eq!(
             prepared.output_path,
-            PathBuf::from("/tmp/apexshot-recordings/apexshot_recording_20260325_120000.mp4")
+            PathBuf::from("/tmp/apexshot-recordings/ApexShot Recording 2026-03-25 at 12-00-00.mp4")
         );
         assert_eq!(prepared.updated_app_config.rec_controls, true);
         assert_eq!(prepared.updated_app_config.rec_display_time, true);
@@ -2775,7 +2778,7 @@ mod tests {
 
         assert_eq!(
             prepared.output_path,
-            PathBuf::from("/var/tmp/apexshot-gifs/apexshot_recording_20260325_120001.gif")
+            PathBuf::from("/var/tmp/apexshot-gifs/ApexShot Recording 2026-03-25 at 12-00-01.gif")
         );
         assert_eq!(prepared.updated_app_config.rec_remember_selection, false);
         assert_eq!(prepared.updated_app_config.last_selection_x, None);

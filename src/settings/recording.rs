@@ -8,6 +8,7 @@ pub struct RecordingSettingsWidgets {
     pub section: GtkBox,
     pub video_export_location_entry: Entry,
     pub video_export_location_browse: Button,
+    pub rec_filename_pattern_entry: Entry,
     pub rec_notifications_check: CheckButton,
     pub rec_countdown_check: CheckButton,
     pub rec_remember_selection_check: CheckButton,
@@ -72,6 +73,29 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     export_hbox.append(&export_label);
     export_hbox.append(&entry_row);
     location_frame.append(&build_row!(&export_hbox, false));
+
+    // Filename pattern
+    let rec_filename_pattern_entry = Entry::new();
+    rec_filename_pattern_entry.set_hexpand(true);
+    rec_filename_pattern_entry.set_width_chars(28);
+    rec_filename_pattern_entry.set_placeholder_text(Some("Filename pattern"));
+    rec_filename_pattern_entry.set_text(&config.rec_filename_pattern);
+    let pattern_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    pattern_hbox.set_hexpand(true);
+    let pattern_label = Label::new(Some("Filename pattern"));
+    pattern_label.set_xalign(0.0);
+    pattern_label.set_hexpand(true);
+    let pattern_hint = Label::new(Some("Use {Date} and {Time} placeholders"));
+    pattern_hint.add_css_class("settings-sub-option");
+    pattern_hint.set_xalign(0.0);
+    pattern_hbox.append(&pattern_label);
+    let pattern_vbox = GtkBox::new(Orientation::Vertical, 4);
+    pattern_vbox.set_hexpand(true);
+    pattern_vbox.append(&rec_filename_pattern_entry);
+    pattern_vbox.append(&pattern_hint);
+    pattern_hbox.append(&pattern_vbox);
+    location_frame.append(&build_row!(&pattern_hbox, false));
+
     section.append(&location_frame);
 
     // --- Recording Behavior Group ---
@@ -124,6 +148,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         section,
         video_export_location_entry,
         video_export_location_browse,
+        rec_filename_pattern_entry,
         rec_notifications_check,
         rec_countdown_check,
         rec_remember_selection_check,

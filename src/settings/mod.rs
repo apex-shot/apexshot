@@ -399,6 +399,7 @@ fn build_settings_window(app: &Application) {
         screenshot_export_location: screenshots.export_location_entry.clone(),
         screenshot_format: screenshots.format_input.clone(),
         video_export_location: recordings.video_export_location_entry.clone(),
+        rec_filename_pattern: recordings.rec_filename_pattern_entry.clone(),
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),
