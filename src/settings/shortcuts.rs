@@ -659,10 +659,17 @@ mod tests {
 
     #[test]
     fn shortcuts_section_hides_removed_general_rows_and_keeps_supported_ones() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static GTK_AVAILABLE: AtomicBool = AtomicBool::new(false);
         static GTK_INIT: Once = Once::new();
         GTK_INIT.call_once(|| {
-            let _ = gtk4::init();
+            GTK_AVAILABLE.store(gtk4::init().is_ok(), Ordering::Relaxed);
         });
+
+        if !GTK_AVAILABLE.load(Ordering::Relaxed) {
+            eprintln!("Skipping: GTK not available (no display server)");
+            return;
+        }
 
         let config = AppConfig::default();
         let widgets = build_shortcuts_section(&config);
