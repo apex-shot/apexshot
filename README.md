@@ -125,9 +125,13 @@ The extension provides:
 
 ## Usage
 
-### Daemon Mode (Recommended)
+### Default Behavior (Deb Package)
 
-Runs as a background service with system tray icon and global hotkeys:
+The deb package installs ApexShot as a background daemon with system tray icon and global hotkeys by default. It starts automatically on login.
+
+### Manual Daemon Mode
+
+If you built from source or want to run the daemon manually:
 
 ```bash
 apexshot daemon
