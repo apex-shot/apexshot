@@ -2310,23 +2310,7 @@ fn apply_screenshot_after_capture_actions(
     let config = load_config().sanitized();
     state.lock().unwrap().last_capture_path = Some(saved_path.clone());
 
-    if config.after_capture_copy_file_to_clipboard {
-        if config.adv_clipboard_mode == "Image Only" {
-            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(&saved_path) {
-                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
-            }
-        } else {
-            // "File & Image (default)" — copy both URI and image
-            // First copy the image, then the URI (last copy wins on most clipboards,
-            // but some apps read both mime types)
-            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(&saved_path) {
-                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
-            }
-            if let Err(e) = copy_capture_uri_to_clipboard(&saved_path) {
-                eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
-            }
-        }
-    }
+    copy_screenshot_to_clipboard(&saved_path, &config);
 
     if config.after_capture_open_annotate {
         // Spawn editor as subprocess to avoid tokio runtime conflicts
@@ -2340,9 +2324,38 @@ fn apply_screenshot_after_capture_actions(
     }
 }
 
+fn copy_screenshot_to_clipboard(path: &std::path::Path, config: &crate::config::AppConfig) {
+    if !config.after_capture_copy_file_to_clipboard {
+        return;
+    }
+    if config.adv_clipboard_mode == "Image Only" {
+        if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
+            eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+        }
+    } else {
+        // "File & Image (default)" — copy both image and URI
+        if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
+            eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+        }
+        if let Err(e) = copy_capture_uri_to_clipboard(path) {
+            eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
+        }
+    }
+}
+
 fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonState>>) {
     let config = load_config().sanitized();
+
     if !config.after_capture_save {
+        // Even if not saving, copy to clipboard if enabled (using temp capture data)
+        if config.after_capture_copy_file_to_clipboard {
+            // Save to a temp file first for clipboard copy
+            if let Ok(temp_path) = save_capture(&capture, &screenshot_save_config()) {
+                copy_screenshot_to_clipboard(&temp_path, &config);
+                let _ = std::fs::remove_file(&temp_path);
+            }
+        }
+
         eprintln!(
             "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
         );
@@ -2367,6 +2380,8 @@ fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonSt
 fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mutex<DaemonState>>) {
     let config = load_config().sanitized();
     if !config.after_capture_save {
+        // Even if not saving, copy to clipboard if enabled
+        copy_screenshot_to_clipboard(&path, &config);
         let _ = std::fs::remove_file(&path);
         eprintln!(
             "[daemon] Screenshot discarded because Save is disabled in after-capture settings"

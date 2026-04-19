@@ -77,7 +77,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
             config.after_capture_show_quick_access,
         ),
         (
-            "Copy file to clipboard",
+            "Copy to clipboard",
             config.after_capture_copy_file_to_clipboard,
         ),
         ("Save", config.after_capture_save),
