@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "ApexShot Web Scroll Capture",
-  "version": "0.1.0",
-  "description": "Capture full webpage scroll screenshots and send to ApexShot.",
+  "version": "1.0.0",
+  "description": "Capture entire webpages with one click. Scroll, screenshot, and edit in ApexShot.",
   "permissions": [
     "activeTab",
     "scripting",
-    "tabs",
-    "nativeMessaging"
+    "nativeMessaging",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -16,6 +16,17 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Capture full webpage"
+    "default_title": "Capture full webpage",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon-16.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
   }
 }

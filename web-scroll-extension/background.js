@@ -6,19 +6,76 @@ const OVERLAP_PX = 80;
 const MAX_STEPS = 120;
 const BOTTOM_RECHECK_LIMIT = 2;
 
+async function testNativeHostConnection() {
+  try {
+    const response = await chrome.runtime.sendNativeMessage(HOST_NAME, {
+      cmd: "ping"
+    });
+    return response && response.ok;
+  } catch (error) {
+    // Try auto-registration
+    try {
+      const registerResponse = await chrome.runtime.sendNativeMessage(HOST_NAME, {
+        cmd: "auto_register",
+        extension_id: chrome.runtime.id
+      });
+      return registerResponse && registerResponse.ok;
+    } catch (regError) {
+      return false;
+    }
+  }
+}
+
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab || !tab.id || typeof tab.windowId !== "number") {
     return;
   }
 
   if (!tab.url || !(tab.url.startsWith("http://") || tab.url.startsWith("https://"))) {
-    console.error("ApexShot web scroll capture only supports http/https pages");
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icon-128.png",
+      title: "ApexShot Web Scroll Capture",
+      message: "Only http/https pages are supported"
+    });
+    return;
+  }
+
+  // Test native host connection first (will try auto-registration)
+  const isConnected = await testNativeHostConnection();
+  if (!isConnected) {
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icon-128.png",
+      title: "ApexShot Not Connected",
+      message: "Please log out and log back in to start the ApexShot daemon",
+      priority: 2
+    });
     return;
   }
 
   try {
+    chrome.action.setIcon({
+      path: {
+        "16": "icon-16.png",
+        "48": "icon-48.png",
+        "128": "icon-128.png"
+      },
+      tabId: tab.id
+    });
+    chrome.action.setTitle({
+      tabId: tab.id,
+      title: "Capturing webpage..."
+    });
+
     const metrics = await getPageMetrics(tab.id);
     const stitchedDataUrl = await captureAndStitch(tab, metrics);
+    
+    chrome.action.setTitle({
+      tabId: tab.id,
+      title: "Sending to ApexShot..."
+    });
+
     const response = await chrome.runtime.sendNativeMessage(HOST_NAME, {
       cmd: "capture_web_scroll",
       png_data_url: stitchedDataUrl,
@@ -30,8 +87,27 @@ chrome.action.onClicked.addListener(async (tab) => {
       const msg = response && response.message ? response.message : "Native host import failed";
       throw new Error(msg);
     }
+
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icon-128.png",
+      title: "Capture Successful",
+      message: "Screenshot sent to ApexShot for editing"
+    });
   } catch (error) {
     console.error("ApexShot web scroll capture failed", error);
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icon-128.png",
+      title: "Capture Failed",
+      message: error.message || "Failed to capture webpage",
+      priority: 2
+    });
+  } finally {
+    chrome.action.setTitle({
+      tabId: tab.id,
+      title: "Capture full webpage"
+    });
   }
 });
 

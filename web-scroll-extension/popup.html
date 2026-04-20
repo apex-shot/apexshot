@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApexShot Web Scroll Capture</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      margin: 0;
+      padding: 20px;
+      width: 400px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 20px;
+      color: #333;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo {
+      width: 32px;
+      height: 32px;
+    }
+    .status {
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+    .status.error {
+      background: #fee;
+      color: #c33;
+      border: 1px solid #fcc;
+    }
+    .status.success {
+      background: #efe;
+      color: #3c3;
+      border: 1px solid #cfc;
+    }
+    .status.info {
+      background: #eef;
+      color: #33c;
+      border: 1px solid #ccf;
+    }
+    .steps {
+      margin: 15px 0;
+    }
+    .step {
+      margin-bottom: 12px;
+      padding-left: 20px;
+      position: relative;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #555;
+    }
+    .step::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: #E95420;
+      font-weight: bold;
+    }
+    .code {
+      background: #f5f5f5;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: "Courier New", monospace;
+      font-size: 12px;
+      margin: 5px 0;
+      display: inline-block;
+    }
+    .button {
+      background: #E95420;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      width: 100%;
+      margin-top: 10px;
+      transition: background 0.2s;
+    }
+    .button:hover {
+      background: #d4461a;
+    }
+    .button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .link {
+      color: #E95420;
+      text-decoration: none;
+    }
+    .link:hover {
+      text-decoration: underline;
+    }
+    .note {
+      font-size: 12px;
+      color: #666;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid #eee;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>
+      <svg class="logo" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+        <rect x="8" y="8" width="112" height="112" rx="24" ry="24" fill="#E95420"/>
+        <path d="M 24 96 C 40 96, 48 20, 64 20 C 80 20, 88 96, 104 96" stroke="white" stroke-width="14" stroke-linecap="round" fill="none"/>
+      </svg>
+      ApexShot Web Scroll Capture
+    </h1>
+    
+    <div id="status" class="status info">
+      Checking native host connection...
+    </div>
+    
+    <div id="instructions" class="steps" style="display: none;">
+      <div class="step">
+        <strong>Install ApexShot desktop app</strong><br>
+        Install from deb package: <span class="code">sudo apt install apexshot</span>
+      </div>
+      <div class="step">
+        <strong>Reload this extension</strong><br>
+        Go to chrome://extensions and click the reload button
+      </div>
+      <div class="step">
+        <strong>The extension will auto-configure itself</strong><br>
+        Daemon auto-starts on login, native host setup is automatic
+      </div>
+    </div>
+    
+    <button id="test-btn" class="button" style="display: none;">Test Connection</button>
+    
+    <div class="note">
+      This extension captures full webpage screenshots by scrolling and automatically sends them to ApexShot for editing. The ApexShot desktop app must be installed and running for this extension to work.
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

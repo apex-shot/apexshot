@@ -1744,6 +1744,7 @@ struct NativeHostRequest {
     png_data_url: Option<String>,
     page_url: Option<String>,
     page_title: Option<String>,
+    extension_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1845,6 +1846,41 @@ async fn run_native_host() -> Result<(), String> {
                 continue;
             }
         };
+
+        // Handle ping command for connection testing
+        if req.cmd == "ping" {
+            let _ = write_native_host_response(&NativeHostResponse {
+                ok: true,
+                message: "Pong".into(),
+            });
+            continue;
+        }
+
+        // Handle auto-registration request
+        if req.cmd == "auto_register" {
+            if let Some(extension_id) = req.extension_id {
+                match install_native_host_manifest(&extension_id, BrowserTarget::Both) {
+                    Ok(_) => {
+                        let _ = write_native_host_response(&NativeHostResponse {
+                            ok: true,
+                            message: format!("Native host registered for extension {}", extension_id),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = write_native_host_response(&NativeHostResponse {
+                            ok: false,
+                            message: format!("Failed to register native host: {e}"),
+                        });
+                    }
+                }
+            } else {
+                let _ = write_native_host_response(&NativeHostResponse {
+                    ok: false,
+                    message: "Missing extension_id in auto_register request".into(),
+                });
+            }
+            continue;
+        }
 
         if req.cmd != "capture_web_scroll" {
             let _ = write_native_host_response(&NativeHostResponse {

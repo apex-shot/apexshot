@@ -1,9 +1,9 @@
 {
   "name": "io.github.codegoddy.apexshot",
   "description": "ApexShot native host",
-  "path": "/usr/local/bin/apexshot-native-host",
+  "path": "/usr/bin/apexshot-native-host",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://__EXTENSION_ID__/"
+    "chrome-extension://nblgiakamgiiehpcknfnhgoiihacaeli/"
   ]
 }
