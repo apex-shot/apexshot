@@ -523,6 +523,28 @@ fn install_binary(force: bool) {
 }
 
 fn install_autostart() {
+    // Clean up stale desktop files from previous `apexshot install` runs.
+    // The .deb package installs the proper desktop entry to /usr/share/applications/,
+    // but older versions of `apexshot install` wrote one to ~/.local/share/applications/
+    // which takes priority and can point to a non-existent binary path.
+    {
+        let local_apps_dir = std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                let home = std::env::var_os("HOME")
+                    .map(std::path::PathBuf::from)
+                    .expect("HOME is not set");
+                home.join(".local/share")
+            })
+            .join("applications");
+
+        let stale_desktop = local_apps_dir.join("io.github.codegoddy.apexshot.desktop");
+        if stale_desktop.exists() {
+            let _ = std::fs::remove_file(&stale_desktop);
+            eprintln!("[install] Removed stale desktop entry: {}", stale_desktop.display());
+        }
+    }
+
     let autostart_dir = {
         let config_home = std::env::var_os("XDG_CONFIG_HOME")
             .map(std::path::PathBuf::from)
