@@ -382,6 +382,10 @@ fn run_install(args: &[String]) {
             std::process::exit(1);
         }
     }
+
+    // Persist XDG portal permissions so the user doesn't have to re-approve
+    // screenshot/screencast access after every reboot.
+    apexshot::backend::portal_permissions::ensure_portal_permissions();
 }
 
 fn run_uninstall(args: &[String]) {

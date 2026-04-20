@@ -479,6 +479,10 @@ fn should_quit_on_sigint(recording_active: bool) -> bool {
 async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> anyhow::Result<()> {
     eprintln!("[daemon] ApexShot daemon starting…");
 
+    // Ensure XDG portal permissions are persisted so the user doesn't have
+    // to re-approve screenshot/screencast access after reboot.
+    crate::backend::portal_permissions::ensure_portal_permissions();
+
     if should_autostart_ydotoold() {
         ensure_ydotoold_running();
     }

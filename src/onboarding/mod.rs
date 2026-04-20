@@ -253,6 +253,12 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
         let window = widgets.window.clone();
         finish_btn.connect_clicked(move |_| {
             let _ = mark_onboarding_complete();
+            // Spawn the main app (settings UI) now that onboarding is complete
+            let exe = std::env::current_exe()
+                .unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+            if let Err(e) = std::process::Command::new(&exe).spawn() {
+                eprintln!("Failed to launch settings window: {e}");
+            }
             window.close();
         });
         widgets.nav_box.append(&finish_btn);

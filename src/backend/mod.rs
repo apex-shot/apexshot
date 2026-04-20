@@ -1,3 +1,4 @@
+pub mod portal_permissions;
 pub mod screencopy;
 pub mod wayland;
 pub mod x11;
