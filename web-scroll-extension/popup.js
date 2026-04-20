@@ -7,9 +7,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Test native host connection
   try {
+    console.log('[ApexShot] Pinging native host:', HOST_NAME);
     const response = await chrome.runtime.sendNativeMessage(HOST_NAME, {
       cmd: "ping"
     });
+    console.log('[ApexShot] Ping response:', response);
     
     if (response && response.ok) {
       statusEl.className = 'status success';
@@ -19,15 +21,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       throw new Error('Native host responded with error');
     }
   } catch (error) {
+    console.error('[ApexShot] Ping failed:', error.message);
     // Try auto-registration
     statusEl.className = 'status info';
     statusEl.textContent = 'Setting up native host...';
     
     try {
+      console.log('[ApexShot] Attempting auto-register with extension_id:', chrome.runtime.id);
       const registerResponse = await chrome.runtime.sendNativeMessage(HOST_NAME, {
         cmd: "auto_register",
         extension_id: chrome.runtime.id
       });
+      console.log('[ApexShot] Auto-register response:', registerResponse);
       
       if (registerResponse && registerResponse.ok) {
         statusEl.className = 'status success';
@@ -37,8 +42,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error(registerResponse?.message || 'Auto-registration failed');
       }
     } catch (regError) {
+      console.error('[ApexShot] Auto-register failed:', regError.message);
       statusEl.className = 'status error';
-      statusEl.textContent = '✗ ApexShot daemon not running. Please log out and log back in';
+      statusEl.textContent = '✗ ' + (regError.message || 'Native host not found');
       instructionsEl.style.display = 'block';
       testBtn.style.display = 'block';
     }

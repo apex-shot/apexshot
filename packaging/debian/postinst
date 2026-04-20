@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+# Install native messaging host manifest for each user with a Chrome/Chromium config
+for user_dir in /home/*; do
+  user_name=$(basename "$user_dir")
+
+  # Skip system accounts
+  case "$user_name" in
+    lost+found|share|nobody|root) continue ;;
+  esac
+
+  # Get UID for ownership
+  user_uid=$(id -u "$user_name" 2>/dev/null) || continue
+  user_gid=$(id -g "$user_name" 2>/dev/null) || continue
+
+  # Google Chrome
+  chrome_nm_dir="$user_dir/.config/google-chrome/NativeMessagingHosts"
+  if [ -d "$user_dir/.config/google-chrome" ]; then
+    mkdir -p "$chrome_nm_dir"
+    cp /etc/opt/chrome/NativeMessagingHosts/io.github.codegoddy.apexshot.json "$chrome_nm_dir/"
+    chown -R "$user_uid:$user_gid" "$chrome_nm_dir/io.github.codegoddy.apexshot.json"
+    chmod 644 "$chrome_nm_dir/io.github.codegoddy.apexshot.json"
+  fi
+
+  # Chromium
+  chromium_nm_dir="$user_dir/.config/chromium/NativeMessagingHosts"
+  if [ -d "$user_dir/.config/chromium" ]; then
+    mkdir -p "$chromium_nm_dir"
+    cp /etc/chromium/NativeMessagingHosts/io.github.codegoddy.apexshot.json "$chromium_nm_dir/"
+    chown -R "$user_uid:$user_gid" "$chromium_nm_dir/io.github.codegoddy.apexshot.json"
+    chmod 644 "$chromium_nm_dir/io.github.codegoddy.apexshot.json"
+  fi
+done
+
+exit 0

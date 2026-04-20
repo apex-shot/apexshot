@@ -4,4 +4,14 @@ set -e
 # Stop apexshot process before removal
 killall -9 apexshot 2>/dev/null || true
 
+# Remove native messaging host manifests from user Chrome/Chromium dirs
+for user_dir in /home/*; do
+  user_name=$(basename "$user_dir")
+  case "$user_name" in
+    lost+found|share|nobody|root) continue ;;
+  esac
+  rm -f "$user_dir/.config/google-chrome/NativeMessagingHosts/io.github.codegoddy.apexshot.json" 2>/dev/null || true
+  rm -f "$user_dir/.config/chromium/NativeMessagingHosts/io.github.codegoddy.apexshot.json" 2>/dev/null || true
+done
+
 exit 0
