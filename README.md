@@ -49,7 +49,14 @@ A premium, open-source Linux screen capture tool with annotation, recording, and
 
 ### Debian/Ubuntu (.deb)
 
-Download the latest `.deb` package from [GitHub Releases](https://github.com/apex-shot/apexshot/releases).
+Download and install the latest `.deb` package from GitHub Releases:
+
+```bash
+# Download and install the latest release
+curl -s https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4 | xargs wget && sudo dpkg -i apexshot_*.deb && sudo apt install -f
+```
+
+Or manually download from [GitHub Releases](https://github.com/apex-shot/apexshot/releases):
 
 ```bash
 # Install the downloaded package
