@@ -2150,22 +2150,24 @@ pub fn run_overlay_recording_request_with_gtk(
 
     eprintln!("Starting recording to {:?}...", prepared.output_path);
 
-    let handle = tokio::runtime::Handle::current();
-    let outcome = if let Some(params) = prepared.controls_params {
-        handle
-            .block_on(run_recording_with_controls_with_runtime_overlay(
-                prepared.recording_config.clone(),
-                params,
-                prepared.runtime_overlay_snapshot,
-                prepared.shell_controls_visibility_policy,
-            ))
-            .map_err(|err| anyhow::anyhow!("failed to run recording controls: {err}"))
-    } else {
-        handle
-            .block_on(start_recording(prepared.recording_config.clone()))
-            .map(|path| (path, StopAction::Save))
-            .map_err(|err| anyhow::anyhow!("Recording failed: {err}"))
-    };
+    let outcome = tokio::task::block_in_place(|| {
+        let handle = tokio::runtime::Handle::current();
+        if let Some(params) = prepared.controls_params {
+            handle
+                .block_on(run_recording_with_controls_with_runtime_overlay(
+                    prepared.recording_config.clone(),
+                    params,
+                    prepared.runtime_overlay_snapshot,
+                    prepared.shell_controls_visibility_policy,
+                ))
+                .map_err(|err| anyhow::anyhow!("failed to run recording controls: {err}"))
+        } else {
+            handle
+                .block_on(start_recording(prepared.recording_config.clone()))
+                .map(|path| (path, StopAction::Save))
+                .map_err(|err| anyhow::anyhow!("Recording failed: {err}"))
+        }
+    });
 
     match outcome {
         Ok((path, StopAction::Discard)) => {

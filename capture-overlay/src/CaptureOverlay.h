@@ -24,6 +24,7 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QRegion>
+#include <QRegularExpression>
 #include <algorithm>
 
 class QTimer;
@@ -134,7 +135,20 @@ public:
         m_recWebcam = v;
         if (!m_recWebcam) {
             stopWebcamCapture();
-        } else if (m_recordingPanelOpen && m_webcamDevice >= 0) {
+        } else if (m_webcamDevice < 0) {
+            // Auto-detect first available webcam when device is None
+            enumerateWebcamDevices();
+            if (!m_webcamDevices.isEmpty()) {
+                QRegularExpression re(QStringLiteral("video(\\d+)"));
+                QRegularExpressionMatch m = re.match(m_webcamDevices[0]);
+                if (m.hasMatch()) {
+                    m_webcamDevice = m.captured(1).toInt();
+                }
+            }
+            if (m_recordingPanelOpen && m_webcamDevice >= 0) {
+                startWebcamCapture();
+            }
+        } else if (m_recordingPanelOpen) {
             startWebcamCapture();
         }
     }

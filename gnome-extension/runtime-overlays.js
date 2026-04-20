@@ -333,7 +333,7 @@ function applyWebcamPreviewFrame(overlayState, framePath) {
     const file = Gio.File.new_for_path(framePath);
     const width = Math.max(1, overlayState.webcamActor.width);
     const height = Math.max(1, overlayState.webcamActor.height);
-    
+
     const texture = St.TextureCache.get_default().load_file_async(file, -1, height, 1, 1);
     texture.reactive = false;
 
@@ -342,19 +342,20 @@ function applyWebcamPreviewFrame(overlayState, framePath) {
             return;
         }
 
-        // Transfer content to frame actor
-        const content = texture.content;
-        overlayState.webcamFrameActor.set({
-            content,
-            width,
-            height,
+        // Remove previous frame child if any
+        const oldChild = overlayState.webcamFrameActor.get_first_child();
+        if (oldChild)
+            oldChild.destroy();
+
+        // Add texture as child so parent's border-radius + overflow:hidden clips it
+        texture.set_size(width, height);
+        texture.set({
+            x_expand: true,
+            y_expand: true,
             contentGravity: Clutter.ContentGravity.RESIZE_ASPECT_FILL,
         });
+        overlayState.webcamFrameActor.add_child(texture);
         overlayState.webcamLastFramePath = framePath;
-        
-        // Clear the temp texture's content so it doesn't destroy our content
-        texture.content = null;
-        texture.destroy();
     };
 
     if (texture.content) {

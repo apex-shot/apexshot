@@ -137,6 +137,9 @@ void CaptureOverlay::openRecordingPanelForShortcut()
     if (m_recordType == RecordType::None) {
         m_recordType = RecordType::Video;
     }
+    if (m_recWebcam && m_webcamDevice >= 0) {
+        startWebcamCapture();
+    }
     update();
 }
 
