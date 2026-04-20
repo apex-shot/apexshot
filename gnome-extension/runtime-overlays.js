@@ -53,6 +53,7 @@ function ensureRuntimeOverlayState(sessionState) {
             webcamLastFramePath: "",
             webcamLastSequence: -1,
             webcamPollSource: null,
+            webcamAsyncInProgress: false,
             webcamDragging: false,
             webcamDragOffsetX: 0,
             webcamDragOffsetY: 0,
@@ -301,22 +302,31 @@ function updateChromeSize(overlayState) {
     overlayState.chrome?.set_size(global.stage.width, global.stage.height);
 }
 
-function loadWebcamPreviewManifest(path) {
-    if (!path)
-        return null;
-
-    try {
-        const [, bytes] = GLib.file_get_contents(path);
-        const text = new TextDecoder().decode(bytes);
-        const parsed = JSON.parse(text);
-        if (!parsed || typeof parsed !== "object")
-            return null;
-        if (typeof parsed.sequence !== "number" || typeof parsed.frame_path !== "string")
-            return null;
-        return parsed;
-    } catch (_) {
-        return null;
+function loadWebcamPreviewManifestAsync(path, callback) {
+    if (!path) {
+        callback(null);
+        return;
     }
+
+    const file = Gio.File.new_for_path(path);
+    file.load_contents_async(null, (source, result) => {
+        try {
+            const [, bytes] = source.load_contents_finish(result);
+            const text = new TextDecoder().decode(bytes);
+            const parsed = JSON.parse(text);
+            if (!parsed || typeof parsed !== "object") {
+                callback(null);
+                return;
+            }
+            if (typeof parsed.sequence !== "number" || typeof parsed.frame_path !== "string") {
+                callback(null);
+                return;
+            }
+            callback(parsed);
+        } catch (_) {
+            callback(null);
+        }
+    });
 }
 
 function applyWebcamPreviewFrame(overlayState, framePath) {
@@ -365,14 +375,19 @@ function ensureWebcamPreviewPolling(sessionState, overlayState) {
             return GLib.SOURCE_REMOVE;
         }
 
-        const manifest = loadWebcamPreviewManifest(snapshot.webcam_preview_manifest_path);
-        if (manifest && manifest.sequence !== overlayState.webcamLastSequence) {
-            overlayState.webcamLastSequence = manifest.sequence;
-            try {
-                applyWebcamPreviewFrame(overlayState, manifest.frame_path);
-            } catch (error) {
-                logError(error, `[apexshot] webcam preview apply failed path=${manifest.frame_path}`);
-            }
+        if (!overlayState.webcamAsyncInProgress) {
+            overlayState.webcamAsyncInProgress = true;
+            loadWebcamPreviewManifestAsync(snapshot.webcam_preview_manifest_path, (manifest) => {
+                overlayState.webcamAsyncInProgress = false;
+                if (manifest && manifest.sequence !== overlayState.webcamLastSequence) {
+                    overlayState.webcamLastSequence = manifest.sequence;
+                    try {
+                        applyWebcamPreviewFrame(overlayState, manifest.frame_path);
+                    } catch (error) {
+                        logError(error, `[apexshot] webcam preview apply failed path=${manifest.frame_path}`);
+                    }
+                }
+            });
         }
         return GLib.SOURCE_CONTINUE;
     });
@@ -671,6 +686,7 @@ export function destroyRuntimeOverlays(sessionState) {
     overlayState.webcamFrameImageUri = "";
     overlayState.webcamLastFramePath = "";
     overlayState.webcamLastSequence = -1;
+    overlayState.webcamAsyncInProgress = false;
     overlayState.clicksActor = null;
     overlayState.clickPulseStackActor = null;
     overlayState.clickPulseActor = null;

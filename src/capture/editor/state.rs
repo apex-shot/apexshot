@@ -863,6 +863,13 @@ impl EditorState {
         }
 
         self.text_size = fitted_size;
+
+        // Clamp so the box never overflows below the image.
+        let image_height = self.base_image.height() as i32;
+        if bounds.rect.y + bounds.rect.height > image_height {
+            bounds.rect.height = (image_height - bounds.rect.y).max(44);
+        }
+
         bounds.sync_handles();
         self.active_text_bounds = Some(bounds);
     }
@@ -930,6 +937,13 @@ impl EditorState {
 
         // Only update height — x, y, width are untouched.
         bounds.rect.height = new_height;
+
+        // Clamp so the box never overflows below the image.
+        let image_height = self.base_image.height() as i32;
+        if bounds.rect.y + bounds.rect.height > image_height {
+            bounds.rect.height = (image_height - bounds.rect.y).max(44);
+        }
+
         bounds.sync_handles();
         self.active_text_bounds = Some(bounds);
     }
@@ -970,6 +984,13 @@ impl EditorState {
             .round() as i32;
 
         bounds.rect.height = new_height;
+
+        // Clamp so the box never overflows below the image.
+        let image_height = self.base_image.height() as i32;
+        if bounds.rect.y + bounds.rect.height > image_height {
+            bounds.rect.height = (image_height - bounds.rect.y).max(44);
+        }
+
         bounds.sync_handles();
         self.active_text_bounds = Some(bounds);
     }

@@ -465,7 +465,6 @@ class RecordingMaskService {
             } catch (e) {
                 logError(e, `Failed to unexport ${MASK_DBUS_PATH}`);
             }
-            this._dbusObject.run_dispose();
             this._dbusObject = null;
         }
     }
@@ -766,12 +765,12 @@ class RecordingMaskService {
 
 export default class ApexShotShellSupport {
     constructor() {
-        this._previewHelper = new PreviewStackingHelper();
-        this._maskService = new RecordingMaskService();
     }
 
     enable() {
         log("[apexshot] extension enable marker 2026-03-29T02:45Z");
+        this._previewHelper = new PreviewStackingHelper();
+        this._maskService = new RecordingMaskService();
         this._previewHelper.enable();
         this._maskService.enable();
     }
@@ -779,5 +778,7 @@ export default class ApexShotShellSupport {
     disable() {
         this._maskService.disable();
         this._previewHelper.disable();
+        this._previewHelper = null;
+        this._maskService = null;
     }
 }
