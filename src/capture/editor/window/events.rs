@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use crate::annotations::save_annotations;
 use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
-    io_ops::{copy_uri_to_clipboard, open_target, save_edited_image},
+    io_ops::{copy_uri_to_clipboard, save_edited_image},
     numbering_style::{NumberSize, NumberingStyle},
     render::cursor_position_for_text_point,
     state::EditorState,
@@ -180,6 +180,7 @@ pub(super) struct EventContext {
     pub zoom_to_selection_btn: Button,
     pub zoom_level: Rc<Cell<f64>>,
     pub copy_btn: Button,
+    #[allow(dead_code)]
     pub upload_btn: Button,
     pub color_buttons: Vec<Button>,
     pub color_picker_dot: GtkBox,
@@ -270,7 +271,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         zoom_to_selection_btn,
         zoom_level,
         copy_btn,
-        upload_btn,
+        upload_btn: _,
         color_buttons,
         color_picker_dot,
         color_class_names,
@@ -728,18 +729,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     copy_btn.connect_clicked(move |_| {
         if let Err(e) = copy_uri_to_clipboard(&path_copy) {
             eprintln!("Copy failed: {e}");
-        }
-    });
-
-    let path_upload = path.clone();
-    upload_btn.connect_clicked(move |_| {
-        let target = path_upload
-            .parent()
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_else(|| path_upload.clone());
-
-        if let Err(e) = open_target(&target) {
-            eprintln!("Upload action failed: {e}");
         }
     });
 

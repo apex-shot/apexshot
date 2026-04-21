@@ -29,6 +29,7 @@ pub fn copy_uri_to_clipboard(path: &Path) -> Result<(), String> {
     clipboard::copy_uri_to_clipboard(path)
 }
 
+#[allow(dead_code)]
 pub fn open_target(path: &Path) -> Result<(), String> {
     Command::new("xdg-open")
         .arg(path)

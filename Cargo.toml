@@ -73,8 +73,8 @@ relm4-icons-build = "0.10.1"
 maintainer = "codegoddy <codegoddy@gmail.com>"
 copyright = "2026, codegoddy"
 license-file = ["LICENSE", "4"]
-depends = "$auto"
-recommends = "gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad"
+depends = "$auto, wl-clipboard, ffmpeg, libnotify-bin, wget, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav"
+recommends = ""
 section = "graphics"
 priority = "optional"
 assets = [
@@ -85,16 +85,16 @@ assets = [
     ["packaging/apexshot-daemon.desktop", "etc/xdg/autostart/apexshot.desktop", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/apexshot.svg", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg", "644"],
-    ["src/capture/editor/background-images/codioful-formerly-gradienta-O10vBIDRkZw-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/codioful-formerly-gradienta-n2XqPm7Bqhk-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/kunal-patil-2hB-jhXLd3c-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/kunal-patil-8ZKlgI_G-mw-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/luke-chesser-CxBx_J3yp9g-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/luke-chesser-pJadQetzTkI-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/magicpattern-87PP9Zd7MNo-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/magicpattern-bevXKKL7E9g-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/magicpattern-oPH_5xuMgQw-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
-    ["src/capture/editor/background-images/milad-fakurian-nY14Fs8pxT8-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-01.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-02.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-03.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-04.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-05.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-06.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-07.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-08.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-09.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-10.jpg", "usr/share/apexshot/background-images/", "644"],
     ["native-host/io.github.codegoddy.apexshot.json", "etc/opt/chrome/NativeMessagingHosts/", "644"],
     ["native-host/io.github.codegoddy.apexshot.json", "etc/chromium/NativeMessagingHosts/", "644"],
 ]

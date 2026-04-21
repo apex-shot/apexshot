@@ -71,8 +71,8 @@ fn deb_package_includes_background_gradient_assets() {
     let cargo_toml = include_str!("../Cargo.toml");
 
     assert!(
-        cargo_toml.contains("src/capture/editor/background-images/codioful-formerly-gradienta-n2XqPm7Bqhk-unsplash.jpg")
-            && cargo_toml.contains("src/capture/editor/background-images/milad-fakurian-nY14Fs8pxT8-unsplash.jpg"),
+        cargo_toml.contains("src/capture/editor/background-images/gradient-01.jpg")
+            && cargo_toml.contains("src/capture/editor/background-images/gradient-10.jpg"),
         "release .deb must include the background gradient image assets in package.metadata.deb.assets"
     );
 

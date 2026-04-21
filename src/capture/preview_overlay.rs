@@ -160,7 +160,6 @@ fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: Str
     let (preview_width, preview_height) = preview_dimensions(config.quick_access_overlay_size);
     let dismiss_action = preview_dismiss_action(&config.quick_access_auto_close_action);
     let dismiss_after_dragging = config.quick_access_close_after_dragging;
-    let dismiss_after_uploading = config.quick_access_close_after_uploading;
     let start_pinned = initial_preview_pinned(config.quick_access_auto_close_enabled);
     let auto_close_seconds = config.quick_access_auto_close_interval as u64;
 
@@ -221,8 +220,9 @@ fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: Str
     );
     let (upload_btn, _) = icon_button(
         crate::capture::editor::window::icon_names::CLOUD_ARROW_UP_REGULAR,
-        "Upload",
+        "Cloud upload (coming soon)",
     );
+    upload_btn.set_sensitive(false);
     let (pin_btn, pin_icon) = icon_button("view-pin-symbolic", "Pin");
 
     // Floating close button – centered, revealed on hover over the image
@@ -541,32 +541,6 @@ fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: Str
 
         if let Some(window) = window_weak_edit.upgrade() {
             window.close();
-        }
-    });
-
-    let path_upload = path.clone();
-    let window_weak_upload = window.downgrade();
-    let pinned_upload = pinned.clone();
-    let upload_dismiss_action = dismiss_action;
-    upload_btn.connect_clicked(move |_| {
-        let target = path_upload
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| path_upload.clone());
-        if let Err(e) = open_target(&target) {
-            eprintln!("Upload action failed: {e}");
-            return;
-        }
-
-        if !should_dismiss_for_behavior(
-            pinned_upload.load(Ordering::Relaxed),
-            dismiss_after_uploading,
-        ) {
-            return;
-        }
-
-        if let Some(window) = window_weak_upload.upgrade() {
-            dismiss_preview_window(&window, upload_dismiss_action);
         }
     });
 
@@ -898,6 +872,7 @@ fn copy_uri_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> {
     })
 }
 
+#[allow(dead_code)]
 fn open_target(path: &Path) -> Result<(), CapturePreviewError> {
     Command::new("xdg-open")
         .arg(path)
