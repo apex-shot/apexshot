@@ -5,10 +5,22 @@ Cargo.lock
 
 # Build artifacts
 *.deb
+build/
 capture-overlay/build/
 capture-overlay/dist/
 capture-overlay/out/
 .tmp-capture-overlay-build/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+*.o
+*.o.d
+_autogen/
 
 # Editor
 .idea/

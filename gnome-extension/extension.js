@@ -6,6 +6,7 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Clutter from "gi://Clutter";
 import St from "gi://St";
+import Shell from "gi://Shell";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {createSessionState} from "./session-state.js";
 import {pushRuntimeOverlayKeystrokeText} from "./session-state.js";
@@ -16,6 +17,7 @@ import {shouldExcludeOverlayEvent, updateRuntimeOverlaySnapshot} from "./runtime
 import {MaskUi} from "./mask-ui.js";
 import {ControlsUi} from "./controls-ui.js";
 import {ScreenshotLockController} from "./screenshot-lock.js";
+import {WindowListService} from "./window-list.js";
 
 // D-Bus interface exposed by the apexshot native process.
 // The extension listens for signals on this name/path/iface.
@@ -771,13 +773,23 @@ export default class ApexShotShellSupport {
         log("[apexshot] extension enable marker 2026-03-29T02:45Z");
         this._previewHelper = new PreviewStackingHelper();
         this._maskService = new RecordingMaskService();
+        this._windowListService = new WindowListService({
+            Gio,
+            GLib,
+            Meta,
+            shellGlobal: global,
+            windowTracker: Shell.WindowTracker.get_default(),
+        });
         this._previewHelper.enable();
         this._maskService.enable();
+        this._windowListService.enable();
     }
 
     disable() {
+        this._windowListService.disable();
         this._maskService.disable();
         this._previewHelper.disable();
+        this._windowListService = null;
         this._previewHelper = null;
         this._maskService = null;
     }

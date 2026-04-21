@@ -32,14 +32,20 @@
 #include <cmath>
 #include <algorithm>
 
-// ── Toolbar constants (mirrors CaptureOverlay) ────────────────────────────────
+// ── Toolbar constants (reduced capture-toolbar subset) ───────────────────────
 static const double TB_ITEM_W   = 62.0;
-static const double TB_H        = 46.0;
+static const double TB_H        = 58.0;
 static const double TB_RADIUS   = 13.0;
-static const int    TB_NUM      = 8;
+static const int    TB_NUM      = 2;
+static const int    WINDOW_PICKER_TOOL_INDICES[] = {1, 3};
 static const char*  TB_LABELS[] = {
-    "Capture","Area","Fullscreen","Window","Scroll","Timer","OCR","Recording"
+    "Area", "Window"
 };
+static const QColor TB_WARM_FILL(176, 92, 56, 76);
+static const QColor TB_WARM_RIM(255, 212, 178, 152);
+static const QColor TB_HOVER_FILL(255, 255, 255, 22);
+static const QColor TB_HOVER_RIM(255, 255, 255, 86);
+static const QColor TB_ACTIVE_TEXT(255, 229, 206, 255);
 
 static void tbRoundedPath(QPainterPath& path, double x, double y, double w, double h, double r) {
     r = std::min(r, std::min(w/2.0, h/2.0));
@@ -47,17 +53,19 @@ static void tbRoundedPath(QPainterPath& path, double x, double y, double w, doub
 }
 
 static void drawTbFrostedPanel(QPainter& p, double x, double y, double w, double h, double r) {
-    // Drop shadow
-    QPainterPath shadow; tbRoundedPath(shadow, x, y+3, w, h, r);
-    p.fillPath(shadow, QColor(0,0,0,77));
-    // Clip
+    QPainterPath shadow; tbRoundedPath(shadow, x, y + 3, w, h, r);
+    p.fillPath(shadow, QColor(0, 0, 0, 77));
+
     p.save();
     QPainterPath clip; tbRoundedPath(clip, x, y, w, h, r);
     p.setClipPath(clip);
-    p.fillRect(QRectF(x,y,w,h), QColor(20,20,20,255));
-    p.fillRect(QRectF(x,y,w,h), QColor(0,0,0,133));
-    p.fillRect(QRectF(x,y,w,h), QColor(255,255,255,26));
+    p.fillRect(QRectF(x, y, w, h), QColor(20, 20, 20, 230));
+    p.fillRect(QRectF(x, y, w, h), QColor(255, 255, 255, 10));
     p.restore();
+
+    p.setPen(QPen(QColor(255, 255, 255, 26), 1.0));
+    p.setBrush(Qt::NoBrush);
+    p.drawPath(clip);
 }
 
 static void drawTbIcon(QPainter& p, int idx, double cx, double cy, QColor col) {
@@ -129,57 +137,61 @@ QRectF WindowPickerOverlay::toolbarItemRect(int i) const
 
 void WindowPickerOverlay::drawToolbar(QPainter& p)
 {
-    double panelW = TB_ITEM_W * TB_NUM;
-    double panelX = (width() - panelW) / 2.0;
-    double panelY = height() - TB_H - 24.0;
+    const double panelW = TB_ITEM_W * TB_NUM;
+    const double panelX = (width() - panelW) / 2.0;
+    const double panelY = height() - TB_H - 24.0;
     m_toolbarRect = QRectF(panelX, panelY, panelW, TB_H);
 
     drawTbFrostedPanel(p, panelX, panelY, panelW, TB_H, TB_RADIUS);
 
-    // Hover highlight
+    auto drawAccentCell = [&](const QRectF& cell, const QColor& fill, const QColor& rim) {
+        const double hx = cell.x() + 4.0;
+        const double hy = cell.y() + 4.0;
+        const double hw = cell.width() - 8.0;
+        const double hh = cell.height() - 8.0;
+        QPainterPath card;
+        tbRoundedPath(card, hx, hy, hw, hh, 10.0);
+        p.fillPath(card, fill);
+        if (rim.alpha() > 0) {
+            p.save();
+            p.setClipPath(card);
+            p.setPen(QPen(rim, 1.2));
+            p.setBrush(Qt::NoBrush);
+            QPainterPath border;
+            tbRoundedPath(border, hx + 0.6, hy + 0.6, hw - 1.2, hh - 1.2, 9.5);
+            p.drawPath(border);
+            p.restore();
+        }
+    };
+
+    const int activeTool = 1;
+    drawAccentCell(toolbarItemRect(activeTool), TB_WARM_FILL, QColor(0, 0, 0, 0));
+
     if (m_hoveredTool >= 0 && m_hoveredTool < TB_NUM) {
-        QRectF cell = toolbarItemRect(m_hoveredTool);
-        double hx=cell.x()+3, hy=cell.y()+4, hw=cell.width()-6, hh=cell.height()-8;
-        QPainterPath glow; tbRoundedPath(glow, hx-1, hy-1, hw+2, hh+2, 9);
-        p.fillPath(glow, QColor(255,255,255,20));
-        QPainterPath pill; tbRoundedPath(pill, hx, hy, hw, hh, 8);
-        p.fillPath(pill, QColor(255,255,255,66));
-        p.save(); p.setClipPath(pill);
-        p.setPen(QPen(QColor(255,255,255,140),1.2)); p.setBrush(Qt::NoBrush);
-        QPainterPath rim; tbRoundedPath(rim, hx+0.6, hy+0.6, hw-1.2, hh-1.2, 7.5);
-        p.drawPath(rim);
-        p.setPen(QPen(QColor(255,255,255,204),1.5));
-        p.drawLine(QPointF(hx+10, hy+0.75), QPointF(hx+hw-10, hy+0.75));
-        p.restore();
+        drawAccentCell(toolbarItemRect(m_hoveredTool), TB_HOVER_FILL, TB_HOVER_RIM);
     }
 
-    // Window tool active highlight (blue tint — currently selected)
-    {
-        QRectF cell = toolbarItemRect(3);
-        double hx=cell.x()+3, hy=cell.y()+4, hw=cell.width()-6, hh=cell.height()-8;
-        QPainterPath pill; tbRoundedPath(pill, hx, hy, hw, hh, 8);
-        p.fillPath(pill, QColor(0,122,255,60));
-    }
-
-    // Icons + labels
     for (int i = 0; i < TB_NUM; ++i) {
-        QRectF cell = toolbarItemRect(i);
-        double cx   = cell.x() + cell.width() / 2.0;
-        bool hovered = (m_hoveredTool == i);
-        double shadowAlpha = hovered ? 0.30 : 0.52;
-        double iconY = panelY + (hovered ? 15.5 : 16.0);
+        const QRectF cell = toolbarItemRect(i);
+        const double cx = cell.x() + cell.width() / 2.0;
+        const bool hovered = (m_hoveredTool == i);
+        const bool active = (activeTool == i);
+        const double shadowAlpha = hovered ? 0.24 : (active ? 0.32 : 0.50);
+        const double iconY = cell.y() + ((hovered || active) ? 23.5 : 24.0);
+        const QColor iconColor = active ? TB_ACTIVE_TEXT : QColor(255, 255, 255, 240);
 
-        drawTbIcon(p, i, cx+0.6, iconY+0.8, QColor(0,0,0,int(shadowAlpha*255)));
-        drawTbIcon(p, i, cx, iconY, QColor(255,255,255,255));
+        drawTbIcon(p, WINDOW_PICKER_TOOL_INDICES[i], cx + 0.6, iconY + 0.8,
+                   QColor(0, 0, 0, int(shadowAlpha * 255)));
+        drawTbIcon(p, WINDOW_PICKER_TOOL_INDICES[i], cx, iconY, iconColor);
 
-        QFont f; f.setFamily("Sans"); f.setPointSizeF(7.5); f.setBold(hovered); p.setFont(f);
+        QFont f; f.setFamily("Sans"); f.setPointSizeF(7.1); f.setBold(hovered || active); p.setFont(f);
         QFontMetricsF fm(f);
-        QString label(TB_LABELS[i]);
-        double tw = fm.horizontalAdvance(label);
-        p.setPen(QColor(0,0,0,int(shadowAlpha*255)));
-        p.drawText(QPointF(cx-tw/2+0.6, panelY+34.0+0.8), label);
-        p.setPen(QColor(255,255,255,255));
-        p.drawText(QPointF(cx-tw/2, panelY+34.0), label);
+        const QString label(TB_LABELS[i]);
+        const double tw = fm.horizontalAdvance(label);
+        p.setPen(QColor(0, 0, 0, int(shadowAlpha * 255)));
+        p.drawText(QPointF(cx - tw / 2.0 + 0.6, cell.y() + 50.0 + 0.8), label);
+        p.setPen(active ? TB_ACTIVE_TEXT : QColor(244, 244, 244, 240));
+        p.drawText(QPointF(cx - tw / 2.0, cell.y() + 50.0), label);
     }
 }
 
@@ -416,6 +428,121 @@ static QList<QRect> computeLayout(const QList<AppWindowInfo>& windows,
     return result;
 }
 
+static void drawWindowCard(QPainter& p,
+                           const QRect& thumb,
+                           const AppWindowInfo& win,
+                           bool hovered)
+{
+    const bool hasThumbnail = !win.icon.isNull();
+
+    QPainterPath cardPath;
+    cardPath.addRoundedRect(thumb, 10, 10);
+
+    if (hasThumbnail) {
+        const QPixmap scaled = win.icon.scaled(
+            thumb.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        const int drawX = thumb.x() + (thumb.width() - scaled.width()) / 2;
+        const int drawY = thumb.y() + (thumb.height() - scaled.height()) / 2;
+        p.save();
+        p.setClipPath(cardPath);
+        p.drawPixmap(drawX, drawY, scaled);
+        p.fillRect(thumb, hovered ? QColor(0, 0, 0, 22) : QColor(0, 0, 0, 40));
+        p.restore();
+    }
+
+    QLinearGradient gradient(thumb.topLeft(), thumb.bottomRight());
+    if (hasThumbnail) {
+        if (hovered) {
+            gradient.setColorAt(0.0, QColor(176, 92, 56, 36));
+            gradient.setColorAt(1.0, QColor(72, 34, 24, 44));
+            p.setPen(QPen(QColor(255, 212, 178, 255), 2.8));
+        } else {
+            gradient.setColorAt(0.0, QColor(255, 255, 255, 12));
+            gradient.setColorAt(1.0, QColor(24, 24, 30, 54));
+            p.setPen(QPen(QColor(255, 255, 255, 152), 1.7));
+        }
+    } else if (hovered) {
+        gradient.setColorAt(0.0, QColor(176, 92, 56, 84));
+        gradient.setColorAt(1.0, QColor(72, 34, 24, 124));
+        p.setPen(QPen(QColor(255, 212, 178, 255), 2.8));
+    } else {
+        gradient.setColorAt(0.0, QColor(255, 255, 255, 32));
+        gradient.setColorAt(1.0, QColor(24, 24, 30, 150));
+        p.setPen(QPen(QColor(255, 255, 255, 124), 1.7));
+    }
+    p.fillPath(cardPath, gradient);
+    p.drawPath(cardPath);
+
+    const QRect titleBar(thumb.x(), thumb.y(), thumb.width(), std::min(28, thumb.height()));
+    QPainterPath titleBarPath;
+    titleBarPath.addRoundedRect(titleBar, 10, 10);
+    p.fillPath(titleBarPath, hovered ? QColor(176, 92, 56, 175) : QColor(0, 0, 0, 145));
+
+    QString appLabel = win.appName.isEmpty() ? win.title : win.appName;
+    if (appLabel.isEmpty()) appLabel = QStringLiteral("Window");
+    if (appLabel.length() > 30) appLabel = appLabel.left(27) + QStringLiteral("…");
+
+    QFont appFont;
+    appFont.setPointSizeF(9.5);
+    appFont.setBold(true);
+    p.setFont(appFont);
+    p.setPen(QColor(255, 255, 255, 236));
+    p.drawText(titleBar.adjusted(8, 0, -8, 0), Qt::AlignLeft | Qt::AlignVCenter, appLabel);
+
+    if (!hasThumbnail) {
+        QString badge = appLabel.left(1).toUpper();
+        const int badgeSize = std::max(16, std::min(56, std::min(thumb.width(), thumb.height()) / 3));
+        const QRect badgeRect(thumb.center().x() - badgeSize / 2,
+                              thumb.center().y() - badgeSize / 2 + 6,
+                              badgeSize,
+                              badgeSize);
+        p.setBrush(hovered ? QColor(176, 92, 56, 220) : QColor(255, 255, 255, 52));
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(badgeRect);
+
+        QFont badgeFont;
+        badgeFont.setPointSizeF(std::max(9.0, badgeSize * 0.38));
+        badgeFont.setBold(true);
+        p.setFont(badgeFont);
+        p.setPen(QColor(255, 255, 255, 245));
+        p.drawText(badgeRect, Qt::AlignCenter, badge);
+    }
+
+    QString windowTitle = win.title.isEmpty() ? appLabel : win.title;
+    if (windowTitle.length() > 36) windowTitle = windowTitle.left(33) + QStringLiteral("…");
+
+    QFont titleFontCard;
+    titleFontCard.setPointSizeF(9.0);
+    titleFontCard.setBold(false);
+    p.setFont(titleFontCard);
+    p.setPen(QColor(255, 255, 255, hovered ? 222 : 200));
+    const QRect footerTextRect = thumb.adjusted(10, thumb.height() - 30, -10, -8);
+    p.drawText(footerTextRect, Qt::AlignLeft | Qt::AlignVCenter, windowTitle);
+
+    const QString dims = QStringLiteral("%1×%2")
+                           .arg(std::max(1, win.rect.width()))
+                           .arg(std::max(1, win.rect.height()));
+    QFont dimsFont;
+    dimsFont.setPointSizeF(8.3);
+    dimsFont.setBold(false);
+    p.setFont(dimsFont);
+    p.setPen(QColor(255, 255, 255, hovered ? 210 : 176));
+    p.drawText(footerTextRect, Qt::AlignRight | Qt::AlignVCenter, dims);
+
+    if (hovered) {
+        const QRect tickRect(thumb.right() - 24, thumb.y() + 6, 16, 16);
+        p.setBrush(QColor(176, 92, 56, 234));
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(tickRect);
+        QFont tickFont;
+        tickFont.setPointSizeF(9.0);
+        tickFont.setBold(true);
+        p.setFont(tickFont);
+        p.setPen(QColor(255, 255, 255, 255));
+        p.drawText(tickRect, Qt::AlignCenter, QStringLiteral("✓"));
+    }
+}
+
 static QRect pickerDisplayArea(int width, int height)
 {
     // Keep room for title at the top and hint + toolbar at the bottom.
@@ -529,119 +656,16 @@ void WindowPickerOverlay::paintEvent(QPaintEvent*)
         return;
     }
 
-    // Draw window cards
+    // Draw all cards in base state first.
     for (int i = 0; i < m_thumbnailRects.size(); ++i) {
         const QRect& thumb = m_thumbnailRects[i];
         const AppWindowInfo& win = m_windows[i];
-        const bool hovered = (i == m_hoveredIdx);
-        const bool hasThumbnail = !win.icon.isNull();
+        drawWindowCard(p, thumb, win, false);
+    }
 
-        QPainterPath cardPath;
-        cardPath.addRoundedRect(thumb, 10, 10);
-
-        if (hasThumbnail) {
-            const QPixmap scaled = win.icon.scaled(
-                thumb.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-            const int drawX = thumb.x() + (thumb.width() - scaled.width()) / 2;
-            const int drawY = thumb.y() + (thumb.height() - scaled.height()) / 2;
-            p.save();
-            p.setClipPath(cardPath);
-            p.drawPixmap(drawX, drawY, scaled);
-            p.fillRect(thumb, hovered ? QColor(0, 0, 0, 22) : QColor(0, 0, 0, 40));
-            p.restore();
-        }
-
-        QLinearGradient gradient(thumb.topLeft(), thumb.bottomRight());
-        if (hasThumbnail) {
-            if (hovered) {
-                gradient.setColorAt(0.0, QColor(64, 140, 255, 36));
-                gradient.setColorAt(1.0, QColor(28, 44, 84, 44));
-                p.setPen(QPen(QColor(90, 170, 255, 255), 2.8));
-            } else {
-                gradient.setColorAt(0.0, QColor(255, 255, 255, 12));
-                gradient.setColorAt(1.0, QColor(24, 24, 30, 54));
-                p.setPen(QPen(QColor(255, 255, 255, 152), 1.7));
-            }
-        } else if (hovered) {
-            gradient.setColorAt(0.0, QColor(64, 140, 255, 84));
-            gradient.setColorAt(1.0, QColor(28, 44, 84, 124));
-            p.setPen(QPen(QColor(90, 170, 255, 255), 2.8));
-        } else {
-            gradient.setColorAt(0.0, QColor(255, 255, 255, 32));
-            gradient.setColorAt(1.0, QColor(24, 24, 30, 150));
-            p.setPen(QPen(QColor(255, 255, 255, 124), 1.7));
-        }
-        p.fillPath(cardPath, gradient);
-        p.drawPath(cardPath);
-
-        const QRect titleBar(thumb.x(), thumb.y(), thumb.width(), std::min(28, thumb.height()));
-        QPainterPath titleBarPath;
-        titleBarPath.addRoundedRect(titleBar, 10, 10);
-        p.fillPath(titleBarPath, hovered ? QColor(0, 122, 255, 175) : QColor(0, 0, 0, 145));
-
-        QString appLabel = win.appName.isEmpty() ? win.title : win.appName;
-        if (appLabel.isEmpty()) appLabel = QStringLiteral("Window");
-        if (appLabel.length() > 30) appLabel = appLabel.left(27) + QStringLiteral("…");
-
-        QFont appFont;
-        appFont.setPointSizeF(9.5);
-        appFont.setBold(true);
-        p.setFont(appFont);
-        p.setPen(QColor(255, 255, 255, 236));
-        p.drawText(titleBar.adjusted(8, 0, -8, 0), Qt::AlignLeft | Qt::AlignVCenter, appLabel);
-
-        if (!hasThumbnail) {
-            QString badge = appLabel.left(1).toUpper();
-            const int badgeSize = std::max(16, std::min(56, std::min(thumb.width(), thumb.height()) / 3));
-            const QRect badgeRect(thumb.center().x() - badgeSize / 2,
-                                  thumb.center().y() - badgeSize / 2 + 6,
-                                  badgeSize,
-                                  badgeSize);
-            p.setBrush(hovered ? QColor(0, 122, 255, 220) : QColor(255, 255, 255, 52));
-            p.setPen(Qt::NoPen);
-            p.drawEllipse(badgeRect);
-
-            QFont badgeFont;
-            badgeFont.setPointSizeF(std::max(9.0, badgeSize * 0.38));
-            badgeFont.setBold(true);
-            p.setFont(badgeFont);
-            p.setPen(QColor(255, 255, 255, 245));
-            p.drawText(badgeRect, Qt::AlignCenter, badge);
-        }
-
-        QString windowTitle = win.title.isEmpty() ? appLabel : win.title;
-        if (windowTitle.length() > 36) windowTitle = windowTitle.left(33) + QStringLiteral("…");
-
-        QFont titleFontCard;
-        titleFontCard.setPointSizeF(9.0);
-        titleFontCard.setBold(false);
-        p.setFont(titleFontCard);
-        p.setPen(QColor(255, 255, 255, hovered ? 222 : 200));
-        const QRect footerTextRect = thumb.adjusted(10, thumb.height() - 30, -10, -8);
-        p.drawText(footerTextRect, Qt::AlignLeft | Qt::AlignVCenter, windowTitle);
-
-        const QString dims = QStringLiteral("%1×%2")
-                               .arg(std::max(1, win.rect.width()))
-                               .arg(std::max(1, win.rect.height()));
-        QFont dimsFont;
-        dimsFont.setPointSizeF(8.3);
-        dimsFont.setBold(false);
-        p.setFont(dimsFont);
-        p.setPen(QColor(255, 255, 255, hovered ? 210 : 176));
-        p.drawText(footerTextRect, Qt::AlignRight | Qt::AlignVCenter, dims);
-
-        if (hovered) {
-            const QRect tickRect(thumb.right() - 24, thumb.y() + 6, 16, 16);
-            p.setBrush(QColor(0, 122, 255, 234));
-            p.setPen(Qt::NoPen);
-            p.drawEllipse(tickRect);
-            QFont tickFont;
-            tickFont.setPointSizeF(9.0);
-            tickFont.setBold(true);
-            p.setFont(tickFont);
-            p.setPen(QColor(255, 255, 255, 255));
-            p.drawText(tickRect, Qt::AlignCenter, QStringLiteral("✓"));
-        }
+    // Draw exactly one hovered card as a second pass.
+    if (m_hoveredIdx >= 0 && m_hoveredIdx < m_thumbnailRects.size() && m_hoveredIdx < m_windows.size()) {
+        drawWindowCard(p, m_thumbnailRects[m_hoveredIdx], m_windows[m_hoveredIdx], true);
     }
 
     // Bottom hint
@@ -676,7 +700,7 @@ void WindowPickerOverlay::mouseMoveEvent(QMouseEvent* event)
     // Check thumbnail hover
     int newHover = -1;
     if (newToolHover < 0) {
-        for (int i = 0; i < m_thumbnailRects.size(); ++i) {
+        for (int i = static_cast<int>(m_thumbnailRects.size()) - 1; i >= 0; --i) {
             if (m_thumbnailRects[i].contains(pos)) { newHover = i; break; }
         }
     }
@@ -696,23 +720,13 @@ void WindowPickerOverlay::mousePressEvent(QMouseEvent* event)
     // Check toolbar click first
     for (int i = 0; i < TB_NUM; ++i) {
         if (toolbarItemRect(i).contains(pos)) {
-            if (i == 1) {
+            if (i == 0) {
                 // Area tool — exit window picker, go to area mode
                 releaseKeyboard();
                 hide();
                 QApplication::exit(4); // code 4 = switch to area mode
-            } else if (i == 2) {
-                // Fullscreen tool — exit window picker, go to fullscreen mode
-                releaseKeyboard();
-                hide();
-                QApplication::exit(5); // code 5 = switch to fullscreen mode
-            } else if (i == 3) {
+            } else if (i == 1) {
                 // Window — already in window mode, do nothing
-            } else {
-                // Other tools — confirm with full screen capture
-                releaseKeyboard();
-                hide();
-                QApplication::exit(i + 10); // code 10+ = tool index
             }
             return;
         }
