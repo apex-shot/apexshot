@@ -333,8 +333,9 @@ fn action_to_serializable(action: &AnnotationAction) -> Option<SerializableAnnot
             })
         }
 
-        AnnotationAction::Focus { rect } => Some(SerializableAnnotation::Focus {
+        AnnotationAction::Focus { rect, intensity } => Some(SerializableAnnotation::Focus {
             rect: Rect::from_editor(*rect),
+            intensity: *intensity,
         }),
     }
 }
@@ -458,8 +459,9 @@ pub fn serializable_to_action(ann: &SerializableAnnotation) -> AnnotationAction 
             amount: *amount,
         },
 
-        SerializableAnnotation::Focus { rect } => AnnotationAction::Focus {
+        SerializableAnnotation::Focus { rect, intensity } => AnnotationAction::Focus {
             rect: rect.to_editor(),
+            intensity: *intensity,
         },
     }
 }
@@ -496,8 +498,7 @@ fn serializable_to_arrow_style(s: super::schema::ArrowStyle) -> EditorArrowStyle
 fn obfuscate_method_to_serializable(m: crate::capture::editor::types::ObfuscateMethod) -> super::schema::ObfuscateMethod {
     match m {
         crate::capture::editor::types::ObfuscateMethod::Pixelate => super::schema::ObfuscateMethod::Pixelate,
-        crate::capture::editor::types::ObfuscateMethod::BlurSecure => super::schema::ObfuscateMethod::BlurSecure,
-        crate::capture::editor::types::ObfuscateMethod::BlurSmooth => super::schema::ObfuscateMethod::BlurSmooth,
+        crate::capture::editor::types::ObfuscateMethod::Blur => super::schema::ObfuscateMethod::Blur,
         crate::capture::editor::types::ObfuscateMethod::Blackout => super::schema::ObfuscateMethod::Blackout,
     }
 }
@@ -505,8 +506,7 @@ fn obfuscate_method_to_serializable(m: crate::capture::editor::types::ObfuscateM
 fn serializable_to_obfuscate_method(m: super::schema::ObfuscateMethod) -> crate::capture::editor::types::ObfuscateMethod {
     match m {
         super::schema::ObfuscateMethod::Pixelate => crate::capture::editor::types::ObfuscateMethod::Pixelate,
-        super::schema::ObfuscateMethod::BlurSecure => crate::capture::editor::types::ObfuscateMethod::BlurSecure,
-        super::schema::ObfuscateMethod::BlurSmooth => crate::capture::editor::types::ObfuscateMethod::BlurSmooth,
+        super::schema::ObfuscateMethod::Blur => crate::capture::editor::types::ObfuscateMethod::Blur,
         super::schema::ObfuscateMethod::Blackout => crate::capture::editor::types::ObfuscateMethod::Blackout,
     }
 }

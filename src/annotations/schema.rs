@@ -125,8 +125,7 @@ pub enum ArrowStyle {
 #[serde(rename_all = "lowercase")]
 pub enum ObfuscateMethod {
     Pixelate,
-    BlurSecure,
-    BlurSmooth,
+    Blur,
     Blackout,
 }
 
@@ -254,7 +253,13 @@ pub enum SerializableAnnotation {
     },
     Focus {
         rect: Rect,
+        #[serde(default = "default_focus_intensity")]
+        intensity: f64,
     },
+}
+
+fn default_focus_intensity() -> f64 {
+    58.0
 }
 
 impl AnnotationFile {

@@ -1,14 +1,14 @@
 use super::color::{
-    clamp_blur_secure_amount, clamp_blur_smooth_amount, clamp_obfuscate_amount,
-    clamp_pixelate_amount, clamp_stroke_size, clamp_text_size,
-    selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale, DEFAULT_COLOR_INDEX,
-    DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS, SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
+    clamp_focus_intensity, clamp_obfuscate_amount, clamp_pixelate_amount, clamp_stroke_size,
+    clamp_text_size, selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale,
+    DEFAULT_COLOR_INDEX, DEFAULT_FOCUS_INTENSITY, DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS,
+    SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
 };
 use super::numbering_style::{NumberSize, NumberingStyle};
 use super::pen_weight::{HighlighterMode, PenWeight};
 use super::render::{
-    apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_secure_blur,
-    layout_wrapped_text,
+    apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect,
+    apply_hybrid_blur, layout_wrapped_text,
 };
 use super::selection::{
     action_bounds_with_padding, action_contains_point_with_padding,
@@ -49,8 +49,8 @@ pub struct EditorState {
     pub text_font_family: String,
     pub obfuscate_method: ObfuscateMethod,
     pub obfuscate_pixelate_amount: f64,
-    pub obfuscate_blur_secure_amount: f64,
-    pub obfuscate_blur_smooth_amount: f64,
+    pub obfuscate_blur_amount: f64,
+    pub focus_intensity: f64,
     pub arrow_style: ArrowStyle,
     pub arrow_editing_controls: bool,
     pub arrow_control_dragging: Option<usize>,
@@ -387,8 +387,8 @@ impl EditorState {
             text_font_family: String::from("Sans"),
             obfuscate_method: ObfuscateMethod::Pixelate,
             obfuscate_pixelate_amount: DEFAULT_OBFUSCATE_AMOUNT,
-            obfuscate_blur_secure_amount: DEFAULT_OBFUSCATE_AMOUNT,
-            obfuscate_blur_smooth_amount: DEFAULT_OBFUSCATE_AMOUNT,
+            obfuscate_blur_amount: DEFAULT_OBFUSCATE_AMOUNT,
+            focus_intensity: DEFAULT_FOCUS_INTENSITY,
             arrow_style: ArrowStyle::Standard,
             arrow_editing_controls: false,
             arrow_control_dragging: None,
@@ -1278,8 +1278,7 @@ impl EditorState {
     pub fn current_obfuscate_amount(&self) -> f64 {
         match self.obfuscate_method {
             ObfuscateMethod::Pixelate => self.obfuscate_pixelate_amount,
-            ObfuscateMethod::BlurSecure => self.obfuscate_blur_secure_amount,
-            ObfuscateMethod::BlurSmooth => self.obfuscate_blur_smooth_amount,
+            ObfuscateMethod::Blur => self.obfuscate_blur_amount,
             ObfuscateMethod::Blackout => 0.0,
         }
     }
@@ -1289,11 +1288,8 @@ impl EditorState {
             ObfuscateMethod::Pixelate => {
                 self.obfuscate_pixelate_amount = clamp_pixelate_amount(amount)
             }
-            ObfuscateMethod::BlurSecure => {
-                self.obfuscate_blur_secure_amount = clamp_blur_secure_amount(amount)
-            }
-            ObfuscateMethod::BlurSmooth => {
-                self.obfuscate_blur_smooth_amount = clamp_blur_smooth_amount(amount)
+            ObfuscateMethod::Blur => {
+                self.obfuscate_blur_amount = clamp_obfuscate_amount(amount)
             }
             ObfuscateMethod::Blackout => {}
         }
@@ -1305,6 +1301,56 @@ impl EditorState {
         self.set_current_obfuscate_amount(amount);
         let after = self.current_obfuscate_amount();
         (after - before).abs() > f64::EPSILON
+    }
+
+    pub fn current_focus_intensity(&self) -> f64 {
+        clamp_focus_intensity(self.focus_intensity)
+    }
+
+    pub fn set_current_focus_intensity_and_check(&mut self, intensity: f64) -> bool {
+        let next = clamp_focus_intensity(intensity);
+        if (self.focus_intensity - next).abs() <= f64::EPSILON {
+            return false;
+        }
+        self.focus_intensity = next;
+        true
+    }
+
+    pub fn selected_focus_action_intensity(&self) -> Option<f64> {
+        let AnnotationAction::Focus { intensity, .. } = self.selected_action()? else {
+            return None;
+        };
+
+        Some(*intensity)
+    }
+
+    pub fn set_selected_focus_action_intensity_without_rebuild(&mut self, intensity: f64) -> bool {
+        let next = clamp_focus_intensity(intensity);
+
+        let Some(index) = self.selected_action_index else {
+            return false;
+        };
+
+        let Some(action) = self.actions.get_mut(index) else {
+            self.selected_action_index = None;
+            return false;
+        };
+
+        let AnnotationAction::Focus {
+            intensity: act_intensity,
+            ..
+        } = action
+        else {
+            return false;
+        };
+
+        if (*act_intensity - next).abs() <= f64::EPSILON {
+            return false;
+        }
+
+        *act_intensity = next;
+        self.redo_actions.clear();
+        true
     }
 
     pub fn selected_action_stroke_size(&self) -> Option<f64> {
@@ -1550,6 +1596,9 @@ impl EditorState {
             if self.selected_obfuscate_action_amount().is_some() {
                 return Some(SizeControlMode::Obfuscate);
             }
+            if self.selected_focus_action_intensity().is_some() {
+                return Some(SizeControlMode::Focus);
+            }
             return None;
         }
 
@@ -1559,6 +1608,10 @@ impl EditorState {
 
         if self.selected_tool == Tool::Obfuscate {
             return Some(SizeControlMode::Obfuscate);
+        }
+
+        if self.selected_tool == Tool::Focus {
+            return Some(SizeControlMode::Focus);
         }
 
         if super::types::tool_uses_stroke_size(self.selected_tool) {
@@ -1590,6 +1643,16 @@ impl EditorState {
                     Some(self.current_obfuscate_amount())
                 }
             }
+            SizeControlMode::Focus => {
+                if self.selected_tool == Tool::Select {
+                    Some(
+                        self.selected_focus_action_intensity()
+                            .unwrap_or_else(|| self.current_focus_intensity()),
+                    )
+                } else {
+                    Some(self.current_focus_intensity())
+                }
+            }
         }
     }
 
@@ -1612,12 +1675,17 @@ impl EditorState {
             }
             Some(SizeControlMode::Obfuscate) => {
                 // Update the per-method amount for the current method only.
-                // This ensures Pixelate, BlurSecure, and BlurSmooth each have
-                // independent intensity values and don't interfere with each other.
+                // This ensures Pixelate and Blur each keep their own intensity values.
                 let changed = self.set_current_obfuscate_amount_and_check(size);
                 // Also update any currently selected obfuscate action in-place.
                 let current_amount = self.current_obfuscate_amount();
                 let _ = self.set_selected_obfuscate_action_amount_without_rebuild(current_amount);
+                changed
+            }
+            Some(SizeControlMode::Focus) => {
+                let changed = self.set_current_focus_intensity_and_check(size);
+                let current_intensity = self.current_focus_intensity();
+                let _ = self.set_selected_focus_action_intensity_without_rebuild(current_intensity);
                 changed
             }
             None => false,
@@ -2338,8 +2406,9 @@ impl EditorState {
 mod tests {
     use image::RgbaImage;
 
+    use crate::capture::editor::color::DEFAULT_OBFUSCATE_AMOUNT;
     use crate::capture::editor::types::{
-        AnnotationAction, ArrowStyle, DrawColor, Point, Rect, SelectHandle,
+        AnnotationAction, ArrowStyle, DrawColor, ObfuscateMethod, Point, Rect, SelectHandle,
     };
 
     use super::EditorState;
@@ -2438,6 +2507,85 @@ mod tests {
         assert!(state.select_drag_anchor.is_none());
         assert!(state.select_resize_handle.is_none());
     }
+
+    #[test]
+    fn focus_tool_uses_dedicated_slider_state_and_persists_intensity_per_action() {
+        let mut state = EditorState::new(RgbaImage::from_pixel(16, 16, image::Rgba([200, 180, 160, 255])));
+        state.selected_tool = super::Tool::Focus;
+
+        assert_eq!(state.active_size_control_mode(), Some(super::SizeControlMode::Focus));
+        assert_eq!(state.active_size_value(), Some(58.0));
+
+        assert!(state.set_active_size_without_rebuild(72.0));
+        assert_eq!(state.current_focus_intensity(), 72.0);
+        assert_eq!(state.active_size_value(), Some(72.0));
+
+        state.drag_start = Some(Point { x: 2.0, y: 2.0 });
+        state.drag_current = Some(Point { x: 10.0, y: 10.0 });
+        let draft = state.draft_action().expect("focus draft");
+        match draft {
+            AnnotationAction::Focus { rect, intensity } => {
+                assert_eq!(rect.x, 2);
+                assert_eq!(rect.y, 2);
+                assert_eq!(rect.width, 8);
+                assert_eq!(rect.height, 8);
+                assert_eq!(intensity, 72.0);
+            }
+            other => panic!("expected focus draft, got {other:?}"),
+        }
+
+        state.actions.push(AnnotationAction::Focus {
+            rect: Rect {
+                x: 3,
+                y: 3,
+                width: 6,
+                height: 6,
+            },
+            intensity: 44.0,
+        });
+        state.selected_tool = super::Tool::Select;
+        state.selected_action_index = Some(0);
+
+        assert_eq!(state.active_size_control_mode(), Some(super::SizeControlMode::Focus));
+        assert_eq!(state.active_size_value(), Some(44.0));
+        assert!(state.set_active_size_without_rebuild(66.0));
+        assert_eq!(state.selected_focus_action_intensity(), Some(66.0));
+
+        let final_image = state.to_rendered_image().expect("rendered image");
+        assert_eq!(*final_image.get_pixel(4, 4), image::Rgba([200, 180, 160, 255]));
+        let outside = *final_image.get_pixel(1, 1);
+        assert!(outside[0] < 200 && outside[1] < 180 && outside[2] < 160);
+    }
+
+    #[test]
+    fn obfuscate_blur_uses_single_shared_blur_method_and_slider_state() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.set_obfuscate_method(ObfuscateMethod::Blur);
+
+        assert_eq!(state.current_obfuscate_amount(), DEFAULT_OBFUSCATE_AMOUNT);
+        assert_eq!(state.active_size_control_mode(), None);
+
+        state.selected_tool = super::Tool::Obfuscate;
+        assert_eq!(state.active_size_control_mode(), Some(super::SizeControlMode::Obfuscate));
+        assert_eq!(state.active_size_value(), Some(DEFAULT_OBFUSCATE_AMOUNT));
+
+        assert!(state.set_active_size_without_rebuild(21.0));
+        assert_eq!(state.current_obfuscate_amount(), 21.0);
+
+        state.drag_start = Some(Point { x: 4.0, y: 5.0 });
+        state.drag_current = Some(Point { x: 15.0, y: 18.0 });
+        match state.draft_action().expect("obfuscate draft") {
+            AnnotationAction::Obfuscate { rect, method, amount } => {
+                assert_eq!(rect.x, 4);
+                assert_eq!(rect.y, 5);
+                assert_eq!(rect.width, 11);
+                assert_eq!(rect.height, 13);
+                assert_eq!(method, ObfuscateMethod::Blur);
+                assert_eq!(amount, 21.0);
+            }
+            other => panic!("expected obfuscate draft, got {other:?}"),
+        }
+    }
 }
 
 /// Clamp an annotation action so it stays within the image bounds.
@@ -2446,7 +2594,7 @@ mod tests {
 fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) {
     match action {
         AnnotationAction::Obfuscate { rect, .. }
-        | AnnotationAction::Focus { rect }
+        | AnnotationAction::Focus { rect, .. }
         | AnnotationAction::Box { rect, .. }
         | AnnotationAction::Circle { rect, .. } => {
             // Keep the rect fully inside the image.
@@ -2610,11 +2758,8 @@ pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction])
                 ObfuscateMethod::Pixelate => {
                     apply_censor_rect(image, *rect, *amount);
                 }
-                ObfuscateMethod::BlurSecure => {
-                    apply_secure_blur(image, *rect, *amount);
-                }
-                ObfuscateMethod::BlurSmooth => {
-                    apply_blur_rect(image, *rect, *amount);
+                ObfuscateMethod::Blur => {
+                    apply_hybrid_blur(image, *rect, *amount);
                 }
                 ObfuscateMethod::Blackout => {
                     apply_blackout_rect(image, rect);
@@ -2841,7 +2986,10 @@ impl EditorState {
                 })
             }
             Tool::Focus => {
-                Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
+                Rect::from_points(start, end).map(|rect| AnnotationAction::Focus {
+                    rect,
+                    intensity: self.current_focus_intensity(),
+                })
             }
             Tool::Text => None,
         };
@@ -2968,7 +3116,10 @@ impl EditorState {
                 })
             }
             Tool::Focus => {
-                Rect::from_points(start, end).map(|rect| AnnotationAction::Focus { rect })
+                Rect::from_points(start, end).map(|rect| AnnotationAction::Focus {
+                    rect,
+                    intensity: self.current_focus_intensity(),
+                })
             }
             Tool::Text => None,
         };
@@ -3123,8 +3274,8 @@ impl EditorState {
 
         let mut source_image = self.working_image.clone();
         for action in &self.actions {
-            if let AnnotationAction::Focus { rect } = action {
-                apply_focus_rect(&mut source_image, *rect);
+            if let AnnotationAction::Focus { rect, intensity } = action {
+                apply_focus_rect(&mut source_image, *rect, *intensity);
             }
         }
 

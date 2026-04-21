@@ -334,6 +334,8 @@ impl WaylandBackend {
     ///
     /// `interactive=true` opens the desktop's selector UI first.
     async fn capture_via_screenshot_portal(interactive: bool) -> DisplayResult<CaptureData> {
+        let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
+
         let request = Screenshot::request()
             .interactive(interactive)
             .modal(false)
@@ -396,6 +398,8 @@ impl WaylandBackend {
         interactive: bool,
         restore_token: Option<&str>,
     ) -> DisplayResult<CaptureData> {
+        let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
+
         let screencast = Screencast::new().await.map_err(|e| {
             DisplayError::PortalError(format!("Failed to create ScreenCast proxy: {e}"))
         })?;

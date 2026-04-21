@@ -111,6 +111,33 @@ mod tests {
             gtk4::cairo::Filter::Nearest
         );
     }
+
+    #[test]
+    fn focus_overlay_and_export_use_configurable_intensity() {
+        assert!(focus_overlay_alpha(80.0, false) > focus_overlay_alpha(20.0, false));
+        assert!(focus_overlay_alpha(80.0, true) > focus_overlay_alpha(20.0, true));
+
+        let rect = Rect {
+            x: 2,
+            y: 2,
+            width: 4,
+            height: 4,
+        };
+        let mut low = RgbaImage::from_pixel(8, 8, image::Rgba([200, 180, 160, 255]));
+        let mut high = low.clone();
+
+        apply_focus_rect(&mut low, rect, 20.0);
+        apply_focus_rect(&mut high, rect, 80.0);
+
+        let low_outside = low.get_pixel(0, 0);
+        let high_outside = high.get_pixel(0, 0);
+        let inside = high.get_pixel(3, 3);
+
+        assert!(high_outside[0] < low_outside[0]);
+        assert!(high_outside[1] < low_outside[1]);
+        assert!(high_outside[2] < low_outside[2]);
+        assert_eq!(*inside, image::Rgba([200, 180, 160, 255]));
+    }
 }
 
 pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &AnnotationAction) {
@@ -350,7 +377,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             context.set_line_width(2.0);
             let _ = context.stroke();
         }
-        AnnotationAction::Focus { rect } => {
+        AnnotationAction::Focus { rect, .. } => {
             draw_focus_rect_outline(context, *rect, true);
         }
     }
@@ -372,11 +399,21 @@ fn draw_focus_rect_outline(context: &gtk4::cairo::Context, rect: Rect, active: b
     context.set_dash(&[], 0.0);
 }
 
+fn focus_overlay_alpha(intensity: f64, active: bool) -> f64 {
+    let base_alpha = (intensity / 100.0).clamp(0.10, 0.90);
+    if active {
+        base_alpha.min(0.95)
+    } else {
+        (base_alpha - 0.06).max(0.08)
+    }
+}
+
 pub fn draw_focus_overlay(
     context: &gtk4::cairo::Context,
     image_width: f64,
     image_height: f64,
     rect: Rect,
+    intensity: f64,
     active: bool,
 ) {
     let Some(rect) = rect.clamp_to(image_width as u32, image_height as u32) else {
@@ -393,7 +430,7 @@ pub fn draw_focus_overlay(
     context.rectangle(0.0, 0.0, image_width, image_height);
     context.rectangle(rect.x as f64, rect.y as f64, width, height);
     context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
-    context.set_source_rgba(0.0, 0.0, 0.0, if active { 0.58 } else { 0.52 });
+    context.set_source_rgba(0.0, 0.0, 0.0, focus_overlay_alpha(intensity, active));
     let _ = context.fill();
     let _ = context.restore();
 
@@ -2798,13 +2835,9 @@ pub fn apply_secure_pixelate(image: &mut RgbaImage, rect: Rect, block_size: f64)
     }
 }
 
-/// Secure blur: irreversibly obfuscate a region with a smooth blurred appearance.
-///
-/// Strategy: downsample the region to a very small thumbnail (aggressively
-/// destroying detail), then upsample back and blur multiple times.
-/// The result looks like a smooth blur but is cryptographically irreversible
-/// because the original pixel content is reduced to a tiny representation.
-pub fn apply_secure_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
+/// Hybrid blur: low values look smoother, while high values become more
+/// destructive by downsampling harder before blurring.
+pub fn apply_hybrid_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
     };
@@ -2813,13 +2846,14 @@ pub fn apply_secure_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
         return;
     }
 
-    // Use a much more aggressive downsample than Blur (Smooth).
-    // At amount=1 we downsample to ~1/6, at amount=25 we downsample to ~1/20.
-    // This ensures the secure variant always destroys more detail than smooth blur.
-    let base_factor = 6.0 + (amount / 25.0) * 14.0; // 6x at min, 20x at max
+    let normalized = (amount / 25.0).clamp(0.0, 1.0);
+
+    // Lower values preserve more structure with a gentle blur.
+    // Higher values downsample more aggressively so detail is destroyed.
+    let base_factor = 2.0 + normalized * 14.0; // 2x at min, 16x at max
     let factor = (base_factor as u32)
-        .max(4)
-        .min((rect.width.min(rect.height) as u32 / 2).max(4));
+        .max(2)
+        .min((rect.width.min(rect.height) as u32 / 2).max(2));
 
     let thumb_w = (rect.width as u32 / factor).max(2);
     let thumb_h = (rect.height as u32 / factor).max(2);
@@ -2834,7 +2868,7 @@ pub fn apply_secure_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
     )
     .to_image();
 
-    // 2) Downsample aggressively (destroys detail — irreversible)
+    // 2) Downsample based on intensity (higher = more destructive)
     let thumb = image::imageops::resize(
         &cropped,
         thumb_w,
@@ -2850,10 +2884,10 @@ pub fn apply_secure_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
         image::imageops::FilterType::Triangle,
     );
 
-    // 4) Apply multiple blur passes to produce a smooth, blurred appearance.
-    //    More passes = more secure-looking (less structure visible).
-    let blur_radius = (amount / 3.0).max(2.0);
-    let passes = if amount > 15.0 {
+    // 4) Apply blur passes. Low intensity stays soft; high intensity gets
+    //    stronger radius and more passes.
+    let blur_radius = (1.2 + normalized * 7.8).max(1.2);
+    let passes = if amount > 17.0 {
         3
     } else if amount > 8.0 {
         2
@@ -2906,7 +2940,7 @@ pub fn apply_blackout_rect(image: &mut RgbaImage, rect: &Rect) {
     }
 }
 
-pub fn apply_focus_rect(image: &mut RgbaImage, rect: Rect) {
+pub fn apply_focus_rect(image: &mut RgbaImage, rect: Rect, intensity: f64) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
     };
@@ -2922,26 +2956,32 @@ pub fn apply_focus_rect(image: &mut RgbaImage, rect: Rect) {
     let x1 = (rect.x + rect.width).max(0) as u32;
     let y1 = (rect.y + rect.height).max(0) as u32;
 
-    darken_region(image, 0, 0, image_width, y0);
-    darken_region(image, 0, y1, image_width, image_height);
-    darken_region(image, 0, y0, x0, y1);
-    darken_region(image, x1, y0, image_width, y1);
+    darken_region(image, 0, 0, image_width, y0, intensity);
+    darken_region(image, 0, y1, image_width, image_height, intensity);
+    darken_region(image, 0, y0, x0, y1, intensity);
+    darken_region(image, x1, y0, image_width, y1, intensity);
 }
 
-fn darken_region(image: &mut RgbaImage, x_start: u32, y_start: u32, x_end: u32, y_end: u32) {
+fn darken_region(
+    image: &mut RgbaImage,
+    x_start: u32,
+    y_start: u32,
+    x_end: u32,
+    y_end: u32,
+    intensity: f64,
+) {
     if x_start >= x_end || y_start >= y_end {
         return;
     }
 
-    const KEEP_NUMERATOR: u16 = 42;
-    const KEEP_DENOMINATOR: u16 = 100;
+    let keep_ratio = (1.0 - (intensity / 100.0).clamp(0.10, 0.90)).clamp(0.10, 0.90);
 
     for y in y_start..y_end {
         for x in x_start..x_end {
             let pixel = image.get_pixel_mut(x, y);
-            pixel[0] = ((pixel[0] as u16 * KEEP_NUMERATOR) / KEEP_DENOMINATOR) as u8;
-            pixel[1] = ((pixel[1] as u16 * KEEP_NUMERATOR) / KEEP_DENOMINATOR) as u8;
-            pixel[2] = ((pixel[2] as u16 * KEEP_NUMERATOR) / KEEP_DENOMINATOR) as u8;
+            pixel[0] = (pixel[0] as f64 * keep_ratio).round() as u8;
+            pixel[1] = (pixel[1] as f64 * keep_ratio).round() as u8;
+            pixel[2] = (pixel[2] as f64 * keep_ratio).round() as u8;
         }
     }
 }

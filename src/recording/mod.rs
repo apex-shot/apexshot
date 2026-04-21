@@ -1228,6 +1228,8 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         restore_token: Option<&str>,
         persist_mode: PersistMode,
     ) -> RecordResult<(ashpd::desktop::screencast::Streams, RecordingPortalSession)> {
+        let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
+
         let proxy = Screencast::new()
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?;

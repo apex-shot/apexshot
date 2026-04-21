@@ -40,8 +40,7 @@ pub enum BackgroundAlignment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ObfuscateMethod {
     Pixelate,
-    BlurSecure,
-    BlurSmooth,
+    Blur,
     Blackout,
 }
 
@@ -50,8 +49,7 @@ impl ObfuscateMethod {
     pub fn display_name(&self) -> &'static str {
         match self {
             ObfuscateMethod::Pixelate => "Pixelate",
-            ObfuscateMethod::BlurSecure => "Blur (Secure)",
-            ObfuscateMethod::BlurSmooth => "Blur (Smooth)",
+            ObfuscateMethod::Blur => "Blur",
             ObfuscateMethod::Blackout => "Blackout",
         }
     }
@@ -59,8 +57,7 @@ impl ObfuscateMethod {
     pub fn icon_name(&self) -> &'static str {
         match self {
             ObfuscateMethod::Pixelate => "obfuscate-pixelate",
-            ObfuscateMethod::BlurSecure => "obfuscate-blur-secure",
-            ObfuscateMethod::BlurSmooth => "obfuscate-blur-smooth",
+            ObfuscateMethod::Blur => "obfuscate-blur",
             ObfuscateMethod::Blackout => "obfuscate-blackout",
         }
     }
@@ -156,6 +153,7 @@ impl Default for FontSettings {
 pub enum SizeControlMode {
     Stroke,
     Obfuscate,
+    Focus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -491,6 +489,7 @@ pub enum AnnotationAction {
     },
     Focus {
         rect: Rect,
+        intensity: f64,
     },
 }
 

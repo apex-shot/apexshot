@@ -104,10 +104,9 @@ use super::ui_support::{
 
 const TEXT_SIZE_OPTIONS: [i32; 12] = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
 const TEXT_FONT_FAMILIES: [&str; 5] = ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"];
-const OBFUSCATE_METHOD_OPTIONS: [(super::types::ObfuscateMethod, &str); 4] = [
+const OBFUSCATE_METHOD_OPTIONS: [(super::types::ObfuscateMethod, &str); 3] = [
     (super::types::ObfuscateMethod::Pixelate, "Pixelate"),
-    (super::types::ObfuscateMethod::BlurSecure, "Blur (Secure)"),
-    (super::types::ObfuscateMethod::BlurSmooth, "Blur (Smooth)"),
+    (super::types::ObfuscateMethod::Blur, "Blur"),
     (super::types::ObfuscateMethod::Blackout, "Blackout"),
 ];
 
@@ -519,7 +518,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         obfuscate: icon_names::FOG,
         focus: icon_names::SMALL_RECTANGLE_IN_FOCUS,
         obfuscate_pixelate: icon_names::VIEW_GRID,
-        obfuscate_blur_secure: icon_names::SHIELD_REGULAR,
+        obfuscate_blur_secure: icon_names::BLUR,
         obfuscate_blur_smooth: icon_names::BLUR,
         obfuscate_blackout: icon_names::MEDIA_PLAYBACK_STOP,
     });
@@ -2335,12 +2334,20 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                         size_slider.set_value(value);
                         let tooltip = match method {
                             super::types::ObfuscateMethod::Pixelate => "Pixelate intensity",
-                            super::types::ObfuscateMethod::BlurSecure => "Blur (Secure) intensity",
-                            super::types::ObfuscateMethod::BlurSmooth => "Blur (Smooth) intensity",
+                            super::types::ObfuscateMethod::Blur => "Blur intensity",
                             super::types::ObfuscateMethod::Blackout => "Blackout",
                         };
                         size_slider.set_tooltip_text(Some(tooltip));
                     }
+                }
+                SizeControlMode::Focus => {
+                    use super::color::{MAX_FOCUS_INTENSITY, MIN_FOCUS_INTENSITY};
+                    size_group.set_visible(true);
+                    size_group.remove_css_class("size-group-inactive");
+                    size_slider.set_sensitive(true);
+                    size_slider.set_range(MIN_FOCUS_INTENSITY, MAX_FOCUS_INTENSITY);
+                    size_slider.set_value(value);
+                    size_slider.set_tooltip_text(Some("Focus background intensity"));
                 }
             }
         }
@@ -2744,12 +2751,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
 
         for action in &actions {
-            if let AnnotationAction::Focus { rect } = action {
+            if let AnnotationAction::Focus { rect, intensity } = action {
                 draw_focus_overlay(
                     context,
                     working_image.width() as f64,
                     working_image.height() as f64,
                     *rect,
+                    *intensity,
                     false,
                 );
             }
@@ -2772,12 +2780,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
 
         if let Some(draft) = draft_action {
-            if let AnnotationAction::Focus { rect } = &draft {
+            if let AnnotationAction::Focus { rect, intensity } = &draft {
                 draw_focus_overlay(
                     context,
                     working_image.width() as f64,
                     working_image.height() as f64,
                     *rect,
+                    *intensity,
                     true,
                 );
             } else {
@@ -3455,6 +3464,33 @@ mod tests {
                 && production_source.contains("append_inspector_section(\n        &number_inspector_content,\n        \"Start\",")
                 && production_source.contains("number_start_row.upcast_ref()"),
             "Number inspector should expose the starting number controls inside the sidebar",
+        );
+    }
+
+    #[test]
+    fn focus_tool_routes_toolbar_slider_to_background_intensity() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("SizeControlMode::Focus => {")
+                && production_source.contains("Focus background intensity")
+                && production_source.contains("size_slider.set_range(MIN_FOCUS_INTENSITY, MAX_FOCUS_INTENSITY);")
+                && production_source.contains("draw_focus_overlay(")
+                && production_source.contains("*intensity,"),
+            "Focus should use the toolbar slider as a background intensity control in the live preview",
+        );
+    }
+
+    #[test]
+    fn obfuscate_inspector_and_slider_expose_a_single_blur_mode() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("(super::types::ObfuscateMethod::Blur, \"Blur\")")
+                && !production_source.contains("Blur (Secure)")
+                && !production_source.contains("Blur (Smooth)")
+                && production_source.contains("super::types::ObfuscateMethod::Blur => \"Blur intensity\""),
+            "Obfuscate inspector and toolbar slider should expose one merged Blur mode",
         );
     }
 }

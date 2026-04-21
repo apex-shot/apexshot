@@ -1033,8 +1033,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     // NOTE: Do not remove children here; that would empty the popover and nothing would display.
     let methods = [
         ObfuscateMethod::Pixelate,
-        ObfuscateMethod::BlurSecure,
-        ObfuscateMethod::BlurSmooth,
+        ObfuscateMethod::Blur,
         ObfuscateMethod::Blackout,
     ];
 
@@ -1074,8 +1073,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 if let Ok(img) = child.downcast::<Image>() {
                     let icon_name = match method {
                         ObfuscateMethod::Pixelate => icon_names::VIEW_GRID,
-                        ObfuscateMethod::BlurSecure => icon_names::SHIELD_REGULAR,
-                        ObfuscateMethod::BlurSmooth => icon_names::BLUR,
+                        ObfuscateMethod::Blur => icon_names::BLUR,
                         ObfuscateMethod::Blackout => icon_names::MEDIA_PLAYBACK_STOP,
                     };
                     img.set_icon_name(Some(icon_name));

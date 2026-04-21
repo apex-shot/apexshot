@@ -719,16 +719,7 @@ pub(super) fn build_toolbar_mode_controls(
     // Populate obfuscate method list with options
     let methods = [
         (ObfuscateMethod::Pixelate, icon_names::VIEW_GRID, "Pixelate"),
-        (
-            ObfuscateMethod::BlurSecure,
-            icon_names::SHIELD_REGULAR,
-            "Blur (Secure)",
-        ),
-        (
-            ObfuscateMethod::BlurSmooth,
-            icon_names::BLUR,
-            "Blur (Smooth)",
-        ),
+        (ObfuscateMethod::Blur, icon_names::BLUR, "Blur"),
         (
             ObfuscateMethod::Blackout,
             icon_names::MEDIA_PLAYBACK_STOP,

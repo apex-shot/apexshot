@@ -284,7 +284,7 @@ mod tests {
                 width: 18,
                 height: 18,
             },
-            method: ObfuscateMethod::BlurSmooth,
+            method: ObfuscateMethod::Blur,
             amount: DEFAULT_OBFUSCATE_AMOUNT,
         });
 
@@ -964,7 +964,7 @@ mod tests {
         let before_inside = *image.get_pixel(4, 4);
         let before_outside = *image.get_pixel(1, 1);
 
-        render::apply_focus_rect(&mut image, rect);
+        render::apply_focus_rect(&mut image, rect, 58.0);
 
         let inside = *image.get_pixel(4, 4);
         let outside = *image.get_pixel(1, 1);
@@ -992,6 +992,7 @@ mod tests {
                 width: 6,
                 height: 6,
             },
+            intensity: 58.0,
         });
 
         let final_image = state.to_final_image().unwrap();
@@ -1462,11 +1463,12 @@ mod tests {
         state.update_drag(Point { x: 13.0, y: 15.0 });
 
         match state.draft_action().unwrap() {
-            AnnotationAction::Focus { rect } => {
+            AnnotationAction::Focus { rect, intensity } => {
                 assert_eq!(rect.x, 2);
                 assert_eq!(rect.y, 3);
                 assert_eq!(rect.width, 11);
                 assert_eq!(rect.height, 12);
+                assert_eq!(intensity, 58.0);
             }
             other => panic!("unexpected draft action: {:?}", other),
         }

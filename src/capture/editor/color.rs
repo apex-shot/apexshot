@@ -11,6 +11,9 @@ pub const MAX_TEXT_SIZE: f64 = 120.0;
 pub const MIN_OBFUSCATE_AMOUNT: f64 = 1.0;
 pub const MAX_OBFUSCATE_AMOUNT: f64 = 25.0;
 pub const DEFAULT_OBFUSCATE_AMOUNT: f64 = 13.0;
+pub const MIN_FOCUS_INTENSITY: f64 = 10.0;
+pub const MAX_FOCUS_INTENSITY: f64 = 90.0;
+pub const DEFAULT_FOCUS_INTENSITY: f64 = 58.0;
 #[allow(dead_code)]
 pub const CENSOR_BLOCK_SIZE: i32 = 10;
 pub const DRAG_REDRAW_INTERVAL_US: i64 = 16_000;
@@ -72,12 +75,8 @@ pub fn clamp_pixelate_amount(amount: f64) -> f64 {
     amount.clamp(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT)
 }
 
-pub fn clamp_blur_secure_amount(amount: f64) -> f64 {
-    amount.clamp(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT)
-}
-
-pub fn clamp_blur_smooth_amount(amount: f64) -> f64 {
-    amount.clamp(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT)
+pub fn clamp_focus_intensity(intensity: f64) -> f64 {
+    intensity.clamp(MIN_FOCUS_INTENSITY, MAX_FOCUS_INTENSITY)
 }
 
 pub fn highlighter_stroke_width(stroke_size: f64) -> f64 {

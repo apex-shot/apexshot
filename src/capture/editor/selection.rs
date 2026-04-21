@@ -22,7 +22,7 @@ pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Op
         AnnotationAction::Circle { rect, .. }
         | AnnotationAction::Box { rect, .. }
         | AnnotationAction::Obfuscate { rect, .. }
-        | AnnotationAction::Focus { rect } => Rect::from_bounds(
+        | AnnotationAction::Focus { rect, .. } => Rect::from_bounds(
             rect.x as f64 - padding,
             rect.y as f64 - padding,
             rect.x as f64 + rect.width as f64 + padding,
@@ -173,7 +173,7 @@ pub fn action_resize_handles(action: &AnnotationAction) -> Vec<(SelectHandle, Po
         AnnotationAction::Circle { rect, .. }
         | AnnotationAction::Box { rect, .. }
         | AnnotationAction::Obfuscate { rect, .. }
-        | AnnotationAction::Focus { rect } => {
+        | AnnotationAction::Focus { rect, .. } => {
             let left = rect.x as f64;
             let top = rect.y as f64;
             let right = left + rect.width as f64;
@@ -351,7 +351,7 @@ pub fn resize_action(
         AnnotationAction::Circle { rect, .. }
         | AnnotationAction::Box { rect, .. }
         | AnnotationAction::Obfuscate { rect, .. }
-        | AnnotationAction::Focus { rect } => resize_rect_with_handle(rect, handle, dx, dy),
+        | AnnotationAction::Focus { rect, .. } => resize_rect_with_handle(rect, handle, dx, dy),
         AnnotationAction::Line { start, end, .. } | AnnotationAction::Arrow { start, end, .. } => {
             let target = match handle {
                 SelectHandle::Start => start,
@@ -413,7 +413,7 @@ pub fn translate_action(action: &mut AnnotationAction, dx: f64, dy: f64) -> bool
         AnnotationAction::Circle { rect, .. }
         | AnnotationAction::Box { rect, .. }
         | AnnotationAction::Obfuscate { rect, .. }
-        | AnnotationAction::Focus { rect } => {
+        | AnnotationAction::Focus { rect, .. } => {
             let dx_i = dx.round() as i32;
             let dy_i = dy.round() as i32;
             if dx_i == 0 && dy_i == 0 {
