@@ -13,6 +13,10 @@ const WINDOW_LIST_DBUS_IFACE_XML = `
       <arg type="s" name="filename" direction="in"/>
       <arg type="b" name="success" direction="out"/>
     </method>
+    <method name="ActivateWindowById">
+      <arg type="u" name="window_id" direction="in"/>
+      <arg type="b" name="success" direction="out"/>
+    </method>
   </interface>
 </node>`;
 
@@ -85,6 +89,30 @@ function readFrameRect(metaWindow) {
         width: rect?.width ?? 1,
         height: rect?.height ?? 1,
     };
+}
+
+export function activateWindowRecord(metaWindow, timestamp = 0) {
+    if (!metaWindow)
+        return false;
+
+    try {
+        const isMinimized = typeof metaWindow.minimized === "boolean"
+            ? metaWindow.minimized
+            : typeof metaWindow.get_minimized === "function"
+                ? metaWindow.get_minimized()
+                : false;
+        if (isMinimized && typeof metaWindow.unminimize === "function")
+            metaWindow.unminimize();
+
+        if (typeof metaWindow.activate === "function") {
+            metaWindow.activate(timestamp);
+            return true;
+        }
+    } catch (e) {
+        logError(e, "[apexshot] Failed to activate selected window");
+    }
+
+    return false;
 }
 
 function extractWindowRecord(metaWindow, windowTracker) {
@@ -218,6 +246,18 @@ export class WindowListService {
                     }
                 }
             );
+        } catch (e) {
+            invocation.return_dbus_error("org.apexshot.WindowList.Error", e.message);
+        }
+    }
+
+    ActivateWindowByIdAsync(params, invocation) {
+        try {
+            const [windowId] = params;
+            const metaWindow = this._listCurrentWindows()
+                .find(window => window?.get_id?.() === windowId) ?? null;
+            const success = activateWindowRecord(metaWindow, this._global.get_current_time());
+            invocation.return_value(this._GLib.Variant.new("(b)", [success]));
         } catch (e) {
             invocation.return_dbus_error("org.apexshot.WindowList.Error", e.message);
         }

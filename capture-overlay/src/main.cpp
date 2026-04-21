@@ -585,24 +585,32 @@ int main(int argc, char* argv[])
             selected.title.toLocal8Bit().constData(),
             (unsigned long long)selected.xid);
 
-        // Prefer portal-permission route on Wayland/desktop portals.
-        // This keeps window capture aligned with compositor security constraints.
+        // Activate the selected window before capture so GNOME Shell captures
+        // that real window surface instead of composited pixels underneath the
+        // picker overlay.
         {
-            QString imagePath;
-            QSize imageSize;
-            QString error;
-            if (ScreenCapture::captureAreaToTempPngViaPortal(
-                  selected.rect, imagePath, imageSize, error)) {
-                printCaptureScreenJson(imagePath, imageSize);
-                return 0;
+            QDBusInterface windowListIface(
+                QStringLiteral("org.apexshot.WindowList"),
+                QStringLiteral("/org/apexshot/WindowList"),
+                QStringLiteral("org.apexshot.WindowList"),
+                QDBusConnection::sessionBus());
+
+            if (windowListIface.isValid()) {
+                QDBusReply<bool> activateReply = windowListIface.call(
+                    QStringLiteral("ActivateWindowById"),
+                    static_cast<quint32>(selected.xid));
+                if (!activateReply.isValid() || !activateReply.value()) {
+                    std::fprintf(stderr,
+                                 "apexshot-capture: failed to activate selected window before capture\n");
+                }
             }
-            std::fprintf(stderr,
-                         "apexshot-capture: portal window capture failed, falling back to GNOME Shell API: %s\n",
-                         error.toLocal8Bit().constData());
         }
 
-        // Use GNOME Shell ScreenshotWindow to capture the selected window
-        // First focus the window, then capture
+        QApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(180);
+        QApplication::processEvents(QEventLoop::AllEvents, 50);
+
+        // Use GNOME Shell ScreenshotWindow to capture the active selected window.
         const QString tmpPath = QDir::tempPath() + QStringLiteral("/apexshot-window-%1.png")
                                     .arg(QCoreApplication::applicationPid());
 

@@ -65,3 +65,19 @@ fn deb_package_includes_capture_helper_binary() {
         "containerized release job should install gtk4-layer-shell without sudo"
     );
 }
+
+#[test]
+fn deb_package_includes_background_gradient_assets() {
+    let cargo_toml = include_str!("../Cargo.toml");
+
+    assert!(
+        cargo_toml.contains("src/capture/editor/background-images/codioful-formerly-gradienta-n2XqPm7Bqhk-unsplash.jpg")
+            && cargo_toml.contains("src/capture/editor/background-images/milad-fakurian-nY14Fs8pxT8-unsplash.jpg"),
+        "release .deb must include the background gradient image assets in package.metadata.deb.assets"
+    );
+
+    assert!(
+        cargo_toml.contains("usr/share/apexshot/background-images/"),
+        "background gradient assets should be installed into a shared runtime directory"
+    );
+}

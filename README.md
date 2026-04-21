@@ -6,7 +6,7 @@ A premium, open-source Linux screen capture tool with annotation, recording, and
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-0.2.19-orange.svg)
+![Version](https://img.shields.io/badge/version-0.2.24-orange.svg)
 ![Status](https://img.shields.io/badge/status-Alpha-yellow.svg)
 
 ## Features

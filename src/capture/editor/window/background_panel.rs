@@ -134,9 +134,29 @@ const BACKGROUND_GRADIENT_PREVIEW_CLASSES: [&str; 20] = [
     "editor-background-gradient-preview-20",
 ];
 pub fn background_gradient_asset_path(file_name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("src/capture/editor/background-images")
-        .join(file_name)
+    let asset_paths = [
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src/capture/editor/background-images")
+            .join(file_name),
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                exe.parent()
+                    .map(|dir| dir.join("background-images").join(file_name))
+            })
+            .unwrap_or_default(),
+        PathBuf::from("/usr/share/apexshot/background-images").join(file_name),
+        PathBuf::from("/usr/local/share/apexshot/background-images").join(file_name),
+    ];
+
+    asset_paths
+        .into_iter()
+        .find(|path| !path.as_os_str().is_empty() && path.exists())
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("src/capture/editor/background-images")
+                .join(file_name)
+        })
 }
 pub(super) fn load_background_preview_image(path: &Path, preview_size: u32) -> Option<RgbaImage> {
     let img = match image::io::Reader::open(path) {
@@ -1484,6 +1504,18 @@ mod tests {
                 && !production_source
                     .contains("background_sidebar_options.append(&plain_color_section);"),
             "Background panel should no longer render the embedded plain-color section",
+        );
+    }
+
+    #[test]
+    fn background_gradient_assets_support_installed_runtime_paths() {
+        let source = include_str!("background_panel.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+
+        assert!(
+            production_source.contains("/usr/share/apexshot/background-images")
+                && production_source.contains("/usr/local/share/apexshot/background-images"),
+            "background gradient lookup should support installed shared asset directories",
         );
     }
 }

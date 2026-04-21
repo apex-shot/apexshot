@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import {buildWindowListPayload} from "../window-list.js";
+import {activateWindowRecord, buildWindowListPayload} from "../window-list.js";
 
 function assert(condition, message) {
     if (!condition)
@@ -114,4 +114,25 @@ runTest("buildWindowListPayload does not exclude non-apexshot apps whose titles 
 
     assertEqual(payload.length, 1, "ghostty should remain eligible even if title mentions apexshot");
     assertEqual(payload[0].app, "Ghostty", "non-ApexShot app should be preserved");
+});
+
+runTest("activateWindowRecord unminimizes and activates the selected window", () => {
+    let unminimized = false;
+    let activatedAt = null;
+    const metaWindow = {
+        minimized: true,
+        unminimize() {
+            unminimized = true;
+            this.minimized = false;
+        },
+        activate(timestamp) {
+            activatedAt = timestamp;
+        },
+    };
+
+    const activated = activateWindowRecord(metaWindow, 4242);
+
+    assertEqual(activated, true, "window should be activated");
+    assertEqual(unminimized, true, "minimized window should be restored before capture");
+    assertEqual(activatedAt, 4242, "activation should use the requested timestamp");
 });

@@ -1,6 +1,6 @@
 [package]
 name = "apexshot"
-version = "0.2.23"
+version = "0.2.24"
 edition = "2021"
 description = "Screenshot and screen recording tool for Linux"
 license = "GPL-3.0"
@@ -85,6 +85,16 @@ assets = [
     ["packaging/apexshot-daemon.desktop", "etc/xdg/autostart/apexshot.desktop", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/apexshot.svg", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg", "644"],
+    ["src/capture/editor/background-images/codioful-formerly-gradienta-O10vBIDRkZw-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/codioful-formerly-gradienta-n2XqPm7Bqhk-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/kunal-patil-2hB-jhXLd3c-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/kunal-patil-8ZKlgI_G-mw-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/luke-chesser-CxBx_J3yp9g-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/luke-chesser-pJadQetzTkI-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/magicpattern-87PP9Zd7MNo-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/magicpattern-bevXKKL7E9g-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/magicpattern-oPH_5xuMgQw-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/milad-fakurian-nY14Fs8pxT8-unsplash.jpg", "usr/share/apexshot/background-images/", "644"],
     ["native-host/io.github.codegoddy.apexshot.json", "etc/opt/chrome/NativeMessagingHosts/", "644"],
     ["native-host/io.github.codegoddy.apexshot.json", "etc/chromium/NativeMessagingHosts/", "644"],
 ]
