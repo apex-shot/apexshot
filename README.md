@@ -2,7 +2,7 @@
 
 A premium, open-source Linux screen capture tool with annotation, recording, and OCR.
 
-> **Note:** Currently tested on GNOME Ubuntu (Wayland). Support for other distributions and desktop environments will be added as the project grows.
+> **Note:** Currently tested on GNOME Ubuntu (Wayland). X11 implementations exist in the codebase but have not been thoroughly tested. Support for other distributions and desktop environments will be expanded as the project grows.
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
@@ -28,7 +28,7 @@ A premium, open-source Linux screen capture tool with annotation, recording, and
 
 ### Integration
 - **Daemon Mode** — Background service with system tray and global hotkeys for instant capture
-- **Dual Display Support** — Works on both X11 and Wayland (including GNOME)
+- **Dual Display Support** — Wayland (including GNOME) is fully tested; X11 implementations exist but are not yet thoroughly tested
 - **Browser Integration** — Full-page scroll capture via Chrome/Chromium extension
 - **GNOME Integration** — Always-on-top previews and shell-managed recording overlays
 - **Smart Clipboard** — Automatic clipboard integration for quick sharing
@@ -113,8 +113,9 @@ sudo apexshot install --force                  # Reinstall even if same version
 ApexShot requires the GNOME Shell extension for full functionality on GNOME:
 
 ```bash
-# Download from GitHub releases
-wget https://github.com/apex-shot/apexshot/releases/download/gnome-extension-v2/apexshot-gnome-integration.zip
+# Download the GNOME extension from the latest release
+LATEST_TAG=$(curl -s https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+wget "https://github.com/apex-shot/apexshot/releases/download/${LATEST_TAG}/apexshot-gnome-integration.zip"
 
 # Install using gnome-extensions
 gnome-extensions install apexshot-gnome-integration.zip
@@ -182,11 +183,16 @@ Configure global hotkeys in Settings > Shortcuts. The daemon supports:
 apexshot/
 ├── src/                    # Rust core (capture, editor, recording, settings, daemon)
 │   ├── capture/            # Screen capture logic
-│   ├── editor/             # Image annotation editor
+│   │   └── editor/         # Image annotation editor
+│   ├── backend/            # Display backend abstraction (X11, Wayland)
 │   ├── recording/          # Screen recording with GStreamer
 │   ├── settings/           # Settings UI and management
 │   ├── onboarding/         # First-time setup wizard
-│   └── gnome_integration/  # GNOME Shell integration
+│   ├── gnome_integration/  # GNOME Shell integration
+│   ├── qr/                 # QR code detection
+│   ├── capture_overlay.rs  # C++ Qt5 overlay launcher
+│   ├── lib.rs              # Library exports
+│   └── build.rs            # Build script (CMake C++ overlay + icons)
 ├── capture-overlay/        # C++ Qt5 native overlay (region selection, drawing)
 ├── gnome-extension/        # GNOME Shell extension (preview windows, recording mask)
 ├── web-scroll-extension/   # Chrome/Chromium extension (full-page scroll capture)

@@ -6,6 +6,7 @@ This guide provides information for developers who want to contribute to ApexSho
 
 ### System Requirements
 - Linux (GNOME Ubuntu Wayland recommended)
+  - X11 backend implementations exist in the codebase but have not been thoroughly tested
 - Rust 1.70 or later
 - CMake 3.10 or later
 - Qt5 development libraries
@@ -20,20 +21,30 @@ sudo apt update
 sudo apt install -y \
     build-essential \
     cmake \
-    libqt5-dev \
+    pkg-config \
+    libx11-dev \
+    libxext6 \
+    libxtst-dev \
+    qtbase5-dev \
+    libqt5widgets5 \
     libqt5x11extras5-dev \
+    libqt5network5-dev \
+    libqt5dbus5-dev \
     libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    libpipewire-0.3-dev \
     tesseract-ocr \
     libtesseract-dev \
     libleptonica-dev \
+    libgtk-4-dev \
+    libadwaita-1-dev \
+    libgtk4-layer-shell-dev \
     libxcb-shape0-dev \
-    libxcb-xfixes0-dev \
-    pkg-config
+    libxcb-xfixes0-dev
 ```
 
 **Fedora:**
@@ -41,6 +52,10 @@ sudo apt install -y \
 sudo dnf install -y \
     gcc-c++ \
     cmake \
+    pkg-config \
+    libX11-devel \
+    libXext-devel \
+    libXtst-devel \
     qt5-qtbase-devel \
     qt5-qtx11extras-devel \
     gstreamer1-devel \
@@ -50,12 +65,18 @@ sudo dnf install -y \
     gstreamer1-plugins-bad-free \
     gstreamer1-plugins-bad-nonfree \
     gstreamer1-plugins-ugly \
+    gstreamer1-libav \
+    pipewire-devel \
     tesseract \
     tesseract-devel \
     leptonica-devel \
-    libxcb-devel \
-    pkg-config
+    gtk4-devel \
+    libadwaita-devel \
+    gtk4-layer-shell-devel \
+    libxcb-devel
 ```
+
+> **Note:** Fedora package names for GTK4 layer shell may vary by release. If a package is unavailable, consult your distribution's repositories or build the missing dependency from source.
 
 ## Building
 
@@ -151,24 +172,27 @@ cargo test --package apexshot --lib config
 ```
 apexshot/
 ├── src/                    # Rust source code
-│   ├── annotations/        # Annotation editor
-│   ├── backend/           # Backend API
+│   ├── annotations/        # Annotation persistence
+│   ├── backend/           # Display backend (X11, Wayland)
 │   ├── capture/           # Screen capture
+│   │   └── editor/        # Image annotation editor
 │   ├── config.rs          # Configuration
 │   ├── daemon/            # Background daemon
 │   ├── gnome_integration/ # GNOME integration
 │   ├── gnome_shell.rs     # GNOME Shell D-Bus
 │   ├── hotkeys/           # Global hotkeys
 │   ├── icons/             # Icon resources
+│   ├── lib.rs             # Library exports
 │   ├── main.rs            # Entry point
 │   ├── ocr/               # OCR functionality
 │   ├── onboarding/        # First-time setup
-│   ├── overlay.rs         # GTK4 overlay
+│   ├── overlay.rs         # X11 area selector (GTK4)
 │   ├── qr/                # QR code detection
 │   ├── recording/         # Screen recording
 │   ├── settings/          # Settings UI
 │   ├── tray/              # System tray
-│   └── utils/             # Utilities
+│   ├── utils/             # Utilities
+│   └── capture_overlay.rs # C++ Qt5 overlay launcher
 ├── capture-overlay/        # C++ Qt5 overlay
 │   ├── src/               # C++ source
 │   └── CMakeLists.txt     # CMake build
@@ -180,7 +204,7 @@ apexshot/
 │   └── debian/           # Debian packaging
 ├── tests/                 # Integration tests
 ├── Cargo.toml             # Rust dependencies
-└── build.rs               # Build script
+└── build.rs               # Build script (CMake + icons)
 ```
 
 ## Adding Features

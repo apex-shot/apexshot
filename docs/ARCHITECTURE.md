@@ -98,12 +98,11 @@ Screen recording with GStreamer:
 - Recording controls (pause, resume, stop, restart)
 - GNOME Shell integration for recording masks
 
-### 6. Overlay (`src/overlay.rs`)
-Native overlay window for:
-- Region selection during capture
-- Recording controls UI
-- Runtime overlay display (clicks, keystrokes, time)
-- Built with GTK4
+### 6. X11 Area Selector (`src/overlay.rs`)
+GTK4 overlay for interactive area selection on X11:
+- Full-screen transparent window with mouse drag selection
+- Built with GTK4 + gtk4-layer-shell
+- Only used for X11 backend; Wayland uses portal/ashpd instead
 
 ### 7. Settings (`src/settings/`)
 GTK4-based settings UI:
@@ -114,17 +113,18 @@ GTK4-based settings UI:
 - Quick access settings
 - Advanced settings
 
-### 8. Annotations (`src/annotations/`)
-Image annotation editor:
-- Drawing tools (pen, arrow, text, number, blur, crop)
-- Color management
+### 8. Annotation Persistence (`src/annotations/`)
+Non-destructive annotation storage:
 - Serialization/deserialization of annotations
-- Undo/redo support
+- Saved separately from images by SHA256 hash
+- Original image preservation for re-editing
+- Integration with `capture/editor/`
 
 ### 9. OCR (`src/ocr/`)
-Text recognition using Tesseract:
+Text recognition using Tesseract, with QR fallback:
 - Multi-language support
 - Line break preservation
+- QR code detection attempted first; falls back to Tesseract
 - Integration with annotation editor
 
 ### 10. GNOME Integration (`src/gnome_integration/`, `src/gnome_shell.rs`)
@@ -159,6 +159,26 @@ Utility functions:
 - Common helper functions
 - File operations
 - System information
+
+### 15. Display Backend (`src/backend/`)
+Abstraction over display servers:
+- X11 backend (`x11.rs`)
+- Wayland backend (`wayland.rs`, `screencopy.rs`)
+- Portal permissions handling (`portal_permissions.rs`)
+
+### 16. QR Code Detection (`src/qr/`)
+Fast QR code decoding:
+- Uses `rqrr` with raw-byte API
+- Fallback integration in OCR pipeline
+
+### 17. C++ Overlay Launcher (`src/capture_overlay.rs`)
+Rust wrapper that builds and invokes the C++ Qt5 overlay binary:
+- Handles CMake compilation via `build.rs`
+- Communicates with overlay process
+
+### 18. Library Exports (`src/lib.rs`)
+Public API surface for integration tests and downstream use:
+- Re-exports from `backend`, `capture`, `config`, `ocr`, `overlay`, `recording`, `settings`, `onboarding`
 
 ## External Components
 
@@ -239,7 +259,9 @@ Configuration stored in `~/.config/apexshot/config.yml`:
 Currently tested on:
 - GNOME Ubuntu (Wayland)
 
+Implemented but not thoroughly tested:
+- X11 (backend code exists in `src/backend/x11.rs`)
+
 Future support planned for:
 - Other Linux distributions
-- X11
 - Other desktop environments (KDE Plasma, XFCE, etc.)

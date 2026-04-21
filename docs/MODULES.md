@@ -87,24 +87,20 @@ This document provides detailed information about each module in the ApexShot co
 
 ---
 
-### Overlay Module (`src/overlay.rs`)
+### X11 Area Selector (`src/overlay.rs`)
 
-**Purpose:** Native overlay window for UI elements
+**Purpose:** GTK4 overlay for interactive area selection on X11
 
 **Key Functions:**
-- `OverlayWindow` - Main overlay window struct
-- `show()` - Display the overlay
-- `hide()` - Hide the overlay
-- `set_position()` - Set overlay position
-- `update_content()` - Update overlay content
+- `select_area()` - Show full-screen selector and return selection
+- `AreaSelector` - Main selector struct
+- `SelectionArea` - Selected coordinates with normalization/validation
 
 **Use Cases:**
-- Region selection during capture
-- Recording controls UI (pause, resume, stop)
-- Runtime overlay (clicks, keystrokes, time display)
-- Quick access overlay
+- Region selection during capture on X11
+- Wayland uses portal/ashpd instead of this overlay
 
-**Technology:** GTK4
+**Technology:** GTK4 + gtk4-layer-shell
 
 ---
 
@@ -131,48 +127,50 @@ This document provides detailed information about each module in the ApexShot co
 
 ---
 
-### Annotations Module (`src/annotations/`)
+### Annotation Persistence (`src/annotations/`)
 
-**Purpose:** Image annotation editor
+**Purpose:** Non-destructive annotation storage
 
 **Submodules:**
-- `editor/` - Annotation editor UI
-- `mod.rs` - Main annotation logic
+- `mod.rs` - Main persistence logic
 - `schema.rs` - Annotation serialization schema
+- `storage.rs` - Save/load helpers
 
 **Key Functions:**
-- `AnnotationEditor` - Main editor struct
-- `load_image()` - Load image for editing
-- `save_image()` - Save edited image
-- `add_annotation()` - Add annotation object
-- `serialize_annotations()` - Serialize to JSON
-- `deserialize_annotations()` - Deserialize from JSON
+- `save_annotations()` - Save annotations by image hash
+- `load_annotations()` - Load annotations by image hash
+- `load_original_image()` - Load un-annotated original image
+- `compute_image_hash()` - Hash image path for storage lookup
+- `serializable_to_action()` - Convert schema to editor action
 
-**Annotation Types:**
-- Pen (freehand drawing)
-- Arrow (directional arrows)
-- Text (text labels)
-- Number (numbered points)
-- Blur (blur regions)
-- Crop (image cropping)
+**Storage Locations:**
+- Annotations: `~/.local/share/apexshot/annotations/`
+- Originals: `~/.local/share/apexshot/originals/`
 
 ---
 
 ### OCR Module (`src/ocr/`)
 
-**Purpose:** Text recognition using Tesseract
+**Purpose:** Text recognition using Tesseract, with QR code fallback
 
 **Key Functions:**
 - `extract_text()` - Extract text from image
-- `set_language()` - Set OCR language
-- `set_line_breaks()` - Configure line break preservation
+- `extract_text_from_path()` - Extract text from image file
+- `copy_to_clipboard()` - Copy extracted text to clipboard
+- `OcrConfig` - Configuration (language, confidence, clipboard)
 
 **Supported Languages:**
 - English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Japanese, Russian
 
+**Behavior:**
+- QR code detection is attempted first; if found, returns decoded QR content
+- Falls back to Tesseract OCR for text extraction
+- Text detection for highlighter tool uses `ocrs`/`rten` engine (see `capture/editor/text_detect.rs`)
+
 **Configuration:**
 - Language selection
-- Line break preservation
+- Minimum confidence threshold
+- Clipboard auto-copy
 
 ---
 
@@ -260,6 +258,51 @@ This document provides detailed information about each module in the ApexShot co
 - Various helper functions for common operations
 - File operations
 - System information
+
+---
+
+### Display Backend (`src/backend/`)
+
+**Purpose:** Abstraction over X11 and Wayland display servers
+
+**Submodules:**
+- `x11.rs` - X11 backend implementation
+- `wayland.rs` - Wayland backend implementation
+- `screencopy.rs` - Screencopy protocol support
+- `portal_permissions.rs` - Portal permission handling
+
+**Key Types:**
+- `DisplayBackend` - Trait for capture backends
+- `X11Backend` - X11 implementation
+- `WaylandBackend` - Wayland implementation
+- `CaptureData` - Captured pixel buffer
+- `PixelFormat` - Pixel format descriptor
+
+---
+
+### QR Code Detection (`src/qr/`)
+
+**Purpose:** Fast QR code detection and decoding
+
+**Key Functions:**
+- `detect_and_decode()` - Detect and decode QR codes from an image
+- `detect_and_decode_from_gray()` - Decode from raw grayscale data
+
+**Technology:** `rqrr` with raw-byte API to avoid image crate version conflicts
+
+---
+
+### C++ Overlay Launcher (`src/capture_overlay.rs`)
+
+**Purpose:** Rust wrapper that builds and invokes the C++ Qt5 overlay binary
+
+**Key Types:**
+- `RecordingRequest` - Request to start recording overlay
+- `RecordingType` - Enum for recording variants
+
+**Integration:**
+- CMake compilation triggered by `build.rs`
+- Binary location embedded at compile time via `option_env!("APEXSHOT_CAPTURE_BIN_DIR")`
 
 ---
 
@@ -355,6 +398,6 @@ Most modules use `anyhow::Result<T>` for error handling:
 
 ## Testing
 
-- Unit tests in `tests/` directory
+- Unit tests inline in source modules (`#[cfg(test)]`)
+- Integration tests in `tests/` directory
 - Module-specific tests in respective modules
-- Integration tests for recording module
