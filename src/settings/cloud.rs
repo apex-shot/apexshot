@@ -1,7 +1,8 @@
 use crate::AppConfig;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, Label, Orientation, show_uri,
+    prelude::*, Align, Box as GtkBox, Button, Label, Orientation,
 };
+use std::process::Command;
 
 pub struct CloudSettingsWidgets {
     pub section: GtkBox,
@@ -44,7 +45,9 @@ pub fn build_cloud_section(_config: &AppConfig) -> CloudSettingsWidgets {
     waitlist_btn.add_css_class("settings-primary-btn");
     waitlist_btn.set_margin_top(16);
     waitlist_btn.connect_clicked(|_| {
-        let _ = show_uri(None::<&gtk4::Window>, "https://apexshot.org/waitlist", 0);
+        std::thread::spawn(move || {
+            let _ = Command::new("xdg-open").arg("https://apexshot.org/waitlist").spawn();
+        });
     });
 
     content.append(&waitlist_btn);

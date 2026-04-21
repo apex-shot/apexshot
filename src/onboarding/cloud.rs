@@ -1,9 +1,13 @@
-use gtk4::{prelude::*, Align, Button, Label, show_uri};
+use gtk4::{prelude::*, Align, Button, Label};
+use std::process::Command;
 
 const WAITLIST_URL: &str = "https://apexshot.org/waitlist";
 
 fn open_url(url: &str) {
-    let _ = show_uri(None::<&gtk4::Window>, url, 0);
+    let url = url.to_string();
+    std::thread::spawn(move || {
+        let _ = Command::new("xdg-open").arg(&url).spawn();
+    });
 }
 
 pub fn build(content: &gtk4::Box) {

@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Align, Button, Label, show_uri};
+use gtk4::{prelude::*, Align, Button, Label};
 use std::process::Command;
 
 // TODO: Update these URLs when extensions are published
@@ -9,7 +9,10 @@ const OLD_EXTENSION_UUID: &str = "apexshot-preview-helper@apexshot.github.io";
 const EXTENSION_ZIP_URL: &str = "https://github.com/apex-shot/apexshot/releases/download/gnome-extension-v2/apexshot-gnome-integration.zip";
 
 fn open_url(url: &str) {
-    let _ = show_uri(None::<&gtk4::Window>, url, 0);
+    let url = url.to_string();
+    std::thread::spawn(move || {
+        let _ = Command::new("xdg-open").arg(&url).spawn();
+    });
 }
 
 fn is_gnome() -> bool {
@@ -57,37 +60,38 @@ fn remove_old_extension() {
 }
 
 fn install_extension() {
-    // Download and install the extension
-    let home = std::env::var("HOME").unwrap_or_default();
-    let ext_dir = format!(
-        "{}/.local/share/gnome-shell/extensions/{}",
-        home, EXTENSION_UUID
-    );
+    std::thread::spawn(move || {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let ext_dir = format!(
+            "{}/.local/share/gnome-shell/extensions/{}",
+            home, EXTENSION_UUID
+        );
 
-    // Create directory
-    let _ = Command::new("mkdir")
-        .args(["-p", &ext_dir])
-        .output();
+        // Create directory
+        let _ = Command::new("mkdir")
+            .args(["-p", &ext_dir])
+            .output();
 
-    // Download zip
-    let _ = Command::new("wget")
-        .args(["-O", "/tmp/apexshot-extension.zip", EXTENSION_ZIP_URL])
-        .output();
+        // Download zip
+        let _ = Command::new("wget")
+            .args(["-O", "/tmp/apexshot-extension.zip", EXTENSION_ZIP_URL])
+            .output();
 
-    // Extract to extension directory
-    let _ = Command::new("unzip")
-        .args(["-o", "/tmp/apexshot-extension.zip", "-d", &ext_dir])
-        .output();
+        // Extract to extension directory
+        let _ = Command::new("unzip")
+            .args(["-o", "/tmp/apexshot-extension.zip", "-d", &ext_dir])
+            .output();
 
-    // Enable extension
-    let _ = Command::new("gnome-extensions")
-        .args(["enable", EXTENSION_UUID])
-        .output();
+        // Enable extension
+        let _ = Command::new("gnome-extensions")
+            .args(["enable", EXTENSION_UUID])
+            .output();
 
-    // Clean up
-    let _ = Command::new("rm")
-        .args(["-f", "/tmp/apexshot-extension.zip"])
-        .output();
+        // Clean up
+        let _ = Command::new("rm")
+            .args(["-f", "/tmp/apexshot-extension.zip"])
+            .output();
+    });
 }
 
 pub fn build_gnome(content: &gtk4::Box) {
