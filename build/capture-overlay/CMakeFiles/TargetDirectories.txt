@@ -1,9 +1,0 @@
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/apexshot-capture.dir
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/edit_cache.dir
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/rebuild_cache.dir
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/list_install_components.dir
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/install.dir
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/install/local.dir
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/install/strip.dir
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/apexshot-capture_autogen_timestamp_deps.dir
-/home/codegoddy/Desktop/apexshot/build/capture-overlay/CMakeFiles/apexshot-capture_autogen.dir

@@ -5,11 +5,18 @@ Cargo.lock
 
 # Build artifacts
 *.deb
-build/
-capture-overlay/build/
-capture-overlay/dist/
-capture-overlay/out/
+/build/
+/capture-overlay/build/
+/capture-overlay/dist/
+/capture-overlay/out/
 .tmp-capture-overlay-build/
+
+# Native/C++ build outputs
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
 
 # CMake
 CMakeFiles/
