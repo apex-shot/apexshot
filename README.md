@@ -9,6 +9,8 @@ A premium, open-source Linux screen capture tool with annotation, recording, and
 ![Version](https://img.shields.io/badge/version-0.2.24-orange.svg)
 ![Status](https://img.shields.io/badge/status-Alpha-yellow.svg)
 
+![ApexShot Workflow Demo](example.gif)
+
 ## Features
 
 ### Screenshots
