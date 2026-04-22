@@ -18,7 +18,7 @@ use super::pen_weight::PenWeight;
 use super::render::{
     draw_active_text_input, draw_annotation_action, draw_arrow_control_handles,
     draw_arrow_selection_outline, draw_canvas_checkerboard_background, draw_crop_overlay,
-    draw_draft_action, draw_focus_overlay, draw_rgba_to_context, draw_selection_handles,
+    draw_draft_action, draw_rgba_to_context, draw_selection_handles,
     draw_selection_outline, draw_text_edit_border, draw_text_edit_handles, rgba_image_to_surface,
     text_action_bounds,
 };
@@ -2750,19 +2750,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             draw_rgba_to_context(context, &working_image);
         }
 
-        for action in &actions {
-            if let AnnotationAction::Focus { rect, intensity } = action {
-                draw_focus_overlay(
-                    context,
-                    working_image.width() as f64,
-                    working_image.height() as f64,
-                    *rect,
-                    *intensity,
-                    false,
-                );
-            }
-        }
-
         let editing_action_index = active_text_input
             .as_ref()
             .and_then(|input| input.editing_action_index);
@@ -2780,18 +2767,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         }
 
         if let Some(draft) = draft_action {
-            if let AnnotationAction::Focus { rect, intensity } = &draft {
-                draw_focus_overlay(
-                    context,
-                    working_image.width() as f64,
-                    working_image.height() as f64,
-                    *rect,
-                    *intensity,
-                    true,
-                );
-            } else {
-                draw_draft_action(context, &draft);
-            }
+            draw_draft_action(context, &draft);
         }
 
         if crop_mode_active {
@@ -2865,7 +2841,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         if let Some(selected_action) = selected_action.as_ref() {
             if selected_tool == Tool::Select
                 && select_drag_anchor.is_some()
-                && matches!(selected_action, AnnotationAction::Obfuscate { .. })
+                && matches!(
+                    selected_action,
+                    AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
+                )
             {
                 draw_draft_action(context, selected_action);
             }
@@ -2903,7 +2882,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 }
             }
 
-            if selected_tool == Tool::Select || selected_tool == Tool::Arrow {
+            if selected_tool == Tool::Select
+                || selected_tool == Tool::Arrow
+                || (matches!(selected_tool, Tool::Box | Tool::Circle)
+                    && matches!(
+                        selected_action,
+                        AnnotationAction::Box { .. } | AnnotationAction::Circle { .. }
+                    ))
+            {
                 if let AnnotationAction::Text { .. } = selected_action {
                     // Already handled above.
                 } else if let AnnotationAction::Arrow {
@@ -3474,9 +3460,7 @@ mod tests {
         assert!(
             production_source.contains("SizeControlMode::Focus => {")
                 && production_source.contains("Focus background intensity")
-                && production_source.contains("size_slider.set_range(MIN_FOCUS_INTENSITY, MAX_FOCUS_INTENSITY);")
-                && production_source.contains("draw_focus_overlay(")
-                && production_source.contains("*intensity,"),
+                && production_source.contains("size_slider.set_range(MIN_FOCUS_INTENSITY, MAX_FOCUS_INTENSITY);"),
             "Focus should use the toolbar slider as a background intensity control in the live preview",
         );
     }

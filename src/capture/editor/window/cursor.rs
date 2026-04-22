@@ -136,11 +136,54 @@ pub fn cursor_name_for_view_point(
             // This returns crosshair as fallback
             "crosshair"
         }
+        Tool::Box | Tool::Circle => {
+            if state.select_drag_anchor.is_some() {
+                if let Some(handle) = state.select_resize_handle {
+                    cursor_name_for_select_handle(handle)
+                } else {
+                    "grabbing"
+                }
+            } else {
+                // Check resize handles on the selected action first.
+                if let Some(index) = state.selected_action_index {
+                    if let Some(selected) = state.actions.get(index) {
+                        let is_matching_type = match selected {
+                            AnnotationAction::Box { .. } => state.selected_tool == Tool::Box,
+                            AnnotationAction::Circle { .. } => state.selected_tool == Tool::Circle,
+                            _ => false,
+                        };
+                        if is_matching_type {
+                            let handle_hit_radius = selection_handle_hit_radius_for_scale(transform.scale);
+                            if let Some(handle) = super::super::selection::action_resize_handle_at_point_with_radius(
+                                selected, image_point, handle_hit_radius,
+                            ) {
+                                return cursor_name_for_select_handle(handle);
+                            }
+                        }
+                    }
+                }
+                let hit_padding = selection_hit_padding_for_scale(transform.scale);
+                let is_over_action = state.actions.iter().rev().any(|action| {
+                    let matches_tool = match action {
+                        AnnotationAction::Box { .. } => state.selected_tool == Tool::Box,
+                        AnnotationAction::Circle { .. } => state.selected_tool == Tool::Circle,
+                        _ => false,
+                    };
+                    matches_tool
+                        && super::super::selection::action_contains_point_with_padding(
+                            action, image_point, hit_padding,
+                        )
+                });
+                if is_over_action {
+                    "grab"
+                } else {
+                    "crosshair"
+                }
+            }
+        }
         Tool::Pen
-        | Tool::Circle
         | Tool::Arrow
         | Tool::Line
-        | Tool::Box
         | Tool::Number
         | Tool::Obfuscate
         | Tool::Focus => "crosshair",

@@ -994,6 +994,7 @@ mod tests {
             },
             intensity: 58.0,
         });
+        state.rebuild_effect_layer();
 
         let final_image = state.to_final_image().unwrap();
         let inside = *final_image.get_pixel(4, 4);

@@ -2266,7 +2266,7 @@ impl EditorState {
                 clamp_action_to_image(action, img_w, img_h);
             }
 
-            let effect_action = matches!(action, AnnotationAction::Obfuscate { .. });
+            let effect_action = matches!(action, AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. });
             (moved, effect_action)
         } else {
             self.selected_action_index = None;
@@ -2550,6 +2550,7 @@ mod tests {
         assert_eq!(state.active_size_value(), Some(44.0));
         assert!(state.set_active_size_without_rebuild(66.0));
         assert_eq!(state.selected_focus_action_intensity(), Some(66.0));
+        state.rebuild_effect_layer();
 
         let final_image = state.to_rendered_image().expect("rendered image");
         assert_eq!(*final_image.get_pixel(4, 4), image::Rgba([200, 180, 160, 255]));
@@ -2764,6 +2765,9 @@ pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction])
                 ObfuscateMethod::Blackout => {
                     apply_blackout_rect(image, rect);
                 }
+            },
+            AnnotationAction::Focus { rect, intensity } => {
+                apply_focus_rect(image, *rect, *intensity);
             },
             _ => {}
         }
@@ -3272,12 +3276,7 @@ impl EditorState {
             .stride_for_width(width)
             .map_err(|e| EditorError::ImageSave(e.to_string()))?;
 
-        let mut source_image = self.working_image.clone();
-        for action in &self.actions {
-            if let AnnotationAction::Focus { rect, intensity } = action {
-                apply_focus_rect(&mut source_image, *rect, *intensity);
-            }
-        }
+        let source_image = self.working_image.clone();
 
         let data = super::render::rgba_to_cairo_argb_bytes(&source_image);
         let mut surface = gtk4::cairo::ImageSurface::create_for_data(

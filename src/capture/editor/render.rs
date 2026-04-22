@@ -113,10 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_overlay_and_export_use_configurable_intensity() {
-        assert!(focus_overlay_alpha(80.0, false) > focus_overlay_alpha(20.0, false));
-        assert!(focus_overlay_alpha(80.0, true) > focus_overlay_alpha(20.0, true));
-
+    fn focus_effect_uses_configurable_intensity() {
         let rect = Rect {
             x: 2,
             y: 2,
@@ -378,64 +375,18 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             let _ = context.stroke();
         }
         AnnotationAction::Focus { rect, .. } => {
-            draw_focus_rect_outline(context, *rect, true);
+            context.set_source_rgba(0.18, 0.48, 0.94, 0.18);
+            context.rectangle(
+                rect.x as f64,
+                rect.y as f64,
+                rect.width as f64,
+                rect.height as f64,
+            );
+            let _ = context.fill_preserve();
+            context.set_source_rgba(0.20, 0.56, 0.98, 0.95);
+            context.set_line_width(2.0);
+            let _ = context.stroke();
         }
-    }
-}
-
-fn draw_focus_rect_outline(context: &gtk4::cairo::Context, rect: Rect, active: bool) {
-    let width = rect.width.max(1) as f64;
-    let height = rect.height.max(1) as f64;
-
-    context.rectangle(rect.x as f64, rect.y as f64, width, height);
-    context.set_line_width(if active { 2.0 } else { 1.4 });
-    context.set_source_rgba(0.94, 0.97, 1.0, if active { 0.95 } else { 0.85 });
-    let _ = context.stroke_preserve();
-
-    context.set_dash(&[6.0, 4.0], 0.0);
-    context.set_source_rgba(0.16, 0.60, 0.99, if active { 0.92 } else { 0.72 });
-    context.set_line_width(1.2);
-    let _ = context.stroke();
-    context.set_dash(&[], 0.0);
-}
-
-fn focus_overlay_alpha(intensity: f64, active: bool) -> f64 {
-    let base_alpha = (intensity / 100.0).clamp(0.10, 0.90);
-    if active {
-        base_alpha.min(0.95)
-    } else {
-        (base_alpha - 0.06).max(0.08)
-    }
-}
-
-pub fn draw_focus_overlay(
-    context: &gtk4::cairo::Context,
-    image_width: f64,
-    image_height: f64,
-    rect: Rect,
-    intensity: f64,
-    active: bool,
-) {
-    let Some(rect) = rect.clamp_to(image_width as u32, image_height as u32) else {
-        return;
-    };
-
-    let width = rect.width.max(1) as f64;
-    let height = rect.height.max(1) as f64;
-    if width <= 1.0 || height <= 1.0 {
-        return;
-    }
-
-    let _ = context.save();
-    context.rectangle(0.0, 0.0, image_width, image_height);
-    context.rectangle(rect.x as f64, rect.y as f64, width, height);
-    context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
-    context.set_source_rgba(0.0, 0.0, 0.0, focus_overlay_alpha(intensity, active));
-    let _ = context.fill();
-    let _ = context.restore();
-
-    if active {
-        draw_focus_rect_outline(context, rect, true);
     }
 }
 
@@ -971,15 +922,37 @@ pub fn draw_circle(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor,
     let center_y = rect.y as f64 + height / 2.0;
     let radius_x = width / 2.0;
     let radius_y = height / 2.0;
-    let min_radius = radius_x.min(radius_y).max(1.0);
+    let min_radius = radius_x.min(radius_y);
 
     let _ = context.save();
-    context.translate(center_x, center_y);
-    context.scale(radius_x.max(1.0), radius_y.max(1.0));
     context.set_source_rgba(color.r, color.g, color.b, color.a);
-    context.set_line_width(stroke_size.max(0.5) / min_radius);
-    context.arc(0.0, 0.0, 1.0, 0.0, std::f64::consts::TAU);
-    let _ = context.stroke();
+
+    // When one dimension is much smaller than the stroke size, the
+    // scale-based ellipse rendering breaks — the stroke becomes
+    // distorted into a line.  Use a rounded-rect path instead, which
+    // degrades gracefully to a capsule/stadium shape for thin ellipses.
+    if min_radius < stroke_size * 0.75 {
+        let r = min_radius.max(0.5);
+        let left = rect.x as f64 + r;
+        let right = rect.x as f64 + width - r;
+        let top = rect.y as f64 + r;
+        let bottom = rect.y as f64 + height - r;
+        context.set_line_width(stroke_size.max(0.5));
+        context.arc(left, top, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
+        context.arc(right, top, r, 1.5 * std::f64::consts::PI, 2.0 * std::f64::consts::PI);
+        context.arc(right, bottom, r, 0.0, 0.5 * std::f64::consts::PI);
+        context.arc(left, bottom, r, 0.5 * std::f64::consts::PI, std::f64::consts::PI);
+        context.close_path();
+        let _ = context.stroke();
+    } else {
+        // Normal ellipse rendering for well-proportioned circles/ellipses
+        context.translate(center_x, center_y);
+        context.scale(radius_x, radius_y);
+        context.set_line_width(stroke_size.max(0.5) / min_radius);
+        context.arc(0.0, 0.0, 1.0, 0.0, std::f64::consts::TAU);
+        let _ = context.stroke();
+    }
+
     let _ = context.restore();
 }
 

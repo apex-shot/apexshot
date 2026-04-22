@@ -1953,6 +1953,108 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             return;
         }
 
+        // Box/Circle tool: unified interaction — resize, move, or draw new.
+        if matches!(st.selected_tool, Tool::Box | Tool::Circle) {
+            let image_point = t.view_to_image_clamped(view_point);
+
+            // If an action is already selected and we're dragging it, continue.
+            if st.selected_action_index.is_some() && st.select_drag_anchor.is_some() {
+                drop(st);
+                if let Some(area) = drawing_area_begin.upgrade() {
+                    area.queue_draw();
+                }
+                drag_last_redraw_begin.set(glib::monotonic_time());
+                return;
+            }
+
+            // If an action is already selected, check resize handles first, then body hit.
+            if st.selected_action_index.is_some() {
+                if let Some(index) = st.selected_action_index {
+                    if let Some(selected) = st.actions.get(index) {
+                        let is_matching_type = match selected {
+                            super::super::types::AnnotationAction::Box { .. } => st.selected_tool == Tool::Box,
+                            super::super::types::AnnotationAction::Circle { .. } => st.selected_tool == Tool::Circle,
+                            _ => false,
+                        };
+                        if is_matching_type {
+                            // Check resize handles first.
+                            let handle_hit_radius = super::super::color::selection_handle_hit_radius_for_scale(t.scale);
+                            if let Some(handle) = super::super::selection::action_resize_handle_at_point_with_radius(
+                                selected, image_point, handle_hit_radius,
+                            ) {
+                                st.select_resize_handle = Some(handle);
+                                st.select_drag_anchor = Some(image_point);
+                                st.drag_start_view = Some(view_point);
+                                drop(st);
+                                if let Some(area) = drawing_area_begin.upgrade() {
+                                    area.queue_draw();
+                                }
+                                drag_last_redraw_begin.set(glib::monotonic_time());
+                                return;
+                            }
+
+                            // Body hit — move the whole action.
+                            let hit_padding = super::super::color::selection_hit_padding_for_scale(t.scale);
+                            if super::super::selection::action_contains_point_with_padding(
+                                selected, image_point, hit_padding,
+                            ) {
+                                st.select_drag_anchor = Some(image_point);
+                                st.select_resize_handle = None;
+                                st.drag_start_view = Some(view_point);
+                                drop(st);
+                                if let Some(area) = drawing_area_begin.upgrade() {
+                                    area.queue_draw();
+                                }
+                                drag_last_redraw_begin.set(glib::monotonic_time());
+                                return;
+                            }
+                        }
+                    }
+                }
+                // Clicked outside the selected action — deselect, fall through to new draw.
+                st.selected_action_index = None;
+                st.select_drag_anchor = None;
+            }
+
+            // No action selected — check if click lands on an existing matching action.
+            if st.selected_action_index.is_none() {
+                let hit_padding = super::super::color::selection_hit_padding_for_scale(t.scale);
+                let hit_index = st.actions.iter().enumerate().rev().find(|(_, action)| {
+                    let is_matching_type = match action {
+                        super::super::types::AnnotationAction::Box { .. } => st.selected_tool == Tool::Box,
+                        super::super::types::AnnotationAction::Circle { .. } => st.selected_tool == Tool::Circle,
+                        _ => false,
+                    };
+                    is_matching_type
+                        && super::super::selection::action_contains_point_with_padding(
+                            action, image_point, hit_padding,
+                        )
+                }).map(|(index, _)| index);
+
+                if let Some(index) = hit_index {
+                    st.selected_action_index = Some(index);
+                    // Check resize handles on the newly selected action.
+                    let handle_hit_radius = super::super::color::selection_handle_hit_radius_for_scale(t.scale);
+                    if let Some(handle) = super::super::selection::action_resize_handle_at_point_with_radius(
+                        &st.actions[index], image_point, handle_hit_radius,
+                    ) {
+                        st.select_resize_handle = Some(handle);
+                    } else {
+                        st.select_resize_handle = None;
+                    }
+                    st.select_drag_anchor = Some(image_point);
+                    st.drag_start_view = Some(view_point);
+                    drop(st);
+                    if let Some(area) = drawing_area_begin.upgrade() {
+                        area.queue_draw();
+                    }
+                    drag_last_redraw_begin.set(glib::monotonic_time());
+                    return;
+                }
+            }
+            // No hit — fall through to normal draw.
+        }
+
         st.drag_shift_active = shift_pressed;
         st.begin_drag(t.view_to_image_clamped(view_point));
         st.drag_start_view = Some(view_point);
@@ -2026,6 +2128,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     && st.selected_action_index.is_some()
                     && st.active_text_input.is_none()
                     && !st.active_text_is_dragging)
+                || (matches!(st.selected_tool, Tool::Box | Tool::Circle)
+                    && st.selected_action_index.is_some()
+                    && st.select_drag_anchor.is_some())
             {
                 let now = glib::monotonic_time();
                 if now - drag_last_redraw_update.get() < DRAG_REDRAW_INTERVAL_US {
@@ -2148,6 +2253,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 || (st.selected_tool == Tool::Text
                     && st.active_text_input.is_none()
                     && !st.active_text_is_dragging)
+                || (matches!(st.selected_tool, Tool::Box | Tool::Circle)
+                    && st.selected_action_index.is_some()
+                    && st.select_drag_anchor.is_some())
             {
                 st.update_select_drag(t.view_to_image_clamped(current_view));
                 if st.end_select_drag_without_rebuild_and_check_effect() {
