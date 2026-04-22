@@ -171,6 +171,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_countdownValue(0)
     , m_countdownCancelRequested(false)
     , m_hoveredCountdownCancel(false)
+    , m_countdownTimer(new QTimer(this))
+    , m_countdownForRecording(false)
     , m_captureCropMenuOpen(false)
     , m_captureAspectRatioIndex(0)
     , m_hoveredCaptureCropMenuItem(-1)
@@ -304,6 +306,9 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
 
     m_scrollCaptureTimer->setSingleShot(true);
     connect(m_scrollCaptureTimer, &QTimer::timeout, this, &CaptureOverlay::onAutoScrollTick);
+
+    m_countdownTimer->setSingleShot(true);
+    connect(m_countdownTimer, &QTimer::timeout, this, &CaptureOverlay::onCountdownTick);
 
     connect(m_scrollControlPanel, &ScrollControlPanel::cancelClicked, this, &CaptureOverlay::cancelSelection);
     connect(m_scrollControlPanel, &ScrollControlPanel::doneClicked, this, [this]() {

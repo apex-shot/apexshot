@@ -1563,6 +1563,38 @@ fn start_audio_level_stream(
     });
 }
 
+/// Detect the first physical (non-monitor) audio input device via pactl.
+/// Returns `None` if no suitable device is found, letting PipeWire fall back
+/// to the default input.
+fn find_physical_input_device() -> Option<String> {
+    let output = std::process::Command::new("pactl")
+        .args(["list", "sources", "short"])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8(output.stdout).ok()?;
+
+    for line in stdout.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 2 {
+            continue;
+        }
+        let name = fields[1].trim();
+        // Monitor sources end with `.monitor` — skip them to avoid picking up
+        // system audio loopback (which the speaker stream already captures).
+        if name.ends_with(".monitor") {
+            continue;
+        }
+        eprintln!(
+            "[daemon] PipeWire (mic): detected physical input device '{name}'"
+        );
+        return Some(name.to_string());
+    }
+    eprintln!(
+        "[daemon] PipeWire (mic): no physical input device found; falling back to default"
+    );
+    None
+}
+
 async fn run_dbus_server(
     conn: zbus::Connection,
     tx: std::sync::mpsc::Sender<DaemonAction>,
@@ -1575,12 +1607,13 @@ async fn run_dbus_server(
     // Serve the IPC object on the existing connection (name already registered)
     conn.object_server().at(DAEMON_OBJECT_PATH, ipc).await?;
 
-    // Mic: explicitly target physical input device to avoid picking up system audio
-    // Falls back to default input if specific device not found
+    // Mic: detect physical input device at runtime to avoid picking up system audio
+    // Falls back to PipeWire default if no physical device is found
+    let mic_target = find_physical_input_device();
     start_audio_level_stream(
         "mic",
         "apexshot-mic-monitor",
-        Some("alsa_input.pci-0000_00_1f.3.analog-stereo"),
+        mic_target.as_deref(),
         false,
         &MIC_LEVEL,
     );

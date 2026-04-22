@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QPoint>
 #include <QRect>
+#include <QTimer>
 #include <cmath>
 
 namespace {
@@ -237,7 +238,28 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
     if (m_countdownActive) {
         if (event->button() == Qt::LeftButton && m_countdownBubbleRect.contains(pos)) {
             m_countdownCancelRequested = true;
+            // Trigger immediate cancel processing in the timer callback
+            m_countdownTimer->stop();
+            onCountdownTick();
+            return;
         }
+        // Allow moving/resizing the selection during countdown
+        if (event->button() == Qt::LeftButton && m_hasSelection) {
+            HandlePos h = hitTest(pos);
+            if (h == HandlePos::Inside) {
+                m_moving = true;
+                m_selectionAtDragStart = m_selection.normalized();
+                m_dragStart = pos;
+                setCursor(Qt::ClosedHandCursor);
+                return;
+            } else if (h != HandlePos::None) {
+                m_resizing = h;
+                m_selectionAtDragStart = m_selection.normalized();
+                m_dragStart = pos;
+                return;
+            }
+        }
+        // Ignore other clicks during countdown (don't start new selections)
         return;
     }
 
@@ -901,8 +923,8 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
             m_hoveredCountdownCancel = hoveringCancel;
             update();
         }
-        setCursor(hoveringCancel ? Qt::PointingHandCursor : Qt::ArrowCursor);
-        return;
+        // Don't return — fall through to allow selection drag/move/resize during countdown.
+        // Cursor is set at the end of this function.
     }
 
     // ── Slider Drag ─────────────────────────────────────────────────────────
@@ -1282,7 +1304,31 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
             update();
         }
     }
-    updateCursor(pos);
+
+    if (m_countdownActive) {
+        // During countdown, only show drag/resize/move or cancel-bubble cursor
+        if (m_moving) {
+            setCursor(Qt::ClosedHandCursor);
+        } else if (m_resizing != HandlePos::None) {
+            switch (m_resizing) {
+            case HandlePos::TopLeft:
+            case HandlePos::BottomRight: setCursor(Qt::SizeFDiagCursor); break;
+            case HandlePos::TopRight:
+            case HandlePos::BottomLeft:   setCursor(Qt::SizeBDiagCursor); break;
+            case HandlePos::Top:
+            case HandlePos::Bottom:      setCursor(Qt::SizeVerCursor);   break;
+            case HandlePos::Left:
+            case HandlePos::Right:       setCursor(Qt::SizeHorCursor);   break;
+            default:                     setCursor(Qt::ArrowCursor);       break;
+            }
+        } else if (m_hoveredCountdownCancel) {
+            setCursor(Qt::PointingHandCursor);
+        } else {
+            setCursor(Qt::ArrowCursor);
+        }
+    } else {
+        updateCursor(pos);
+    }
 }
 
 void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)

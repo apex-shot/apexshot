@@ -236,6 +236,7 @@ private:
 
 private slots:
     void onMicLevelUpdated(double level);
+    void onCountdownTick();
 
 private:
     // Drawing
@@ -349,6 +350,8 @@ private:
     int       m_countdownValue;
     bool      m_countdownCancelRequested;
     bool      m_hoveredCountdownCancel;
+    QTimer*   m_countdownTimer;
+    bool      m_countdownForRecording;
     QRectF    m_countdownBubbleRect;
     bool      m_captureCropMenuOpen;
     int       m_captureAspectRatioIndex;

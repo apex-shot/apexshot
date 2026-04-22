@@ -45,16 +45,13 @@ void CaptureOverlay::confirmSelection()
 
     if (m_timerDelayActive && m_captureDelaySeconds > 0 && !m_countdownActive) {
         m_countdownActive = true;
-        for (int remaining = m_captureDelaySeconds; remaining > 0; --remaining) {
-            m_countdownValue = remaining;
-            update();
-            QApplication::processEvents();
-            QThread::sleep(1);
-        }
-        m_countdownActive = false;
-        m_countdownValue = 0;
+        m_countdownValue = m_captureDelaySeconds;
+        m_countdownForRecording = false;
+        m_countdownCancelRequested = false;
+        m_countdownTimer->setInterval(1000);
+        m_countdownTimer->start();
         update();
-        QApplication::processEvents();
+        return;
     }
 
     releaseKeyboard();
@@ -79,34 +76,55 @@ void CaptureOverlay::confirmRecordingSelection()
 
     if (m_showCountdown && !m_countdownActive) {
         m_countdownActive = true;
-        for (int remaining = 3; remaining > 0; --remaining) {
-            m_countdownValue = remaining;
-            update();
-            for (int step = 0; step < 20; ++step) {
-                QApplication::processEvents();
-                if (m_countdownCancelRequested) {
-                    m_countdownActive = false;
-                    m_countdownValue = 0;
-                    m_countdownCancelRequested = false;
-                    m_hoveredCountdownCancel = false;
-                    m_recordingToolsHidden = false;
-                    if (m_recWebcam && m_webcamDevice >= 0) {
-                        startWebcamCapture();
-                    }
-                    update();
-                    QApplication::processEvents();
-                    return;
-                }
-                QThread::msleep(50);
-            }
-        }
-        m_countdownActive = false;
-        m_countdownValue = 0;
+        m_countdownValue = 3;
+        m_countdownForRecording = true;
+        m_countdownCancelRequested = false;
         m_hoveredCountdownCancel = false;
+        m_countdownTimer->setInterval(1000);
+        m_countdownTimer->start();
         update();
-        QApplication::processEvents();
+        return;
     }
 
+    releaseKeyboard();
+    hide();
+    QApplication::processEvents();
+    QThread::msleep(120);
+    QApplication::exit(0);
+}
+
+void CaptureOverlay::onCountdownTick()
+{
+    if (!m_countdownActive)
+        return;
+
+    // Check for cancel request (set by clicking the countdown bubble)
+    if (m_countdownCancelRequested) {
+        m_countdownActive = false;
+        m_countdownValue = 0;
+        m_countdownCancelRequested = false;
+        m_hoveredCountdownCancel = false;
+        if (m_countdownForRecording) {
+            m_recordingToolsHidden = false;
+            if (m_recWebcam && m_webcamDevice >= 0) {
+                startWebcamCapture();
+            }
+        }
+        update();
+        return;
+    }
+
+    m_countdownValue--;
+    if (m_countdownValue > 0) {
+        update();
+        m_countdownTimer->start();
+        return;
+    }
+
+    // Countdown finished — proceed with capture/recording
+    m_countdownActive = false;
+    m_countdownValue = 0;
+    m_hoveredCountdownCancel = false;
     releaseKeyboard();
     hide();
     QApplication::processEvents();
@@ -145,6 +163,11 @@ void CaptureOverlay::cancelSelection()
     m_captureCropMenuPanelRect = QRectF();
     m_captureCropMenuItemRects.clear();
     exitScrollMode();
+    if (m_countdownActive) {
+        m_countdownActive = false;
+        m_countdownValue = 0;
+        m_countdownTimer->stop();
+    }
     releaseKeyboard();
     QApplication::exit(1);
 }
