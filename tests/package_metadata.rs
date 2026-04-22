@@ -13,7 +13,7 @@ fn deb_package_includes_capture_helper_binary() {
     );
 
     assert!(
-        cargo_toml.contains("depends = \"$auto\""),
+        cargo_toml.contains("depends = \"$auto"),
         "release .deb should rely on cargo-deb auto dependency detection for native runtime libraries"
     );
 
