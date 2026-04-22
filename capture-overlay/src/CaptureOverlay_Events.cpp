@@ -800,17 +800,8 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 update();
                 return;
             }
-            if (layout.confirmCard.contains(pos)) {
-                handleActionClick(ToolbarActionCard::Confirm);
-                return;
-            }
-            if (layout.cancelCard.contains(pos)) {
-                handleActionClick(ToolbarActionCard::Cancel);
-                return;
-            }
         } else {
             bool clickedToolbar = layout.leftToolsPanel.contains(pos) ||
-                                  layout.rightActionsPanel.contains(pos) ||
                                   layout.sizeCard.contains(pos);
             if (clickedToolbar) {
                 for (int i = 0; i < NUM_TOOLS; ++i) {
@@ -824,14 +815,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     closeCaptureCropMenu();
                     m_captureCropMenuOpen = !wasOpen;
                     update();
-                    return;
-                }
-                if (layout.confirmCard.contains(pos)) {
-                    handleActionClick(ToolbarActionCard::Confirm);
-                    return;
-                }
-                if (layout.cancelCard.contains(pos)) {
-                    handleActionClick(ToolbarActionCard::Cancel);
                     return;
                 }
                 // Clicked toolbar panel background but not a specific tool —
@@ -1287,20 +1270,12 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         }
         bool newSizeHover = layout.sizeCard.contains(pos);
         bool newCropHover = layout.cropCard.contains(pos);
-        ToolbarActionCard newActionHover = ToolbarActionCard::None;
-        if (layout.confirmCard.contains(pos)) {
-            newActionHover = ToolbarActionCard::Confirm;
-        } else if (layout.cancelCard.contains(pos)) {
-            newActionHover = ToolbarActionCard::Cancel;
-        }
         if (newHover != m_hoveredTool
             || newSizeHover != m_hoveredSizeCard
-            || newCropHover != m_hoveredCaptureCropCard
-            || newActionHover != m_hoveredActionCard) {
+            || newCropHover != m_hoveredCaptureCropCard) {
             m_hoveredTool = newHover;
             m_hoveredSizeCard = newSizeHover;
             m_hoveredCaptureCropCard = newCropHover;
-            m_hoveredActionCard = newActionHover;
             update();
         }
     }
@@ -1427,7 +1402,6 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
             m_captureIntent == CaptureIntent::Scroll
         );
         bool clickedToolbar = layout.leftToolsPanel.contains(pos) ||
-                              layout.rightActionsPanel.contains(pos) ||
                               layout.sizeCard.contains(pos) ||
                               layout.cropCard.contains(pos);
         if (clickedToolbar) {
@@ -1499,18 +1473,6 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                 const bool wasOpen = m_captureCropMenuOpen;
                 m_captureCropMenuOpen = !wasOpen;
                 update();
-                return;
-            }
-            if (layout.confirmCard.contains(pos)) {
-                if (m_captureIntent == CaptureIntent::Record) {
-                    confirmRecordingSelection();
-                } else {
-                    confirmSelection();
-                }
-                return;
-            }
-            if (layout.cancelCard.contains(pos)) {
-                cancelSelection();
                 return;
             }
             return; // Clicked toolbar background — do nothing

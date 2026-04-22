@@ -74,8 +74,8 @@ ToolbarLayout computeToolbarLayout(double selX, double selY,
 {
     ToolbarLayout layout;
     const double toolPanelH = TOOL_CARD_H * NUM_TOOLS;
-    const double actionBarW = (2.0 * ACTION_RAIL_W) + ACTION_CARD_GAP;
-    const double actionBarH = ACTION_CARD_H;
+    const double actionBarW = 0.0;
+    const double actionBarH = 0.0;
     const double sizeCardW = 152.0;
     const double cropCardW = 62.0;
     const double topClusterH = REC_TOP_CLUSTER_H;
@@ -116,7 +116,7 @@ ToolbarLayout computeToolbarLayout(double selX, double selY,
     layout.compactMode = forceAbove || toolRailClamped || !actionBelowFits || !sizeAboveFits;
 
     layout.leftToolsPanel = QRectF(leftPanelX, leftPanelY, TOOL_RAIL_W, toolPanelH);
-    layout.rightActionsPanel = QRectF(actionBarX, actionBarY, actionBarW, actionBarH);
+    layout.rightActionsPanel = QRectF();
     for (int i = 0; i < NUM_TOOLS; ++i) {
         layout.toolCells[i] = QRectF(
             layout.leftToolsPanel.x(),
@@ -144,18 +144,8 @@ ToolbarLayout computeToolbarLayout(double selX, double selY,
         cropCardW,
         topClusterH
     );
-    layout.confirmCard = QRectF(
-        layout.rightActionsPanel.x(),
-        layout.rightActionsPanel.y(),
-        ACTION_RAIL_W,
-        ACTION_CARD_H
-    );
-    layout.cancelCard = QRectF(
-        layout.confirmCard.right() + ACTION_CARD_GAP,
-        layout.rightActionsPanel.y(),
-        ACTION_RAIL_W,
-        ACTION_CARD_H
-    );
+    layout.confirmCard = QRectF();
+    layout.cancelCard = QRectF();
     return layout;
 }
 
@@ -860,33 +850,76 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         drawKeystrokePreview(p, sx, sy, selW, selH);
     }
 
-    // ── Visible countdown overlay (Centered Circle) ──────────────────────────
+    // ── Visible countdown overlay ───────────────────────────────────────────
     if (m_countdownActive && m_countdownValue > 0) {
-        const double bubbleSize = 184.0;
-        const double bubbleX = (sw - bubbleSize) / 2.0;
-        const double bubbleY = (sh - bubbleSize) / 2.0;
-        const QRectF bubbleRect(bubbleX, bubbleY, bubbleSize, bubbleSize);
-        m_countdownBubbleRect = bubbleRect;
-
         p.save();
         p.setRenderHint(QPainter::Antialiasing);
 
-        p.setPen(Qt::NoPen);
-        p.setBrush(m_hoveredCountdownCancel
-                       ? QColor(132, 38, 24, 242)
-                       : QColor(0, 0, 0, 240));
-        p.drawEllipse(bubbleRect);
+        if (!m_countdownForRecording) {
+            // Capture-delay countdown: pill badge at top-center
+            const double pillW = 112.0;
+            const double pillH = 44.0;
+            const double pillX = (sw - pillW) / 2.0;
+            const double pillY = 28.0;
+            const QRectF pillRect(pillX, pillY, pillW, pillH);
+            m_countdownBubbleRect = pillRect;
 
-        QFont countdownFont(QStringLiteral("Sans"));
-        countdownFont.setBold(true);
-        countdownFont.setPointSizeF(m_hoveredCountdownCancel ? 34.0 : 72.0);
-        p.setFont(countdownFont);
-        p.setPen(m_hoveredCountdownCancel ? QColor(255, 228, 214) : Qt::white);
+            p.setPen(Qt::NoPen);
+            p.setBrush(m_hoveredCountdownCancel
+                           ? QColor(200, 60, 40, 242)
+                           : QColor(233, 84, 32, 235)); // #E95420 with alpha
+            p.drawRoundedRect(pillRect, pillH / 2.0, pillH / 2.0);
 
-        p.drawText(bubbleRect,
-                   Qt::AlignCenter,
-                   m_hoveredCountdownCancel ? QStringLiteral("Cancel")
-                                            : QString::number(m_countdownValue));
+            // Draw timer icon (clock face) on the left side of the pill
+            const double iconCx = pillX + 22.0;
+            const double iconCy = pillY + pillH / 2.0;
+            const double iconR = 11.0;
+            p.setPen(QPen(Qt::white, 2.2, Qt::SolidLine, Qt::RoundCap));
+            p.setBrush(Qt::NoBrush);
+            p.drawEllipse(QPointF(iconCx, iconCy), iconR, iconR);
+            // Clock hands — small hour hand pointing up-ish
+            p.drawLine(QPointF(iconCx, iconCy), QPointF(iconCx, iconCy - 5.5));
+            // Minute hand pointing right-ish
+            p.drawLine(QPointF(iconCx, iconCy), QPointF(iconCx + 5.0, iconCy + 2.0));
+
+            // Draw countdown number on the right side
+            QFont countdownFont(QStringLiteral("Sans"));
+            countdownFont.setBold(true);
+            countdownFont.setPointSizeF(m_hoveredCountdownCancel ? 13.0 : 22.0);
+            p.setFont(countdownFont);
+            p.setPen(Qt::white);
+            p.setBrush(Qt::NoBrush);
+
+            const QRectF textRect(pillX + 40.0, pillY, pillW - 44.0, pillH);
+            p.drawText(textRect,
+                       Qt::AlignCenter,
+                       m_hoveredCountdownCancel ? QStringLiteral("Cancel")
+                                                : QString::number(m_countdownValue));
+        } else {
+            // Recording countdown: centered circle (3-2-1)
+            const double bubbleSize = 184.0;
+            const double bubbleX = (sw - bubbleSize) / 2.0;
+            const double bubbleY = (sh - bubbleSize) / 2.0;
+            const QRectF bubbleRect(bubbleX, bubbleY, bubbleSize, bubbleSize);
+            m_countdownBubbleRect = bubbleRect;
+
+            p.setPen(Qt::NoPen);
+            p.setBrush(m_hoveredCountdownCancel
+                           ? QColor(132, 38, 24, 242)
+                           : QColor(0, 0, 0, 240));
+            p.drawEllipse(bubbleRect);
+
+            QFont countdownFont(QStringLiteral("Sans"));
+            countdownFont.setBold(true);
+            countdownFont.setPointSizeF(m_hoveredCountdownCancel ? 34.0 : 72.0);
+            p.setFont(countdownFont);
+            p.setPen(m_hoveredCountdownCancel ? QColor(255, 228, 214) : Qt::white);
+
+            p.drawText(bubbleRect,
+                       Qt::AlignCenter,
+                       m_hoveredCountdownCancel ? QStringLiteral("Cancel")
+                                                : QString::number(m_countdownValue));
+        }
 
         p.restore();
     } else {
@@ -2072,11 +2105,6 @@ void CaptureOverlay::drawToolbar(QPainter& p,
                      layout.topCluster.width(), layout.topCluster.height(),
                      FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
 
-    drawFrostedPanel(p,
-                     layout.rightActionsPanel.x(), layout.rightActionsPanel.y(),
-                     layout.rightActionsPanel.width(), layout.rightActionsPanel.height(),
-                     12.0, blurPtr, screenW, screenH);
-
     auto drawAccentCard = [&](const QRectF& rect,
                               const QColor& fill,
                               const QColor& rim,
@@ -2252,25 +2280,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         p.drawText(rect, Qt::AlignCenter, text);
     };
 
-    drawAccentCard(
-        layout.confirmCard,
-        m_hoveredActionCard == ToolbarActionCard::Confirm
-            ? QColor(176, 92, 56, 88)
-            : QColor(176, 92, 56, 60),
-        QColor(255, 212, 178, 214),
-        8.0
-    );
-    drawAccentCard(
-        layout.cancelCard,
-        m_hoveredActionCard == ToolbarActionCard::Cancel
-            ? QColor(255, 255, 255, 34)
-            : QColor(255, 255, 255, 18),
-        QColor(255, 255, 255, 112),
-        8.0
-    );
-
-    drawActionLabel(layout.confirmCard, QStringLiteral("CAPTURE"), true);
-    drawActionLabel(layout.cancelCard, QStringLiteral("CANCEL"), false);
+    // Confirm/cancel action cards removed — use Enter/Space to confirm, Esc to cancel
 
     if (m_captureIntent != CaptureIntent::Record && m_captureCropMenuOpen) {
         const QRectF cropRect = layout.cropCard;

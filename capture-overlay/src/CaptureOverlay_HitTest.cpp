@@ -293,10 +293,6 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
         setCursor(Qt::PointingHandCursor);
         return;
     }
-    if (layout.confirmCard.contains(pos) || layout.cancelCard.contains(pos)) {
-        setCursor(Qt::PointingHandCursor);
-        return;
-    }
     if (layout.sizeCard.contains(pos)) {
         setCursor(Qt::ArrowCursor);
         return;
