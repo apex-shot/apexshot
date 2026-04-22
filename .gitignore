@@ -10,6 +10,7 @@ Cargo.lock
 /capture-overlay/dist/
 /capture-overlay/out/
 .tmp-capture-overlay-build/
+apexshot-gnome-integration@apexshot.github.io.zip
 
 # Native/C++ build outputs
 *.a

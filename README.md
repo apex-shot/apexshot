@@ -110,7 +110,11 @@ sudo apexshot install --force                  # Reinstall even if same version
 
 ### GNOME Extension (Required)
 
-ApexShot requires the GNOME Shell extension for full functionality on GNOME:
+ApexShot requires the GNOME Shell extension for full functionality on GNOME Wayland. Without it, preview windows may not stay on top, recording masks will not appear, and runtime overlays will not work.
+
+**Supported GNOME versions:** 45–49
+
+#### Install from GitHub Release (Recommended)
 
 ```bash
 # Download the GNOME extension from the latest release
@@ -122,16 +126,57 @@ gnome-extensions install apexshot-gnome-integration.zip
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ```
 
-The extension provides:
-- Always-on-top preview windows during drag operations
-- Shell-managed recording masks
-- Runtime overlays (click display)
+#### Install from Source
+
+If you cloned the repository and want to install the development version:
+
+```bash
+cd gnome-extension
+zip -r apexshot-gnome-integration.zip . -x "*.git*" "screenshots/*" "tests/*" "*.md"
+gnome-extensions install apexshot-gnome-integration.zip
+gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
+```
+
+#### Install via Extension Manager (GUI)
+
+1. Install [Extension Manager](https://flathub.org/apps/com.mattjakeman.ExtensionManager) from Flathub
+2. Click **Browse** and search for "ApexShot"
+3. Install and enable the extension
+
+> **Note:** The extension may not yet be published on extensions.gnome.org. Use the release zip or source methods above until it is available.
+
+#### Verify Installation
+
+```bash
+# Check that the extension is installed and enabled
+gnome-extensions list
+gnome-extensions info apexshot-gnome-integration@apexshot.github.io
+
+# Check GNOME Shell logs for ApexShot activity
+journalctl /usr/bin/gnome-shell -f | grep apexshot
+```
+
+#### What the Extension Provides
+
+- **Always-on-top preview windows** — Screenshot previews and annotation editor windows stay above other applications during drag operations
+- **Shell-managed recording masks** — A dimmed fullscreen mask highlights the selected recording area
+- **Runtime overlays** — Click animations and keystroke displays rendered directly on the GNOME Shell stage
+- **Window tracking** — D-Bus signals keep preview windows stacked correctly when switching apps
+
+#### Troubleshooting
+
+| Issue | Solution |
+|---|---|
+| Preview windows get hidden behind other apps | Verify extension is enabled: `gnome-extensions list` |
+| Recording mask does not appear | Check logs: `journalctl /usr/bin/gnome-shell -f \| grep apexshot` |
+| Extension fails to enable | Confirm GNOME Shell version is 45–49 and matches `metadata.json` |
+| D-Bus signals not working | Monitor session bus: `dbus-monitor --session \| grep apexshot` |
 
 **Known Limitations:**
 - Keystroke display is not currently functional on GNOME due to platform constraints. Only click display is supported during recording.
 - Capture overlay is tied to the window where it was initiated. Moving to another application window will hide the overlay until you return to the original window.
 
-**Note:** The onboarding wizard will automatically guide you through installing the GNOME extension.
+**Note:** The onboarding wizard will automatically guide you through installing the GNOME extension on first launch.
 
 ## Usage
 
@@ -191,14 +236,16 @@ apexshot/
 │   ├── gnome_integration/  # GNOME Shell integration
 │   ├── qr/                 # QR code detection
 │   ├── capture_overlay.rs  # C++ Qt5 overlay launcher
-│   ├── lib.rs              # Library exports
-│   └── build.rs            # Build script (CMake C++ overlay + icons)
+│   └── lib.rs              # Library exports
 ├── capture-overlay/        # C++ Qt5 native overlay (region selection, drawing)
 ├── gnome-extension/        # GNOME Shell extension (preview windows, recording mask)
 ├── web-scroll-extension/   # Chrome/Chromium extension (full-page scroll capture)
 ├── native-host/            # Native messaging host for browser integration
 ├── packaging/              # Package assets (desktop files, icons, deb helper)
-└── docs/                   # Architecture, data flow, and implementation docs
+├── tests/                  # Integration tests
+├── docs/                   # Architecture, data flow, and implementation docs
+├── build.rs                # Build script (CMake C++ overlay + icon bundling)
+└── Cargo.toml              # Rust dependencies and package metadata
 ```
 
 ## Development
