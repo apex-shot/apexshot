@@ -3154,7 +3154,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let eyedropper_rendered_keys = eyedropper_rendered.clone();
     let canvas_eyedropper_ring_keys = canvas_eyedropper_ring.clone();
     let window_keys = window.downgrade();
-    let app_keys = app.downgrade();
 
     let zoom_level_keys = zoom_level.clone();
     let update_canvas_content_size_keys = update_canvas_content_size.clone();
@@ -3314,16 +3313,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         {
             if let Some(area) = drawing_area_keys.upgrade() {
                 area.queue_draw();
-            }
-            return glib::Propagation::Stop;
-        }
-
-        if key == gdk::Key::Escape {
-            if let Some(window) = window_keys.upgrade() {
-                window.close();
-            }
-            if let Some(app) = app_keys.upgrade() {
-                app.quit();
             }
             return glib::Propagation::Stop;
         }

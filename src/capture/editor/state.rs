@@ -3277,9 +3277,7 @@ impl EditorState {
             .stride_for_width(width)
             .map_err(|e| EditorError::ImageSave(e.to_string()))?;
 
-        let source_image = (*self.working_image).clone();
-
-        let data = super::render::rgba_to_cairo_argb_bytes(&source_image);
+        let data = super::render::rgba_to_cairo_argb_bytes(&*self.working_image);
         let mut surface = gtk4::cairo::ImageSurface::create_for_data(
             data,
             gtk4::cairo::Format::ARgb32,
