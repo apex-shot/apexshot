@@ -85,6 +85,7 @@ assets = [
     ["packaging/apexshot-daemon.desktop", "etc/xdg/autostart/apexshot.desktop", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/apexshot.svg", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg", "644"],
+    ["packaging/apexshot.svg", "usr/share/pixmaps/apexshot.svg", "644"],
     ["src/capture/editor/background-images/gradient-01.jpg", "usr/share/apexshot/background-images/", "644"],
     ["src/capture/editor/background-images/gradient-02.jpg", "usr/share/apexshot/background-images/", "644"],
     ["src/capture/editor/background-images/gradient-03.jpg", "usr/share/apexshot/background-images/", "644"],
