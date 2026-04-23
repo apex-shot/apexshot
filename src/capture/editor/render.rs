@@ -2230,7 +2230,7 @@ fn draw_number_with_shadow(
 const BLUR_PERFORMANCE_THRESHOLD: usize = 400 * 400; // 400x400 pixels
 const BLUR_DOWNSAMPLE_FACTOR: usize = 4;
 
-pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64) {
+pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64, preserve_alpha: bool) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
     };
@@ -2248,7 +2248,7 @@ pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64) {
     // For large regions, use downsampled blur (never fall back to pixelation).
     // The downsampled path is robust and always produces a real blur.
     if area > BLUR_PERFORMANCE_THRESHOLD {
-        apply_blur_rect_downsampled(image, rect, radius);
+        apply_blur_rect_downsampled(image, rect, radius, preserve_alpha);
         return;
     }
 
@@ -2390,14 +2390,16 @@ pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64) {
             let work_x = x - sample_x0;
             let work_y = y - sample_y0;
             let mut pixel = work_buffer[work_y * work_width + work_x];
-            // Prevent alpha artifacts from making the checkerboard show through.
-            pixel[3] = 255;
+            if !preserve_alpha {
+                // Prevent alpha artifacts from making the checkerboard show through.
+                pixel[3] = 255;
+            }
             image.put_pixel(x as u32, y as u32, image::Rgba(pixel));
         }
     }
 }
 
-fn apply_blur_rect_downsampled(image: &mut RgbaImage, rect: Rect, radius: f64) {
+fn apply_blur_rect_downsampled(image: &mut RgbaImage, rect: Rect, radius: f64, preserve_alpha: bool) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
     };
@@ -2455,8 +2457,10 @@ fn apply_blur_rect_downsampled(image: &mut RgbaImage, rect: Rect, radius: f64) {
                 let py = y0 + y;
                 if px < image.width() && py < image.height() {
                     let mut p = *up.get_pixel(x, y);
-                    // Prevent any alpha artifacts from making the checkerboard show through.
-                    p[3] = 255;
+                    if !preserve_alpha {
+                        // Prevent any alpha artifacts from making the checkerboard show through.
+                        p[3] = 255;
+                    }
                     image.put_pixel(px, py, p);
                 }
             }
@@ -2871,6 +2875,7 @@ pub fn apply_hybrid_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
                 height: rect.height,
             },
             blur_radius,
+            false,
         );
     }
 

@@ -3380,6 +3380,7 @@ impl EditorState {
                         height: screenshot.height() as i32,
                     },
                     blur_radius,
+                    false,
                 );
                 image::imageops::resize(
                     &blurred,
@@ -3418,16 +3419,24 @@ impl EditorState {
             if shadow.blur > 0.0 {
                 let shadow_width = shadow_layer.width() as i32;
                 let shadow_height = shadow_layer.height() as i32;
-                apply_blur_rect(
-                    &mut shadow_layer,
-                    Rect {
-                        x: 0,
-                        y: 0,
-                        width: shadow_width,
-                        height: shadow_height,
-                    },
-                    shadow.blur,
-                );
+                let blur_rect = Rect {
+                    x: 0,
+                    y: 0,
+                    width: shadow_width,
+                    height: shadow_height,
+                };
+                // Apply 3 passes of box blur to approximate Gaussian blur.
+                // A single pass produces harsh edges; multiple passes create
+                // the smooth falloff expected of a realistic shadow.
+                let pass_radius = (shadow.blur / 2.0).max(1.0);
+                for _ in 0..3 {
+                    apply_blur_rect(
+                        &mut shadow_layer,
+                        blur_rect,
+                        pass_radius,
+                        true,
+                    );
+                }
             }
             image::imageops::overlay(
                 &mut canvas,

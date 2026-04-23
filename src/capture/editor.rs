@@ -891,7 +891,7 @@ mod tests {
         };
         let before_outside = *image.get_pixel(0, 0);
 
-        render::apply_blur_rect(&mut image, rect, 2.0);
+        render::apply_blur_rect(&mut image, rect, 2.0, false);
 
         let inside = *image.get_pixel(4, 4);
         let outside = *image.get_pixel(0, 0);

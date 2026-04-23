@@ -3168,13 +3168,12 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         {
             let mut st = state_keys.lock().unwrap();
             if st.active_text_input.is_some() {
-                let mut should_commit = false;
                 let mut should_cancel = false;
                 let mut handled = true;
 
                 match key {
                     gdk::Key::Escape => should_cancel = true,
-                    gdk::Key::Return | gdk::Key::KP_Enter => should_commit = true,
+                    gdk::Key::Return | gdk::Key::KP_Enter => st.add_text_input_char('\n'),
                     gdk::Key::BackSpace => st.delete_text_input_char(),
                     gdk::Key::space => st.add_text_input_char(' '),
                     gdk::Key::Left => st.move_cursor_left(),
@@ -3198,8 +3197,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
                 if should_cancel {
                     st.cancel_text_input();
-                } else if should_commit {
-                    st.commit_active_text_input();
                 }
 
                 if handled && st.active_text_input.is_some() {
@@ -3207,7 +3204,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     st.reset_text_cursor_blink();
                 }
 
-                if handled || should_commit || should_cancel {
+                if handled || should_cancel {
                     drop(st);
                     if let Some(area) = drawing_area_keys.upgrade() {
                         area.queue_draw();
@@ -3359,13 +3356,13 @@ mod tests {
     }
 
     #[test]
-    fn enter_key_is_not_handled_by_legacy_text_bounds_canceller() {
+    fn enter_key_inserts_newline_in_text_input() {
         let source = include_str!("events.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             !production_source.contains("if keyval == gdk::Key::Return || keyval == gdk::Key::KP_Enter {")
-                && production_source.contains("gdk::Key::Return | gdk::Key::KP_Enter => should_commit = true,"),
-            "Enter should commit active text input in the main key handler, not be cancelled by the legacy text-bounds handler",
+                && production_source.contains("gdk::Key::Return | gdk::Key::KP_Enter => st.add_text_input_char('\\n'),"),
+            "Enter should insert a newline character in the text input, not commit or be cancelled by the legacy text-bounds handler",
         );
     }
 }

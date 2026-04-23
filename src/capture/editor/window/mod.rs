@@ -2601,6 +2601,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                                 height: nbh as i32,
                             },
                             blur_radius,
+                            false,
                         );
                         *bg_cache = rgba_image_to_surface(&blurred_bg);
                         cached_blurred_revision_draw.set(current_revision);
@@ -2643,13 +2644,30 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     let shadow_width = (image_width * t.scale).round().max(1.0) as u32;
                     let shadow_height = (image_height * t.scale).round().max(1.0) as u32;
 
-                    if let Ok(shadow_image) = render_shadow_layer(
+                    if let Ok(mut shadow_image) = render_shadow_layer(
                         shadow_width,
                         shadow_height,
                         shadow_blur,
                         shadow.opacity,
                         shadow_corner,
                     ) {
+                        if shadow_blur > 0.0 {
+                            let blur_rect = Rect {
+                                x: 0,
+                                y: 0,
+                                width: shadow_image.width() as i32,
+                                height: shadow_image.height() as i32,
+                            };
+                            let pass_radius = (shadow_blur / 2.0).max(1.0);
+                            for _ in 0..3 {
+                                super::render::apply_blur_rect(
+                                    &mut shadow_image,
+                                    blur_rect,
+                                    pass_radius,
+                                    true,
+                                );
+                            }
+                        }
                         if let Some(shadow_surface) = rgba_image_to_surface(&shadow_image) {
                             super::render::paint_surface_with_filter(
                                 context,
