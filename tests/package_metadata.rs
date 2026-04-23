@@ -67,6 +67,27 @@ fn deb_package_includes_capture_helper_binary() {
 }
 
 #[test]
+fn build_script_tracks_all_capture_overlay_sources() {
+    let build_script = include_str!("../build.rs");
+    let cmake = include_str!("../capture-overlay/CMakeLists.txt");
+
+    for line in cmake.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("src/") {
+            continue;
+        }
+
+        let path = format!("capture-overlay/{}", trimmed);
+        let needle = format!("println!(\"cargo:rerun-if-changed={}\")", path);
+        assert!(
+            build_script.contains(&needle),
+            "build.rs must watch {} so cargo rebuilds apexshot-capture when that C++ file changes",
+            path
+        );
+    }
+}
+
+#[test]
 fn deb_package_includes_background_gradient_assets() {
     let cargo_toml = include_str!("../Cargo.toml");
 

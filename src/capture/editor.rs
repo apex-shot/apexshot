@@ -1,4 +1,5 @@
 mod color;
+mod composition;
 mod io_ops;
 #[allow(dead_code)]
 pub mod numbering_style;
@@ -1039,6 +1040,44 @@ mod tests {
         assert_eq!(final_image.dimensions(), (5, 4));
         assert_eq!(*final_image.get_pixel(0, 0), *image.get_pixel(3, 2));
         assert_eq!(*final_image.get_pixel(4, 3), *image.get_pixel(7, 5));
+    }
+
+    #[test]
+    fn final_image_keeps_background_for_tall_capture_crop() {
+        let mut image = RgbaImage::from_pixel(120, 1200, image::Rgba([240, 240, 240, 255]));
+        image.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+
+        let mut state = EditorState::new(image);
+        state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.05, 0.05, 0.05, 1.0));
+        state.background_padding = 36.0;
+        state.background_shadow = 30.0;
+        state.crop_selection = Some(Rect {
+            x: -20,
+            y: -10,
+            width: 180,
+            height: 1240,
+        });
+
+        let final_image = state.to_final_image().expect("final image");
+
+        assert!(final_image.width() > 180);
+        assert!(final_image.height() > 1240);
+        assert_eq!(*final_image.get_pixel(0, 0), image::Rgba([12, 12, 12, 255]));
+    }
+
+    #[test]
+    fn final_image_shadow_does_not_replace_background_with_black_mask() {
+        let image = RgbaImage::from_pixel(400, 240, image::Rgba([220, 220, 220, 255]));
+        let mut state = EditorState::new(image);
+        state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
+        state.background_padding = 40.0;
+        state.background_shadow = 45.0;
+
+        let final_image = state.to_final_image().expect("final image");
+        let corner = *final_image.get_pixel(0, 0);
+
+        assert_ne!(corner, image::Rgba([0, 0, 0, 255]));
+        assert_eq!(corner, image::Rgba([255, 255, 255, 255]));
     }
 
     #[test]

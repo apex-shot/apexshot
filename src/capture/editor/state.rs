@@ -4,6 +4,7 @@ use super::color::{
     DEFAULT_COLOR_INDEX, DEFAULT_FOCUS_INTENSITY, DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS,
     SELECT_MIN_RESIZE_SIZE, STROKE_WIDTH, TEXT_SIZE,
 };
+use super::composition::{BackgroundComposition, CompositionLayout};
 use super::numbering_style::{NumberSize, NumberingStyle};
 use super::pen_weight::{HighlighterMode, PenWeight};
 use super::render::{
@@ -3316,88 +3317,33 @@ impl EditorState {
     }
 
     pub fn to_final_image(&self) -> Result<RgbaImage, EditorError> {
-        let rendered = self.to_rendered_image()?;
-
-        let final_base = if self.background_style != BackgroundStyle::None {
-            self.render_with_background(&rendered)?
-        } else {
-            rendered
-        };
+        let mut rendered = self.to_rendered_image()?;
 
         if let Some(crop) = self.crop_selection {
-            let crop_width = crop.width.max(0) as u32;
-            let crop_height = crop.height.max(0) as u32;
-            if crop_width == 0 || crop_height == 0 {
-                return Ok(final_base);
-            }
-
-            let background = image::Rgba([
-                (self.crop_background_color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
-                (self.crop_background_color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
-                (self.crop_background_color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
-                (self.crop_background_color.a.clamp(0.0, 1.0) * 255.0).round() as u8,
-            ]);
-            let mut output = RgbaImage::from_pixel(crop_width, crop_height, background);
-
-            let source_x = crop.x.max(0) as u32;
-            let source_y = crop.y.max(0) as u32;
-            let source_right = (crop.x + crop.width).clamp(0, final_base.width() as i32) as u32;
-            let source_bottom = (crop.y + crop.height).clamp(0, final_base.height() as i32) as u32;
-
-            if source_right > source_x && source_bottom > source_y {
-                let source_width = source_right - source_x;
-                let source_height = source_bottom - source_y;
-                let source = image::imageops::crop_imm(
-                    &final_base,
-                    source_x,
-                    source_y,
-                    source_width,
-                    source_height,
-                )
-                .to_image();
-                let dest_x = source_x as i64 - crop.x as i64;
-                let dest_y = source_y as i64 - crop.y as i64;
-                image::imageops::overlay(&mut output, &source, dest_x, dest_y);
-            }
-
-            return Ok(output);
+            rendered = crop_image(&rendered, crop, self.crop_background_color);
         }
 
-        Ok(final_base)
+        if self.background_style != BackgroundStyle::None {
+            return self.render_with_background(&rendered);
+        }
+
+        Ok(rendered)
+    }
+
+    fn background_layout_for(&self, screenshot: &RgbaImage) -> CompositionLayout {
+        BackgroundComposition::new(screenshot.width() as f64, screenshot.height() as f64)
+            .with_style(self.background_style.clone())
+            .with_padding(self.background_padding)
+            .with_shadow(self.background_shadow)
+            .with_insert(self.background_insert)
+            .with_alignment(self.background_alignment)
+            .with_corner_radius(self.background_corner_radius)
+            .with_aspect_ratio(self.background_aspect_ratio)
+            .compute()
     }
 
     fn render_with_background(&self, screenshot: &RgbaImage) -> Result<RgbaImage, EditorError> {
-        let screenshot_w = screenshot.width() as f64;
-        let screenshot_h = screenshot.height() as f64;
-
-        // Base scaling factor for padding based on screenshot size
-        let ref_size = screenshot_w.max(screenshot_h);
-        let scale_factor = ref_size / 400.0;
-
-        // Padding increases the CANVAS size
-        let padding_px = self.background_padding * scale_factor;
-        let mut canvas_w = screenshot_w + padding_px * 2.0;
-        let mut canvas_h = screenshot_h + padding_px * 2.0;
-
-        // Apply background aspect ratio expansion if set
-        if let Some(ratio) = self
-            .background_aspect_ratio
-            .aspect_ratio(canvas_w as i32, canvas_h as i32)
-        {
-            let current_ratio = canvas_w / canvas_h;
-            if current_ratio < ratio {
-                canvas_w = canvas_h * ratio;
-            } else {
-                canvas_h = canvas_w / ratio;
-            }
-        }
-
-        // Insert shrinks the SCREENSHOT within the canvas
-        // (0.0 means 100% size, 100.0 means 50% size for safety)
-        let insert_ratio = self.background_insert / 200.0;
-        let draw_scale = 1.0 - insert_ratio;
-        let draw_w = screenshot_w * draw_scale;
-        let draw_h = screenshot_h * draw_scale;
+        let layout = self.background_layout_for(screenshot);
 
         let mut canvas = match &self.background_style {
             BackgroundStyle::PlainColor(color) => {
@@ -3407,22 +3353,22 @@ impl EditorState {
                     (color.b.clamp(0.0, 1.0) * 255.0) as u8,
                     (color.a.clamp(0.0, 1.0) * 255.0) as u8,
                 ]);
-                RgbaImage::from_pixel(canvas_w as u32, canvas_h as u32, pixel)
+                RgbaImage::from_pixel(layout.canvas_width as u32, layout.canvas_height as u32, pixel)
             }
             BackgroundStyle::Gradient(idx) => {
                 let file_name = crate::capture::editor::window::background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES[*idx];
                 let path = crate::capture::editor::window::background_panel::background_gradient_asset_path(file_name);
-                self.load_and_resize_background(&path, canvas_w as u32, canvas_h as u32)?
+                self.load_and_resize_background(&path, layout.canvas_width as u32, layout.canvas_height as u32)?
             }
             BackgroundStyle::Wallpaper(path) => {
-                self.load_and_resize_background(path, canvas_w as u32, canvas_h as u32)?
+                self.load_and_resize_background(path, layout.canvas_width as u32, layout.canvas_height as u32)?
             }
             BackgroundStyle::Blurred(blur_idx) => {
                 let blur_radius = match blur_idx {
-                    0 => 10.0,  // Light blur
-                    1 => 35.0,  // Medium blur
-                    2 => 80.0,  // Heavy blur
-                    _ => 20.0,  // Default
+                    0 => 10.0,
+                    1 => 35.0,
+                    2 => 80.0,
+                    _ => 20.0,
                 };
                 let mut blurred = screenshot.clone();
                 apply_blur_rect(
@@ -3430,96 +3376,73 @@ impl EditorState {
                     Rect {
                         x: 0,
                         y: 0,
-                        width: screenshot_w as i32,
-                        height: screenshot_h as i32,
+                        width: screenshot.width() as i32,
+                        height: screenshot.height() as i32,
                     },
                     blur_radius,
                 );
                 image::imageops::resize(
                     &blurred,
-                    canvas_w as u32,
-                    canvas_h as u32,
+                    layout.canvas_width as u32,
+                    layout.canvas_height as u32,
                     image::imageops::FilterType::Triangle,
                 )
             }
             BackgroundStyle::None => return Ok(screenshot.clone()),
         };
 
-        // Draw screenshot onto background with alignment
-        // Calculate available space and position based on alignment
-        let available_w = canvas_w - draw_w;
-        let available_h = canvas_h - draw_h;
-
-        let (dest_x, dest_y) = match self.background_alignment {
-            BackgroundAlignment::TopLeft => (0.0, 0.0),
-            BackgroundAlignment::TopCenter => (available_w / 2.0, 0.0),
-            BackgroundAlignment::TopRight => (available_w, 0.0),
-            BackgroundAlignment::CenterLeft => (0.0, available_h / 2.0),
-            BackgroundAlignment::Center => (available_w / 2.0, available_h / 2.0),
-            BackgroundAlignment::CenterRight => (available_w, available_h / 2.0),
-            BackgroundAlignment::BottomLeft => (0.0, available_h),
-            BackgroundAlignment::BottomCenter => (available_w / 2.0, available_h),
-            BackgroundAlignment::BottomRight => (available_w, available_h),
-        };
-
-        // Scale and handle corner radius
-        let scaled_screenshot = if (draw_scale - 1.0).abs() > 0.001 {
+        let mut final_screenshot = if (layout.draw_scale - 1.0).abs() > 0.001 {
             image::imageops::resize(
                 screenshot,
-                draw_w as u32,
-                draw_h as u32,
+                layout.image_rect.width.round().max(1.0) as u32,
+                layout.image_rect.height.round().max(1.0) as u32,
                 image::imageops::FilterType::Triangle,
             )
         } else {
             screenshot.clone()
         };
 
-        let mut final_screenshot = scaled_screenshot;
         if self.background_corner_radius > 0.0 {
-            let radius = self.background_corner_radius * scale_factor * draw_scale;
+            let radius = self.background_corner_radius * layout.scale_factor * layout.draw_scale;
             apply_corner_radius(&mut final_screenshot, radius);
         }
 
-        // Draw shadow if requested
-        if self.background_shadow > 0.0 {
-            let shadow_strength = self.background_shadow / 100.0;
-            // Very minimal offset - shadow mostly behind image
-            let shadow_offset_x = (0.5 + self.background_shadow * 0.01) * scale_factor * draw_scale;
-            let shadow_offset_y = (1.0 + self.background_shadow * 0.02) * scale_factor * draw_scale;
-            let shadow_blur = (8.0 + self.background_shadow * 0.25) * scale_factor * draw_scale;
-            let shadow_opacity = (0.25 + 0.2 * shadow_strength) as f64;
-
-            // Create shadow layer with extra space for blur
-            let blur_px = shadow_blur.ceil() as u32;
-            let shadow_w = final_screenshot.width() + blur_px * 2;
-            let shadow_h = final_screenshot.height() + blur_px * 2;
-            let shadow_alpha = ((shadow_opacity * 255.0).min(255.0)) as u8;
-            let mut shadow_layer = RgbaImage::from_pixel(shadow_w, shadow_h, image::Rgba([0, 0, 0, shadow_alpha]));
-
-            // Apply corner radius to shadow
-            if self.background_corner_radius > 0.0 {
-                let radius = self.background_corner_radius * scale_factor * draw_scale;
-                apply_corner_radius(&mut shadow_layer, radius);
-            }
-
-            // Apply blur for soft shadow edges
-            if shadow_blur > 0.0 {
+        if let Some(shadow) = layout.shadow {
+            let mut shadow_layer = render_shadow_layer(
+                final_screenshot.width(),
+                final_screenshot.height(),
+                shadow.blur,
+                shadow.opacity,
+                self.background_corner_radius * layout.scale_factor * layout.draw_scale,
+            )?;
+            if shadow.blur > 0.0 {
+                let shadow_width = shadow_layer.width() as i32;
+                let shadow_height = shadow_layer.height() as i32;
                 apply_blur_rect(
                     &mut shadow_layer,
-                    Rect { x: 0, y: 0, width: shadow_w as i32, height: shadow_h as i32 },
-                    shadow_blur,
+                    Rect {
+                        x: 0,
+                        y: 0,
+                        width: shadow_width,
+                        height: shadow_height,
+                    },
+                    shadow.blur,
                 );
             }
-
             image::imageops::overlay(
                 &mut canvas,
                 &shadow_layer,
-                dest_x as i64 + shadow_offset_x as i64 - blur_px as i64,
-                dest_y as i64 + shadow_offset_y as i64 - blur_px as i64,
+                shadow.rect.x.round() as i64,
+                shadow.rect.y.round() as i64,
             );
         }
 
-        image::imageops::overlay(&mut canvas, &final_screenshot, dest_x as i64, dest_y as i64);
+        image::imageops::overlay(
+            &mut canvas,
+            &final_screenshot,
+            layout.image_rect.x.round() as i64,
+            layout.image_rect.y.round() as i64,
+        );
 
         Ok(canvas)
     }
@@ -3547,6 +3470,131 @@ impl EditorState {
     pub fn set_pen_weight(&mut self, weight: PenWeight) {
         self.pen_weight = weight;
     }
+}
+
+fn crop_fill_pixel(fill: DrawColor) -> image::Rgba<u8> {
+    image::Rgba([
+        (fill.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (fill.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (fill.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (fill.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+    ])
+}
+
+fn crop_image(source: &RgbaImage, crop: Rect, fill: DrawColor) -> RgbaImage {
+    let crop_width = crop.width.max(0) as u32;
+    let crop_height = crop.height.max(0) as u32;
+    if crop_width == 0 || crop_height == 0 {
+        return source.clone();
+    }
+
+    let mut output = RgbaImage::from_pixel(crop_width, crop_height, crop_fill_pixel(fill));
+    let source_x = crop.x.max(0) as u32;
+    let source_y = crop.y.max(0) as u32;
+    let source_right = (crop.x + crop.width).clamp(0, source.width() as i32) as u32;
+    let source_bottom = (crop.y + crop.height).clamp(0, source.height() as i32) as u32;
+
+    if source_right > source_x && source_bottom > source_y {
+        let source_width = source_right - source_x;
+        let source_height = source_bottom - source_y;
+        let source_crop =
+            image::imageops::crop_imm(source, source_x, source_y, source_width, source_height)
+                .to_image();
+        let dest_x = source_x as i64 - crop.x as i64;
+        let dest_y = source_y as i64 - crop.y as i64;
+        image::imageops::overlay(&mut output, &source_crop, dest_x, dest_y);
+    }
+
+    output
+}
+
+fn render_shadow_layer(
+    width: u32,
+    height: u32,
+    blur: f64,
+    opacity: f64,
+    corner_radius: f64,
+) -> Result<RgbaImage, EditorError> {
+    let blur_px = blur.ceil().max(0.0) as i32;
+    let shadow_width = width as i32 + blur_px * 2;
+    let shadow_height = height as i32 + blur_px * 2;
+    let stride = gtk4::cairo::Format::ARgb32
+        .stride_for_width(shadow_width as u32)
+        .map_err(|e| EditorError::ImageSave(e.to_string()))?;
+    let mut surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, shadow_width, shadow_height)
+        .map_err(|e| EditorError::ImageSave(e.to_string()))?;
+    {
+        let context = gtk4::cairo::Context::new(&surface)
+            .map_err(|e| EditorError::ImageSave(e.to_string()))?;
+        context.set_source_rgba(0.0, 0.0, 0.0, opacity.clamp(0.0, 1.0));
+        draw_rounded_rect_path(
+            &context,
+            blur_px as f64,
+            blur_px as f64,
+            width as f64,
+            height as f64,
+            corner_radius,
+        );
+        let _ = context.fill();
+    }
+    surface.flush();
+    let data = surface
+        .data()
+        .map_err(|e| EditorError::ImageSave(e.to_string()))?;
+    Ok(super::render::cairo_argb_to_rgba_image(
+        shadow_width as u32,
+        shadow_height as u32,
+        stride as usize,
+        data.as_ref(),
+    ))
+}
+
+fn draw_rounded_rect_path(
+    context: &gtk4::cairo::Context,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    radius: f64,
+) {
+    let radius = radius.min(width / 2.0).min(height / 2.0).max(0.0);
+    if radius <= 0.0 {
+        context.rectangle(x, y, width, height);
+        return;
+    }
+
+    let right = x + width;
+    let bottom = y + height;
+    context.new_sub_path();
+    context.arc(
+        right - radius,
+        y + radius,
+        radius,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    );
+    context.arc(
+        right - radius,
+        bottom - radius,
+        radius,
+        0.0,
+        std::f64::consts::FRAC_PI_2,
+    );
+    context.arc(
+        x + radius,
+        bottom - radius,
+        radius,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    context.arc(
+        x + radius,
+        y + radius,
+        radius,
+        std::f64::consts::PI,
+        std::f64::consts::PI * 1.5,
+    );
+    context.close_path();
 }
 
 fn apply_corner_radius(image: &mut RgbaImage, radius: f64) {

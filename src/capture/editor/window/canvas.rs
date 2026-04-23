@@ -10,6 +10,28 @@ use super::super::{
 
 pub(super) const CANVAS_PADDING: i32 = 24;
 pub(super) const EYEDROPPER_LOUPE_SIZE: i32 = 132;
+
+pub(super) struct InitialViewportPlacement {
+    pub offset_x: f64,
+    pub offset_y: f64,
+}
+
+pub(super) fn initial_viewport_offset(
+    content_w: f64,
+    content_h: f64,
+    viewport_w: f64,
+    viewport_h: f64,
+    canvas_padding: f64,
+) -> InitialViewportPlacement {
+    let centered_x = ((viewport_w - content_w) / 2.0).max(canvas_padding);
+    let centered_y = ((viewport_h - content_h) / 2.0).max(canvas_padding);
+    let top_aligned = content_h > viewport_h * 1.5;
+
+    InitialViewportPlacement {
+        offset_x: centered_x,
+        offset_y: if top_aligned { canvas_padding } else { centered_y },
+    }
+}
 const EYEDROPPER_LOUPE_GRID_SIZE: i32 = 15;
 const EYEDROPPER_LOUPE_PIXEL_SIZE: f64 = 8.0;
 
@@ -133,7 +155,7 @@ pub(super) fn crop_canvas_overflow(
 
 #[cfg(test)]
 mod tests {
-    use super::crop_canvas_overflow;
+    use super::{crop_canvas_overflow, initial_viewport_offset};
     use crate::capture::editor::types::Rect;
 
     #[test]
@@ -207,6 +229,18 @@ mod tests {
             true,
         );
         assert_eq!(huge, small);
+    }
+
+    #[test]
+    fn tall_images_start_top_aligned_instead_of_centered() {
+        let placement = initial_viewport_offset(1200.0, 6400.0, 900.0, 700.0, 1.0);
+        assert_eq!(placement.offset_y, 1.0);
+    }
+
+    #[test]
+    fn regular_images_remain_centered() {
+        let placement = initial_viewport_offset(700.0, 400.0, 900.0, 700.0, 1.0);
+        assert!(placement.offset_y > 1.0);
     }
 }
 

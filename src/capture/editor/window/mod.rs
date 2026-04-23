@@ -14,6 +14,7 @@ use x11rb::{connection::Connection, protocol::xproto, protocol::xproto::Connecti
 
 use self::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use super::color::{draw_color_to_hex, draw_color_to_rgba_u8, selection_hit_padding_for_scale};
+use super::composition::BackgroundComposition;
 use super::pen_weight::PenWeight;
 use super::render::{
     draw_active_text_input, draw_annotation_action, draw_arrow_control_handles,
@@ -2055,7 +2056,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             let (
                 image_w,
                 image_h,
+                background_style,
                 background_padding,
+                background_insert,
                 background_aspect_ratio,
                 has_background,
                 crop_rect,
@@ -2065,7 +2068,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 (
                     st.working_image.width().max(1) as i32,
                     st.working_image.height().max(1) as i32,
+                    st.background_style.clone(),
                     st.background_padding,
+                    st.background_insert,
                     st.background_aspect_ratio,
                     st.background_style != BackgroundStyle::None,
                     st.draft_crop_rect().or(st.crop_selection),
@@ -2077,22 +2082,16 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             let mut virtual_h = image_h as f64;
 
             if has_background {
-                let ref_size = virtual_w.max(virtual_h);
-                let scale_factor = ref_size / 400.0;
-                let padding_px = background_padding * scale_factor;
-                virtual_w += padding_px * 2.0;
-                virtual_h += padding_px * 2.0;
-
-                if let Some(ratio) =
-                    background_aspect_ratio.aspect_ratio(virtual_w as i32, virtual_h as i32)
-                {
-                    let current_ratio = virtual_w / virtual_h;
-                    if current_ratio < ratio {
-                        virtual_w = virtual_h * ratio;
-                    } else {
-                        virtual_h = virtual_w / ratio;
-                    }
-                }
+                let layout = BackgroundComposition::new(virtual_w, virtual_h)
+                    .with_style(background_style)
+                    .with_padding(background_padding)
+                    .with_insert(background_insert)
+                    .with_alignment(BackgroundAlignment::Center)
+                    .with_corner_radius(18.0)
+                    .with_aspect_ratio(background_aspect_ratio)
+                    .compute();
+                virtual_w = layout.canvas_width;
+                virtual_h = layout.canvas_height;
             }
 
             let scroller_width = canvas_scroller.allocated_width().max(1) as f64;
@@ -2455,29 +2454,23 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let mut virtual_w = image_width;
         let mut virtual_h = image_height;
         let mut draw_scale_factor = 1.0;
+        let mut background_layout = None;
 
         let has_background = background_style != BackgroundStyle::None;
         if has_background {
-            let ref_size = image_width.max(image_height);
-            let scale_factor = ref_size / 400.0;
-            let padding_px = background_padding * scale_factor;
-
-            virtual_w = image_width + padding_px * 2.0;
-            virtual_h = image_height + padding_px * 2.0;
-
-            if let Some(ratio) =
-                background_aspect_ratio.aspect_ratio(virtual_w as i32, virtual_h as i32)
-            {
-                let current_ratio = virtual_w / virtual_h;
-                if current_ratio < ratio {
-                    virtual_w = virtual_h * ratio;
-                } else {
-                    virtual_h = virtual_w / ratio;
-                }
-            }
-
-            let insert_ratio = background_insert / 200.0;
-            draw_scale_factor = 1.0 - insert_ratio;
+            let layout = BackgroundComposition::new(image_width, image_height)
+                .with_style(background_style.clone())
+                .with_padding(background_padding)
+                .with_shadow(background_shadow)
+                .with_insert(background_insert)
+                .with_alignment(background_alignment)
+                .with_corner_radius(background_corner_radius)
+                .with_aspect_ratio(background_aspect_ratio)
+                .compute();
+            virtual_w = layout.canvas_width;
+            virtual_h = layout.canvas_height;
+            draw_scale_factor = layout.draw_scale;
+            background_layout = Some(layout);
         }
 
         let base_view_width = (width as f64 - canvas_padding_draw * 2.0).max(1.0);
@@ -2505,10 +2498,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             * zoom_level_draw.get().max(0.1_f64);
         let draw_width = virtual_w * scale;
         let draw_height = virtual_h * scale;
+        let placement = canvas::initial_viewport_offset(
+            draw_width,
+            draw_height,
+            view_width,
+            view_height,
+            canvas_padding_draw,
+        );
         let mut t = ViewTransform {
             scale,
-            offset_x: (view_width - draw_width) / 2.0 + canvas_padding_draw + overflow_left,
-            offset_y: (view_height - draw_height) / 2.0 + canvas_padding_draw + overflow_top,
+            offset_x: placement.offset_x + overflow_left,
+            offset_y: placement.offset_y + overflow_top,
             image_width: virtual_w,
             image_height: virtual_h,
         };
@@ -2640,63 +2640,40 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 let _ = context.fill();
             }
 
-            let draw_w = image_width * draw_scale_factor;
-            let draw_h = image_height * draw_scale_factor;
+            if let Some(layout) = background_layout.as_ref() {
+                t.offset_x = canvas_t.offset_x + layout.image_rect.x * canvas_t.scale;
+                t.offset_y = canvas_t.offset_y + layout.image_rect.y * canvas_t.scale;
+                t.scale = canvas_t.scale * layout.draw_scale;
 
-            // Calculate available space (canvas minus the drawn image)
-            let available_w = virtual_w * canvas_t.scale - draw_w * canvas_t.scale;
-            let available_h = virtual_h * canvas_t.scale - draw_h * canvas_t.scale;
+                if let Some(shadow) = layout.shadow {
+                    let rect_w = image_width * t.scale;
+                    let rect_h = image_height * t.scale;
+                    let corner_r = background_corner_radius * t.scale;
 
-            // Alignment positions the image within the available space
-            // TopLeft = 0%, Center = 50%, BottomRight = 100%
-            let (sc_off_x, sc_off_y) = match background_alignment {
-                BackgroundAlignment::TopLeft => (0.0, 0.0),
-                BackgroundAlignment::TopCenter => (available_w / 2.0, 0.0),
-                BackgroundAlignment::TopRight => (available_w, 0.0),
-                BackgroundAlignment::CenterLeft => (0.0, available_h / 2.0),
-                BackgroundAlignment::Center => (available_w / 2.0, available_h / 2.0),
-                BackgroundAlignment::CenterRight => (available_w, available_h / 2.0),
-                BackgroundAlignment::BottomLeft => (0.0, available_h),
-                BackgroundAlignment::BottomCenter => (available_w / 2.0, available_h),
-                BackgroundAlignment::BottomRight => (available_w, available_h),
-            };
+                    let _ = context.save();
+                    context.translate(
+                        canvas_t.offset_x
+                            + (layout.image_rect.x + shadow.offset_x) * canvas_t.scale,
+                        canvas_t.offset_y
+                            + (layout.image_rect.y + shadow.offset_y) * canvas_t.scale,
+                    );
 
-            t.offset_x = canvas_t.offset_x + sc_off_x;
-            t.offset_y = canvas_t.offset_y + sc_off_y;
-            t.scale = canvas_t.scale * draw_scale_factor;
+                    let total_layers = 8;
+                    for i in 0..total_layers {
+                        let layer_factor = i as f64 / total_layers as f64;
+                        let stroke_radius = shadow.blur * canvas_t.scale * (1.0 - layer_factor);
+                        let layer_opacity = shadow.opacity * (1.0 - layer_factor * 0.9);
 
-            if background_shadow > 0.0 {
-                let shadow_strength = background_shadow / 100.0;
-                // Very minimal offset - shadow is mostly behind the image
-                let shadow_offset_x = (0.5 + background_shadow * 0.01) * t.scale;
-                let shadow_offset_y = (1.0 + background_shadow * 0.02) * t.scale;
-                // Shadow blur/softness
-                let shadow_blur = (8.0 + background_shadow * 0.25) * t.scale;
-                // Shadow opacity
-                let shadow_opacity = 0.25 + 0.2 * shadow_strength;
+                        context.set_source_rgba(0.0, 0.0, 0.0, layer_opacity);
+                        context.set_line_width(stroke_radius);
+                        draw_rounded_rect_path(&context, rect_w, rect_h, corner_r, 0.0);
+                        let _ = context.stroke();
+                    }
 
-                let rect_w = image_width * t.scale;
-                let rect_h = image_height * t.scale;
-                let corner_r = background_corner_radius * t.scale;
-
-                let _ = context.save();
-                context.translate(t.offset_x + shadow_offset_x, t.offset_y + shadow_offset_y);
-
-                // Draw shadow as a soft rectangle using strokes from outside in
-                let total_layers = 8;
-                for i in 0..total_layers {
-                    let layer_factor = i as f64 / total_layers as f64;
-                    // Stroke from outside (larger) to inside (smaller)
-                    let stroke_radius = shadow_blur * (1.0 - layer_factor);
-                    let layer_opacity = shadow_opacity * (1.0 - layer_factor * 0.9);
-
-                    context.set_source_rgba(0.0, 0.0, 0.0, layer_opacity);
-                    context.set_line_width(stroke_radius);
-                    draw_rounded_rect_path(&context, rect_w, rect_h, corner_r, 0.0);
-                    let _ = context.stroke();
+                    let _ = context.restore();
                 }
-
-                let _ = context.restore();
+            } else {
+                t.scale = canvas_t.scale * draw_scale_factor;
             }
 
             let rect_w = image_width * t.scale;
