@@ -1099,7 +1099,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     // Async Effects Pipeline
     let (effects_sender, effects_receiver) = std::sync::mpsc::channel::<(RgbaImage, u64)>();
     let (request_sender, request_receiver) =
-        std::sync::mpsc::channel::<(RgbaImage, Vec<AnnotationAction>, u64)>();
+        std::sync::mpsc::channel::<(Arc<RgbaImage>, Vec<AnnotationAction>, u64)>();
 
     // Used by the UI thread to coalesce effect rebuild requests.
     let effects_request_sender = request_sender.clone();
@@ -1116,7 +1116,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     if revision <= st.last_applied_effect_revision {
                         (false, None, None, 0)
                     } else {
-                        st.working_image = new_image;
+                        st.working_image = Arc::new(new_image);
                         st.last_applied_effect_revision = revision;
                         st.select_effect_rebuild_pending = false;
                         st.mark_working_image_dirty();
@@ -1128,7 +1128,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                             st.pending_effect_revision += 1;
                             (
                                 true,
-                                Some(st.base_image.clone()),
+                                Some(Arc::clone(&st.base_image)),
                                 Some(st.actions.clone()),
                                 st.pending_effect_revision,
                             )
@@ -1161,7 +1161,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
 
             let (base_image, actions, revision) = request;
-            let mut working_image = base_image;
+            let mut working_image = (*base_image).clone();
 
             // EXPENSIVE: This blocks the worker thread
             apply_effect_actions(&mut working_image, &actions);
@@ -1190,7 +1190,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
                 st.pending_effect_revision += 1;
                 Some((
-                    st.base_image.clone(),
+                    Arc::clone(&st.base_image),
                     st.actions.clone(),
                     st.pending_effect_revision,
                 ))
@@ -2411,7 +2411,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 can_undo,
                 can_redo,
                 st.can_remove_selected_action(),
-                st.working_image.clone(),
+                Arc::clone(&st.working_image),
                 st.working_image_revision,
                 st.actions.clone(),
                 st.draft_action(),
@@ -2573,20 +2573,23 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                         || bg_cache.is_none();
 
                     if needs_recompute {
-                        let mut blurred_bg = working_image.clone();
-                        let (bw, bh) = blurred_bg.dimensions();
+                        let (bw, bh) = working_image.dimensions();
 
-                        // Optimization: Downsample for background blur to save CPU
+                        // Optimization: Downsample for background blur to save CPU.
+                        // For very long webpage screenshots, resize directly from the
+                        // source image to avoid cloning the full-size buffer first.
                         let max_dim = 800u32;
-                        if bw > max_dim || bh > max_dim {
+                        let mut blurred_bg = if bw > max_dim || bh > max_dim {
                             let scale = max_dim as f64 / (bw.max(bh) as f64);
-                            blurred_bg = image::imageops::resize(
-                                &blurred_bg,
+                            image::imageops::resize(
+                                &*working_image,
                                 (bw as f64 * scale) as u32,
                                 (bh as f64 * scale) as u32,
                                 image::imageops::FilterType::Triangle,
-                            );
-                        }
+                            )
+                        } else {
+                            (*working_image).clone()
+                        };
 
                         // Different blur intensities for each tile
                         let blur_radius = match blur_idx {

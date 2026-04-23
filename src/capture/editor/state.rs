@@ -28,8 +28,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 pub struct EditorState {
-    pub base_image: RgbaImage,
-    pub working_image: RgbaImage,
+    pub base_image: Arc<RgbaImage>,
+    pub working_image: Arc<RgbaImage>,
     pub working_image_revision: u64,
     pub crop_selection: Option<Rect>,
     pub crop_aspect_ratio: CropAspectRatio,
@@ -365,8 +365,9 @@ fn resize_crop_rect_with_fixed_aspect(
 
 impl EditorState {
     pub fn new(base_image: RgbaImage) -> Self {
+        let base_image = Arc::new(base_image);
         Self {
-            working_image: base_image.clone(),
+            working_image: Arc::clone(&base_image),
             base_image,
             working_image_revision: 1,
             crop_selection: None,
@@ -2350,9 +2351,9 @@ impl EditorState {
     }
 
     pub fn rebuild_effect_layer(&mut self) {
-        let mut working = self.base_image.clone();
+        let mut working = (*self.base_image).clone();
         apply_effect_actions(&mut working, &self.actions);
-        self.working_image = working;
+        self.working_image = Arc::new(working);
         self.select_effect_rebuild_pending = false;
         self.mark_working_image_dirty();
     }
@@ -3200,20 +3201,20 @@ impl EditorState {
             return;
         }
 
-        self.base_image = expand_rgba_image(
+        self.base_image = Arc::new(expand_rgba_image(
             &self.base_image,
             next_width,
             next_height,
             expand_left,
             expand_top,
-        );
-        self.working_image = expand_rgba_image(
+        ));
+        self.working_image = Arc::new(expand_rgba_image(
             &self.working_image,
             next_width,
             next_height,
             expand_left,
             expand_top,
-        );
+        ));
 
         if expand_left > 0 || expand_top > 0 {
             let dx = expand_left as f64;
@@ -3249,8 +3250,8 @@ impl EditorState {
             return Ok(false);
         }
 
-        self.base_image = cropped_image.clone();
-        self.working_image = cropped_image;
+        self.base_image = Arc::new(cropped_image.clone());
+        self.working_image = Arc::new(cropped_image);
         self.actions.clear();
         self.redo_actions.clear();
         self.selected_action_index = None;
@@ -3276,7 +3277,7 @@ impl EditorState {
             .stride_for_width(width)
             .map_err(|e| EditorError::ImageSave(e.to_string()))?;
 
-        let source_image = self.working_image.clone();
+        let source_image = (*self.working_image).clone();
 
         let data = super::render::rgba_to_cairo_argb_bytes(&source_image);
         let mut surface = gtk4::cairo::ImageSurface::create_for_data(
