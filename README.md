@@ -55,7 +55,7 @@ Download and install the latest `.deb` package from GitHub Releases:
 
 ```bash
 # Download and install the latest release
-curl -s https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4 | xargs wget && sudo dpkg -i apexshot_*.deb && sudo apt install -f
+DEB_URL=$(curl -s https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4) && curl -LO "$DEB_URL" && sudo dpkg -i apexshot_*.deb && sudo apt install -f
 ```
 
 Or manually download from [GitHub Releases](https://github.com/apex-shot/apexshot/releases):
