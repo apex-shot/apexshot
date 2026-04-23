@@ -1,6 +1,19 @@
 #!/bin/bash
 set -e
 
+# Kill any lingering apexshot processes to prevent stale daemons
+# from conflicting with the newly installed version
+killall -9 apexshot 2>/dev/null || true
+
+# Remove stale local .desktop files that shadow the system entry.
+# Old local copies pointed to /usr/local/bin/apexshot and lacked
+# Icon=, causing GNOME to display the app without name or logo.
+for user_dir in /home/*; do
+  rm -f "$user_dir/.local/share/applications/io.github.codegoddy.apexshot.desktop" 2>/dev/null || true
+done
+# Also clean up root's local copy if it exists
+rm -f /root/.local/share/applications/io.github.codegoddy.apexshot.desktop 2>/dev/null || true
+
 # Install native messaging host manifest for each user with a Chrome/Chromium config
 for user_dir in /home/*; do
   user_name=$(basename "$user_dir")

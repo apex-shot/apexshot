@@ -2,8 +2,8 @@
 Type=Application
 Name=ApexShot Daemon
 Comment=ApexShot screenshot daemon — tray icon and hotkey listener
-Exec=/usr/bin/apexshot daemon
-Icon=io.github.codegoddy.apexshot
+Exec=/usr/bin/env -u GIO_LAUNCHED_DESKTOP_FILE -u GIO_LAUNCHED_DESKTOP_FILE_PID /usr/bin/apexshot daemon
+Icon=apexshot
 Categories=Utility;
 Keywords=screenshot;capture;record;
 StartupNotify=false
