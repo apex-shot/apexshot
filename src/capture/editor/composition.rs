@@ -63,7 +63,7 @@ impl BackgroundComposition {
             style: BackgroundStyle::None,
             padding: 24.0,
             shadow: 15.0,
-            insert: 20.0,
+            insert: 0.0,
             alignment: BackgroundAlignment::Center,
             corner_radius: 18.0,
             aspect_ratio: CropAspectRatio::Original,
@@ -164,10 +164,10 @@ impl BackgroundComposition {
             let shadow_strength = (self.shadow / 100.0).clamp(0.0, 1.0);
             let size_scale = (ref_size / 1200.0).sqrt().clamp(0.85, 1.8);
             let offset_x = 0.0;
-            let offset_y = (4.0 + shadow_strength * 6.0) * size_scale * draw_scale;
-            let blur = (18.0 + shadow_strength * 20.0) * size_scale * draw_scale;
-            let opacity = 0.10 + shadow_strength * 0.08;
-            let spread = blur * 1.35;
+            let offset_y = (6.0 + shadow_strength * 10.0) * size_scale * draw_scale;
+            let blur = (16.0 + shadow_strength * 18.0) * size_scale * draw_scale;
+            let opacity = 0.16 + shadow_strength * 0.12;
+            let spread = blur * 1.2;
             let rect = FloatRect {
                 x: image_rect.x + offset_x - spread,
                 y: image_rect.y + offset_y - spread,

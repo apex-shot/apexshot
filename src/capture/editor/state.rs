@@ -417,7 +417,7 @@ impl EditorState {
             background_style: BackgroundStyle::None,
             background_padding: 24.0,
             background_shadow: 15.0,
-            background_insert: 20.0,
+            background_insert: 0.0,
             auto_balance: false,
             background_alignment: BackgroundAlignment::Center,
             background_corner_radius: 18.0,
@@ -808,11 +808,12 @@ impl EditorState {
                 }
             }
 
-            let (layout, mut height) = measure(fitted_size, max_width);
+            let (mut layout, mut height) = measure(fitted_size, max_width);
             if !preserve_font_size {
                 while fitted_size > 10.0 && height > available_height {
                     fitted_size = (fitted_size - 1.0).max(10.0);
                     let measured = measure(fitted_size, max_width);
+                    layout = measured.0;
                     height = measured.1;
                 }
             }
@@ -831,7 +832,19 @@ impl EditorState {
                         }
                     }
                     max_width = high;
-                    height = measure(fitted_size, max_width).1;
+                    let measured = measure(fitted_size, max_width);
+                    layout = measured.0;
+                    height = measured.1;
+                }
+
+                // Live typing should prefer the current font size, but once
+                // width is exhausted we must shrink instead of letting text
+                // extend past the bottom image boundary.
+                while fitted_size > 10.0 && height > available_height {
+                    fitted_size = (fitted_size - 1.0).max(10.0);
+                    let measured = measure(fitted_size, max_width);
+                    layout = measured.0;
+                    height = measured.1;
                 }
             }
 
@@ -3393,12 +3406,12 @@ impl EditorState {
         };
 
         let mut final_screenshot = if (layout.draw_scale - 1.0).abs() > 0.001 {
-            image::imageops::resize(
-                screenshot,
-                layout.image_rect.width.round().max(1.0) as u32,
-                layout.image_rect.height.round().max(1.0) as u32,
-                image::imageops::FilterType::Triangle,
-            )
+                image::imageops::resize(
+                    screenshot,
+                    layout.image_rect.width.round().max(1.0) as u32,
+                    layout.image_rect.height.round().max(1.0) as u32,
+                    image::imageops::FilterType::CatmullRom,
+                )
         } else {
             screenshot.clone()
         };

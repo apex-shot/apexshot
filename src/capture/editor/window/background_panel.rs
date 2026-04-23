@@ -1059,7 +1059,7 @@ pub(super) fn build_background_panel(
     insert_slider.add_css_class("editor-opacity-slider");
     insert_slider.add_css_class("editor-background-compact-slider");
     insert_slider.set_draw_value(false);
-    insert_slider.set_value(20.0);
+    insert_slider.set_value(0.0);
     insert_slider.set_halign(gtk4::Align::Fill);
     insert_slider.set_hexpand(true);
     insert_slider.set_margin_start(0);

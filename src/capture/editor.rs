@@ -1081,6 +1081,44 @@ mod tests {
     }
 
     #[test]
+    fn final_image_background_keeps_screenshot_at_native_scale_by_default() {
+        let mut image = RgbaImage::new(400, 300);
+        image.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+        image.put_pixel(399, 299, image::Rgba([0, 0, 255, 255]));
+
+        let mut state = EditorState::new(image.clone());
+        state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
+        state.background_shadow = 0.0;
+        state.background_corner_radius = 0.0;
+
+        let final_image = state.to_final_image().expect("final image");
+
+        assert_eq!(final_image.dimensions(), (448, 348));
+        assert_eq!(*final_image.get_pixel(24, 24), *image.get_pixel(0, 0));
+        assert_eq!(*final_image.get_pixel(423, 323), *image.get_pixel(399, 299));
+    }
+
+    #[test]
+    fn final_image_background_shadow_visibly_darkens_pixels_below_card() {
+        let image = RgbaImage::from_pixel(400, 240, image::Rgba([220, 220, 220, 255]));
+        let mut state = EditorState::new(image);
+        state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
+        state.background_padding = 40.0;
+        state.background_insert = 0.0;
+        state.background_shadow = 45.0;
+        state.background_corner_radius = 18.0;
+
+        let final_image = state.to_final_image().expect("final image");
+        let shadow_pixel = *final_image.get_pixel(final_image.width() / 2, 290);
+
+        assert!(
+            shadow_pixel[0] < 235,
+            "expected visible shadow below the card, got pixel {:?}",
+            shadow_pixel
+        );
+    }
+
+    #[test]
     fn text_input_preserves_selected_text_size_while_typing() {
         let mut state = EditorState::new(RgbaImage::new(400, 300));
         state.set_tool(Tool::Text);
@@ -1090,6 +1128,27 @@ mod tests {
         state.fit_active_text_to_layout();
 
         assert_eq!(state.text_size, 48.0);
+    }
+
+    #[test]
+    fn text_input_shrinks_to_stay_within_bottom_image_boundary() {
+        let mut state = EditorState::new(RgbaImage::new(140, 92));
+        state.set_tool(Tool::Text);
+        state.set_text_size(30.0);
+        state.begin_text_input(Point { x: 12.0, y: 78.0 }, 64.0, 44.0);
+        for ch in "this text should shrink instead of overflowing below the image".chars() {
+            state.add_text_input_char(ch);
+        }
+
+        state.fit_active_text_to_layout();
+
+        let bounds = state.get_text_bounds().expect("active text bounds");
+        assert!(bounds.rect.y + bounds.rect.height <= state.base_image.height() as i32);
+        assert!(
+            state.text_size < 30.0,
+            "expected font size to shrink when bottom boundary is reached, got {}",
+            state.text_size
+        );
     }
 
     #[test]
