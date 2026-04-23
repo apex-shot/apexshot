@@ -24,7 +24,7 @@ use super::render::{
     text_action_bounds,
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
-use super::state::{apply_effect_actions, EditorState};
+use super::state::{apply_effect_actions, render_shadow_layer, EditorState};
 use super::types::{
     AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
     EditorError, Point, Rect, Tool, ViewTransform,
@@ -38,7 +38,6 @@ pub struct AnnotateRuntimeConfig {
     pub auto_expand_canvas: bool,
     pub show_color_names: bool,
     pub always_on_top: bool,
-    pub show_dock_icon: bool,
 }
 
 impl AnnotateRuntimeConfig {
@@ -50,7 +49,6 @@ impl AnnotateRuntimeConfig {
             auto_expand_canvas: config.annotate_auto_expand,
             show_color_names: config.annotate_show_color_names,
             always_on_top: config.annotate_always_on_top,
-            show_dock_icon: config.annotate_show_dock_icon,
         }
     }
 }
@@ -373,12 +371,6 @@ fn set_window_always_on_top(
 
     let _ = request_x11_state(window, b"_NET_WM_STATE_ABOVE", enabled);
     let _ = request_x11_state(window, b"_NET_WM_STATE_STICKY", enabled);
-}
-
-fn set_window_dock_visibility(window: &ApplicationWindow, show_dock_icon: bool) {
-    let hide = !show_dock_icon;
-    let _ = request_x11_state(window, b"_NET_WM_STATE_SKIP_TASKBAR", hide);
-    let _ = request_x11_state(window, b"_NET_WM_STATE_SKIP_PAGER", hide);
 }
 
 pub fn setup_editor_window(app: &Application, path: PathBuf) {
@@ -2646,31 +2638,28 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 t.scale = canvas_t.scale * layout.draw_scale;
 
                 if let Some(shadow) = layout.shadow {
-                    let rect_w = image_width * t.scale;
-                    let rect_h = image_height * t.scale;
-                    let corner_r = background_corner_radius * t.scale;
+                    let shadow_blur = (shadow.blur * canvas_t.scale).max(1.0);
+                    let shadow_corner = background_corner_radius * t.scale;
+                    let shadow_width = (image_width * t.scale).round().max(1.0) as u32;
+                    let shadow_height = (image_height * t.scale).round().max(1.0) as u32;
 
-                    let _ = context.save();
-                    context.translate(
-                        canvas_t.offset_x
-                            + (layout.image_rect.x + shadow.offset_x) * canvas_t.scale,
-                        canvas_t.offset_y
-                            + (layout.image_rect.y + shadow.offset_y) * canvas_t.scale,
-                    );
-
-                    let total_layers = 8;
-                    for i in 0..total_layers {
-                        let layer_factor = i as f64 / total_layers as f64;
-                        let stroke_radius = shadow.blur * canvas_t.scale * (1.0 - layer_factor);
-                        let layer_opacity = shadow.opacity * (1.0 - layer_factor * 0.9);
-
-                        context.set_source_rgba(0.0, 0.0, 0.0, layer_opacity);
-                        context.set_line_width(stroke_radius);
-                        draw_rounded_rect_path(&context, rect_w, rect_h, corner_r, 0.0);
-                        let _ = context.stroke();
+                    if let Ok(shadow_image) = render_shadow_layer(
+                        shadow_width,
+                        shadow_height,
+                        shadow_blur,
+                        shadow.opacity,
+                        shadow_corner,
+                    ) {
+                        if let Some(shadow_surface) = rgba_image_to_surface(&shadow_image) {
+                            super::render::paint_surface_with_filter(
+                                context,
+                                &shadow_surface,
+                                canvas_t.offset_x + shadow.rect.x * canvas_t.scale,
+                                canvas_t.offset_y + shadow.rect.y * canvas_t.scale,
+                                gtk4::cairo::Filter::Good,
+                            );
+                        }
                     }
-
-                    let _ = context.restore();
                 }
             } else {
                 t.scale = canvas_t.scale * draw_scale_factor;
@@ -3092,7 +3081,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     });
 
     window.present();
-    set_window_dock_visibility(&window, annotate_config.show_dock_icon);
     if annotate_config.always_on_top {
         set_window_always_on_top(
             &window,
@@ -3171,6 +3159,14 @@ mod tests {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(production_source.contains("editor-right-inspector"));
+    }
+
+    #[test]
+    fn annotate_runtime_config_no_longer_contains_dock_icon_setting() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(!production_source.contains("show_dock_icon"));
+        assert!(!production_source.contains("set_window_dock_visibility"));
     }
 
     #[test]

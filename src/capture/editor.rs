@@ -1081,6 +1081,18 @@ mod tests {
     }
 
     #[test]
+    fn text_input_preserves_selected_text_size_while_typing() {
+        let mut state = EditorState::new(RgbaImage::new(400, 300));
+        state.set_tool(Tool::Text);
+        state.set_text_size(48.0);
+        state.begin_text_input(Point { x: 20.0, y: 80.0 }, 160.0, 60.0);
+        state.add_text_input_char('H');
+        state.fit_active_text_to_layout();
+
+        assert_eq!(state.text_size, 48.0);
+    }
+
+    #[test]
     fn set_tool_clears_crop_selection_when_leaving_crop_mode() {
         let mut state = EditorState::new(RgbaImage::new(20, 20));
         state.set_tool(Tool::Crop);

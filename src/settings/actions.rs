@@ -68,7 +68,6 @@ pub struct SaveInputs {
     pub annotate_auto_expand: CheckButton,
     pub annotate_show_color_names: CheckButton,
     pub annotate_always_on_top: CheckButton,
-    pub annotate_show_dock_icon: CheckButton,
     pub rec_notifications: CheckButton,
     pub rec_countdown: CheckButton,
     pub rec_remember_selection: CheckButton,
@@ -222,7 +221,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.annotate_auto_expand = inputs.annotate_auto_expand.is_active();
     config.annotate_show_color_names = inputs.annotate_show_color_names.is_active();
     config.annotate_always_on_top = inputs.annotate_always_on_top.is_active();
-    config.annotate_show_dock_icon = inputs.annotate_show_dock_icon.is_active();
 
     config.rec_notifications = inputs.rec_notifications.is_active();
     config.rec_countdown = inputs.rec_countdown.is_active();

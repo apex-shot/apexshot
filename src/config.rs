@@ -103,7 +103,6 @@ pub struct AppConfig {
     pub annotate_auto_expand: bool,
     pub annotate_show_color_names: bool,
     pub annotate_always_on_top: bool,
-    pub annotate_show_dock_icon: bool,
     // Wallpaper settings
     pub wallpaper_mode: String,
     pub wallpaper_dont_change_on_space: bool,
@@ -233,7 +232,6 @@ impl Default for AppConfig {
             annotate_auto_expand: false,
             annotate_show_color_names: false,
             annotate_always_on_top: false,
-            annotate_show_dock_icon: true,
             wallpaper_mode: "Desktop".to_string(),
             wallpaper_dont_change_on_space: false,
             wallpaper_custom_path: String::new(),
@@ -577,7 +575,6 @@ mod tests {
             annotate_auto_expand: true,
             annotate_show_color_names: true,
             annotate_always_on_top: true,
-            annotate_show_dock_icon: false,
             ..AppConfig::default()
         };
 
@@ -602,10 +599,16 @@ mod tests {
             loaded.annotate_always_on_top,
             original.annotate_always_on_top
         );
-        assert_eq!(
-            loaded.annotate_show_dock_icon,
-            original.annotate_show_dock_icon
-        );
+    }
+
+    #[test]
+    fn legacy_annotate_show_dock_icon_key_is_ignored_on_load() {
+        let loaded: AppConfig = serde_yml::from_str(
+            "annotate_always_on_top: true\nannotate_show_dock_icon: false\n",
+        )
+        .unwrap();
+
+        assert!(loaded.annotate_always_on_top);
     }
 
     #[test]

@@ -10,7 +10,6 @@ pub struct AnnotateSettingsWidgets {
     pub auto_expand_check: CheckButton,
     pub show_color_names_check: CheckButton,
     pub always_on_top_check: CheckButton,
-    pub show_dock_icon_check: CheckButton,
 }
 
 pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
@@ -146,18 +145,6 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     on_top_hbox.append(&always_on_top_check);
     window_frame.append(&build_row!(&on_top_hbox, false));
 
-    // Show Dock icon
-    let show_dock_icon_check = CheckButton::new();
-    show_dock_icon_check.set_active(config.annotate_show_dock_icon);
-    let dock_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    dock_hbox.set_hexpand(true);
-    let dock_option = Label::new(Some("Show Dock icon"));
-    dock_option.set_xalign(0.0);
-    dock_option.set_hexpand(true);
-    dock_hbox.append(&dock_option);
-    dock_hbox.append(&show_dock_icon_check);
-    window_frame.append(&build_row!(&dock_hbox, true));
-
     section.append(&window_frame);
 
     AnnotateSettingsWidgets {
@@ -168,6 +155,17 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
         auto_expand_check,
         show_color_names_check,
         always_on_top_check,
-        show_dock_icon_check,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn annotate_window_section_no_longer_shows_dock_icon_option() {
+        let source = include_str!("annotate.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(production_source.contains("Always on top"));
+        assert!(!production_source.contains("Show Dock icon"));
+        assert!(!production_source.contains("show_dock_icon_check"));
     }
 }

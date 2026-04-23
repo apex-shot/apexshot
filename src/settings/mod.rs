@@ -423,7 +423,6 @@ fn build_settings_window(app: &Application) {
         annotate_auto_expand: annotate.auto_expand_check.clone(),
         annotate_show_color_names: annotate.show_color_names_check.clone(),
         annotate_always_on_top: annotate.always_on_top_check.clone(),
-        annotate_show_dock_icon: annotate.show_dock_icon_check.clone(),
         rec_notifications: recordings.rec_notifications_check.clone(),
         rec_countdown: recordings.rec_countdown_check.clone(),
         rec_remember_selection: recordings.rec_remember_selection_check.clone(),

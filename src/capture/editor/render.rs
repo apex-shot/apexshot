@@ -65,12 +65,8 @@ pub fn paint_surface_with_filter(
     }
 }
 
-pub fn editor_image_filter_for_scale(scale: f64) -> gtk4::cairo::Filter {
-    if scale < 0.999 {
-        gtk4::cairo::Filter::Good
-    } else {
-        gtk4::cairo::Filter::Nearest
-    }
+pub fn editor_image_filter_for_scale(_scale: f64) -> gtk4::cairo::Filter {
+    gtk4::cairo::Filter::Good
 }
 
 #[cfg(test)]
@@ -101,15 +97,10 @@ mod tests {
     }
 
     #[test]
-    fn editor_image_filter_uses_nearest_at_full_scale() {
-        assert_eq!(
-            editor_image_filter_for_scale(1.0),
-            gtk4::cairo::Filter::Nearest
-        );
-        assert_eq!(
-            editor_image_filter_for_scale(1.2),
-            gtk4::cairo::Filter::Nearest
-        );
+    fn editor_image_filter_stays_smooth_at_full_scale_and_above() {
+        assert_eq!(editor_image_filter_for_scale(1.0), gtk4::cairo::Filter::Good);
+        assert_eq!(editor_image_filter_for_scale(1.2), gtk4::cairo::Filter::Good);
+        assert_eq!(editor_image_filter_for_scale(2.0), gtk4::cairo::Filter::Good);
     }
 
     #[test]
@@ -938,6 +929,7 @@ pub fn draw_circle(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor,
         let top = rect.y as f64 + r;
         let bottom = rect.y as f64 + height - r;
         context.set_line_width(stroke_size.max(0.5));
+        context.new_sub_path();
         context.arc(left, top, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
         context.arc(right, top, r, 1.5 * std::f64::consts::PI, 2.0 * std::f64::consts::PI);
         context.arc(right, bottom, r, 0.0, 0.5 * std::f64::consts::PI);
@@ -949,6 +941,7 @@ pub fn draw_circle(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor,
         context.translate(center_x, center_y);
         context.scale(radius_x, radius_y);
         context.set_line_width(stroke_size.max(0.5) / min_radius);
+        context.new_sub_path();
         context.arc(0.0, 0.0, 1.0, 0.0, std::f64::consts::TAU);
         let _ = context.stroke();
     }

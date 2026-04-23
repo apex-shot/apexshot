@@ -161,16 +161,18 @@ impl BackgroundComposition {
         };
 
         let shadow = if self.style != BackgroundStyle::None && self.shadow > 0.0 {
-            let shadow_strength = self.shadow / 100.0;
-            let offset_x = (0.5 + self.shadow * 0.01) * scale_factor * draw_scale;
-            let offset_y = (1.0 + self.shadow * 0.02) * scale_factor * draw_scale;
-            let blur = (8.0 + self.shadow * 0.25) * scale_factor * draw_scale;
-            let opacity = 0.25 + 0.2 * shadow_strength;
+            let shadow_strength = (self.shadow / 100.0).clamp(0.0, 1.0);
+            let size_scale = (ref_size / 1200.0).sqrt().clamp(0.85, 1.8);
+            let offset_x = 0.0;
+            let offset_y = (4.0 + shadow_strength * 6.0) * size_scale * draw_scale;
+            let blur = (18.0 + shadow_strength * 20.0) * size_scale * draw_scale;
+            let opacity = 0.10 + shadow_strength * 0.08;
+            let spread = blur * 1.35;
             let rect = FloatRect {
-                x: image_rect.x + offset_x - blur,
-                y: image_rect.y + offset_y - blur,
-                width: image_rect.width + blur * 2.0,
-                height: image_rect.height + blur * 2.0,
+                x: image_rect.x + offset_x - spread,
+                y: image_rect.y + offset_y - spread,
+                width: image_rect.width + spread * 2.0,
+                height: image_rect.height + spread * 2.0,
             };
             Some(ShadowSpec {
                 offset_x,
@@ -234,5 +236,20 @@ mod tests {
         let shadow = layout.shadow_rect.unwrap();
         assert!(shadow.width() > layout.image_rect.width());
         assert!(shadow.height() > layout.image_rect.height());
+    }
+
+    #[test]
+    fn composition_shadow_matches_soft_cards_profile() {
+        let layout = BackgroundComposition::new(1200.0, 800.0)
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0)))
+            .with_shadow(50.0)
+            .with_insert(0.0)
+            .with_alignment(BackgroundAlignment::Center)
+            .compute();
+
+        let shadow = layout.shadow.expect("shadow");
+        assert!(shadow.offset_x.abs() <= 0.75);
+        assert!(shadow.opacity < 0.24);
+        assert!(shadow.blur > shadow.offset_y * 2.0);
     }
 }

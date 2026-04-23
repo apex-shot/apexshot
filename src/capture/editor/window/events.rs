@@ -2349,16 +2349,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             }
         }
 
-        if keyval == gdk::Key::Return || keyval == gdk::Key::KP_Enter {
-            let has_active_edit = state_key.lock().unwrap().active_text_bounds.is_some();
-            if has_active_edit {
-                state_key.lock().unwrap().cancel_text_edit();
-                if let Some(area) = drawing_area_key.upgrade() {
-                    area.queue_draw();
-                }
-                return glib::Propagation::Stop;
-            }
-        }
 
         glib::Propagation::Proceed
     });
@@ -3365,6 +3355,17 @@ mod tests {
                 && production_source.contains("drawing_area.queue_draw();")
                 && production_source.contains("scroll_controller.connect_scroll(move |_, _dx, dy| {"),
             "Footer zoom actions should open the popover, update the zoom state, refresh canvas layout, and support wheel zoom",
+        );
+    }
+
+    #[test]
+    fn enter_key_is_not_handled_by_legacy_text_bounds_canceller() {
+        let source = include_str!("events.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains("if keyval == gdk::Key::Return || keyval == gdk::Key::KP_Enter {")
+                && production_source.contains("gdk::Key::Return | gdk::Key::KP_Enter => should_commit = true,"),
+            "Enter should commit active text input in the main key handler, not be cancelled by the legacy text-bounds handler",
         );
     }
 }

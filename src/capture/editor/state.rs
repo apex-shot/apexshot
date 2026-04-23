@@ -892,7 +892,7 @@ impl EditorState {
     }
 
     pub fn fit_active_text_to_layout(&mut self) {
-        self.fit_active_text_to_layout_with_constraints(false, false, false);
+        self.fit_active_text_to_layout_with_constraints(false, false, true);
     }
 
     /// Reflow only the box height to fit the current text at the current width
@@ -3508,16 +3508,16 @@ fn crop_image(source: &RgbaImage, crop: Rect, fill: DrawColor) -> RgbaImage {
     output
 }
 
-fn render_shadow_layer(
+pub(crate) fn render_shadow_layer(
     width: u32,
     height: u32,
     blur: f64,
     opacity: f64,
     corner_radius: f64,
 ) -> Result<RgbaImage, EditorError> {
-    let blur_px = blur.ceil().max(0.0) as i32;
-    let shadow_width = width as i32 + blur_px * 2;
-    let shadow_height = height as i32 + blur_px * 2;
+    let spread_px = (blur * 1.35).ceil().max(0.0) as i32;
+    let shadow_width = width as i32 + spread_px * 2;
+    let shadow_height = height as i32 + spread_px * 2;
     let stride = gtk4::cairo::Format::ARgb32
         .stride_for_width(shadow_width as u32)
         .map_err(|e| EditorError::ImageSave(e.to_string()))?;
@@ -3529,8 +3529,8 @@ fn render_shadow_layer(
         context.set_source_rgba(0.0, 0.0, 0.0, opacity.clamp(0.0, 1.0));
         draw_rounded_rect_path(
             &context,
-            blur_px as f64,
-            blur_px as f64,
+            spread_px as f64,
+            spread_px as f64,
             width as f64,
             height as f64,
             corner_radius,
