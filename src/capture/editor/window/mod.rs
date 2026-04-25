@@ -19,9 +19,8 @@ use super::pen_weight::PenWeight;
 use super::render::{
     draw_active_text_input, draw_annotation_action, draw_arrow_control_handles,
     draw_arrow_selection_outline, draw_canvas_checkerboard_background, draw_crop_overlay,
-    draw_draft_action, draw_rgba_to_context, draw_selection_handles,
-    draw_selection_outline, draw_text_edit_border, draw_text_edit_handles, rgba_image_to_surface,
-    text_action_bounds,
+    draw_draft_action, draw_rgba_to_context, draw_selection_handles, draw_selection_outline,
+    draw_text_edit_border, draw_text_edit_handles, rgba_image_to_surface, text_action_bounds,
 };
 use super::selection::{action_bounds_with_padding, action_resize_handles};
 use super::state::{apply_effect_actions, render_shadow_layer, EditorState};
@@ -410,17 +409,36 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         st.smooth_drawing_enabled = annotate_config.smooth_drawing;
         st.draw_object_shadow = annotate_config.draw_object_shadow;
         st.auto_expand_canvas = annotate_config.auto_expand_canvas;
-        
+
         // Load existing annotations if available
         match crate::annotations::load_annotations(&path) {
             Ok(Some(annotation_file)) => {
+                st.background_style = crate::annotations::background_style_from_serializable(
+                    &annotation_file.background.style,
+                );
+                st.background_padding = annotation_file.background.padding;
+                st.background_shadow = annotation_file.background.shadow;
+                st.background_insert = annotation_file.background.insert;
+                st.auto_balance = annotation_file.background.auto_balance;
+                st.background_alignment =
+                    crate::annotations::background_alignment_from_serializable(
+                        annotation_file.background.alignment,
+                    );
+                st.background_corner_radius = annotation_file.background.corner_radius;
+                st.background_aspect_ratio =
+                    crate::annotations::crop_aspect_ratio_from_serializable(
+                        annotation_file.background.aspect_ratio,
+                    );
+
                 // Load annotations into state
                 for ann in &annotation_file.annotations {
                     let action = crate::annotations::serializable_to_action(ann);
                     st.actions.push(action);
                 }
                 // Update next_number based on existing number annotations
-                let max_number = st.actions.iter()
+                let max_number = st
+                    .actions
+                    .iter()
                     .filter_map(|a| match a {
                         AnnotationAction::Number { number, .. } => Some(*number),
                         _ => None,
@@ -428,7 +446,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     .max()
                     .unwrap_or(0);
                 st.next_number = max_number + 1;
-                
+
                 // Rebuild effect layer to render loaded annotations
                 st.rebuild_effect_layer();
             }
@@ -436,13 +454,15 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 // No existing annotations, start fresh
             }
             Err(crate::annotations::AnnotationError::HashMismatch) => {
-                eprintln!("[editor] Warning: Image was modified externally, annotations may not align");
+                eprintln!(
+                    "[editor] Warning: Image was modified externally, annotations may not align"
+                );
             }
             Err(e) => {
                 eprintln!("[editor] Warning: Failed to load annotations: {e}");
             }
         }
-        
+
         let detector = st.text_detector.clone();
         let ready_flag = st.text_detection_ready.clone();
         st.text_detection_handle = Some(super::text_detect::spawn_text_detection(
@@ -2585,10 +2605,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
                         // Different blur intensities for each tile
                         let blur_radius = match blur_idx {
-                            0 => 10.0,  // Light blur
-                            1 => 35.0,  // Medium blur
-                            2 => 80.0,  // Heavy blur
-                            _ => 20.0,  // Default
+                            0 => 10.0, // Light blur
+                            1 => 35.0, // Medium blur
+                            2 => 80.0, // Heavy blur
+                            _ => 20.0, // Default
                         };
 
                         let (nbw, nbh) = blurred_bg.dimensions();
@@ -3132,8 +3152,20 @@ fn draw_rounded_rect_path(
     context.new_sub_path();
     context.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
     context.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
-    context.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-    context.arc(x + r, y + r, r, std::f64::consts::PI, std::f64::consts::PI * 1.5);
+    context.arc(
+        x + r,
+        y + h - r,
+        r,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    context.arc(
+        x + r,
+        y + r,
+        r,
+        std::f64::consts::PI,
+        std::f64::consts::PI * 1.5,
+    );
     context.close_path();
 }
 
@@ -3467,7 +3499,8 @@ mod tests {
             production_source.contains("(super::types::ObfuscateMethod::Blur, \"Blur\")")
                 && !production_source.contains("Blur (Secure)")
                 && !production_source.contains("Blur (Smooth)")
-                && production_source.contains("super::types::ObfuscateMethod::Blur => \"Blur intensity\""),
+                && production_source
+                    .contains("super::types::ObfuscateMethod::Blur => \"Blur intensity\""),
             "Obfuscate inspector and toolbar slider should expose one merged Blur mode",
         );
     }

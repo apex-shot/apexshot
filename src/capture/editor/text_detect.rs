@@ -819,7 +819,8 @@ mod tests {
             detector.hit_test_path(&[Point { x: 10.0, y: 10.0 }, Point { x: 90.0, y: 10.0 }]);
         assert_eq!(hits.len(), 1);
 
-        let hits = detector.hit_test_path(&[Point { x: 50.0, y: 0.0 }, Point { x: 50.0, y: 170.0 }]);
+        let hits =
+            detector.hit_test_path(&[Point { x: 50.0, y: 0.0 }, Point { x: 50.0, y: 170.0 }]);
         assert_eq!(hits.len(), 2);
 
         let hits =

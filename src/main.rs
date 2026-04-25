@@ -37,15 +37,10 @@ use apexshot::{
         setup_hotkeys_for_current_desktop, uninstall_hotkeys_for_current_desktop,
     },
     ocr::{extract_text_from_path, OcrConfig},
-    onboarding::{
-        is_onboarding_complete,
-        show_onboarding_window,
-    },
+    onboarding::{is_onboarding_complete, show_onboarding_window},
     recording::{
-        run_overlay_recording_request,
-        run_recording_with_controls, run_recording_countdown_bar,
-        start_recording, RecordingConfig,
-        RecordingControlsParams, StopAction,
+        run_overlay_recording_request, run_recording_countdown_bar, run_recording_with_controls,
+        start_recording, RecordingConfig, RecordingControlsParams, StopAction,
     },
     settings::show_settings_window,
 };
@@ -438,6 +433,8 @@ fn install_binary(force: bool) {
 
     let dest = std::path::Path::new("/usr/local/bin/apexshot");
     let capture_dest = std::path::Path::new("/usr/local/bin/apexshot-capture");
+    let packaged_dest = std::path::Path::new("/usr/bin/apexshot");
+    let packaged_capture_dest = std::path::Path::new("/usr/bin/apexshot-capture");
 
     let src = std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("target/release/apexshot"));
@@ -449,7 +446,11 @@ fn install_binary(force: bool) {
         let installed_version = get_installed_version(dest);
         match installed_version {
             Some(ref v) if v == current_version => {
-                println!("ApexShot {} is already installed at {}. Use --force to reinstall.", current_version, dest.display());
+                println!(
+                    "ApexShot {} is already installed at {}. Use --force to reinstall.",
+                    current_version,
+                    dest.display()
+                );
                 return;
             }
             Some(ref v) => {
@@ -457,9 +458,25 @@ fn install_binary(force: bool) {
             }
             None => {
                 // Could not determine version — proceed with install (likely a dev build or corrupted).
-                println!("Existing installation found at {}. Updating to {}.", dest.display(), current_version);
+                println!(
+                    "Existing installation found at {}. Updating to {}.",
+                    dest.display(),
+                    current_version
+                );
             }
         }
+    }
+
+    if packaged_dest.exists() || packaged_capture_dest.exists() {
+        eprintln!(
+            "Warning: package-managed ApexShot binaries exist under /usr/bin."
+        );
+        eprintln!(
+            "`apexshot install` writes to /usr/local/bin and will shadow the .deb installation instead of upgrading it."
+        );
+        eprintln!(
+            "Use `sudo dpkg -i apexshot_*.deb` to update the package-managed install in place."
+        );
     }
 
     println!("Installing binary: {} → {}", src.display(), dest.display());
@@ -541,7 +558,10 @@ fn install_autostart() {
         let stale_desktop = local_apps_dir.join("io.github.codegoddy.apexshot.desktop");
         if stale_desktop.exists() {
             let _ = std::fs::remove_file(&stale_desktop);
-            eprintln!("[install] Removed stale desktop entry: {}", stale_desktop.display());
+            eprintln!(
+                "[install] Removed stale desktop entry: {}",
+                stale_desktop.display()
+            );
         }
     }
 
@@ -1093,7 +1113,10 @@ fn ensure_gio_desktop_env_for_capture() {
     let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
     if std::path::Path::new(system_desktop).exists() {
         std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
-        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
+        std::env::set_var(
+            "GIO_LAUNCHED_DESKTOP_FILE_PID",
+            std::process::id().to_string(),
+        );
         return;
     }
 
@@ -1106,7 +1129,10 @@ fn ensure_gio_desktop_env_for_capture() {
 
     if let Ok(desktop_path) = ensure_desktop_entry_pub(&app_id) {
         std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
-        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
+        std::env::set_var(
+            "GIO_LAUNCHED_DESKTOP_FILE_PID",
+            std::process::id().to_string(),
+        );
     }
 }
 
@@ -1863,7 +1889,10 @@ async fn run_native_host() -> Result<(), String> {
                     Ok(_) => {
                         let _ = write_native_host_response(&NativeHostResponse {
                             ok: true,
-                            message: format!("Native host registered for extension {}", extension_id),
+                            message: format!(
+                                "Native host registered for extension {}",
+                                extension_id
+                            ),
                         });
                     }
                     Err(e) => {

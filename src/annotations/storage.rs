@@ -3,9 +3,14 @@
 //! Annotations are stored in ~/.local/share/apexshot/annotations/
 //! Each file is named by the SHA256 hash of the image path.
 
-use super::schema::{AnnotationFile, Point, Rect, SerializableAnnotation};
+use super::schema::{
+    AnnotationFile, BackgroundAlignment, BackgroundSettings, BackgroundStyle, CropAspectRatio,
+    Point, Rect, SerializableAnnotation,
+};
 use crate::capture::editor::types::{
-    AnnotationAction, ArrowStyle as EditorArrowStyle, DrawColor, FontSettings as EditorFontSettings,
+    AnnotationAction, ArrowStyle as EditorArrowStyle,
+    BackgroundAlignment as EditorBackgroundAlignment, BackgroundStyle as EditorBackgroundStyle,
+    CropAspectRatio as EditorCropAspectRatio, DrawColor, FontSettings as EditorFontSettings,
 };
 use image::RgbaImage;
 use sha2::{Digest, Sha256};
@@ -72,8 +77,7 @@ pub fn original_path_for_image(image_path: &Path) -> std::path::PathBuf {
 
 /// Compute SHA256 hash of an image file's contents
 pub fn compute_image_hash(image_path: &Path) -> Result<String, AnnotationError> {
-    let bytes =
-        std::fs::read(image_path).map_err(|e| AnnotationError::HashError(e.to_string()))?;
+    let bytes = std::fs::read(image_path).map_err(|e| AnnotationError::HashError(e.to_string()))?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     let hash = format!("{:x}", hasher.finalize());
@@ -87,11 +91,29 @@ pub fn save_annotations(
     canvas_height: u32,
     annotations: &[AnnotationAction],
     original_base_image: &RgbaImage,
+    background_style: &EditorBackgroundStyle,
+    background_padding: f64,
+    background_shadow: f64,
+    background_insert: f64,
+    auto_balance: bool,
+    background_alignment: EditorBackgroundAlignment,
+    background_corner_radius: f64,
+    background_aspect_ratio: EditorCropAspectRatio,
 ) -> Result<(), AnnotationError> {
     let annotation_path = annotation_path_for_image(image_path);
     let image_hash = compute_image_hash(image_path)?;
 
     let mut file = AnnotationFile::new(image_path, image_hash, canvas_width, canvas_height);
+    file.background = BackgroundSettings {
+        style: background_style_to_serializable(background_style),
+        padding: background_padding,
+        shadow: background_shadow,
+        insert: background_insert,
+        auto_balance,
+        alignment: background_alignment_to_serializable(background_alignment),
+        corner_radius: background_corner_radius,
+        aspect_ratio: crop_aspect_ratio_to_serializable(background_aspect_ratio),
+    };
     file.annotations = annotations
         .iter()
         .filter_map(|a| action_to_serializable(a))
@@ -121,11 +143,52 @@ pub fn save_annotations(
 
     std::fs::rename(&temp_path, &annotation_path)
         .map_err(|e| AnnotationError::WriteError(e.to_string()))?;
-    
+
     // Also save the original base image for non-destructive re-editing
     save_original_image(image_path, original_base_image)?;
 
     Ok(())
+}
+
+pub fn background_style_from_serializable(style: &BackgroundStyle) -> EditorBackgroundStyle {
+    match style {
+        BackgroundStyle::None => EditorBackgroundStyle::None,
+        BackgroundStyle::Gradient { index } => EditorBackgroundStyle::Gradient(*index),
+        BackgroundStyle::Wallpaper { path } => EditorBackgroundStyle::Wallpaper(path.into()),
+        BackgroundStyle::Blurred { index } => EditorBackgroundStyle::Blurred(*index),
+        BackgroundStyle::PlainColor { color } => {
+            EditorBackgroundStyle::PlainColor(color_from_serializable(*color))
+        }
+    }
+}
+
+pub fn background_alignment_from_serializable(
+    alignment: BackgroundAlignment,
+) -> EditorBackgroundAlignment {
+    match alignment {
+        BackgroundAlignment::TopLeft => EditorBackgroundAlignment::TopLeft,
+        BackgroundAlignment::TopCenter => EditorBackgroundAlignment::TopCenter,
+        BackgroundAlignment::TopRight => EditorBackgroundAlignment::TopRight,
+        BackgroundAlignment::CenterLeft => EditorBackgroundAlignment::CenterLeft,
+        BackgroundAlignment::Center => EditorBackgroundAlignment::Center,
+        BackgroundAlignment::CenterRight => EditorBackgroundAlignment::CenterRight,
+        BackgroundAlignment::BottomLeft => EditorBackgroundAlignment::BottomLeft,
+        BackgroundAlignment::BottomCenter => EditorBackgroundAlignment::BottomCenter,
+        BackgroundAlignment::BottomRight => EditorBackgroundAlignment::BottomRight,
+    }
+}
+
+pub fn crop_aspect_ratio_from_serializable(ratio: CropAspectRatio) -> EditorCropAspectRatio {
+    match ratio {
+        CropAspectRatio::Freeform => EditorCropAspectRatio::Freeform,
+        CropAspectRatio::Original => EditorCropAspectRatio::Original,
+        CropAspectRatio::Square => EditorCropAspectRatio::Square,
+        CropAspectRatio::FourThree => EditorCropAspectRatio::FourThree,
+        CropAspectRatio::SixteenNine => EditorCropAspectRatio::SixteenNine,
+        CropAspectRatio::TwentyOneNine => EditorCropAspectRatio::TwentyOneNine,
+        CropAspectRatio::ThreeTwo => EditorCropAspectRatio::ThreeTwo,
+        CropAspectRatio::NineSixteen => EditorCropAspectRatio::NineSixteen,
+    }
 }
 
 /// Load annotations for an image
@@ -143,8 +206,8 @@ pub fn load_annotations(image_path: &Path) -> Result<Option<AnnotationFile>, Ann
 
     let json = std::fs::read_to_string(&annotation_path)
         .map_err(|e| AnnotationError::ReadError(e.to_string()))?;
-    let file: AnnotationFile = serde_json::from_str(&json)
-        .map_err(|e| AnnotationError::ParseError(e.to_string()))?;
+    let file: AnnotationFile =
+        serde_json::from_str(&json).map_err(|e| AnnotationError::ParseError(e.to_string()))?;
 
     // Verify hash matches current image
     let current_hash = compute_image_hash(image_path)?;
@@ -176,20 +239,24 @@ pub fn delete_annotations(image_path: &Path) -> Result<(), AnnotationError> {
 }
 
 /// Save the original base image (before annotations)
-pub fn save_original_image(image_path: &Path, original: &image::RgbaImage) -> Result<(), AnnotationError> {
+pub fn save_original_image(
+    image_path: &Path,
+    original: &image::RgbaImage,
+) -> Result<(), AnnotationError> {
     let original_path = original_path_for_image(image_path);
-    
+
     // Ensure directory exists
     let dir = originals_directory();
     if !dir.exists() {
         std::fs::create_dir_all(&dir)
             .map_err(|e| AnnotationError::DirectoryError(e.to_string()))?;
     }
-    
+
     // Save as PNG to preserve quality
-    original.save_with_format(&original_path, image::ImageFormat::Png)
+    original
+        .save_with_format(&original_path, image::ImageFormat::Png)
         .map_err(|e| AnnotationError::WriteError(e.to_string()))?;
-    
+
     Ok(())
 }
 
@@ -199,11 +266,11 @@ pub fn load_original_image(image_path: &Path) -> Result<Option<image::RgbaImage>
     if !original_path.exists() {
         return Ok(None);
     }
-    
+
     let img = image::open(&original_path)
         .map_err(|e| AnnotationError::ReadError(e.to_string()))?
         .to_rgba8();
-    
+
     Ok(Some(img))
 }
 
@@ -325,13 +392,15 @@ fn action_to_serializable(action: &AnnotationAction) -> Option<SerializableAnnot
             shadow: *shadow,
         }),
 
-        AnnotationAction::Obfuscate { rect, method, amount } => {
-            Some(SerializableAnnotation::Obfuscate {
-                rect: Rect::from_editor(*rect),
-                method: obfuscate_method_to_serializable(*method),
-                amount: *amount,
-            })
-        }
+        AnnotationAction::Obfuscate {
+            rect,
+            method,
+            amount,
+        } => Some(SerializableAnnotation::Obfuscate {
+            rect: Rect::from_editor(*rect),
+            method: obfuscate_method_to_serializable(*method),
+            amount: *amount,
+        }),
 
         AnnotationAction::Focus { rect, intensity } => Some(SerializableAnnotation::Focus {
             rect: Rect::from_editor(*rect),
@@ -453,7 +522,11 @@ pub fn serializable_to_action(ann: &SerializableAnnotation) -> AnnotationAction 
             shadow: *shadow,
         },
 
-        SerializableAnnotation::Obfuscate { rect, method, amount } => AnnotationAction::Obfuscate {
+        SerializableAnnotation::Obfuscate {
+            rect,
+            method,
+            amount,
+        } => AnnotationAction::Obfuscate {
             rect: rect.to_editor(),
             method: serializable_to_obfuscate_method(*method),
             amount: *amount,
@@ -477,6 +550,49 @@ fn color_from_serializable(c: super::schema::Color) -> DrawColor {
     DrawColor::new(r, g, b, a)
 }
 
+fn background_style_to_serializable(style: &EditorBackgroundStyle) -> BackgroundStyle {
+    match style {
+        EditorBackgroundStyle::None => BackgroundStyle::None,
+        EditorBackgroundStyle::Gradient(index) => BackgroundStyle::Gradient { index: *index },
+        EditorBackgroundStyle::Wallpaper(path) => BackgroundStyle::Wallpaper {
+            path: path.to_string_lossy().to_string(),
+        },
+        EditorBackgroundStyle::Blurred(index) => BackgroundStyle::Blurred { index: *index },
+        EditorBackgroundStyle::PlainColor(color) => BackgroundStyle::PlainColor {
+            color: color_to_serializable(*color),
+        },
+    }
+}
+
+fn background_alignment_to_serializable(
+    alignment: EditorBackgroundAlignment,
+) -> BackgroundAlignment {
+    match alignment {
+        EditorBackgroundAlignment::TopLeft => BackgroundAlignment::TopLeft,
+        EditorBackgroundAlignment::TopCenter => BackgroundAlignment::TopCenter,
+        EditorBackgroundAlignment::TopRight => BackgroundAlignment::TopRight,
+        EditorBackgroundAlignment::CenterLeft => BackgroundAlignment::CenterLeft,
+        EditorBackgroundAlignment::Center => BackgroundAlignment::Center,
+        EditorBackgroundAlignment::CenterRight => BackgroundAlignment::CenterRight,
+        EditorBackgroundAlignment::BottomLeft => BackgroundAlignment::BottomLeft,
+        EditorBackgroundAlignment::BottomCenter => BackgroundAlignment::BottomCenter,
+        EditorBackgroundAlignment::BottomRight => BackgroundAlignment::BottomRight,
+    }
+}
+
+fn crop_aspect_ratio_to_serializable(ratio: EditorCropAspectRatio) -> CropAspectRatio {
+    match ratio {
+        EditorCropAspectRatio::Freeform => CropAspectRatio::Freeform,
+        EditorCropAspectRatio::Original => CropAspectRatio::Original,
+        EditorCropAspectRatio::Square => CropAspectRatio::Square,
+        EditorCropAspectRatio::FourThree => CropAspectRatio::FourThree,
+        EditorCropAspectRatio::SixteenNine => CropAspectRatio::SixteenNine,
+        EditorCropAspectRatio::TwentyOneNine => CropAspectRatio::TwentyOneNine,
+        EditorCropAspectRatio::ThreeTwo => CropAspectRatio::ThreeTwo,
+        EditorCropAspectRatio::NineSixteen => CropAspectRatio::NineSixteen,
+    }
+}
+
 fn arrow_style_to_serializable(s: EditorArrowStyle) -> super::schema::ArrowStyle {
     match s {
         EditorArrowStyle::Standard => super::schema::ArrowStyle::Standard,
@@ -495,19 +611,35 @@ fn serializable_to_arrow_style(s: super::schema::ArrowStyle) -> EditorArrowStyle
     }
 }
 
-fn obfuscate_method_to_serializable(m: crate::capture::editor::types::ObfuscateMethod) -> super::schema::ObfuscateMethod {
+fn obfuscate_method_to_serializable(
+    m: crate::capture::editor::types::ObfuscateMethod,
+) -> super::schema::ObfuscateMethod {
     match m {
-        crate::capture::editor::types::ObfuscateMethod::Pixelate => super::schema::ObfuscateMethod::Pixelate,
-        crate::capture::editor::types::ObfuscateMethod::Blur => super::schema::ObfuscateMethod::Blur,
-        crate::capture::editor::types::ObfuscateMethod::Blackout => super::schema::ObfuscateMethod::Blackout,
+        crate::capture::editor::types::ObfuscateMethod::Pixelate => {
+            super::schema::ObfuscateMethod::Pixelate
+        }
+        crate::capture::editor::types::ObfuscateMethod::Blur => {
+            super::schema::ObfuscateMethod::Blur
+        }
+        crate::capture::editor::types::ObfuscateMethod::Blackout => {
+            super::schema::ObfuscateMethod::Blackout
+        }
     }
 }
 
-fn serializable_to_obfuscate_method(m: super::schema::ObfuscateMethod) -> crate::capture::editor::types::ObfuscateMethod {
+fn serializable_to_obfuscate_method(
+    m: super::schema::ObfuscateMethod,
+) -> crate::capture::editor::types::ObfuscateMethod {
     match m {
-        super::schema::ObfuscateMethod::Pixelate => crate::capture::editor::types::ObfuscateMethod::Pixelate,
-        super::schema::ObfuscateMethod::Blur => crate::capture::editor::types::ObfuscateMethod::Blur,
-        super::schema::ObfuscateMethod::Blackout => crate::capture::editor::types::ObfuscateMethod::Blackout,
+        super::schema::ObfuscateMethod::Pixelate => {
+            crate::capture::editor::types::ObfuscateMethod::Pixelate
+        }
+        super::schema::ObfuscateMethod::Blur => {
+            crate::capture::editor::types::ObfuscateMethod::Blur
+        }
+        super::schema::ObfuscateMethod::Blackout => {
+            crate::capture::editor::types::ObfuscateMethod::Blackout
+        }
     }
 }
 
@@ -603,7 +735,9 @@ fn number_size_to_serializable(
     }
 }
 
-fn serializable_to_number_size(s: super::schema::NumberSize) -> crate::capture::editor::numbering_style::NumberSize {
+fn serializable_to_number_size(
+    s: super::schema::NumberSize,
+) -> crate::capture::editor::numbering_style::NumberSize {
     use crate::capture::editor::numbering_style::NumberSize as ENumberSize;
     match s {
         super::schema::NumberSize::Small => ENumberSize::Small,
@@ -635,6 +769,29 @@ mod tests {
         assert_ne!(
             annotation_path_for_image(&path1),
             annotation_path_for_image(&path2)
+        );
+    }
+
+    #[test]
+    fn background_settings_roundtrip_through_serializable_schema() {
+        let style = EditorBackgroundStyle::Wallpaper(PathBuf::from("/tmp/background.png"));
+        let serializable_style = background_style_to_serializable(&style);
+
+        assert_eq!(
+            background_style_from_serializable(&serializable_style),
+            style
+        );
+        assert_eq!(
+            background_alignment_from_serializable(background_alignment_to_serializable(
+                EditorBackgroundAlignment::BottomCenter
+            )),
+            EditorBackgroundAlignment::BottomCenter
+        );
+        assert_eq!(
+            crop_aspect_ratio_from_serializable(crop_aspect_ratio_to_serializable(
+                EditorCropAspectRatio::TwentyOneNine
+            )),
+            EditorCropAspectRatio::TwentyOneNine
         );
     }
 }

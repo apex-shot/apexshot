@@ -18,8 +18,15 @@ fn deb_package_includes_capture_helper_binary() {
     );
 
     assert!(
-        release_section.contains("cp target/release/apexshot-capture packaging/deb/apexshot-capture"),
+        release_section
+            .contains("cp target/release/apexshot-capture packaging/deb/apexshot-capture"),
         "release workflow must stage apexshot-capture into packaging/deb before running cargo-deb"
+    );
+
+    assert!(
+        release_section
+            .contains("cmp target/release/apexshot-capture packaging/deb/apexshot-capture"),
+        "release workflow must verify the staged apexshot-capture binary matches the fresh release build"
     );
 
     assert!(

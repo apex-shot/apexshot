@@ -38,7 +38,10 @@ const PERM_YES: &str = "yes";
 ///   - `apexshot install` (so permissions are set up at install time)
 ///   - Daemon startup (so a fresh session still has permissions after reboot)
 pub fn ensure_portal_permissions() {
-    for (table, id) in [(SCREENSHOT_TABLE, SCREENSHOT_ID), (SCREENCAST_TABLE, SCREENCAST_ID)] {
+    for (table, id) in [
+        (SCREENSHOT_TABLE, SCREENSHOT_ID),
+        (SCREENCAST_TABLE, SCREENCAST_ID),
+    ] {
         let status = grant_permission(table, id);
         match status {
             PermStatus::AlreadyGranted => {

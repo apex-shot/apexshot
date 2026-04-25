@@ -34,6 +34,8 @@ _autogen/
 # Editor
 .idea/
 .vscode/
+.codex
+.codex/
 *.swp
 *.swo
 *.autosave

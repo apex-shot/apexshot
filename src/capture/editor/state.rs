@@ -8,8 +8,8 @@ use super::composition::{BackgroundComposition, CompositionLayout};
 use super::numbering_style::{NumberSize, NumberingStyle};
 use super::pen_weight::{HighlighterMode, PenWeight};
 use super::render::{
-    apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect,
-    apply_hybrid_blur, layout_wrapped_text,
+    apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_hybrid_blur,
+    cairo_argb_to_rgba_image, layout_wrapped_text, rgba_image_to_surface,
 };
 use super::selection::{
     action_bounds_with_padding, action_contains_point_with_padding,
@@ -1303,9 +1303,7 @@ impl EditorState {
             ObfuscateMethod::Pixelate => {
                 self.obfuscate_pixelate_amount = clamp_pixelate_amount(amount)
             }
-            ObfuscateMethod::Blur => {
-                self.obfuscate_blur_amount = clamp_obfuscate_amount(amount)
-            }
+            ObfuscateMethod::Blur => self.obfuscate_blur_amount = clamp_obfuscate_amount(amount),
             ObfuscateMethod::Blackout => {}
         }
     }
@@ -2281,7 +2279,10 @@ impl EditorState {
                 clamp_action_to_image(action, img_w, img_h);
             }
 
-            let effect_action = matches!(action, AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. });
+            let effect_action = matches!(
+                action,
+                AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
+            );
             (moved, effect_action)
         } else {
             self.selected_action_index = None;
@@ -2426,7 +2427,7 @@ mod tests {
         AnnotationAction, ArrowStyle, DrawColor, ObfuscateMethod, Point, Rect, SelectHandle,
     };
 
-    use super::EditorState;
+    use super::{apply_corner_radius, EditorState};
 
     #[test]
     fn editor_state_defaults_to_background_tool() {
@@ -2499,6 +2500,27 @@ mod tests {
     }
 
     #[test]
+    fn corner_radius_antialiases_top_right_edge() {
+        let mut image = RgbaImage::from_pixel(40, 40, image::Rgba([255, 255, 255, 255]));
+
+        apply_corner_radius(&mut image, 12.0);
+
+        let top_right_band_has_partial_alpha = (28..40).any(|x| {
+            (0..12).any(|y| {
+                let alpha = image.get_pixel(x, y)[3];
+                alpha > 0 && alpha < 255
+            })
+        });
+
+        assert!(
+            top_right_band_has_partial_alpha,
+            "expected antialiased pixels along the top-right rounded edge"
+        );
+        assert_eq!(image.get_pixel(39, 0)[3], 0);
+        assert_eq!(image.get_pixel(20, 20)[3], 255);
+    }
+
+    #[test]
     fn reset_crop_interaction_clears_crop_selection_and_drag_handles() {
         let mut state = EditorState::new(RgbaImage::new(32, 32));
         state.crop_selection = Some(Rect {
@@ -2525,10 +2547,17 @@ mod tests {
 
     #[test]
     fn focus_tool_uses_dedicated_slider_state_and_persists_intensity_per_action() {
-        let mut state = EditorState::new(RgbaImage::from_pixel(16, 16, image::Rgba([200, 180, 160, 255])));
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            16,
+            16,
+            image::Rgba([200, 180, 160, 255]),
+        ));
         state.selected_tool = super::Tool::Focus;
 
-        assert_eq!(state.active_size_control_mode(), Some(super::SizeControlMode::Focus));
+        assert_eq!(
+            state.active_size_control_mode(),
+            Some(super::SizeControlMode::Focus)
+        );
         assert_eq!(state.active_size_value(), Some(58.0));
 
         assert!(state.set_active_size_without_rebuild(72.0));
@@ -2561,14 +2590,20 @@ mod tests {
         state.selected_tool = super::Tool::Select;
         state.selected_action_index = Some(0);
 
-        assert_eq!(state.active_size_control_mode(), Some(super::SizeControlMode::Focus));
+        assert_eq!(
+            state.active_size_control_mode(),
+            Some(super::SizeControlMode::Focus)
+        );
         assert_eq!(state.active_size_value(), Some(44.0));
         assert!(state.set_active_size_without_rebuild(66.0));
         assert_eq!(state.selected_focus_action_intensity(), Some(66.0));
         state.rebuild_effect_layer();
 
         let final_image = state.to_rendered_image().expect("rendered image");
-        assert_eq!(*final_image.get_pixel(4, 4), image::Rgba([200, 180, 160, 255]));
+        assert_eq!(
+            *final_image.get_pixel(4, 4),
+            image::Rgba([200, 180, 160, 255])
+        );
         let outside = *final_image.get_pixel(1, 1);
         assert!(outside[0] < 200 && outside[1] < 180 && outside[2] < 160);
     }
@@ -2582,7 +2617,10 @@ mod tests {
         assert_eq!(state.active_size_control_mode(), None);
 
         state.selected_tool = super::Tool::Obfuscate;
-        assert_eq!(state.active_size_control_mode(), Some(super::SizeControlMode::Obfuscate));
+        assert_eq!(
+            state.active_size_control_mode(),
+            Some(super::SizeControlMode::Obfuscate)
+        );
         assert_eq!(state.active_size_value(), Some(DEFAULT_OBFUSCATE_AMOUNT));
 
         assert!(state.set_active_size_without_rebuild(21.0));
@@ -2591,7 +2629,11 @@ mod tests {
         state.drag_start = Some(Point { x: 4.0, y: 5.0 });
         state.drag_current = Some(Point { x: 15.0, y: 18.0 });
         match state.draft_action().expect("obfuscate draft") {
-            AnnotationAction::Obfuscate { rect, method, amount } => {
+            AnnotationAction::Obfuscate {
+                rect,
+                method,
+                amount,
+            } => {
                 assert_eq!(rect.x, 4);
                 assert_eq!(rect.y, 5);
                 assert_eq!(rect.width, 11);
@@ -2783,7 +2825,7 @@ pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction])
             },
             AnnotationAction::Focus { rect, intensity } => {
                 apply_focus_rect(image, *rect, *intensity);
-            },
+            }
             _ => {}
         }
     }
@@ -3004,12 +3046,10 @@ impl EditorState {
                     amount: self.current_obfuscate_amount(),
                 })
             }
-            Tool::Focus => {
-                Rect::from_points(start, end).map(|rect| AnnotationAction::Focus {
-                    rect,
-                    intensity: self.current_focus_intensity(),
-                })
-            }
+            Tool::Focus => Rect::from_points(start, end).map(|rect| AnnotationAction::Focus {
+                rect,
+                intensity: self.current_focus_intensity(),
+            }),
             Tool::Text => None,
         };
 
@@ -3134,12 +3174,10 @@ impl EditorState {
                     amount: self.current_obfuscate_amount(),
                 })
             }
-            Tool::Focus => {
-                Rect::from_points(start, end).map(|rect| AnnotationAction::Focus {
-                    rect,
-                    intensity: self.current_focus_intensity(),
-                })
-            }
+            Tool::Focus => Rect::from_points(start, end).map(|rect| AnnotationAction::Focus {
+                rect,
+                intensity: self.current_focus_intensity(),
+            }),
             Tool::Text => None,
         };
 
@@ -3366,16 +3404,26 @@ impl EditorState {
                     (color.b.clamp(0.0, 1.0) * 255.0) as u8,
                     (color.a.clamp(0.0, 1.0) * 255.0) as u8,
                 ]);
-                RgbaImage::from_pixel(layout.canvas_width as u32, layout.canvas_height as u32, pixel)
+                RgbaImage::from_pixel(
+                    layout.canvas_width as u32,
+                    layout.canvas_height as u32,
+                    pixel,
+                )
             }
             BackgroundStyle::Gradient(idx) => {
                 let file_name = crate::capture::editor::window::background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES[*idx];
                 let path = crate::capture::editor::window::background_panel::background_gradient_asset_path(file_name);
-                self.load_and_resize_background(&path, layout.canvas_width as u32, layout.canvas_height as u32)?
+                self.load_and_resize_background(
+                    &path,
+                    layout.canvas_width as u32,
+                    layout.canvas_height as u32,
+                )?
             }
-            BackgroundStyle::Wallpaper(path) => {
-                self.load_and_resize_background(path, layout.canvas_width as u32, layout.canvas_height as u32)?
-            }
+            BackgroundStyle::Wallpaper(path) => self.load_and_resize_background(
+                path,
+                layout.canvas_width as u32,
+                layout.canvas_height as u32,
+            )?,
             BackgroundStyle::Blurred(blur_idx) => {
                 let blur_radius = match blur_idx {
                     0 => 10.0,
@@ -3406,12 +3454,12 @@ impl EditorState {
         };
 
         let mut final_screenshot = if (layout.draw_scale - 1.0).abs() > 0.001 {
-                image::imageops::resize(
-                    screenshot,
-                    layout.image_rect.width.round().max(1.0) as u32,
-                    layout.image_rect.height.round().max(1.0) as u32,
-                    image::imageops::FilterType::CatmullRom,
-                )
+            image::imageops::resize(
+                screenshot,
+                layout.image_rect.width.round().max(1.0) as u32,
+                layout.image_rect.height.round().max(1.0) as u32,
+                image::imageops::FilterType::CatmullRom,
+            )
         } else {
             screenshot.clone()
         };
@@ -3443,12 +3491,7 @@ impl EditorState {
                 // the smooth falloff expected of a realistic shadow.
                 let pass_radius = (shadow.blur / 2.0).max(1.0);
                 for _ in 0..3 {
-                    apply_blur_rect(
-                        &mut shadow_layer,
-                        blur_rect,
-                        pass_radius,
-                        true,
-                    );
+                    apply_blur_rect(&mut shadow_layer, blur_rect, pass_radius, true);
                 }
             }
             image::imageops::overlay(
@@ -3543,8 +3586,9 @@ pub(crate) fn render_shadow_layer(
     let stride = gtk4::cairo::Format::ARgb32
         .stride_for_width(shadow_width as u32)
         .map_err(|e| EditorError::ImageSave(e.to_string()))?;
-    let mut surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, shadow_width, shadow_height)
-        .map_err(|e| EditorError::ImageSave(e.to_string()))?;
+    let mut surface =
+        gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, shadow_width, shadow_height)
+            .map_err(|e| EditorError::ImageSave(e.to_string()))?;
     {
         let context = gtk4::cairo::Context::new(&surface)
             .map_err(|e| EditorError::ImageSave(e.to_string()))?;
@@ -3621,61 +3665,53 @@ fn draw_rounded_rect_path(
 
 fn apply_corner_radius(image: &mut RgbaImage, radius: f64) {
     let (width, height) = image.dimensions();
+    if width == 0 || height == 0 || radius <= 0.0 {
+        return;
+    }
+
+    let radius = radius.min(width as f64 / 2.0).min(height as f64 / 2.0);
     if radius <= 0.0 {
         return;
     }
 
-    let r2 = radius * radius;
-    for y in 0..height {
-        for x in 0..width {
-            let fx = x as f64;
-            let fy = y as f64;
-            let mut alpha_scale = 1.0;
+    let Some(source_surface) = rgba_image_to_surface(image) else {
+        return;
+    };
 
-            // Top-left
-            if fx < radius && fy < radius {
-                let dx = radius - fx;
-                let dy = radius - fy;
-                let dist2 = dx * dx + dy * dy;
-                if dist2 > r2 {
-                    alpha_scale = (radius - (dist2.sqrt() - radius)).clamp(0.0, 1.0); // Anti-aliasing hack
-                    if dist2 > (radius + 1.0) * (radius + 1.0) {
-                        alpha_scale = 0.0;
-                    }
-                }
-            }
-            // Top-right
-            else if fx > (width as f64 - radius) && fy < radius {
-                let dx = fx - (width as f64 - radius);
-                let dy = radius - fy;
-                let dist2 = dx * dx + dy * dy;
-                if dist2 > r2 {
-                    alpha_scale = 0.0;
-                }
-            }
-            // Bottom-left
-            else if fx < radius && fy > (height as f64 - radius) {
-                let dx = radius - fx;
-                let dy = fy - (height as f64 - radius);
-                let dist2 = dx * dx + dy * dy;
-                if dist2 > r2 {
-                    alpha_scale = 0.0;
-                }
-            }
-            // Bottom-right
-            else if fx > (width as f64 - radius) && fy > (height as f64 - radius) {
-                let dx = fx - (width as f64 - radius);
-                let dy = fy - (height as f64 - radius);
-                let dist2 = dx * dx + dy * dy;
-                if dist2 > r2 {
-                    alpha_scale = 0.0;
-                }
-            }
+    let stride = match gtk4::cairo::Format::ARgb32.stride_for_width(width) {
+        Ok(stride) => stride,
+        Err(_) => return,
+    };
+    let mut clipped_surface = match gtk4::cairo::ImageSurface::create(
+        gtk4::cairo::Format::ARgb32,
+        width as i32,
+        height as i32,
+    ) {
+        Ok(surface) => surface,
+        Err(_) => return,
+    };
 
-            if alpha_scale < 1.0 {
-                let pixel = image.get_pixel_mut(x, y);
-                pixel[3] = (pixel[3] as f64 * alpha_scale) as u8;
-            }
+    {
+        let context = match gtk4::cairo::Context::new(&clipped_surface) {
+            Ok(context) => context,
+            Err(_) => return,
+        };
+        context.set_antialias(gtk4::cairo::Antialias::Best);
+        draw_rounded_rect_path(&context, 0.0, 0.0, width as f64, height as f64, radius);
+        context.clip();
+        if context
+            .set_source_surface(&source_surface, 0.0, 0.0)
+            .is_err()
+        {
+            return;
         }
+        let _ = context.paint();
     }
+
+    clipped_surface.flush();
+    let surface_data = match clipped_surface.data() {
+        Ok(data) => data,
+        Err(_) => return,
+    };
+    *image = cairo_argb_to_rgba_image(width, height, stride as usize, surface_data.as_ref());
 }

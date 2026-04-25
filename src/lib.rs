@@ -32,6 +32,6 @@ pub use overlay::{
     SelectionError, SelectionResult,
 };
 
+pub use onboarding::{is_onboarding_complete, show_onboarding_window};
 pub use recording::{start_recording, RecordError, RecordResult, RecordingConfig};
 pub use settings::show_settings_window;
-pub use onboarding::{is_onboarding_complete, show_onboarding_window};

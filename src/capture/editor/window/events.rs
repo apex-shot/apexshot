@@ -1,8 +1,8 @@
 use gtk4::{
     gdk, glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, EventControllerFocus, EventControllerKey, EventControllerMotion, EventControllerScroll,
-    EventControllerScrollFlags, GestureClick, GestureDrag, Image, Label, Overlay, Popover, Scale,
-    ScrolledWindow,
+    DrawingArea, EventControllerFocus, EventControllerKey, EventControllerMotion,
+    EventControllerScroll, EventControllerScrollFlags, GestureClick, GestureDrag, Image, Label,
+    Overlay, Popover, Scale, ScrolledWindow,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -11,7 +11,6 @@ use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use crate::annotations::save_annotations;
 use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
     io_ops::{copy_uri_to_clipboard, save_edited_image},
@@ -27,6 +26,7 @@ use super::super::{
         set_crop_apply_button_state, toolbar_icon_size,
     },
 };
+use crate::annotations::save_annotations;
 
 const MOVE_HANDLE_DRAG_RADIUS: f64 = 10.0;
 const RESIZE_HANDLE_DRAG_SIZE: f64 = 18.0;
@@ -567,16 +567,20 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         }
 
         // Get popup position relative to window
-        let (popup_win_x, popup_win_y) = zoom_popup_window_click.translate_coordinates(&window_for_click, 0.0, 0.0).unwrap_or((0.0, 0.0));
+        let (popup_win_x, popup_win_y) = zoom_popup_window_click
+            .translate_coordinates(&window_for_click, 0.0, 0.0)
+            .unwrap_or((0.0, 0.0));
         let popup_alloc = zoom_popup_window_click.allocation();
-        
+
         let in_popup = click_x >= popup_win_x
             && click_x <= popup_win_x + popup_alloc.width() as f64
             && click_y >= popup_win_y
             && click_y <= popup_win_y + popup_alloc.height() as f64;
 
         // Check if click is on the zoom button (toggle button)
-        let (btn_x, btn_y) = zoom_button_for_click.translate_coordinates(&window_for_click, 0.0, 0.0).unwrap_or((0.0, 0.0));
+        let (btn_x, btn_y) = zoom_button_for_click
+            .translate_coordinates(&window_for_click, 0.0, 0.0)
+            .unwrap_or((0.0, 0.0));
         let btn_alloc = zoom_button_for_click.allocation();
         let in_button = click_x >= btn_x
             && click_x <= btn_x + btn_alloc.width() as f64
@@ -1560,6 +1564,14 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 st.base_image.height(),
                 &st.actions,
                 &st.base_image,
+                &st.background_style,
+                st.background_padding,
+                st.background_shadow,
+                st.background_insert,
+                st.auto_balance,
+                st.background_alignment,
+                st.background_corner_radius,
+                st.background_aspect_ratio,
             );
             (save_result, annotation_result)
         };
@@ -1972,16 +1984,25 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 if let Some(index) = st.selected_action_index {
                     if let Some(selected) = st.actions.get(index) {
                         let is_matching_type = match selected {
-                            super::super::types::AnnotationAction::Box { .. } => st.selected_tool == Tool::Box,
-                            super::super::types::AnnotationAction::Circle { .. } => st.selected_tool == Tool::Circle,
+                            super::super::types::AnnotationAction::Box { .. } => {
+                                st.selected_tool == Tool::Box
+                            }
+                            super::super::types::AnnotationAction::Circle { .. } => {
+                                st.selected_tool == Tool::Circle
+                            }
                             _ => false,
                         };
                         if is_matching_type {
                             // Check resize handles first.
-                            let handle_hit_radius = super::super::color::selection_handle_hit_radius_for_scale(t.scale);
-                            if let Some(handle) = super::super::selection::action_resize_handle_at_point_with_radius(
-                                selected, image_point, handle_hit_radius,
-                            ) {
+                            let handle_hit_radius =
+                                super::super::color::selection_handle_hit_radius_for_scale(t.scale);
+                            if let Some(handle) =
+                                super::super::selection::action_resize_handle_at_point_with_radius(
+                                    selected,
+                                    image_point,
+                                    handle_hit_radius,
+                                )
+                            {
                                 st.select_resize_handle = Some(handle);
                                 st.select_drag_anchor = Some(image_point);
                                 st.drag_start_view = Some(view_point);
@@ -1994,9 +2015,12 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                             }
 
                             // Body hit — move the whole action.
-                            let hit_padding = super::super::color::selection_hit_padding_for_scale(t.scale);
+                            let hit_padding =
+                                super::super::color::selection_hit_padding_for_scale(t.scale);
                             if super::super::selection::action_contains_point_with_padding(
-                                selected, image_point, hit_padding,
+                                selected,
+                                image_point,
+                                hit_padding,
                             ) {
                                 st.select_drag_anchor = Some(image_point);
                                 st.select_resize_handle = None;
@@ -2019,25 +2043,42 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             // No action selected — check if click lands on an existing matching action.
             if st.selected_action_index.is_none() {
                 let hit_padding = super::super::color::selection_hit_padding_for_scale(t.scale);
-                let hit_index = st.actions.iter().enumerate().rev().find(|(_, action)| {
-                    let is_matching_type = match action {
-                        super::super::types::AnnotationAction::Box { .. } => st.selected_tool == Tool::Box,
-                        super::super::types::AnnotationAction::Circle { .. } => st.selected_tool == Tool::Circle,
-                        _ => false,
-                    };
-                    is_matching_type
-                        && super::super::selection::action_contains_point_with_padding(
-                            action, image_point, hit_padding,
-                        )
-                }).map(|(index, _)| index);
+                let hit_index = st
+                    .actions
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, action)| {
+                        let is_matching_type = match action {
+                            super::super::types::AnnotationAction::Box { .. } => {
+                                st.selected_tool == Tool::Box
+                            }
+                            super::super::types::AnnotationAction::Circle { .. } => {
+                                st.selected_tool == Tool::Circle
+                            }
+                            _ => false,
+                        };
+                        is_matching_type
+                            && super::super::selection::action_contains_point_with_padding(
+                                action,
+                                image_point,
+                                hit_padding,
+                            )
+                    })
+                    .map(|(index, _)| index);
 
                 if let Some(index) = hit_index {
                     st.selected_action_index = Some(index);
                     // Check resize handles on the newly selected action.
-                    let handle_hit_radius = super::super::color::selection_handle_hit_radius_for_scale(t.scale);
-                    if let Some(handle) = super::super::selection::action_resize_handle_at_point_with_radius(
-                        &st.actions[index], image_point, handle_hit_radius,
-                    ) {
+                    let handle_hit_radius =
+                        super::super::color::selection_handle_hit_radius_for_scale(t.scale);
+                    if let Some(handle) =
+                        super::super::selection::action_resize_handle_at_point_with_radius(
+                            &st.actions[index],
+                            image_point,
+                            handle_hit_radius,
+                        )
+                    {
                         st.select_resize_handle = Some(handle);
                     } else {
                         st.select_resize_handle = None;
@@ -2348,7 +2389,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 return glib::Propagation::Stop;
             }
         }
-
 
         glib::Propagation::Proceed
     });

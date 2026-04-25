@@ -5,8 +5,8 @@ use gtk4::{
     gdk,
     glib::{self, ControlFlow},
     prelude::*,
-    Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea, EventControllerKey,
-    EventControllerMotion, Orientation, Overlay, WidgetPaintable, Window,
+    Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea,
+    EventControllerKey, EventControllerMotion, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::RefCell;
@@ -117,13 +117,19 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
     let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
     if std::path::Path::new(system_desktop).exists() {
         std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
-        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
+        std::env::set_var(
+            "GIO_LAUNCHED_DESKTOP_FILE_PID",
+            std::process::id().to_string(),
+        );
     } else {
         let app_id = std::env::var("APEXSHOT_APP_ID")
             .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
         if let Ok(desktop_path) = crate::hotkeys::ensure_desktop_entry_pub(&app_id) {
             std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
-            std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
+            std::env::set_var(
+                "GIO_LAUNCHED_DESKTOP_FILE_PID",
+                std::process::id().to_string(),
+            );
         }
     }
 

@@ -64,6 +64,7 @@ void CaptureOverlay::confirmSelection()
 void CaptureOverlay::confirmRecordingSelection()
 {
     m_recordConfigRequested = false;
+    m_micTimer->stop();
     stopWebcamCapture();
     m_recordingToolsHidden = true;
     m_hoveredRecordTile = RecordPanelTile::None;
@@ -136,6 +137,7 @@ void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
 {
     Q_UNUSED(keepSelection);
     m_recordingPanelOpen = false;
+    m_micTimer->stop();
     m_recordingToolsHidden = false;
     m_settingsOpen = false;
     m_clickOptionsOpen = false;
@@ -152,6 +154,8 @@ void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
     m_hoveredCountdownCancel = false;
     stopClickAnimTimer();
     stopWebcamCapture();
+    m_micLevel = 0.0;
+    m_speakerLevel = 0.0;
 }
 
 void CaptureOverlay::cancelSelection()

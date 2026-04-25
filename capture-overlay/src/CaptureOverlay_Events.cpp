@@ -753,6 +753,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Record;
                 m_recordingPanelOpen = true;
+                m_micTimer->start();
                 m_recordingToolsHidden = false;
                 if (m_recWebcam && m_webcamDevice >= 0)
                     startWebcamCapture();
@@ -970,8 +971,15 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
             }
         }
         if (newHover != m_hoveredWindow) {
+            const int previousHover = m_hoveredWindow;
             m_hoveredWindow = newHover;
-            update();
+            QRegion dirty = windowHoverDirtyRegion(previousHover);
+            dirty += windowHoverDirtyRegion(newHover);
+            if (dirty.isEmpty()) {
+                update();
+            } else {
+                update(dirty);
+            }
         }
         return;
     }
@@ -1456,6 +1464,7 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         m_captureCropMenuOpen = false;
                         m_captureIntent = CaptureIntent::Record;
                         m_recordingPanelOpen = true;
+                        m_micTimer->start();
                         m_recordingToolsHidden = false;
                         if (m_recWebcam && m_webcamDevice >= 0)
                             startWebcamCapture();

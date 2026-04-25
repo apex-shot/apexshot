@@ -543,10 +543,47 @@ QRegion CaptureOverlay::crosshairDirtyRegion(const QPoint& oldPoint,
     return dirty.intersected(widgetRect);
 }
 
-void CaptureOverlay::paintEvent(QPaintEvent*)
+QRegion CaptureOverlay::windowHoverDirtyRegion(int index) const
+{
+    if (index < 0 || index >= m_windows.size()) {
+        return QRegion();
+    }
+
+    const QRect widgetRect = rect();
+    const WindowInfo& win = m_windows[index];
+    if (!widgetRect.intersects(win.rect)) {
+        return QRegion();
+    }
+
+    QRegion dirty(win.rect.adjusted(-4, -4, 4, 4));
+
+    QFont font;
+    font.setPointSizeF(11.5);
+    font.setBold(true);
+    QFontMetricsF metrics(font);
+
+    QString label = win.title.length() > 48 ? win.title.left(45) + QStringLiteral("…")
+                                            : win.title;
+    const double textWidth = metrics.horizontalAdvance(label);
+    const double pillWidth = textWidth + 28.0;
+    const double pillHeight = 32.0;
+    double pillX = win.rect.x() + (win.rect.width() - pillWidth) / 2.0;
+    double pillY = win.rect.y() - pillHeight - 8.0;
+    if (pillY < 8.0) {
+        pillY = win.rect.y() + 8.0;
+    }
+    pillX = std::max(8.0, std::min(pillX, rect().width() - pillWidth - 8.0));
+
+    dirty += QRectF(pillX, pillY, pillWidth, pillHeight).toAlignedRect().adjusted(-4, -4, 4, 4);
+    return dirty.intersected(widgetRect);
+}
+
+void CaptureOverlay::paintEvent(QPaintEvent* event)
 {
     QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing);
+    if (event) {
+        p.setClipRegion(event->region());
+    }
     p.setRenderHint(QPainter::TextAntialiasing);
 
     const QRect widgetRect = rect();
@@ -558,8 +595,9 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
             p.drawPixmap(widgetRect, m_background);
         }
 
-        const QPoint cursorPoint = mapFromGlobal(QCursor::pos());
-        const QPoint guidePoint = widgetRect.contains(cursorPoint) ? cursorPoint : m_pointerPos;
+        const QPoint guidePoint = widgetRect.contains(m_pointerPos)
+            ? m_pointerPos
+            : m_lastCrosshairPaintPoint;
 
         p.save();
         // Brand orange for crosshair lines (more visible on white backgrounds)
@@ -589,10 +627,13 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
             labelText = QStringLiteral("%1, %2").arg(guidePoint.x()).arg(guidePoint.y());
         }
 
-        QFont font(QStringLiteral("Sans"));
-        font.setPixelSize(12);
-        font.setWeight(QFont::Medium);
-        p.setFont(font);
+        static const QFont crosshairBubbleFont = []() {
+            QFont font(QStringLiteral("Sans"));
+            font.setPixelSize(12);
+            font.setWeight(QFont::Medium);
+            return font;
+        }();
+        p.setFont(crosshairBubbleFont);
 
         const QRect bubbleRect = crosshairBubbleRectForPoint(guidePoint).adjusted(3, 3, -3, -3);
 
@@ -617,6 +658,8 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
         return;
     }
 
+    p.setRenderHint(QPainter::Antialiasing);
+
     // ── Background ────────────────────────────────────────────────────────────
     if (!m_background.isNull()) {
         p.drawPixmap(widgetRect, m_background);
@@ -637,10 +680,12 @@ void CaptureOverlay::paintEvent(QPaintEvent*)
     if (m_windowMode) {
         p.fillRect(widgetRect, QColor(0, 0, 0, 80));
         // Draw highlight rect over hovered window
+        const QRegion dirtyRegion = p.clipRegion();
         for (int i = 0; i < m_windows.size(); ++i) {
             const WindowInfo& win = m_windows[i];
             if (!widgetRect.intersects(win.rect)) continue;
             bool hovered = (i == m_hoveredWindow);
+            if (!hovered && !dirtyRegion.intersects(win.rect.adjusted(-4, -4, 4, 4))) continue;
             if (hovered) {
                 // Bright highlight border
                 p.setPen(QPen(QColor(0, 122, 255, 230), 3.0));

@@ -123,9 +123,9 @@ mod tests {
             std::env::set_var(GIO_DESKTOP_FILE_PID_ENV, "12345");
 
             {
-                let _identity = super::scoped_portal_capture_identity_for_path(Some(PathBuf::from(
-                    "/tmp/io.github.codegoddy.apexshot.desktop",
-                )));
+                let _identity = super::scoped_portal_capture_identity_for_path(Some(
+                    PathBuf::from("/tmp/io.github.codegoddy.apexshot.desktop"),
+                ));
                 assert_eq!(
                     std::env::var(GIO_DESKTOP_FILE_ENV).ok().as_deref(),
                     Some("/tmp/io.github.codegoddy.apexshot.desktop")

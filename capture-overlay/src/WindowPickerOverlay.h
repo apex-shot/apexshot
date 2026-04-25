@@ -41,6 +41,7 @@ private:
     QPixmap              m_background;
     QList<AppWindowInfo> m_windows;
     QList<QRect>         m_thumbnailRects;
+    QList<QPixmap>       m_scaledThumbnails;
     int                  m_hoveredIdx    = -1;
     int                  m_hoveredTool   = -1;
     bool                 m_selected      = false;

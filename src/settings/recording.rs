@@ -1,7 +1,5 @@
 use crate::config::AppConfig;
-use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation,
-};
+use gtk4::{prelude::*, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 
 #[allow(dead_code)]
 pub struct RecordingSettingsWidgets {

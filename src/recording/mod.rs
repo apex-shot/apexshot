@@ -1741,7 +1741,8 @@ pub fn prepare_overlay_recording_request(
     // Generate filename using pattern from config
     let date_str = now.format("%Y-%m-%d").to_string();
     let time_str = now.format("%H-%M-%S").to_string();
-    let filename = app_config.rec_filename_pattern
+    let filename = app_config
+        .rec_filename_pattern
         .replace("{Date}", &date_str)
         .replace("{Time}", &time_str);
     let output_path = output_dir.join(format!("{}.{}", filename, extension));
@@ -1885,8 +1886,7 @@ async fn run_recording_with_controls_with_runtime_overlay(
         config,
         params,
         runtime_overlay_snapshot,
-        visibility_policy
-            .unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
+        visibility_policy.unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
     )
     .await
 }
@@ -2770,10 +2770,7 @@ mod tests {
         assert_eq!(prepared.updated_app_config.rec_key_blur_bg, false);
         assert_eq!(prepared.updated_app_config.rec_key_filter, 4);
         let shell_supported = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
-        assert_eq!(
-            prepared.runtime_overlay_snapshot.is_some(),
-            shell_supported
-        );
+        assert_eq!(prepared.runtime_overlay_snapshot.is_some(), shell_supported);
         if shell_supported {
             let snap = prepared.runtime_overlay_snapshot.unwrap();
             assert_eq!(snap.mic_visible, true);
@@ -2931,7 +2928,8 @@ mod tests {
         assert_eq!(prepared.use_shell_controls, shell_supported);
         assert_eq!(
             prepared.shell_controls_visibility_policy,
-            shell_supported.then_some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
+            shell_supported
+                .then_some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
         );
     }
 
@@ -2979,7 +2977,8 @@ mod tests {
         assert_eq!(prepared.use_shell_controls, shell_supported);
         assert_eq!(
             prepared.shell_controls_visibility_policy,
-            shell_supported.then_some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
+            shell_supported
+                .then_some(crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden)
         );
         assert_eq!(
             prepared.controls_params,

@@ -6,10 +6,10 @@
 #include <QImage>
 #include <QRect>
 #include <QTimer>
+#include <QCursor>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
-#include <gst/gst.h>
 
 void CaptureOverlay::onMicLevelUpdated(double) { /* unused — using polling */ }
 
@@ -131,6 +131,7 @@ static Qt::WindowFlags captureOverlayWindowFlags()
 void CaptureOverlay::openRecordingPanelForShortcut()
 {
     m_recordingPanelOpen = true;
+    m_micTimer->start();
     m_recordingToolsHidden = false;
     m_settingsOpen = false;
     m_captureIntent = CaptureIntent::Area;
@@ -249,15 +250,6 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_cropMenuOpen(false)
     , m_recordConfigRequested(false)
 {
-    // Init GStreamer for webcam capture
-    static bool gstInited = false;
-    if (!gstInited) {
-        int argc = 0;
-        char* argv[] = {nullptr};
-        gst_init(&argc, nullptr);
-        gstInited = true;
-    }
-
     // Cover entire virtual desktop
     QRect desktop;
     for (QScreen* screen : QGuiApplication::screens())
@@ -270,9 +262,13 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
         setAttribute(Qt::WA_TranslucentBackground, true);
 
     setAttribute(Qt::WA_DeleteOnClose, false);
+    setAttribute(Qt::WA_StaticContents, true);
     setMouseTracking(true);
     setCursor(Qt::CrossCursor);
     m_lastCursorShape = Qt::CrossCursor;
+    const QPoint initialPointer = mapFromGlobal(QCursor::pos());
+    m_pointerPos = initialPointer;
+    m_lastCrosshairPaintPoint = initialPointer;
     focusAndRaiseOverlay();
 
     if (isCrosshairMode()) {
@@ -280,7 +276,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
         m_selection = QRect();
         m_hasSelection = false;
         m_lastCrosshairSelectionRect = QRect();
-        m_lastCrosshairBubbleRect = crosshairBubbleRectForPoint(m_pointerPos);
+        m_lastCrosshairBubbleRect = crosshairBubbleRectForPoint(initialPointer);
     } else {
         const int defaultW = std::max(kMinSize, std::min(DEFAULT_SELECTION_W, width()));
         const int defaultH = std::max(kMinSize, std::min(DEFAULT_SELECTION_H, height()));
@@ -318,43 +314,59 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     // ── Audio level timer — polls daemon for mic + speaker levels ──────────
     m_micTimer->setInterval(33);
     connect(m_micTimer, &QTimer::timeout, this, [this]() {
+        if (!m_recordingPanelOpen || (!m_recMic && !m_recSpeaker)) {
+            const bool hadLevels = m_micLevel > 0.0 || m_speakerLevel > 0.0;
+            m_micLevel = 0.0;
+            m_speakerLevel = 0.0;
+            if (hadLevels) {
+                update();
+            }
+            return;
+        }
+
         QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
                              QStringLiteral("/org/apexshot/Daemon"),
                              QStringLiteral("org.apexshot.Daemon"),
                              QDBusConnection::sessionBus());
-        if (iface.isValid()) {
-            // Poll mic level
-            if (m_recordingPanelOpen && m_recMic) {
-                QDBusReply<double> reply = iface.call(QStringLiteral("GetMicLevel"));
-                if (reply.isValid()) {
-                    double level = reply.value();
-                    if (level > m_micLevel) {
-                        m_micLevel = level;
-                    } else {
-                        m_micLevel = m_micLevel * 0.6 + level * 0.4;
-                    }
-                }
-            } else {
-                m_micLevel = 0.0;
-            }
+        if (!iface.isValid()) {
+            return;
+        }
 
-            // Poll speaker level
-            if (m_recordingPanelOpen && m_recSpeaker) {
-                QDBusReply<double> reply = iface.call(QStringLiteral("GetSpeakerLevel"));
-                if (reply.isValid()) {
-                    double level = reply.value();
-                    if (level > m_speakerLevel) {
-                        m_speakerLevel = level;
-                    } else {
-                        m_speakerLevel = m_speakerLevel * 0.6 + level * 0.4;
-                    }
-                }
-            } else {
-                m_speakerLevel = 0.0;
-            }
+        const double previousMicLevel = m_micLevel;
+        const double previousSpeakerLevel = m_speakerLevel;
 
-            update(); // repaint for animation
+        // Poll mic level
+        if (m_recMic) {
+            QDBusReply<double> reply = iface.call(QStringLiteral("GetMicLevel"));
+            if (reply.isValid()) {
+                double level = reply.value();
+                if (level > m_micLevel) {
+                    m_micLevel = level;
+                } else {
+                    m_micLevel = m_micLevel * 0.6 + level * 0.4;
+                }
+            }
+        } else {
+            m_micLevel = 0.0;
+        }
+
+        // Poll speaker level
+        if (m_recSpeaker) {
+            QDBusReply<double> reply = iface.call(QStringLiteral("GetSpeakerLevel"));
+            if (reply.isValid()) {
+                double level = reply.value();
+                if (level > m_speakerLevel) {
+                    m_speakerLevel = level;
+                } else {
+                    m_speakerLevel = m_speakerLevel * 0.6 + level * 0.4;
+                }
+            }
+        } else {
+            m_speakerLevel = 0.0;
+        }
+
+        if (m_micLevel != previousMicLevel || m_speakerLevel != previousSpeakerLevel) {
+            update();
         }
     });
-    m_micTimer->start();
 }

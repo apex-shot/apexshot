@@ -1,7 +1,5 @@
 use crate::config::AppConfig;
-use gtk4::{
-    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Label, Orientation,
-};
+use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Label, Orientation};
 
 #[allow(dead_code)]
 pub struct AdvancedSettingsWidgets {
@@ -104,7 +102,9 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     clip_vbox.set_hexpand(true);
     let lbl_clip = Label::new(Some("Copy behavior"));
     lbl_clip.set_xalign(0.0);
-    let clip_hint = Label::new(Some("Adjust if you encounter issues with clipboard managers."));
+    let clip_hint = Label::new(Some(
+        "Adjust if you encounter issues with clipboard managers.",
+    ));
     clip_hint.add_css_class("settings-sub-option-hint");
     clip_hint.set_xalign(0.0);
     clip_vbox.append(&lbl_clip);

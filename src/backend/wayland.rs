@@ -438,12 +438,9 @@ impl WaylandBackend {
             .response()
             .map_err(|e| DisplayError::PortalError(format!("ScreenCast start failed: {e}")))?;
 
-        let stream = response
-            .streams()
-            .first()
-            .ok_or_else(|| {
-                DisplayError::PortalError("No streams returned by ScreenCast portal".into())
-            })?;
+        let stream = response.streams().first().ok_or_else(|| {
+            DisplayError::PortalError("No streams returned by ScreenCast portal".into())
+        })?;
         let node_id = stream.pipe_wire_node_id();
 
         // Get the actual window size and position within the stream
@@ -469,20 +466,16 @@ impl WaylandBackend {
                 "[capture] Window capture: stream_size={:?}, stream_position={:?}",
                 stream_size, stream_position
             );
-            if let (Some((win_width, win_height)), Some((win_x, win_y))) = (stream_size, stream_position) {
+            if let (Some((win_width, win_height)), Some((win_x, win_y))) =
+                (stream_size, stream_position)
+            {
                 if win_width > 0 && win_height > 0 && win_x >= 0 && win_y >= 0 {
                     let data = capture?;
                     eprintln!(
                         "[capture] Window capture: cropping from {}x{} to {}x{} at ({}, {})",
                         data.width, data.height, win_width, win_height, win_x, win_y
                     );
-                    return crop_capture(
-                        data,
-                        win_x,
-                        win_y,
-                        win_width as i32,
-                        win_height as i32,
-                    );
+                    return crop_capture(data, win_x, win_y, win_width as i32, win_height as i32);
                 }
             }
 

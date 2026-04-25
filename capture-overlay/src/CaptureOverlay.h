@@ -269,6 +269,7 @@ private:
                                  const QRect& newSelection,
                                  bool hadSelection,
                                  bool hasSelection) const;
+    QRegion windowHoverDirtyRegion(int index) const;
 
     // Webcam
     void showWebcamContextMenu(const QPoint& globalPos);

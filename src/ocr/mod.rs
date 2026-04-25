@@ -430,8 +430,7 @@ pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrO
 /// * `Ok(())` if successful
 /// * `Err(OcrError)` if clipboard operation failed
 pub fn copy_to_clipboard(text: &str) -> OcrResult<()> {
-    crate::utils::clipboard::copy_text_to_clipboard(text)
-        .map_err(|e| OcrError::ClipboardError(e))
+    crate::utils::clipboard::copy_text_to_clipboard(text).map_err(|e| OcrError::ClipboardError(e))
 }
 
 /// Extract text from an image file path

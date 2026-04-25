@@ -25,10 +25,7 @@ use ashpd::desktop::{
 
 use crate::{
     backend::DisplayBackend,
-    capture::{
-        copy_capture_uri_to_clipboard, save_capture, save_existing_png,
-        SaveConfig,
-    },
+    capture::{copy_capture_uri_to_clipboard, save_capture, save_existing_png, SaveConfig},
     capture_overlay::{
         begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
         capture_screen_file_via_cpp, capture_window_file_via_cpp, is_launch_blocked_error,
@@ -505,14 +502,16 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     let name_result = dbus_conn
         .request_name_with_flags(
             DAEMON_BUS_NAME,
-            zbus::fdo::RequestNameFlags::DoNotQueue
-                | zbus::fdo::RequestNameFlags::ReplaceExisting,
+            zbus::fdo::RequestNameFlags::DoNotQueue | zbus::fdo::RequestNameFlags::ReplaceExisting,
         )
         .await;
     match name_result {
         Ok(_) => eprintln!("[daemon] D-Bus name '{}' registered.", DAEMON_BUS_NAME),
         Err(e) => {
-            eprintln!("[daemon] Another daemon is already running (D-Bus name taken): {}", e);
+            eprintln!(
+                "[daemon] Another daemon is already running (D-Bus name taken): {}",
+                e
+            );
             return Ok(()); // Exit gracefully, another instance is running
         }
     }
@@ -1584,14 +1583,10 @@ fn find_physical_input_device() -> Option<String> {
         if name.ends_with(".monitor") {
             continue;
         }
-        eprintln!(
-            "[daemon] PipeWire (mic): detected physical input device '{name}'"
-        );
+        eprintln!("[daemon] PipeWire (mic): detected physical input device '{name}'");
         return Some(name.to_string());
     }
-    eprintln!(
-        "[daemon] PipeWire (mic): no physical input device found; falling back to default"
-    );
+    eprintln!("[daemon] PipeWire (mic): no physical input device found; falling back to default");
     None
 }
 
@@ -2496,8 +2491,7 @@ fn run_ocr_and_report(capture: crate::backend::CaptureData) {
     eprintln!("[daemon] OCR tool selected — extracting text from selected area...");
 
     let config = load_config().sanitized();
-    let ocr_config = OcrConfig::default()
-        .with_language(&config.adv_ocr_language);
+    let ocr_config = OcrConfig::default().with_language(&config.adv_ocr_language);
 
     match extract_text(&capture, &ocr_config) {
         Ok(result) => match &result.source {
@@ -2696,7 +2690,11 @@ fn show_settings_subprocess() {
 fn spawn_editor_subprocess(path: std::path::PathBuf) {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
 
-    if let Err(e) = std::process::Command::new(&exe).arg("edit").arg(&path).spawn() {
+    if let Err(e) = std::process::Command::new(&exe)
+        .arg("edit")
+        .arg(&path)
+        .spawn()
+    {
         eprintln!("[daemon] Failed to spawn editor subprocess: {e}");
     }
 }
@@ -2852,7 +2850,10 @@ fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
                 eprintln!("[daemon] Recording failed: {err}");
                 // Show notification for GNOME extension not installed
-                if err.to_string().contains("GNOME Shell extension is not installed") {
+                if err
+                    .to_string()
+                    .contains("GNOME Shell extension is not installed")
+                {
                     send_desktop_notification(
                         "Recording failed",
                         "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
@@ -3005,7 +3006,10 @@ async fn handle_open_recording_ui(_tx: std::sync::mpsc::Sender<DaemonAction>) {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, None) {
                 eprintln!("[daemon] Recording UI failed: {err}");
                 // Show notification for GNOME extension not installed
-                if err.to_string().contains("GNOME Shell extension is not installed") {
+                if err
+                    .to_string()
+                    .contains("GNOME Shell extension is not installed")
+                {
                     send_desktop_notification(
                         "Recording failed",
                         "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",

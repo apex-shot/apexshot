@@ -1,11 +1,13 @@
-use gtk4::{prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation};
+use gtk4::{
+    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation,
+};
 use std::fs;
 use std::path::PathBuf;
 
-mod welcome;
-mod extensions;
 mod cloud;
 mod complete;
+mod extensions;
+mod welcome;
 
 use crate::settings::ui_support::install_settings_css;
 
@@ -195,13 +197,23 @@ fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
 
 fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
     // Build progress dots
-    let steps = [OnboardingStep::Welcome, OnboardingStep::GnomeExtension, OnboardingStep::ChromeExtension, OnboardingStep::Cloud, OnboardingStep::Complete];
+    let steps = [
+        OnboardingStep::Welcome,
+        OnboardingStep::GnomeExtension,
+        OnboardingStep::ChromeExtension,
+        OnboardingStep::Cloud,
+        OnboardingStep::Complete,
+    ];
     let current_idx = steps.iter().position(|s| *s == step).unwrap_or(0);
 
     for (idx, _) in steps.iter().enumerate() {
         let dot = Label::new(Some(if idx == current_idx { "●" } else { "○" }));
         dot.set_halign(Align::Center);
-        dot.add_css_class(if idx == current_idx { "settings-group-title" } else { "settings-sub-option" });
+        dot.add_css_class(if idx == current_idx {
+            "settings-group-title"
+        } else {
+            "settings-sub-option"
+        });
         widgets.progress_box.append(&dot);
     }
 
@@ -254,8 +266,8 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
         finish_btn.connect_clicked(move |_| {
             let _ = mark_onboarding_complete();
             // Spawn the main app (settings UI) now that onboarding is complete
-            let exe = std::env::current_exe()
-                .unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+            let exe =
+                std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
             if let Err(e) = std::process::Command::new(&exe).spawn() {
                 eprintln!("Failed to launch settings window: {e}");
             }

@@ -12,6 +12,23 @@
 #include <gst/app/gstappsink.h>
 #include <thread>
 
+namespace {
+
+void ensureGStreamerInitialized()
+{
+    static bool initialized = false;
+    if (initialized) {
+        return;
+    }
+
+    int argc = 0;
+    char** argv = nullptr;
+    gst_init(&argc, &argv);
+    initialized = true;
+}
+
+} // namespace
+
 void CaptureOverlay::enumerateWebcamDevices()
 {
     m_webcamDevices.clear();
@@ -46,6 +63,8 @@ void CaptureOverlay::startWebcamCapture()
     stopWebcamCapture(); // stop any existing pipeline
 
     if (m_webcamDevice < 0) return;
+
+    ensureGStreamerInitialized();
 
     QString device = QStringLiteral("/dev/video%1").arg(m_webcamDevice);
     std::string pipelineStr = QStringLiteral(

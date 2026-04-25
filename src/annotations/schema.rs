@@ -17,6 +17,9 @@ pub struct AnnotationFile {
     pub image_hash: String,
     /// Canvas size at time of save
     pub canvas_size: CanvasSize,
+    /// Persisted background composition settings for non-destructive re-editing
+    #[serde(default)]
+    pub background: BackgroundSettings,
     /// All annotation objects
     pub annotations: Vec<SerializableAnnotation>,
     /// When annotations were first created
@@ -30,6 +33,74 @@ pub struct AnnotationFile {
 pub struct CanvasSize {
     pub width: u32,
     pub height: u32,
+}
+
+/// Persisted background composition settings
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackgroundSettings {
+    pub style: BackgroundStyle,
+    pub padding: f64,
+    pub shadow: f64,
+    pub insert: f64,
+    pub auto_balance: bool,
+    pub alignment: BackgroundAlignment,
+    pub corner_radius: f64,
+    pub aspect_ratio: CropAspectRatio,
+}
+
+impl Default for BackgroundSettings {
+    fn default() -> Self {
+        Self {
+            style: BackgroundStyle::None,
+            padding: 24.0,
+            shadow: 15.0,
+            insert: 0.0,
+            auto_balance: false,
+            alignment: BackgroundAlignment::Center,
+            corner_radius: 18.0,
+            aspect_ratio: CropAspectRatio::Original,
+        }
+    }
+}
+
+/// Serializable background style
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BackgroundStyle {
+    None,
+    Gradient { index: usize },
+    Wallpaper { path: String },
+    Blurred { index: usize },
+    PlainColor { color: Color },
+}
+
+/// Serializable background alignment
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundAlignment {
+    TopLeft,
+    TopCenter,
+    TopRight,
+    CenterLeft,
+    Center,
+    CenterRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
+/// Serializable crop aspect ratio
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CropAspectRatio {
+    Freeform,
+    Original,
+    Square,
+    FourThree,
+    SixteenNine,
+    TwentyOneNine,
+    ThreeTwo,
+    NineSixteen,
 }
 
 /// Serializable color (f64 -> u8 for JSON compactness)
@@ -267,10 +338,11 @@ impl AnnotationFile {
     pub fn new(image_path: &std::path::Path, image_hash: String, width: u32, height: u32) -> Self {
         let now = Utc::now();
         Self {
-            version: "1.0".to_string(),
+            version: "1.1".to_string(),
             image_path: image_path.to_string_lossy().to_string(),
             image_hash,
             canvas_size: CanvasSize { width, height },
+            background: BackgroundSettings::default(),
             annotations: Vec::new(),
             created_at: now,
             modified_at: now,
@@ -302,7 +374,33 @@ mod tests {
         );
         let json = serde_json::to_string_pretty(&file).unwrap();
         let parsed: AnnotationFile = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.version, "1.0");
+        assert_eq!(parsed.version, "1.1");
         assert_eq!(parsed.canvas_size.width, 1920);
+        assert_eq!(parsed.background, BackgroundSettings::default());
+    }
+
+    #[test]
+    fn annotation_file_preserves_background_settings() {
+        let mut file = AnnotationFile::new(
+            std::path::Path::new("/test/image.png"),
+            "sha256:def456".to_string(),
+            1280,
+            720,
+        );
+        file.background = BackgroundSettings {
+            style: BackgroundStyle::Gradient { index: 4 },
+            padding: 42.0,
+            shadow: 28.0,
+            insert: 9.0,
+            auto_balance: true,
+            alignment: BackgroundAlignment::BottomRight,
+            corner_radius: 32.0,
+            aspect_ratio: CropAspectRatio::SixteenNine,
+        };
+
+        let json = serde_json::to_string_pretty(&file).unwrap();
+        let parsed: AnnotationFile = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.background, file.background);
     }
 }

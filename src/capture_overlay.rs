@@ -21,7 +21,7 @@ use std::{
 };
 
 use crate::{
-    backend::{CaptureData, PixelFormat},
+    backend::{CaptureData, DisplayBackend, PixelFormat, WaylandBackend},
     gnome_integration::{emit_tracked_window_closed, emit_tracked_window_opened},
     overlay::{SelectionArea, SelectionError, SelectionResult},
 };
@@ -371,6 +371,12 @@ fn run_capture_binary(
                 .into(),
         )
     })?;
+
+    // Capture requests often originate from the autostart daemon, which uses a
+    // different desktop identity for tray/hotkey purposes. Override that
+    // identity while spawning the capture helper so xdg-desktop-portal stores
+    // screenshot/screencast grants against the main ApexShot desktop file.
+    let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
 
     let mut interactive_session = InteractiveOverlaySessionGuard::begin(extra_args);
 
@@ -829,7 +835,20 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
         ));
     }
 
-    // Always use C++ window picker (requires GNOME Shell extension)
+    if WaylandBackend::is_supported() {
+        eprintln!(
+            "[capture_overlay] capture_window_via_cpp: using Wayland ScreenCast portal backend"
+        );
+        let backend = WaylandBackend::new().map_err(|e| {
+            SelectionError::InitError(format!("Failed to initialize Wayland backend: {e}"))
+        })?;
+        let capture = backend.capture_window(0).map_err(|e| {
+            SelectionError::InitError(format!("Wayland window capture failed: {e}"))
+        })?;
+        return save_capture_to_temp_png(&capture);
+    }
+
+    // Non-Wayland path: use the native C++ window picker/capture flow.
     eprintln!("[capture_overlay] capture_window_via_cpp: launching --window-capture");
     let output = run_capture_binary(&["--window-capture"], None)?;
     let exit_code = output.status.code();
@@ -1144,6 +1163,61 @@ pub fn capture_crosshair_via_cpp() -> Result<AreaCaptureResult, SelectionError> 
     capture.map(AreaCaptureResult::Captured)
 }
 
+fn save_capture_to_temp_png(capture: &CaptureData) -> Result<PathBuf, SelectionError> {
+    use image::{ImageBuffer, Rgba};
+
+    let tmp = std::env::temp_dir().join(format!(
+        "apexshot_capture_{}.png",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    let bytes_per_pixel = capture.format.bytes_per_pixel as usize;
+    let stride = capture.stride as usize;
+    let width = capture.width;
+    let height = capture.height;
+
+    let is_bgr = capture.format == PixelFormat::BGR24
+        || capture.format == PixelFormat::BGR32
+        || capture.format == PixelFormat::BGRA32;
+
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height as usize {
+        let row_start = row * stride;
+        let row_end = (row_start + width as usize * bytes_per_pixel).min(capture.pixels.len());
+        let row_data = &capture.pixels[row_start..row_end];
+        for px in row_data.chunks(bytes_per_pixel) {
+            if px.len() >= 4 {
+                if is_bgr {
+                    rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+                } else {
+                    rgba.extend_from_slice(&[px[0], px[1], px[2], px[3]]);
+                }
+            } else if px.len() == 3 {
+                if is_bgr {
+                    rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
+                } else {
+                    rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
+                }
+            }
+        }
+    }
+
+    let image: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgba)
+        .ok_or_else(|| SelectionError::InitError("Failed to build RGBA image buffer".into()))?;
+
+    image.save(&tmp).map_err(|e| {
+        SelectionError::InitError(format!(
+            "Failed to save temporary window capture {}: {e}",
+            tmp.display()
+        ))
+    })?;
+
+    Ok(tmp)
+}
+
 fn load_capture_data_from_path(path: &Path) -> Result<CaptureData, SelectionError> {
     let image = image::open(path).map_err(|e| {
         SelectionError::InitError(format!(
@@ -1383,11 +1457,14 @@ mod tests {
         append_screenshot_timer_args, build_area_init_args, build_crosshair_args,
         build_recording_ui_args, classify_overlay_exit_code, execute_builtin_overlay_query,
         parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
-        parse_recording_json, parse_selection_json, should_request_screenshot_lock,
-        tracked_overlay_id, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,
-        RecordingType,
+        parse_recording_json, parse_selection_json, save_capture_to_temp_png,
+        should_request_screenshot_lock, tracked_overlay_id, CaptureSessionCoordinator,
+        LaunchBlockedReason, OverlayExitCode, RecordingType,
     };
-    use crate::config::AppConfig;
+    use crate::{
+        backend::{CaptureData, PixelFormat},
+        config::AppConfig,
+    };
 
     #[test]
     fn crosshair_capture_does_not_build_area_init_settings_args() {
@@ -1700,5 +1777,25 @@ mod tests {
             result,
             super::AreaCapturePathResult::RecordingConfigUpdated
         ));
+    }
+
+    #[test]
+    fn save_capture_to_temp_png_round_trips_rgba_capture() {
+        let capture = CaptureData::new(
+            vec![
+                255, 0, 0, 255, 0, 255, 0, 255,
+                0, 0, 255, 255, 255, 255, 0, 255,
+            ],
+            2,
+            2,
+            PixelFormat::RGBA32,
+        );
+
+        let path = save_capture_to_temp_png(&capture).expect("temp png should save");
+        let loaded = image::open(&path).expect("temp png should load").into_rgba8();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded.width(), 2);
+        assert_eq!(loaded.height(), 2);
     }
 }

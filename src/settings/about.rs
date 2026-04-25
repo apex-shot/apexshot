@@ -65,7 +65,9 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     check_btn.set_halign(Align::Center);
     check_btn.connect_clicked(|_| {
         std::thread::spawn(move || {
-            let _ = Command::new("xdg-open").arg("https://github.com/apex-shot/apexshot/releases").spawn();
+            let _ = Command::new("xdg-open")
+                .arg("https://github.com/apex-shot/apexshot/releases")
+                .spawn();
         });
     });
 
@@ -75,7 +77,9 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     whats_new_btn.set_halign(Align::Center);
     whats_new_btn.connect_clicked(|_| {
         std::thread::spawn(move || {
-            let _ = Command::new("xdg-open").arg("https://github.com/apex-shot/apexshot/releases/latest").spawn();
+            let _ = Command::new("xdg-open")
+                .arg("https://github.com/apex-shot/apexshot/releases/latest")
+                .spawn();
         });
     });
 
@@ -95,7 +99,9 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         btn.add_css_class("about-link-button");
         btn.connect_clicked(|_| {
             std::thread::spawn(move || {
-                let _ = Command::new("xdg-open").arg("https://apexshot.org/").spawn();
+                let _ = Command::new("xdg-open")
+                    .arg("https://apexshot.org/")
+                    .spawn();
             });
         });
         btn

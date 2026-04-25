@@ -29,7 +29,11 @@ pub(super) fn initial_viewport_offset(
 
     InitialViewportPlacement {
         offset_x: centered_x,
-        offset_y: if top_aligned { canvas_padding } else { centered_y },
+        offset_y: if top_aligned {
+            canvas_padding
+        } else {
+            centered_y
+        },
     }
 }
 const EYEDROPPER_LOUPE_GRID_SIZE: i32 = 15;

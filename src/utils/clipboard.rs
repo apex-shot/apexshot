@@ -112,8 +112,8 @@ pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
     }
 
     // Try arboard (works on X11 and as fallback on Wayland)
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| format!("Failed to access clipboard: {e}"))?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
 
     clipboard
         .set_text(text)
@@ -126,8 +126,7 @@ pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
 ///
 /// On Wayland uses `wl-copy --type image/png`, on X11 uses `xclip`.
 pub fn copy_image_to_clipboard(path: &Path) -> Result<(), String> {
-    let image_data = std::fs::read(path)
-        .map_err(|e| format!("Failed to read image file: {e}"))?;
+    let image_data = std::fs::read(path).map_err(|e| format!("Failed to read image file: {e}"))?;
 
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         let mut child = std::process::Command::new("wl-copy")

@@ -603,10 +603,9 @@ mod tests {
 
     #[test]
     fn legacy_annotate_show_dock_icon_key_is_ignored_on_load() {
-        let loaded: AppConfig = serde_yml::from_str(
-            "annotate_always_on_top: true\nannotate_show_dock_icon: false\n",
-        )
-        .unwrap();
+        let loaded: AppConfig =
+            serde_yml::from_str("annotate_always_on_top: true\nannotate_show_dock_icon: false\n")
+                .unwrap();
 
         assert!(loaded.annotate_always_on_top);
     }

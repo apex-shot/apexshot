@@ -98,9 +98,18 @@ mod tests {
 
     #[test]
     fn editor_image_filter_stays_smooth_at_full_scale_and_above() {
-        assert_eq!(editor_image_filter_for_scale(1.0), gtk4::cairo::Filter::Good);
-        assert_eq!(editor_image_filter_for_scale(1.2), gtk4::cairo::Filter::Good);
-        assert_eq!(editor_image_filter_for_scale(2.0), gtk4::cairo::Filter::Good);
+        assert_eq!(
+            editor_image_filter_for_scale(1.0),
+            gtk4::cairo::Filter::Good
+        );
+        assert_eq!(
+            editor_image_filter_for_scale(1.2),
+            gtk4::cairo::Filter::Good
+        );
+        assert_eq!(
+            editor_image_filter_for_scale(2.0),
+            gtk4::cairo::Filter::Good
+        );
     }
 
     #[test]
@@ -930,10 +939,28 @@ pub fn draw_circle(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor,
         let bottom = rect.y as f64 + height - r;
         context.set_line_width(stroke_size.max(0.5));
         context.new_sub_path();
-        context.arc(left, top, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
-        context.arc(right, top, r, 1.5 * std::f64::consts::PI, 2.0 * std::f64::consts::PI);
+        context.arc(
+            left,
+            top,
+            r,
+            std::f64::consts::PI,
+            1.5 * std::f64::consts::PI,
+        );
+        context.arc(
+            right,
+            top,
+            r,
+            1.5 * std::f64::consts::PI,
+            2.0 * std::f64::consts::PI,
+        );
         context.arc(right, bottom, r, 0.0, 0.5 * std::f64::consts::PI);
-        context.arc(left, bottom, r, 0.5 * std::f64::consts::PI, std::f64::consts::PI);
+        context.arc(
+            left,
+            bottom,
+            r,
+            0.5 * std::f64::consts::PI,
+            std::f64::consts::PI,
+        );
         context.close_path();
         let _ = context.stroke();
     } else {
@@ -2399,7 +2426,12 @@ pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64, preserve_
     }
 }
 
-fn apply_blur_rect_downsampled(image: &mut RgbaImage, rect: Rect, radius: f64, preserve_alpha: bool) {
+fn apply_blur_rect_downsampled(
+    image: &mut RgbaImage,
+    rect: Rect,
+    radius: f64,
+    preserve_alpha: bool,
+) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
     };

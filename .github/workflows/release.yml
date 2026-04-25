@@ -140,6 +140,9 @@ jobs:
           mkdir -p packaging/deb
           cp target/release/apexshot-capture packaging/deb/apexshot-capture
 
+      - name: Verify staged capture helper matches release build
+        run: cmp target/release/apexshot-capture packaging/deb/apexshot-capture
+
       - name: Build .deb package
         run: cargo deb --no-build --verbose
 

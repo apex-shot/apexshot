@@ -11,7 +11,9 @@ fn window_picker_uses_reduced_toolbar_and_warm_hover_contract() {
 
     assert!(
         source.contains("for (int i = m_thumbnailRects.size() - 1; i >= 0; --i)")
-            || source.contains("for (int i = static_cast<int>(m_thumbnailRects.size()) - 1; i >= 0; --i)"),
+            || source.contains(
+                "for (int i = static_cast<int>(m_thumbnailRects.size()) - 1; i >= 0; --i)"
+            ),
         "window picker hover hit testing should walk cards from topmost to bottommost"
     );
 

@@ -431,21 +431,20 @@ static QList<QRect> computeLayout(const QList<AppWindowInfo>& windows,
 static void drawWindowCard(QPainter& p,
                            const QRect& thumb,
                            const AppWindowInfo& win,
+                           const QPixmap& scaledThumbnail,
                            bool hovered)
 {
-    const bool hasThumbnail = !win.icon.isNull();
+    const bool hasThumbnail = !scaledThumbnail.isNull();
 
     QPainterPath cardPath;
     cardPath.addRoundedRect(thumb, 10, 10);
 
     if (hasThumbnail) {
-        const QPixmap scaled = win.icon.scaled(
-            thumb.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        const int drawX = thumb.x() + (thumb.width() - scaled.width()) / 2;
-        const int drawY = thumb.y() + (thumb.height() - scaled.height()) / 2;
+        const int drawX = thumb.x() + (thumb.width() - scaledThumbnail.width()) / 2;
+        const int drawY = thumb.y() + (thumb.height() - scaledThumbnail.height()) / 2;
         p.save();
         p.setClipPath(cardPath);
-        p.drawPixmap(drawX, drawY, scaled);
+        p.drawPixmap(drawX, drawY, scaledThumbnail);
         p.fillRect(thumb, hovered ? QColor(0, 0, 0, 22) : QColor(0, 0, 0, 40));
         p.restore();
     }
@@ -552,14 +551,37 @@ static QRect pickerDisplayArea(int width, int height)
     return QRect(0, topInset, width, usableHeight);
 }
 
+static QRect thumbnailDirtyRect(const QRect& thumb)
+{
+    return thumb.adjusted(-10, -10, 10, 10);
+}
+
+static QRect toolbarDirtyRect(const QRectF& cell)
+{
+    return cell.toAlignedRect().adjusted(-8, -8, 8, 8);
+}
+
 void WindowPickerOverlay::recomputeThumbnailLayout()
 {
     if (width() <= 0 || height() <= 0 || m_windows.isEmpty()) {
         m_thumbnailRects.clear();
+        m_scaledThumbnails.clear();
         return;
     }
 
     m_thumbnailRects = computeLayout(m_windows, pickerDisplayArea(width(), height()), 24);
+    m_scaledThumbnails.clear();
+    m_scaledThumbnails.reserve(m_thumbnailRects.size());
+    for (int i = 0; i < m_thumbnailRects.size() && i < m_windows.size(); ++i) {
+        if (m_windows[i].icon.isNull()) {
+            m_scaledThumbnails.append(QPixmap());
+            continue;
+        }
+        m_scaledThumbnails.append(m_windows[i].icon.scaled(
+            m_thumbnailRects[i].size(),
+            Qt::KeepAspectRatioByExpanding,
+            Qt::SmoothTransformation));
+    }
 }
 
 // ── WindowPickerOverlay ───────────────────────────────────────────────────────
@@ -569,6 +591,7 @@ WindowPickerOverlay::WindowPickerOverlay(QWidget* parent)
 {
     setWindowFlags(windowPickerWindowFlags());
     setAttribute(Qt::WA_TranslucentBackground, true);
+    setAttribute(Qt::WA_StaticContents, true);
     setMouseTracking(true);
     setCursor(Qt::CrossCursor);
 
@@ -615,15 +638,17 @@ void WindowPickerOverlay::resizeEvent(QResizeEvent* event)
     recomputeThumbnailLayout();
 }
 
-void WindowPickerOverlay::paintEvent(QPaintEvent*)
+void WindowPickerOverlay::paintEvent(QPaintEvent* event)
 {
     if (m_thumbnailRects.size() != m_windows.size()) {
         recomputeThumbnailLayout();
     }
 
     QPainter p(this);
+    if (event) {
+        p.setClipRegion(event->region());
+    }
     p.setRenderHint(QPainter::Antialiasing);
-    p.setRenderHint(QPainter::SmoothPixmapTransform);
 
     // Blurred wallpaper background
     if (!m_background.isNull())
@@ -660,12 +685,22 @@ void WindowPickerOverlay::paintEvent(QPaintEvent*)
     for (int i = 0; i < m_thumbnailRects.size(); ++i) {
         const QRect& thumb = m_thumbnailRects[i];
         const AppWindowInfo& win = m_windows[i];
-        drawWindowCard(p, thumb, win, false);
+        if (p.clipRegion().intersects(thumbnailDirtyRect(thumb))) {
+            const QPixmap scaled =
+                (i < m_scaledThumbnails.size()) ? m_scaledThumbnails[i] : QPixmap();
+            drawWindowCard(p, thumb, win, scaled, false);
+        }
     }
 
     // Draw exactly one hovered card as a second pass.
     if (m_hoveredIdx >= 0 && m_hoveredIdx < m_thumbnailRects.size() && m_hoveredIdx < m_windows.size()) {
-        drawWindowCard(p, m_thumbnailRects[m_hoveredIdx], m_windows[m_hoveredIdx], true);
+        const QRect hoveredRect = thumbnailDirtyRect(m_thumbnailRects[m_hoveredIdx]);
+        if (p.clipRegion().intersects(hoveredRect)) {
+            const QPixmap scaled =
+                (m_hoveredIdx < m_scaledThumbnails.size()) ? m_scaledThumbnails[m_hoveredIdx]
+                                                           : QPixmap();
+            drawWindowCard(p, m_thumbnailRects[m_hoveredIdx], m_windows[m_hoveredIdx], scaled, true);
+        }
     }
 
     // Bottom hint
@@ -706,9 +741,28 @@ void WindowPickerOverlay::mouseMoveEvent(QMouseEvent* event)
     }
 
     if (newHover != m_hoveredIdx || newToolHover != m_hoveredTool) {
+        const int previousHover = m_hoveredIdx;
+        const int previousToolHover = m_hoveredTool;
         m_hoveredIdx  = newHover;
         m_hoveredTool = newToolHover;
-        update();
+        QRegion dirty;
+        if (previousHover >= 0 && previousHover < m_thumbnailRects.size()) {
+            dirty += thumbnailDirtyRect(m_thumbnailRects[previousHover]);
+        }
+        if (newHover >= 0 && newHover < m_thumbnailRects.size()) {
+            dirty += thumbnailDirtyRect(m_thumbnailRects[newHover]);
+        }
+        if (previousToolHover >= 0 && previousToolHover < TB_NUM) {
+            dirty += toolbarDirtyRect(toolbarItemRect(previousToolHover));
+        }
+        if (newToolHover >= 0 && newToolHover < TB_NUM) {
+            dirty += toolbarDirtyRect(toolbarItemRect(newToolHover));
+        }
+        if (dirty.isEmpty()) {
+            update();
+        } else {
+            update(dirty);
+        }
     }
 }
 

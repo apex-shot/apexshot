@@ -207,7 +207,9 @@ mod tests {
     #[test]
     fn composition_keeps_background_canvas_for_tall_images() {
         let layout = BackgroundComposition::new(1200.0, 6400.0)
-            .with_style(BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0)))
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                1.0, 1.0, 1.0, 1.0,
+            )))
             .with_padding(24.0)
             .with_shadow(20.0)
             .with_insert(0.0)
@@ -224,7 +226,9 @@ mod tests {
     #[test]
     fn composition_shadow_bounds_extend_beyond_image_rect() {
         let layout = BackgroundComposition::new(1000.0, 800.0)
-            .with_style(BackgroundStyle::PlainColor(DrawColor::new(0.0, 0.0, 0.0, 1.0)))
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                0.0, 0.0, 0.0, 1.0,
+            )))
             .with_padding(32.0)
             .with_shadow(40.0)
             .with_insert(0.0)
@@ -241,7 +245,9 @@ mod tests {
     #[test]
     fn composition_shadow_matches_soft_cards_profile() {
         let layout = BackgroundComposition::new(1200.0, 800.0)
-            .with_style(BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0)))
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                1.0, 1.0, 1.0, 1.0,
+            )))
             .with_shadow(50.0)
             .with_insert(0.0)
             .with_alignment(BackgroundAlignment::Center)

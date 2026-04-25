@@ -153,10 +153,15 @@ pub fn cursor_name_for_view_point(
                             _ => false,
                         };
                         if is_matching_type {
-                            let handle_hit_radius = selection_handle_hit_radius_for_scale(transform.scale);
-                            if let Some(handle) = super::super::selection::action_resize_handle_at_point_with_radius(
-                                selected, image_point, handle_hit_radius,
-                            ) {
+                            let handle_hit_radius =
+                                selection_handle_hit_radius_for_scale(transform.scale);
+                            if let Some(handle) =
+                                super::super::selection::action_resize_handle_at_point_with_radius(
+                                    selected,
+                                    image_point,
+                                    handle_hit_radius,
+                                )
+                            {
                                 return cursor_name_for_select_handle(handle);
                             }
                         }
@@ -171,7 +176,9 @@ pub fn cursor_name_for_view_point(
                     };
                     matches_tool
                         && super::super::selection::action_contains_point_with_padding(
-                            action, image_point, hit_padding,
+                            action,
+                            image_point,
+                            hit_padding,
                         )
                 });
                 if is_over_action {
@@ -181,12 +188,9 @@ pub fn cursor_name_for_view_point(
                 }
             }
         }
-        Tool::Pen
-        | Tool::Arrow
-        | Tool::Line
-        | Tool::Number
-        | Tool::Obfuscate
-        | Tool::Focus => "crosshair",
+        Tool::Pen | Tool::Arrow | Tool::Line | Tool::Number | Tool::Obfuscate | Tool::Focus => {
+            "crosshair"
+        }
     }
 }
 

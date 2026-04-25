@@ -40,7 +40,10 @@ pub fn show_settings_window() -> anyhow::Result<()> {
     let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
     if std::path::Path::new(system_desktop).exists() {
         std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
-        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE_PID", std::process::id().to_string());
+        std::env::set_var(
+            "GIO_LAUNCHED_DESKTOP_FILE_PID",
+            std::process::id().to_string(),
+        );
     }
 
     let app = Application::builder()

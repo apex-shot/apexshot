@@ -2,7 +2,8 @@ use gtk4::{prelude::*, Align, Button, Label};
 use std::process::Command;
 
 // TODO: Update these URLs when extensions are published
-const GNOME_EXTENSION_URL: &str = "https://github.com/apex-shot/apexshot/releases/tag/gnome-extension-v2";
+const GNOME_EXTENSION_URL: &str =
+    "https://github.com/apex-shot/apexshot/releases/tag/gnome-extension-v2";
 const CHROME_EXTENSION_URL: &str = "https://chromewebstore.google.com/detail/apexshot/XXXXX";
 const EXTENSION_UUID: &str = "apexshot-gnome-integration@apexshot.github.io";
 const OLD_EXTENSION_UUID: &str = "apexshot-preview-helper@apexshot.github.io";
@@ -26,10 +27,7 @@ fn is_extension_installed() -> bool {
     Command::new("gnome-extensions")
         .args(["list"])
         .output()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .contains(EXTENSION_UUID)
-        })
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(EXTENSION_UUID))
         .unwrap_or(false)
 }
 
@@ -37,10 +35,7 @@ fn is_old_extension_installed() -> bool {
     Command::new("gnome-extensions")
         .args(["list"])
         .output()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .contains(OLD_EXTENSION_UUID)
-        })
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(OLD_EXTENSION_UUID))
         .unwrap_or(false)
 }
 
@@ -54,9 +49,7 @@ fn remove_old_extension() {
         "{}/.local/share/gnome-shell/extensions/{}",
         home, OLD_EXTENSION_UUID
     );
-    let _ = Command::new("rm")
-        .args(["-rf", &old_ext_dir])
-        .output();
+    let _ = Command::new("rm").args(["-rf", &old_ext_dir]).output();
 }
 
 fn install_extension() {
@@ -68,9 +61,7 @@ fn install_extension() {
         );
 
         // Create directory
-        let _ = Command::new("mkdir")
-            .args(["-p", &ext_dir])
-            .output();
+        let _ = Command::new("mkdir").args(["-p", &ext_dir]).output();
 
         // Download zip
         let _ = Command::new("wget")
@@ -98,7 +89,8 @@ pub fn build_gnome(content: &gtk4::Box) {
     // Check if running GNOME
     if !is_gnome() {
         let title = Label::new(None);
-        title.set_markup("<span size='x-large' weight='bold'>GNOME Shell Extension Required</span>");
+        title
+            .set_markup("<span size='x-large' weight='bold'>GNOME Shell Extension Required</span>");
         title.set_halign(Align::Center);
         title.set_margin_bottom(8);
         content.append(&title);
@@ -246,10 +238,7 @@ pub fn build_chrome(content: &gtk4::Box) {
     features_box.set_margin_top(32);
     features_box.set_halign(Align::Center);
 
-    let features = [
-        "Full-page scroll capture",
-        "Sends directly to ApexShot",
-    ];
+    let features = ["Full-page scroll capture", "Sends directly to ApexShot"];
 
     for feature in features {
         let label = Label::new(Some(feature));

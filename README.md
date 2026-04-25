@@ -117,6 +117,11 @@ sudo apexshot install --extension-id <id>      # + browser native messaging host
 sudo apexshot install --force                  # Reinstall even if same version
 ```
 
+`apexshot install` is not the same as installing/upgrading the `.deb`.
+It copies `apexshot` and `apexshot-capture` into `/usr/local/bin`, which can
+shadow the package-managed binaries in `/usr/bin`. To upgrade an existing `.deb`
+installation in place, use the `.deb` update flow above with `dpkg -i`.
+
 ### GNOME Extension (Required)
 
 ApexShot requires the GNOME Shell extension for full functionality on GNOME Wayland. Without it, preview windows may not stay on top, recording masks will not appear, and runtime overlays will not work.

@@ -17,7 +17,21 @@
 //! use apexshot::annotations::{save_annotations, load_annotations, load_original_image, serializable_to_action};
 //!
 //! // Save annotations when user clicks "Done"
-//! save_annotations(&image_path, width, height, &editor_state.actions, &editor_state.base_image)?;
+//! save_annotations(
+//!     &image_path,
+//!     width,
+//!     height,
+//!     &editor_state.actions,
+//!     &editor_state.base_image,
+//!     &editor_state.background_style,
+//!     editor_state.background_padding,
+//!     editor_state.background_shadow,
+//!     editor_state.background_insert,
+//!     editor_state.auto_balance,
+//!     editor_state.background_alignment,
+//!     editor_state.background_corner_radius,
+//!     editor_state.background_aspect_ratio,
+//! )?;
 //!
 //! // Load annotations when user clicks "Edit" again
 //! if let Some(original) = load_original_image(&image_path)? {
@@ -36,10 +50,13 @@ mod schema;
 mod storage;
 
 pub use schema::{
-    AnnotationFile, ArrowStyle, CanvasSize, Color, FontSettings, NumberSize, NumberingStyle,
-    ObfuscateMethod, Point, Rect, SerializableAnnotation, TextAlignment, TextDecoration, FontStyle,
+    AnnotationFile, ArrowStyle, BackgroundAlignment, BackgroundSettings, BackgroundStyle,
+    CanvasSize, Color, CropAspectRatio, FontSettings, FontStyle, NumberSize, NumberingStyle,
+    ObfuscateMethod, Point, Rect, SerializableAnnotation, TextAlignment, TextDecoration,
 };
 pub use storage::{
-    annotations_exist, compute_image_hash, delete_annotations, load_annotations,
-    load_original_image, original_exists, save_annotations, serializable_to_action, AnnotationError,
+    annotations_exist, background_alignment_from_serializable, background_style_from_serializable,
+    compute_image_hash, crop_aspect_ratio_from_serializable, delete_annotations, load_annotations,
+    load_original_image, original_exists, save_annotations, serializable_to_action,
+    AnnotationError,
 };
