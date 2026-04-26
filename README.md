@@ -2,6 +2,8 @@
 
 A premium, open-source Linux screen capture tool with annotation, recording, and OCR.
 
+**Website:** https://apexshot.org/
+
 > **Note:** Currently tested on GNOME Ubuntu (Wayland). X11 implementations exist in the codebase but have not been thoroughly tested. Support for other distributions and desktop environments will be expanded as the project grows.
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
