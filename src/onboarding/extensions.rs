@@ -52,36 +52,41 @@ fn remove_old_extension() {
     let _ = Command::new("rm").args(["-rf", &old_ext_dir]).output();
 }
 
-fn install_extension() {
+fn install_extension(sender: gtk4::glib::Sender<()>) {
     std::thread::spawn(move || {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let ext_dir = format!(
-            "{}/.local/share/gnome-shell/extensions/{}",
-            home, EXTENSION_UUID
-        );
+        // Dynamically find the latest release that actually contains the zip file
+        // This handles cases where recent releases (e.g., .deb only) don't have the zip
+        let get_url_cmd = r#"curl -s https://api.github.com/repos/apex-shot/apexshot/releases | grep -o '"browser_download_url": *"[^"]*apexshot-gnome-integration.zip"' | head -n 1 | cut -d '"' -f 4"#;
+        
+        if let Ok(output) = Command::new("sh").arg("-c").arg(get_url_cmd).output() {
+            let zip_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            
+            if !zip_url.is_empty() {
+                // Download zip
+                let _ = Command::new("wget")
+                    .args(["-O", "/tmp/apexshot-extension.zip", &zip_url])
+                    .output();
 
-        // Create directory
-        let _ = Command::new("mkdir").args(["-p", &ext_dir]).output();
+                // Install using the official gnome-extensions tool
+                // This ensures GNOME Shell registers it immediately without a Wayland restart
+                let _ = Command::new("gnome-extensions")
+                    .args(["install", "--force", "/tmp/apexshot-extension.zip"])
+                    .output();
 
-        // Download zip
-        let _ = Command::new("wget")
-            .args(["-O", "/tmp/apexshot-extension.zip", EXTENSION_ZIP_URL])
-            .output();
+                // Enable extension
+                let _ = Command::new("gnome-extensions")
+                    .args(["enable", EXTENSION_UUID])
+                    .output();
 
-        // Extract to extension directory
-        let _ = Command::new("unzip")
-            .args(["-o", "/tmp/apexshot-extension.zip", "-d", &ext_dir])
-            .output();
-
-        // Enable extension
-        let _ = Command::new("gnome-extensions")
-            .args(["enable", EXTENSION_UUID])
-            .output();
-
-        // Clean up
-        let _ = Command::new("rm")
-            .args(["-f", "/tmp/apexshot-extension.zip"])
-            .output();
+                // Clean up
+                let _ = Command::new("rm")
+                    .args(["-f", "/tmp/apexshot-extension.zip"])
+                    .output();
+            }
+        }
+            
+        // Notify the main UI thread that installation is complete
+        let _ = sender.send(());
     });
 }
 
@@ -196,8 +201,21 @@ pub fn build_gnome(content: &gtk4::Box) {
     install_btn.set_margin_top(32);
 
     if !is_installed {
-        install_btn.connect_clicked(|_| {
-            install_extension();
+        let (sender, receiver) = gtk4::glib::MainContext::channel(gtk4::glib::Priority::DEFAULT);
+        let btn_clone = install_btn.clone();
+        
+        receiver.attach(
+            None,
+            move |_| {
+                btn_clone.set_label("Extension Installed ✓");
+                gtk4::glib::ControlFlow::Break
+            },
+        );
+
+        install_btn.connect_clicked(move |btn| {
+            btn.set_label("Installing...");
+            btn.set_sensitive(false);
+            install_extension(sender.clone());
         });
     } else {
         install_btn.set_sensitive(false);
