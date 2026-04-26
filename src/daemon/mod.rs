@@ -1654,20 +1654,26 @@ async fn run_hotkey_listener(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyho
     run_hotkey_listener_portal(&cfg, tx).await
 }
 
-/// Set GIO_LAUNCHED_DESKTOP_FILE env vars so the hotkey portal can identify us.
+/// Set GIO_LAUNCHED_DESKTOP_FILE env vars so the portal can identify us.
 ///
-/// IMPORTANT: We point to the system autostart desktop file (NoDisplay=true) so
-/// GNOME Shell does NOT associate the daemon with the main app's icon. If we used
-/// the main app's desktop file, GNOME would route app-icon clicks to the daemon
-/// instead of launching the settings window.
+/// We point to the main app's desktop file so that xdg-desktop-portal
+/// associates the daemon with `io.github.codegoddy.apexshot` — the same
+/// app ID used in the PermissionStore by `ensure_portal_permissions()`.
+/// Without this, the portal derives the app ID from the autostart desktop
+/// file name (`apexshot`) which never matches, so permissions are never
+/// found and the user is asked to approve every time.
+///
+/// The autostart desktop file has NoDisplay=true, so GNOME Shell won't
+/// show a duplicate dock entry regardless of which desktop file we point to.
 fn ensure_gio_desktop_env() {
-    // Use the system autostart daemon desktop file if it exists
-    let system_daemon_desktop = std::path::Path::new("/etc/xdg/autostart/apexshot.desktop");
-    let desktop_path = if system_daemon_desktop.exists() {
-        system_daemon_desktop.to_path_buf()
+    // Prefer the system-packaged main app desktop file (installed by the .deb)
+    let system_main_desktop =
+        std::path::Path::new("/usr/share/applications/io.github.codegoddy.apexshot.desktop");
+    let desktop_path = if system_main_desktop.exists() {
+        system_main_desktop.to_path_buf()
     } else {
-        // Fallback: create a minimal daemon desktop entry in user dir
-        let app_id = "io.github.codegoddy.apexshot.daemon";
+        // Fallback: create a desktop entry in user dir with the canonical app ID
+        let app_id = "io.github.codegoddy.apexshot";
         match ensure_desktop_entry_pub(app_id) {
             Ok(path) => path,
             Err(_) => return,

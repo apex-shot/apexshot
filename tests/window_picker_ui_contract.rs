@@ -28,8 +28,8 @@ fn window_picker_uses_reduced_toolbar_and_warm_hover_contract() {
     );
 
     assert!(
-        source.contains("drawWindowCard(p, thumb, win, false);")
-            && source.contains("drawWindowCard(p, m_thumbnailRects[m_hoveredIdx], m_windows[m_hoveredIdx], true);"),
+        source.contains("drawWindowCard(p, thumb, win, scaled, false);")
+            && source.contains("drawWindowCard(p, m_thumbnailRects[m_hoveredIdx], m_windows[m_hoveredIdx], scaled, true);"),
         "window picker should render base cards first and the hovered card in a dedicated second pass"
     );
 }

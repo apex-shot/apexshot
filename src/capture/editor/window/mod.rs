@@ -2466,6 +2466,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let mut virtual_w = image_width;
         let mut virtual_h = image_height;
         let mut draw_scale_factor = 1.0;
+        let mut background_scale_factor = 1.0;
         let mut background_layout = None;
 
         let has_background = background_style != BackgroundStyle::None;
@@ -2482,6 +2483,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             virtual_w = layout.canvas_width;
             virtual_h = layout.canvas_height;
             draw_scale_factor = layout.draw_scale;
+            background_scale_factor = layout.scale_factor;
             background_layout = Some(layout);
         }
 
@@ -2660,7 +2662,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
                 if let Some(shadow) = layout.shadow {
                     let shadow_blur = (shadow.blur * canvas_t.scale).max(1.0);
-                    let shadow_corner = background_corner_radius * t.scale;
+                    let shadow_corner = background_corner_radius * layout.scale_factor * t.scale;
                     let shadow_width = (image_width * t.scale).round().max(1.0) as u32;
                     let shadow_height = (image_height * t.scale).round().max(1.0) as u32;
 
@@ -2705,7 +2707,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             let rect_w = image_width * t.scale;
             let rect_h = image_height * t.scale;
-            let corner_r = background_corner_radius * t.scale;
+            let corner_r = background_corner_radius * background_scale_factor * t.scale;
 
             let _ = context.save();
             context.translate(t.offset_x, t.offset_y);
