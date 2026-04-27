@@ -4,6 +4,6 @@
   "path": "/usr/bin/apexshot-native-host",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://nblgiakamgiiehpcknfnhgoiihacaeli/"
+    "chrome-extension://kaejmfabajnakpodjffipckmcpfpdenj/"
   ]
 }

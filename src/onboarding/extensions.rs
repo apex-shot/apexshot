@@ -4,11 +4,10 @@ use std::process::Command;
 // TODO: Update these URLs when extensions are published
 const GNOME_EXTENSION_URL: &str =
     "https://github.com/apex-shot/apexshot/releases/tag/gnome-extension-v2";
-const CHROME_EXTENSION_URL: &str = "https://chromewebstore.google.com/detail/apexshot/XXXXX";
+const CHROME_EXTENSION_URL: &str =
+    "https://chromewebstore.google.com/detail/apexshot/kaejmfabajnakpodjffipckmcpfpdenj";
 const EXTENSION_UUID: &str = "apexshot-gnome-integration@apexshot.github.io";
 const OLD_EXTENSION_UUID: &str = "apexshot-preview-helper@apexshot.github.io";
-const EXTENSION_ZIP_URL: &str = "https://github.com/apex-shot/apexshot/releases/download/gnome-extension-v2/apexshot-gnome-integration.zip";
-
 fn open_url(url: &str) {
     let url = url.to_string();
     std::thread::spawn(move || {
@@ -52,7 +51,7 @@ fn remove_old_extension() {
     let _ = Command::new("rm").args(["-rf", &old_ext_dir]).output();
 }
 
-fn install_extension(sender: gtk4::glib::Sender<()>) {
+fn install_extension(button: gtk4::glib::SendWeakRef<Button>) {
     std::thread::spawn(move || {
         // Dynamically find the latest release that actually contains the zip file
         // This handles cases where recent releases (e.g., .deb only) don't have the zip
@@ -85,8 +84,12 @@ fn install_extension(sender: gtk4::glib::Sender<()>) {
             }
         }
             
-        // Notify the main UI thread that installation is complete
-        let _ = sender.send(());
+        gtk4::glib::MainContext::default().invoke(move || {
+            if let Some(button) = button.upgrade() {
+                button.set_label("Extension Installed ✓");
+                button.set_sensitive(false);
+            }
+        });
     });
 }
 
@@ -201,21 +204,12 @@ pub fn build_gnome(content: &gtk4::Box) {
     install_btn.set_margin_top(32);
 
     if !is_installed {
-        let (sender, receiver) = gtk4::glib::MainContext::channel(gtk4::glib::Priority::DEFAULT);
-        let btn_clone = install_btn.clone();
-        
-        receiver.attach(
-            None,
-            move |_| {
-                btn_clone.set_label("Extension Installed ✓");
-                gtk4::glib::ControlFlow::Break
-            },
-        );
+        let install_btn_weak = gtk4::glib::SendWeakRef::from(install_btn.downgrade());
 
         install_btn.connect_clicked(move |btn| {
             btn.set_label("Installing...");
             btn.set_sensitive(false);
-            install_extension(sender.clone());
+            install_extension(install_btn_weak.clone());
         });
     } else {
         install_btn.set_sensitive(false);
