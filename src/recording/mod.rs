@@ -587,7 +587,7 @@ impl Default for RecordingConfig {
             x: None,
             y: None,
             cursor: true,
-            hidpi: false,
+            hidpi: true,
             max_resolution: None,
             fps: 30,
             mono_audio: false,
@@ -702,18 +702,29 @@ async fn start_recording_with_commands(
 
     // 2. Select Encoder Profile
     let (profile, final_path) = select_encoder(config.output_path.as_path())?;
+    let effective_config = normalize_recording_config_for_profile(profile, &config);
     println!("Using Encoder: {} ({})", profile.name, profile.encoder);
+    if effective_config.width != config.width || effective_config.height != config.height {
+        println!(
+            "Adjusted recording area for {} compatibility: {:?}x{:?} -> {:?}x{:?}",
+            profile.encoder,
+            config.width,
+            config.height,
+            effective_config.width,
+            effective_config.height
+        );
+    }
     println!(
         "Recording config: fps={} area={:?}x{:?} at ({:?},{:?}) max_resolution={:?} hidpi={} mic={} speaker={}",
-        config.fps,
-        config.width,
-        config.height,
-        config.x,
-        config.y,
-        config.max_resolution,
-        config.hidpi,
-        config.mic_enabled,
-        config.speaker_enabled
+        effective_config.fps,
+        effective_config.width,
+        effective_config.height,
+        effective_config.x,
+        effective_config.y,
+        effective_config.max_resolution,
+        effective_config.hidpi,
+        effective_config.mic_enabled,
+        effective_config.speaker_enabled
     );
 
     if final_path != config.output_path {
@@ -724,7 +735,7 @@ async fn start_recording_with_commands(
     }
 
     // 3. Build pipeline description
-    let built_pipeline = build_pipeline(&config, profile, final_path.as_path()).await?;
+    let built_pipeline = build_pipeline(&effective_config, profile, final_path.as_path()).await?;
     let _wayland_source = built_pipeline.wayland_source;
     let pipeline_str = built_pipeline.pipeline_str;
     println!("Starting recording to: {:?}", final_path);
@@ -754,15 +765,6 @@ async fn start_recording_with_commands(
             }
         }
         let _ = pipeline.set_state(gst::State::Null);
-        if config.fps > 30 {
-            eprintln!(
-                "Recording startup failed at {} FPS; retrying once at 30 FPS.",
-                config.fps
-            );
-            let mut retry_config = config.clone();
-            retry_config.fps = 30;
-            return Box::pin(start_recording_with_commands(retry_config, command_rx)).await;
-        }
         return Err(RecordError::GStreamerError(format!(
             "State change failed: {}",
             err
@@ -1003,8 +1005,11 @@ fn video_encoder_props(profile: &EncoderProfile, config: &RecordingConfig) -> St
         // Screen recordings favor detail retention over ultra-low-latency delivery.
         // Bias toward structural detail so scrolling text and thumbnails stay sharper
         // in both area and fullscreen recordings.
+        // `psy-tune=film` keeps psychovisual rate-distortion ON, which preserves
+        // perceived sharpness on text and UI edges. `ssim`/`psnr` tunes optimize
+        // for benchmark scores by disabling psy-rd, which softens screen content.
         return format!(
-            "speed-preset=medium pass=qual quantizer=14 bitrate=8000 key-int-max={} rc-lookahead=20 ref=4 subme=6 psy-tune=ssim",
+            "speed-preset=medium pass=qual quantizer=14 bitrate=8000 key-int-max={} rc-lookahead=20 ref=4 subme=6 psy-tune=film",
             key_int_max
         );
     }
@@ -1036,6 +1041,31 @@ fn video_raw_caps(profile: &EncoderProfile, config: &RecordingConfig) -> String 
     }
 
     format!("video/x-raw,framerate={}/1", config.fps)
+}
+
+fn normalize_recording_config_for_profile(
+    profile: &EncoderProfile,
+    config: &RecordingConfig,
+) -> RecordingConfig {
+    let mut normalized = config.clone();
+
+    if profile.encoder != "x264enc" {
+        return normalized;
+    }
+
+    if let Some(width) = normalized.width {
+        if width > 1 && width % 2 != 0 {
+            normalized.width = Some(width - 1);
+        }
+    }
+
+    if let Some(height) = normalized.height {
+        if height > 1 && height % 2 != 0 {
+            normalized.height = Some(height - 1);
+        }
+    }
+
+    normalized
 }
 
 fn video_queue_props(profile: &EncoderProfile) -> &'static str {
@@ -1081,16 +1111,29 @@ async fn build_pipeline(
         (get_x11_source(config)?, String::new())
     };
 
-    // HiDPI: downscale to logical resolution (2x)
-    let hidpi_filter = if config.hidpi { " ! videoscale" } else { "" };
+    // HiDPI: see commentary in `record_gif_rust_with_commands` for the full rationale.
+    //   ON  -> keep native source resolution (physical pixels, sharper, larger files).
+    //   OFF -> downscale to the user's logical selection size with Lanczos.
+    //   Fullscreen (no width/height) is always a no-op since we have no logical target.
+    let hidpi_filter = if !config.hidpi {
+        match (config.width, config.height) {
+            (Some(w), Some(h)) => format!(
+                " ! videoscale method=lanczos ! video/x-raw,width={},height={}",
+                w, h
+            ),
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
 
     // Max resolution: downscale if needed
     let resolution_filter = if let Some((max_w, max_h)) = config.max_resolution {
         if let (Some(w), Some(h)) = (config.width, config.height) {
             if w > max_w || h > max_h {
-                // Only downscale, never upscale
+                // Only downscale, never upscale; lanczos keeps text/UI edges sharp.
                 format!(
-                    " ! videoscale ! video/x-raw,width={},height={}",
+                    " ! videoscale method=lanczos ! video/x-raw,width={},height={}",
                     max_w, max_h
                 )
             } else {
@@ -1435,16 +1478,31 @@ async fn record_gif_rust_with_commands(
         (get_x11_source(&config)?, String::new())
     };
 
-    // HiDPI: downscale to logical resolution (2x)
-    let hidpi_filter = if config.hidpi { " ! videoscale" } else { "" };
+    // HiDPI:
+    //   ON  -> keep the native source resolution (physical pixels on HiDPI displays).
+    //          Sharper, larger files. This is the default to match historical behavior.
+    //   OFF -> downscale to the user's logical selection size with Lanczos. Smaller
+    //          files, output matches the rectangle the user drew on screen.
+    //   Fullscreen (no width/height) is always a no-op since we have no logical target.
+    let hidpi_filter = if !config.hidpi {
+        match (config.width, config.height) {
+            (Some(w), Some(h)) => format!(
+                " ! videoscale method=lanczos ! video/x-raw,width={},height={}",
+                w, h
+            ),
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
 
     // Max resolution: downscale if needed
     let resolution_filter = if let Some((max_w, max_h)) = config.max_resolution {
         if let (Some(w), Some(h)) = (config.width, config.height) {
             if w > max_w || h > max_h {
-                // Only downscale, never upscale
+                // Only downscale, never upscale; lanczos keeps text/UI edges sharp.
                 format!(
-                    " ! videoscale ! video/x-raw,width={},height={}",
+                    " ! videoscale method=lanczos ! video/x-raw,width={},height={}",
                     max_w, max_h
                 )
             } else {
@@ -1559,8 +1617,15 @@ async fn record_gif_rust_with_commands(
                                 "bayer:bayer_scale=5"
                             };
                             let stats_mode = if config.gif_optimize { "diff" } else { "full" };
+                            // GIF size dropdown: when a width is set we always scale to it
+                            // (matches Kap/ScreenToGif/GIPHY Capture semantics — the dropdown is a
+                            // target, not a cap). `None` means "Original" (no resize).
+                            // `-2` keeps aspect ratio while ensuring the height is divisible by 2,
+                            // which is required by ffmpeg's GIF encoder for some palette filters.
                             let scale_prefix = match config.gif_max_width {
-                                Some(max_w) if width > max_w => format!("scale={}:-1,", max_w),
+                                Some(target_w) if target_w != width => {
+                                    format!("scale={}:-2:flags=lanczos,", target_w)
+                                }
                                 _ => String::new(),
                             };
                             let vf_filter = format!(
@@ -1616,6 +1681,20 @@ async fn record_gif_rust_with_commands(
     pipeline
         .set_state(gst::State::Null)
         .map_err(|e| RecordError::GStreamerError(format!("Failed to stop pipeline: {}", e)))?;
+
+    // Eagerly tear down the recording UI before the (potentially long) ffmpeg
+    // finalization step so the user sees the dim mask and tray state clear
+    // immediately, matching the non-GIF stop UX. ffmpeg can take many seconds
+    // to run palettegen/paletteuse on the buffered frames; we don't want the
+    // overlay/tray hanging around for that. The outer recording loop will also
+    // emit `recording_session_ended` once we return — that is idempotent.
+    if matches!(
+        stop_action,
+        RecordingTerminalAction::Save | RecordingTerminalAction::Discard
+    ) {
+        crate::gnome_shell::hide_recording_mask_best_effort();
+        notify_daemon_event("recording_session_ended");
+    }
 
     // Close stdin to signal EOF to ffmpeg
     if let Some(mut child) = ffmpeg_child {
@@ -2457,7 +2536,7 @@ mod tests {
         assert!(props.contains("rc-lookahead=20"));
         assert!(props.contains("ref=4"));
         assert!(props.contains("subme=6"));
-        assert!(props.contains("psy-tune=ssim"));
+        assert!(props.contains("psy-tune=film"));
         assert!(!props.contains("tune=zerolatency"));
         assert!(!props.contains("speed-preset=fast "));
         assert!(!props.contains("speed-preset=ultrafast"));
@@ -2541,7 +2620,7 @@ mod tests {
         assert!(built.pipeline_str.contains("rc-lookahead=20"));
         assert!(built.pipeline_str.contains("ref=4"));
         assert!(built.pipeline_str.contains("subme=6"));
-        assert!(built.pipeline_str.contains("psy-tune=ssim"));
+        assert!(built.pipeline_str.contains("psy-tune=film"));
         assert!(built
             .pipeline_str
             .contains("video/x-raw,framerate=60/1,format=I420"));
@@ -2551,6 +2630,38 @@ mod tests {
         assert!(built.pipeline_str.contains("video/x-h264,profile=high"));
         assert!(!built.pipeline_str.contains("tune=zerolatency"));
         assert!(!built.pipeline_str.contains("speed-preset=ultrafast"));
+    }
+
+    #[test]
+    fn normalize_recording_config_for_x264_makes_area_dimensions_even() {
+        let config = RecordingConfig {
+            width: Some(801),
+            height: Some(599),
+            ..x11_recording_config()
+        };
+
+        let normalized =
+            normalize_recording_config_for_profile(profile_by_encoder("x264enc"), &config);
+
+        assert_eq!(normalized.width, Some(800));
+        assert_eq!(normalized.height, Some(598));
+        assert_eq!(normalized.x, config.x);
+        assert_eq!(normalized.y, config.y);
+    }
+
+    #[test]
+    fn normalize_recording_config_for_vp9_preserves_area_dimensions() {
+        let config = RecordingConfig {
+            width: Some(801),
+            height: Some(599),
+            ..x11_recording_config()
+        };
+
+        let normalized =
+            normalize_recording_config_for_profile(profile_by_encoder("vp9enc"), &config);
+
+        assert_eq!(normalized.width, Some(801));
+        assert_eq!(normalized.height, Some(599));
     }
 
     #[tokio::test]
@@ -2587,7 +2698,7 @@ mod tests {
         .expect("pipeline should build");
         assert!(downscale_pipeline
             .pipeline_str
-            .contains("! videoscale ! video/x-raw,width=1280,height=720"));
+            .contains("! videoscale method=lanczos ! video/x-raw,width=1280,height=720"));
     }
 
     #[tokio::test]
@@ -2613,7 +2724,12 @@ mod tests {
         .await
         .expect("pipeline should build");
 
-        assert!(built.pipeline_str.contains("videoconvert ! videoscale"));
+        // hidpi=true preserves the native source resolution; the pipeline must NOT
+        // inject a logical-resolution downscale stage.
+        assert!(!built
+            .pipeline_str
+            .contains(" ! videoscale method=lanczos ! video/x-raw,width=2560,height=1440"));
+        assert!(built.pipeline_str.contains(" ! videoconvert ! videorate"));
 
         if gst::ElementFactory::find("pulsesrc").is_some()
             && select_audio_encoder(PROFILES[0].muxer).is_some()

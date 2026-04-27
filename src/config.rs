@@ -170,7 +170,7 @@ impl Default for AppConfig {
             after_capture_open_annotate: DEFAULT_AFTER_CAPTURE_OPEN_ANNOTATE,
             rec_controls: true,
             rec_display_time: false,
-            rec_hidpi: false,
+            rec_hidpi: true,
             rec_notifications: true,
             rec_cursor: true,
             rec_clicks: false,
@@ -615,7 +615,7 @@ mod tests {
         let cfg = AppConfig::default();
         assert!(cfg.rec_controls);
         assert!(!cfg.rec_display_time);
-        assert!(!cfg.rec_hidpi);
+        assert!(cfg.rec_hidpi);
         assert!(cfg.rec_notifications);
         assert!(cfg.rec_cursor);
         assert!(!cfg.rec_clicks);
@@ -752,7 +752,7 @@ mod tests {
         assert_eq!(cfg.rec_webcam_rel_y, 0.0);
         assert!(cfg.rec_controls);
         assert!(cfg.rec_cursor);
-        assert!(!cfg.rec_hidpi);
+        assert!(cfg.rec_hidpi);
         assert_eq!(cfg.rec_video_format, 0);
     }
 

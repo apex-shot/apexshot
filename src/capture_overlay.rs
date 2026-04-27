@@ -638,7 +638,7 @@ impl Default for RecordingRequest {
             webcam_rel_x: 0.0,
             webcam_rel_y: 0.0,
             display_rec_time: false,
-            hidpi: false,
+            hidpi: true,
             notifications: true,
             cursor: true,
             remember_selection: false,

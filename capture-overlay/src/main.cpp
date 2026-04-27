@@ -247,7 +247,7 @@ int main(int argc, char* argv[])
     bool initialSpeaker = false;
     bool initialRecControls = true;
     bool initialDisplayRecTime = false;
-    bool initialHidpi = false;
+    bool initialHidpi = true;
     bool initialDoNotDisturb = true;
     bool initialShowCursor = true;
     bool initialRecClicks = false;

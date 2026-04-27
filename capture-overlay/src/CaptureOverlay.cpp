@@ -197,7 +197,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_hoveredDropdownItem(-1)
     , m_recControls(true)
     , m_displayRecTime(false)
-    , m_hidpi(false)
+    , m_hidpi(true)
     , m_doNotDisturb(true)
     , m_showCursor(true)
     , m_recClicks(false)
