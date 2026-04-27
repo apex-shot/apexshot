@@ -133,9 +133,9 @@ ApexShot requires the GNOME Shell extension for full functionality on GNOME Wayl
 #### Install from GitHub Release (Recommended)
 
 ```bash
-# Download the GNOME extension from the latest release
-LATEST_TAG=$(curl -s https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-wget "https://github.com/apex-shot/apexshot/releases/download/${LATEST_TAG}/apexshot-gnome-integration.zip"
+# Download the GNOME extension (finds latest release that has the zip)
+ZIP_URL=$(curl -s https://api.github.com/repos/apex-shot/apexshot/releases | grep -o '"browser_download_url": *"[^"]*apexshot-gnome-integration.zip"' | head -n 1 | cut -d '"' -f 4)
+wget -O apexshot-gnome-integration.zip "$ZIP_URL"
 
 # Install using gnome-extensions
 gnome-extensions install apexshot-gnome-integration.zip

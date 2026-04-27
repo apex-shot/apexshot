@@ -216,11 +216,22 @@ pub fn build_gnome(content: &gtk4::Box) {
     }
     content.append(&install_btn);
 
+    // Note about logout
+    let note = Label::new(Some(
+        "Note: You may need to log out and back in for the extension to appear in GNOME.",
+    ));
+    note.set_halign(Align::Center);
+    note.set_wrap(true);
+    note.set_width_request(500);
+    note.set_margin_top(16);
+    note.add_css_class("settings-sub-option");
+    content.append(&note);
+
     // Manual download link
     let manual_link = Button::with_label("Or download manually from GitHub");
     manual_link.add_css_class("secondary-settings-button");
     manual_link.set_halign(Align::Center);
-    manual_link.set_margin_top(8);
+    manual_link.set_margin_top(16);
     manual_link.connect_clicked(|_| {
         open_url(GNOME_EXTENSION_URL);
     });
