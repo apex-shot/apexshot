@@ -232,6 +232,12 @@ class PreviewStackingHelper {
     // -------------------------------------------------------------------------
 
     _bindPreview(previewId, pid, title, role, openedAtMs, win) {
+        if (!win) {
+            this._pendingPreviews.set(previewId, { pid, title, role, openedAtMs });
+            this._startResolveLoop();
+            return;
+        }
+
         const signalIds = [];
 
         signalIds.push(win.connect("notify::minimized", () => {
@@ -308,7 +314,14 @@ class PreviewStackingHelper {
         for (const [previewId, info] of this._pendingPreviews) {
             const win = this._findWindowByPid(info.pid, info.title);
             if (win) {
-                this._bindPreview(previewId, info.pid, info.title, info.openedAtMs, win);
+                this._bindPreview(
+                    previewId,
+                    info.pid,
+                    info.title,
+                    info.role,
+                    info.openedAtMs,
+                    win
+                );
             }
         }
     }

@@ -82,13 +82,6 @@ fn daemon_event_for_terminal_action(action: RecordingTerminalAction) -> Option<&
     }
 }
 
-fn should_end_recording_ui_for_terminal_action(action: RecordingTerminalAction) -> bool {
-    matches!(
-        action,
-        RecordingTerminalAction::Save | RecordingTerminalAction::Discard
-    )
-}
-
 fn notify_daemon_event(event: &str) {
     match event {
         "recording_session_started" => {
@@ -710,6 +703,18 @@ async fn start_recording_with_commands(
     // 2. Select Encoder Profile
     let (profile, final_path) = select_encoder(config.output_path.as_path())?;
     println!("Using Encoder: {} ({})", profile.name, profile.encoder);
+    println!(
+        "Recording config: fps={} area={:?}x{:?} at ({:?},{:?}) max_resolution={:?} hidpi={} mic={} speaker={}",
+        config.fps,
+        config.width,
+        config.height,
+        config.x,
+        config.y,
+        config.max_resolution,
+        config.hidpi,
+        config.mic_enabled,
+        config.speaker_enabled
+    );
 
     if final_path != config.output_path {
         println!(
@@ -723,6 +728,7 @@ async fn start_recording_with_commands(
     let _wayland_source = built_pipeline.wayland_source;
     let pipeline_str = built_pipeline.pipeline_str;
     println!("Starting recording to: {:?}", final_path);
+    println!("Pipeline: {}", pipeline_str);
 
     // 4. Create pipeline
     let pipeline = gst::parse::launch(&pipeline_str)
@@ -748,6 +754,15 @@ async fn start_recording_with_commands(
             }
         }
         let _ = pipeline.set_state(gst::State::Null);
+        if config.fps > 30 {
+            eprintln!(
+                "Recording startup failed at {} FPS; retrying once at 30 FPS.",
+                config.fps
+            );
+            let mut retry_config = config.clone();
+            retry_config.fps = 30;
+            return Box::pin(start_recording_with_commands(retry_config, command_rx)).await;
+        }
         return Err(RecordError::GStreamerError(format!(
             "State change failed: {}",
             err
@@ -1956,9 +1971,6 @@ pub async fn run_recording_with_cpp_controls(
         control_server.clear_command_sender();
         forward_commands.abort();
         let outcome = outcome?;
-        if should_end_recording_ui_for_terminal_action(outcome.1) {
-            control_server.end_recording_ui();
-        }
 
         match outcome {
             (path, action @ RecordingTerminalAction::Restart) => {
@@ -2046,9 +2058,6 @@ async fn run_recording_with_shell_controls(
         let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
         control_server.clear_command_sender();
         let outcome = outcome?;
-        if should_end_recording_ui_for_terminal_action(outcome.1) {
-            control_server.end_recording_ui();
-        }
 
         match outcome {
             (path, action @ RecordingTerminalAction::Restart) => {
@@ -2223,19 +2232,6 @@ mod tests {
             daemon_event_for_terminal_action(RecordingTerminalAction::Discard),
             Some("recording_session_ended")
         );
-    }
-
-    #[test]
-    fn restart_does_not_request_recording_ui_teardown() {
-        assert!(!should_end_recording_ui_for_terminal_action(
-            RecordingTerminalAction::Restart
-        ));
-        assert!(should_end_recording_ui_for_terminal_action(
-            RecordingTerminalAction::Save
-        ));
-        assert!(should_end_recording_ui_for_terminal_action(
-            RecordingTerminalAction::Discard
-        ));
     }
 
     fn x11_recording_config() -> RecordingConfig {

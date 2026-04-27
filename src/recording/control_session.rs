@@ -65,22 +65,14 @@ fn apply_command_side_effects(
     session_id: &str,
 ) {
     match command {
-        RecordingControlCommand::Pause => {
-            paused.store(true, Ordering::Relaxed);
-            notify_shell_overlay(command, session_id);
-        }
-        RecordingControlCommand::Resume => {
-            paused.store(false, Ordering::Relaxed);
-            notify_shell_overlay(command, session_id);
-        }
-        RecordingControlCommand::Restart => {
-            paused.store(false, Ordering::Relaxed);
-            notify_shell_overlay(command, session_id);
-        }
-        RecordingControlCommand::StopSave | RecordingControlCommand::StopDiscard => {
-            notify_shell_overlay(command, session_id);
-        }
+        RecordingControlCommand::Pause => paused.store(true, Ordering::Relaxed),
+        RecordingControlCommand::Resume
+        | RecordingControlCommand::Restart
+        | RecordingControlCommand::StopSave
+        | RecordingControlCommand::StopDiscard => paused.store(false, Ordering::Relaxed),
     }
+
+    notify_shell_overlay(command, session_id);
 }
 
 fn register_active_recording_control(
@@ -278,9 +270,6 @@ impl RecordingControlServer {
         clear_active_recording_control(&self.command_tx);
     }
 
-    pub fn end_recording_ui(&self) {
-        let _ = crate::gnome_shell::end_recording_ui(&self.session_id);
-    }
 }
 
 impl Drop for RecordingControlServer {
