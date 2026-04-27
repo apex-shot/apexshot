@@ -227,7 +227,7 @@ static void drawFrostedPanel(QPainter& p, double x, double y,
         p.fillRect(QRectF(x, y, w, h), QColor(20, 20, 20));
     }
 
-    // Subtle white sheen (0.04 alpha) for a premium feel
+    // Subtle white sheen (0.04 alpha) for a polished feel
     p.fillRect(QRectF(x, y, w, h), QColor(255, 255, 255, 10));
 
     // Panel border (matching editor's .editor-root border: 1px solid rgba(255, 255, 255, 0.10))

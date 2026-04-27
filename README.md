@@ -1,6 +1,6 @@
 # ApexShot
 
-A premium, open-source Linux screen capture tool with annotation, recording, and OCR.
+An open-source Linux screen capture tool with annotation, recording, and OCR.
 
 **Website:** https://apexshot.org/
 
