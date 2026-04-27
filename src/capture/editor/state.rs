@@ -3431,14 +3431,36 @@ impl EditorState {
                     2 => 80.0,
                     _ => 20.0,
                 };
-                let mut blurred = screenshot.clone();
+                // Match the editor's on-screen preview: downsample the screenshot
+                // to <=800px on its longest edge BEFORE blurring, then upscale to
+                // canvas size. The on-screen draw path does this for the cached
+                // preview surface, but the original save path re-blurred at full
+                // resolution which dominated "Done" latency on large captures
+                // (4K screenshots could spend 1-2 s just blurring before encode).
+                // Blur is intrinsically smooth, so the visible result of
+                // downsample -> blur -> upscale is indistinguishable from
+                // full-resolution blur.
+                const MAX_BLUR_DIM: u32 = 800;
+                let (sw, sh) = screenshot.dimensions();
+                let mut blurred = if sw > MAX_BLUR_DIM || sh > MAX_BLUR_DIM {
+                    let scale = MAX_BLUR_DIM as f64 / (sw.max(sh) as f64);
+                    image::imageops::resize(
+                        screenshot,
+                        ((sw as f64) * scale).round().max(1.0) as u32,
+                        ((sh as f64) * scale).round().max(1.0) as u32,
+                        image::imageops::FilterType::Triangle,
+                    )
+                } else {
+                    screenshot.clone()
+                };
+                let (bw, bh) = blurred.dimensions();
                 apply_blur_rect(
                     &mut blurred,
                     Rect {
                         x: 0,
                         y: 0,
-                        width: screenshot.width() as i32,
-                        height: screenshot.height() as i32,
+                        width: bw as i32,
+                        height: bh as i32,
                     },
                     blur_radius,
                     false,

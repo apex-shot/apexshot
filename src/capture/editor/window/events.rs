@@ -1554,56 +1554,83 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let window_save = window.downgrade();
     let app_save = app.downgrade();
     save_btn.connect_clicked(move |_| {
-        // Get the state data we need
-        let (image_result, annotation_data) = {
-            let st = state_save.lock().unwrap();
-            let save_result = save_edited_image(&path_save, &st);
-            let annotation_result = save_annotations(
-                &path_save,
-                st.base_image.width(),
-                st.base_image.height(),
-                &st.actions,
-                &st.base_image,
-                &st.background_style,
-                st.background_padding,
-                st.background_shadow,
-                st.background_insert,
-                st.auto_balance,
-                st.background_alignment,
-                st.background_corner_radius,
-                st.background_aspect_ratio,
-            );
-            (save_result, annotation_result)
-        };
-
-        // Log annotation errors but don't fail the save
-        if let Err(e) = annotation_data {
-            eprintln!("[editor] Warning: Failed to save annotations: {e}");
+        // Hide the editor window immediately so the user gets instant visual
+        // feedback when they click Done. Without this, GTK can't repaint until
+        // the click handler returns, and the editor stays visible (with the
+        // Done button stuck pressed) for the full duration of the save —
+        // typically a noticeable freeze when a background tool is in use due
+        // to the full-resolution composition + PNG encode that has to run.
+        // The actual save work is deferred to an idle callback so this hide
+        // gets a chance to render before the heavy work begins.
+        if let Some(window) = window_save.upgrade() {
+            window.set_visible(false);
         }
 
-        match image_result {
-            Ok(()) => {
-                // Close editor window
-                if let Some(window) = window_save.upgrade() {
-                    window.close();
-                }
-                if let Some(app) = app_save.upgrade() {
-                    app.quit();
-                }
+        let state_save = state_save.clone();
+        let path_save = path_save.clone();
+        let window_save = window_save.clone();
+        let app_save = app_save.clone();
 
-                // Show preview via daemon for single-instance coordination
-                // If daemon not running, fall back to spawning directly
-                if !crate::daemon::show_preview_via_daemon(&path_save) {
-                    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-                    if let Err(e) = Command::new(&exe).arg("preview").arg(&path_save).spawn() {
-                        eprintln!("[editor] Failed to open preview: {e}");
+        glib::idle_add_local_once(move || {
+            // Get the state data we need
+            let (image_result, annotation_data) = {
+                let st = state_save.lock().unwrap();
+                let save_result = save_edited_image(&path_save, &st);
+                let annotation_result = save_annotations(
+                    &path_save,
+                    st.base_image.width(),
+                    st.base_image.height(),
+                    &st.actions,
+                    &st.base_image,
+                    &st.background_style,
+                    st.background_padding,
+                    st.background_shadow,
+                    st.background_insert,
+                    st.auto_balance,
+                    st.background_alignment,
+                    st.background_corner_radius,
+                    st.background_aspect_ratio,
+                );
+                (save_result, annotation_result)
+            };
+
+            // Log annotation errors but don't fail the save
+            if let Err(e) = annotation_data {
+                eprintln!("[editor] Warning: Failed to save annotations: {e}");
+            }
+
+            match image_result {
+                Ok(()) => {
+                    // Close editor window
+                    if let Some(window) = window_save.upgrade() {
+                        window.close();
+                    }
+                    if let Some(app) = app_save.upgrade() {
+                        app.quit();
+                    }
+
+                    // Show preview via daemon for single-instance coordination
+                    // If daemon not running, fall back to spawning directly
+                    if !crate::daemon::show_preview_via_daemon(&path_save) {
+                        let exe =
+                            std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+                        if let Err(e) =
+                            Command::new(&exe).arg("preview").arg(&path_save).spawn()
+                        {
+                            eprintln!("[editor] Failed to open preview: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to save edited image: {e}");
+                    // Re-show the window so the user can retry, since the file
+                    // was never written.
+                    if let Some(window) = window_save.upgrade() {
+                        window.set_visible(true);
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to save edited image: {e}");
-            }
-        }
+        });
     });
 
     let window_close = window.downgrade();

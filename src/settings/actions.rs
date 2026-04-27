@@ -81,8 +81,10 @@ pub struct SaveInputs {
     pub shortcut_capture_previous_area: Button,
     pub shortcut_capture_fullscreen: Button,
     pub shortcut_capture_window: Button,
+    pub shortcut_show_last_preview: Button,
     pub shortcut_open_recording_ui: Button,
     pub shortcut_record_screen: Button,
+    pub shortcut_record_area: Button,
     pub shortcut_recording_pause_resume: Button,
     pub shortcut_recording_stop_save: Button,
     pub shortcut_recording_restart: Button,
@@ -238,8 +240,10 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         button_label_value(&inputs.shortcut_capture_previous_area);
     config.shortcut_capture_fullscreen = button_label_value(&inputs.shortcut_capture_fullscreen);
     config.shortcut_capture_window = button_label_value(&inputs.shortcut_capture_window);
+    config.shortcut_show_last_preview = button_label_value(&inputs.shortcut_show_last_preview);
     config.shortcut_open_recording_ui = button_label_value(&inputs.shortcut_open_recording_ui);
     config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);
+    config.shortcut_record_area = button_label_value(&inputs.shortcut_record_area);
     config.shortcut_recording_pause_resume =
         button_label_value(&inputs.shortcut_recording_pause_resume);
     config.shortcut_recording_stop_save = button_label_value(&inputs.shortcut_recording_stop_save);
@@ -278,8 +282,10 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         || previous_config.shortcut_capture_previous_area != config.shortcut_capture_previous_area
         || previous_config.shortcut_capture_fullscreen != config.shortcut_capture_fullscreen
         || previous_config.shortcut_capture_window != config.shortcut_capture_window
+        || previous_config.shortcut_show_last_preview != config.shortcut_show_last_preview
         || previous_config.shortcut_open_recording_ui != config.shortcut_open_recording_ui
         || previous_config.shortcut_record_screen != config.shortcut_record_screen
+        || previous_config.shortcut_record_area != config.shortcut_record_area
         || previous_config.shortcut_recording_pause_resume
             != config.shortcut_recording_pause_resume
         || previous_config.shortcut_recording_stop_save != config.shortcut_recording_stop_save

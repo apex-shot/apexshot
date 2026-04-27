@@ -349,8 +349,10 @@ pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &Appl
         &widgets.capture_prev_btn,
         &widgets.capture_fullscreen_btn,
         &widgets.capture_window_btn,
+        &widgets.show_last_preview_btn,
         &widgets.open_recording_ui_btn,
         &widgets.record_screen_btn,
+        &widgets.record_area_btn,
         &widgets.recording_pause_resume_btn,
         &widgets.recording_stop_save_btn,
         &widgets.recording_restart_btn,
@@ -371,8 +373,10 @@ pub struct ShortcutSettingsWidgets {
     pub capture_prev_btn: Button,
     pub capture_fullscreen_btn: Button,
     pub capture_window_btn: Button,
+    pub show_last_preview_btn: Button,
     pub open_recording_ui_btn: Button,
     pub record_screen_btn: Button,
+    pub record_area_btn: Button,
     pub recording_pause_resume_btn: Button,
     pub recording_stop_save_btn: Button,
     pub recording_restart_btn: Button,
@@ -543,6 +547,13 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         &config.shortcut_capture_window,
         false,
     );
+    let show_last_preview_btn = create_row(
+        &screenshots_frame,
+        "Show Last Preview:",
+        None,
+        &config.shortcut_show_last_preview,
+        true,
+    );
     section.append(&screenshots_frame);
 
     create_header(&section, "Recording", "camera-video-symbolic");
@@ -560,6 +571,13 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_record_screen,
         true,
+    );
+    let record_area_btn = create_row(
+        &recording_frame,
+        "Record Area:",
+        None,
+        &config.shortcut_record_area,
+        false,
     );
     let recording_pause_resume_btn = create_row(
         &recording_frame,
@@ -602,8 +620,10 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         capture_prev_btn,
         capture_fullscreen_btn,
         capture_window_btn,
+        show_last_preview_btn,
         open_recording_ui_btn,
         record_screen_btn,
+        record_area_btn,
         recording_pause_resume_btn,
         recording_stop_save_btn,
         recording_restart_btn,
