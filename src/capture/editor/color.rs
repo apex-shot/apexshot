@@ -16,7 +16,11 @@ pub const MAX_FOCUS_INTENSITY: f64 = 90.0;
 pub const DEFAULT_FOCUS_INTENSITY: f64 = 58.0;
 #[allow(dead_code)]
 pub const CENSOR_BLOCK_SIZE: i32 = 10;
-pub const DRAG_REDRAW_INTERVAL_US: i64 = 16_000;
+// Cap motion-driven redraws at ~120 Hz so high-refresh displays feel smooth
+// while still coalescing very fast pointer events. The display server / GTK
+// frame clock will further align repaints to the actual vsync, so this value
+// only bounds the worst-case redraw rate – it does not force draws.
+pub const DRAG_REDRAW_INTERVAL_US: i64 = 8_000;
 pub const DEFAULT_COLOR_INDEX: usize = 0;
 pub const SELECT_HIT_PADDING: f64 = 8.0;
 #[allow(dead_code)]

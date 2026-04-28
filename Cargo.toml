@@ -73,8 +73,32 @@ relm4-icons-build = "0.10.1"
 maintainer = "codegoddy <codegoddy@gmail.com>"
 copyright = "2026, codegoddy"
 license-file = ["LICENSE", "4"]
-depends = "$auto, wl-clipboard, ffmpeg, libnotify-bin, wget, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav"
-recommends = ""
+# Runtime dependency policy — every entry below is REQUIRED for some
+# user-facing feature to work. Entries are grouped by what they unlock:
+#
+#   $auto                                      → shared libs of the Rust binary
+#                                                (gtk4, gstreamer, pipewire, …)
+#   wl-clipboard, xclip                        → clipboard copy on Wayland / X11
+#   xdg-utils                                  → `xdg-open` (open file/URL)
+#   libnotify-bin                              → desktop notifications via notify-send
+#   pulseaudio-utils                           → pactl (audio source/sink lookup for recording)
+#   ffmpeg                                     → GIF encoding & video post-processing
+#   wget, curl, unzip                          → in-app GNOME extension installer
+#   gstreamer1.0-{plugins-*,libav,pipewire,pulseaudio}
+#                                              → ScreenCast/PipeWire capture, encoding, audio
+#   tesseract-ocr, tesseract-ocr-eng           → OCR (text extraction) – English by default
+#   libqt5widgets5/dbus5/network5/x11extras5,
+#   libxtst6                                   → run-time libs for the bundled
+#                                                `apexshot-capture` C++ overlay
+#                                                (cargo-deb's $auto cannot
+#                                                introspect asset binaries, so
+#                                                these MUST be listed manually)
+depends = "$auto, wl-clipboard, xclip, xdg-utils, libnotify-bin, pulseaudio-utils, ffmpeg, wget, curl, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-pipewire, gstreamer1.0-pulseaudio, tesseract-ocr, tesseract-ocr-eng, libqt5widgets5, libqt5dbus5, libqt5network5, libqt5x11extras5, libxtst6"
+# Recommended (not required) — adds optional capture paths and GNOME polish:
+#   xdg-desktop-portal-gnome | -gtk            → ScreenCast / Screenshot portal backend
+#   grim                                       → fast wlroots screencopy fallback
+#   pipewire                                   → PipeWire daemon (already on most modern installs)
+recommends = "xdg-desktop-portal-gnome | xdg-desktop-portal-gtk, grim, pipewire"
 section = "graphics"
 priority = "optional"
 assets = [

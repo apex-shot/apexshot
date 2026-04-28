@@ -520,11 +520,7 @@ fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
         HotkeyBinding {
             name: Some("record_area".into()),
             accelerator: "CTRL+ALT+SHIFT+R".into(),
-            args: vec![
-                "record".into(),
-                "area".into(),
-                "--overlay-stop".into(),
-            ],
+            args: vec!["record".into(), "area".into(), "--overlay-stop".into()],
         },
         HotkeyBinding {
             name: Some("recording_pause_resume".into()),
@@ -2031,10 +2027,7 @@ mod tests {
             .find(|binding| binding.name.as_deref() == Some("record_area"))
             .expect("record_area binding should exist by default");
         assert_eq!(record_area.accelerator, "CTRL+ALT+SHIFT+R");
-        assert_eq!(
-            record_area.args,
-            vec!["record", "area", "--overlay-stop"]
-        );
+        assert_eq!(record_area.args, vec!["record", "area", "--overlay-stop"]);
 
         assert!(hotkeys
             .bindings

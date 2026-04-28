@@ -56,10 +56,10 @@ fn install_extension(button: gtk4::glib::SendWeakRef<Button>) {
         // Dynamically find the latest release that actually contains the zip file
         // This handles cases where recent releases (e.g., .deb only) don't have the zip
         let get_url_cmd = r#"curl -s https://api.github.com/repos/apex-shot/apexshot/releases | grep -o '"browser_download_url": *"[^"]*apexshot-gnome-integration.zip"' | head -n 1 | cut -d '"' -f 4"#;
-        
+
         if let Ok(output) = Command::new("sh").arg("-c").arg(get_url_cmd).output() {
             let zip_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            
+
             if !zip_url.is_empty() {
                 // Download zip
                 let _ = Command::new("wget")
@@ -83,7 +83,7 @@ fn install_extension(button: gtk4::glib::SendWeakRef<Button>) {
                     .output();
             }
         }
-            
+
         gtk4::glib::MainContext::default().invoke(move || {
             if let Some(button) = button.upgrade() {
                 button.set_label("Extension Installed ✓");

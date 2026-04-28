@@ -269,7 +269,6 @@ impl RecordingControlServer {
         self.paused.store(false, Ordering::Relaxed);
         clear_active_recording_control(&self.command_tx);
     }
-
 }
 
 impl Drop for RecordingControlServer {

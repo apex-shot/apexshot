@@ -1025,20 +1025,73 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
         }
     });
 
+    // Decode the screenshot on a background thread so the preview card can
+    // appear immediately (often a frame or two earlier on large screenshots)
+    // without blocking the GTK main loop on PNG decode. The decoded RGBA
+    // bytes are then handed back to the main loop, which wraps them in a
+    // Pixbuf + Texture and triggers a single redraw.
+    let (tx, rx) = std::sync::mpsc::channel::<Option<(Vec<u8>, i32, i32)>>();
+    let path_decode = path.clone();
+    std::thread::spawn(move || {
+        let decoded = image::open(&path_decode)
+            .map(|img| {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                (rgba.into_raw(), w as i32, h as i32)
+            })
+            .ok();
+        if decoded.is_none() {
+            eprintln!(
+                "Preview thumbnail warning: failed to decode screenshot at {}",
+                path_decode.display()
+            );
+        }
+        let _ = tx.send(decoded);
+    });
+
     let area_weak = area.downgrade();
-    glib::idle_add_local_once(move || {
-        let Some(area) = area_weak.upgrade() else {
-            return;
-        };
-        *texture.borrow_mut() = preview_texture(&path, preview_width, preview_height);
-        area.queue_draw();
+    let texture_main = texture.clone();
+    let path_fallback = path.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(4), move || {
+        match rx.try_recv() {
+            Ok(Some((data, width, height))) => {
+                let stride = width.saturating_mul(4);
+                let bytes = gtk4::glib::Bytes::from_owned(data);
+                let pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_bytes(
+                    &bytes,
+                    gtk4::gdk_pixbuf::Colorspace::Rgb,
+                    true,
+                    8,
+                    width,
+                    height,
+                    stride,
+                );
+                *texture_main.borrow_mut() = Some(gdk::Texture::for_pixbuf(&pixbuf));
+                if let Some(area) = area_weak.upgrade() {
+                    area.queue_draw();
+                }
+                ControlFlow::Break
+            }
+            Ok(None) => {
+                // Background decode failed – fall back to the synchronous
+                // gdk-pixbuf loader on the main thread so the preview is
+                // never empty if the worker thread choked.
+                *texture_main.borrow_mut() = preview_texture(&path_fallback);
+                if let Some(area) = area_weak.upgrade() {
+                    area.queue_draw();
+                }
+                ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
+        }
     });
 
     area
 }
 
-fn preview_texture(path: &Path, _preview_width: i32, _preview_height: i32) -> Option<gdk::Texture> {
-    // Load full image to allow the draw_func to 'cover' without distortion
+fn preview_texture(path: &Path) -> Option<gdk::Texture> {
+    // Synchronous fallback used only if the background decoder thread fails.
     let preview_pixbuf = match gtk4::gdk_pixbuf::Pixbuf::from_file(path) {
         Ok(pixbuf) => pixbuf,
         Err(err) => {

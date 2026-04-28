@@ -30,17 +30,28 @@ const WEBCAM_SIZE_MAP = Object.freeze({
     3: {width: 360, height: 480},  // Huge
     // 4 = Fullscreen: handled specially in webcamPreviewSize()
 });
+// Click colours mirror the C++ recording overlay palette so the live
+// click marker on screen is visually identical to the preview the user
+// configured (see capture-overlay/src/CaptureOverlay_Drawing.cpp).
 const CLICK_COLOR_MAP = Object.freeze({
-    0: "rgb(180, 180, 180)",
-    1: "rgb(122, 100, 255)",
-    2: "rgb(255, 60, 60)",
-    3: "rgb(60, 120, 255)",
-    4: "rgb(60, 200, 80)",
-    5: "rgb(255, 210, 50)",
-    6: "rgb(255, 150, 30)",
-    7: "rgb(180, 60, 220)",
-    8: "rgb(255, 255, 255)",
+    0: {r: 180, g: 180, b: 180}, // Gray
+    1: {r: 122, g: 100, b: 255}, // Indigo
+    2: {r: 255, g: 60,  b: 60},  // Red
+    3: {r: 60,  g: 120, b: 255}, // Blue
+    4: {r: 60,  g: 200, b: 80},  // Green
+    5: {r: 255, g: 210, b: 50},  // Yellow
+    6: {r: 255, g: 150, b: 30},  // Orange
+    7: {r: 180, g: 60,  b: 220}, // Purple
+    8: {r: 255, g: 255, b: 255}, // White
 });
+
+function clickRgb(color) {
+    return `rgb(${color.r}, ${color.g}, ${color.b})`;
+}
+
+function clickRgba(color, alpha) {
+    return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+}
 
 function ensureRuntimeOverlayState(sessionState) {
     if (!sessionState.runtimeOverlayState) {
@@ -57,6 +68,13 @@ function ensureRuntimeOverlayState(sessionState) {
             webcamDragging: false,
             webcamDragOffsetX: 0,
             webcamDragOffsetY: 0,
+            // Stage-level signal IDs used while a webcam drag is in
+            // progress. We listen on `global.stage` for motion / release
+            // (instead of only on the actor) so a fast pointer movement or a
+            // release that lands on another widget never leaves the webcam
+            // stuck to the cursor.
+            webcamStageMotionId: 0,
+            webcamStageReleaseId: 0,
             webcamImageContent: null,
             webcamFrameWidth: 0,
             webcamFrameHeight: 0,
@@ -64,6 +82,7 @@ function ensureRuntimeOverlayState(sessionState) {
             clickPulseStackActor: null,
             clickPulseActor: null,
             clickHaloActor: null,
+            clickMarkerActor: null,
             clickLabelActor: null,
             lastAnimatedClickTimestampMs: -1,
             keystrokesActor: null,
@@ -101,31 +120,17 @@ function createWebcamActor(sessionState, overlayState) {
     });
     actor.add_child(overlayState.webcamFrameActor);
 
-    actor.connect("button-press-event", (_actor, event) => {
+    // Apply the current pointer position to the webcam actor. Shared by
+    // the actor's own motion handler (slow drags inside the widget) and
+    // the stage-level capture installed during an active drag (fast drags
+    // that move the pointer outside the widget bounds).
+    const applyDragPosition = (stageX, stageY) => {
         const controlsState = sessionState.controlsState;
         const snapshot = sessionState.runtimeOverlaySnapshot;
         if (!controlsState || !snapshot)
-            return Clutter.EVENT_PROPAGATE;
-
-        const [stageX, stageY] = event.get_coords();
-        const [actorX, actorY] = actor.get_position();
-        overlayState.webcamDragging = true;
-        overlayState.webcamDragOffsetX = stageX - actorX;
-        overlayState.webcamDragOffsetY = stageY - actorY;
-        return Clutter.EVENT_STOP;
-    });
-
-    actor.connect("motion-event", (_actor, event) => {
-        if (!overlayState.webcamDragging)
-            return Clutter.EVENT_PROPAGATE;
-
-        const controlsState = sessionState.controlsState;
-        const snapshot = sessionState.runtimeOverlaySnapshot;
-        if (!controlsState || !snapshot)
-            return Clutter.EVENT_STOP;
+            return false;
 
         const size = webcamPreviewSize(snapshot, controlsState.rect);
-        const [stageX, stageY] = event.get_coords();
         const bounds = clampPlacement(
             controlsState.rect,
             stageX - overlayState.webcamDragOffsetX,
@@ -142,20 +147,90 @@ function createWebcamActor(sessionState, overlayState) {
         const relY = maxY > minY ? 1 - ((bounds.y - minY) / (maxY - minY)) : 0;
         setRuntimeOverlayWebcamPosition(sessionState, relX, relY);
         updateRuntimeOverlaySnapshot(sessionState);
-        return Clutter.EVENT_STOP;
-    });
+        return true;
+    };
 
     const stopDragging = () => {
         overlayState.webcamDragging = false;
+        if (overlayState.webcamStageMotionId) {
+            global.stage.disconnect(overlayState.webcamStageMotionId);
+            overlayState.webcamStageMotionId = 0;
+        }
+        if (overlayState.webcamStageReleaseId) {
+            global.stage.disconnect(overlayState.webcamStageReleaseId);
+            overlayState.webcamStageReleaseId = 0;
+        }
         return Clutter.EVENT_STOP;
     };
+
+    actor.connect("button-press-event", (_actor, event) => {
+        const controlsState = sessionState.controlsState;
+        const snapshot = sessionState.runtimeOverlaySnapshot;
+        if (!controlsState || !snapshot)
+            return Clutter.EVENT_PROPAGATE;
+
+        // Defensively clear any leftover stage-level handlers before we
+        // start a new drag, in case a previous drag's release was somehow
+        // missed (e.g. the pointer was grabbed by another window).
+        stopDragging();
+
+        const [stageX, stageY] = event.get_coords();
+        const [actorX, actorY] = actor.get_position();
+        overlayState.webcamDragging = true;
+        overlayState.webcamDragOffsetX = stageX - actorX;
+        overlayState.webcamDragOffsetY = stageY - actorY;
+
+        // Track motion + release on the stage so the drag follows the
+        // pointer reliably even when it leaves the actor's bounds, and so
+        // the release is always observed regardless of which widget is
+        // under the cursor when the user lets go.
+        overlayState.webcamStageMotionId = global.stage.connect(
+            "motion-event",
+            (_stage, ev) => {
+                if (!overlayState.webcamDragging)
+                    return Clutter.EVENT_PROPAGATE;
+                const [sx, sy] = ev.get_coords();
+                applyDragPosition(sx, sy);
+                return Clutter.EVENT_STOP;
+            }
+        );
+        overlayState.webcamStageReleaseId = global.stage.connect(
+            "button-release-event",
+            () => stopDragging()
+        );
+
+        return Clutter.EVENT_STOP;
+    });
+
+    actor.connect("motion-event", (_actor, event) => {
+        if (!overlayState.webcamDragging)
+            return Clutter.EVENT_PROPAGATE;
+        const [stageX, stageY] = event.get_coords();
+        applyDragPosition(stageX, stageY);
+        return Clutter.EVENT_STOP;
+    });
+
     actor.connect("button-release-event", stopDragging);
     actor.connect("leave-event", () => Clutter.EVENT_PROPAGATE);
+    // If the actor itself is destroyed mid-drag (e.g. the recording
+    // session ends), make sure we don't leave the stage handlers dangling
+    // — they would otherwise keep the actor stuck to the pointer for any
+    // future overlay state object that re-reads `webcamDragging`.
+    actor.connect("destroy", () => stopDragging());
 
     return actor;
 }
 
 function createClicksActor(overlayState) {
+    // Layered structure (back to front), centered via BinLayout so each
+    // child can have its own size and pivot:
+    //   clickHaloActor   → soft radial glow behind the marker
+    //   clickPulseActor  → animated expanding ring (when click_animate)
+    //   clickMarkerActor → the filled / outlined click circle itself
+    //
+    // The container (`clicksActor`) and its inner stack
+    // (`clickPulseStackActor`) are sized to the largest element (the
+    // expanded pulse ring) so the ring can grow without being clipped.
     const actor = new St.Widget({
         reactive: false,
         layout_manager: new Clutter.BinLayout(),
@@ -174,6 +249,9 @@ function createClicksActor(overlayState) {
 
     overlayState.clickPulseActor = new St.Widget({reactive: false});
     overlayState.clickPulseStackActor.add_child(overlayState.clickPulseActor);
+
+    overlayState.clickMarkerActor = new St.Widget({reactive: false});
+    overlayState.clickPulseStackActor.add_child(overlayState.clickMarkerActor);
 
     return actor;
 }
@@ -449,6 +527,7 @@ function updateClicksActor(overlayState, snapshot, rect) {
             overlayState.clicksActor.remove_all_transitions();
             overlayState.clickHaloActor.remove_all_transitions();
             overlayState.clickPulseActor.remove_all_transitions();
+            overlayState.clickMarkerActor?.remove_all_transitions();
             overlayState.clicksActor.opacity = 0;
             overlayState.clicksActor.hide();
         }
@@ -460,91 +539,175 @@ function updateClicksActor(overlayState, snapshot, rect) {
 
     overlayState.lastAnimatedClickTimestampMs = click.timestampMs;
 
-    const clickSize = 12 + Math.round(snapshot.click_size * 56);
-    const haloSize = clickSize + 18 + Math.round(snapshot.click_size * 10);
-    const clickColor = CLICK_COLOR_MAP[snapshot.click_color] ?? CLICK_COLOR_MAP[0];
-    let borderWidth = 2;
-    let fillColor = "rgba(255, 255, 255, 0.06)";
-    let innerOpacity = 230;
-    let haloOpacity = 120;
+    // ── Geometry ─────────────────────────────────────────────────────────
+    // markerSize is the diameter of the visible click marker. Mirrors the
+    // C++ preview's `baseRadius = 6 + click_size * 28` doubled (the preview
+    // is rendered at ~half scale inside the configuration panel), so a
+    // user-set size of 0.5 → 40 px on screen.
+    const markerSize = 12 + Math.round(snapshot.click_size * 56);
+    const markerRadius = Math.floor(markerSize / 2);
+    // Halo is the soft radial glow behind the marker. The C++ preview uses
+    // `baseRadius * 2.4` for the gradient extent; we reproduce that with a
+    // box-shadow whose blur radius scales the same way.
+    const haloSize = markerSize;
+    const haloRadius = Math.floor(haloSize / 2);
+    // Maximum extent the animated pulse ring grows to. Keep the container
+    // big enough for it to expand without clipping.
+    const pulseMaxScale = 1.85;
+    const containerSize = Math.ceil(markerSize * pulseMaxScale) + 24;
+    const containerHalf = Math.floor(containerSize / 2);
 
-    if (snapshot.click_style === 1) {
-        borderWidth = 0;
-        fillColor = clickColor;
-        innerOpacity = 210;
-        haloOpacity = 92;
-    } else if (snapshot.click_style >= 2) {
-        borderWidth = 3;
-        fillColor = "rgba(255, 255, 255, 0.12)";
-        innerOpacity = 240;
-        haloOpacity = 138;
-    }
+    const colorRgb = CLICK_COLOR_MAP[snapshot.click_color] ?? CLICK_COLOR_MAP[0];
+    const colorString = clickRgb(colorRgb);
+    const isFilled = snapshot.click_style === 1;
 
+    // ── Halo: soft radial glow, identical to the gradient-halo in the C++
+    // preview. Implemented as a transparent circle with a coloured
+    // box-shadow so it works on any GNOME Shell version (no reliance on
+    // CSS radial-gradient support in St). ────────────────────────────────
+    const glowSpread = Math.max(2, Math.round(markerSize * 0.18));
+    const glowBlur = Math.max(8, Math.round(markerSize * 0.85));
     overlayState.clickHaloActor.set_size(haloSize, haloSize);
     overlayState.clickHaloActor.set_style([
         `width: ${haloSize}px;`,
         `height: ${haloSize}px;`,
-        `border-radius: ${Math.floor(haloSize / 2)}px;`,
-        `border: 2px solid ${clickColor};`,
+        `border-radius: ${haloRadius}px;`,
         "background-color: transparent;",
+        "border: none;",
+        `box-shadow: 0 0 ${glowBlur}px ${glowSpread}px ${clickRgba(colorRgb, 0.34)};`,
     ].join(" "));
 
-    overlayState.clickPulseActor.set_size(clickSize, clickSize);
+    // ── Pulse ring: expanding outline that travels outward when the user
+    // enabled the "Animate clicks" option. Matches the per-frame ring in
+    // the C++ preview (`baseRadius + phase * 30`). ──────────────────────
+    overlayState.clickPulseActor.set_size(markerSize, markerSize);
     overlayState.clickPulseActor.set_style([
-        `width: ${clickSize}px;`,
-        `height: ${clickSize}px;`,
-        `border-radius: ${Math.floor(clickSize / 2)}px;`,
-        borderWidth > 0 ? `border: ${borderWidth}px solid ${clickColor};` : "border: none;",
-        `background-color: ${fillColor};`,
+        `width: ${markerSize}px;`,
+        `height: ${markerSize}px;`,
+        `border-radius: ${markerRadius}px;`,
+        "background-color: transparent;",
+        `border: 2.4px solid ${colorString};`,
     ].join(" "));
-    overlayState.clickPulseStackActor.set_size(haloSize, haloSize);
+
+    // ── Marker: the actual click indicator. Two styles, each chosen to
+    // read clearly on any background:
+    //   • Filled  → solid colour disc with a thin white inner rim and a
+    //               soft drop shadow that lifts it off light pixels.
+    //   • Outline → 3 px coloured ring with a faint translucent fill that
+    //               keeps the centre legible against busy backgrounds. ──
+    overlayState.clickMarkerActor.set_size(markerSize, markerSize);
+    overlayState.clickMarkerActor.set_style((
+        isFilled
+            ? [
+                `width: ${markerSize}px;`,
+                `height: ${markerSize}px;`,
+                `border-radius: ${markerRadius}px;`,
+                `background-color: ${colorString};`,
+                `border: 1.5px solid rgba(255, 255, 255, 0.55);`,
+                `box-shadow: 0 2px 10px rgba(0, 0, 0, 0.42);`,
+            ]
+            : [
+                `width: ${markerSize}px;`,
+                `height: ${markerSize}px;`,
+                `border-radius: ${markerRadius}px;`,
+                `background-color: ${clickRgba(colorRgb, 0.16)};`,
+                `border: 3px solid ${colorString};`,
+                `box-shadow: 0 2px 10px rgba(0, 0, 0, 0.42);`,
+            ]
+    ).join(" "));
+
+    // ── Layout / positioning ────────────────────────────────────────────
+    overlayState.clickPulseStackActor.set_size(containerSize, containerSize);
+    overlayState.clickPulseStackActor.set_position(0, 0);
     const bounds = clampPlacement(
         rect,
-        click.x - Math.floor(haloSize / 2),
-        click.y - Math.floor(haloSize / 2),
-        haloSize,
-        haloSize,
+        click.x - containerHalf,
+        click.y - containerHalf,
+        containerSize,
+        containerSize,
         CLICK_INDICATOR_MARGIN
     );
     overlayState.clicksActor.set_size(bounds.width, bounds.height);
     overlayState.clicksActor.set_position(bounds.x, bounds.y);
-    overlayState.clickPulseStackActor.set_position(0, 0);
 
+    // ── Animation ───────────────────────────────────────────────────────
     overlayState.clicksActor.remove_all_transitions();
     overlayState.clickHaloActor.remove_all_transitions();
     overlayState.clickPulseActor.remove_all_transitions();
+    overlayState.clickMarkerActor.remove_all_transitions();
+
+    overlayState.clickHaloActor.set_pivot_point(0.5, 0.5);
+    overlayState.clickPulseActor.set_pivot_point(0.5, 0.5);
+    overlayState.clickMarkerActor.set_pivot_point(0.5, 0.5);
+
     overlayState.clicksActor.opacity = 255;
     overlayState.clicksActor.show();
 
-    overlayState.clickPulseStackActor.set_scale(snapshot.click_animate ? 0.82 : 1.0, snapshot.click_animate ? 0.82 : 1.0);
-    overlayState.clickPulseStackActor.opacity = 255;
-    overlayState.clickHaloActor.opacity = snapshot.click_animate ? haloOpacity : 0;
-    overlayState.clickPulseActor.opacity = innerOpacity;
+    // Marker pops in slightly under-sized then settles to 1.0 — feels like
+    // a real button press without being cartoonish.
+    overlayState.clickMarkerActor.set_scale(0.78, 0.78);
+    overlayState.clickMarkerActor.opacity = 255;
+    overlayState.clickMarkerActor.ease({
+        scale_x: 1.0,
+        scale_y: 1.0,
+        duration: 130,
+        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+    });
 
-    const durationMs = snapshot.click_animate ? 170 : 110;
+    // Halo blooms briefly, then fades. Stays subtle when animation is off
+    // so it doesn't draw attention to itself.
+    overlayState.clickHaloActor.set_scale(0.85, 0.85);
+    overlayState.clickHaloActor.opacity = snapshot.click_animate ? 220 : 160;
+    overlayState.clickHaloActor.ease({
+        scale_x: 1.0,
+        scale_y: 1.0,
+        duration: 140,
+        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+    });
+
+    // Pulse ring only renders when the user opted in.
     if (snapshot.click_animate) {
-        overlayState.clickPulseStackActor.ease({
-            scale_x: 1.18,
-            scale_y: 1.18,
-            duration: durationMs,
+        overlayState.clickPulseActor.show();
+        overlayState.clickPulseActor.set_scale(1.0, 1.0);
+        overlayState.clickPulseActor.opacity = 210;
+        overlayState.clickPulseActor.ease({
+            scale_x: pulseMaxScale,
+            scale_y: pulseMaxScale,
+            duration: 480,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
-        overlayState.clickHaloActor.ease({
+        overlayState.clickPulseActor.ease({
             opacity: 0,
-            duration: durationMs,
+            duration: 480,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
     } else {
-        overlayState.clickHaloActor.opacity = 0;
+        overlayState.clickPulseActor.opacity = 0;
+        overlayState.clickPulseActor.set_scale(1.0, 1.0);
     }
-    overlayState.clickPulseActor.ease({
+
+    // Coordinated fade-out of every layer. The total visible time for the
+    // marker is ~440 ms (animated) / ~280 ms (static) — long enough to
+    // register on a recording at typical frame rates without bleeding into
+    // the next click.
+    const fadeDuration = snapshot.click_animate ? 360 : 220;
+    const fadeDelay = snapshot.click_animate ? 80 : 40;
+    overlayState.clickMarkerActor.ease({
         opacity: 0,
-        duration: durationMs,
+        duration: fadeDuration,
+        delay: fadeDelay,
+        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+    });
+    overlayState.clickHaloActor.ease({
+        opacity: 0,
+        duration: fadeDuration,
+        delay: fadeDelay,
         mode: Clutter.AnimationMode.EASE_OUT_QUAD,
     });
     overlayState.clicksActor.ease({
         opacity: 0,
-        duration: durationMs,
+        duration: fadeDuration,
+        delay: fadeDelay,
         mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         onComplete: () => {
             overlayState.clicksActor.hide();
@@ -692,6 +855,7 @@ export function destroyRuntimeOverlays(sessionState) {
     overlayState.clickPulseStackActor = null;
     overlayState.clickPulseActor = null;
     overlayState.clickHaloActor = null;
+    overlayState.clickMarkerActor = null;
     overlayState.clickLabelActor = null;
     overlayState.keystrokesActor = null;
     overlayState.keystrokeLabelActor = null;

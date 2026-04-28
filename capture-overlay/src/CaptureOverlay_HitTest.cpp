@@ -250,7 +250,14 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
     if (m_recordingPanelOpen) {
         RecordPanelTile tile = hitTestRecordingPanel(pos);
         if (tile != RecordPanelTile::None) {
-            setCursor(Qt::PointingHandCursor);
+            // Disabled features keep the default arrow cursor so the tile
+            // visibly communicates that it is non-interactive.
+            if (tile == RecordPanelTile::Keystrokes
+                && !apexshot::kKeystrokesFeatureAvailable) {
+                setCursor(Qt::ArrowCursor);
+            } else {
+                setCursor(Qt::PointingHandCursor);
+            }
             return;
         }
         // Still allow resize handles when panel is open

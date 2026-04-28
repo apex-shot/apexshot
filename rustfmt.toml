@@ -1,0 +1,12 @@
+# ApexShot Rust formatting rules.
+#
+# Stable rustfmt options only — anything `unstable_features = true` would
+# require nightly and breaks `cargo fmt` on stable. Keep this list short
+# and only override defaults when there's a reason to.
+
+edition = "2021"
+max_width = 100
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true
+

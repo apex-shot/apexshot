@@ -31,6 +31,15 @@ class QTimer;
 
 #include "ScrollControlPanel.h"
 
+// ── Feature flags ────────────────────────────────────────────────────────
+// The "Show keystrokes" recording overlay is still under development. The
+// UI is kept in place so the layout/state machine doesn't churn, but the
+// tile and the matching settings row are rendered as disabled and clicks
+// are ignored. Flip this to `true` once the recorder side is implemented.
+namespace apexshot {
+inline constexpr bool kKeystrokesFeatureAvailable = false;
+}
+
 class CaptureOverlay : public QWidget
 {
     Q_OBJECT
@@ -84,7 +93,12 @@ public:
     bool recordMicEnabled() const { return m_recMic; }
     bool recordSpeakerEnabled() const { return m_recSpeaker; }
     bool recordClicksEnabled() const { return m_recClicks; }
-    bool recordKeystrokesEnabled() const { return m_recKeystrokes; }
+    bool recordKeystrokesEnabled() const {
+        // Force the keystroke flag off whenever the feature is gated, so the
+        // recorder never tries to render the (still-broken) keystroke overlay
+        // even if the persisted user setting was `true`.
+        return apexshot::kKeystrokesFeatureAvailable && m_recKeystrokes;
+    }
     bool recordWebcamEnabled() const { return m_recWebcam; }
     double recordClickSize() const { return m_clickSize; }
     int recordClickColor() const { return m_clickColor; }

@@ -2963,7 +2963,13 @@ impl EditorState {
             Tool::Crop => None,
             Tool::Background => None,
             Tool::Pen => {
-                let points = self.processed_drag_path(self.drag_path.clone());
+                // Skip Douglas–Peucker simplification for the in-progress draft.
+                // Simplification is O(n log n) (worst-case O(n²)) and runs on every
+                // redraw, which adds visible lag for long pen strokes. The raw path
+                // already de-duplicates points within 0.1px in `update_drag`, so the
+                // draft renders identically without the per-frame work. The full
+                // simplification still runs once in `finalize_drag_action`.
+                let points = self.drag_path.clone();
                 if points.len() >= 2 {
                     Some(AnnotationAction::Pen {
                         points,
@@ -2975,7 +2981,8 @@ impl EditorState {
                 }
             }
             Tool::Highlighter => {
-                let source_points = self.processed_drag_path(self.drag_path.clone());
+                // See note above on Tool::Pen – skip simplification for the draft.
+                let source_points = self.drag_path.clone();
                 if source_points.len() >= 2 {
                     let points = if self.drag_shift_active {
                         let first = source_points[0];

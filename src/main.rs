@@ -468,9 +468,7 @@ fn install_binary(force: bool) {
     }
 
     if packaged_dest.exists() || packaged_capture_dest.exists() {
-        eprintln!(
-            "Warning: package-managed ApexShot binaries exist under /usr/bin."
-        );
+        eprintln!("Warning: package-managed ApexShot binaries exist under /usr/bin.");
         eprintln!(
             "`apexshot install` writes to /usr/local/bin and will shadow the .deb installation instead of upgrading it."
         );

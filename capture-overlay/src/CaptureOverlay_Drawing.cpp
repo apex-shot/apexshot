@@ -1209,7 +1209,43 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
     m_recTileRects.append(clickRect);
     drawModuleTile(clickRect, RecordPanelTile::Click, 14, m_recClicks, QStringLiteral("Clicks"), false, false, 0.0);
     m_recTileRects.append(keysRect);
-    drawModuleTile(keysRect, RecordPanelTile::Keystrokes, 15, m_recKeystrokes, QStringLiteral("Keys"), false, false, 0.0);
+    if (apexshot::kKeystrokesFeatureAvailable) {
+        drawModuleTile(keysRect, RecordPanelTile::Keystrokes, 15, m_recKeystrokes, QStringLiteral("Keys"), false, false, 0.0);
+    } else {
+        // Render a disabled-looking tile: dimmed icon, no hover/active rim,
+        // and a small "Soon" badge so the user understands why the tile
+        // doesn't react. Click handling for this tile is short-circuited in
+        // CaptureOverlay_Events.cpp.
+        p.save();
+        p.setOpacity(0.45);
+        const QPointF iconCenter(keysRect.center().x(), keysRect.y() + 20.0);
+        drawToolbarIcon(p, 15, iconCenter.x() + 0.6, iconCenter.y() + 0.8, QColor(0, 0, 0, 110));
+        drawToolbarIcon(p, 15, iconCenter.x(), iconCenter.y(), QColor(255, 255, 255, 200));
+        QFont keysLabelFont; keysLabelFont.setFamily("Sans"); keysLabelFont.setPointSizeF(8.0);
+        p.setFont(keysLabelFont);
+        QFontMetricsF keysLabelFm(keysLabelFont);
+        const QString keysLabel = QStringLiteral("Keys");
+        const double keysLabelW = keysLabelFm.horizontalAdvance(keysLabel);
+        p.setPen(QColor(0, 0, 0, 110));
+        p.drawText(QPointF(keysRect.center().x() - keysLabelW / 2.0 + 0.6, keysRect.y() + 50.8), keysLabel);
+        p.setPen(QColor(244, 244, 244, 200));
+        p.drawText(QPointF(keysRect.center().x() - keysLabelW / 2.0, keysRect.y() + 50.0), keysLabel);
+        p.restore();
+
+        // "Soon" badge — small pill in the top-right corner of the tile.
+        QFont badgeFont; badgeFont.setFamily("Sans"); badgeFont.setPointSizeF(6.5); badgeFont.setBold(true);
+        p.setFont(badgeFont);
+        QFontMetricsF badgeFm(badgeFont);
+        const QString badge = QStringLiteral("SOON");
+        const double badgeTextW = badgeFm.horizontalAdvance(badge);
+        const QRectF badgeRect(keysRect.right() - badgeTextW - 14.0, keysRect.y() + 6.0,
+                               badgeTextW + 10.0, 13.0);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255, 28));
+        p.drawRoundedRect(badgeRect, 5.0, 5.0);
+        p.setPen(QColor(255, 232, 214, 220));
+        p.drawText(badgeRect, Qt::AlignCenter, badge);
+    }
 
     const QRectF videoRect(bottomX, bottomY, ACTION_RAIL_W, ACTION_CARD_H);
     const QRectF gifRect(videoRect.right() + ACTION_CARD_GAP, bottomY, ACTION_RAIL_W, ACTION_CARD_H);
@@ -1354,17 +1390,21 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
         const double valueX = menuX + 140.0;
         const double rowH = 32.0;
 
-        auto drawSetting = [&](const QString& label, const QString& desc, bool checked, bool* target) {
+        auto drawSetting = [&](const QString& label, const QString& desc, bool checked, bool* target,
+                               bool disabled = false, const QString& badge = QString()) {
             QRectF labelRect(labelX, currY, 110, rowH);
             p.setFont(QFont("Sans", 10, QFont::Bold));
-            p.setPen(QColor(255, 255, 255, 200));
+            p.setPen(QColor(255, 255, 255, disabled ? 110 : 200));
             p.drawText(labelRect, Qt::AlignRight | Qt::AlignVCenter, label);
 
             QRectF checkArea(valueX, currY, menuW - (valueX - menuX) - 20, rowH);
             int itemIdx = m_settingsClickableRects.size();
-            m_settingsClickableRects.append(checkArea); // settings row rect
-            
-            bool hovered = (m_hoveredSettingsItem == itemIdx);
+            // Disabled rows still need a placeholder rect so the index stays
+            // aligned with the click handler's switch on `itemIdx`. We use a
+            // collapsed (empty) rect so it can never be hit.
+            m_settingsClickableRects.append(disabled ? QRectF() : checkArea);
+
+            bool hovered = !disabled && (m_hoveredSettingsItem == itemIdx);
             if (hovered) {
                 p.setPen(Qt::NoPen);
                 p.setBrush(QColor(255, 255, 255, 12));
@@ -1374,7 +1414,7 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
             // Checkbox
             QRectF cb(valueX, currY + (rowH - 18) / 2.0, 18, 18);
             p.setRenderHint(QPainter::Antialiasing);
-            if (checked) {
+            if (checked && !disabled) {
                 p.setPen(Qt::NoPen);
                 p.setBrush(accentColor);
                 p.drawRoundedRect(cb, 4, 4);
@@ -1382,14 +1422,29 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
                 p.drawLine(QPointF(cb.x() + 4, cb.y() + 9), QPointF(cb.x() + 8, cb.y() + 13));
                 p.drawLine(QPointF(cb.x() + 8, cb.y() + 13), QPointF(cb.x() + 14, cb.y() + 5));
             } else {
-                p.setPen(QPen(QColor(255, 255, 255, 60), 1.5));
-                p.setBrush(QColor(0, 0, 0, 40));
+                p.setPen(QPen(QColor(255, 255, 255, disabled ? 35 : 60), 1.5));
+                p.setBrush(QColor(0, 0, 0, disabled ? 25 : 40));
                 p.drawRoundedRect(cb, 4, 4);
             }
 
             p.setFont(QFont("Sans", 10, QFont::Normal));
-            p.setPen(Qt::white);
+            p.setPen(disabled ? QColor(255, 255, 255, 110) : QColor(Qt::white));
             p.drawText(QRectF(valueX + 28, currY, checkArea.width() - 28, rowH), Qt::AlignLeft | Qt::AlignVCenter, desc);
+
+            if (disabled && !badge.isEmpty()) {
+                QFont badgeFont; badgeFont.setFamily("Sans"); badgeFont.setPointSizeF(7.0); badgeFont.setBold(true);
+                p.setFont(badgeFont);
+                QFontMetricsF badgeFm(badgeFont);
+                const double badgeTextW = badgeFm.horizontalAdvance(badge);
+                const double descW = QFontMetricsF(QFont("Sans", 10, QFont::Normal)).horizontalAdvance(desc);
+                const double badgeX = valueX + 28 + descW + 10.0;
+                QRectF badgeRect(badgeX, currY + (rowH - 14) / 2.0, badgeTextW + 12.0, 14.0);
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(255, 255, 255, 28));
+                p.drawRoundedRect(badgeRect, 5.0, 5.0);
+                p.setPen(QColor(255, 232, 214, 220));
+                p.drawText(badgeRect, Qt::AlignCenter, badge);
+            }
 
             currY += rowH;
         };
@@ -1404,7 +1459,10 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
         drawSetting("", "Highlight clicks", m_recClicks, &m_recClicks);
         
         currY += 10.0; // Gap
-        drawSetting("Keyboard:", "Show keystrokes", m_recKeystrokes, &m_recKeystrokes);
+        drawSetting("Keyboard:", "Show keystrokes", m_recKeystrokes, &m_recKeystrokes,
+                    /*disabled=*/!apexshot::kKeystrokesFeatureAvailable,
+                    /*badge=*/apexshot::kKeystrokesFeatureAvailable ? QString()
+                                                                   : QStringLiteral("SOON"));
         
         currY += 10.0; // Gap
         drawSetting("Recording area:", "Remember last selection", m_rememberSelection, &m_rememberSelection);
@@ -1770,111 +1828,227 @@ void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
     p.drawText(QRectF(menuX + 18.0, menuY + 28.0, menuW - 36.0, 22.0),
                Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Click Overlay"));
 
+    static const QStringList styleNames = { "Outline", "Filled" };
+    auto styleName = [&]() -> QString {
+        const int idx = std::clamp(m_clickStyle, 0, static_cast<int>(styleNames.size() - 1));
+        return styleNames[idx];
+    };
+
+    // Helper that paints a small triangular chevron — much crisper than two
+    // hand-drawn line segments and stays anti-aliased at any DPI.
+    auto drawChevron = [&](const QPointF& center) {
+        QPainterPath path;
+        path.moveTo(center.x() - 4.0, center.y() - 2.0);
+        path.lineTo(center.x() + 4.0, center.y() - 2.0);
+        path.lineTo(center.x(),       center.y() + 3.0);
+        path.closeSubpath();
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255, 215));
+        p.drawPath(path);
+    };
+
+    auto drawDropdownButton = [&](const QRectF& rect, int hoverIdx,
+                                  const QColor* swatch, const QString& label) {
+        const bool hovered = (m_hoveredSettingsItem == hoverIdx);
+        QLinearGradient bg(rect.topLeft(), rect.bottomLeft());
+        bg.setColorAt(0.0, QColor(255, 255, 255, hovered ? 32 : 20));
+        bg.setColorAt(1.0, QColor(0, 0, 0, hovered ? 70 : 92));
+        p.setPen(QPen(QColor(255, 255, 255, hovered ? 70 : 38), 1.0));
+        p.setBrush(bg);
+        p.drawRoundedRect(rect, 8.0, 8.0);
+
+        double textX = rect.x() + 14.0;
+        if (swatch) {
+            const QPointF sc(rect.x() + 16.0, rect.center().y());
+            // Outer ring for contrast on light swatches
+            p.setPen(QPen(QColor(0, 0, 0, 110), 1.0));
+            p.setBrush(*swatch);
+            p.drawEllipse(sc, 7.5, 7.5);
+            // Inner highlight to lift the swatch off the panel
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 255, 255, 60));
+            p.drawEllipse(QPointF(sc.x() - 1.6, sc.y() - 1.6), 2.6, 2.6);
+            textX = rect.x() + 32.0;
+        }
+
+        p.setPen(QColor(245, 245, 246));
+        p.setFont(QFont("Sans", 10, QFont::DemiBold));
+        p.drawText(QRectF(textX, rect.y(), rect.width() - (textX - rect.x()) - 20.0, rect.height()),
+                   Qt::AlignLeft | Qt::AlignVCenter, label);
+
+        drawChevron(QPointF(rect.right() - 13.0, rect.center().y() + 1.0));
+    };
+
     const double labelX = menuX + 25.0;
     const double valueX = menuX + 130.0;
     const double controlW = 280.0;
-    const double rowH = 45.0;
+    const double rowH = 46.0;
     double currY = menuY + 78.0;
 
     auto drawLabel = [&](const QString& txt) {
         p.setFont(QFont("Sans", 10, QFont::Bold));
-        p.setPen(QColor(255, 255, 255, 200));
+        p.setPen(QColor(255, 255, 255, 210));
         p.drawText(QRectF(labelX, currY, 90, rowH), Qt::AlignRight | Qt::AlignVCenter, txt);
     };
 
-    // 1. Size Slider
+    // ── 1. Size slider ──────────────────────────────────────────────────
     drawLabel("Size:");
-    QRectF sliderTrack(valueX, currY + (rowH - 4) / 2.0, controlW, 4);
-    m_sliderTrackRect = sliderTrack;
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(255, 255, 255, 30));
-    p.drawRoundedRect(sliderTrack, 2, 2);
-    
-    double handleX = valueX + m_clickSize * controlW;
-    QRectF handle(handleX - 8, currY + (rowH - 24) / 2.0, 16, 24);
-    p.setBrush(Qt::white);
-    p.drawRoundedRect(handle, 4, 4);
-    m_clickOptionsClickableRects.append(QRectF(valueX, currY, controlW, rowH)); // index 0: slider
+    {
+        const QRectF sliderRow(valueX, currY, controlW, rowH);
+        const int sliderHoverIdx = m_clickOptionsClickableRects.size();
+        const bool hovered = (m_hoveredSettingsItem == sliderHoverIdx);
 
-    currY += rowH;
-
-    // 2. Color Dropdown
-    drawLabel("Color:");
-    QRectF colorBtn(valueX, currY + (rowH - 30) / 2.0, 160, 30);
-    p.setPen(QPen(QColor(255, 255, 255, 40), 1));
-    p.setBrush(QColor(0, 0, 0, 60));
-    p.drawRoundedRect(colorBtn, 6, 6);
-    
-    // Color circle
-    p.setPen(Qt::NoPen);
-    p.setBrush(clickColorValue(m_clickColor));
-    p.drawEllipse(QPointF(colorBtn.x() + 15, colorBtn.center().y()), 7, 7);
-    
-    p.setPen(Qt::white);
-    p.setFont(QFont("Sans", 10));
-    p.drawText(colorBtn.adjusted(30, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, colorNames[m_clickColor]);
-    
-    // Chevron
-    p.setPen(QPen(Qt::white, 1.5));
-    p.drawLine(QPointF(colorBtn.right() - 15, colorBtn.center().y() - 3), QPointF(colorBtn.right() - 11, colorBtn.center().y() + 1));
-    p.drawLine(QPointF(colorBtn.right() - 11, colorBtn.center().y() + 1), QPointF(colorBtn.right() - 7, colorBtn.center().y() - 3));
-    
-    m_clickOptionsClickableRects.append(colorBtn); // index 1: color
-
-    currY += rowH;
-
-    // 3. Style Dropdown
-    drawLabel("Style:");
-    QRectF styleBtn(valueX, currY + (rowH - 30) / 2.0, 80, 30);
-    p.setPen(QPen(QColor(255, 255, 255, 40), 1));
-    p.setBrush(QColor(0, 0, 0, 60));
-    p.drawRoundedRect(styleBtn, 6, 6);
-    
-    p.setPen(Qt::white);
-    p.drawText(styleBtn.adjusted(10, 0, -20, 0), Qt::AlignLeft | Qt::AlignVCenter, "Outline");
-    
-    p.setPen(QPen(Qt::white, 1.5));
-    p.drawLine(QPointF(styleBtn.right() - 15, styleBtn.center().y() - 3), QPointF(styleBtn.right() - 11, styleBtn.center().y() + 1));
-    p.drawLine(QPointF(styleBtn.right() - 11, styleBtn.center().y() + 1), QPointF(styleBtn.right() - 7, styleBtn.center().y() - 3));
-
-    m_clickOptionsClickableRects.append(styleBtn); // index 2: style
-
-    currY += rowH;
-
-    // 4. Animation Checkbox
-    drawLabel("Animation:");
-    QRectF animRow(valueX, currY, controlW, rowH);
-    QRectF cb(valueX, currY + (rowH - 18) / 2.0, 18, 18);
-    if (m_clickAnimate) {
+        QRectF sliderTrack(valueX, currY + (rowH - 6.0) / 2.0, controlW, 6.0);
+        m_sliderTrackRect = sliderTrack;
+        // Track background
         p.setPen(Qt::NoPen);
-        p.setBrush(accentColor);
-        p.drawRoundedRect(cb, 4, 4);
-        p.setPen(QPen(Qt::white, 2));
-        p.drawLine(QPointF(cb.x() + 4, cb.y() + 9), QPointF(cb.x() + 8, cb.y() + 13));
-        p.drawLine(QPointF(cb.x() + 8, cb.y() + 13), QPointF(cb.x() + 14, cb.y() + 5));
-    } else {
-        p.setPen(QPen(QColor(255, 255, 255, 60), 1.5));
-        p.setBrush(QColor(0, 0, 0, 40));
-        p.drawRoundedRect(cb, 4, 4);
+        p.setBrush(QColor(255, 255, 255, hovered ? 36 : 28));
+        p.drawRoundedRect(sliderTrack, 3.0, 3.0);
+
+        // Filled portion uses the warm accent so it ties into the rest of the
+        // recording UI, with a subtle gradient for depth.
+        const double filledW = std::max(0.0, std::min(1.0, m_clickSize)) * controlW;
+        if (filledW > 1.0) {
+            QLinearGradient fillGrad(sliderTrack.topLeft(), sliderTrack.topRight());
+            fillGrad.setColorAt(0.0, QColor(204, 122, 80, 235));
+            fillGrad.setColorAt(1.0, QColor(255, 178, 122, 235));
+            QRectF filled(sliderTrack.x(), sliderTrack.y(), filledW, sliderTrack.height());
+            p.setBrush(fillGrad);
+            p.drawRoundedRect(filled, 3.0, 3.0);
+        }
+
+        // Live preview dot whose radius matches what the user will see
+        // on-screen (scaled down to fit the slider row).
+        const double previewR = 4.0 + m_clickSize * 10.0;
+        const QPointF previewC(valueX + filledW, sliderTrack.center().y());
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(clickColorValue(m_clickColor)));
+        p.drawEllipse(previewC, previewR, previewR);
+        p.setPen(QPen(QColor(0, 0, 0, 90), 1.0));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(previewC, previewR, previewR);
+
+        // Slider handle — a soft white capsule with a faint shadow.
+        const double handleW = hovered ? 18.0 : 14.0;
+        const double handleH = 26.0;
+        QRectF handle(valueX + filledW - handleW / 2.0, currY + (rowH - handleH) / 2.0,
+                      handleW, handleH);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 90));
+        p.drawRoundedRect(handle.adjusted(0.6, 1.4, 0.6, 1.4), 6.0, 6.0);
+        QLinearGradient handleGrad(handle.topLeft(), handle.bottomLeft());
+        handleGrad.setColorAt(0.0, QColor(255, 255, 255));
+        handleGrad.setColorAt(1.0, QColor(225, 225, 230));
+        p.setBrush(handleGrad);
+        p.drawRoundedRect(handle, 6.0, 6.0);
+
+        // Numeric badge to the right (e.g. "32%") — gives the slider a value.
+        const int pct = static_cast<int>(std::round(m_clickSize * 100.0));
+        p.setFont(QFont("Sans", 9, QFont::DemiBold));
+        p.setPen(QColor(255, 232, 214, 220));
+        p.drawText(QRectF(sliderRow.right() - 38.0, sliderRow.y(), 36.0, sliderRow.height()),
+                   Qt::AlignRight | Qt::AlignVCenter, QString::number(pct) + QStringLiteral("%"));
+
+        m_clickOptionsClickableRects.append(sliderRow); // index 0: slider
     }
-    p.setPen(Qt::white);
-    p.drawText(QRectF(valueX + 28, currY, controlW - 28, rowH), Qt::AlignLeft | Qt::AlignVCenter, "Animate clicks");
-    
-    m_clickOptionsClickableRects.append(animRow); // index 3: animate
 
-    currY += rowH + 10;
+    currY += rowH;
 
-    // 5. Preview Area
-    QRectF previewArea(menuX + 20, currY, menuW - 40, 130);
-    p.setPen(QPen(QColor(255, 255, 255, 20), 1));
-    p.setBrush(QColor(0, 0, 0, 40));
-    p.drawRoundedRect(previewArea, 10, 10);
-    
+    // ── 2. Color dropdown ───────────────────────────────────────────────
+    drawLabel("Color:");
+    {
+        QRectF colorBtn(valueX, currY + (rowH - 32.0) / 2.0, 168.0, 32.0);
+        const QColor swatch = clickColorValue(m_clickColor);
+        const int idx = m_clickOptionsClickableRects.size();
+        drawDropdownButton(colorBtn, idx, &swatch, colorNames[m_clickColor]);
+        m_clickOptionsClickableRects.append(colorBtn); // index 1: color
+    }
+
+    currY += rowH;
+
+    // ── 3. Style dropdown ───────────────────────────────────────────────
+    drawLabel("Style:");
+    {
+        QRectF styleBtn(valueX, currY + (rowH - 32.0) / 2.0, 110.0, 32.0);
+        const int idx = m_clickOptionsClickableRects.size();
+        drawDropdownButton(styleBtn, idx, nullptr, styleName());
+        m_clickOptionsClickableRects.append(styleBtn); // index 2: style
+    }
+
+    currY += rowH;
+
+    // ── 4. Animation toggle ─────────────────────────────────────────────
+    drawLabel("Animation:");
+    {
+        QRectF animRow(valueX, currY, controlW, rowH);
+        const int idx = m_clickOptionsClickableRects.size();
+        const bool hovered = (m_hoveredSettingsItem == idx);
+        if (hovered) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 255, 255, 16));
+            p.drawRoundedRect(animRow.adjusted(-4.0, 4.0, 4.0, -4.0), 8.0, 8.0);
+        }
+        QRectF cb(valueX, currY + (rowH - 20.0) / 2.0, 20.0, 20.0);
+        p.setRenderHint(QPainter::Antialiasing);
+        if (m_clickAnimate) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(accentColor);
+            p.drawRoundedRect(cb, 5.0, 5.0);
+            p.setPen(QPen(Qt::white, 2.2));
+            p.drawLine(QPointF(cb.x() + 4.5, cb.y() + 10.5), QPointF(cb.x() + 9.0, cb.y() + 14.5));
+            p.drawLine(QPointF(cb.x() + 9.0, cb.y() + 14.5), QPointF(cb.x() + 15.5, cb.y() + 5.5));
+        } else {
+            p.setPen(QPen(QColor(255, 255, 255, hovered ? 110 : 70), 1.5));
+            p.setBrush(QColor(0, 0, 0, 60));
+            p.drawRoundedRect(cb, 5.0, 5.0);
+        }
+        p.setPen(QColor(245, 245, 246));
+        p.setFont(QFont("Sans", 10, QFont::DemiBold));
+        p.drawText(QRectF(valueX + 30.0, currY, controlW - 30.0, rowH),
+                   Qt::AlignLeft | Qt::AlignVCenter,
+                   m_clickAnimate ? QStringLiteral("Animate clicks  ·  ON")
+                                  : QStringLiteral("Animate clicks"));
+        m_clickOptionsClickableRects.append(animRow); // index 3: animate
+    }
+
+    currY += rowH + 10.0;
+
+    // ── 5. Preview area ─────────────────────────────────────────────────
+    QRectF previewArea(menuX + 20.0, currY, menuW - 40.0, 138.0);
+    {
+        QLinearGradient bg(previewArea.topLeft(), previewArea.bottomLeft());
+        bg.setColorAt(0.0, QColor(255, 255, 255, 14));
+        bg.setColorAt(1.0, QColor(0, 0, 0, 96));
+        p.setPen(QPen(QColor(255, 255, 255, 36), 1.0));
+        p.setBrush(bg);
+        p.drawRoundedRect(previewArea, 12.0, 12.0);
+
+        // Subtle dotted grid so the preview doesn't look empty.
+        p.save();
+        p.setClipRect(previewArea.adjusted(1, 1, -1, -1));
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255, 18));
+        const double gridStep = 22.0;
+        for (double gy = previewArea.y() + gridStep; gy < previewArea.bottom(); gy += gridStep) {
+            for (double gx = previewArea.x() + gridStep; gx < previewArea.right(); gx += gridStep) {
+                p.drawEllipse(QPointF(gx, gy), 1.0, 1.0);
+            }
+        }
+        p.restore();
+    }
+
     // Draw click previews (each lives for 1.5 seconds then fades out)
     const qint64 CLICK_LIFETIME_MS = 1500;
     if (m_clickPreviews.isEmpty()) {
-        p.setPen(QColor(255, 255, 255, 120));
-        p.drawText(previewArea, Qt::AlignCenter, "Click here to preview");
+        p.setFont(QFont("Sans", 10, QFont::DemiBold));
+        p.setPen(QColor(255, 255, 255, 160));
+        p.drawText(previewArea, Qt::AlignCenter,
+                   QStringLiteral("Click anywhere to preview"));
+        p.setFont(QFont("Sans", 8));
+        p.setPen(QColor(255, 255, 255, 110));
+        p.drawText(QRectF(previewArea.x(), previewArea.y() + 18.0, previewArea.width(), previewArea.height()),
+                   Qt::AlignHCenter | Qt::AlignBottom,
+                   QStringLiteral("Settings update live with each click"));
     } else {
         p.save();
         p.setClipRect(previewArea.adjusted(1, 1, -1, -1));
@@ -1888,57 +2062,83 @@ void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
             QPointF pt = cp.pos;
             if (!previewArea.contains(pt)) continue;
 
-            qint64 age = now - cp.birthMs;
-            double progress = std::min(1.0, (double)age / CLICK_LIFETIME_MS); // 0→1 over lifetime
-            double fadeAlpha = 1.0 - progress; // full opacity → zero
+            const qint64 age = now - cp.birthMs;
+            const double progress = std::min(1.0, (double)age / CLICK_LIFETIME_MS);
+            const double fadeAlpha = 1.0 - progress;
+            if (fadeAlpha <= 0.01) continue;
 
-            if (fadeAlpha <= 0.01) continue; // expired, skip (will be removed by timer)
+            // Soft glow halo behind every click — gives the preview much
+            // more presence without being noisy.
+            QRadialGradient halo(pt, baseRadius * 2.4);
+            QColor haloColor = clickColor;
+            haloColor.setAlpha(static_cast<int>(110 * fadeAlpha));
+            halo.setColorAt(0.0, haloColor);
+            halo.setColorAt(1.0, QColor(haloColor.red(), haloColor.green(), haloColor.blue(), 0));
+            p.setPen(Qt::NoPen);
+            p.setBrush(halo);
+            p.drawEllipse(pt, baseRadius * 2.4, baseRadius * 2.4);
 
-            double radius = baseRadius;
-
-            // Animation: pulsing ring that expands outward
+            // Animation: expanding ring on top of the halo.
             if (m_clickAnimate) {
-                double phase = std::fmod((double)age / 500.0, 1.0); // cycle every 500ms
-                double pulseRadius = radius + phase * 25.0;
-                double pulseAlpha = (1.0 - phase) * 200.0 * fadeAlpha;
-
+                const double phase = std::fmod((double)age / 500.0, 1.0);
+                const double pulseRadius = baseRadius + phase * 30.0;
+                const double pulseAlpha = (1.0 - phase) * 220.0 * fadeAlpha;
                 if (pulseAlpha > 1.0) {
                     QColor pulseColor = clickColor;
-                    pulseColor.setAlpha((int)pulseAlpha);
-                    p.setPen(QPen(pulseColor, 2));
+                    pulseColor.setAlpha(static_cast<int>(pulseAlpha));
+                    p.setPen(QPen(pulseColor, 2.4));
                     p.setBrush(Qt::NoBrush);
                     p.drawEllipse(pt, pulseRadius, pulseRadius);
                 }
             }
 
-            // Main click circle — fade out based on age
+            // Main click marker — fade out based on age.
             QColor c = clickColor;
-            c.setAlpha((int)(255 * fadeAlpha));
+            c.setAlpha(static_cast<int>(255 * fadeAlpha));
             if (m_clickStyle == 1) { // Filled
-                p.setPen(Qt::NoPen);
+                p.setPen(QPen(QColor(255, 255, 255, static_cast<int>(160 * fadeAlpha)), 1.4));
                 p.setBrush(c);
-                p.drawEllipse(pt, radius, radius);
+                p.drawEllipse(pt, baseRadius, baseRadius);
             } else { // Outline
-                p.setPen(QPen(c, 3));
-                p.setBrush(Qt::NoBrush);
-                p.drawEllipse(pt, radius, radius);
+                p.setPen(QPen(c, 3.0));
+                p.setBrush(QColor(c.red(), c.green(), c.blue(), static_cast<int>(40 * fadeAlpha)));
+                p.drawEllipse(pt, baseRadius, baseRadius);
             }
         }
         p.restore();
     }
-    
+
     m_clickOptionsClickableRects.append(previewArea); // index 4: preview
 
-    // 6. OK Button
-    QRectF okBtn(menuX + menuW - 90, menuY + menuH - 45, 70, 30);
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(accentColor.red(), accentColor.green(), accentColor.blue(), 210));
-    p.drawRoundedRect(okBtn, 6, 6);
-    p.setPen(accentRim);
-    p.setFont(QFont("Sans", 10, QFont::Bold));
-    p.drawText(okBtn, Qt::AlignCenter, "OK");
-    
-    m_clickOptionsClickableRects.append(okBtn); // index 5: OK
+    // ── 6. OK button ────────────────────────────────────────────────────
+    {
+        QRectF okBtn(menuX + menuW - 96.0, menuY + menuH - 48.0, 76.0, 32.0);
+        const int idx = m_clickOptionsClickableRects.size();
+        const bool hovered = (m_hoveredSettingsItem == idx);
+
+        // Drop shadow for clear separation from the panel.
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 110));
+        p.drawRoundedRect(okBtn.adjusted(0.6, 1.6, 0.6, 1.6), 8.0, 8.0);
+
+        QLinearGradient grad(okBtn.topLeft(), okBtn.bottomLeft());
+        if (hovered) {
+            grad.setColorAt(0.0, QColor(220, 132, 84));
+            grad.setColorAt(1.0, QColor(178, 92, 56));
+        } else {
+            grad.setColorAt(0.0, QColor(196, 110, 70));
+            grad.setColorAt(1.0, QColor(150, 76, 44));
+        }
+        p.setBrush(grad);
+        p.setPen(QPen(accentRim, 1.0));
+        p.drawRoundedRect(okBtn, 8.0, 8.0);
+
+        p.setPen(Qt::white);
+        p.setFont(QFont("Sans", 10, QFont::Bold));
+        p.drawText(okBtn, Qt::AlignCenter, QStringLiteral("Done"));
+
+        m_clickOptionsClickableRects.append(okBtn); // index 5: OK
+    }
 }
 
 void CaptureOverlay::drawKeystrokeOptions(QPainter& p, const QRectF& parentRect)

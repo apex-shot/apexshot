@@ -13,9 +13,76 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  lint:
+    name: Lint (rustfmt + clippy + JS)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies (clippy needs the same headers as build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev \
+            libpipewire-0.3-dev \
+            libtesseract-dev \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxtst-dev \
+            libwayland-dev \
+            libdbus-1-dev \
+            meson ninja-build gobject-introspection valac \
+            qtbase5-dev libqt5x11extras5-dev pkg-config
+
+      - name: Build gtk4-layer-shell from source
+        run: |
+          git clone https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
+          cd /tmp/gtk4-layer-shell
+          meson setup build --prefix=/usr
+          sudo ninja -C build install
+          sudo ldconfig
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        # The codebase still carries a backlog of pre-existing clippy
+        # warnings (see issue tracker). We surface them on every CI run so
+        # contributors can see the noise around their changes, but we
+        # don't yet fail the build on them. Once the backlog is cleared
+        # this step should become `-- -D warnings`.
+        run: cargo clippy --workspace --all-targets
+
+      - name: GNOME extension JS syntax check
+        run: |
+          # The GJS-targeted unit tests in gnome-extension/tests/ rely on
+          # GNOME globals (printerr, imports.gi …) and can't be run under
+          # plain Node, but `node --check` is a fast safety net for the
+          # extension source files themselves.
+          set -euo pipefail
+          for f in gnome-extension/*.js; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+
   ci:
     name: Build & Test
     runs-on: ubuntu-24.04
+    needs: [lint]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

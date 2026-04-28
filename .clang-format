@@ -1,0 +1,41 @@
+# clang-format style for the C++ overlay (capture-overlay/).
+# Run `clang-format -i src/**/*.{cpp,h}` from inside `capture-overlay/`.
+#
+# This is a Qt/KDE-leaning style chosen to match the existing source: LLVM
+# base, 4-space indent, opening braces on new lines for functions and on
+# the same line for control flow, soft 100-column limit.
+
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++17
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true
+  AfterControlStatement: false
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: false
+  BeforeElse: false
+
+NamespaceIndentation: None
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+PointerAlignment: Left
+ReferenceAlignment: Left
+SpaceAfterCStyleCast: false
+SpaceAfterTemplateKeyword: false
+SpacesBeforeTrailingComments: 2
+IncludeBlocks: Preserve
+SortIncludes: false

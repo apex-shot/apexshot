@@ -1,0 +1,113 @@
+name: Bug report
+description: Something doesn't behave the way it should.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report.
+
+        Before submitting, please:
+        - Search [existing issues](https://github.com/apex-shot/apexshot/issues?q=is%3Aissue) for duplicates.
+        - Try the latest release — many bugs are fixed within days.
+        - Read the *Known Limitations* section in the [README](https://github.com/apex-shot/apexshot#known-limitations).
+
+  - type: input
+    id: version
+    attributes:
+      label: ApexShot version
+      description: Output of `apexshot --version` or the `.deb` filename.
+      placeholder: "0.2.25"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install ApexShot?
+      options:
+        - .deb from GitHub Releases
+        - Built from source (`cargo build --release`)
+        - AUR / third-party package
+        - Other (describe in the bug body)
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution + version
+      placeholder: "Ubuntu 25.10, Fedora 42, Arch (rolling), …"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: display-server
+    attributes:
+      label: Display server
+      options:
+        - Wayland
+        - X11
+        - Both / unsure
+    validations:
+      required: true
+
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop environment + version
+      description: GNOME Shell version if applicable (`gnome-shell --version`).
+      placeholder: "GNOME 47.2, KDE Plasma 6.2, Sway 1.10, …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Clear description of the problem and what you expected instead.
+      placeholder: |
+        I clicked "Crosshair capture" and …
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Numbered, copy-pastable steps if possible.
+      placeholder: |
+        1. Run `apexshot daemon`
+        2. Press `Ctrl+Alt+X`
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Run the offending command in a terminal and paste the output. For
+        the daemon, also include `journalctl --user -u apexshot.service` or
+        the output of `journalctl /usr/bin/gnome-shell -f | grep apexshot`.
+      render: shell
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / recordings
+      description: Drag-and-drop images or videos here if it's a visual bug.
+
+  - type: checkboxes
+    id: sanity
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I'm running the latest release (or `main`) and the bug is still present.
+          required: true
+        - label: I have not included any private screenshots, tokens, or sensitive logs.
+          required: true

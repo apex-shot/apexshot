@@ -1783,8 +1783,7 @@ mod tests {
     fn save_capture_to_temp_png_round_trips_rgba_capture() {
         let capture = CaptureData::new(
             vec![
-                255, 0, 0, 255, 0, 255, 0, 255,
-                0, 0, 255, 255, 255, 255, 0, 255,
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
             ],
             2,
             2,
@@ -1792,7 +1791,9 @@ mod tests {
         );
 
         let path = save_capture_to_temp_png(&capture).expect("temp png should save");
-        let loaded = image::open(&path).expect("temp png should load").into_rgba8();
+        let loaded = image::open(&path)
+            .expect("temp png should load")
+            .into_rgba8();
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(loaded.width(), 2);

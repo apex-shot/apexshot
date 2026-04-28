@@ -589,6 +589,11 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             update();
             return;
         case RecordPanelTile::Keystrokes:
+            if (!apexshot::kKeystrokesFeatureAvailable) {
+                // Feature is gated off — swallow the click so the rest of
+                // the overlay keeps behaving normally but no state changes.
+                return;
+            }
             if (m_recKeystrokes) {
                 closeRecordingMenus();
                 m_recKeystrokes = false;

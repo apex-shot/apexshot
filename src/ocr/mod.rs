@@ -17,8 +17,15 @@ pub mod deskew;
 /// Tesseract OCR Engine Mode — LSTM only (best accuracy for most text)
 const TESS_OEM: &str = "1";
 
-/// Tesseract Page Segmentation Mode — auto with OSD (handles mixed layouts)
-const TESS_PSM: &str = "3";
+/// Page Segmentation Modes tried in order. The result with the highest
+/// average word confidence is returned, which dramatically improves accuracy
+/// on multi-column UI screenshots (e.g. tabular recovery-phrase grids) where
+/// a single PSM frequently mis-orders columns.
+///  - 6  : assume a single uniform block of text (best for tight tabular grids)
+///  - 4  : single column of text of variable sizes (good for forms / lists)
+///  - 3  : fully automatic page segmentation, no OSD (general fallback)
+///  - 11 : sparse text — find as much text as possible in no particular order
+const TESS_PSM_CANDIDATES: &[&str] = &["6", "4", "3", "11"];
 
 /// Errors that can occur during OCR operations
 #[derive(Debug, Error)]
@@ -144,9 +151,17 @@ struct PreprocessConfig {
 impl Default for PreprocessConfig {
     fn default() -> Self {
         Self {
-            scale_factor: 2.0, // Reduced from 3.0 for faster processing (still good for OCR)
-            contrast: 1.05,    // Reduced contrast enhancement for speed
-            threshold: true,   // Otsu's binarization — fast and effective
+            // 3.0 lifts UI text (typically 11–14 px) close to the 30–40 px
+            // glyph height that Tesseract's LSTM is trained on, which fixes
+            // most "rusted → rustied" style misreads on small dark-mode text.
+            scale_factor: 3.0,
+            // Mild contrast boost is enough once the image is upscaled.
+            contrast: 1.10,
+            // IMPORTANT: do NOT pre-binarize for the LSTM engine. Otsu's
+            // threshold throws away anti-aliasing information that LSTM uses
+            // to disambiguate similar glyphs (e/c, i/l, rn/m, etc.). Tesseract
+            // performs its own internal thresholding tuned to the LSTM model.
+            threshold: false,
         }
     }
 }
@@ -308,6 +323,53 @@ fn apply_otsu_threshold(data: &mut [u8]) {
     }
 }
 
+/// Run Tesseract once with a specific Page Segmentation Mode, returning the
+/// recognised text together with its mean word confidence.
+///
+/// Re-running recognition with multiple PSMs is the most reliable way to
+/// recover from layout-analysis failures on UI screenshots without depending
+/// on a separate ML model. Tesseract initialisation itself is cheap (a few
+/// milliseconds) compared to recognition, so re-initialising per attempt
+/// keeps the code straightforward without measurable overhead.
+fn run_tesseract_with_psm(
+    datapath: Option<&str>,
+    language: &str,
+    psm: &str,
+    luma_data: &[u8],
+    width: i32,
+    height: i32,
+) -> OcrResult<(String, i32)> {
+    let mut tesseract = tesseract::Tesseract::new(datapath, Some(language))
+        .map_err(|e| OcrError::InitializationError(e.to_string()))?
+        .set_variable("tessedit_ocr_engine_mode", TESS_OEM)
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set oem: {}", e)))?
+        .set_variable("tessedit_pageseg_mode", psm)
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
+        // Preserve the spaces between columns/words so multi-column tables
+        // (recovery phrases, 2FA grids, etc.) keep their visual layout.
+        .set_variable("preserve_interword_spaces", "1")
+        .map_err(|e| {
+            OcrError::InitializationError(format!("Failed to set preserve spaces: {}", e))
+        })?
+        // Tell Tesseract the effective DPI of the upscaled image so the LSTM
+        // engine picks the right scoring parameters.
+        .set_variable("user_defined_dpi", "300")
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set dpi: {}", e)))?
+        .set_variable("textord_heavy_nr", "1")
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
+        .set_frame(luma_data, width, height, 1, width)
+        .map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
+        .recognize()
+        .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
+
+    let text = tesseract
+        .get_text()
+        .map_err(|e| OcrError::RecognitionError(format!("Failed to get text: {}", e)))?;
+
+    let confidence = tesseract.mean_text_conf();
+    Ok((text, confidence))
+}
+
 /// Run Tesseract OCR on an RGBA image.
 ///
 /// Handles QR detection, preprocessing, Tesseract setup, and result formatting.
@@ -335,25 +397,51 @@ fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOut
     let width = (rgba_image.width() as f32 * preprocess_config.scale_factor) as i32;
     let height = (rgba_image.height() as f32 * preprocess_config.scale_factor) as i32;
 
-    let datapath = config.datapath.as_deref();
-    let mut tesseract = tesseract::Tesseract::new(datapath, Some(&config.language))
-        .map_err(|e| OcrError::InitializationError(e.to_string()))?
-        .set_variable("tessedit_ocr_engine_mode", TESS_OEM)
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set oem: {}", e)))?
-        .set_variable("tessedit_pageseg_mode", TESS_PSM)
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set psm: {}", e)))?
-        .set_variable("textord_heavy_nr", "1")
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
-        .set_frame(&luma_data, width, height, 1, width)
-        .map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
-        .recognize()
-        .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
+    // Run Tesseract with several Page Segmentation Modes and keep the result
+    // with the highest mean word confidence. Multi-column UI screenshots
+    // (e.g. recovery-phrase / 2FA grids) frequently confuse a single PSM,
+    // so the small extra cost of re-running recognition is well worth the
+    // accuracy gain. We also early-exit once a result is "good enough" to
+    // avoid paying the full 4-PSM cost for clean documents.
+    const HIGH_CONFIDENCE_EARLY_EXIT: i32 = 85;
 
-    let text = tesseract
-        .get_text()
-        .map_err(|e| OcrError::RecognitionError(format!("Failed to get text: {}", e)))?;
+    let mut best: Option<(String, i32)> = None;
 
-    let confidence = tesseract.mean_text_conf();
+    for &psm in TESS_PSM_CANDIDATES {
+        let attempt = run_tesseract_with_psm(
+            config.datapath.as_deref(),
+            &config.language,
+            psm,
+            &luma_data,
+            width,
+            height,
+        );
+
+        match attempt {
+            Ok((text, confidence)) => {
+                let take = match &best {
+                    None => true,
+                    Some((_, best_conf)) => confidence > *best_conf,
+                };
+                if take {
+                    best = Some((text, confidence));
+                }
+                if confidence >= HIGH_CONFIDENCE_EARLY_EXIT {
+                    break;
+                }
+            }
+            Err(err) => {
+                // If we already have a usable result, skip this PSM and keep
+                // going; otherwise propagate the first hard error so callers
+                // still see meaningful diagnostics.
+                if best.is_none() {
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    let (text, confidence) = best.ok_or(OcrError::NoTextDetected)?;
 
     let trimmed_text = text.trim();
     if trimmed_text.is_empty() {

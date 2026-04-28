@@ -1,0 +1,41 @@
+# https://editorconfig.org
+# Applies to every editor / IDE that respects EditorConfig.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Rust source uses 4-space indent (also enforced by rustfmt).
+[*.rs]
+indent_size = 4
+
+# C / C++ overlay sources match the existing 4-space style.
+[*.{c,cc,cpp,h,hpp}]
+indent_size = 4
+
+# JavaScript (GNOME extension + browser extension) uses 4 spaces.
+[*.{js,mjs,cjs}]
+indent_size = 4
+
+# YAML / JSON / TOML conventionally use 2-space indent.
+[*.{yml,yaml,json,toml}]
+indent_size = 2
+
+# Shell scripts.
+[*.sh]
+indent_size = 4
+
+# Markdown — preserve trailing whitespace because it has line-break
+# semantics, but still LF + final newline.
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefiles require literal tabs.
+[Makefile]
+indent_style = tab

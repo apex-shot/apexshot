@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or general discussion
+    url: https://github.com/apex-shot/apexshot/discussions
+    about: |
+      Use GitHub Discussions for usage questions, design ideas, or anything
+      that isn't a confirmed bug or a concrete feature request.
+  - name: Security vulnerability
+    url: https://github.com/apex-shot/apexshot/security/policy
+    about: |
+      Please report security issues privately via SECURITY.md instead of
+      opening a public issue. ApexShot has access to your screen, audio,
+      webcam, and clipboard, so we take these reports seriously.

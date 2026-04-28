@@ -10,12 +10,14 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
 #include <QIODevice>
 #include <QMap>
 #include <QPixmap>
 #include <QScreen>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QUuid>
 #include <QUrl>
@@ -395,6 +397,64 @@ bool saveCroppedToTemp(const QImage& fullImage,
 #if defined(Q_OS_LINUX)
 #include <QDBusMetaType>
 
+namespace {
+
+// Path used to persist the ScreenCast portal `restore_token` between
+// capture invocations *and* across reboots. Mirrors the location used by
+// the Rust capture path (~/.cache/apexshot/...) but uses a distinct file
+// name so the two flows don't accidentally share / clobber each other's
+// token grants. See `src/backend/wayland.rs::restore_token_path`.
+QString screenCastRestoreTokenPath()
+{
+    QString cacheDir =
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (cacheDir.isEmpty()) {
+        cacheDir = QDir::homePath() + QLatin1String("/.cache");
+    }
+    // QStandardPaths::CacheLocation already includes the application name
+    // when QCoreApplication::applicationName() is set, but we don't rely
+    // on that here — pin it to the same `apexshot/` directory the Rust
+    // side uses so both restore-token caches live under one folder.
+    QDir dir(cacheDir);
+    if (dir.dirName() != QLatin1String("apexshot")) {
+        dir = QDir(cacheDir + QLatin1String("/apexshot"));
+    }
+    return dir.filePath(QStringLiteral("cpp-screencast.token"));
+}
+
+QString loadScreenCastRestoreToken()
+{
+    QFile file(screenCastRestoreTokenPath());
+    if (!file.exists() || !file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return QString();
+    }
+    const QString token = QString::fromUtf8(file.readAll()).trimmed();
+    file.close();
+    return token;
+}
+
+void saveScreenCastRestoreToken(const QString& token)
+{
+    if (token.trimmed().isEmpty()) {
+        return;
+    }
+    const QString path = screenCastRestoreTokenPath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        return;
+    }
+    file.write(token.toUtf8());
+    file.close();
+}
+
+void clearScreenCastRestoreToken()
+{
+    QFile::remove(screenCastRestoreTokenPath());
+}
+
+} // namespace
+
 bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outError)
 {
     auto* connectionInterface = QDBusConnection::sessionBus().interface();
@@ -454,8 +514,13 @@ bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outEr
     });
     sessionTimeout.start();
 
+    // NOTE: per the xdg-desktop-portal ScreenCast spec, `persist_mode` and
+    // `restore_token` belong on `SelectSources`, NOT on `CreateSession`.
+    // The previous code placed a malformed `"once"` string here, which the
+    // portal silently ignored — that's why the user was re-prompted on
+    // every reboot. Leave CreateSession's options empty (apart from the
+    // mandatory request handle, which Qt/libdbus fills in automatically).
     QVariantMap sessionOptions;
-    sessionOptions["persist_mode"] = QStringLiteral("once");
 
     auto sessionReply =
       screenCastInterface.call(QStringLiteral("CreateSession"), sessionOptions);
@@ -513,6 +578,18 @@ bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outEr
     sourceOptions["types"] = QVariant::fromValue(QVariantList() << "screen" << "window");
     sourceOptions["multiple"] = false;
     sourceOptions["cursor_mode"] = QStringLiteral("embedded");
+    // ScreenCast spec v4+ (GNOME 43, KDE Plasma 5.27+): ask the portal to
+    // persist the access grant until the user explicitly revokes it. The
+    // value MUST be a uint32 — passing a string here is what caused the
+    // permission to silently fall back to "do not persist" before.
+    sourceOptions["persist_mode"] = QVariant::fromValue<quint32>(2);
+    // If we have a token from a prior accepted session, hand it back so
+    // the portal skips the "Allow…?" dialog entirely. The token is opaque;
+    // we never inspect it.
+    const QString restoreToken = loadScreenCastRestoreToken();
+    if (!restoreToken.isEmpty()) {
+        sourceOptions["restore_token"] = restoreToken;
+    }
 
     auto sourceReply = screenCastInterface.call(
       QStringLiteral("SelectSources"), QVariant::fromValue(sessionHandle), sourceOptions);
@@ -546,6 +623,7 @@ bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outEr
 
     QEventLoop startLoop;
     QString streamPath;
+    QString returnedRestoreToken;
     bool startSuccess = false;
 
     QObject::connect(&startRequest,
@@ -555,6 +633,23 @@ bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outEr
                          if (response == 0) {
                              streamPath = results.value("stream_path").toString();
                              startSuccess = !streamPath.isEmpty();
+                             // The portal includes a `restore_token` here
+                             // when persist_mode != 0 and the user
+                             // approved the request. Cache it so future
+                             // captures (including across reboots) skip
+                             // the dialog. If the user denied the
+                             // request, this key is simply absent and we
+                             // do nothing.
+                             returnedRestoreToken =
+                                 results.value(QStringLiteral("restore_token")).toString();
+                         } else {
+                             // Response code 1 == user cancelled, 2 ==
+                             // failed. In either case the previously
+                             // cached token is no longer valid (revoked
+                             // or rejected), so drop it to avoid getting
+                             // stuck repeatedly retrying with a stale
+                             // token.
+                             clearScreenCastRestoreToken();
                          }
                          startLoop.quit();
                      });
@@ -587,6 +682,13 @@ bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outEr
         outError = QStringLiteral("ScreenCast start failed");
         startRequest.deleteLater();
         return false;
+    }
+
+    // Save the freshly-issued token now (before we touch PipeWire) — even
+    // if the actual frame grab below fails for some unrelated reason, the
+    // grant itself is already valid and we want the next run to reuse it.
+    if (!returnedRestoreToken.isEmpty()) {
+        saveScreenCastRestoreToken(returnedRestoreToken);
     }
 
     startRequest.Close().waitForFinished();
