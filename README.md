@@ -180,9 +180,9 @@ journalctl /usr/bin/gnome-shell -f | grep apexshot
 | Issue | Solution |
 |---|---|
 | Preview windows get hidden behind other apps | Verify extension is enabled: `gnome-extensions list` |
-| Recording mask does not appear | Check logs: `journalctl /usr/bin/gnome-shell -f \| grep apexshot` |
+| Recording mask does not appear | Check logs: `journalctl /usr/bin/gnome-shell -f | grep apexshot` |
 | Extension fails to enable | Confirm GNOME Shell version is 45–49 and matches `metadata.json` |
-| D-Bus signals not working | Monitor session bus: `dbus-monitor --session \| grep apexshot` |
+| D-Bus signals not working | Monitor session bus: `dbus-monitor --session | grep apexshot` |
 
 **Known Limitations:**
 - **Keystroke overlay is intentionally disabled in the current release.** The "Show keystrokes" tile in the recording UI is greyed out with a `SOON` badge; the configuration row in the recording settings is also disabled. Click handling for the tile is short-circuited so toggling it has no effect, and `recordKeystrokesEnabled()` is force-clamped to `false` so a stale persisted setting can't reach the recorder. The feature will return once the recorder-side keystroke pipeline is implemented; tracked behind the `apexshot::kKeystrokesFeatureAvailable` flag in `capture-overlay/src/CaptureOverlay.h`.
