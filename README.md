@@ -108,16 +108,30 @@ After installation, ApexShot will launch an onboarding wizard to help you:
 
 ### Manual Install
 
+The manual install command copies `apexshot` and `apexshot-capture` into
+`/usr/local/bin` (which shadows the package-managed binaries in `/usr/bin`).
+**For in-place `.deb` upgrades, use the updater script instead.**
+
+Because binaries need root but autostart lives in your home directory, run
+the two parts separately:
+
 ```bash
-sudo apexshot install                          # Binary + autostart
-sudo apexshot install --extension-id <id>      # + browser native messaging host
-sudo apexshot install --force                  # Reinstall even if same version
+# 1. Install binaries (requires root)
+sudo apexshot install --no-autostart
+
+# 2. Set up autostart for the CURRENT user (no sudo)
+apexshot install --no-binary
 ```
 
-`apexshot install` is not the same as installing/upgrading the `.deb`.
-It copies `apexshot` and `apexshot-capture` into `/usr/local/bin`, which can
-shadow the package-managed binaries in `/usr/bin`. To upgrade an existing `.deb`
-installation in place, use the updater script above.
+Optional flags:
+
+```bash
+# Also install the browser native-messaging host (for the web-scroll extension)
+sudo apexshot install --no-autostart --extension-id <chrome-extension-id>
+
+# Force reinstall even if the same version is already present
+sudo apexshot install --no-autostart --force
+```
 
 ### GNOME Extension (Required)
 
