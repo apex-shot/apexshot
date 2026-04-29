@@ -52,36 +52,24 @@ An open-source Linux screen capture tool with annotation, recording, and OCR.
 
 ## Download
 
-### Debian/Ubuntu (.deb)
+### Quick Install (Recommended)
 
-Download and install the latest `.deb` package from GitHub Releases:
-
-```bash
-# Download and install the latest release
-curl -fsSL -o apexshot_latest.deb \
-  "$(curl -fsSL https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4)" \
-  && sudo dpkg -i apexshot_latest.deb \
-  && sudo apt install -f
-```
-
-Or manually download from [GitHub Releases](https://github.com/apex-shot/apexshot/releases):
+Run the interactive installer. It will detect missing dependencies,
+install them, download the latest `.deb`, and set up the GNOME extension:
 
 ```bash
-# Install the downloaded package
-sudo dpkg -i apexshot_*.deb
-sudo apt install -f  # Install any missing dependencies
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
 ```
+
+> **Tip:** The installer shows a stylish progress UI with spinners, colour-coded
+> status messages, and a summary screen when finished.
 
 ### Updating
 
-The same install command works for updates — `dpkg -i` performs an in-place
-upgrade, preserving your settings and configuration. No need to uninstall first:
+Run the updater to get the latest release in place (settings are preserved):
 
 ```bash
-curl -fsSL -o apexshot_latest.deb \
-  "$(curl -fsSL https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4)" \
-  && sudo dpkg -i apexshot_latest.deb \
-  && sudo apt install -f
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/update.sh | bash
 ```
 
 ### Build from Source
@@ -129,7 +117,7 @@ sudo apexshot install --force                  # Reinstall even if same version
 `apexshot install` is not the same as installing/upgrading the `.deb`.
 It copies `apexshot` and `apexshot-capture` into `/usr/local/bin`, which can
 shadow the package-managed binaries in `/usr/bin`. To upgrade an existing `.deb`
-installation in place, use the `.deb` update flow above with `dpkg -i`.
+installation in place, use the updater script above.
 
 ### GNOME Extension (Required)
 
