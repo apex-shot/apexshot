@@ -58,7 +58,10 @@ Download and install the latest `.deb` package from GitHub Releases:
 
 ```bash
 # Download and install the latest release
-DEB_URL=$(curl -s https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4) && curl -LO "$DEB_URL" && sudo dpkg -i apexshot_*.deb && sudo apt install -f
+curl -fsSL -o apexshot_latest.deb \
+  "$(curl -fsSL https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4)" \
+  && sudo dpkg -i apexshot_latest.deb \
+  && sudo apt install -f
 ```
 
 Or manually download from [GitHub Releases](https://github.com/apex-shot/apexshot/releases):
@@ -75,7 +78,10 @@ The same install command works for updates — `dpkg -i` performs an in-place
 upgrade, preserving your settings and configuration. No need to uninstall first:
 
 ```bash
-DEB_URL=$(curl -s https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4) && curl -LO "$DEB_URL" && sudo dpkg -i apexshot_*.deb && sudo apt install -f
+curl -fsSL -o apexshot_latest.deb \
+  "$(curl -fsSL https://api.github.com/repos/apex-shot/apexshot/releases/latest | grep "browser_download_url.*amd64.deb" | cut -d '"' -f 4)" \
+  && sudo dpkg -i apexshot_latest.deb \
+  && sudo apt install -f
 ```
 
 ### Build from Source
@@ -135,8 +141,8 @@ ApexShot requires the GNOME Shell extension for full functionality on GNOME Wayl
 
 ```bash
 # Download the GNOME extension (finds latest release that has the zip)
-ZIP_URL=$(curl -s https://api.github.com/repos/apex-shot/apexshot/releases | grep -o '"browser_download_url": *"[^"]*apexshot-gnome-integration.zip"' | head -n 1 | cut -d '"' -f 4)
-wget -O apexshot-gnome-integration.zip "$ZIP_URL"
+curl -fsSL -o apexshot-gnome-integration.zip \
+  "$(curl -fsSL https://api.github.com/repos/apex-shot/apexshot/releases | grep -o '"browser_download_url": *"[^"]*apexshot-gnome-integration.zip"' | head -n 1 | cut -d '"' -f 4)"
 
 # Install using gnome-extensions
 gnome-extensions install apexshot-gnome-integration.zip
