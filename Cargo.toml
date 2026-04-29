@@ -73,19 +73,29 @@ relm4-icons-build = "0.10.1"
 maintainer = "codegoddy <codegoddy@gmail.com>"
 copyright = "2026, codegoddy"
 license-file = ["LICENSE", "4"]
-# Runtime dependency policy — every entry below is REQUIRED for some
-# user-facing feature to work. Entries are grouped by what they unlock:
+# Runtime dependency policy.
+#
+# Hard `depends` entries are required for the *core* feature set to work
+# on any modern Linux system (Wayland or X11, PipeWire or PulseAudio).
+# Anything that is only needed for one specific stack is expressed as an
+# apt alternative (`pkg-a | pkg-b`) so that whichever the user already
+# runs satisfies the dependency. Stack-specific extras with no
+# alternative go into `recommends` instead, so dpkg never refuses to
+# install on a perfectly valid setup.
 #
 #   $auto                                      → shared libs of the Rust binary
 #                                                (gtk4, gstreamer, pipewire, …)
-#   wl-clipboard, xclip                        → clipboard copy on Wayland / X11
+#   wl-clipboard | xclip                       → clipboard copy: wl-clipboard on Wayland,
+#                                                xclip on X11. Either satisfies.
+#   pipewire-pulse | pulseaudio-utils          → provides `pactl` for audio source listing.
+#                                                pipewire-pulse ships it on PipeWire systems;
+#                                                pulseaudio-utils on legacy PulseAudio systems.
 #   xdg-utils                                  → `xdg-open` (open file/URL)
 #   libnotify-bin                              → desktop notifications via notify-send
-#   pulseaudio-utils                           → pactl (audio source/sink lookup for recording)
 #   ffmpeg                                     → GIF encoding & video post-processing
 #   wget, curl, unzip                          → in-app GNOME extension installer
-#   gstreamer1.0-{plugins-*,libav,pipewire,pulseaudio}
-#                                              → ScreenCast/PipeWire capture, encoding, audio
+#   gstreamer1.0-{plugins-base,plugins-good,plugins-bad,libav,pipewire}
+#                                              → ScreenCast / PipeWire capture + encoding
 #   tesseract-ocr, tesseract-ocr-eng           → OCR (text extraction) – English by default
 #   libqt5widgets5/dbus5/network5/x11extras5,
 #   libxtst6                                   → run-time libs for the bundled
@@ -93,12 +103,17 @@ license-file = ["LICENSE", "4"]
 #                                                (cargo-deb's $auto cannot
 #                                                introspect asset binaries, so
 #                                                these MUST be listed manually)
-depends = "$auto, wl-clipboard, xclip, xdg-utils, libnotify-bin, pulseaudio-utils, ffmpeg, wget, curl, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-pipewire, gstreamer1.0-pulseaudio, tesseract-ocr, tesseract-ocr-eng, libqt5widgets5, libqt5dbus5, libqt5network5, libqt5x11extras5, libxtst6"
-# Recommended (not required) — adds optional capture paths and GNOME polish:
+depends = "$auto, wl-clipboard | xclip, pipewire-pulse | pulseaudio-utils, xdg-utils, libnotify-bin, ffmpeg, wget, curl, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-pipewire, tesseract-ocr, tesseract-ocr-eng, libqt5widgets5, libqt5dbus5, libqt5network5, libqt5x11extras5, libxtst6"
+# Recommended (not required) — optional capture paths, GNOME polish, and
+# stack-specific helpers that we don't want to *force* onto users who
+# don't need them:
 #   xdg-desktop-portal-gnome | -gtk            → ScreenCast / Screenshot portal backend
 #   grim                                       → fast wlroots screencopy fallback
 #   pipewire                                   → PipeWire daemon (already on most modern installs)
-recommends = "xdg-desktop-portal-gnome | xdg-desktop-portal-gtk, grim, pipewire"
+#   gstreamer1.0-pulseaudio                    → only needed when recording via the legacy
+#                                                PulseAudio sink; PipeWire users don't need it
+#                                                and forcing it can pull in conflicting pulse stacks.
+recommends = "xdg-desktop-portal-gnome | xdg-desktop-portal-gtk, grim, pipewire, gstreamer1.0-pulseaudio"
 section = "graphics"
 priority = "optional"
 assets = [
