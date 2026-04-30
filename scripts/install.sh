@@ -9,7 +9,7 @@ set -euo pipefail
 # ============================================================================
 
 REPO="apex-shot/apexshot"
-API_URL="https://api.github.com/repos/${REPO}"
+RELEASES_URL="https://github.com/${REPO}/releases"
 VERSION=""
 TMPDIR=""
 SUDO=""
@@ -126,8 +126,14 @@ check_prereqs() {
 
 fetch_version() {
     step "Resolving latest release"
-    VERSION=$(curl -fsSL "${API_URL}/releases/latest" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | cut -d '"' -f 4)
-    if [[ -z "$VERSION" ]]; then
+
+    # Use the public redirect from /releases/latest -> /releases/tag/<TAG>.
+    # This avoids api.github.com which is rate-limited (60 req/hour per IP
+    # for unauthenticated callers).
+    local effective
+    effective=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "${RELEASES_URL}/latest" || true)
+    VERSION="${effective##*/}"
+    if [[ -z "$VERSION" ]] || [[ "$VERSION" == "latest" ]]; then
         err "Could not determine the latest release version."
         err "Please check your internet connection or try again later."
         exit 1
@@ -186,10 +192,13 @@ download_deb() {
     step "Downloading ApexShot ${VERSION}"
 
     TMPDIR=$(mktemp -d -t apexshot-install.XXXXXX)
-    local deb_url
-    deb_url=$(curl -fsSL "${API_URL}/releases/latest" |
-              grep "browser_download_url.*amd64.deb" |
-              cut -d '"' -f 4)
+    # Scrape the release's assets page (HTML, not API) to find the .deb URL.
+    local deb_path
+    deb_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
+               grep -oE "/${REPO}/releases/download/${VERSION}/[^\"]*amd64\.deb" |
+               head -n 1)
+    local deb_url=""
+    [[ -n "$deb_path" ]] && deb_url="https://github.com${deb_path}"
 
     if [[ -z "$deb_url" ]]; then
         err "Could not find the .deb download URL."
