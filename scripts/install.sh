@@ -82,6 +82,15 @@ run_spinner() {
     spinner $! "$msg"
 }
 
+# Prompt the user for their sudo password up front so the subsequent
+# commands inside a spinner don't have their prompt clobbered by the
+# spinner output. No-op when running as root.
+prime_sudo() {
+    if [[ -n "$SUDO" ]]; then
+        $SUDO -v
+    fi
+}
+
 # --- Prerequisites -----------------------------------------------------------
 
 check_prereqs() {
@@ -177,6 +186,8 @@ install_deps() {
 
     info "Missing packages: ${missing[*]}"
 
+    prime_sudo
+
     # Update apt quietly
     run_spinner "Updating package lists..." bash -c "${SUDO} apt-get update -qq"
 
@@ -217,6 +228,7 @@ install_deb() {
     step "Installing ApexShot"
 
     local deb_file="${TMPDIR}/apexshot_${VERSION}_amd64.deb"
+    prime_sudo
     run_spinner "Installing package..." bash -c "${SUDO} dpkg -i '${deb_file}' && ${SUDO} apt install -f -y -qq"
 
     ok "ApexShot installed"
