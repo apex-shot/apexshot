@@ -1,0 +1,38 @@
+# Arch Linux install script for apexshot
+# This file is sourced by pacman during package installation
+
+post_install() {
+    echo "Setting up ApexShot..."
+    
+    # Kill any lingering processes from previous installation
+    killall -9 apexshot 2>/dev/null || true
+    
+    # Update desktop database
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database -q /usr/share/applications/ 2>/dev/null || true
+    fi
+    
+    # Update icon cache
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor/ 2>/dev/null || true
+    fi
+    
+    echo "ApexShot installed successfully!"
+    echo "Run 'apexshot --help' to get started."
+}
+
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    # Clean up desktop database
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database -q /usr/share/applications/ 2>/dev/null || true
+    fi
+    
+    # Clean up icon cache
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor/ 2>/dev/null || true
+    fi
+}

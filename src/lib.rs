@@ -15,6 +15,8 @@ pub mod recording;
 pub mod settings;
 pub mod tray;
 pub mod utils;
+// Distribution-specific code (scaffolded for future use)
+// pub mod distro;
 
 // Re-export commonly used types
 pub use backend::{CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};

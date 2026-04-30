@@ -96,10 +96,22 @@ prime_sudo() {
 check_prereqs() {
     step "Checking prerequisites"
 
+    # --- DISTRO DETECTION ---
+    # TODO: Add support for other distributions
+    # Arch Linux support is scaffolded in scripts/install-arch.sh
+    # For now, only Ubuntu/Debian is supported to ensure stability
+
+    # Detect Arch-based systems and redirect
+    # if command -v pacman >/dev/null 2>&1; then
+    #     info "Arch Linux detected. Using Arch installer..."
+    #     exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install-arch.sh)"
+    # fi
+
     if command -v apt >/dev/null 2>&1; then
         ok "apt package manager found"
     else
         err "This installer currently supports Debian/Ubuntu (apt)."
+        err "For Arch Linux, use: scripts/install-arch.sh"
         err "Please install manually or open an issue: https://github.com/${REPO}/issues"
         exit 1
     fi

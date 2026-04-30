@@ -1,0 +1,106 @@
+# Maintainer: codegoddy <codegoddy@gmail.com>
+# This is a template PKGBUILD for Arch Linux packaging.
+# Full implementation pending - see docs/ARCH_SUPPORT.md
+
+pkgname=apexshot
+pkgver=0.2.25
+pkgrel=1
+pkgdesc="Screenshot and screen recording tool for Linux"
+arch=('x86_64')
+url="https://github.com/apex-shot/apexshot"
+license=('GPL-3.0')
+depends=(
+    # Core display/clipboard
+    'wl-clipboard'
+    'xclip'
+    'libnotify'
+    'xdg-utils'
+    
+    # GStreamer stack
+    'gstreamer'
+    'gst-plugins-base'
+    'gst-plugins-good'
+    'gst-plugins-bad'
+    'gst-libav'
+    'gst-plugin-pipewire'
+    
+    # PipeWire
+    'pipewire'
+    'pipewire-pulse'
+    
+    # OCR
+    'tesseract'
+    'tesseract-data-eng'
+    
+    # Qt5 (for bundled capture overlay binary)
+    'qt5-base'
+    'qt5-x11extras'
+    
+    # X11
+    'libxtst'
+    
+    # Desktop portal
+    'xdg-desktop-portal'
+    'xdg-desktop-portal-gnome'
+    
+    # Optional but recommended
+    'ffmpeg'
+    'grim'  # wlroots fallback
+)
+makedepends=(
+    'rust'
+    'cargo'
+    'git'
+    'cmake'
+    'pkgconf'
+    'gtk4'
+    'libadwaita'
+    'gtk4-layer-shell'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/apex-shot/apexshot/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # TODO: Update with actual checksum when released
+
+build() {
+    cd "$pkgname-$pkgver"
+    cargo build --release --locked
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    
+    # Main binary
+    install -Dm755 "target/release/apexshot" "$pkgdir/usr/bin/apexshot"
+    
+    # Bundled capture overlay (C++ binary)
+    install -Dm755 "packaging/deb/apexshot-capture" "$pkgdir/usr/bin/apexshot-capture"
+    
+    # Native messaging host wrapper
+    install -Dm755 "packaging/deb/apexshot-native-host" "$pkgdir/usr/bin/apexshot-native-host"
+    
+    # Desktop files
+    install -Dm644 "packaging/apexshot.desktop" \
+        "$pkgdir/usr/share/applications/io.github.codegoddy.apexshot.desktop"
+    install -Dm644 "packaging/apexshot-daemon.desktop" \
+        "$pkgdir/etc/xdg/autostart/apexshot.desktop"
+    
+    # Icons
+    install -Dm644 "packaging/apexshot.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/apexshot.svg"
+    install -Dm644 "packaging/apexshot.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg"
+    install -Dm644 "packaging/apexshot.svg" \
+        "$pkgdir/usr/share/pixmaps/apexshot.svg"
+    
+    # Browser native messaging manifests
+    install -Dm644 "native-host/io.github.codegoddy.apexshot.json" \
+        "$pkgdir/etc/opt/chrome/NativeMessagingHosts/io.github.codegoddy.apexshot.json"
+    install -Dm644 "native-host/io.github.codegoddy.apexshot.json" \
+        "$pkgdir/etc/chromium/NativeMessagingHosts/io.github.codegoddy.apexshot.json"
+    
+    # Background images for editor
+    for img in src/capture/editor/background-images/*.jpg; do
+        install -Dm644 "$img" "$pkgdir/usr/share/apexshot/background-images/"
+    done
+}
+
+# vim:set ts=2 sw=2 et:
