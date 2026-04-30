@@ -213,50 +213,6 @@ install_deb() {
     ok "ApexShot installed"
 }
 
-# --- GNOME Extension ---------------------------------------------------------
-
-install_gnome_extension() {
-    step "Installing GNOME Shell extension"
-
-    if ! command -v gnome-shell >/dev/null 2>&1; then
-        warn "GNOME Shell not detected — skipping extension installation."
-        info "The GNOME extension is required for full functionality on GNOME Wayland."
-        return
-    fi
-
-    local shell_ver
-    shell_ver=$(gnome-shell --version 2>/dev/null | awk '{print $3}' | cut -d. -f1)
-    if [[ -z "$shell_ver" ]] || [[ "$shell_ver" -lt 45 ]] || [[ "$shell_ver" -gt 49 ]]; then
-        warn "GNOME Shell version ${shell_ver:-unknown} is not in the supported range (45–49)."
-        info "Skipping extension installation."
-        return
-    fi
-
-    local zip_url
-    zip_url=$(curl -fsSL "${API_URL}/releases" |
-              grep -o '"browser_download_url": *"[^"]*apexshot-gnome-integration.zip"' |
-              head -n 1 |
-              cut -d '"' -f 4)
-
-    if [[ -z "$zip_url" ]]; then
-        warn "GNOME extension zip not found in releases — skipping."
-        return
-    fi
-
-    local zip_file="${TMPDIR}/apexshot-gnome-integration.zip"
-    run_spinner "Downloading GNOME extension..." bash -c "curl -fsSL -o '${zip_file}' '${zip_url}'"
-
-    # Install for current user (no sudo needed for gnome-extensions)
-    if command -v gnome-extensions >/dev/null 2>&1; then
-        gnome-extensions install "${zip_file}" --force 2>/dev/null || true
-        gnome-extensions enable apexshot-gnome-integration@apexshot.github.io 2>/dev/null || true
-        ok "GNOME extension installed & enabled"
-    else
-        warn "gnome-extensions CLI not found — skipping automatic install."
-        info "You can install it manually later: gnome-extensions install ${zip_file}"
-    fi
-}
-
 # --- Browser native messaging host -------------------------------------------
 
 setup_browser_host() {
@@ -309,7 +265,6 @@ main() {
     install_deps
     download_deb
     install_deb
-    install_gnome_extension
     setup_browser_host
     summary
 }
