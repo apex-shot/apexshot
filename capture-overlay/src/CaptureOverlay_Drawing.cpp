@@ -2067,42 +2067,27 @@ void CaptureOverlay::drawClickOptions(QPainter& p, const QRectF& parentRect)
             const double fadeAlpha = 1.0 - progress;
             if (fadeAlpha <= 0.01) continue;
 
-            // Soft glow halo behind every click — gives the preview much
-            // more presence without being noisy.
-            QRadialGradient halo(pt, baseRadius * 2.4);
-            QColor haloColor = clickColor;
-            haloColor.setAlpha(static_cast<int>(110 * fadeAlpha));
-            halo.setColorAt(0.0, haloColor);
-            halo.setColorAt(1.0, QColor(haloColor.red(), haloColor.green(), haloColor.blue(), 0));
-            p.setPen(Qt::NoPen);
-            p.setBrush(halo);
-            p.drawEllipse(pt, baseRadius * 2.4, baseRadius * 2.4);
-
-            // Animation: expanding ring on top of the halo.
+            // Marker scale: when animation is enabled, the marker briefly
+            // shrinks at the start of its lifetime (mimicking a button
+            // press) and settles to its natural size. No halo, no
+            // radar-style expanding ring.
+            double markerRadius = baseRadius;
             if (m_clickAnimate) {
-                const double phase = std::fmod((double)age / 500.0, 1.0);
-                const double pulseRadius = baseRadius + phase * 30.0;
-                const double pulseAlpha = (1.0 - phase) * 220.0 * fadeAlpha;
-                if (pulseAlpha > 1.0) {
-                    QColor pulseColor = clickColor;
-                    pulseColor.setAlpha(static_cast<int>(pulseAlpha));
-                    p.setPen(QPen(pulseColor, 2.4));
-                    p.setBrush(Qt::NoBrush);
-                    p.drawEllipse(pt, pulseRadius, pulseRadius);
-                }
+                const double pressPhase = std::min(1.0, (double)age / 110.0);
+                const double pressScale = 0.85 + 0.15 * pressPhase;
+                markerRadius = baseRadius * pressScale;
             }
 
-            // Main click marker — fade out based on age.
             QColor c = clickColor;
             c.setAlpha(static_cast<int>(255 * fadeAlpha));
             if (m_clickStyle == 1) { // Filled
                 p.setPen(QPen(QColor(255, 255, 255, static_cast<int>(160 * fadeAlpha)), 1.4));
                 p.setBrush(c);
-                p.drawEllipse(pt, baseRadius, baseRadius);
+                p.drawEllipse(pt, markerRadius, markerRadius);
             } else { // Outline
                 p.setPen(QPen(c, 3.0));
                 p.setBrush(QColor(c.red(), c.green(), c.blue(), static_cast<int>(40 * fadeAlpha)));
-                p.drawEllipse(pt, baseRadius, baseRadius);
+                p.drawEllipse(pt, markerRadius, markerRadius);
             }
         }
         p.restore();

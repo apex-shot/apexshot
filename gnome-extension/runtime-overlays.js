@@ -561,33 +561,14 @@ function updateClicksActor(overlayState, snapshot, rect) {
     const colorString = clickRgb(colorRgb);
     const isFilled = snapshot.click_style === 1;
 
-    // ── Halo: soft radial glow, identical to the gradient-halo in the C++
-    // preview. Implemented as a transparent circle with a coloured
-    // box-shadow so it works on any GNOME Shell version (no reliance on
-    // CSS radial-gradient support in St). ────────────────────────────────
-    const glowSpread = Math.max(2, Math.round(markerSize * 0.18));
-    const glowBlur = Math.max(8, Math.round(markerSize * 0.85));
-    overlayState.clickHaloActor.set_size(haloSize, haloSize);
-    overlayState.clickHaloActor.set_style([
-        `width: ${haloSize}px;`,
-        `height: ${haloSize}px;`,
-        `border-radius: ${haloRadius}px;`,
-        "background-color: transparent;",
-        "border: none;",
-        `box-shadow: 0 0 ${glowBlur}px ${glowSpread}px ${clickRgba(colorRgb, 0.34)};`,
-    ].join(" "));
-
-    // ── Pulse ring: expanding outline that travels outward when the user
-    // enabled the "Animate clicks" option. Matches the per-frame ring in
-    // the C++ preview (`baseRadius + phase * 30`). ──────────────────────
-    overlayState.clickPulseActor.set_size(markerSize, markerSize);
-    overlayState.clickPulseActor.set_style([
-        `width: ${markerSize}px;`,
-        `height: ${markerSize}px;`,
-        `border-radius: ${markerRadius}px;`,
-        "background-color: transparent;",
-        `border: 2.4px solid ${colorString};`,
-    ].join(" "));
+    // Halo and pulse-ring layers are kept zero-sized / invisible; the
+    // marker itself now carries the click feedback (see animation block
+    // below). The empty styles ensure no leftover paintables remain from
+    // earlier frames.
+    overlayState.clickHaloActor.set_size(0, 0);
+    overlayState.clickHaloActor.set_style("background-color: transparent; border: none;");
+    overlayState.clickPulseActor.set_size(0, 0);
+    overlayState.clickPulseActor.set_style("background-color: transparent; border: none;");
 
     // ── Marker: the actual click indicator. Two styles, each chosen to
     // read clearly on any background:
@@ -604,7 +585,6 @@ function updateClicksActor(overlayState, snapshot, rect) {
                 `border-radius: ${markerRadius}px;`,
                 `background-color: ${colorString};`,
                 `border: 1.5px solid rgba(255, 255, 255, 0.55);`,
-                `box-shadow: 0 2px 10px rgba(0, 0, 0, 0.42);`,
             ]
             : [
                 `width: ${markerSize}px;`,
@@ -612,7 +592,6 @@ function updateClicksActor(overlayState, snapshot, rect) {
                 `border-radius: ${markerRadius}px;`,
                 `background-color: ${clickRgba(colorRgb, 0.16)};`,
                 `border: 3px solid ${colorString};`,
-                `box-shadow: 0 2px 10px rgba(0, 0, 0, 0.42);`,
             ]
     ).join(" "));
 
@@ -643,62 +622,31 @@ function updateClicksActor(overlayState, snapshot, rect) {
     overlayState.clicksActor.opacity = 255;
     overlayState.clicksActor.show();
 
-    // Marker pops in slightly under-sized then settles to 1.0 — feels like
-    // a real button press without being cartoonish.
-    overlayState.clickMarkerActor.set_scale(0.78, 0.78);
+    // Halo and pulse layers stay invisible — no glow, no radar ring.
+    overlayState.clickHaloActor.opacity = 0;
+    overlayState.clickPulseActor.opacity = 0;
+
+    // Marker animation: a quick tactile press. When `click_animate` is
+    // on, the marker briefly shrinks (mimicking a button being pressed)
+    // and settles back to its natural size. When off, it just appears.
     overlayState.clickMarkerActor.opacity = 255;
-    overlayState.clickMarkerActor.ease({
-        scale_x: 1.0,
-        scale_y: 1.0,
-        duration: 130,
-        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-    });
-
-    // Halo blooms briefly, then fades. Stays subtle when animation is off
-    // so it doesn't draw attention to itself.
-    overlayState.clickHaloActor.set_scale(0.85, 0.85);
-    overlayState.clickHaloActor.opacity = snapshot.click_animate ? 220 : 160;
-    overlayState.clickHaloActor.ease({
-        scale_x: 1.0,
-        scale_y: 1.0,
-        duration: 140,
-        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-    });
-
-    // Pulse ring only renders when the user opted in.
     if (snapshot.click_animate) {
-        overlayState.clickPulseActor.show();
-        overlayState.clickPulseActor.set_scale(1.0, 1.0);
-        overlayState.clickPulseActor.opacity = 210;
-        overlayState.clickPulseActor.ease({
-            scale_x: pulseMaxScale,
-            scale_y: pulseMaxScale,
-            duration: 480,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-        });
-        overlayState.clickPulseActor.ease({
-            opacity: 0,
-            duration: 480,
+        overlayState.clickMarkerActor.set_scale(0.85, 0.85);
+        overlayState.clickMarkerActor.ease({
+            scale_x: 1.0,
+            scale_y: 1.0,
+            duration: 110,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
     } else {
-        overlayState.clickPulseActor.opacity = 0;
-        overlayState.clickPulseActor.set_scale(1.0, 1.0);
+        overlayState.clickMarkerActor.set_scale(1.0, 1.0);
     }
 
-    // Coordinated fade-out of every layer. The total visible time for the
-    // marker is ~440 ms (animated) / ~280 ms (static) — long enough to
-    // register on a recording at typical frame rates without bleeding into
-    // the next click.
-    const fadeDuration = snapshot.click_animate ? 360 : 220;
+    // Fade-out timing — long enough to register on a recording without
+    // bleeding into the next click.
+    const fadeDuration = 220;
     const fadeDelay = snapshot.click_animate ? 80 : 40;
     overlayState.clickMarkerActor.ease({
-        opacity: 0,
-        duration: fadeDuration,
-        delay: fadeDelay,
-        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-    });
-    overlayState.clickHaloActor.ease({
         opacity: 0,
         duration: fadeDuration,
         delay: fadeDelay,
