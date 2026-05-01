@@ -1,17 +1,19 @@
 # ApexShot
 
-An open-source Linux screen capture tool with annotation, recording, and OCR.
+**The open-source Linux answer to ShareX and CleanShot X.**
+Screen capture, recording, OCR, QR detection, and annotation — all in one tool.
 
-**Website:** https://apexshot.org/
+![ApexShot Workflow Demo](example.gif)
 
-> **Note:** Currently tested on GNOME Ubuntu (Wayland). X11 implementations exist in the codebase but have not been thoroughly tested. Support for other distributions and desktop environments will be expanded as the project grows.
+[**▶ Install in one command**](#quick-install-recommended) ·
+[Website](https://apexshot.org/) ·
+[Releases](https://github.com/apex-shot/apexshot/releases) ·
+[Report a bug](https://github.com/apex-shot/apexshot/issues/new/choose)
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-0.2.24-orange.svg)
+![Version](https://img.shields.io/github/v/release/apex-shot/apexshot?label=version&color=orange)
 ![Status](https://img.shields.io/badge/status-Alpha-yellow.svg)
-
-![ApexShot Workflow Demo](example.gif)
 
 ## Features
 
@@ -49,6 +51,19 @@ An open-source Linux screen capture tool with annotation, recording, and OCR.
 | **OCR** | Tesseract + ocrs/rten |
 | **System Tray** | ksni (KDE System Tray Integration) |
 | **Webcam** | GStreamer + v4l2 |
+
+## Compatibility
+
+ApexShot is in alpha. Here is the honest support matrix today:
+
+| Environment | Status |
+|---|---|
+| GNOME Shell 47–49 on Ubuntu 24.04 / 25.10 (Wayland) | ✅ Primary, tested daily |
+| GNOME Shell 45 / 46 (Wayland) | 🟡 Should work, less exercised |
+| KDE Plasma 6 / Sway / Hyprland (Wayland) | 🟡 Best-effort, looking for testers |
+| X11 on any distro | 🟡 Code path exists, not thoroughly tested |
+
+If it breaks on your setup, please [open an issue](https://github.com/apex-shot/apexshot/issues/new/choose) — the templates ask for distro / DE / display server up front so triage is fast. Coverage will expand as the project matures.
 
 ## Download
 
