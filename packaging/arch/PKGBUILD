@@ -54,6 +54,7 @@ optdepends=(
     'xdg-desktop-portal-hyprland: for Hyprland'
     'xdg-desktop-portal-wlr: for Sway / other wlroots compositors'
     'xdg-desktop-portal-kde: for KDE Plasma'
+    'gnome-shell-extension-appindicator: system tray icon on GNOME'
     'xclip: clipboard support on X11'
     'grim: faster screenshot fallback on wlroots compositors'
 )

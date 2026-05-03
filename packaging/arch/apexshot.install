@@ -71,6 +71,8 @@ post_install() {
     gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
     echo '>>> ApexShot: Restart GNOME Shell (log out and back in on Wayland) to activate the GNOME extension.'
     echo '>>> ApexShot: The extension can also be toggled via gnome-extensions enable/disable.'
+    echo '>>> ApexShot: For the system tray icon on GNOME, install gnome-shell-extension-appindicator'
+    echo '>>>           and enable it: gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com'
 }
 
 post_upgrade() {
