@@ -84,8 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ins
 Install the pre-built package from the latest GitHub Release:
 
 ```bash
-# Download and install the latest .pkg.tar.zst
-curl -sL https://github.com/apex-shot/apexshot/releases/latest/download/apexshot-0.2.26-1-x86_64.pkg.tar.zst -o /tmp/apexshot.pkg.tar.zst
+curl -#L https://github.com/apex-shot/apexshot/releases/download/v0.2.26/apexshot-0.2.26-1-x86_64.pkg.tar.zst -o /tmp/apexshot.pkg.tar.zst
 sudo pacman -U /tmp/apexshot.pkg.tar.zst
 ```
 
@@ -112,8 +111,7 @@ curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/upd
 **Arch Linux:**
 
 ```bash
-# Re-download the latest package and reinstall
-curl -sL https://github.com/apex-shot/apexshot/releases/latest/download/apexshot-0.2.26-1-x86_64.pkg.tar.zst -o /tmp/apexshot.pkg.tar.zst
+curl -#L https://github.com/apex-shot/apexshot/releases/download/v0.2.26/apexshot-0.2.26-1-x86_64.pkg.tar.zst -o /tmp/apexshot.pkg.tar.zst
 sudo pacman -U /tmp/apexshot.pkg.tar.zst
 ```
 
