@@ -252,12 +252,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Initialize pacman keyring
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+
       - name: Install build dependencies
         run: |
           pacman -Syu --noconfirm \
             base-devel \
             rust \
-            cargo \
             git \
             cmake \
             clang \
@@ -270,15 +274,24 @@ jobs:
             gst-plugins-bad \
             gst-libav \
             pipewire \
+            pipewire-pulse \
             tesseract \
+            tesseract-data-eng \
             qt5-base \
             qt5-x11extras \
-            libxtst
+            libxtst \
+            wl-clipboard \
+            libnotify \
+            xdg-utils \
+            ffmpeg \
+            wget \
+            curl \
+            unzip \
+            sudo
+          which cargo && cargo --version
 
       - name: Build
-        run: |
-          source /etc/profile.d/rust.sh 2>/dev/null || true
-          cargo build --release --verbose
+        run: cargo build --release --verbose
 
       - name: Stage capture helper
         run: cp target/release/apexshot-capture packaging/deb/apexshot-capture
