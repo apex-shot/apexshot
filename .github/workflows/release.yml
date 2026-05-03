@@ -225,7 +225,8 @@ jobs:
             controls-ui.js controls-ui-layout.js \
             keystroke-display.js click-display.js \
             mask-ui.js runtime-overlays.js runtime-overlays-visibility.js \
-            screenshot-lock.js session-state.js window-list.js
+            screenshot-lock.js session-state.js window-list.js \
+            gnome-version.js
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -235,5 +236,71 @@ jobs:
           files: |
             target/debian/*.deb
             gnome-extension/apexshot-gnome-integration.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  arch:
+    name: Build Arch Linux package
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [ci]
+    container:
+      image: archlinux:latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm \
+            base-devel \
+            rust \
+            cargo \
+            git \
+            cmake \
+            clang \
+            pkgconf \
+            gtk4 \
+            libadwaita \
+            gtk4-layer-shell \
+            gst-plugins-base \
+            gst-plugins-good \
+            gst-plugins-bad \
+            gst-libav \
+            pipewire \
+            tesseract \
+            qt5-base \
+            qt5-x11extras \
+            libxtst
+
+      - name: Build
+        run: |
+          source /etc/profile.d/rust.sh 2>/dev/null || true
+          cargo build --release --verbose
+
+      - name: Stage capture helper
+        run: cp target/release/apexshot-capture packaging/deb/apexshot-capture
+
+      - name: Build package with makepkg
+        run: |
+          cd packaging/arch
+          # makepkg refuses to run as root; use a build user
+          useradd -m builduser
+          echo 'builduser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+          chown -R builduser:builduser /__w/apexshot/apexshot
+          sudo -u builduser makepkg -sf --noconfirm
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Upload Arch package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ApexShot ${{ steps.get_version.outputs.VERSION }}
+          files: |
+            packaging/arch/*.pkg.tar.zst
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

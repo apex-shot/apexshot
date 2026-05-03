@@ -1,50 +1,52 @@
 # Maintainer: codegoddy <codegoddy@gmail.com>
-# This is a template PKGBUILD for Arch Linux packaging.
-# Full implementation pending - see docs/ARCH_SUPPORT.md
-
 pkgname=apexshot
-pkgver=0.2.25
+pkgver=0.2.26
 pkgrel=1
-pkgdesc="Screenshot and screen recording tool for Linux"
+pkgdesc="Screenshot and screen recording tool for Linux — Wayland & X11"
 arch=('x86_64')
 url="https://github.com/apex-shot/apexshot"
-license=('GPL-3.0')
+license=('GPL-3.0-or-later')
 options=('!lto')
+install=apexshot.install
 depends=(
-    # Core display/clipboard
+    # Core clipboard / notifications
     'wl-clipboard'
-    'xclip'
     'libnotify'
     'xdg-utils'
-    
-    # GStreamer stack
+
+    # GStreamer stack (ScreenCast / PipeWire capture + encoding)
     'gstreamer'
     'gst-plugins-base'
     'gst-plugins-good'
     'gst-plugins-bad'
     'gst-libav'
     'gst-plugin-pipewire'
-    
+
     # PipeWire
     'pipewire'
     'pipewire-pulse'
-    
+
     # OCR
     'tesseract'
     'tesseract-data-eng'
-    
-    # Qt5 (for bundled capture overlay binary)
+
+    # Qt5 (for bundled C++ capture overlay binary)
     'qt5-base'
     'qt5-x11extras'
-    
-    # X11
+
+    # X11 libs (capture overlay input handling)
     'libxtst'
-    
+
     # Desktop portal (base — required)
     'xdg-desktop-portal'
 
     # Media
     'ffmpeg'
+
+    # In-app GNOME extension installer
+    'wget'
+    'curl'
+    'unzip'
 )
 optdepends=(
     # Portal backends — install the one matching your desktop
@@ -52,6 +54,7 @@ optdepends=(
     'xdg-desktop-portal-hyprland: for Hyprland'
     'xdg-desktop-portal-wlr: for Sway / other wlroots compositors'
     'xdg-desktop-portal-kde: for KDE Plasma'
+    'xclip: clipboard support on X11'
     'grim: faster screenshot fallback on wlroots compositors'
 )
 makedepends=(
@@ -65,54 +68,66 @@ makedepends=(
     'libadwaita'
     'gtk4-layer-shell'
 )
-source=("$pkgname-$pkgver.tar.gz::https://github.com/apex-shot/apexshot/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')  # TODO: Update with actual checksum when released
+source=("apexshot-0.2.26.tar.gz::https://github.com/apex-shot/apexshot/archive/v0.2.26.tar.gz")
+sha256sums=('SKIP')  # Update with actual checksum on release
 
 build() {
     cd "$pkgname-$pkgver"
-    # The upstream repository does not track Cargo.lock, so release
-    # tarballs cannot be built with --locked.
     cargo build --release
 }
 
 package() {
     cd "$pkgname-$pkgver"
-    
-    # Main binary
-    install -Dm755 "target/release/apexshot" "$pkgdir/usr/bin/apexshot"
-    
-    # C++ capture overlay built by build.rs during cargo build
-    install -Dm755 "target/release/apexshot-capture" "$pkgdir/usr/bin/apexshot-capture"
-    
-    # Native messaging host wrapper
+
+    # ── Binaries ──────────────────────────────────────────────
+    install -Dm755 "target/release/apexshot"           "$pkgdir/usr/bin/apexshot"
+    install -Dm755 "target/release/apexshot-capture"   "$pkgdir/usr/bin/apexshot-capture"
     install -Dm755 "packaging/deb/apexshot-native-host" "$pkgdir/usr/bin/apexshot-native-host"
-    
-    # Desktop files
+
+    # ── Desktop files ─────────────────────────────────────────
     install -Dm644 "packaging/apexshot.desktop" \
         "$pkgdir/usr/share/applications/io.github.codegoddy.apexshot.desktop"
     install -Dm644 "packaging/apexshot-daemon.desktop" \
         "$pkgdir/etc/xdg/autostart/apexshot.desktop"
-    
-    # Icons
+
+    # ── Icons ─────────────────────────────────────────────────
     install -Dm644 "packaging/apexshot.svg" \
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/apexshot.svg"
     install -Dm644 "packaging/apexshot.svg" \
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg"
     install -Dm644 "packaging/apexshot.svg" \
         "$pkgdir/usr/share/pixmaps/apexshot.svg"
-    
-    # Browser native messaging manifests
+
+    # ── Browser native messaging manifests ────────────────────
     install -Dm644 "native-host/io.github.codegoddy.apexshot.json" \
         "$pkgdir/etc/opt/chrome/NativeMessagingHosts/io.github.codegoddy.apexshot.json"
     install -Dm644 "native-host/io.github.codegoddy.apexshot.json" \
         "$pkgdir/etc/chromium/NativeMessagingHosts/io.github.codegoddy.apexshot.json"
-    
-    # Background images for editor, when present in a release tarball
-    if compgen -G "src/capture/editor/background-images/*.jpg" > /dev/null; then
-        for img in src/capture/editor/background-images/*.jpg; do
-            install -Dm644 "$img" "$pkgdir/usr/share/apexshot/background-images/$(basename "$img")"
-        done
-    fi
+
+    # ── GNOME Shell extension (system-wide) ───────────────────
+    local ext_uuid="apexshot-gnome-integration@apexshot.github.io"
+    local ext_dir="$pkgdir/usr/share/gnome-shell/extensions/$ext_uuid"
+    install -d "$ext_dir"
+    install -Dm644 "gnome-extension/metadata.json"  "$ext_dir/metadata.json"
+    install -Dm644 "gnome-extension/extension.js"    "$ext_dir/extension.js"
+    install -Dm644 "gnome-extension/controls-ui.js" "$ext_dir/controls-ui.js"
+    install -Dm644 "gnome-extension/controls-ui-layout.js" "$ext_dir/controls-ui-layout.js"
+    install -Dm644 "gnome-extension/runtime-overlays.js" "$ext_dir/runtime-overlays.js"
+    install -Dm644 "gnome-extension/runtime-overlays-visibility.js" "$ext_dir/runtime-overlays-visibility.js"
+    install -Dm644 "gnome-extension/mask-ui.js"     "$ext_dir/mask-ui.js"
+    install -Dm644 "gnome-extension/window-list.js" "$ext_dir/window-list.js"
+    install -Dm644 "gnome-extension/session-state.js" "$ext_dir/session-state.js"
+    install -Dm644 "gnome-extension/click-display.js" "$ext_dir/click-display.js"
+    install -Dm644 "gnome-extension/keystroke-display.js" "$ext_dir/keystroke-display.js"
+    install -Dm644 "gnome-extension/screenshot-lock.js" "$ext_dir/screenshot-lock.js"
+    install -Dm644 "gnome-extension/gnome-version.js" "$ext_dir/gnome-version.js"
+
+    # ── Background images for editor ──────────────────────────
+    local bg_dir="$pkgdir/usr/share/apexshot/background-images"
+    install -d "$bg_dir"
+    for img in src/capture/editor/background-images/*.jpg; do
+        [ -f "$img" ] && install -Dm644 "$img" "$bg_dir/$(basename "$img")"
+    done
 }
 
 # vim:set ts=2 sw=2 et:
