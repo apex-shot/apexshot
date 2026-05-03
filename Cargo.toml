@@ -135,6 +135,9 @@ assets = [
     ["src/capture/editor/background-images/gradient-08.jpg", "usr/share/apexshot/background-images/", "644"],
     ["src/capture/editor/background-images/gradient-09.jpg", "usr/share/apexshot/background-images/", "644"],
     ["src/capture/editor/background-images/gradient-10.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["assets/sounds/camera.ogg", "usr/share/apexshot/sounds/", "644"],
+    ["assets/sounds/classic.ogg", "usr/share/apexshot/sounds/", "644"],
+    ["assets/sounds/pop.ogg", "usr/share/apexshot/sounds/", "644"],
     ["native-host/io.github.codegoddy.apexshot.json", "etc/opt/chrome/NativeMessagingHosts/", "644"],
     ["native-host/io.github.codegoddy.apexshot.json", "etc/chromium/NativeMessagingHosts/", "644"],
 ]

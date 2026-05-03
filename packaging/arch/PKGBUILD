@@ -129,6 +129,13 @@ package() {
     for img in src/capture/editor/background-images/*.jpg; do
         [ -f "$img" ] && install -Dm644 "$img" "$bg_dir/$(basename "$img")"
     done
+
+    # ── Sound files for capture shutter ───────────────────────
+    local snd_dir="$pkgdir/usr/share/apexshot/sounds"
+    install -d "$snd_dir"
+    for snd in assets/sounds/*.ogg; do
+        [ -f "$snd" ] && install -Dm644 "$snd" "$snd_dir/$(basename "$snd")"
+    done
 }
 
 # vim:set ts=2 sw=2 et:
