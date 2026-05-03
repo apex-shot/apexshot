@@ -113,6 +113,20 @@ sudo apt install \
   libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
 ```
 
+### System Dependencies (Arch Linux)
+
+```bash
+sudo pacman -S --needed \
+  base-devel rust cargo git cmake clang pkgconf \
+  gtk4 libadwaita gtk4-layer-shell \
+  gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav gst-plugin-pipewire \
+  pipewire pipewire-pulse libpipewire \
+  tesseract tesseract-data-eng \
+  qt5-base qt5-x11extras libxtst \
+  wl-clipboard xclip libnotify xdg-utils ffmpeg grim \
+  xdg-desktop-portal xdg-desktop-portal-gnome
+```
+
 ### First-Time Setup
 
 After installation, ApexShot will launch an onboarding wizard to help you:

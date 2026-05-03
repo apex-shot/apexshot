@@ -259,7 +259,7 @@ fn synthetic_output(status_code: i32) -> Output {
 /// 1. `APEXSHOT_CAPTURE_BIN` env variable (manual override).
 /// 2. Installed system paths (/usr/bin, /usr/local/bin).
 /// 3. Same directory as the currently-running executable.
-/// 4. Build-time output directory embedded by build.rs via `APEXSHOT_CAPTURE_BIN_DIR`.
+/// 4. Debug build output directory embedded by build.rs via `APEXSHOT_CAPTURE_BIN_DIR`.
 /// 5. Common target profile directories relative to the exe (handles `cargo run` edge cases).
 /// 6. PATH lookup.
 fn find_capture_binary() -> Option<PathBuf> {
@@ -297,7 +297,7 @@ fn find_capture_binary() -> Option<PathBuf> {
         }
     }
 
-    // 3. Build-time output directory embedded by build.rs
+    // 4. Debug build-time output directory embedded by build.rs.
     if let Some(dir) = option_env!("APEXSHOT_CAPTURE_BIN_DIR") {
         let candidate = PathBuf::from(dir).join("apexshot-capture");
         if candidate.exists() {

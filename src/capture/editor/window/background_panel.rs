@@ -135,7 +135,8 @@ const BACKGROUND_GRADIENT_PREVIEW_CLASSES: [&str; 20] = [
 ];
 pub fn background_gradient_asset_path(file_name: &str) -> PathBuf {
     let asset_paths = [
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        std::env::current_dir()
+            .unwrap_or_default()
             .join("src/capture/editor/background-images")
             .join(file_name),
         std::env::current_exe()
@@ -153,7 +154,8 @@ pub fn background_gradient_asset_path(file_name: &str) -> PathBuf {
         .into_iter()
         .find(|path| !path.as_os_str().is_empty() && path.exists())
         .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            std::env::current_dir()
+                .unwrap_or_default()
                 .join("src/capture/editor/background-images")
                 .join(file_name)
         })

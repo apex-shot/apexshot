@@ -79,6 +79,43 @@ sudo dnf install -y \
 
 > **Note:** Fedora package names for GTK4 layer shell may vary by release. If a package is unavailable, consult your distribution's repositories or build the missing dependency from source.
 
+**Arch Linux:**
+```bash
+sudo pacman -S --needed \
+    base-devel \
+    rust \
+    cargo \
+    git \
+    cmake \
+    clang \
+    pkgconf \
+    gtk4 \
+    libadwaita \
+    gtk4-layer-shell \
+    gstreamer \
+    gst-plugins-base \
+    gst-plugins-good \
+    gst-plugins-bad \
+    gst-libav \
+    gst-plugin-pipewire \
+    pipewire \
+    pipewire-pulse \
+    libpipewire \
+    tesseract \
+    tesseract-data-eng \
+    qt5-base \
+    qt5-x11extras \
+    libxtst \
+    wl-clipboard \
+    xclip \
+    libnotify \
+    xdg-utils \
+    ffmpeg \
+    grim \
+    xdg-desktop-portal \
+    xdg-desktop-portal-gnome
+```
+
 ## Building
 
 ### Clone Repository

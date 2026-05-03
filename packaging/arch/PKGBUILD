@@ -9,6 +9,7 @@ pkgdesc="Screenshot and screen recording tool for Linux"
 arch=('x86_64')
 url="https://github.com/apex-shot/apexshot"
 license=('GPL-3.0')
+options=('!lto')
 depends=(
     # Core display/clipboard
     'wl-clipboard'
@@ -52,6 +53,7 @@ makedepends=(
     'cargo'
     'git'
     'cmake'
+    'clang'
     'pkgconf'
     'gtk4'
     'libadwaita'
@@ -62,7 +64,9 @@ sha256sums=('SKIP')  # TODO: Update with actual checksum when released
 
 build() {
     cd "$pkgname-$pkgver"
-    cargo build --release --locked
+    # The upstream repository does not track Cargo.lock, so release
+    # tarballs cannot be built with --locked.
+    cargo build --release
 }
 
 package() {
@@ -71,8 +75,8 @@ package() {
     # Main binary
     install -Dm755 "target/release/apexshot" "$pkgdir/usr/bin/apexshot"
     
-    # Bundled capture overlay (C++ binary)
-    install -Dm755 "packaging/deb/apexshot-capture" "$pkgdir/usr/bin/apexshot-capture"
+    # C++ capture overlay built by build.rs during cargo build
+    install -Dm755 "target/release/apexshot-capture" "$pkgdir/usr/bin/apexshot-capture"
     
     # Native messaging host wrapper
     install -Dm755 "packaging/deb/apexshot-native-host" "$pkgdir/usr/bin/apexshot-native-host"
@@ -97,10 +101,12 @@ package() {
     install -Dm644 "native-host/io.github.codegoddy.apexshot.json" \
         "$pkgdir/etc/chromium/NativeMessagingHosts/io.github.codegoddy.apexshot.json"
     
-    # Background images for editor
-    for img in src/capture/editor/background-images/*.jpg; do
-        install -Dm644 "$img" "$pkgdir/usr/share/apexshot/background-images/"
-    done
+    # Background images for editor, when present in a release tarball
+    if compgen -G "src/capture/editor/background-images/*.jpg" > /dev/null; then
+        for img in src/capture/editor/background-images/*.jpg; do
+            install -Dm644 "$img" "$pkgdir/usr/share/apexshot/background-images/$(basename "$img")"
+        done
+    fi
 }
 
 # vim:set ts=2 sw=2 et:

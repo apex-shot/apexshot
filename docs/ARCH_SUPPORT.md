@@ -2,9 +2,9 @@
 
 This document outlines the Arch Linux support implementation for ApexShot.
 
-## Status: Scaffolded (Not Fully Implemented)
+## Status: Initial Source and Package Build Tested
 
-The infrastructure for Arch Linux support has been created but requires testing and completion. This approach ensures:
+The infrastructure for Arch Linux support has been created, the source-build dependency list has been tested on Arch, and the PKGBUILD has completed a local package build. Installer and desktop-environment coverage still need more testing. This approach ensures:
 - **Isolation**: Arch-specific code is separate from Ubuntu/GNOME implementation
 - **Maintainability**: Ubuntu code remains unchanged and functional
 - **Extensibility**: Pattern can be replicated for other distributions
@@ -111,9 +111,9 @@ Placeholder for Arch-specific functionality:
 
 ### Phase 1: Testing (Current)
 
-- [ ] Test PKGBUILD on clean Arch installation
+- [x] Test PKGBUILD local package build
 - [ ] Test `install-arch.sh` script
-- [ ] Verify all dependencies are correctly specified
+- [x] Verify source-build dependencies are correctly specified
 - [ ] Test on major Arch-based distros:
   - [ ] Manjaro
   - [ ] EndeavourOS

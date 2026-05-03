@@ -14,6 +14,7 @@ AUR_URL="https://aur.archlinux.org/packages/apexshot"
 VERSION=""
 TMPDIR=""
 SUDO=""
+INSTALL_PATH="/usr/bin/apexshot"
 
 # --- ANSI colours & styles ---------------------------------------------------
 BOLD="\033[1m"
@@ -225,6 +226,7 @@ install_from_source() {
         cargo
         git
         cmake
+        clang
         pkgconf
         gtk4
         libadwaita
@@ -260,11 +262,12 @@ install_from_source() {
     
     step "Installing"
     run_spinner "Installing to /usr/local/bin..." bash -c "${SUDO} cp '$TMPDIR/apexshot/target/release/apexshot' /usr/local/bin/"
+    INSTALL_PATH="/usr/local/bin/apexshot"
     
     # Install bundled binaries if they exist
-    if [[ -f "$TMPDIR/apexshot/packaging/deb/apexshot-capture" ]]; then
+    if [[ -f "$TMPDIR/apexshot/target/release/apexshot-capture" ]]; then
         run_spinner "Installing capture overlay..." \
-            bash -c "${SUDO} cp '$TMPDIR/apexshot/packaging/deb/apexshot-capture' /usr/local/bin/"
+            bash -c "${SUDO} cp '$TMPDIR/apexshot/target/release/apexshot-capture' /usr/local/bin/"
     fi
     
     if [[ -f "$TMPDIR/apexshot/packaging/deb/apexshot-native-host" ]]; then
@@ -305,7 +308,7 @@ cleanup() {
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is ready!${RESET}\n"
-    echo -e "  Binary:    ${BOLD}/usr/bin/apexshot${RESET}"
+    echo -e "  Binary:    ${BOLD}${INSTALL_PATH}${RESET}"
     echo -e "  Website:   ${DIM}https://apexshot.org/${RESET}"
     echo -e "  Issues:    ${DIM}https://github.com/${REPO}/issues${RESET}"
     echo -e "\n  ${BOLD}Quick start:${RESET}"

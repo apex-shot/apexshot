@@ -1,7 +1,7 @@
 /// Compile the C++ Qt5 capture overlay binary using CMake.
-/// The compiled binary is placed in OUT_DIR and its location is exported
-/// via the APEXSHOT_CAPTURE_BIN_DIR env var (embedded at compile time
-/// via `option_env!` in capture_overlay.rs).
+/// The compiled binary is placed in OUT_DIR. Debug builds also embed the
+/// build directory for local development; release builds avoid embedding
+/// absolute package build paths.
 fn build_capture_overlay() {
     use std::path::PathBuf;
     use std::process::Command;
@@ -66,12 +66,15 @@ fn build_capture_overlay() {
         panic!("cmake build failed for capture-overlay");
     }
 
-    // Export the directory so capture_overlay.rs can find the binary at runtime
-    // (via option_env!("APEXSHOT_CAPTURE_BIN_DIR"))
-    println!(
-        "cargo:rustc-env=APEXSHOT_CAPTURE_BIN_DIR={}",
-        build_dir.display()
-    );
+    // Export the directory only for debug/dev builds. Release package builds
+    // should not contain absolute references to $srcdir.
+    let profile = std::env::var("PROFILE").unwrap_or_default();
+    if profile != "release" {
+        println!(
+            "cargo:rustc-env=APEXSHOT_CAPTURE_BIN_DIR={}",
+            build_dir.display()
+        );
+    }
 
     // Also copy the binary next to the Rust binary in the target directory
     // so it's available when running `cargo run` during development.

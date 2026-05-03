@@ -2290,8 +2290,9 @@ fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
     };
 
     let asset_paths = [
-        // Development: relative to project manifest
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        // Development: relative to the current project directory.
+        std::env::current_dir()
+            .unwrap_or_default()
             .join("assets/sounds")
             .join(file_name),
         // Installed: relative to binary location
