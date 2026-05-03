@@ -626,5 +626,4 @@ mod tests {
         let result = crop_capture(data, 3, 3, 3, 3);
         assert!(result.is_err());
     }
-
 }
