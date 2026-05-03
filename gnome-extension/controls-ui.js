@@ -4,6 +4,7 @@ import GLib from "gi://GLib";
 import St from "gi://St";
 import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
+import {shellVersionAtLeast50} from "./gnome-version.js";
 import {
     clearControlsState,
     getRuntimeOverlaySupportMessage,
@@ -403,10 +404,10 @@ export class ControlsUi {
             menu.add_child(this._createRuntimeOverlayToggleRow(spec));
 
         this._runtimeOverlayMenu = menu;
-        Main.layoutManager.addChrome(this._runtimeOverlayMenu, {
-            affectsInputRegion: true,
-            trackFullscreen: false,
-        });
+        const menuChromeParams = {trackFullscreen: false};
+        if (!shellVersionAtLeast50())
+            menuChromeParams.affectsInputRegion = true;
+        Main.layoutManager.addChrome(this._runtimeOverlayMenu, menuChromeParams);
         this._runtimeOverlayMenu.show();
         this._refreshRuntimeOverlayToggleRows();
         this._positionRuntimeOverlayMenu();
@@ -443,10 +444,10 @@ export class ControlsUi {
 
         this._warningPopup = popup;
         this._warningPopupAnchor = nearButton;
-        Main.layoutManager.addChrome(this._warningPopup, {
-            affectsInputRegion: false,
-            trackFullscreen: false,
-        });
+        const warningChromeParams = {trackFullscreen: false};
+        if (!shellVersionAtLeast50())
+            warningChromeParams.affectsInputRegion = false;
+        Main.layoutManager.addChrome(this._warningPopup, warningChromeParams);
         this._warningPopup.show();
         this._positionWarningPopup();
 

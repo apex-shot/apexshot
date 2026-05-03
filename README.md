@@ -58,7 +58,7 @@ ApexShot is in alpha. Here is the honest support matrix today:
 
 | Environment | Status |
 |---|---|
-| GNOME Shell 47–49 on Ubuntu 24.04 / 25.10 (Wayland) | ✅ Primary, tested daily |
+| GNOME Shell 47–50 on Ubuntu 24.04 / 25.10 / Arch (Wayland) | ✅ Primary, tested daily |
 | GNOME Shell 45 / 46 (Wayland) | 🟡 Should work, less exercised |
 | KDE Plasma 6 / Sway / Hyprland (Wayland) | 🟡 Best-effort, looking for testers |
 | X11 on any distro | 🟡 Code path exists, not thoroughly tested |

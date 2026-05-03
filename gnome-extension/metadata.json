@@ -2,7 +2,7 @@
   "name": "ApexShot GNOME Integration",
   "description": "Enhances ApexShot with GNOME Shell integration for window stacking, recording masks, and runtime overlays",
   "uuid": "apexshot-gnome-integration@apexshot.github.io",
-  "shell-version": ["45", "46", "47", "48", "49"],
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
   "url": "https://github.com/apex-shot/apexshot",
   "version": 2,
   "gettext-domain": "apexshot-gnome-integration",

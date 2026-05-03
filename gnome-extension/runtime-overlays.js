@@ -6,6 +6,7 @@ import St from "gi://St";
 import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {createKeystrokeOverlayModel} from "./keystroke-display.js";
+import {shellVersionAtLeast50} from "./gnome-version.js";
 import {
     createRenderableRuntimeOverlayVisibility,
     hasRenderableRuntimeOverlays,
@@ -747,10 +748,10 @@ export function attachRuntimeOverlays(sessionState) {
     registerSelfOwnedActor(sessionState, overlayState.clicksActor, "runtime-overlay.clicks");
     registerSelfOwnedActor(sessionState, overlayState.keystrokesActor, "runtime-overlay.keystrokes");
 
-    Main.layoutManager.addChrome(overlayState.chrome, {
-        affectsInputRegion: false,
-        trackFullscreen: false,
-    });
+    const chromeParams = {trackFullscreen: false};
+    if (!shellVersionAtLeast50())
+        chromeParams.affectsInputRegion = false;
+    Main.layoutManager.addChrome(overlayState.chrome, chromeParams);
     overlayState.chrome.show();
     return overlayState;
 }
