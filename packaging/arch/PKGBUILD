@@ -40,13 +40,19 @@ depends=(
     # X11
     'libxtst'
     
-    # Desktop portal
+    # Desktop portal (base — required)
     'xdg-desktop-portal'
-    'xdg-desktop-portal-gnome'
-    
-    # Optional but recommended
+
+    # Media
     'ffmpeg'
-    'grim'  # wlroots fallback
+)
+optdepends=(
+    # Portal backends — install the one matching your desktop
+    'xdg-desktop-portal-gnome: for GNOME Wayland'
+    'xdg-desktop-portal-hyprland: for Hyprland'
+    'xdg-desktop-portal-wlr: for Sway / other wlroots compositors'
+    'xdg-desktop-portal-kde: for KDE Plasma'
+    'grim: faster screenshot fallback on wlroots compositors'
 )
 makedepends=(
     'rust'

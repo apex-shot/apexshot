@@ -89,41 +89,6 @@ fn clear_restore_token(target: CaptureTarget) {
     }
 }
 
-fn is_gnome_wayland_session() -> bool {
-    std::env::var_os("WAYLAND_DISPLAY").is_some()
-        && (std::env::var_os("GNOME_SETUP_DISPLAY").is_some()
-            || std::env::var("XDG_CURRENT_DESKTOP")
-                .map(|desktop| desktop.to_ascii_lowercase().contains("gnome"))
-                .unwrap_or(false))
-}
-
-fn gnome_wayland_fast_path(
-    is_gnome_wayland: bool,
-    allow_screencast: bool,
-    allow_screenshot_portal: bool,
-) -> bool {
-    is_gnome_wayland && allow_screencast && allow_screenshot_portal
-}
-
-fn grim_available() -> bool {
-    std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
-        .map(|dir| dir.join("grim"))
-        .any(|path| path.is_file())
-}
-
-fn should_probe_grim_with_env(
-    allow_screenshot_portal: bool,
-    is_gnome_wayland: bool,
-    grim_installed: bool,
-) -> bool {
-    if is_gnome_wayland && allow_screenshot_portal {
-        return false;
-    }
-    grim_installed
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // GStreamer helpers (only used in the ScreenCast fallback)
 // ──────────────────────────────────────────────────────────────────────────────
@@ -279,57 +244,6 @@ fn crop_capture(
 // ──────────────────────────────────────────────────────────────────────────────
 
 impl WaylandBackend {
-    /// `grim` speaks `wlr-screencopy` / `ext-image-copy-capture` directly over
-    /// the Wayland socket — no D-Bus, no portal daemon.  This is the same path
-    /// the system screenshot button takes on wlroots compositors.
-    ///
-    /// Returns `Err` if `grim` is not installed or fails, so the caller can
-    /// fall through to the next tier.
-    fn capture_via_grim() -> DisplayResult<CaptureData> {
-        // Write to a deterministic temp file so we don't have to parse stdout.
-        let tmp = std::env::temp_dir().join(format!(
-            "apexshot_grim_{}.png",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-
-        let status = std::process::Command::new("grim")
-            .arg(tmp.as_os_str())
-            // Forward the Wayland display socket so grim can connect even when
-            // we're running from a spawned process.
-            .env(
-                "WAYLAND_DISPLAY",
-                std::env::var("WAYLAND_DISPLAY").unwrap_or_default(),
-            )
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map_err(|e| {
-                DisplayError::CaptureError(format!("grim not found or failed to start: {e}"))
-            })?;
-
-        if !status.success() {
-            return Err(DisplayError::CaptureError(format!(
-                "grim exited with status {}",
-                status
-            )));
-        }
-
-        let img = image::open(&tmp)
-            .map_err(|e| DisplayError::CaptureError(format!("Failed to load grim output: {e}")))?
-            .into_rgba8();
-
-        let _ = std::fs::remove_file(&tmp);
-
-        let width = img.width();
-        let height = img.height();
-        let pixels = img.into_raw();
-
-        Ok(CaptureData::new(pixels, width, height, PixelFormat::RGBA32))
-    }
-
     /// Screenshot portal capture.
     ///
     /// `interactive=true` opens the desktop's selector UI first.
@@ -579,116 +493,12 @@ impl WaylandBackend {
         result
     }
 
-    fn capture_screen_chain(
-        &self,
-        allow_screenshot_portal: bool,
-        allow_screencast: bool,
-    ) -> DisplayResult<CaptureData> {
-        eprintln!("[capture] capture_screen_chain: starting (allow_screenshot_portal={allow_screenshot_portal}, allow_screencast={allow_screencast})");
-
-        // Tier 0: direct wlr-screencopy — fastest, no popup, no portal daemon.
-        // Returns Ok(None) if compositor lacks zwlr_screencopy_manager_v1.
-        eprintln!("[capture] Tier 0 (wlr-screencopy): attempting...");
-        let t0_start = std::time::Instant::now();
-        match super::screencopy::capture() {
-            Ok(Some(capture)) => {
-                eprintln!("[capture] Tier 0 (wlr-screencopy) succeeded in {:.0}ms — NO portal flash/sound.", t0_start.elapsed().as_millis());
-                return Ok(capture);
-            }
-            Ok(None) => eprintln!(
-                "[capture] Tier 0 (wlr-screencopy) not supported by compositor ({:.0}ms).",
-                t0_start.elapsed().as_millis()
-            ),
-            Err(e) => eprintln!(
-                "[capture] Tier 0 (wlr-screencopy) failed ({:.0}ms): {e}",
-                t0_start.elapsed().as_millis()
-            ),
-        }
-
-        let is_gnome_wayland = is_gnome_wayland_session();
-        let prefer_screencast_first =
-            gnome_wayland_fast_path(is_gnome_wayland, allow_screencast, allow_screenshot_portal);
-
-        if should_probe_grim_with_env(allow_screenshot_portal, is_gnome_wayland, grim_available()) {
-            // Tier 1: grim subprocess — wlroots compositors.
-            eprintln!("[capture] Tier 1 (grim): attempting...");
-            let t1_start = std::time::Instant::now();
-            match Self::capture_via_grim() {
-                Ok(capture) => {
-                    eprintln!(
-                        "[capture] Tier 1 (grim) succeeded in {:.0}ms — NO portal flash/sound.",
-                        t1_start.elapsed().as_millis()
-                    );
-                    return Ok(capture);
-                }
-                Err(e) => eprintln!(
-                    "[capture] Tier 1 (grim) failed ({:.0}ms): {e}",
-                    t1_start.elapsed().as_millis()
-                ),
-            }
-        } else {
-            eprintln!("[capture] Tier 1 (grim): SKIPPED for current environment.");
-        }
-
-        if prefer_screencast_first {
-            eprintln!(
-                "[capture] GNOME Wayland detected — preferring ScreenCast before Screenshot portal to avoid flash/sound."
-            );
-            eprintln!(
-                "[capture] Tier 3 (ScreenCast portal + PipeWire): attempting before Screenshot portal..."
-            );
-            if let Ok(capture) = Self::capture_monitor_via_screencast() {
-                return Ok(capture);
-            }
-        }
-
-        if allow_screenshot_portal {
-            eprintln!("[capture] Tier 2 (Screenshot portal): attempting — ⚠ THIS WILL TRIGGER PORTAL SCREENSHOT (flash/sound expected)");
-            let t2_start = std::time::Instant::now();
-            match block_on_async(Self::capture_via_screenshot_portal(false)) {
-                Ok(capture) => {
-                    eprintln!("[capture] Tier 2 (Screenshot portal) succeeded in {:.0}ms — portal flash/sound was triggered here.", t2_start.elapsed().as_millis());
-                    return Ok(capture);
-                }
-                Err(e) => eprintln!(
-                    "[capture] Tier 2 (Screenshot portal) failed ({:.0}ms): {e}",
-                    t2_start.elapsed().as_millis()
-                ),
-            }
-        } else {
-            eprintln!(
-                "[capture] Tier 2 (Screenshot portal): SKIPPED (allow_screenshot_portal=false)"
-            );
-        }
-
-        if allow_screencast && !prefer_screencast_first {
-            eprintln!(
-                "[capture] Tier 3 (ScreenCast portal + PipeWire): attempting (last resort)..."
-            );
-            Self::capture_monitor_via_screencast()
-        } else if allow_screencast {
-            Err(DisplayError::CaptureError(
-                "GNOME Wayland ScreenCast capture failed and Screenshot portal fallback also failed"
-                    .into(),
-            ))
-        } else {
-            eprintln!("[capture] Tier 3 (ScreenCast): SKIPPED (allow_screencast=false) — all tiers exhausted.");
-            Err(DisplayError::CaptureError(
-                "No non-screencast Wayland capture path available (all tiers failed or skipped)"
-                    .into(),
-            ))
-        }
-    }
-
-    /// Run the capture chain for a full-screen monitor capture.
+    /// Run a full-screen monitor capture via the ScreenCast portal + PipeWire.
     ///
-    /// Tiers (fastest → slowest):
-    /// 0. wlr-screencopy (direct Wayland, ~50 ms, no popup)
-    /// 1. grim subprocess (~50 ms, wlroots)
-    /// 2. Screenshot portal (~200-400 ms, no persistent share session)
-    /// 3. ScreenCast + PipeWire (last resort, may show popup)
+    /// Always uses the ScreenCast path for full customization and cross-distro
+    /// consistency. wlr-screencopy, grim, and the Screenshot portal are bypassed.
     pub fn capture_screen_impl(&self) -> DisplayResult<CaptureData> {
-        self.capture_screen_chain(true, true)
+        Self::capture_monitor_via_screencast()
     }
 
     /// Area capture via interactive Screenshot portal selector.
@@ -721,13 +531,10 @@ impl WaylandBackend {
 
     /// Capture used for area-selector backgrounds on Wayland.
     ///
-    /// Allows the Screenshot portal fallback, but intentionally skips
-    /// ScreenCast to avoid triggering a persistent screen-sharing session.
-    /// ⚠ On GNOME Wayland (no wlr-screencopy, no grim), this will fall through to
-    /// the Screenshot portal (Tier 2), which triggers the system screenshot sound + flash.
+    /// Uses ScreenCast portal + PipeWire for cross-distro consistency.
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
         eprintln!("[capture] capture_screen_for_selection_impl: called (Wayland selector background capture)");
-        self.capture_screen_chain(true, false)
+        Self::capture_monitor_via_screencast()
     }
 }
 
@@ -820,20 +627,4 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn gnome_wayland_fast_path_is_enabled_for_selector_backgrounds() {
-        assert!(gnome_wayland_fast_path(true, true, true));
-        assert!(!gnome_wayland_fast_path(true, false, true));
-        assert!(!gnome_wayland_fast_path(false, true, true));
-        assert!(!gnome_wayland_fast_path(true, true, false));
-    }
-
-    #[test]
-    fn grim_probe_respects_environment_and_binary_presence() {
-        assert!(!should_probe_grim_with_env(true, true, false));
-        assert!(!should_probe_grim_with_env(true, false, false));
-        assert!(should_probe_grim_with_env(true, false, true));
-        assert!(should_probe_grim_with_env(false, false, true));
-        assert!(!should_probe_grim_with_env(false, false, false));
-    }
 }
