@@ -150,7 +150,7 @@ jobs:
       - name: Bootstrap container tooling
         run: |
           apt-get update
-          apt-get install -y curl ca-certificates git
+          apt-get install -y curl ca-certificates git zip
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
