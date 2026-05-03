@@ -67,7 +67,7 @@ If it breaks on your setup, please [open an issue](https://github.com/apex-shot/
 
 ## Download
 
-### Quick Install (Recommended)
+### Quick Install — Ubuntu / Debian (Recommended)
 
 Run the interactive installer. It will detect missing dependencies,
 install them, download the latest `.deb`, and set up the GNOME extension:
@@ -79,12 +79,42 @@ curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ins
 > **Tip:** The installer shows a stylish progress UI with spinners, colour-coded
 > status messages, and a summary screen when finished.
 
+### Quick Install — Arch Linux
+
+Install the pre-built package from the latest GitHub Release:
+
+```bash
+# Download and install the latest .pkg.tar.zst
+curl -sL https://github.com/apex-shot/apexshot/releases/latest/download/apexshot-0.2.26-1-x86_64.pkg.tar.zst -o /tmp/apexshot.pkg.tar.zst
+sudo pacman -U /tmp/apexshot.pkg.tar.zst
+```
+
+Or build from the AUR PKGBUILD:
+
+```bash
+git clone https://github.com/apex-shot/apexshot.git
+cd apexshot/packaging/arch
+makepkg -sf
+sudo pacman -U *.pkg.tar.zst
+```
+
+> **Note:** The package installs the GNOME Shell extension system-wide.
+> Restart GNOME Shell (log out and back in on Wayland) to activate it.
+
 ### Updating
 
-Run the updater to get the latest release in place (settings are preserved):
+**Ubuntu / Debian:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/update.sh | bash
+```
+
+**Arch Linux:**
+
+```bash
+# Re-download the latest package and reinstall
+curl -sL https://github.com/apex-shot/apexshot/releases/latest/download/apexshot-0.2.26-1-x86_64.pkg.tar.zst -o /tmp/apexshot.pkg.tar.zst
+sudo pacman -U /tmp/apexshot.pkg.tar.zst
 ```
 
 ### Build from Source
