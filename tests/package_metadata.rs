@@ -66,6 +66,18 @@ fn deb_package_includes_capture_helper_binary() {
                 && !release_section.contains("sudo ninja -C build install"),
             "containerized release job should install gtk4-layer-shell without sudo"
         );
+    } else {
+        assert!(
+            release_section.contains("sudo apt-get update")
+                && release_section.contains("sudo apt-get install -y"),
+            "non-containerized release job should install packages with sudo"
+        );
+
+        assert!(
+            release_section.contains("sudo ninja -C build install")
+                && release_section.contains("sudo ldconfig"),
+            "non-containerized release job should install gtk4-layer-shell with sudo"
+        );
     }
 
     assert!(
