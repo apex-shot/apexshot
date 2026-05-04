@@ -73,22 +73,22 @@ Run the interactive installer. It will detect missing dependencies,
 install them, download the latest `.deb`, and set up the GNOME extension:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-install.sh | bash
 ```
 
 > **Tip:** The installer shows a stylish progress UI with spinners, colour-coded
-> status messages, and a summary screen when finished.
+> status messages, download progress, and a summary screen when finished.
 
 ### Quick Install — Arch Linux
 
-Install the pre-built package from the latest GitHub Release:
+Run the interactive Arch installer. It can install from the AUR, install the
+latest pre-built GitHub Release package, or build from source:
 
 ```bash
-curl -#L https://github.com/apex-shot/apexshot/releases/download/v0.2.26/apexshot-0.2.26-1-x86_64.pkg.tar.zst -o /tmp/apexshot.pkg.tar.zst
-sudo pacman -U /tmp/apexshot.pkg.tar.zst
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-install.sh | bash
 ```
 
-Or build from the AUR PKGBUILD:
+Or install manually from the AUR PKGBUILD:
 
 ```bash
 git clone https://github.com/apex-shot/apexshot.git
@@ -105,14 +105,13 @@ sudo pacman -U *.pkg.tar.zst
 **Ubuntu / Debian:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/update.sh | bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-update.sh | bash
 ```
 
 **Arch Linux:**
 
 ```bash
-curl -#L https://github.com/apex-shot/apexshot/releases/download/v0.2.26/apexshot-0.2.26-1-x86_64.pkg.tar.zst -o /tmp/apexshot.pkg.tar.zst
-sudo pacman -U /tmp/apexshot.pkg.tar.zst
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-update.sh | bash
 ```
 
 ### Build from Source
