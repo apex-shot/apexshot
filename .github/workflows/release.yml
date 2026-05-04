@@ -139,11 +139,29 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: startsWith(github.ref, 'refs/tags/')
     needs: [ci]
+    container:
+      image: ubuntu:25.10
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_API_URL: ${{ github.api_url }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
     permissions:
       contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Bootstrap container tooling
+        run: |
+          apt-get update
+          apt-get install -y curl ca-certificates git zip
+
+      - name: Add swap space to prevent OOM during build
+        run: |
+          fallocate -l 4G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -155,8 +173,8 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
             clang \
             cmake \
             libgtk-4-dev \
@@ -186,8 +204,8 @@ jobs:
           git clone https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
           cd /tmp/gtk4-layer-shell
           meson setup build --prefix=/usr
-          sudo ninja -C build install
-          sudo ldconfig
+          ninja -C build install
+          ldconfig
 
       - name: Install cargo-deb
         run: cargo install cargo-deb
