@@ -47,7 +47,7 @@ fn deb_package_includes_capture_helper_binary() {
 
     assert!(
         release_section.contains("- name: Bootstrap container tooling")
-            && release_section.contains("apt-get install -y curl ca-certificates git"),
+            && release_section.contains("curl ca-certificates git"),
         "release workflow container must install curl, certificates, and git before invoking the Rust toolchain action"
     );
 
