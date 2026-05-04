@@ -187,42 +187,26 @@ jobs:
         with:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install core system dependencies
+      - name: Install system dependencies
         run: |
           apt-get update
           for i in 1 2 3; do
-            apt-get install -y --no-install-recommends --fix-missing \
+            apt-get install -y --fix-missing \
               clang cmake pkg-config \
               libgtk-4-dev libclang-dev \
-              libxkbcommon-dev libx11-dev libxtst-dev libwayland-dev libdbus-1-dev && break
-            echo "apt-get install attempt $i failed, retrying..."
-            sleep 10
-            apt-get update
-          done
-
-      - name: Install media system dependencies
-        run: |
-          for i in 1 2 3; do
-            apt-get install -y --no-install-recommends --fix-missing \
               libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
               libgstreamer-plugins-bad1.0-dev \
               gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-              libpipewire-0.3-dev libtesseract-dev && break
-            echo "apt-get install attempt $i failed, retrying..."
-            sleep 10
-            apt-get update
-          done
-
-      - name: Install build tool dependencies
-        run: |
-          for i in 1 2 3; do
-            apt-get install -y --no-install-recommends --fix-missing \
+              libpipewire-0.3-dev libtesseract-dev \
+              libxkbcommon-dev libx11-dev libxtst-dev libwayland-dev libdbus-1-dev \
               meson ninja-build gobject-introspection valac \
               qtbase5-dev libqt5x11extras5-dev && break
             echo "apt-get install attempt $i failed, retrying..."
             sleep 10
             apt-get update
           done
+          # Fail if the loop exhausted all retries without breaking
+          dpkg -l libgtk-4-dev cmake clang > /dev/null 2>&1 || (echo "ERROR: Required packages not installed" && exit 1)
 
       - name: Build gtk4-layer-shell from source
         run: |
