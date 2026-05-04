@@ -397,9 +397,9 @@ pub fn install_editor_css() {
             }
 
             button.editor-tool-button.active-tool {
-                background-color: #2a2a2a;
+                background-color: #ff9900;
                 color: #ffffff;
-                border: 1px solid rgba(255, 255, 255, 0.18);
+                border: 1px solid #ff9900;
                 box-shadow: none;
             }
 
@@ -2711,6 +2711,16 @@ mod tests {
         assert!(
             production_source.contains("button.editor-background-alignment-button.active-alignment-option {\n                background: rgba(255, 255, 255, 0.15);\n                border: 1px solid #ff9900;"),
             "alignment selected state should use the orange editor accent",
+        );
+    }
+
+    #[test]
+    fn editor_toolbar_active_tool_uses_flat_orange_slider_accent() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("button.editor-tool-button.active-tool {\n                background-color: #ff9900;\n                color: #ffffff;\n                border: 1px solid #ff9900;\n                box-shadow: none;"),
+            "selected annotate toolbar tools should use the flat orange slider accent",
         );
     }
 

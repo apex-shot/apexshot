@@ -26,8 +26,11 @@ use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 pub struct WaylandBackend;
+
+const PORTAL_DIALOG_DISMISSAL_DELAY_MS: u64 = 650;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ScreenCast restore-token helpers
@@ -87,6 +90,10 @@ fn clear_restore_token(target: CaptureTarget) {
     if let Some(path) = restore_token_path(target) {
         let _ = std::fs::remove_file(path);
     }
+}
+
+fn should_wait_for_portal_dialog_to_close(restore_token: Option<&str>) -> bool {
+    restore_token.is_none()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -371,6 +378,13 @@ impl WaylandBackend {
             }
         }
 
+        if should_wait_for_portal_dialog_to_close(restore_token) {
+            // GNOME can keep the portal "Share screen" dialog composited for a
+            // frame or two after Start succeeds. Wait before opening PipeWire so
+            // the first grabbed frame is the desktop, not the dismissed dialog.
+            tokio::time::sleep(Duration::from_millis(PORTAL_DIALOG_DISMISSAL_DELAY_MS)).await;
+        }
+
         let capture = capture_single_frame_from_pipewire(node_id);
         let _ = session.close().await;
 
@@ -625,5 +639,14 @@ mod tests {
         let data = CaptureData::new(vec![255; 4 * 4 * 4], 4, 4, PixelFormat::RGBA32);
         let result = crop_capture(data, 3, 3, 3, 3);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn screencast_waits_for_portal_dialog_only_without_restore_token() {
+        assert!(should_wait_for_portal_dialog_to_close(None));
+        assert!(!should_wait_for_portal_dialog_to_close(Some(
+            "restore-token"
+        )));
+        assert!(PORTAL_DIALOG_DISMISSAL_DELAY_MS >= 500);
     }
 }

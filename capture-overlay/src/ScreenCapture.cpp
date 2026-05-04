@@ -18,6 +18,7 @@
 #include <QPixmap>
 #include <QScreen>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 #include <QUuid>
 #include <QUrl>
@@ -33,6 +34,8 @@ QString makeTempPngPath()
 }
 
 #if defined(Q_OS_LINUX)
+constexpr unsigned long kPortalDialogDismissalDelayMs = 650;
+
 bool isGnomeWaylandSession()
 {
     const bool wayland = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
@@ -453,6 +456,11 @@ void clearScreenCastRestoreToken()
     QFile::remove(screenCastRestoreTokenPath());
 }
 
+void waitForPortalDialogDismissal()
+{
+    QThread::msleep(kPortalDialogDismissalDelayMs);
+}
+
 } // namespace
 
 bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outError)
@@ -587,6 +595,7 @@ bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outEr
     // the portal skips the "Allow…?" dialog entirely. The token is opaque;
     // we never inspect it.
     const QString restoreToken = loadScreenCastRestoreToken();
+    const bool usedRestoreToken = !restoreToken.isEmpty();
     if (!restoreToken.isEmpty()) {
         sourceOptions["restore_token"] = restoreToken;
     }
@@ -693,6 +702,13 @@ bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outEr
 
     startRequest.Close().waitForFinished();
     startRequest.deleteLater();
+
+    if (!usedRestoreToken) {
+        // GNOME can keep the portal "Share screen" dialog composited briefly
+        // after Start succeeds. Wait before opening PipeWire so the first
+        // captured frame does not include the dismissed dialog.
+        waitForPortalDialogDismissal();
+    }
 
     QDBusInterface streamInterface("org.freedesktop.portal.Desktop",
                                     streamPath,
