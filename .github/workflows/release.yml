@@ -33,20 +33,25 @@ jobs:
       - name: Install system dependencies (clippy needs the same headers as build)
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-4-dev \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer-plugins-bad1.0-dev \
-            libpipewire-0.3-dev \
-            libtesseract-dev \
-            libxkbcommon-dev \
-            libx11-dev \
-            libxtst-dev \
-            libwayland-dev \
-            libdbus-1-dev \
-            meson ninja-build gobject-introspection valac \
-            qtbase5-dev libqt5x11extras5-dev pkg-config
+          for i in 1 2 3; do
+            sudo apt-get install -y --fix-missing \
+              libgtk-4-dev \
+              libgstreamer1.0-dev \
+              libgstreamer-plugins-base1.0-dev \
+              libgstreamer-plugins-bad1.0-dev \
+              libpipewire-0.3-dev \
+              libtesseract-dev \
+              libxkbcommon-dev \
+              libx11-dev \
+              libxtst-dev \
+              libwayland-dev \
+              libdbus-1-dev \
+              meson ninja-build gobject-introspection valac \
+              qtbase5-dev libqt5x11extras5-dev pkg-config && break
+            echo "apt-get install attempt $i failed, retrying..."
+            sleep 10
+            sudo apt-get update
+          done
 
       - name: Build gtk4-layer-shell from source
         run: |
@@ -98,27 +103,32 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-4-dev \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer-plugins-bad1.0-dev \
-            gstreamer1.0-plugins-good \
-            gstreamer1.0-plugins-bad \
-            libpipewire-0.3-dev \
-            libtesseract-dev \
-            libxkbcommon-dev \
-            libx11-dev \
-            libxtst-dev \
-            libwayland-dev \
-            libdbus-1-dev \
-            meson \
-            ninja-build \
-            gobject-introspection \
-            valac \
-            qtbase5-dev \
-            libqt5x11extras5-dev \
-            pkg-config
+          for i in 1 2 3; do
+            sudo apt-get install -y --fix-missing \
+              libgtk-4-dev \
+              libgstreamer1.0-dev \
+              libgstreamer-plugins-base1.0-dev \
+              libgstreamer-plugins-bad1.0-dev \
+              gstreamer1.0-plugins-good \
+              gstreamer1.0-plugins-bad \
+              libpipewire-0.3-dev \
+              libtesseract-dev \
+              libxkbcommon-dev \
+              libx11-dev \
+              libxtst-dev \
+              libwayland-dev \
+              libdbus-1-dev \
+              meson \
+              ninja-build \
+              gobject-introspection \
+              valac \
+              qtbase5-dev \
+              libqt5x11extras5-dev \
+              pkg-config && break
+            echo "apt-get install attempt $i failed, retrying..."
+            sleep 10
+            sudo apt-get update
+          done
 
       - name: Build gtk4-layer-shell from source
         run: |
@@ -174,30 +184,35 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y \
-            clang \
-            cmake \
-            libgtk-4-dev \
-            libclang-dev \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer-plugins-bad1.0-dev \
-            gstreamer1.0-plugins-good \
-            gstreamer1.0-plugins-bad \
-            libpipewire-0.3-dev \
-            libtesseract-dev \
-            libxkbcommon-dev \
-            libx11-dev \
-            libxtst-dev \
-            libwayland-dev \
-            libdbus-1-dev \
-            meson \
-            ninja-build \
-            gobject-introspection \
-            valac \
-            qtbase5-dev \
-            libqt5x11extras5-dev \
-            pkg-config
+          for i in 1 2 3; do
+            apt-get install -y --fix-missing \
+              clang \
+              cmake \
+              libgtk-4-dev \
+              libclang-dev \
+              libgstreamer1.0-dev \
+              libgstreamer-plugins-base1.0-dev \
+              libgstreamer-plugins-bad1.0-dev \
+              gstreamer1.0-plugins-good \
+              gstreamer1.0-plugins-bad \
+              libpipewire-0.3-dev \
+              libtesseract-dev \
+              libxkbcommon-dev \
+              libx11-dev \
+              libxtst-dev \
+              libwayland-dev \
+              libdbus-1-dev \
+              meson \
+              ninja-build \
+              gobject-introspection \
+              valac \
+              qtbase5-dev \
+              libqt5x11extras5-dev \
+              pkg-config && break
+            echo "apt-get install attempt $i failed, retrying..."
+            sleep 10
+            apt-get update
+          done
 
       - name: Build gtk4-layer-shell from source
         run: |
