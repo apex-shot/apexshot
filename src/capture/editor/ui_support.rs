@@ -776,6 +776,35 @@ pub fn install_editor_css() {
                     0 2px 4px rgba(0, 0, 0, 0.2);
             }
 
+            .editor-root.editor-theme-light scale trough {
+                background-color: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+            }
+
+            .editor-root.editor-theme-light scale highlight {
+                background-color: #ff9900;
+            }
+
+            .editor-root.editor-theme-light scale slider {
+                background: #f5f5f7;
+                border: 1px solid rgba(0, 0, 0, 0.18);
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
+            }
+
+            .editor-root.editor-theme-light scale:disabled trough {
+                background-color: rgba(255, 255, 255, 0.04);
+                border-color: rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-root.editor-theme-light scale:disabled highlight {
+                background-color: rgba(255, 153, 0, 0.42);
+            }
+
+            .editor-root.editor-theme-light scale:disabled slider {
+                background: rgba(245, 245, 247, 0.62);
+                border-color: rgba(0, 0, 0, 0.10);
+            }
+
             .editor-hue-slider trough {
                 min-height: 10px;
                 border-radius: 999px;
