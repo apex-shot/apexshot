@@ -168,10 +168,14 @@ jobs:
 
       - name: Add swap space to prevent OOM during build
         run: |
-          fallocate -l 4G /swapfile
-          chmod 600 /swapfile
-          mkswap /swapfile
-          swapon /swapfile
+          if swapon --show | grep -q '/swapfile'; then
+            echo "Swap already configured, skipping"
+          else
+            fallocate -l 4G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
