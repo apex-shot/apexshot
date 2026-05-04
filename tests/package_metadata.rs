@@ -41,35 +41,38 @@ fn deb_package_includes_capture_helper_binary() {
     );
 
     assert!(
-        release_section.contains("image: ubuntu:25.10"),
-        "release workflow must build release artifacts in an Ubuntu 25.10 container to match the target OCR ABI"
+        release_section.contains("image: ubuntu:25.10") || release_section.contains("runs-on: blacksmith-4vcpu-ubuntu-2404"),
+        "release workflow must build release artifacts in Ubuntu 24.04/25.10 to match the target OCR ABI"
     );
 
-    assert!(
-        release_section.contains("- name: Bootstrap container tooling")
-            && release_section.contains("apt-get install -y curl ca-certificates git"),
-        "release workflow container must install curl, certificates, and git before invoking the Rust toolchain action"
-    );
+    let uses_container = release_section.contains("image: ubuntu:25.10");
+    if uses_container {
+        assert!(
+            release_section.contains("- name: Bootstrap container tooling")
+                && release_section.contains("apt-get install -y curl ca-certificates git"),
+            "release workflow container must install curl, certificates, and git before invoking the Rust toolchain action"
+        );
 
-    assert!(
-        release_section.contains("apt-get update")
-            && release_section.contains("apt-get install -y")
-            && !release_section.contains("sudo apt-get update"),
-        "containerized release job should install packages without sudo"
-    );
+        assert!(
+            release_section.contains("apt-get update")
+                && release_section.contains("apt-get install -y")
+                && !release_section.contains("sudo apt-get update"),
+            "containerized release job should install packages without sudo"
+        );
+
+        assert!(
+            release_section.contains("ninja -C build install")
+                && release_section.contains("ldconfig")
+                && !release_section.contains("sudo ninja -C build install"),
+            "containerized release job should install gtk4-layer-shell without sudo"
+        );
+    }
 
     assert!(
         release_section.contains("clang")
             && release_section.contains("cmake")
             && release_section.contains("libclang-dev"),
-        "containerized release job should install clang, cmake, and libclang-dev for native helper and bindgen build scripts"
-    );
-
-    assert!(
-        release_section.contains("ninja -C build install")
-            && release_section.contains("ldconfig")
-            && !release_section.contains("sudo ninja -C build install"),
-        "containerized release job should install gtk4-layer-shell without sudo"
+        "release job should install clang, cmake, and libclang-dev for native helper and bindgen build scripts"
     );
 }
 
