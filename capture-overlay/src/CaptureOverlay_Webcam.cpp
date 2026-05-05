@@ -2,6 +2,7 @@
 #include <QFile>
 #include <QMenu>
 #include <QAction>
+#include <QDir>
 #include <QImage>
 #include <QPixmap>
 #include <QMutexLocker>
@@ -10,6 +11,10 @@
 #include <QSet>
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
+#include <fcntl.h>
+#include <linux/videodev2.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 #include <thread>
 
 namespace {
@@ -27,17 +32,51 @@ void ensureGStreamerInitialized()
     initialized = true;
 }
 
+bool isVideoCaptureDevice(const QString& devPath)
+{
+    int fd = ::open(devPath.toLocal8Bit().constData(), O_RDONLY | O_NONBLOCK);
+    if (fd < 0) {
+        return false;
+    }
+
+    v4l2_capability caps {};
+    bool canCapture = false;
+    if (::ioctl(fd, VIDIOC_QUERYCAP, &caps) == 0) {
+        __u32 deviceCaps = (caps.capabilities & V4L2_CAP_DEVICE_CAPS)
+            ? caps.device_caps
+            : caps.capabilities;
+        canCapture = (deviceCaps & V4L2_CAP_VIDEO_CAPTURE)
+            || (deviceCaps & V4L2_CAP_VIDEO_CAPTURE_MPLANE);
+    }
+
+    ::close(fd);
+    return canCapture;
+}
+
 } // namespace
 
 void CaptureOverlay::enumerateWebcamDevices()
 {
     m_webcamDevices.clear();
+    m_webcamDeviceIndexes.clear();
     // Track names we've already added to deduplicate (same camera can have subdev nodes)
     QSet<QString> seenNames;
 
-    for (int i = 0; i < 32; ++i) {
+    QDir devDir(QStringLiteral("/dev"));
+    QStringList entries = devDir.entryList(QStringList() << QStringLiteral("video*"), QDir::System | QDir::Files);
+    QRegularExpression videoRe(QStringLiteral("^video(\\d+)$"));
+    QList<int> deviceIndexes;
+    for (const QString& entry : entries) {
+        QRegularExpressionMatch match = videoRe.match(entry);
+        if (match.hasMatch()) {
+            deviceIndexes.append(match.captured(1).toInt());
+        }
+    }
+    std::sort(deviceIndexes.begin(), deviceIndexes.end());
+
+    for (int i : deviceIndexes) {
         QString devPath = QStringLiteral("/dev/video%1").arg(i);
-        if (!QFile::exists(devPath)) continue;
+        if (!QFile::exists(devPath) || !isVideoCaptureDevice(devPath)) continue;
 
         QString name;
         QFile nameFile(QStringLiteral("/sys/class/video4linux/video%1/name").arg(i));
@@ -55,6 +94,7 @@ void CaptureOverlay::enumerateWebcamDevices()
         seenNames.insert(name);
 
         m_webcamDevices.append(QStringLiteral("%1 (%2)").arg(name, devPath));
+        m_webcamDeviceIndexes.append(i);
     }
 }
 
@@ -213,9 +253,7 @@ void CaptureOverlay::showWebcamContextMenu(const QPoint& globalPos)
     noneAct->setData(-1);
 
     for (int i = 0; i < m_webcamDevices.size(); ++i) {
-        QRegularExpression re(QStringLiteral("video(\\d+)"));
-        QRegularExpressionMatch m = re.match(m_webcamDevices[i]);
-        int devIdx = m.hasMatch() ? m.captured(1).toInt() : i;
+        int devIdx = i < m_webcamDeviceIndexes.size() ? m_webcamDeviceIndexes[i] : i;
         
         QAction* act = menu.addAction(m_webcamDevices[i]);
         act->setCheckable(true);

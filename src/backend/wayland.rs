@@ -110,11 +110,26 @@ fn ensure_gstreamer_initialized() -> DisplayResult<()> {
     }
 }
 
+fn pipewire_source_pipeline(node_id: u32) -> String {
+    let copy_buffers = gst::ElementFactory::make("pipewiresrc")
+        .build()
+        .map(|element| element.has_property("always-copy"))
+        .unwrap_or(false);
+    let copy_buffers_prop = if copy_buffers {
+        " always-copy=true"
+    } else {
+        ""
+    };
+
+    format!("pipewiresrc path={node_id} do-timestamp=true{copy_buffers_prop}")
+}
+
 fn capture_single_frame_from_pipewire(node_id: u32) -> DisplayResult<CaptureData> {
     ensure_gstreamer_initialized()?;
 
     let pipeline_str = format!(
-        "pipewiresrc path={node_id} do-timestamp=true num-buffers=1 ! videoconvert ! video/x-raw,format=RGBA ! appsink name=sink emit-signals=false sync=false max-buffers=1 drop=true"
+        "{} num-buffers=1 ! videoconvert ! video/x-raw,format=RGBA ! appsink name=sink emit-signals=false sync=false max-buffers=1 drop=true",
+        pipewire_source_pipeline(node_id)
     );
 
     let pipeline = gst::parse::launch(&pipeline_str)

@@ -273,6 +273,10 @@ install_from_source() {
         gtk4
         libadwaita
         gtk4-layer-shell
+        gstreamer
+        gst-plugins-base
+        gst-plugins-good
+        gst-plugins-bad
         gst-libav
         gst-plugin-pipewire
         libpipewire

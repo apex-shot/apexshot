@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QWindow>
 #include <QImage>
 #include <QRect>
 #include <QTimer>
@@ -100,8 +101,9 @@ void CaptureOverlay::focusAndRaiseOverlay()
 {
     show();
     raise();
-    if (!qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
-        activateWindow();
+    activateWindow();
+    if (windowHandle()) {
+        windowHandle()->requestActivate();
     }
     setFocus(Qt::ActiveWindowFocusReason);
     if (QWidget::keyboardGrabber() != this) {
@@ -257,6 +259,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     setGeometry(desktop);
 
     setWindowFlags(captureOverlayWindowFlags());
+    setFocusPolicy(Qt::StrongFocus);
 
     if (m_background.isNull())
         setAttribute(Qt::WA_TranslucentBackground, true);
@@ -270,6 +273,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     m_pointerPos = initialPointer;
     m_lastCrosshairPaintPoint = initialPointer;
     focusAndRaiseOverlay();
+    QTimer::singleShot(0, this, [this]() { focusAndRaiseOverlay(); });
+    QTimer::singleShot(100, this, [this]() { focusAndRaiseOverlay(); });
 
     if (isCrosshairMode()) {
         m_dimScreen = false;

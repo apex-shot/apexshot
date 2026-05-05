@@ -103,6 +103,11 @@ fn notify_daemon_event(event: &str) {
     }
 }
 
+fn notify_recording_session_ended_best_effort() {
+    crate::gnome_shell::hide_recording_mask_best_effort();
+    notify_daemon_event("recording_session_ended");
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecordingTerminalAction {
     Save,
@@ -267,6 +272,20 @@ fn clear_recording_restore_token(target: RecordingScreenCastTarget) {
     if let Some(path) = recording_restore_token_path(target) {
         let _ = std::fs::remove_file(path);
     }
+}
+
+fn pipewire_source_pipeline(node_id: u32) -> String {
+    let copy_buffers = gst::ElementFactory::make("pipewiresrc")
+        .build()
+        .map(|element| element.has_property("always-copy"))
+        .unwrap_or(false);
+    let copy_buffers_prop = if copy_buffers {
+        " always-copy=true"
+    } else {
+        ""
+    };
+
+    format!("pipewiresrc path={node_id} do-timestamp=true{copy_buffers_prop}")
 }
 
 fn overlay_recording_output_dir(app_config: &AppConfig) -> PathBuf {
@@ -1419,7 +1438,7 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
     };
 
     Ok(WaylandSource {
-        pipeline_source: format!("pipewiresrc path={} do-timestamp=true", node_id),
+        pipeline_source: pipewire_source_pipeline(node_id),
         crop,
         _session: session,
     })
@@ -2049,7 +2068,21 @@ pub async fn run_recording_with_cpp_controls(
         let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
         control_server.clear_command_sender();
         forward_commands.abort();
-        let outcome = outcome?;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                reaper_task.abort();
+                if let Ok(mut child) = controls_child.lock() {
+                    if let Some(process) = child.as_mut() {
+                        let _ = process.kill();
+                        let _ = process.wait();
+                    }
+                    *child = None;
+                }
+                notify_recording_session_ended_best_effort();
+                return Err(err.into());
+            }
+        };
 
         match outcome {
             (path, action @ RecordingTerminalAction::Restart) => {
@@ -2136,7 +2169,19 @@ async fn run_recording_with_shell_controls(
         control_server.set_command_sender(command_tx);
         let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
         control_server.clear_command_sender();
-        let outcome = outcome?;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                drop(controls_handle);
+                drop(control_server);
+                drop(webcam_preview);
+                if let Some(forwarder) = keystroke_forwarder {
+                    forwarder.stop();
+                }
+                notify_recording_session_ended_best_effort();
+                return Err(err.into());
+            }
+        };
 
         match outcome {
             (path, action @ RecordingTerminalAction::Restart) => {
@@ -2592,6 +2637,20 @@ mod tests {
         } else {
             panic!("expected either vp9enc or vp8enc to be available for webm");
         }
+    }
+
+    #[test]
+    fn pipewire_source_pipeline_uses_copied_buffers_when_supported() {
+        gst::init().expect("gstreamer should initialize for pipewiresrc inspection");
+
+        let source = pipewire_source_pipeline(42);
+        let supports_always_copy = gst::ElementFactory::make("pipewiresrc")
+            .build()
+            .map(|element| element.has_property("always-copy"))
+            .unwrap_or(false);
+
+        assert!(source.starts_with("pipewiresrc path=42 do-timestamp=true"));
+        assert_eq!(source.contains("always-copy=true"), supports_always_copy);
     }
 
     #[tokio::test]
