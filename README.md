@@ -67,22 +67,29 @@ If it breaks on your setup, please [open an issue](https://github.com/apex-shot/
 
 ## Download
 
-### Quick Install — Ubuntu / Debian (Recommended)
+### Quick Install — Recommended
 
-Run the interactive installer. It will detect missing dependencies,
-install them, download the latest `.deb`, and set up the GNOME extension:
+Run the interactive installer. It detects Ubuntu/Debian vs Arch Linux,
+installs the right package type, and sets up the GNOME extension:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
 ```
 
 > **Tip:** The installer shows a stylish progress UI with spinners, colour-coded
 > status messages, download progress, and a summary screen when finished.
 
+### Ubuntu / Debian
+
+The generic installer above will select this automatically. Direct command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-install.sh | bash
+```
+
 ### Quick Install — Arch Linux
 
-Run the interactive Arch installer. It can install from the AUR, install the
-latest pre-built GitHub Release package, or build from source:
+The generic installer above will select this automatically. Direct command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-install.sh | bash
@@ -102,13 +109,19 @@ sudo pacman -U *.pkg.tar.zst
 
 ### Updating
 
-**Ubuntu / Debian:**
+The generic updater detects the distro:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/update.sh | bash
+```
+
+Direct Ubuntu / Debian command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-update.sh | bash
 ```
 
-**Arch Linux:**
+Direct Arch Linux command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-update.sh | bash

@@ -16,6 +16,18 @@ TMPDIR=""
 SUDO=""
 INSTALL_PATH="/usr/bin/apexshot"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+handoff_if_wrong_distro() {
+    if ! command -v pacman >/dev/null 2>&1 && { command -v apt >/dev/null 2>&1 || command -v dpkg >/dev/null 2>&1; }; then
+        echo "Ubuntu/Debian detected; switching to the Ubuntu/Debian installer."
+        if [[ -f "${SCRIPT_DIR}/ubuntu-install.sh" ]]; then
+            exec bash "${SCRIPT_DIR}/ubuntu-install.sh" "$@"
+        fi
+        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/ubuntu-install.sh)"
+    fi
+}
+
 # --- ANSI colours & styles ---------------------------------------------------
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -376,6 +388,7 @@ summary() {
 main() {
     trap cleanup EXIT
 
+    handoff_if_wrong_distro "$@"
     header
     check_prereqs
     select_install_method

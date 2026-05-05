@@ -15,6 +15,18 @@ VERSION=""
 TMPDIR=""
 SUDO=""
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+handoff_if_wrong_distro() {
+    if ! command -v pacman >/dev/null 2>&1 && { command -v apt >/dev/null 2>&1 || command -v dpkg >/dev/null 2>&1; }; then
+        echo "Ubuntu/Debian detected; switching to the Ubuntu/Debian updater."
+        if [[ -f "${SCRIPT_DIR}/ubuntu-update.sh" ]]; then
+            exec bash "${SCRIPT_DIR}/ubuntu-update.sh" "$@"
+        fi
+        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/ubuntu-update.sh)"
+    fi
+}
+
 BOLD="\033[1m"
 DIM="\033[2m"
 RESET="\033[0m"
@@ -345,6 +357,7 @@ summary() {
 main() {
     trap cleanup EXIT
 
+    handoff_if_wrong_distro "$@"
     header
     check_prereqs
     detect_current_version

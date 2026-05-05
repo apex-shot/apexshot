@@ -14,6 +14,18 @@ VERSION=""
 TMPDIR=""
 SUDO=""
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+handoff_if_wrong_distro() {
+    if command -v pacman >/dev/null 2>&1 && ! command -v apt >/dev/null 2>&1; then
+        echo "Arch Linux detected; switching to the Arch installer."
+        if [[ -f "${SCRIPT_DIR}/arch-install.sh" ]]; then
+            exec bash "${SCRIPT_DIR}/arch-install.sh" "$@"
+        fi
+        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/arch-install.sh)"
+    fi
+}
+
 # --- ANSI colours & styles ---------------------------------------------------
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -288,6 +300,7 @@ summary() {
 main() {
     trap cleanup EXIT
 
+    handoff_if_wrong_distro "$@"
     header
     check_prereqs
     fetch_version
