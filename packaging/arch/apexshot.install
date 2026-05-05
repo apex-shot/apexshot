@@ -14,6 +14,32 @@ _apexshot_clean_stale_desktop() {
     rm -f /root/.local/share/applications/io.github.codegoddy.apexshot.desktop 2>/dev/null || true
 }
 
+# Refresh stale user-installed copies of the GNOME extension. GNOME Shell gives
+# ~/.local/share/gnome-shell/extensions precedence over /usr/share and can cache
+# that path for the active session, so an old user copy can silently shadow the
+# package's fixed extension code until logout.
+_apexshot_refresh_user_extension() {
+    local ext_uuid="apexshot-gnome-integration@apexshot.github.io"
+    local system_ext="/usr/share/gnome-shell/extensions/$ext_uuid"
+    for user_dir in /home/*; do
+        local user_name user_uid user_gid user_ext_parent user_ext
+        user_name=$(basename "$user_dir")
+        case "$user_name" in
+            lost+found|share|nobody|root) continue ;;
+        esac
+        user_uid=$(id -u "$user_name" 2>/dev/null) || continue
+        user_gid=$(id -g "$user_name" 2>/dev/null) || continue
+        user_ext_parent="$user_dir/.local/share/gnome-shell/extensions"
+        user_ext="$user_ext_parent/$ext_uuid"
+        if [ -d "$user_ext" ] && [ -d "$system_ext" ]; then
+            rm -rf "$user_ext" 2>/dev/null || true
+            mkdir -p "$user_ext_parent"
+            cp -a "$system_ext" "$user_ext_parent/"
+            chown -R "$user_uid:$user_gid" "$user_ext"
+        fi
+    done
+}
+
 # Install native messaging host manifest for each user with a
 # Chrome/Chromium config so the browser extension can communicate
 # with apexshot-native-host.
@@ -66,6 +92,7 @@ _apexshot_remove_native_messaging() {
 post_install() {
     _apexshot_kill_stale
     _apexshot_clean_stale_desktop
+    _apexshot_refresh_user_extension
     _apexshot_install_native_messaging
     update-desktop-database /usr/share/applications/ 2>/dev/null || true
     gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
@@ -78,6 +105,7 @@ post_install() {
 post_upgrade() {
     _apexshot_kill_stale
     _apexshot_clean_stale_desktop
+    _apexshot_refresh_user_extension
     _apexshot_install_native_messaging
     update-desktop-database /usr/share/applications/ 2>/dev/null || true
     gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true

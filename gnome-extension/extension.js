@@ -417,7 +417,8 @@ class RecordingMaskService {
         this._ownName = null;
         this._monitorsChangedId = null;
         this._pointerPollSource = null;
-        this._stagePointerEventId = null;
+        this._stagePointerPressEventId = null;
+        this._stagePointerReleaseEventId = null;
         this._stageKeyPressEventId = null;
         this._pointerButtons = {
             left: false,
@@ -458,10 +459,19 @@ class RecordingMaskService {
             this._onStageKeyPress(event)
         );
         log("[apexshot] runtime keystroke listener enabled");
-        this._stagePointerEventId = global.stage.connect("captured-event", (_actor, event) =>
-            this._onStagePointerEvent(event)
-        );
-        log("[apexshot] runtime pointer listener enabled");
+        try {
+            this._stagePointerPressEventId = global.stage.connect("button-press-event", (_actor, event) =>
+                this._onStagePointerButtonEvent(event, true)
+            );
+            this._stagePointerReleaseEventId = global.stage.connect("button-release-event", (_actor, event) =>
+                this._onStagePointerButtonEvent(event, false)
+            );
+            log("[apexshot] runtime pointer listener enabled");
+        } catch (e) {
+            logError(e, "[apexshot] failed to enable runtime pointer listener");
+            this._stagePointerPressEventId = null;
+            this._stagePointerReleaseEventId = null;
+        }
     }
 
     disable() {
@@ -474,9 +484,13 @@ class RecordingMaskService {
             this._monitorsChangedId = null;
         }
         this._stopPointerPolling();
-        if (this._stagePointerEventId !== null) {
-            global.stage.disconnect(this._stagePointerEventId);
-            this._stagePointerEventId = null;
+        if (this._stagePointerPressEventId !== null) {
+            global.stage.disconnect(this._stagePointerPressEventId);
+            this._stagePointerPressEventId = null;
+        }
+        if (this._stagePointerReleaseEventId !== null) {
+            global.stage.disconnect(this._stagePointerReleaseEventId);
+            this._stagePointerReleaseEventId = null;
         }
         if (this._stageKeyPressEventId !== null) {
             global.stage.disconnect(this._stageKeyPressEventId);
@@ -731,14 +745,8 @@ class RecordingMaskService {
         updateRuntimeOverlaySnapshot(this._sessionState);
     }
 
-    _onStagePointerEvent(event) {
+    _onStagePointerButtonEvent(event, isPress) {
         if (!this._sessionState.controlsState || !event)
-            return Clutter.EVENT_PROPAGATE;
-
-        const type = typeof event.type === "function" ? event.type() : null;
-        const isPress = type === Clutter.EventType.BUTTON_PRESS;
-        const isRelease = type === Clutter.EventType.BUTTON_RELEASE;
-        if (!isPress && !isRelease)
             return Clutter.EVENT_PROPAGATE;
 
         const rawButton = typeof event.get_button === "function" ? event.get_button() : 0;
