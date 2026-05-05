@@ -10,6 +10,7 @@ set -euo pipefail
 
 REPO="apex-shot/apexshot"
 RELEASES_URL="https://github.com/${REPO}/releases"
+EXT_UUID="apexshot-gnome-integration@apexshot.github.io"
 VERSION=""
 TMPDIR=""
 SUDO=""
@@ -85,6 +86,55 @@ download_file() {
 prime_sudo() {
     if [[ -n "$SUDO" ]]; then
         $SUDO -v
+    fi
+}
+
+run_gnome_extensions() {
+    if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]] && [[ "${SUDO_USER}" != "root" ]]; then
+        local target_uid runtime_dir bus_address
+        target_uid=$(id -u "${SUDO_USER}" 2>/dev/null || true)
+        if [[ -n "$target_uid" ]]; then
+            runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${target_uid}}"
+            bus_address="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${runtime_dir}/bus}"
+            if command -v sudo >/dev/null 2>&1; then
+                sudo -u "${SUDO_USER}" env XDG_RUNTIME_DIR="${runtime_dir}" DBUS_SESSION_BUS_ADDRESS="${bus_address}" gnome-extensions "$@"
+            else
+                runuser -u "${SUDO_USER}" -- env XDG_RUNTIME_DIR="${runtime_dir}" DBUS_SESSION_BUS_ADDRESS="${bus_address}" gnome-extensions "$@"
+            fi
+            return
+        fi
+    fi
+
+    gnome-extensions "$@"
+}
+
+install_gnome_extension_files() {
+    local zip_file=$1
+
+    if ! command -v unzip >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local target_user="" target_home="${HOME:-}" target_uid="" target_gid=""
+    if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]] && [[ "${SUDO_USER}" != "root" ]]; then
+        target_user="${SUDO_USER}"
+        target_home=$(getent passwd "${target_user}" 2>/dev/null | cut -d: -f6)
+        target_uid=$(id -u "${target_user}" 2>/dev/null || true)
+        target_gid=$(id -g "${target_user}" 2>/dev/null || true)
+    fi
+
+    if [[ -z "$target_home" ]]; then
+        return 1
+    fi
+
+    local ext_parent="${target_home}/.local/share/gnome-shell/extensions"
+    local ext_dir="${ext_parent}/${EXT_UUID}"
+    rm -rf "${ext_dir}"
+    mkdir -p "${ext_dir}"
+    unzip -q "${zip_file}" -d "${ext_dir}"
+
+    if [[ -n "$target_uid" ]] && [[ -n "$target_gid" ]]; then
+        chown -R "${target_uid}:${target_gid}" "${ext_dir}"
     fi
 }
 
@@ -185,6 +235,58 @@ update_from_release() {
     ok "ApexShot updated to ${VERSION}"
 }
 
+update_gnome_extension() {
+    step "Updating GNOME Shell extension"
+
+    if ! command -v gnome-extensions >/dev/null 2>&1; then
+        warn "gnome-extensions CLI not found - package files were updated, but the active extension could not be refreshed."
+        info "Install gnome-shell and run: gnome-extensions enable ${EXT_UUID}"
+        return
+    fi
+
+    local zip_path
+    zip_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
+               grep -oE "/${REPO}/releases/download/${VERSION}/[^\"]*apexshot-gnome-integration\.zip" |
+               head -n 1)
+    local zip_url=""
+    [[ -n "$zip_path" ]] && zip_url="https://github.com${zip_path}"
+
+    if [[ -z "$zip_url" ]]; then
+        warn "GNOME extension zip not found in releases - using package-installed extension files only."
+        run_gnome_extensions enable "${EXT_UUID}" 2>/dev/null || true
+        return
+    fi
+
+    local zip_file="${TMPDIR}/apexshot-gnome-integration.zip"
+    info "Downloading GNOME extension with progress:"
+    download_file "$zip_url" "$zip_file"
+
+    local was_enabled=0
+    if run_gnome_extensions list --enabled 2>/dev/null | grep -Fxq "${EXT_UUID}"; then
+        was_enabled=1
+    fi
+
+    run_gnome_extensions disable "${EXT_UUID}" >/dev/null 2>&1 || true
+    if ! run_gnome_extensions install --force "${zip_file}" >/dev/null 2>&1; then
+        warn "gnome-extensions install failed - replacing user extension files directly."
+        if ! install_gnome_extension_files "${zip_file}"; then
+            if [[ $was_enabled -eq 1 ]]; then
+                run_gnome_extensions enable "${EXT_UUID}" >/dev/null 2>&1 || true
+            fi
+            err "Could not install the GNOME extension update."
+            err "Try logging out and back in, then run this updater again."
+            exit 1
+        fi
+    fi
+
+    if run_gnome_extensions enable "${EXT_UUID}" >/dev/null 2>&1; then
+        ok "GNOME extension updated and enabled"
+    else
+        warn "GNOME extension files were updated, but GNOME could not enable it in this session."
+        info "Log out and back in, then run: gnome-extensions enable ${EXT_UUID}"
+    fi
+}
+
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is up to date!${RESET}\n"
@@ -205,6 +307,7 @@ main() {
     check_prereqs
     detect_current_version
     update_from_release
+    update_gnome_extension
     summary
 }
 
