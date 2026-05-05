@@ -181,7 +181,7 @@ update_from_release() {
 
     prime_sudo
     info "Installing package with pacman:"
-    ${SUDO} pacman -U --noconfirm "${pkg_file}"
+    ${SUDO} pacman -U --noconfirm --overwrite 'usr/share/apexshot/sounds/*.ogg' "${pkg_file}"
     ok "ApexShot updated to ${VERSION}"
 }
 
