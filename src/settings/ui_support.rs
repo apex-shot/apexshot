@@ -338,6 +338,166 @@ const SETTINGS_CSS: &str = r#"
                 min-width: 180px;
             }
 
+            /* ── Dark-mode native widget overrides ── */
+            /* Prevent system light-theme from bleeding into native GTK widgets */
+
+            .editor-root entry {
+                background-image: none;
+                background-color: alpha(white, 0.06);
+                color: #F1F1F3;
+                border: 1px solid alpha(white, 0.14);
+                border-radius: 6px;
+            }
+
+            .editor-root entry text {
+                color: #F1F1F3;
+            }
+
+            .editor-root entry:focus {
+                border-color: alpha(#b05c38, 0.55);
+            }
+
+            .editor-root entry:disabled {
+                background-color: alpha(white, 0.03);
+                color: alpha(white, 0.42);
+                border-color: alpha(white, 0.08);
+            }
+
+            .editor-root entry:disabled text {
+                color: alpha(white, 0.42);
+            }
+
+            .editor-root checkbutton check {
+                background-image: none;
+                background-color: alpha(white, 0.06);
+                border: 1px solid alpha(white, 0.24);
+                color: #ffffff;
+            }
+
+            .editor-root checkbutton check:hover {
+                border-color: alpha(white, 0.38);
+                background-color: alpha(white, 0.10);
+            }
+
+            .editor-root checkbutton:checked check {
+                background-color: #b05c38;
+                border-color: #9a4c2c;
+                color: #ffffff;
+            }
+
+            .editor-root checkbutton:disabled check {
+                background-color: alpha(white, 0.03);
+                border-color: alpha(white, 0.10);
+                color: alpha(white, 0.35);
+            }
+
+            .editor-root .settings-select {
+                background-image: none;
+                background-color: alpha(white, 0.06);
+                color: #F1F1F3;
+                border: 1px solid alpha(white, 0.14);
+            }
+
+            .editor-root .settings-select button {
+                background-image: none;
+                background-color: transparent;
+                color: #F1F1F3;
+                border: none;
+            }
+
+            .editor-root .settings-select:focus {
+                border-color: alpha(#b05c38, 0.55);
+            }
+
+            .editor-root .settings-select:disabled {
+                background-color: alpha(white, 0.03);
+                color: alpha(white, 0.42);
+                border-color: alpha(white, 0.08);
+            }
+
+            .editor-root .settings-select:disabled button {
+                color: alpha(white, 0.42);
+            }
+
+            .editor-root .settings-select popover,
+            .editor-root .settings-select popover contents {
+                background-color: #2a2a2e;
+                color: #F1F1F3;
+                border: 1px solid alpha(white, 0.12);
+                border-radius: 8px;
+            }
+
+            .editor-root .settings-select popover list,
+            .editor-root .settings-select popover listview,
+            .editor-root .settings-select popover row,
+            .editor-root .settings-select popover modelbutton {
+                background-color: transparent;
+                color: #F1F1F3;
+            }
+
+            .editor-root .settings-select popover row:hover,
+            .editor-root .settings-select popover modelbutton:hover {
+                background-color: alpha(white, 0.08);
+                color: #F1F1F3;
+            }
+
+            .editor-root scale trough {
+                background-color: alpha(white, 0.08);
+                border: 1px solid alpha(white, 0.14);
+                border-radius: 999px;
+            }
+
+            .editor-root scale highlight {
+                background-color: #b05c38;
+                border-radius: 999px;
+            }
+
+            .editor-root scale slider {
+                background: #F1F1F3;
+                border: 1px solid alpha(white, 0.30);
+                border-radius: 999px;
+                box-shadow: 0 1px 3px alpha(black, 0.3);
+            }
+
+            .editor-root scale:disabled trough {
+                background-color: alpha(white, 0.04);
+                border-color: alpha(white, 0.08);
+            }
+
+            .editor-root scale:disabled highlight {
+                background-color: alpha(#b05c38, 0.42);
+            }
+
+            .editor-root scale:disabled slider {
+                background: alpha(#F1F1F3, 0.42);
+                border-color: alpha(white, 0.10);
+            }
+
+            .editor-root button {
+                background-image: none;
+                background-color: alpha(white, 0.08);
+                color: #F1F1F3;
+                border: 1px solid alpha(white, 0.12);
+                border-radius: 6px;
+            }
+
+            .editor-root button:hover {
+                background-color: alpha(white, 0.12);
+                border-color: alpha(white, 0.18);
+            }
+
+            .editor-root button:active {
+                background-color: alpha(white, 0.18);
+            }
+
+            .editor-root button:disabled {
+                background-color: alpha(white, 0.04);
+                color: alpha(white, 0.42);
+                border-color: alpha(white, 0.08);
+            }
+
+            /* ── Light-mode native widget overrides ── */
+
             .editor-root.editor-theme-light entry,
             .editor-root.editor-theme-light .settings-select,
             .editor-root.editor-theme-light .settings-select button {
@@ -404,6 +564,105 @@ const SETTINGS_CSS: &str = r#"
             .editor-root.editor-theme-light .settings-select popover modelbutton:hover {
                 background-color: alpha(#111827, 0.06);
                 color: #17202a;
+            }
+
+            .editor-root.editor-theme-light entry text {
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light entry:disabled text {
+                color: alpha(#17202a, 0.48);
+            }
+
+            .editor-root.editor-theme-light scale trough {
+                background-color: alpha(#111827, 0.08);
+                border: 1px solid alpha(#111827, 0.14);
+                border-radius: 999px;
+            }
+
+            .editor-root.editor-theme-light scale highlight {
+                background-color: #b05c38;
+                border-radius: 999px;
+            }
+
+            .editor-root.editor-theme-light scale slider {
+                background: #ffffff;
+                border: 1px solid alpha(#111827, 0.18);
+                border-radius: 999px;
+                box-shadow: 0 1px 3px alpha(black, 0.15);
+            }
+
+            .editor-root.editor-theme-light scale:disabled trough {
+                background-color: alpha(#111827, 0.04);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light scale:disabled highlight {
+                background-color: alpha(#b05c38, 0.42);
+            }
+
+            .editor-root.editor-theme-light scale:disabled slider {
+                background: alpha(#ffffff, 0.62);
+                border-color: alpha(#111827, 0.10);
+            }
+
+            .editor-root.editor-theme-light button {
+                background-image: none;
+                background-color: #ffffff;
+                color: #17202a;
+                border-color: alpha(#111827, 0.18);
+            }
+
+            .editor-root.editor-theme-light button:hover {
+                background-color: #f8fafc;
+                border-color: alpha(#111827, 0.28);
+            }
+
+            .editor-root.editor-theme-light button:active {
+                background-color: alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light button:disabled {
+                background-color: alpha(#111827, 0.04);
+                color: alpha(#17202a, 0.48);
+                border-color: alpha(#111827, 0.10);
+            }
+
+            .editor-root.editor-theme-light .recording-tab-switcher {
+                background-color: alpha(#111827, 0.04);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light .recording-tab-button {
+                color: alpha(#111827, 0.6);
+            }
+
+            .editor-root.editor-theme-light .recording-tab-button:hover {
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .settings-action-button {
+                background-color: alpha(#111827, 0.06);
+                border-color: alpha(#111827, 0.12);
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .settings-action-button:hover {
+                background-color: alpha(#111827, 0.10);
+            }
+
+            .editor-root.editor-theme-light .mode-preview-box {
+                background-color: alpha(#111827, 0.04);
+            }
+
+            .editor-root.editor-theme-light .mode-preview-box.active {
+                border-color: #b05c38;
+                background-color: alpha(#b05c38, 0.08);
+                box-shadow: 0 4px 12px alpha(black, 0.12);
+            }
+
+            .editor-root.editor-theme-light .shortcuts-row-zebra {
+                background-color: alpha(#111827, 0.04);
             }
 
             .recording-tab-switcher {
@@ -632,6 +891,82 @@ const SETTINGS_CSS: &str = r#"
 
             .secondary-settings-button:hover { background: #e5e5e5; color: #1d2129; }
             .secondary-settings-button:active { background: #d5d5d5; color: #1d2129; }
+
+            /* ── Light-mode shortcut capture dialog ── */
+
+            .editor-root.editor-theme-light .shortcut-capture-dialog {
+                background: #f6f7fb;
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-title {
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-subtitle {
+                color: rgba(29, 33, 41, 0.88);
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-hint {
+                color: rgba(29, 33, 41, 0.58);
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-listening-icon {
+                color: #b05c38;
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-keycap {
+                background: #ffffff;
+                color: #17202a;
+                border: 1px solid alpha(#111827, 0.18);
+                box-shadow: 0 1px 3px alpha(black, 0.08);
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-plus {
+                color: rgba(29, 33, 41, 0.55);
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-cleared-label {
+                color: rgba(29, 33, 41, 0.72);
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-primary-btn {
+                background: #b05c38;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-primary-btn:hover {
+                background: #c06540;
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-primary-btn:disabled {
+                background: alpha(#111827, 0.10);
+                color: alpha(#17202a, 0.42);
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-secondary-btn {
+                background: alpha(#111827, 0.06);
+                color: #17202a;
+                border: 1px solid alpha(#111827, 0.12);
+            }
+
+            .editor-root.editor-theme-light .shortcut-capture-secondary-btn:hover {
+                background: alpha(#111827, 0.10);
+            }
+
+            .editor-root.editor-theme-light .secondary-settings-button {
+                border-color: alpha(#111827, 0.18);
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .secondary-settings-button:hover {
+                background: alpha(#111827, 0.06);
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .secondary-settings-button:active {
+                background: alpha(#111827, 0.10);
+                color: #17202a;
+            }
 
             /* FILENAME TAG PILLS */
             .filename-tag-pill {

@@ -397,9 +397,9 @@ pub fn install_editor_css() {
             }
 
             button.editor-tool-button.active-tool {
-                background-color: #ff9900;
+                background-color: #B05C38;
                 color: #ffffff;
-                border: 1px solid #ff9900;
+                border: 1px solid #B05C38;
                 box-shadow: none;
             }
 
@@ -932,7 +932,7 @@ pub fn install_editor_css() {
                 min-width: 220px;
                 min-height: 36px;
                 border-radius: 8px;
-                background: #c97800;
+                background: #B05C38;
                 color: #ffffff;
                 font-weight: 700;
                 font-size: 12px;
@@ -946,7 +946,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-add-to-colors-button:hover {
-                background: #db8500;
+                background: #C66B4A;
                 border-color: rgba(255, 193, 92, 0.66);
                 box-shadow:
                     0 4px 10px rgba(0, 0, 0, 0.35),
@@ -955,7 +955,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-add-to-colors-button:active {
-                background: #b36b00;
+                background: #8A4A2D;
                 box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
                 transform: translateY(0);
             }
@@ -1608,13 +1608,13 @@ pub fn install_editor_css() {
                 padding: 0 12px;
                 border-radius: 8px;
                 border: 1px solid rgba(255, 255, 255, 0.10);
-                background: rgba(255, 255, 255, 0.03);
+                background: #B05C38;
                 color: rgba(245, 245, 247, 0.9);
                 box-shadow: none;
             }
 
             .editor-colors-panel-action-button:hover {
-                background: rgba(255, 255, 255, 0.07);
+                background: #C66B4A;
                 color: #ffffff;
             }
 
@@ -2719,8 +2719,8 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-tool-button.active-tool {\n                background-color: #ff9900;\n                color: #ffffff;\n                border: 1px solid #ff9900;\n                box-shadow: none;"),
-            "selected annotate toolbar tools should use the flat orange slider accent",
+            production_source.contains("button.editor-tool-button.active-tool {\n                background-color: #B05C38;\n                color: #ffffff;\n                border: 1px solid #B05C38;\n                box-shadow: none;"),
+            "selected annotate toolbar tools should use the #B05C38 editor accent",
         );
     }
 
@@ -2850,10 +2850,10 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-add-to-colors-button {\n                min-width: 220px;\n                min-height: 36px;\n                border-radius: 8px;\n                background: #c97800;")
-                && production_source.contains("button.editor-add-to-colors-button:hover {\n                background: #db8500;")
-                && production_source.contains("button.editor-add-to-colors-button:active {\n                background: #b36b00;"),
-            "Add to colors button should use the orange editor accent states",
+            production_source.contains("button.editor-add-to-colors-button {\n                min-width: 220px;\n                min-height: 36px;\n                border-radius: 8px;\n                background: #B05C38;")
+                && production_source.contains("button.editor-add-to-colors-button:hover {\n                background: #C66B4A;")
+                && production_source.contains("button.editor-add-to-colors-button:active {\n                background: #8A4A2D;"),
+            "Add to colors button should use the #B05C38 editor accent states",
         );
     }
 
