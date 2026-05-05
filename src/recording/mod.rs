@@ -2,6 +2,7 @@ use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use serde::Serialize;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -193,6 +194,7 @@ type RecordingPortalSession =
 struct WaylandSource {
     pipeline_source: String,
     crop: Option<CropMargins>,
+    _pipewire_fd: OwnedFd,
     _session: RecordingPortalSession,
 }
 
@@ -274,7 +276,7 @@ fn clear_recording_restore_token(target: RecordingScreenCastTarget) {
     }
 }
 
-fn pipewire_source_pipeline(node_id: u32) -> String {
+fn pipewire_source_pipeline(node_id: u32, fd: i32) -> String {
     let copy_buffers = gst::ElementFactory::make("pipewiresrc")
         .build()
         .map(|element| element.has_property("always-copy"))
@@ -285,7 +287,7 @@ fn pipewire_source_pipeline(node_id: u32) -> String {
         ""
     };
 
-    format!("pipewiresrc path={node_id} do-timestamp=true{copy_buffers_prop}")
+    format!("pipewiresrc fd={fd} path={node_id} do-timestamp=true{copy_buffers_prop}")
 }
 
 fn overlay_recording_output_dir(app_config: &AppConfig) -> PathBuf {
@@ -959,6 +961,7 @@ fn select_encoder(
             if profile.extension == ext
                 && gst::ElementFactory::find(profile.encoder).is_some()
                 && gst::ElementFactory::find(profile.muxer).is_some()
+                && h264_parser_available_for_profile(profile)
             {
                 return Ok((profile, requested_path.to_path_buf()));
             }
@@ -972,6 +975,7 @@ fn select_encoder(
     for profile in PROFILES {
         if gst::ElementFactory::find(profile.encoder).is_some()
             && gst::ElementFactory::find(profile.muxer).is_some()
+            && h264_parser_available_for_profile(profile)
         {
             let mut new_path = requested_path.to_path_buf();
             new_path.set_extension(profile.extension);
@@ -980,6 +984,11 @@ fn select_encoder(
     }
 
     Err(RecordError::NoEncoderFound)
+}
+
+fn h264_parser_available_for_profile(profile: &EncoderProfile) -> bool {
+    !matches!(profile.encoder, "x264enc" | "openh264enc")
+        || gst::ElementFactory::find("h264parse").is_some()
 }
 
 fn get_pulse_default_source() -> String {
@@ -1051,11 +1060,15 @@ fn video_encoder_props(profile: &EncoderProfile, config: &RecordingConfig) -> St
         );
     }
 
+    if profile.encoder == "openh264enc" {
+        return "bitrate=8000000 complexity=medium".to_string();
+    }
+
     profile.props.to_string()
 }
 
 fn video_raw_caps(profile: &EncoderProfile, config: &RecordingConfig) -> String {
-    if profile.encoder == "x264enc" {
+    if matches!(profile.encoder, "x264enc" | "openh264enc") {
         return format!("video/x-raw,framerate={}/1,format=I420", config.fps);
     }
 
@@ -1099,7 +1112,9 @@ fn video_queue_props(profile: &EncoderProfile) -> &'static str {
 
 fn video_post_encoder_caps(profile: &EncoderProfile) -> &'static str {
     if profile.encoder == "x264enc" {
-        " ! video/x-h264,profile=high"
+        " ! h264parse config-interval=-1 ! video/x-h264,stream-format=avc,alignment=au,profile=high"
+    } else if profile.encoder == "openh264enc" {
+        " ! h264parse config-interval=-1 ! video/x-h264,stream-format=avc,alignment=au"
     } else {
         ""
     }
@@ -1304,7 +1319,11 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         wants_area_crop: bool,
         restore_token: Option<&str>,
         persist_mode: PersistMode,
-    ) -> RecordResult<(ashpd::desktop::screencast::Streams, RecordingPortalSession)> {
+    ) -> RecordResult<(
+        ashpd::desktop::screencast::Streams,
+        RecordingPortalSession,
+        OwnedFd,
+    )> {
         let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
 
         let proxy = Screencast::new()
@@ -1351,10 +1370,16 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
             .response()
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
 
-        Ok((response, session))
+        let pipewire_fd = proxy
+            .open_pipe_wire_remote(&session)
+            .await
+            .map_err(|e| RecordError::PortalError(e.to_string()))?;
+
+        Ok((response, session, pipewire_fd))
     }
 
-    let (response, session) = if let Some(token) = load_recording_restore_token(target) {
+    let (response, session, pipewire_fd) = if let Some(token) = load_recording_restore_token(target)
+    {
         match request_screencast(
             cursor_mode,
             wants_area_crop,
@@ -1438,8 +1463,9 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
     };
 
     Ok(WaylandSource {
-        pipeline_source: pipewire_source_pipeline(node_id),
+        pipeline_source: pipewire_source_pipeline(node_id, pipewire_fd.as_raw_fd()),
         crop,
+        _pipewire_fd: pipewire_fd,
         _session: session,
     })
 }
@@ -2611,10 +2637,9 @@ mod tests {
         assert!(vp8_props.contains("keyframe-max-dist=120"));
         assert!(vp8_props.contains("deadline=8"));
 
-        assert_eq!(
-            video_encoder_props(profile_by_encoder("openh264enc"), &config),
-            ""
-        );
+        let openh264_props = video_encoder_props(profile_by_encoder("openh264enc"), &config);
+        assert!(openh264_props.contains("bitrate=8000000"));
+        assert!(openh264_props.contains("complexity=medium"));
     }
 
     #[test]
@@ -2643,13 +2668,13 @@ mod tests {
     fn pipewire_source_pipeline_uses_copied_buffers_when_supported() {
         gst::init().expect("gstreamer should initialize for pipewiresrc inspection");
 
-        let source = pipewire_source_pipeline(42);
+        let source = pipewire_source_pipeline(42, 7);
         let supports_always_copy = gst::ElementFactory::make("pipewiresrc")
             .build()
             .map(|element| element.has_property("always-copy"))
             .unwrap_or(false);
 
-        assert!(source.starts_with("pipewiresrc path=42 do-timestamp=true"));
+        assert!(source.starts_with("pipewiresrc fd=7 path=42 do-timestamp=true"));
         assert_eq!(source.contains("always-copy=true"), supports_always_copy);
     }
 
@@ -2686,9 +2711,38 @@ mod tests {
         assert!(built
             .pipeline_str
             .contains("queue max-size-time=5000000000 max-size-bytes=0 max-size-buffers=0"));
-        assert!(built.pipeline_str.contains("video/x-h264,profile=high"));
+        assert!(built.pipeline_str.contains("h264parse config-interval=-1"));
+        assert!(built
+            .pipeline_str
+            .contains("video/x-h264,stream-format=avc,alignment=au,profile=high"));
         assert!(!built.pipeline_str.contains("tune=zerolatency"));
         assert!(!built.pipeline_str.contains("speed-preset=ultrafast"));
+    }
+
+    #[tokio::test]
+    async fn build_pipeline_makes_openh264_compatible_with_mp4mux() {
+        std::env::remove_var("WAYLAND_DISPLAY");
+        let config = RecordingConfig {
+            fps: 30,
+            ..x11_recording_config()
+        };
+
+        let built = build_pipeline(
+            &config,
+            profile_by_encoder("openh264enc"),
+            Path::new("/tmp/out.mp4"),
+        )
+        .await
+        .expect("pipeline should build");
+
+        assert!(built
+            .pipeline_str
+            .contains("video/x-raw,framerate=30/1,format=I420"));
+        assert!(built.pipeline_str.contains("openh264enc bitrate=8000000"));
+        assert!(built.pipeline_str.contains("h264parse config-interval=-1"));
+        assert!(built
+            .pipeline_str
+            .contains("video/x-h264,stream-format=avc,alignment=au"));
     }
 
     #[test]

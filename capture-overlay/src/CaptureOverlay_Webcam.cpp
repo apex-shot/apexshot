@@ -11,6 +11,8 @@
 #include <QSet>
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
+#include <cerrno>
+#include <cstdio>
 #include <fcntl.h>
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
@@ -36,6 +38,16 @@ bool isVideoCaptureDevice(const QString& devPath)
 {
     int fd = ::open(devPath.toLocal8Bit().constData(), O_RDONLY | O_NONBLOCK);
     if (fd < 0) {
+        if (errno == EACCES || errno == EPERM) {
+            std::fprintf(stderr,
+                "[CaptureOverlay] Webcam device %s exists but cannot be queried; listing it anyway.\n",
+                devPath.toLocal8Bit().constData());
+            return true;
+        }
+        std::fprintf(stderr,
+            "[CaptureOverlay] Skipping webcam device %s: open failed with errno=%d.\n",
+            devPath.toLocal8Bit().constData(),
+            errno);
         return false;
     }
 
@@ -76,7 +88,7 @@ void CaptureOverlay::enumerateWebcamDevices()
 
     for (int i : deviceIndexes) {
         QString devPath = QStringLiteral("/dev/video%1").arg(i);
-        if (!QFile::exists(devPath) || !isVideoCaptureDevice(devPath)) continue;
+        if (!QFile::exists(devPath)) continue;
 
         QString name;
         QFile nameFile(QStringLiteral("/sys/class/video4linux/video%1/name").arg(i));
@@ -88,6 +100,7 @@ void CaptureOverlay::enumerateWebcamDevices()
 
         // Skip metadata-only nodes
         if (name.contains("Metadata", Qt::CaseInsensitive)) continue;
+        if (!isVideoCaptureDevice(devPath)) continue;
 
         // Skip duplicate sub-devices from same physical camera (same name already seen)
         if (seenNames.contains(name)) continue;

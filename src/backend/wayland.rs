@@ -24,6 +24,7 @@ use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -110,7 +111,7 @@ fn ensure_gstreamer_initialized() -> DisplayResult<()> {
     }
 }
 
-fn pipewire_source_pipeline(node_id: u32) -> String {
+fn pipewire_source_pipeline(node_id: u32, fd: i32) -> String {
     let copy_buffers = gst::ElementFactory::make("pipewiresrc")
         .build()
         .map(|element| element.has_property("always-copy"))
@@ -121,15 +122,18 @@ fn pipewire_source_pipeline(node_id: u32) -> String {
         ""
     };
 
-    format!("pipewiresrc path={node_id} do-timestamp=true{copy_buffers_prop}")
+    format!("pipewiresrc fd={fd} path={node_id} do-timestamp=true{copy_buffers_prop}")
 }
 
-fn capture_single_frame_from_pipewire(node_id: u32) -> DisplayResult<CaptureData> {
+fn capture_single_frame_from_pipewire(
+    node_id: u32,
+    pipewire_fd: &OwnedFd,
+) -> DisplayResult<CaptureData> {
     ensure_gstreamer_initialized()?;
 
     let pipeline_str = format!(
         "{} num-buffers=1 ! videoconvert ! video/x-raw,format=RGBA ! appsink name=sink emit-signals=false sync=false max-buffers=1 drop=true",
-        pipewire_source_pipeline(node_id)
+        pipewire_source_pipeline(node_id, pipewire_fd.as_raw_fd())
     );
 
     let pipeline = gst::parse::launch(&pipeline_str)
@@ -400,7 +404,13 @@ impl WaylandBackend {
             tokio::time::sleep(Duration::from_millis(PORTAL_DIALOG_DISMISSAL_DELAY_MS)).await;
         }
 
-        let capture = capture_single_frame_from_pipewire(node_id);
+        let pipewire_fd = screencast
+            .open_pipe_wire_remote(&session)
+            .await
+            .map_err(|e| {
+                DisplayError::PortalError(format!("Failed to open PipeWire remote: {e}"))
+            })?;
+        let capture = capture_single_frame_from_pipewire(node_id, &pipewire_fd);
         let _ = session.close().await;
 
         // For window captures, crop to the actual window dimensions if provided
