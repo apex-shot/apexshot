@@ -97,6 +97,48 @@ prime_sudo() {
     fi
 }
 
+is_apexshot_binary() {
+    local path=$1
+    [[ -x "$path" ]] || return 1
+    "$path" --version 2>/dev/null | grep -Eq '^apexshot [0-9]+\.[0-9]+\.[0-9]+'
+}
+
+move_shadowing_local_binary() {
+    local name=$1
+    local local_path="/usr/local/bin/${name}"
+    local package_path="/usr/bin/${name}"
+
+    [[ -e "$local_path" && -e "$package_path" ]] || return 0
+    [[ "$local_path" -ef "$package_path" ]] && return 0
+    [[ -x "$local_path" ]] || return 0
+
+    if [[ "$name" == "apexshot" ]] && ! is_apexshot_binary "$local_path"; then
+        warn "Leaving ${local_path} in place because it does not look like an ApexShot binary."
+        return 0
+    fi
+
+    local backup="${local_path}.pre-package-update.$(date +%Y%m%d%H%M%S)"
+    prime_sudo
+    ${SUDO} mv "$local_path" "$backup"
+    ok "Moved stale ${local_path} to ${backup}"
+}
+
+cleanup_shadowing_local_binaries() {
+    step "Checking command path"
+
+    move_shadowing_local_binary apexshot
+    move_shadowing_local_binary apexshot-capture
+    move_shadowing_local_binary apexshot-native-host
+
+    hash -r 2>/dev/null || true
+    if [[ "$(command -v apexshot 2>/dev/null || true)" != "/usr/bin/apexshot" ]]; then
+        warn "apexshot still resolves to $(command -v apexshot 2>/dev/null || echo '<not found>')"
+        info "Check your PATH for another stale ApexShot binary."
+    else
+        ok "apexshot now resolves to /usr/bin/apexshot"
+    fi
+}
+
 run_gnome_extensions() {
     if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]] && [[ "${SUDO_USER}" != "root" ]]; then
         local target_uid runtime_dir bus_address
@@ -341,6 +383,7 @@ main() {
     fetch_version
     download_latest
     install_update
+    cleanup_shadowing_local_binaries
     update_gnome_extension
     summary
 }
