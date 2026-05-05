@@ -417,7 +417,13 @@ class RecordingMaskService {
         this._ownName = null;
         this._monitorsChangedId = null;
         this._pointerPollSource = null;
+        this._stagePointerEventId = null;
         this._stageKeyPressEventId = null;
+        this._pointerButtons = {
+            left: false,
+            middle: false,
+            right: false,
+        };
         this._sessionState = createSessionState();
         this._maskUi = new MaskUi(this._sessionState);
         this._controlsUi = new ControlsUi(this._sessionState, {
@@ -452,6 +458,10 @@ class RecordingMaskService {
             this._onStageKeyPress(event)
         );
         log("[apexshot] runtime keystroke listener enabled");
+        this._stagePointerEventId = global.stage.connect("captured-event", (_actor, event) =>
+            this._onStagePointerEvent(event)
+        );
+        log("[apexshot] runtime pointer listener enabled");
     }
 
     disable() {
@@ -464,6 +474,10 @@ class RecordingMaskService {
             this._monitorsChangedId = null;
         }
         this._stopPointerPolling();
+        if (this._stagePointerEventId !== null) {
+            global.stage.disconnect(this._stagePointerEventId);
+            this._stagePointerEventId = null;
+        }
         if (this._stageKeyPressEventId !== null) {
             global.stage.disconnect(this._stageKeyPressEventId);
             this._stageKeyPressEventId = null;
@@ -629,6 +643,9 @@ class RecordingMaskService {
 
     _showControls(spec) {
         this._controlsUi.showControls(spec);
+        this._pointerButtons.left = false;
+        this._pointerButtons.middle = false;
+        this._pointerButtons.right = false;
         this._startPointerPolling();
     }
 
@@ -712,6 +729,58 @@ class RecordingMaskService {
             return;
 
         updateRuntimeOverlaySnapshot(this._sessionState);
+    }
+
+    _onStagePointerEvent(event) {
+        if (!this._sessionState.controlsState || !event)
+            return Clutter.EVENT_PROPAGATE;
+
+        const type = typeof event.type === "function" ? event.type() : null;
+        const isPress = type === Clutter.EventType.BUTTON_PRESS;
+        const isRelease = type === Clutter.EventType.BUTTON_RELEASE;
+        if (!isPress && !isRelease)
+            return Clutter.EVENT_PROPAGATE;
+
+        const rawButton = typeof event.get_button === "function" ? event.get_button() : 0;
+        const buttonNumber = Array.isArray(rawButton) ? rawButton[1] : rawButton;
+        const buttonName = {
+            [Clutter.BUTTON_PRIMARY ?? 1]: "left",
+            [Clutter.BUTTON_MIDDLE ?? 2]: "middle",
+            [Clutter.BUTTON_SECONDARY ?? 3]: "right",
+        }[buttonNumber];
+        if (!buttonName)
+            return Clutter.EVENT_PROPAGATE;
+
+        const [x, y] = typeof event.get_coords === "function"
+            ? event.get_coords()
+            : global.get_pointer();
+        let target = typeof event.get_source === "function"
+            ? event.get_source()
+            : null;
+        if ((!target || target === global.stage)
+            && global.stage
+            && typeof global.stage.get_actor_at_pos === "function") {
+            target = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
+        }
+        const exclude = shouldExcludeOverlayEvent(this._sessionState, target);
+
+        this._pointerButtons[buttonName] = isPress;
+
+        const sample = {
+            x,
+            y,
+            left: this._pointerButtons.left,
+            middle: this._pointerButtons.middle,
+            right: this._pointerButtons.right,
+            capture: !exclude,
+            timestampMs: Math.floor(GLib.get_monotonic_time() / 1000),
+        };
+
+        const clicks = recordRuntimeOverlayPointerSample(this._sessionState, sample);
+        if (clicks.length)
+            updateRuntimeOverlaySnapshot(this._sessionState);
+
+        return Clutter.EVENT_PROPAGATE;
     }
 
     _sendRecordingCommand(method, onAccepted = null) {

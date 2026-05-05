@@ -265,6 +265,13 @@ void CaptureOverlay::showWebcamContextMenu(const QPoint& globalPos)
     noneAct->setChecked(m_webcamDevice == -1);
     noneAct->setData(-1);
 
+    if (m_webcamDevices.isEmpty()) {
+        QAction* missingAct = menu.addAction(QStringLiteral("No camera exposed by Linux"));
+        missingAct->setEnabled(false);
+        QAction* hintAct = menu.addAction(QStringLiteral("Check /dev/video* or PipeWire camera support"));
+        hintAct->setEnabled(false);
+    }
+
     for (int i = 0; i < m_webcamDevices.size(); ++i) {
         int devIdx = i < m_webcamDeviceIndexes.size() ? m_webcamDeviceIndexes[i] : i;
         

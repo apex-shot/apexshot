@@ -279,7 +279,11 @@ install_from_source() {
         gst-plugins-bad
         gst-libav
         gst-plugin-pipewire
+        gst-plugin-libcamera
         libpipewire
+        pipewire-libcamera
+        libcamera
+        libcamera-ipa
         tesseract
         qt5-base
         qt5-x11extras

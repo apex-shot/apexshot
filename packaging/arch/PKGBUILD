@@ -21,10 +21,16 @@ depends=(
     'gst-plugins-bad'
     'gst-libav'
     'gst-plugin-pipewire'
+    'gst-plugin-libcamera'
 
     # PipeWire
     'pipewire'
     'pipewire-pulse'
+    'pipewire-libcamera'
+
+    # Camera stack
+    'libcamera'
+    'libcamera-ipa'
 
     # OCR
     'tesseract'
