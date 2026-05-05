@@ -153,25 +153,6 @@ fetch_version() {
     ok "Latest version: ${BOLD}${VERSION}${RESET}"
 }
 
-update_with_aur_helper() {
-    local aur_helper=""
-    for helper in yay paru trizen pikaur; do
-        if command -v "$helper" >/dev/null 2>&1; then
-            aur_helper="$helper"
-            break
-        fi
-    done
-
-    if [[ -z "$aur_helper" ]]; then
-        return 1
-    fi
-
-    step "Updating from AUR"
-    ok "Found AUR helper: ${aur_helper}"
-    run_spinner "Updating apexshot via ${aur_helper}..." bash -c "${aur_helper} -Syu --noconfirm apexshot"
-    return 0
-}
-
 update_from_release() {
     step "Updating from GitHub release"
 
@@ -193,19 +174,21 @@ update_from_release() {
     local pkg_file="${TMPDIR}/apexshot_${VERSION}_x86_64.pkg.tar.zst"
     info "Downloading Arch package with progress:"
     download_file "$pkg_url" "$pkg_file"
+    ok "Package saved to ${pkg_file}"
 
     info "Stopping any running ApexShot daemon..."
     killall -9 apexshot 2>/dev/null || true
 
     prime_sudo
-    run_spinner "Upgrading package..." bash -c "${SUDO} pacman -U --noconfirm '${pkg_file}'"
+    info "Installing package with pacman:"
+    ${SUDO} pacman -U --noconfirm "${pkg_file}"
     ok "ApexShot updated to ${VERSION}"
 }
 
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is up to date!${RESET}\n"
-    echo -e "  Version:   ${BOLD}${VERSION:-AUR latest}${RESET}"
+    echo -e "  Version:   ${BOLD}${VERSION}${RESET}"
     echo -e "  Binary:    ${BOLD}/usr/bin/apexshot${RESET}"
     echo -e "\n  ${BOLD}Quick start:${RESET}"
     echo -e "    apexshot capture screen    # Full-screen screenshot"
@@ -221,9 +204,7 @@ main() {
     header
     check_prereqs
     detect_current_version
-    if ! update_with_aur_helper; then
-        update_from_release
-    fi
+    update_from_release
     summary
 }
 

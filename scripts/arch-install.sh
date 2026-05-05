@@ -156,20 +156,19 @@ check_prereqs() {
 select_install_method() {
     step "Select installation method"
     
-    echo "  1) Install from AUR (recommended - auto-updates)"
-    echo "  2) Install pre-built binary from GitHub releases"
-    echo "  3) Build from source"
+    echo "  1) Install pre-built binary from GitHub releases (recommended)"
+    echo "  2) Build from source"
+    echo "  3) Install from AUR"
     echo ""
     
-    # Default to AUR if no input
     read -rp "  Select [1-3] (default: 1): " choice
     choice=${choice:-1}
     
     case $choice in
-        1) install_from_aur ;;
-        2) install_from_release ;;
-        3) install_from_source ;;
-        *) warn "Invalid choice, defaulting to AUR"; install_from_aur ;;
+        1) install_from_release ;;
+        2) install_from_source ;;
+        3) install_from_aur ;;
+        *) warn "Invalid choice, defaulting to GitHub release"; install_from_release ;;
     esac
 }
 
@@ -241,9 +240,14 @@ install_from_release() {
     local pkg_file="${TMPDIR}/apexshot_${VERSION}_x86_64.pkg.tar.zst"
     info "Downloading Arch package with progress:"
     download_file "$pkg_url" "$pkg_file"
+    ok "Package saved to ${pkg_file}"
+
+    info "Stopping any running ApexShot daemon..."
+    killall -9 apexshot 2>/dev/null || true
 
     prime_sudo
-    run_spinner "Installing package..." bash -c "${SUDO} pacman -U --noconfirm '${pkg_file}'"
+    info "Installing package with pacman:"
+    ${SUDO} pacman -U --noconfirm "${pkg_file}"
     INSTALL_PATH="/usr/bin/apexshot"
 
     ok "ApexShot installed from GitHub release"
