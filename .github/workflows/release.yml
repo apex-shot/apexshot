@@ -337,3 +337,82 @@ jobs:
             packaging/arch/*.pkg.tar.zst
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  aur:
+    name: Publish AUR package
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [arch]
+    container:
+      image: archlinux:latest
+    permissions:
+      contents: read
+    env:
+      AUR_PACKAGE: apexshot
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      AUR_SSH_KNOWN_HOSTS: ${{ secrets.AUR_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip when AUR SSH key is not configured
+        if: env.AUR_SSH_PRIVATE_KEY == ''
+        run: |
+          echo "AUR_SSH_PRIVATE_KEY is not configured; skipping AUR publish."
+
+      - name: Install AUR publish tools
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm base-devel git openssh curl sudo
+          useradd -m builduser
+          echo 'builduser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+          chown -R builduser:builduser "$GITHUB_WORKSPACE"
+
+      - name: Prepare AUR metadata
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        run: |
+          sudo -u builduser bash -lc "cd '$GITHUB_WORKSPACE' && scripts/aur-prepare.sh '${GITHUB_REF_NAME}'"
+          sudo -u builduser bash -lc "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --verifysource --nobuild"
+
+      - name: Configure SSH
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          if [ -n "${AUR_SSH_KNOWN_HOSTS}" ]; then
+            printf '%s\n' "${AUR_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -t rsa,ed25519 aur.archlinux.org > ~/.ssh/known_hosts
+          fi
+          cat > ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            HostName aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Publish to AUR
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "apexshot release bot"
+          git config --global user.email "actions@github.com"
+
+          workdir="$(mktemp -d)"
+          git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" "$workdir/${AUR_PACKAGE}"
+          cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO packaging/arch/apexshot.install "$workdir/${AUR_PACKAGE}/"
+
+          cd "$workdir/${AUR_PACKAGE}"
+          git add PKGBUILD .SRCINFO apexshot.install
+          if git diff --cached --quiet; then
+            echo "AUR package is already up to date."
+            exit 0
+          fi
+          git commit -m "Update to ${GITHUB_REF_NAME#v}"
+          git push

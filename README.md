@@ -112,6 +112,9 @@ makepkg -sf
 sudo pacman -U *.pkg.tar.zst
 ```
 
+AUR publishing notes for maintainers live in
+[`docs/AUR_PUBLISHING.md`](docs/AUR_PUBLISHING.md).
+
 > **Note:** The package installs the GNOME Shell extension system-wide.
 > Restart GNOME Shell (log out and back in on Wayland) to activate it.
 
