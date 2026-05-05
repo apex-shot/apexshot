@@ -1316,6 +1316,31 @@ const SETTINGS_CSS: &str = r#"
                 color: white;
             }
 
+            .editor-root.editor-theme-light button.recent-captures-wm-btn {
+                background: transparent;
+                background-image: none;
+                color: alpha(#111827, 0.58);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .editor-root.editor-theme-light button.recent-captures-wm-btn:hover,
+            .editor-root.editor-theme-light button.recent-captures-wm-btn:active,
+            .editor-root.editor-theme-light button.recent-captures-wm-btn:focus {
+                background: alpha(#111827, 0.08);
+                background-image: none;
+                color: #17202a;
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .editor-root.editor-theme-light button.recent-captures-wm-close:hover {
+                background: alpha(#e34a4a, 0.82);
+                color: white;
+            }
+
             .recent-captures-segmented-control {
                 background: alpha(white, 0.05);
                 border-radius: 8px;
