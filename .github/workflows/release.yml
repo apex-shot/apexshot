@@ -15,6 +15,7 @@ env:
 jobs:
   lint:
     name: Lint (rustfmt + clippy + JS)
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
@@ -86,6 +87,7 @@ jobs:
 
   ci:
     name: Build & Test
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [lint]
     steps:
@@ -148,7 +150,6 @@ jobs:
     name: Build .deb & Release
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [ci]
     container:
       image: ubuntu:25.10
       env:
@@ -263,7 +264,6 @@ jobs:
     name: Build Arch Linux package
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [ci]
     container:
       image: archlinux:latest
     permissions:
