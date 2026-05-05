@@ -407,6 +407,7 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root .settings-select:focus {
                 border-color: alpha(#b05c38, 0.55);
+                outline: none;
             }
 
             .editor-root .settings-select:disabled {
@@ -421,7 +422,7 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root .settings-select popover,
             .editor-root .settings-select popover contents {
-                background-color: #2a2a2e;
+                background-color: #141414;
                 color: #F1F1F3;
                 border: 1px solid alpha(white, 0.12);
                 border-radius: 8px;
@@ -511,6 +512,7 @@ const SETTINGS_CSS: &str = r#"
             .editor-root.editor-theme-light .settings-select:focus,
             .editor-root.editor-theme-light .settings-select button:focus {
                 border-color: alpha(#b05c38, 0.55);
+                outline: none;
             }
 
             .editor-root.editor-theme-light entry:disabled,
@@ -547,7 +549,7 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root.editor-theme-light .settings-select popover,
             .editor-root.editor-theme-light .settings-select popover contents {
-                background-color: #ffffff;
+                background-color: #f6f7fb;
                 color: #17202a;
                 border-color: alpha(#111827, 0.12);
             }
@@ -894,62 +896,62 @@ const SETTINGS_CSS: &str = r#"
 
             /* ── Light-mode shortcut capture dialog ── */
 
-            .editor-root.editor-theme-light .shortcut-capture-dialog {
+            .shortcut-capture-dialog.editor-theme-light {
                 background: #f6f7fb;
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-title {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-title {
                 color: #1d2129;
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-subtitle {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-subtitle {
                 color: rgba(29, 33, 41, 0.88);
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-hint {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-hint {
                 color: rgba(29, 33, 41, 0.58);
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-listening-icon {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-listening-icon {
                 color: #b05c38;
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-keycap {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-keycap {
                 background: #ffffff;
                 color: #17202a;
                 border: 1px solid alpha(#111827, 0.18);
                 box-shadow: 0 1px 3px alpha(black, 0.08);
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-plus {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-plus {
                 color: rgba(29, 33, 41, 0.55);
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-cleared-label {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-cleared-label {
                 color: rgba(29, 33, 41, 0.72);
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-primary-btn {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-primary-btn {
                 background: #b05c38;
                 color: white;
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-primary-btn:hover {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-primary-btn:hover {
                 background: #c06540;
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-primary-btn:disabled {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-primary-btn:disabled {
                 background: alpha(#111827, 0.10);
                 color: alpha(#17202a, 0.42);
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-secondary-btn {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-secondary-btn {
                 background: alpha(#111827, 0.06);
                 color: #17202a;
                 border: 1px solid alpha(#111827, 0.12);
             }
 
-            .editor-root.editor-theme-light .shortcut-capture-secondary-btn:hover {
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-secondary-btn:hover {
                 background: alpha(#111827, 0.10);
             }
 
@@ -1286,20 +1288,30 @@ const SETTINGS_CSS: &str = r#"
                 padding: 12px;
             }
 
-            .recent-captures-wm-btn {
+            button.recent-captures-wm-btn {
                 min-width: 28px;
                 min-height: 28px;
                 padding: 4px;
                 border-radius: 6px;
                 background: transparent;
+                background-image: none;
                 color: alpha(white, 0.65);
+                border: none;
+                box-shadow: none;
+                outline: none;
                 transition: background 0.15s, color 0.15s;
             }
-            .recent-captures-wm-btn:hover {
+            button.recent-captures-wm-btn:hover,
+            button.recent-captures-wm-btn:active,
+            button.recent-captures-wm-btn:focus {
                 background: alpha(white, 0.1);
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                outline: none;
                 color: white;
             }
-            .recent-captures-wm-close:hover {
+            button.recent-captures-wm-close:hover {
                 background: alpha(#e34a4a, 0.75);
                 color: white;
             }

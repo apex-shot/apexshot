@@ -1608,13 +1608,13 @@ pub fn install_editor_css() {
                 padding: 0 12px;
                 border-radius: 8px;
                 border: 1px solid rgba(255, 255, 255, 0.10);
-                background: #B05C38;
+                background: rgba(255, 255, 255, 0.03);
                 color: rgba(245, 245, 247, 0.9);
                 box-shadow: none;
             }
 
             .editor-colors-panel-action-button:hover {
-                background: #C66B4A;
+                background: rgba(255, 255, 255, 0.07);
                 color: #ffffff;
             }
 
@@ -1888,14 +1888,14 @@ pub fn install_editor_css() {
 
             button.editor-background-option-button.active-background-option {
                 background: rgba(255, 255, 255, 0.12);
-                border-color: #ff9900;
+                border-color: #B05C38;
                 color: #ffffff;
                 border-width: 2px;
             }
 
             button.editor-background-alignment-button.active-alignment-option {
                 background: rgba(255, 255, 255, 0.15);
-                border: 1px solid #ff9900;
+                border: 1px solid #B05C38;
                 border-radius: 6px;
             }
 
@@ -1907,7 +1907,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-gradient-button.active-background-option {
-                border-color: #ff9900;
+                border-color: #B05C38;
                 border-width: 2px;
                 background-color: rgba(255, 255, 255, 0.08);
             }
@@ -2005,7 +2005,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-blurred-button.active-background-option {
-                border-color: #ff9900;
+                border-color: #B05C38;
                 border-width: 2px;
                 background-color: rgba(255, 255, 255, 0.12);
             }
@@ -2048,7 +2048,7 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-plain-color-button.active-background-option {
-                border-color: #ff9900;
+                border-color: #B05C38;
                 border-width: 2px;
                 background-color: rgba(255, 255, 255, 0.12);
             }
@@ -2709,8 +2709,8 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-background-alignment-button.active-alignment-option {\n                background: rgba(255, 255, 255, 0.15);\n                border: 1px solid #ff9900;"),
-            "alignment selected state should use the orange editor accent",
+            production_source.contains("button.editor-background-alignment-button.active-alignment-option {\n                background: rgba(255, 255, 255, 0.15);\n                border: 1px solid #B05C38;"),
+            "alignment selected state should use the #B05C38 editor accent",
         );
     }
 

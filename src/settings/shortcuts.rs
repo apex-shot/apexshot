@@ -1,3 +1,4 @@
+use super::windowing::prefers_dark_glass_theme;
 use crate::{config::AppConfig, daemon::set_daemon_hotkey_suppressed};
 use gtk4::{
     gdk, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Dialog, EventControllerKey,
@@ -143,6 +144,9 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
             .default_height(290)
             .build();
         dialog.add_css_class("shortcut-capture-dialog");
+        if !prefers_dark_glass_theme() {
+            dialog.add_css_class("editor-theme-light");
+        }
 
         let header = GtkBox::new(Orientation::Horizontal, 12);
         header.set_margin_top(8);
