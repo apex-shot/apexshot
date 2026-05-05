@@ -95,6 +95,14 @@ The generic installer above will select this automatically. Direct command:
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-install.sh | bash
 ```
 
+By default this installs the pre-built GitHub Release package. To choose a
+different Arch install method explicitly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-install.sh | bash -s -- --aur
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-install.sh | bash -s -- --source
+```
+
 Or install manually from the AUR PKGBUILD:
 
 ```bash

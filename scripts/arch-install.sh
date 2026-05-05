@@ -136,13 +136,6 @@ check_prereqs() {
         exit 1
     fi
 
-    # Check for base-devel (required for AUR builds)
-    if pacman -Qq base-devel >/dev/null 2>&1; then
-        ok "base-devel group found"
-    else
-        warn "base-devel group not found - required for building from AUR"
-    fi
-
     # Resolve sudo or fall back to root
     if [[ $EUID -eq 0 ]]; then
         SUDO=""
@@ -166,21 +159,49 @@ check_prereqs() {
 # --- Installation method selection ------------------------------------------
 
 select_install_method() {
-    step "Select installation method"
-    
-    echo "  1) Install pre-built binary from GitHub releases (recommended)"
-    echo "  2) Build from source"
-    echo "  3) Install from AUR"
-    echo ""
-    
-    read -rp "  Select [1-3] (default: 1): " choice
-    choice=${choice:-1}
-    
+    local choice="${APEXSHOT_ARCH_INSTALL_METHOD:-release}"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --method)
+                shift
+                choice="${1:-release}"
+                ;;
+            --method=*)
+                choice="${1#--method=}"
+                ;;
+            --source)
+                choice="source"
+                ;;
+            --aur)
+                choice="aur"
+                ;;
+            --release|--github-release)
+                choice="release"
+                ;;
+        esac
+        shift || true
+    done
+
+    step "Selecting installation method"
+
     case $choice in
-        1) install_from_release ;;
-        2) install_from_source ;;
-        3) install_from_aur ;;
-        *) warn "Invalid choice, defaulting to GitHub release"; install_from_release ;;
+        1|release|github|github-release)
+            ok "Using pre-built GitHub release package"
+            install_from_release
+            ;;
+        2|source|build)
+            ok "Building from source"
+            install_from_source
+            ;;
+        3|aur)
+            ok "Installing from AUR"
+            install_from_aur
+            ;;
+        *)
+            warn "Unknown method '${choice}' - using GitHub release package"
+            install_from_release
+            ;;
     esac
 }
 
@@ -188,6 +209,12 @@ select_install_method() {
 
 install_from_aur() {
     step "Installing from AUR"
+
+    if pacman -Qq base-devel >/dev/null 2>&1; then
+        ok "base-devel group found"
+    else
+        warn "base-devel group not found - required for AUR builds"
+    fi
     
     info "Checking for AUR helper..."
     
@@ -271,6 +298,12 @@ install_from_source() {
     step "Building from source"
     
     TMPDIR=$(mktemp -d -t apexshot-build.XXXXXX)
+
+    if pacman -Qq base-devel >/dev/null 2>&1; then
+        ok "base-devel group found"
+    else
+        warn "base-devel group not found - installing build dependencies may not be enough without it"
+    fi
     
     # Install build dependencies
     prime_sudo
@@ -391,7 +424,7 @@ main() {
     handoff_if_wrong_distro "$@"
     header
     check_prereqs
-    select_install_method
+    select_install_method "$@"
     setup_browser_host
     summary
 }
