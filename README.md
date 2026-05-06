@@ -1,7 +1,8 @@
 # ApexShot
 
 **The open-source Linux answer to ShareX and CleanShot X.**
-Screen capture, recording, OCR, QR detection, and annotation — all in one tool.
+CleanShot X-style screenshots, annotation, OCR, QR detection, and screen
+recording for Linux, with GNOME Wayland as the first-class target.
 
 ![ApexShot Workflow Demo](example.gif)
 
@@ -13,7 +14,43 @@ Screen capture, recording, OCR, QR detection, and annotation — all in one tool
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
 ![Version](https://img.shields.io/github/v/release/apex-shot/apexshot?label=version&color=orange)
-![Status](https://img.shields.io/badge/status-Alpha-yellow.svg)
+![Status](https://img.shields.io/badge/status-Public%20Beta-green.svg)
+
+## Install
+
+ApexShot is already usable as a daily screenshot tool on GNOME Wayland. The
+recommended installer detects Ubuntu/Debian vs Arch Linux, installs the right
+package type, and sets up the GNOME extension used for shell-level integration:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
+```
+
+Works best today on:
+
+| Environment | Status |
+|---|---|
+| GNOME Shell 47-50 on Ubuntu 24.04 / 25.10 / Arch (Wayland) | Public beta, tested daily |
+| GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
+| KDE Plasma 6 / Sway / Hyprland (Wayland) | Experimental, testers wanted |
+| X11 on any distro | Experimental |
+
+If ApexShot breaks on your setup, please [open an issue](https://github.com/apex-shot/apexshot/issues/new/choose).
+The issue templates ask for distro, desktop environment, and display server so
+triage stays fast.
+
+## Project Status
+
+ApexShot is in **public beta**.
+
+Core screenshot capture, annotation, OCR, QR detection, screen recording, tray
+integration, and hotkeys are implemented. It is not a prototype or library-only
+experiment; it ships as an installable desktop app.
+
+Some advanced recording overlay features are still experimental because GNOME
+Shell restricts what normal desktop apps can draw or listen to globally.
+ApexShot uses a companion GNOME Shell extension for those integrations, and
+support is improving over time.
 
 ## Features
 
@@ -51,19 +88,6 @@ Screen capture, recording, OCR, QR detection, and annotation — all in one tool
 | **OCR** | Tesseract + ocrs/rten |
 | **System Tray** | ksni (KDE System Tray Integration) |
 | **Webcam** | GStreamer + v4l2 |
-
-## Compatibility
-
-ApexShot is in alpha. Here is the honest support matrix today:
-
-| Environment | Status |
-|---|---|
-| GNOME Shell 47–50 on Ubuntu 24.04 / 25.10 / Arch (Wayland) | ✅ Primary, tested daily |
-| GNOME Shell 45 / 46 (Wayland) | 🟡 Should work, less exercised |
-| KDE Plasma 6 / Sway / Hyprland (Wayland) | 🟡 Best-effort, looking for testers |
-| X11 on any distro | 🟡 Code path exists, not thoroughly tested |
-
-If it breaks on your setup, please [open an issue](https://github.com/apex-shot/apexshot/issues/new/choose) — the templates ask for distro / DE / display server up front so triage is fast. Coverage will expand as the project matures.
 
 ## Download
 
@@ -215,9 +239,16 @@ sudo apexshot install --no-autostart --force
 
 ### GNOME Extension (Required)
 
-ApexShot requires the GNOME Shell extension for full functionality on GNOME Wayland. Without it, preview windows may not stay on top, recording masks will not appear, and runtime overlays will not work.
+ApexShot requires the GNOME Shell extension for full functionality on GNOME
+Wayland. Without it, preview windows may not stay on top, recording masks will
+not appear, and runtime overlays will not work.
 
-**Supported GNOME versions:** 45–49
+This is a GNOME platform limitation, not a sign that the app is unfinished:
+normal desktop apps cannot freely draw above every window or listen to every
+global input event on GNOME Wayland. The extension gives ApexShot the shell-side
+hooks needed for CleanShot-style recording overlays and preview behavior.
+
+**Supported GNOME versions:** 45–50
 
 #### Install from GitHub Release (Recommended)
 
@@ -275,7 +306,7 @@ journalctl /usr/bin/gnome-shell -f | grep apexshot
 |---|---|
 | Preview windows get hidden behind other apps | Verify extension is enabled: `gnome-extensions list` |
 | Recording mask does not appear | Check logs: `journalctl /usr/bin/gnome-shell -f | grep apexshot` |
-| Extension fails to enable | Confirm GNOME Shell version is 45–49 and matches `metadata.json` |
+| Extension fails to enable | Confirm GNOME Shell version is 45–50 and matches `metadata.json` |
 | D-Bus signals not working | Monitor session bus: `dbus-monitor --session | grep apexshot` |
 
 **Known Limitations:**
@@ -390,7 +421,17 @@ cargo run -- daemon
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+ApexShot especially needs testers across Linux desktop environments. Helpful
+contributions include:
+
+- Testing the installer on Ubuntu/Debian and Arch-based systems
+- Testing Wayland behavior on KDE Plasma, Sway, Hyprland, and other compositors
+- Improving packaging for additional distros
+- Reporting GNOME extension issues with shell logs attached
+- Improving docs, screenshots, release notes, and troubleshooting steps
+
+If you want to contribute code, start with an issue that includes your distro,
+desktop environment, display server, and the workflow you want to improve.
 
 ## License
 
