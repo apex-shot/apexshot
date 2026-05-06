@@ -220,7 +220,7 @@ Shared utilities:
 Abstraction over display servers:
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`
 - `x11.rs` — X11 backend via `x11rb` + MIT-SHM
-- `wayland.rs` — Wayland backend via `ashpd` portal + `wlr-screencopy`
+- `wayland.rs` — Wayland backend via `ashpd` ScreenCast portal + PipeWire
 - `screencopy.rs` — `wlr-screencopy` protocol implementation
 - `portal_permissions.rs` — persistent XDG portal permission setup
 
@@ -412,14 +412,18 @@ Configuration stored in `~/.config/apexshot/config.yml`:
 ## Platform Support
 
 **Fully tested:**
-- GNOME Ubuntu (Wayland)
-- GNOME Shell versions 45–49
+- Ubuntu GNOME Wayland
+- Arch Linux GNOME Wayland
+- GNOME Shell versions 45–50
 
 **Implemented but not thoroughly tested:**
 - X11 (backend code in `src/backend/x11.rs`)
-- Non-GNOME Wayland compositors (via portal fallback)
+- Non-GNOME Wayland compositors through the XDG ScreenCast portal + PipeWire path
+- Fedora/RHEL, openSUSE, NixOS, Alpine, Gentoo, and Void distro-family metadata
 
-**Future support:**
-- KDE Plasma
-- XFCE
-- Other Linux distributions (Fedora, Arch, etc.)
+**Priority manual validation targets:**
+- Fedora GNOME Wayland
+- Fedora KDE Plasma Wayland
+- openSUSE Tumbleweed or Leap KDE Plasma Wayland
+- Arch Hyprland or Sway Wayland
+- NixOS GNOME or KDE Wayland

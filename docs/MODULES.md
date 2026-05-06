@@ -361,7 +361,7 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 **Submodules:**
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`, `DisplayError`
 - `x11.rs` — `X11Backend` via `x11rb` + MIT-SHM
-- `wayland.rs` — `WaylandBackend` via `ashpd` portal + `wlr-screencopy`
+- `wayland.rs` — `WaylandBackend` via `ashpd` ScreenCast portal + PipeWire
 - `screencopy.rs` — `wlr-screencopy` Wayland protocol implementation
 - `portal_permissions.rs` — Persistent XDG portal permission setup (`ensure_portal_permissions()`)
 
@@ -373,7 +373,11 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 - `CursorData` — `pixels`, `width`, `height`, `x`, `y`, `xhot`, `yhot`
 - `DisplayError` — `UnsupportedBackend`, `InitializationError`, `CaptureError`, `InvalidArea`, `PortalError`, `IoError`
 
-**Platform Note:** `WaylandBackend` is used on GNOME Wayland. `X11Backend` exists but is not thoroughly tested.
+**Platform Note:** `WaylandBackend` uses the XDG ScreenCast portal + PipeWire
+"share screen" path for Wayland capture. Ubuntu GNOME Wayland and Arch GNOME
+Wayland are confirmed; KDE Plasma, Hyprland, Sway, Fedora, openSUSE, and NixOS
+remain priority manual validation targets. `X11Backend` exists but is not
+thoroughly tested.
 
 ---
 

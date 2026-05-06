@@ -5,7 +5,7 @@ This guide provides information for developers who want to contribute to ApexSho
 ## Prerequisites
 
 ### System Requirements
-- Linux (GNOME Ubuntu Wayland recommended)
+- Linux (Ubuntu or Arch GNOME Wayland recommended for the known-good path)
   - X11 backend implementations exist in the codebase but have not been thoroughly tested
 - Rust toolchain (latest stable)
 - CMake 3.10 or later
@@ -234,7 +234,7 @@ apexshot/
 │   ├── backend/                   # Display backend abstraction
 │   │   ├── mod.rs                 # DisplayBackend trait, CaptureData, PixelFormat
 │   │   ├── x11.rs                 # X11 backend (x11rb + MIT-SHM)
-│   │   ├── wayland.rs             # Wayland backend (ashpd + wlr-screencopy)
+│   │   ├── wayland.rs             # Wayland backend (ashpd ScreenCast portal + PipeWire)
 │   │   ├── screencopy.rs          # wlr-screencopy protocol
 │   │   └── portal_permissions.rs  # XDG portal permission persistence
 │   ├── capture/                   # Screen capture + annotation editor
@@ -502,7 +502,9 @@ fn test_config_loading() {
 ```
 
 ### Manual Testing Checklist
-Before submitting a PR, manually verify on GNOME Wayland:
+Before submitting a PR, manually verify on at least one known-good GNOME
+Wayland target. Currently confirmed: Ubuntu GNOME Wayland and Arch Linux GNOME
+Wayland.
 - [ ] `cargo run --release -- capture area` works
 - [ ] `cargo run --release -- capture screen` works
 - [ ] `cargo run --release -- record area` works (start + stop)
@@ -511,6 +513,13 @@ Before submitting a PR, manually verify on GNOME Wayland:
 - [ ] Daemon mode starts and tray icon appears
 - [ ] Global hotkeys trigger captures
 - [ ] GNOME extension keeps preview windows on top
+
+For distro/compositor expansion work, also verify the shared ScreenCast portal
+path on at least one non-GNOME portal backend:
+- [ ] Fedora GNOME Wayland for Fedora/RPM family coverage
+- [ ] Fedora or openSUSE KDE Plasma Wayland for `xdg-desktop-portal-kde`
+- [ ] Arch Hyprland or Sway Wayland for `xdg-desktop-portal-hyprland`/`wlr`
+- [ ] NixOS GNOME or KDE Wayland for non-FHS/runtime dependency coverage
 
 See `CONTRIBUTING.md` for more detailed manual testing guidelines.
 
