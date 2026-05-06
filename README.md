@@ -2,7 +2,9 @@
 
 **The open-source Linux answer to ShareX and CleanShot X.**
 CleanShot X-style screenshots, annotation, OCR, QR detection, and screen
-recording for Linux, with GNOME Wayland as the first-class target.
+recording for Linux. GNOME Wayland is the most tested target, and Wayland
+capture now uses the XDG ScreenCast portal so KDE Plasma, Sway, Hyprland, and
+other portal-backed desktops can follow the same implementation path.
 
 ![ApexShot Workflow Demo](example.gif)
 
@@ -20,7 +22,8 @@ recording for Linux, with GNOME Wayland as the first-class target.
 
 ApexShot is already usable as a daily screenshot tool on GNOME Wayland. The
 recommended installer detects Ubuntu/Debian vs Arch Linux, installs the right
-package type, and sets up the GNOME extension used for shell-level integration:
+package type, and sets up the GNOME extension when shell-level GNOME
+integration is available:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
@@ -32,7 +35,8 @@ Works best today on:
 |---|---|
 | GNOME Shell 47-50 on Ubuntu 24.04 / 25.10 / Arch (Wayland) | Public beta, tested daily |
 | GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
-| KDE Plasma 6 / Sway / Hyprland (Wayland) | Experimental, testers wanted |
+| KDE Plasma 6 / Sway / Hyprland / Niri (Wayland) | Implemented through ScreenCast portal, needs distro testing |
+| Fedora / openSUSE / NixOS / Alpine / Gentoo / Void (Wayland) | Distro-family support metadata implemented, packaging/testing pending |
 | X11 on any distro | Experimental |
 
 If ApexShot breaks on your setup, please [open an issue](https://github.com/apex-shot/apexshot/issues/new/choose).
@@ -82,7 +86,7 @@ support is improving over time.
 | **Core** | Rust 2021 Edition |
 | **Native Overlay** | C++17 / Qt5 (region selection, drawing) |
 | **GUI** | GTK4 + gtk4-layer-shell |
-| **Display Servers** | X11 (x11rb + MIT-SHM), Wayland (ashpd + wlr-screencopy) |
+| **Display Servers** | X11 (x11rb + MIT-SHM), Wayland (ashpd ScreenCast portal + PipeWire) |
 | **Recording** | GStreamer (VP8, VP9, H.264, H.265, Theora, GIF) |
 | **Audio** | PipeWire (mic/speaker level monitoring) |
 | **OCR** | Tesseract + ocrs/rten |

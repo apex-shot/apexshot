@@ -1,18 +1,18 @@
 //! Wayland backend implementation.
 //!
-//! Capture strategy (fastest first):
+//! Capture strategy:
 //!
-//! 0. **wlr-screencopy** — direct Wayland protocol, ~50 ms, no popup.
-//!    Works on Sway, Hyprland, Niri, KDE ≥ 6.3.
+//! 0. **ScreenCast portal + PipeWire** — primary Wayland path. This is the
+//!    "share screen" flow and gives ApexShot a frame stream we can customize
+//!    consistently across GNOME, KDE Plasma, Sway, Hyprland, Niri, and other
+//!    portal-backed desktops.
 //!
-//! 1. **`grim`** (subprocess) — wlr-screencopy via external binary, ~50 ms.
-//!    Works on wlroots compositors.
+//! Legacy/native paths are intentionally not used for normal screen capture
+//! because they do not provide the same controllable stream behavior across
+//! desktops.
 //!
-//! 2. **`org.freedesktop.portal.Screenshot`** — no persistent share session,
-//!    ~200-400 ms.
-//!
-//! 3. **ScreenCast portal + PipeWire** — last resort, ~1-2 s first run.
-//!    Shows the screensharing popup dialog.
+//! 1. **`org.freedesktop.portal.Screenshot`** — retained only for the explicit
+//!    interactive screenshot-selector helper.
 
 use super::{CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};
 use ashpd::desktop::{

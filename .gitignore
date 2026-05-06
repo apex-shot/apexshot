@@ -67,6 +67,8 @@ backend/target
 .worktrees/
 
 # Personal planning documents
+flameshot/
+reddit-opensource-post.md
 src/capture/editor/window-refactor-plan.md
 gnome-extension/SUBMISSION_GUIDE.md
 web-scroll-extension/STORE_LISTING.md

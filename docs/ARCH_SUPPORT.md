@@ -2,9 +2,9 @@
 
 This document outlines the Arch Linux support implementation for ApexShot.
 
-## Status: Initial Source and Package Build Tested
+## Status: Source, Package Build, and Runtime Metadata Implemented
 
-The infrastructure for Arch Linux support has been created, the source-build dependency list has been tested on Arch, and the PKGBUILD has completed a local package build. Installer and desktop-environment coverage still need more testing. This approach ensures:
+The infrastructure for Arch Linux support has been created, the source-build dependency list has been tested on Arch, the PKGBUILD has completed a local package build, and the runtime support metadata is wired into `src/distro`. Installer and desktop-environment coverage still need more testing. This approach ensures:
 - **Isolation**: Arch-specific code is separate from Ubuntu/GNOME implementation
 - **Maintainability**: Ubuntu code remains unchanged and functional
 - **Extensibility**: Pattern can be replicated for other distributions
@@ -98,14 +98,16 @@ if distro.is_arch() {
 - **`DistroInfo::detect()`**: Parses `/etc/os-release`
 - **Helper methods**: `is_arch()`, `is_debian()`, `is_fedora()`, etc.
 - **`PlatformPaths`**: Distribution-specific file paths
+- **`DistroSupport`**: Runtime dependency and portal backend guidance for Debian/Ubuntu, Arch, Fedora/RHEL, openSUSE, NixOS, Alpine, Gentoo, Void, and unknown Linux families
 
 ### 4. Arch Module (`src/distro/arch/`)
 
-Placeholder for Arch-specific functionality:
+Arch-specific functionality:
 
 - **Desktop environment detection**: Hyprland, Sway, i3, etc.
-- **Portal backend preference**: wlroots portal for Wayland
+- **Portal backend preference**: `xdg-desktop-portal-hyprland`, `xdg-desktop-portal-wlr`, `xdg-desktop-portal-kde`, or GNOME based on session detection
 - **Dependency checking**: Verify pacman packages
+- **Capture policy**: Use the shared XDG ScreenCast portal + PipeWire path, matching the current Wayland backend
 
 ## Implementation Roadmap
 
@@ -121,9 +123,9 @@ Placeholder for Arch-specific functionality:
 
 ### Phase 2: Core Integration
 
-- [ ] Implement `DistroInfo::detect()` in `src/distro/mod.rs`
-- [ ] Uncomment `pub mod arch;` in distro module
-- [ ] Test portal backend selection for wlroots
+- [x] Implement `DistroInfo::detect()` in `src/distro/mod.rs`
+- [x] Uncomment `pub mod arch;` in distro module
+- [x] Add portal backend selection for wlroots/Hyprland/KDE/GNOME
 - [ ] Add Arch-specific defaults to Config
 
 ### Phase 3: Desktop Environment Support
@@ -151,6 +153,18 @@ Placeholder for Arch-specific functionality:
 | Build Deps | build-essential | base-devel |
 | Install Path | /usr/bin | /usr/bin (same) |
 | Config Path | ~/.config/apexshot | ~/.config/apexshot (same) |
+
+## Shared Wayland Capture Policy
+
+For other Flameshot-compatible Linux distros, ApexShot should keep the same Wayland capture method instead of adding distro-specific screenshot backends:
+
+1. Use `org.freedesktop.portal.ScreenCast` to request a shared monitor/window stream.
+2. Read the selected PipeWire node through GStreamer.
+3. Reuse restore tokens where the portal backend supports them.
+4. Keep `org.freedesktop.portal.Screenshot` only for explicit interactive selector helpers.
+5. Leave GNOME Shell extension features behind GNOME session gates so non-GNOME desktops use portal-backed capture without requiring the extension.
+
+The distro work that remains is packaging, dependency naming, portal backend installation defaults, and manual testing on each distro/desktop combination.
 
 ## Testing Checklist
 

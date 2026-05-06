@@ -3,16 +3,11 @@
 //! This module contains code specific to Arch Linux and Arch-based
 //! distributions (Manjaro, EndeavourOS, Garuda, etc.).
 //!
-//! ## Status: Scaffolded
-//!
-//! This module is currently a placeholder. Full implementation requires:
-//! - Testing on Arch Linux with various desktop environments
-//! - AUR package maintenance
-//! - Pacman hook integration
-//!
-//! See docs/ARCH_SUPPORT.md for the implementation roadmap.
+//! Arch has first-class packaging support. Desktop coverage is still tested per
+//! compositor, but capture follows the shared ScreenCast portal path used by
+//! the rest of the Linux Wayland implementation.
 
-use crate::config::Config;
+use crate::config::AppConfig;
 
 /// Arch-specific configuration adjustments
 pub struct ArchConfig;
@@ -22,7 +17,7 @@ impl ArchConfig {
     ///
     /// Arch uses different package paths and may have different
     /// default desktop environments than Ubuntu.
-    pub fn apply_defaults(config: &mut Config) {
+    pub fn apply_defaults(config: &mut AppConfig) {
         // TODO: Implement Arch-specific defaults
         // - Different clipboard tool preference (wl-clipboard)
         // - Check for sway/hyprland/i3 as primary DEs on Arch
@@ -36,9 +31,15 @@ impl ArchConfig {
     /// (sway, hyprland, dwl) where xdg-desktop-portal-wlr
     /// should be preferred over xdg-desktop-portal-gnome.
     pub fn preferred_portal_backend() -> &'static str {
-        // TODO: Detect if running under wlroots
-        // For now, default to wlr as it's more common on Arch
-        "xdg-desktop-portal-wlr"
+        if is_hyprland() {
+            "xdg-desktop-portal-hyprland"
+        } else if is_wlroots() {
+            "xdg-desktop-portal-wlr"
+        } else if desktop_contains(["kde", "plasma"]) {
+            "xdg-desktop-portal-kde"
+        } else {
+            "xdg-desktop-portal-gnome"
+        }
     }
 }
 
@@ -46,10 +47,11 @@ impl ArchConfig {
 ///
 /// Common on Arch: sway, hyprland, dwl, river, cage
 pub fn is_wlroots() -> bool {
-    // TODO: Check WAYLAND_DISPLAY and XDG_CURRENT_DESKTOP
-    // TODO: Check for XDG_SESSION_TYPE=wayland
-    // TODO: Check if XDG_CURRENT_DESKTOP contains known wlroots DEs
-    false
+    is_hyprland()
+        || is_sway()
+        || desktop_contains([
+            "sway", "hyprland", "river", "dwl", "wayfire", "labwc", "niri",
+        ])
 }
 
 /// Check if running under Hyprland
@@ -64,6 +66,14 @@ pub fn is_sway() -> bool {
     std::env::var("SWAYSOCK").is_ok()
 }
 
+fn desktop_contains<const N: usize>(needles: [&str; N]) -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .split([':', ';', ','])
+        .map(|part| part.trim().to_ascii_lowercase())
+        .any(|part| needles.iter().any(|needle| part.contains(needle)))
+}
+
 /// Arch-specific dependency checks
 pub struct DependencyCheck;
 
@@ -71,30 +81,32 @@ impl DependencyCheck {
     /// Verify all required packages are installed
     pub fn verify_all() -> Vec<String> {
         let mut missing = Vec::new();
-        
-        // Core packages that should be present
+
+        // Core packages that should be present for the ScreenCast portal path.
         let required = [
             "wl-clipboard",
-            "grim",
-            "slurp",  // area selection for grim
             "pipewire",
+            "gst-plugin-pipewire",
             "xdg-desktop-portal",
         ];
-        
+
         for pkg in &required {
             if !Self::is_installed(pkg) {
                 missing.push(pkg.to_string());
             }
         }
-        
+
         missing
     }
-    
+
     fn is_installed(pkg: &str) -> bool {
-        // TODO: Check pacman database
-        // pacman -Qq <pkg> >/dev/null 2>&1
-        let _ = pkg;
-        true // Placeholder
+        std::process::Command::new("pacman")
+            .args(["-Qq", pkg])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
     }
 }
 

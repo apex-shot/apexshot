@@ -4,6 +4,7 @@ pub mod capture;
 pub mod capture_overlay;
 pub mod config;
 pub mod daemon;
+pub mod distro;
 pub mod gnome_integration;
 pub mod gnome_shell;
 pub mod hotkeys;
@@ -15,8 +16,6 @@ pub mod recording;
 pub mod settings;
 pub mod tray;
 pub mod utils;
-// Distribution-specific code (scaffolded for future use)
-// pub mod distro;
 
 // Re-export commonly used types
 pub use backend::{CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};
