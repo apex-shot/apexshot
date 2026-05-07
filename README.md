@@ -1,14 +1,21 @@
 # ApexShot
 
-**The open-source Linux answer to ShareX and CleanShot X.**
-CleanShot X-style screenshots, annotation, OCR, QR detection, and screen
-recording for Linux. GNOME Wayland is the most tested target, and Wayland
-capture now uses the XDG ScreenCast portal so KDE Plasma, Sway, Hyprland, and
-other portal-backed desktops can follow the same implementation path.
+**ApexShot is an open-source screenshot, annotation, and screen recording tool
+for Linux.** It brings fast captures, editing, OCR, QR code detection, browser
+scroll capture, hotkeys, and copy/share workflows to GNOME Wayland and other
+Linux desktops.
+
+For people searching for a ShareX alternative for Linux, ApexShot covers many
+of the same capture, annotation, recording, OCR, and sharing workflows. This is
+the official ApexShot GitHub repository.
+
+ApexShot is independent and is not affiliated with ShareX, Flameshot, or
+CleanShot X.
 
 ![ApexShot Workflow Demo](example.gif)
 
 [**▶ Install in one command**](#quick-install-recommended) ·
+[GitHub Repository](https://github.com/apex-shot/apexshot) ·
 [Website](https://apexshot.org/) ·
 [Releases](https://github.com/apex-shot/apexshot/releases) ·
 [Report a bug](https://github.com/apex-shot/apexshot/issues/new/choose)
@@ -17,6 +24,23 @@ other portal-backed desktops can follow the same implementation path.
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
 ![Version](https://img.shields.io/github/v/release/apex-shot/apexshot?label=version&color=orange)
 ![Status](https://img.shields.io/badge/status-Public%20Beta-green.svg)
+
+## ApexShot for Linux
+
+ApexShot is built as its own native Linux tool, not a clone. It is useful for
+Linux users who want a polished all-in-one capture workflow, and it is also a
+practical ShareX alternative for Linux users who need screenshots, annotation,
+screen recording, OCR, QR detection, browser scroll capture, global hotkeys, and
+quick clipboard actions in one open-source app.
+
+| Workflow | ApexShot support |
+|---|---|
+| ShareX-style capture | Full screen, area, window, and crosshair screenshots |
+| Annotation and editing | Arrows, shapes, text, blur, pixelate, crop, highlighter, and color picker |
+| Screen recording | Area or full-screen recording with MP4/GIF output, audio monitoring, and webcam PiP |
+| Text and code extraction | OCR plus automatic QR code detection from captured regions |
+| Linux desktop integration | GNOME Wayland support, portal-backed capture paths, tray, daemon mode, and global hotkeys |
+| Open-source project | GPL-3.0 source code, GitHub releases, issues, and discussions at https://github.com/apex-shot/apexshot |
 
 ## Install
 

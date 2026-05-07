@@ -1,5 +1,5 @@
 pkgbase = apexshot
-	pkgdesc = Screenshot and screen recording tool for Linux — Wayland & X11
+	pkgdesc = Open-source Linux screenshot, annotation, OCR, and screen recording tool
 	pkgver = 0.2.26
 	pkgrel = 1
 	url = https://github.com/apex-shot/apexshot

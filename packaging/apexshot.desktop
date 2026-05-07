@@ -1,11 +1,11 @@
 [Desktop Entry]
 Name=ApexShot
-Comment=Screenshot and screen recording tool for Linux
+Comment=Open-source Linux screenshot, annotation, and screen recording tool
 Exec=/usr/bin/apexshot
 Icon=apexshot
 Type=Application
 Categories=Graphics;
-Keywords=screenshot;capture;recording;screen;video;
+Keywords=screenshot;capture;recording;screen;video;sharex;alternative;linux;ocr;qr;annotation;
 StartupNotify=true
 StartupWMClass=io.github.codegoddy.apexshot
 Terminal=false
