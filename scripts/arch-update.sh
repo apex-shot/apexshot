@@ -14,6 +14,9 @@ EXT_UUID="apexshot-gnome-integration@apexshot.github.io"
 VERSION=""
 TMPDIR=""
 SUDO=""
+SCRIPT_NAME="arch-update"
+TELEMETRY_CHANNEL="update"
+TELEMETRY_URL="${APEXSHOT_TELEMETRY_URL:-https://apexshot.org/api/download-telemetry}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -89,10 +92,77 @@ run_spinner() {
     spinner $! "$msg"
 }
 
+telemetry_enabled() {
+    case "${APEXSHOT_TELEMETRY:-1}" in
+        0|false|FALSE|no|NO|off|OFF) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+json_escape() {
+    local value=${1:-}
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//$'\n'/ }
+    value=${value//$'\r'/ }
+    printf '%s' "$value"
+}
+
+telemetry_distro() {
+    if [[ -r /etc/os-release ]]; then
+        (
+            . /etc/os-release
+            printf '%s' "${ID:-linux}"
+            [[ -n "${VERSION_ID:-}" ]] && printf ':%s' "$VERSION_ID"
+        )
+    else
+        printf 'linux'
+    fi
+}
+
+send_download_telemetry() {
+    telemetry_enabled || return 0
+
+    local event=$1
+    local asset_type=$2
+    local status=${3:-}
+    local size_bytes=${4:-0}
+    local asset_name=${5:-}
+    local distro
+    distro=$(telemetry_distro)
+
+    local payload
+    payload=$(printf '{"event":"%s","script":"%s","distro":"%s","channel":"%s","version":"%s","asset_type":"%s","asset_name":"%s","status":"%s","size_bytes":%s}' \
+        "$(json_escape "$event")" \
+        "$(json_escape "$SCRIPT_NAME")" \
+        "$(json_escape "$distro")" \
+        "$(json_escape "$TELEMETRY_CHANNEL")" \
+        "$(json_escape "${VERSION:-unknown}")" \
+        "$(json_escape "$asset_type")" \
+        "$(json_escape "$asset_name")" \
+        "$(json_escape "$status")" \
+        "$size_bytes")
+
+    (curl -fsS -m 2 -H "Content-Type: application/json" -A "ApexShotDownloadTelemetry/${SCRIPT_NAME}" -d "$payload" "$TELEMETRY_URL" >/dev/null 2>&1 || true) &
+}
+
 download_file() {
     local url=$1
     local output=$2
-    curl -fL --progress-bar -o "$output" "$url"
+    local asset_type=${3:-package}
+    local asset_name=${output##*/}
+
+    send_download_telemetry "download_started" "$asset_type" "started" 0 "$asset_name"
+
+    if curl -fL --progress-bar -o "$output" "$url"; then
+        local size_bytes=0
+        size_bytes=$(stat -c%s "$output" 2>/dev/null || wc -c < "$output" 2>/dev/null || echo 0)
+        send_download_telemetry "download_completed" "$asset_type" "success" "$size_bytes" "$asset_name"
+    else
+        local status=$?
+        send_download_telemetry "download_failed" "$asset_type" "curl_${status}" 0 "$asset_name"
+        return "$status"
+    fi
 }
 
 prime_sudo() {
@@ -277,7 +347,7 @@ update_from_release() {
 
     local pkg_file="${TMPDIR}/apexshot_${VERSION}_x86_64.pkg.tar.zst"
     info "Downloading Arch package with progress:"
-    download_file "$pkg_url" "$pkg_file"
+    download_file "$pkg_url" "$pkg_file" "arch_package"
     ok "Package saved to ${pkg_file}"
 
     info "Stopping any running ApexShot daemon..."
@@ -313,7 +383,7 @@ update_gnome_extension() {
 
     local zip_file="${TMPDIR}/apexshot-gnome-integration.zip"
     info "Downloading GNOME extension with progress:"
-    download_file "$zip_url" "$zip_file"
+    download_file "$zip_url" "$zip_file" "gnome_extension"
 
     local was_enabled=0
     if run_gnome_extensions list --enabled 2>/dev/null | grep -Fxq "${EXT_UUID}"; then
