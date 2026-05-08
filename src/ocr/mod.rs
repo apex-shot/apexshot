@@ -558,14 +558,161 @@ pub struct DetectedTextRegion {
     pub confidence: i32,
 }
 
+#[derive(Debug)]
+struct TsvWord {
+    line_key: (i32, i32, i32, i32),
+    bounds: BoundingBox,
+    text: String,
+    confidence: i32,
+}
+
+#[derive(Debug)]
+struct TsvLineAccumulator {
+    bounds: BoundingBox,
+    text: String,
+    confidence_total: i32,
+    word_count: i32,
+}
+
+impl TsvLineAccumulator {
+    fn new(word: &TsvWord) -> Self {
+        Self {
+            bounds: word.bounds.clone(),
+            text: word.text.clone(),
+            confidence_total: word.confidence,
+            word_count: 1,
+        }
+    }
+
+    fn add_word(&mut self, word: &TsvWord) {
+        let left = self.bounds.x.min(word.bounds.x);
+        let top = self.bounds.y.min(word.bounds.y);
+        let right = (self.bounds.x + self.bounds.width).max(word.bounds.x + word.bounds.width);
+        let bottom = (self.bounds.y + self.bounds.height).max(word.bounds.y + word.bounds.height);
+
+        self.bounds = BoundingBox {
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top,
+        };
+
+        if !self.text.is_empty() {
+            self.text.push(' ');
+        }
+        self.text.push_str(&word.text);
+        self.confidence_total += word.confidence;
+        self.word_count += 1;
+    }
+
+    fn into_region(self) -> DetectedTextRegion {
+        DetectedTextRegion {
+            bounds: self.bounds,
+            text: self.text,
+            confidence: self.confidence_total / self.word_count.max(1),
+        }
+    }
+}
+
+fn scaled_i32(value: &str, inv_scale: f32) -> Option<i32> {
+    let parsed = value.parse::<f32>().ok()?;
+    Some((parsed * inv_scale).round() as i32)
+}
+
+fn parse_tesseract_tsv_regions(tsv: &str, inv_scale: f32) -> Vec<DetectedTextRegion> {
+    use std::collections::BTreeMap;
+
+    let mut words = Vec::new();
+
+    for row in tsv.lines().skip(1) {
+        let columns: Vec<&str> = row.splitn(12, '\t').collect();
+        if columns.len() < 12 || columns[0] != "5" {
+            continue;
+        }
+
+        let text = columns[11].trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        let confidence = columns[10]
+            .parse::<f32>()
+            .ok()
+            .map(|value| value.round().clamp(0.0, 100.0) as i32)
+            .unwrap_or(0);
+
+        let Some(x) = scaled_i32(columns[6], inv_scale) else {
+            continue;
+        };
+        let Some(y) = scaled_i32(columns[7], inv_scale) else {
+            continue;
+        };
+        let Some(width) = scaled_i32(columns[8], inv_scale) else {
+            continue;
+        };
+        let Some(height) = scaled_i32(columns[9], inv_scale) else {
+            continue;
+        };
+
+        if width <= 0 || height <= 0 {
+            continue;
+        }
+
+        let line_key = (
+            columns[1].parse().unwrap_or(0),
+            columns[2].parse().unwrap_or(0),
+            columns[3].parse().unwrap_or(0),
+            columns[4].parse().unwrap_or(0),
+        );
+
+        words.push(TsvWord {
+            line_key,
+            bounds: BoundingBox {
+                x,
+                y,
+                width,
+                height,
+            },
+            text: text.to_string(),
+            confidence,
+        });
+    }
+
+    let mut lines: BTreeMap<(i32, i32, i32, i32), TsvLineAccumulator> = BTreeMap::new();
+    for word in &words {
+        lines
+            .entry(word.line_key)
+            .and_modify(|line| line.add_word(word))
+            .or_insert_with(|| TsvLineAccumulator::new(word));
+    }
+
+    let mut regions: Vec<DetectedTextRegion> = lines
+        .into_values()
+        .map(TsvLineAccumulator::into_region)
+        .collect();
+
+    if regions.is_empty() {
+        regions = words
+            .into_iter()
+            .map(|word| DetectedTextRegion {
+                bounds: word.bounds,
+                text: word.text,
+                confidence: word.confidence,
+            })
+            .collect();
+    }
+
+    regions
+}
+
 /// Extract text with bounding boxes from an image
 pub fn extract_text_regions(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>, OcrError> {
     extract_text_regions_tesseract(image)
 }
 
-/// Get both line-level and word-level text regions to maximize text detection.
-/// Words are returned when their bounding boxes are below a minimum threshold,
-/// catching small text elements like view counts that get grouped into lines.
+/// Extract line-level text regions from Tesseract TSV output.
+/// TSV carries recognized text, bounding boxes, and confidence in one pass,
+/// avoiding placeholder text and fragile line-box/text-index matching.
 fn extract_text_regions_tesseract(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>, OcrError> {
     use std::ffi::CString;
 
@@ -604,106 +751,11 @@ fn extract_text_regions_tesseract(image: &RgbaImage) -> Result<Vec<DetectedTextR
         .map_err(|e| OcrError::RecognitionError(e.to_string()))?;
 
     let inv_scale = 1.0 / scale;
-    let mut regions = Vec::new();
-
-    // Get full text for line-by-line extraction
-    let full_text = api
-        .get_utf8_text()
-        .map_err(|e| OcrError::RecognitionError(format!("GetText failed: {}", e)))?;
-    let text_str = full_text.as_ref().to_str().unwrap_or("");
-    let text_lines: Vec<&str> = text_str.lines().collect();
-
-    // First pass: get text line bounding boxes
-    let textline_level: tesseract::plumbing::tesseract_sys::TessPageIteratorLevel = 2; // RIL_TEXTLINE
-    let line_boxes = api.get_component_images_1(textline_level, 1).map_err(|e| {
-        OcrError::RecognitionError(format!("GetComponentImages (lines) failed: {}", e))
-    })?;
-
-    let line_count = line_boxes.get_count();
-
-    // Collect line regions
-    let mut line_regions = Vec::new();
-    for i in 0..line_count {
-        if let Some(box_ref) = line_boxes.get_box_copied(i) {
-            let mut x: i32 = 0;
-            let mut y: i32 = 0;
-            let mut w: i32 = 0;
-            let mut h: i32 = 0;
-            box_ref.get_geometry(Some(&mut x), Some(&mut y), Some(&mut w), Some(&mut h));
-
-            let text = text_lines
-                .get(i as usize)
-                .copied()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-
-            line_regions.push(DetectedTextRegion {
-                bounds: BoundingBox {
-                    x: (x as f32 * inv_scale) as i32,
-                    y: (y as f32 * inv_scale) as i32,
-                    width: (w as f32 * inv_scale) as i32,
-                    height: (h as f32 * inv_scale) as i32,
-                },
-                text,
-                confidence: 0,
-            });
-        }
-    }
-
-    // Second pass: also get word-level boxes for better small text detection
-    // This catches small text elements like "1.2M views" that might be in a single line
-    let word_level: tesseract::plumbing::tesseract_sys::TessPageIteratorLevel = 3; // RIL_WORD
-    if let Ok(word_boxes) = api.get_component_images_1(word_level, 1) {
-        let word_count = word_boxes.get_count();
-        let mut word_regions = Vec::new();
-
-        for i in 0..word_count {
-            if let Some(box_ref) = word_boxes.get_box_copied(i) {
-                let mut x: i32 = 0;
-                let mut y: i32 = 0;
-                let mut w: i32 = 0;
-                let mut h: i32 = 0;
-                box_ref.get_geometry(Some(&mut x), Some(&mut y), Some(&mut w), Some(&mut h));
-
-                // Scale back to original coordinates
-                let orig_x = (x as f32 * inv_scale) as i32;
-                let orig_y = (y as f32 * inv_scale) as i32;
-                let orig_w = (w as f32 * inv_scale) as i32;
-                let orig_h = (h as f32 * inv_scale) as i32;
-
-                // Only add word regions that are not already covered by line regions
-                // This catches small text that Tesseract might group into a larger line
-                let is_covered = line_regions.iter().any(|lr| {
-                    lr.bounds.x <= orig_x
-                        && lr.bounds.y <= orig_y
-                        && (lr.bounds.x + lr.bounds.width) >= (orig_x + orig_w)
-                        && (lr.bounds.y + lr.bounds.height) >= (orig_y + orig_h)
-                });
-
-                if !is_covered {
-                    // Try to get text from the word iterator
-                    let word_text = format!("word_{i}"); // Placeholder - actual text comes from line regions
-                    word_regions.push(DetectedTextRegion {
-                        bounds: BoundingBox {
-                            x: orig_x,
-                            y: orig_y,
-                            width: orig_w,
-                            height: orig_h,
-                        },
-                        text: word_text,
-                        confidence: 0,
-                    });
-                }
-            }
-        }
-        regions.extend(word_regions);
-    }
-
-    // Add all line regions
-    regions.extend(line_regions);
-
-    Ok(regions)
+    let tsv = api
+        .get_tsv_text(0)
+        .map_err(|e| OcrError::RecognitionError(format!("GetTSV failed: {}", e)))?;
+    let tsv_str = tsv.as_ref().to_str().unwrap_or("");
+    Ok(parse_tesseract_tsv_regions(tsv_str, inv_scale))
 }
 
 /// Fast preprocessing config optimized for text region detection (highlighter cursor sizing)
@@ -720,6 +772,113 @@ fn fast_region_preprocess_config() -> PreprocessConfig {
 mod tests {
     use super::*;
     use crate::backend::PixelFormat;
+    use std::process::Command;
+
+    #[test]
+    fn test_parse_tesseract_tsv_regions_groups_words_into_lines() {
+        let tsv = "\
+level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext
+1\t1\t0\t0\t0\t0\t0\t0\t240\t80\t-1\t
+5\t1\t1\t1\t1\t1\t20\t10\t80\t20\t91.2\tApexShot
+5\t1\t1\t1\t1\t2\t112\t10\t42\t20\t87.8\tOCR
+5\t1\t1\t1\t2\t1\t20\t46\t34\t18\t95.0\t123
+";
+
+        let regions = parse_tesseract_tsv_regions(tsv, 0.5);
+
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[0].text, "ApexShot OCR");
+        assert_eq!(regions[0].confidence, 89);
+        assert_eq!(regions[0].bounds.x, 10);
+        assert_eq!(regions[0].bounds.y, 5);
+        assert_eq!(regions[0].bounds.width, 67);
+        assert_eq!(regions[0].bounds.height, 10);
+        assert_eq!(regions[1].text, "123");
+        assert_eq!(regions[1].confidence, 95);
+    }
+
+    #[test]
+    fn test_parse_tesseract_tsv_regions_ignores_empty_and_invalid_words() {
+        let tsv = "\
+level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext
+5\t1\t1\t1\t1\t1\t20\t10\t80\t20\t91\t
+5\t1\t1\t1\t1\t2\tbad\t10\t42\t20\t88\tOCR
+5\t1\t1\t1\t1\t3\t20\t10\t0\t20\t88\tOCR
+";
+
+        assert!(parse_tesseract_tsv_regions(tsv, 1.0).is_empty());
+    }
+
+    fn render_ocr_smoke_fixture(path: &std::path::Path) -> bool {
+        let status = Command::new("convert")
+            .args([
+                "-size",
+                "720x180",
+                "xc:white",
+                "-font",
+                "DejaVu-Sans-Mono",
+                "-pointsize",
+                "42",
+                "-fill",
+                "black",
+                "-gravity",
+                "Center",
+                "-annotate",
+                "0",
+                "APEXSHOT OCR 123",
+                path.to_string_lossy().as_ref(),
+            ])
+            .status();
+
+        matches!(status, Ok(status) if status.success())
+    }
+
+    #[test]
+    fn test_extract_text_from_rendered_fixture_when_tools_available() {
+        let path = std::env::temp_dir().join(format!(
+            "apexshot-ocr-smoke-{}-{}.png",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+
+        if !render_ocr_smoke_fixture(&path) {
+            eprintln!("skipping OCR smoke test: ImageMagick convert is unavailable");
+            return;
+        }
+
+        let config = OcrConfig::default()
+            .with_clipboard(false)
+            .with_min_confidence(40);
+
+        let result = extract_text_from_path(&path, &config);
+        let _ = std::fs::remove_file(&path);
+
+        match result {
+            Ok(output) => {
+                let normalized = output.text.to_uppercase();
+                assert!(
+                    normalized.contains("APEXSHOT"),
+                    "expected APEXSHOT in OCR output, got {:?}",
+                    output.text
+                );
+                assert!(
+                    normalized.contains("OCR"),
+                    "expected OCR in OCR output, got {:?}",
+                    output.text
+                );
+                assert!(
+                    normalized.contains("123"),
+                    "expected 123 in OCR output, got {:?}",
+                    output.text
+                );
+                assert!(matches!(output.source, ContentSource::Ocr { .. }));
+            }
+            Err(OcrError::InitializationError(err)) => {
+                eprintln!("skipping OCR smoke test: Tesseract unavailable: {err}");
+            }
+            Err(err) => panic!("OCR smoke fixture failed: {err}"),
+        }
+    }
 
     #[test]
     fn test_ocr_config_default() {

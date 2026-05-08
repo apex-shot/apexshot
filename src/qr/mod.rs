@@ -45,6 +45,53 @@ pub fn detect_and_decode_from_gray(data: &[u8], width: u32, height: u32) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use qrcode::{types::Color, QrCode};
+
+    fn render_qr(payload: &str, module_px: u32, quiet_zone_modules: u32) -> RgbaImage {
+        let code = QrCode::new(payload.as_bytes()).unwrap();
+        let modules = code.width() as u32;
+        let size = (modules + quiet_zone_modules * 2) * module_px;
+        let mut image = RgbaImage::from_pixel(size, size, image::Rgba([255, 255, 255, 255]));
+
+        for y in 0..modules {
+            for x in 0..modules {
+                if code[(x as usize, y as usize)] == Color::Dark {
+                    let start_x = (x + quiet_zone_modules) * module_px;
+                    let start_y = (y + quiet_zone_modules) * module_px;
+                    for py in start_y..start_y + module_px {
+                        for px in start_x..start_x + module_px {
+                            image.put_pixel(px, py, image::Rgba([0, 0, 0, 255]));
+                        }
+                    }
+                }
+            }
+        }
+
+        image
+    }
+
+    #[test]
+    fn test_detects_generated_qr() {
+        let payload = "https://apexshot.test/qr-smoke";
+        let image = render_qr(payload, 8, 4);
+        assert_eq!(detect_and_decode(&image).as_deref(), Some(payload));
+    }
+
+    #[test]
+    fn test_detects_generated_qr_with_transparent_margin() {
+        let payload = "apexshot:transparent-qr";
+        let mut image = render_qr(payload, 6, 4);
+
+        for y in 0..image.height() {
+            for x in 0..image.width() {
+                if x < 8 || y < 8 || x >= image.width() - 8 || y >= image.height() - 8 {
+                    image.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
+                }
+            }
+        }
+
+        assert_eq!(detect_and_decode(&image).as_deref(), Some(payload));
+    }
 
     #[test]
     fn test_no_qr_on_plain_image() {
