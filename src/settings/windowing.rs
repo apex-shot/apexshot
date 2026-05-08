@@ -120,31 +120,26 @@ pub fn install_autostart_entry_for_current_exe() -> anyhow::Result<std::path::Pa
     let autostart_dir = autostart_dir()?;
     std::fs::create_dir_all(&autostart_dir)?;
 
-    // Prefer installed system paths over current_exe() for reliable autostart
-    let binary_path = if std::path::Path::new("/usr/bin/apexshot").exists() {
-        "/usr/bin/apexshot".to_string()
-    } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
-        "/usr/local/bin/apexshot".to_string()
-    } else {
-        std::env::current_exe()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "apexshot".to_string())
-    };
+    let binary_path = crate::app_identity::preferred_command_path()
+        .display()
+        .to_string();
 
     let desktop_content = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=ApexShot Daemon\n\
-         Comment=ApexShot screenshot daemon — tray icon and hotkey listener\n\
+         Name={}\n\
+         Comment=ApexShot screenshot daemon - tray icon and hotkey listener\n\
          Exec={binary_path} daemon\n\
-         Icon=io.github.codegoddy.apexshot\n\
+         Icon={}\n\
          Categories=Utility;\n\
          Keywords=screenshot;capture;record;\n\
          StartupNotify=false\n\
          X-GNOME-Autostart-enabled=true\n\
          X-GNOME-Autostart-Delay=2\n\
          Hidden=false\n\
-         NoDisplay=true\n"
+         NoDisplay=true\n",
+        crate::app_identity::daemon_name(),
+        crate::app_identity::icon_name(),
     );
 
     let desktop_path = autostart_dir.join("apexshot-daemon.desktop");
@@ -157,33 +152,28 @@ pub fn install_autostart_entry_smart() -> anyhow::Result<std::path::PathBuf> {
     let autostart_dir = autostart_dir()?;
     std::fs::create_dir_all(&autostart_dir)?;
 
-    // Prefer installed system paths over current_exe() for reliable autostart
-    let binary_path = if std::path::Path::new("/usr/bin/apexshot").exists() {
-        "/usr/bin/apexshot".to_string()
-    } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
-        "/usr/local/bin/apexshot".to_string()
-    } else {
-        std::env::current_exe()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "apexshot".to_string())
-    };
+    let binary_path = crate::app_identity::preferred_command_path()
+        .display()
+        .to_string();
 
     // The daemon itself reads config and decides whether to show the tray icon.
     // We always start the daemon — it exits immediately if show_menu_bar_icon is false.
     let desktop_content = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=ApexShot Daemon\n\
-         Comment=ApexShot screenshot daemon — tray icon and hotkey listener\n\
+         Name={}\n\
+         Comment=ApexShot screenshot daemon - tray icon and hotkey listener\n\
          Exec={binary_path} daemon\n\
-         Icon=io.github.codegoddy.apexshot\n\
+         Icon={}\n\
          Categories=Utility;\n\
          Keywords=screenshot;capture;record;\n\
          StartupNotify=false\n\
          X-GNOME-Autostart-enabled=true\n\
          X-GNOME-Autostart-Delay=2\n\
          Hidden=false\n\
-         NoDisplay=true\n"
+         NoDisplay=true\n",
+        crate::app_identity::daemon_name(),
+        crate::app_identity::icon_name(),
     );
 
     let desktop_path = autostart_dir.join("apexshot.desktop");

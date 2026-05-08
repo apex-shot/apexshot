@@ -22,6 +22,7 @@ fn capture_daemon_action(capture_type: &str) -> Option<&'static str> {
 }
 
 use apexshot::{
+    app_identity,
     backend::{CaptureData, DisplayBackend, WaylandBackend, X11Backend},
     capture::{
         open_image_editor, save_capture, show_capture_preview_overlay, ImageFormat, SaveConfig,
@@ -331,6 +332,7 @@ fn run_install(args: &[String]) {
     let mut no_autostart = false;
     let mut no_binary = false;
     let mut force = false;
+    let mut dev_install = false;
     let mut extension_id: Option<String> = None;
 
     let mut i = 2;
@@ -346,6 +348,10 @@ fn run_install(args: &[String]) {
             }
             "--force" => {
                 force = true;
+                i += 1;
+            }
+            "--dev" => {
+                dev_install = true;
                 i += 1;
             }
             "--extension-id" => {
@@ -364,11 +370,12 @@ fn run_install(args: &[String]) {
     }
 
     if !no_binary {
-        install_binary(force);
+        install_binary(force, dev_install);
+        install_desktop_launcher(dev_install);
     }
 
     if !no_autostart {
-        install_autostart();
+        install_autostart(dev_install);
     }
 
     if let Some(id) = extension_id {
@@ -385,12 +392,17 @@ fn run_install(args: &[String]) {
 
 fn run_uninstall(args: &[String]) {
     let mut autostart_only = false;
+    let mut dev_install = false;
 
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
             "--autostart-only" => {
                 autostart_only = true;
+                i += 1;
+            }
+            "--dev" => {
+                dev_install = true;
                 i += 1;
             }
             other => {
@@ -400,9 +412,11 @@ fn run_uninstall(args: &[String]) {
         }
     }
 
-    uninstall_autostart();
+    uninstall_autostart(dev_install);
 
     if !autostart_only {
+        uninstall_binary(dev_install);
+        uninstall_desktop_launcher(dev_install);
         if let Err(e) = uninstall_native_host_manifest(BrowserTarget::Both) {
             eprintln!("Error: failed to uninstall native host: {e}");
             std::process::exit(1);
@@ -428,30 +442,57 @@ fn get_installed_version(binary: &std::path::Path) -> Option<String> {
         .map(|v| v.to_string())
 }
 
-fn install_binary(force: bool) {
+fn install_binary(force: bool, dev_install: bool) {
     use std::os::unix::fs::PermissionsExt;
 
-    let dest = std::path::Path::new("/usr/local/bin/apexshot");
-    let capture_dest = std::path::Path::new("/usr/local/bin/apexshot-capture");
+    let dest = if dev_install {
+        std::path::Path::new("/usr/local/lib/apexshot-dev/apexshot")
+    } else {
+        std::path::Path::new("/usr/local/bin/apexshot")
+    };
+    let capture_dest = if dev_install {
+        std::path::Path::new("/usr/local/lib/apexshot-dev/apexshot-capture")
+    } else {
+        std::path::Path::new("/usr/local/bin/apexshot-capture")
+    };
     let packaged_dest = std::path::Path::new("/usr/bin/apexshot");
     let packaged_capture_dest = std::path::Path::new("/usr/bin/apexshot-capture");
+    let dev_wrapper = std::path::Path::new(app_identity::DEV_WRAPPER);
 
     let src = std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("target/release/apexshot"));
 
     let current_version = env!("CARGO_PKG_VERSION");
 
+    if !dev_install && (packaged_dest.exists() || packaged_capture_dest.exists()) {
+        eprintln!("Error: package-managed ApexShot binaries exist under /usr/bin.");
+        eprintln!(
+            "`apexshot install` would write to /usr/local/bin/apexshot, which shadows the .deb installation."
+        );
+        eprintln!("Use `sudo apexshot install --dev --no-autostart` for a separate test install,");
+        eprintln!("or update the package-managed app with `sudo dpkg -i apexshot_*.deb`.");
+        std::process::exit(1);
+    }
+
     // Check if an existing installation is present and compare versions.
     if dest.exists() && !force {
         let installed_version = get_installed_version(dest);
         match installed_version {
             Some(ref v) if v == current_version => {
-                println!(
-                    "ApexShot {} is already installed at {}. Use --force to reinstall.",
-                    current_version,
-                    dest.display()
-                );
-                return;
+                if dev_install {
+                    println!(
+                        "Refreshing ApexShot Dev {} at {}.",
+                        current_version,
+                        dest.display()
+                    );
+                } else {
+                    println!(
+                        "ApexShot {} is already installed at {}. Use --force to reinstall.",
+                        current_version,
+                        dest.display()
+                    );
+                    return;
+                }
             }
             Some(ref v) => {
                 println!("Updating ApexShot {} → {}", v, current_version);
@@ -467,17 +508,17 @@ fn install_binary(force: bool) {
         }
     }
 
-    if packaged_dest.exists() || packaged_capture_dest.exists() {
-        eprintln!("Warning: package-managed ApexShot binaries exist under /usr/bin.");
-        eprintln!(
-            "`apexshot install` writes to /usr/local/bin and will shadow the .deb installation instead of upgrading it."
-        );
-        eprintln!(
-            "Use `sudo dpkg -i apexshot_*.deb` to update the package-managed install in place."
-        );
-    }
-
     println!("Installing binary: {} → {}", src.display(), dest.display());
+
+    if let Some(parent) = dest.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!(
+                "Error: failed to create install directory {}: {e}",
+                parent.display()
+            );
+            std::process::exit(1);
+        }
+    }
 
     match std::fs::copy(&src, dest) {
         Ok(_) => {
@@ -519,6 +560,16 @@ fn install_binary(force: bool) {
         capture_dest.display()
     );
 
+    if let Some(parent) = capture_dest.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!(
+                "Error: failed to create install directory {}: {e}",
+                parent.display()
+            );
+            std::process::exit(1);
+        }
+    }
+
     match std::fs::copy(&capture_src, capture_dest) {
         Ok(_) => {
             if let Err(e) =
@@ -535,9 +586,31 @@ fn install_binary(force: bool) {
             std::process::exit(1);
         }
     }
+
+    if dev_install {
+        let wrapper_content = format!(
+            "#!/usr/bin/env bash\nexport APEXSHOT_APP_FLAVOR=dev\nexport APEXSHOT_CAPTURE_BIN=\"{}\"\nexec \"{}\" \"$@\"\n",
+            capture_dest.display(),
+            dest.display()
+        );
+        if let Err(e) = std::fs::write(dev_wrapper, wrapper_content) {
+            eprintln!(
+                "Error: failed to write dev wrapper {}: {e}",
+                dev_wrapper.display()
+            );
+            std::process::exit(1);
+        }
+        if let Err(e) =
+            std::fs::set_permissions(dev_wrapper, std::fs::Permissions::from_mode(0o755))
+        {
+            eprintln!("Warning: could not set dev wrapper executable permissions: {e}");
+        } else {
+            println!("✓ Dev wrapper installed to {}", dev_wrapper.display());
+        }
+    }
 }
 
-fn install_autostart() {
+fn install_autostart(dev_install: bool) {
     // Clean up stale desktop files from previous `apexshot install` runs.
     // The .deb package installs the proper desktop entry to /usr/share/applications/,
     // but older versions of `apexshot install` wrote one to ~/.local/share/applications/
@@ -580,8 +653,9 @@ fn install_autostart() {
         std::process::exit(1);
     }
 
-    // The binary path to launch — prefer installed system paths
-    let binary_path = if std::path::Path::new("/usr/bin/apexshot").exists() {
+    let binary_path = if dev_install {
+        app_identity::DEV_WRAPPER.to_string()
+    } else if std::path::Path::new("/usr/bin/apexshot").exists() {
         "/usr/bin/apexshot".to_string()
     } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
         "/usr/local/bin/apexshot".to_string()
@@ -594,20 +668,34 @@ fn install_autostart() {
     let desktop_content = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=ApexShot Daemon\n\
-         Comment=ApexShot screenshot daemon — tray icon and hotkey listener\n\
+         Name={}\n\
+         Comment=ApexShot screenshot daemon - tray icon and hotkey listener\n\
          Exec={binary_path} daemon\n\
-         Icon=camera-photo\n\
+         Icon={}\n\
          Categories=Utility;\n\
          Keywords=screenshot;capture;record;\n\
          StartupNotify=false\n\
          X-GNOME-Autostart-enabled=true\n\
          X-GNOME-Autostart-Delay=2\n\
          Hidden=false\n\
-         NoDisplay=true\n"
+         NoDisplay=true\n",
+        if dev_install {
+            "ApexShot Dev Daemon"
+        } else {
+            "ApexShot Daemon"
+        },
+        if dev_install {
+            app_identity::DEV_APP_ID
+        } else {
+            app_identity::OFFICIAL_APP_ID
+        },
     );
 
-    let desktop_path = autostart_dir.join("apexshot-daemon.desktop");
+    let desktop_path = autostart_dir.join(if dev_install {
+        "apexshot-dev-daemon.desktop"
+    } else {
+        "apexshot-daemon.desktop"
+    });
     match std::fs::write(&desktop_path, &desktop_content) {
         Ok(()) => println!("✓ Autostart entry installed: {}", desktop_path.display()),
         Err(e) => {
@@ -617,7 +705,53 @@ fn install_autostart() {
     }
 }
 
-fn uninstall_autostart() {
+fn install_desktop_launcher(dev_install: bool) {
+    if !dev_install {
+        return;
+    }
+
+    let local_apps_dir = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            let home = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .expect("HOME is not set");
+            home.join(".local/share")
+        })
+        .join("applications");
+
+    if let Err(e) = std::fs::create_dir_all(&local_apps_dir) {
+        eprintln!("Error: could not create applications directory: {e}");
+        std::process::exit(1);
+    }
+
+    let desktop_path = local_apps_dir.join("io.github.codegoddy.apexshot.dev.desktop");
+    let desktop_content = format!(
+        "[Desktop Entry]\n\
+         Name=ApexShot Dev\n\
+         Comment=Development build of ApexShot\n\
+         Exec={}\n\
+         Icon=apexshot\n\
+         Type=Application\n\
+         Categories=Graphics;\n\
+         Keywords=screenshot;capture;recording;screen;video;ocr;annotation;\n\
+         StartupNotify=true\n\
+         StartupWMClass={}\n\
+         Terminal=false\n",
+        app_identity::DEV_WRAPPER,
+        app_identity::DEV_APP_ID,
+    );
+
+    match std::fs::write(&desktop_path, desktop_content) {
+        Ok(()) => println!("✓ Dev app launcher installed: {}", desktop_path.display()),
+        Err(e) => {
+            eprintln!("Error: failed to write dev launcher: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn uninstall_autostart(dev_install: bool) {
     let autostart_dir = {
         let config_home = std::env::var_os("XDG_CONFIG_HOME")
             .map(std::path::PathBuf::from)
@@ -629,14 +763,69 @@ fn uninstall_autostart() {
             });
         config_home.join("autostart")
     };
-    let desktop_path = autostart_dir.join("apexshot-daemon.desktop");
-    match std::fs::remove_file(&desktop_path) {
-        Ok(()) => println!("✓ Autostart entry removed: {}", desktop_path.display()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            println!("Autostart entry not found (nothing to remove).");
+    let names: &[&str] = if dev_install {
+        &["apexshot-dev-daemon.desktop"]
+    } else {
+        &["apexshot-daemon.desktop"]
+    };
+    for name in names {
+        let desktop_path = autostart_dir.join(name);
+        match std::fs::remove_file(&desktop_path) {
+            Ok(()) => println!("✓ Autostart entry removed: {}", desktop_path.display()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                println!("Autostart entry not found: {}", desktop_path.display());
+            }
+            Err(e) => {
+                eprintln!("Error: failed to remove autostart file: {e}");
+                std::process::exit(1);
+            }
         }
+    }
+}
+
+fn uninstall_binary(dev_install: bool) {
+    let paths: &[&str] = if dev_install {
+        &[
+            app_identity::DEV_WRAPPER,
+            "/usr/local/lib/apexshot-dev/apexshot",
+            "/usr/local/lib/apexshot-dev/apexshot-capture",
+        ]
+    } else {
+        &["/usr/local/bin/apexshot", "/usr/local/bin/apexshot-capture"]
+    };
+
+    for path in paths {
+        match std::fs::remove_file(path) {
+            Ok(()) => println!("✓ Removed {}", path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                eprintln!("Error: failed to remove {path}: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn uninstall_desktop_launcher(dev_install: bool) {
+    if !dev_install {
+        return;
+    }
+
+    let Some(mut desktop_path) = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/share"))
+        })
+    else {
+        return;
+    };
+    desktop_path.push("applications/io.github.codegoddy.apexshot.dev.desktop");
+
+    match std::fs::remove_file(&desktop_path) {
+        Ok(()) => println!("✓ Removed {}", desktop_path.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {
-            eprintln!("Error: failed to remove autostart file: {e}");
+            eprintln!("Error: failed to remove {}: {e}", desktop_path.display());
             std::process::exit(1);
         }
     }
@@ -718,11 +907,7 @@ fn install_native_host_manifest(extension_id: &str, browser: BrowserTarget) -> R
 
     validate_extension_id(extension_id)?;
 
-    let binary_path = if std::path::Path::new("/usr/local/bin/apexshot").exists() {
-        PathBuf::from("/usr/local/bin/apexshot")
-    } else {
-        std::env::current_exe().map_err(|e| format!("current_exe failed: {e}"))?
-    };
+    let binary_path = app_identity::preferred_command_path();
 
     let local_bin = if let Some(home) = std::env::var_os("HOME") {
         PathBuf::from(home).join(".local/bin")
@@ -1007,9 +1192,9 @@ fn print_usage() {
     println!("  recent-captures   Open the recent captures gallery");
     println!("  settings          Open settings window");
     println!("  native-host <sub> Install/uninstall native messaging host");
-    println!("  install           Install binary to /usr/local/bin/ and set up autostart");
+    println!("  install           Install local binary and set up autostart");
     println!("  --version / -V    Print version");
-    println!("  uninstall         Remove autostart entry (and native host manifests by default)");
+    println!("  uninstall         Remove local install, autostart, and native host manifests");
     println!();
 
     println!("Daemon options:");
@@ -1047,6 +1232,7 @@ fn print_usage() {
     println!("Install options:");
     println!("  --no-autostart            Skip autostart desktop file");
     println!("  --no-binary               Skip binary copy to /usr/local/bin");
+    println!("  --dev                     Install as separate apexshot-dev test app");
     println!("  --force                   Reinstall even if the same version is already installed");
     println!("  --extension-id <id>       Also install native host manifest for extension");
     println!();
@@ -1107,10 +1293,8 @@ fn run_hotkeys_command(args: &[String]) -> anyhow::Result<()> {
 }
 
 fn ensure_gio_desktop_env_for_capture() {
-    // Force-set to the main app's desktop file so GNOME shows correct icon/name
-    let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
-    if std::path::Path::new(system_desktop).exists() {
-        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
+    if let Some(desktop_path) = app_identity::desktop_file_for_portal() {
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", desktop_path);
         std::env::set_var(
             "GIO_LAUNCHED_DESKTOP_FILE_PID",
             std::process::id().to_string(),
@@ -1122,8 +1306,8 @@ fn ensure_gio_desktop_env_for_capture() {
         return;
     }
 
-    let app_id = std::env::var("APEXSHOT_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
+    let app_id =
+        std::env::var("APEXSHOT_APP_ID").unwrap_or_else(|_| app_identity::app_id().to_string());
 
     if let Ok(desktop_path) = ensure_desktop_entry_pub(&app_id) {
         std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);

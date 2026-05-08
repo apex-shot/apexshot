@@ -149,7 +149,7 @@ impl ksni::Tray for ApexShotTray {
     }
 
     fn id(&self) -> String {
-        "io.github.codegoddy.apexshot".to_string()
+        crate::app_identity::app_id().to_string()
     }
 
     fn text_direction(&self) -> ksni::TextDirection {

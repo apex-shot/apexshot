@@ -8,24 +8,15 @@ use std::path::{Path, PathBuf};
 use zbus::zvariant::OwnedValue;
 use zbus::zvariant::{OwnedObjectPath, Value};
 
-const DEFAULT_PORTAL_APP_ID: &str = "io.github.codegoddy.apexshot";
-
 fn portal_app_id() -> String {
-    std::env::var("APEXSHOT_APP_ID").unwrap_or_else(|_| DEFAULT_PORTAL_APP_ID.to_string())
+    std::env::var("APEXSHOT_APP_ID").unwrap_or_else(|_| crate::app_identity::app_id().to_string())
 }
 
 fn desktop_exec_value() -> String {
-    // Prefer installed system paths over current_exe() for reliable hotkey bindings
-    let exe = if std::path::Path::new("/usr/bin/apexshot").exists() {
-        "/usr/bin/apexshot".to_string()
-    } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
-        "/usr/local/bin/apexshot".to_string()
-    } else {
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.to_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| "apexshot".to_string())
-    };
+    let exe = crate::app_identity::preferred_command_path()
+        .to_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "apexshot".to_string());
 
     // Desktop entry Exec is not shell-parsed; spaces must be escaped per spec.
     let escaped_exe = exe.replace('\\', "\\\\").replace(' ', "\\ ");
@@ -85,12 +76,9 @@ fn strip_deleted_suffix(path: &std::path::Path) -> PathBuf {
 }
 
 fn resolve_action_exe() -> anyhow::Result<PathBuf> {
-    // Prefer installed system paths for reliable hotkey actions
-    if std::path::Path::new("/usr/bin/apexshot").exists() {
-        return Ok(PathBuf::from("/usr/bin/apexshot"));
-    }
-    if std::path::Path::new("/usr/local/bin/apexshot").exists() {
-        return Ok(PathBuf::from("/usr/local/bin/apexshot"));
+    let preferred = crate::app_identity::preferred_command_path();
+    if preferred.exists() {
+        return Ok(preferred);
     }
 
     if let Some(arg0) = std::env::args_os().next() {
@@ -267,25 +255,22 @@ fn ensure_desktop_entry(app_id: &str) -> anyhow::Result<PathBuf> {
     let content = if is_daemon {
         // desktop_exec_value() already includes "daemon" suffix
         format!(
-            "[Desktop Entry]\nType=Application\nName=ApexShot Daemon\nExec={}\nTerminal=false\nCategories=Utility;\nNoDisplay=true\n",
-            desktop_exec_value()
+            "[Desktop Entry]\nType=Application\nName={}\nExec={}\nIcon={}\nTerminal=false\nCategories=Utility;\nNoDisplay=true\n",
+            crate::app_identity::daemon_name(),
+            desktop_exec_value(),
+            crate::app_identity::icon_name()
         )
     } else {
-        // For the main app, Exec should just be the binary (no daemon)
-        let exe = if std::path::Path::new("/usr/bin/apexshot").exists() {
-            "/usr/bin/apexshot".to_string()
-        } else if std::path::Path::new("/usr/local/bin/apexshot").exists() {
-            "/usr/local/bin/apexshot".to_string()
-        } else {
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.to_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| "apexshot".to_string())
-        };
+        let exe = crate::app_identity::preferred_command_path()
+            .to_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "apexshot".to_string());
         let escaped_exe = exe.replace('\\', "\\\\").replace(' ', "\\ ");
         format!(
-            "[Desktop Entry]\nType=Application\nName=ApexShot\nExec={}\nTerminal=false\nCategories=Utility;\n",
-            escaped_exe
+            "[Desktop Entry]\nType=Application\nName={}\nExec={}\nIcon={}\nTerminal=false\nCategories=Utility;\n",
+            crate::app_identity::app_name(),
+            escaped_exe,
+            crate::app_identity::icon_name()
         )
     };
 

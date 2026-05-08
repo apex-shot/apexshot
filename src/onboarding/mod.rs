@@ -72,7 +72,7 @@ pub struct OnboardingWidgets {
 
 pub fn show_onboarding_window() -> anyhow::Result<()> {
     let app = Application::builder()
-        .application_id("io.github.codegoddy.apexshot")
+        .application_id(crate::app_identity::app_id())
         .build();
 
     app.connect_activate(|application| {

@@ -114,16 +114,15 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
     // GIO_LAUNCHED_DESKTOP_FILE pointing to the autostart daemon desktop file.
     // We MUST override it so GNOME Shell shows "ApexShot" with the correct icon
     // instead of "GTK Application" or "ApexShot Daemon".
-    let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
-    if std::path::Path::new(system_desktop).exists() {
-        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
+    if let Some(desktop_path) = crate::app_identity::desktop_file_for_portal() {
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", desktop_path);
         std::env::set_var(
             "GIO_LAUNCHED_DESKTOP_FILE_PID",
             std::process::id().to_string(),
         );
     } else {
         let app_id = std::env::var("APEXSHOT_APP_ID")
-            .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
+            .unwrap_or_else(|_| crate::app_identity::app_id().to_string());
         if let Ok(desktop_path) = crate::hotkeys::ensure_desktop_entry_pub(&app_id) {
             std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
             std::env::set_var(
@@ -137,7 +136,7 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
     // G_APPLICATION_NON_UNIQUE allows multiple processes with the same ID
     // (e.g. settings + preview running simultaneously).
     let app = gtk4::Application::builder()
-        .application_id("io.github.codegoddy.apexshot")
+        .application_id(crate::app_identity::app_id())
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
@@ -172,7 +171,7 @@ fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: Str
     let appwin = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Preview")
-        .icon_name("io.github.codegoddy.apexshot")
+        .icon_name(crate::app_identity::icon_name())
         .default_width(preview_width)
         .default_height(preview_height)
         .resizable(false)

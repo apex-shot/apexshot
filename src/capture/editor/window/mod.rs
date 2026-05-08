@@ -247,7 +247,7 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
     }
 
     let app = Application::builder()
-        .application_id("io.github.codegoddy.apexshot")
+        .application_id(crate::app_identity::app_id())
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
@@ -481,7 +481,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Editor")
-        .icon_name("io.github.codegoddy.apexshot")
+        .icon_name(crate::app_identity::icon_name())
         .default_width(default_width)
         .default_height(default_height)
         .decorated(false)

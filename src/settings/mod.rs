@@ -37,9 +37,8 @@ use self::{
 pub fn show_settings_window() -> anyhow::Result<()> {
     // Force-set GIO_LAUNCHED_DESKTOP_FILE to the main app's desktop entry
     // so GNOME Shell shows the correct icon and name.
-    let system_desktop = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
-    if std::path::Path::new(system_desktop).exists() {
-        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", system_desktop);
+    if let Some(desktop_path) = crate::app_identity::desktop_file_for_portal() {
+        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", desktop_path);
         std::env::set_var(
             "GIO_LAUNCHED_DESKTOP_FILE_PID",
             std::process::id().to_string(),
@@ -47,7 +46,7 @@ pub fn show_settings_window() -> anyhow::Result<()> {
     }
 
     let app = Application::builder()
-        .application_id("io.github.codegoddy.apexshot")
+        .application_id(crate::app_identity::app_id())
         .build();
 
     app.connect_activate(|application| {
@@ -82,7 +81,7 @@ fn build_settings_window(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Settings")
-        .icon_name("io.github.codegoddy.apexshot")
+        .icon_name(crate::app_identity::icon_name())
         .default_width(1020)
         .default_height(840)
         .build();

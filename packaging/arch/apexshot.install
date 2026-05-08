@@ -4,14 +4,16 @@ _apexshot_kill_stale() {
     killall -9 apexshot 2>/dev/null || true
 }
 
-# Remove stale local .desktop files that shadow the system entry.
+# Remove stale local .desktop/autostart files that shadow the system entry.
 # Old local copies pointed to /usr/local/bin/apexshot and lacked
 # Icon=, causing GNOME to display the app without name or logo.
 _apexshot_clean_stale_desktop() {
     for user_dir in /home/*; do
         rm -f "$user_dir/.local/share/applications/io.github.codegoddy.apexshot.desktop" 2>/dev/null || true
+        rm -f "$user_dir/.config/autostart/apexshot-daemon.desktop" 2>/dev/null || true
     done
     rm -f /root/.local/share/applications/io.github.codegoddy.apexshot.desktop 2>/dev/null || true
+    rm -f /root/.config/autostart/apexshot-daemon.desktop 2>/dev/null || true
 }
 
 # Refresh stale user-installed copies of the GNOME extension. GNOME Shell gives

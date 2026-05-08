@@ -240,9 +240,10 @@ After installation, ApexShot will launch an onboarding wizard to help you:
 
 ### Manual Install
 
-The manual install command copies `apexshot` and `apexshot-capture` into
-`/usr/local/bin` (which shadows the package-managed binaries in `/usr/bin`).
-**For in-place `.deb` upgrades, use the updater script instead.**
+The manual install command is for local builds. If a package-managed ApexShot
+already exists in `/usr/bin`, the installer refuses to place another
+`apexshot` in `/usr/local/bin` because that would shadow the `.deb` app.
+Use `--dev` for a separate test install instead.
 
 Because binaries need root but autostart lives in your home directory, run
 the two parts separately:
@@ -255,6 +256,14 @@ sudo apexshot install --no-autostart
 apexshot install --no-binary
 ```
 
+For a local development build that can live beside the official package:
+
+```bash
+cargo build --release
+sudo target/release/apexshot install --dev --no-autostart
+apexshot-dev
+```
+
 Optional flags:
 
 ```bash
@@ -263,6 +272,9 @@ sudo apexshot install --no-autostart --extension-id <chrome-extension-id>
 
 # Force reinstall even if the same version is already present
 sudo apexshot install --no-autostart --force
+
+# Remove the separate development install
+sudo apexshot-dev uninstall --dev
 ```
 
 ### GNOME Extension (Required)

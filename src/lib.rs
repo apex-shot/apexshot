@@ -1,4 +1,5 @@
 pub mod annotations;
+pub mod app_identity;
 pub mod backend;
 pub mod capture;
 pub mod capture_overlay;

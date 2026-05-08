@@ -14,9 +14,6 @@
 //!   2. If not, grants them via `SetPermission` so the portal remembers the
 //!      choice across reboots.
 
-/// The application ID used in the .desktop file and portal permission store.
-const APP_ID: &str = "io.github.codegoddy.apexshot";
-
 /// Permission table used by the Screenshot portal backend (xdg-desktop-portal-gnome).
 const SCREENSHOT_TABLE: &str = "screenshot";
 /// Resource ID inside the screenshot table.
@@ -38,6 +35,7 @@ const PERM_YES: &str = "yes";
 ///   - `apexshot install` (so permissions are set up at install time)
 ///   - Daemon startup (so a fresh session still has permissions after reboot)
 pub fn ensure_portal_permissions() {
+    let app_id = crate::app_identity::app_id();
     for (table, id) in [
         (SCREENSHOT_TABLE, SCREENSHOT_ID),
         (SCREENCAST_TABLE, SCREENCAST_ID),
@@ -45,10 +43,10 @@ pub fn ensure_portal_permissions() {
         let status = grant_permission(table, id);
         match status {
             PermStatus::AlreadyGranted => {
-                eprintln!("[portal-perm] {table}/{id}: already granted for {APP_ID}");
+                eprintln!("[portal-perm] {table}/{id}: already granted for {app_id}");
             }
             PermStatus::Granted => {
-                eprintln!("[portal-perm] {table}/{id}: granted permission for {APP_ID}");
+                eprintln!("[portal-perm] {table}/{id}: granted permission for {app_id}");
             }
             PermStatus::Failed(ref reason) => {
                 // Not fatal — the user will simply see the portal dialog as before.
@@ -65,6 +63,7 @@ enum PermStatus {
 }
 
 fn grant_permission(table: &str, id: &str) -> PermStatus {
+    let app_id = crate::app_identity::app_id();
     // We use `dbus-send` (available on every GNOME system) rather than
     // pulling in zbus synchronously, because this function is called from
     // both the sync `install` path and the async daemon path.
@@ -85,7 +84,7 @@ fn grant_permission(table: &str, id: &str) -> PermStatus {
     match check {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            if stdout.contains(APP_ID) && stdout.contains(PERM_YES) {
+            if stdout.contains(app_id) && stdout.contains(PERM_YES) {
                 return PermStatus::AlreadyGranted;
             }
         }
@@ -105,7 +104,7 @@ fn grant_permission(table: &str, id: &str) -> PermStatus {
             &format!("string:{table}"),
             "boolean:true",
             &format!("string:{id}"),
-            &format!("string:{APP_ID}"),
+            &format!("string:{app_id}"),
             "array:string:yes",
         ])
         .output();
@@ -127,7 +126,7 @@ mod tests {
 
     #[test]
     fn constants_are_sane() {
-        assert!(!APP_ID.is_empty());
+        assert!(!crate::app_identity::app_id().is_empty());
         assert!(!SCREENSHOT_TABLE.is_empty());
         assert!(!SCREENSHOT_ID.is_empty());
         assert!(!SCREENCAST_TABLE.is_empty());

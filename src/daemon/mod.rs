@@ -1666,14 +1666,10 @@ async fn run_hotkey_listener(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyho
 /// The autostart desktop file has NoDisplay=true, so GNOME Shell won't
 /// show a duplicate dock entry regardless of which desktop file we point to.
 fn ensure_gio_desktop_env() {
-    // Prefer the system-packaged main app desktop file (installed by the .deb)
-    let system_main_desktop =
-        std::path::Path::new("/usr/share/applications/io.github.codegoddy.apexshot.desktop");
-    let desktop_path = if system_main_desktop.exists() {
-        system_main_desktop.to_path_buf()
+    let desktop_path = if let Some(desktop_path) = crate::app_identity::desktop_file_for_portal() {
+        desktop_path
     } else {
-        // Fallback: create a desktop entry in user dir with the canonical app ID
-        let app_id = "io.github.codegoddy.apexshot";
+        let app_id = crate::app_identity::app_id();
         match ensure_desktop_entry_pub(app_id) {
             Ok(path) => path,
             Err(_) => return,
@@ -1714,7 +1710,7 @@ fn maybe_relaunch_via_desktop() -> bool {
     }
 
     let app_id = std::env::var("APEXSHOT_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
+        .unwrap_or_else(|_| crate::app_identity::app_id().to_string());
 
     let desktop_path = match ensure_desktop_entry_pub(&app_id) {
         Ok(path) => path,
@@ -1831,7 +1827,7 @@ async fn run_hotkey_listener_portal(
     use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
     let app_id = std::env::var("APEXSHOT_APP_ID")
-        .unwrap_or_else(|_| "io.github.codegoddy.apexshot".to_string());
+        .unwrap_or_else(|_| crate::app_identity::app_id().to_string());
 
     let conn = zbus::Connection::session()
         .await

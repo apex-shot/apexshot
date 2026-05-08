@@ -1,7 +1,5 @@
 use std::{ffi::OsString, path::PathBuf};
 
-const MAIN_APP_ID: &str = "io.github.codegoddy.apexshot";
-const MAIN_APP_DESKTOP_FILE: &str = "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
 const GIO_DESKTOP_FILE_ENV: &str = "GIO_LAUNCHED_DESKTOP_FILE";
 const GIO_DESKTOP_FILE_PID_ENV: &str = "GIO_LAUNCHED_DESKTOP_FILE_PID";
 
@@ -55,16 +53,15 @@ fn scoped_portal_capture_identity_for_path(path: Option<PathBuf>) -> ScopedPorta
 }
 
 fn resolve_main_app_desktop_file() -> Option<PathBuf> {
-    let system_desktop = PathBuf::from(MAIN_APP_DESKTOP_FILE);
-    if system_desktop.exists() {
-        return Some(system_desktop);
+    if let Some(desktop_file) = crate::app_identity::desktop_file_for_portal() {
+        return Some(desktop_file);
     }
 
     if std::env::var_os("WAYLAND_DISPLAY").is_none() {
         return None;
     }
 
-    crate::hotkeys::ensure_desktop_entry_pub(MAIN_APP_ID).ok()
+    crate::hotkeys::ensure_desktop_entry_pub(crate::app_identity::app_id()).ok()
 }
 
 #[cfg(test)]
