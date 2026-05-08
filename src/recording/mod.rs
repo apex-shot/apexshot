@@ -14,6 +14,7 @@ use crate::{
 };
 
 mod control_session;
+pub mod editor;
 mod runtime_keystrokes;
 mod stop_overlay;
 use control_session::RecordingControlServer;
@@ -150,6 +151,7 @@ pub struct PreparedOverlayRecordingRequest {
     pub runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     pub use_shell_mask: bool,
     pub use_shell_controls: bool,
+    pub open_editor: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1995,6 +1997,7 @@ pub fn prepare_overlay_recording_request(
         runtime_overlay_snapshot,
         use_shell_mask,
         use_shell_controls,
+        open_editor: matches!(request.record_type, RecordingType::Video) && request.open_editor,
     }
 }
 
@@ -2338,6 +2341,11 @@ pub fn run_overlay_recording_request_with_gtk(
         }
         Ok((path, StopAction::Save)) => {
             eprintln!("Recording saved to {:?}", path);
+            if prepared.open_editor {
+                if let Err(err) = crate::recording::editor::open_recording_editor(path.clone()) {
+                    eprintln!("[recording] Failed to open recording editor: {err}");
+                }
+            }
             Ok(path)
         }
         Err(err) => Err(anyhow::anyhow!("Recording failed: {err}")),
@@ -2476,6 +2484,7 @@ mod tests {
         assert_eq!(prepared.updated_app_config.rec_video_fps, 3);
         assert_eq!(prepared.updated_app_config.rec_video_mono, true);
         assert_eq!(prepared.updated_app_config.rec_video_open_editor, true);
+        assert_eq!(prepared.open_editor, true);
         assert_eq!(prepared.recording_config.output_path, prepared.output_path);
         assert_eq!(prepared.recording_config.width, Some(640));
         assert_eq!(prepared.recording_config.height, Some(480));
@@ -2508,6 +2517,40 @@ mod tests {
             prepared.use_shell_controls,
             crate::gnome_shell::current_session_supports_gnome_shell_overlay()
         );
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_sets_open_editor_for_video() {
+        let request = RecordingRequest {
+            record_type: RecordingType::Video,
+            open_editor: true,
+            ..RecordingRequest::default()
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 5, 8, 12, 0, 0).unwrap(),
+        );
+
+        assert!(prepared.open_editor);
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_does_not_set_open_editor_for_gif() {
+        let request = RecordingRequest {
+            record_type: RecordingType::Gif,
+            open_editor: true,
+            ..RecordingRequest::default()
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 5, 8, 12, 0, 0).unwrap(),
+        );
+
+        assert!(!prepared.open_editor);
     }
 
     #[test]
