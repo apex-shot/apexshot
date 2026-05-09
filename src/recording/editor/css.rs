@@ -11,6 +11,7 @@ pub fn install_recording_editor_css() {
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
                 min-width: 900px;
                 min-height: 640px;
+                background: #000000;
             }
 
             /* ── Strip native Adwaita/Ubuntu chrome from all descendants ── */
@@ -123,12 +124,19 @@ pub fn install_recording_editor_css() {
 
             .recording-editor-window-controls {
                 min-height: 44px;
+                padding: 0;
+                background: #000000;
+                border-bottom: none;
             }
 
             .recording-editor-title {
                 color: rgba(245, 245, 247, 0.92);
                 font-size: 13px;
                 font-weight: 700;
+            }
+
+            .recording-editor-window-controls .editor-toolbar-left {
+                margin-left: 12px;
             }
 
             .recording-editor-preview-frame {
@@ -155,7 +163,7 @@ pub fn install_recording_editor_css() {
 
             .recording-editor-bottom-tools {
                 padding: 0;
-                background-color: #141414;
+                background-color: rgba(20, 20, 20, 0.94);
                 border-top: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 0 0 10px 10px;
             }
@@ -185,6 +193,10 @@ pub fn install_recording_editor_css() {
 
             .recording-editor-play-button:hover {
                 background: rgba(255, 255, 255, 0.22);
+            }
+
+            .recording-editor-play-button image {
+                color: white;
             }
 
             .recording-editor-thumbnail-strip {
@@ -225,31 +237,46 @@ pub fn install_recording_editor_css() {
             }
 
             .recording-editor-panels {
-                padding: 10px 14px;
-                background: #141414;
+                padding: 12px 14px;
+                background: rgba(20, 20, 20, 0.94);
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
             }
 
             .recording-editor-panel {
-                padding: 12px;
-                border-radius: 6px;
-                background: rgba(0, 0, 0, 0.42);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                padding: 0;
+                border-radius: 0;
+                background: transparent;
+                border: none;
+            }
+
+            .recording-editor-panel-title {
+                color: #f5f5f7;
+                font-size: 14px;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }
+
+            .recording-editor-panel-body {
+                padding: 0;
+                background: transparent;
+                border: none;
+                border-radius: 0;
             }
 
             button.recording-editor-dropdown {
-                min-height: 32px;
-                border-radius: 6px;
+                min-height: 30px;
+                border-radius: 8px;
                 border: 1px solid rgba(255, 255, 255, 0.11);
                 background: #000000;
                 background-image: none;
                 color: #f3f3f5;
+                padding: 0 8px;
                 box-shadow: none;
                 text-shadow: none;
             }
 
             button.recording-editor-dropdown:hover,
-            button.recording-editor-dropdown:active,
-            button.recording-editor-dropdown:focus {
+            button.recording-editor-dropdown:active {
                 background: #000000;
                 background-image: none;
                 border-color: rgba(255, 255, 255, 0.18);
@@ -277,24 +304,19 @@ pub fn install_recording_editor_css() {
             }
 
             .recording-editor-dropdown-list {
-                padding: 8px;
-                border-radius: 12px;
-                background-image: linear-gradient(to bottom,
-                    rgba(28, 28, 34, 0.98),
-                    rgba(18, 18, 23, 0.98));
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                box-shadow:
-                    0 14px 32px rgba(0, 0, 0, 0.55),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+                padding: 4px;
+                border-radius: 8px;
+                background: #000000;
+                border: 1px solid rgba(255, 255, 255, 0.11);
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
             }
 
             button.recording-editor-dropdown-item {
-                min-width: 190px;
                 min-height: 30px;
-                padding: 0 12px;
-                border-radius: 8px;
+                padding: 0 8px;
+                border-radius: 6px;
                 border: 1px solid transparent;
-                background: rgba(255, 255, 255, 0.01);
+                background: transparent;
                 color: #f3f3f5;
                 box-shadow: none;
             }
@@ -304,15 +326,14 @@ pub fn install_recording_editor_css() {
                 border-color: rgba(255, 255, 255, 0.09);
             }
 
-            .recording-editor-panel-title,
             .recording-editor-label {
-                color: rgba(255, 255, 255, 0.86);
+                color: rgba(241, 241, 243, 0.82);
                 font-size: 12px;
             }
 
             .recording-editor-footer {
                 padding: 8px 14px 12px 14px;
-                background: #141414;
+                background: rgba(20, 20, 20, 0.94);
                 border-radius: 0 0 10px 10px;
             }
 
@@ -330,6 +351,22 @@ pub fn install_recording_editor_css() {
                 padding: 5px 12px;
             }
 
+            .recording-editor-primary-button label {
+                color: #050505;
+            }
+
+            .recording-editor-primary-button:disabled {
+                opacity: 1;
+                background: #f5f5f7;
+                color: #050505;
+                border-color: #f5f5f7;
+            }
+
+            .recording-editor-primary-button:disabled label {
+                opacity: 1;
+                color: #050505;
+            }
+
             .recording-editor-secondary-button {
                 min-width: 82px;
                 background: transparent;
@@ -339,9 +376,17 @@ pub fn install_recording_editor_css() {
                 padding: 5px 12px;
             }
 
+            .recording-editor-secondary-button label {
+                color: rgba(255, 255, 255, 0.88);
+            }
+
             .recording-editor-secondary-button:hover {
                 background: #1a1a1d;
                 border-color: rgba(255, 255, 255, 0.09);
+            }
+
+            .recording-editor-secondary-button:hover label {
+                color: #ffffff;
             }
             ",
         );

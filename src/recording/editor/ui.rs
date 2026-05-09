@@ -1,11 +1,12 @@
 use super::css::install_recording_editor_css;
 use super::ffmpeg;
 use super::model::{format_size, AudioMode, DimensionPreset, VideoEditState, VideoMetadata};
+use gtk4::gdk;
 use gtk4::glib;
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, CenterBox,
-    DrawingArea, Entry, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture,
-    Popover, Scale, Spinner,
+    DrawingArea, Entry, EventControllerMotion, GestureDrag, Image, Label, MediaFile, Orientation,
+    Overlay, Picture, Popover, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -72,7 +73,18 @@ fn build_window(
     estimate_label.add_css_class("recording-editor-estimate");
     update_estimate(&estimate_label, &state, false);
 
-    let top_controls = build_top_controls(&window);
+    let file_stem = {
+        let state = state.lock().unwrap();
+        state
+            .metadata
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Recording")
+            .to_string()
+    };
+
+    let top_controls = build_top_controls(&window, &file_stem);
     root.append(&top_controls);
 
     let preview = build_video_preview(state.clone(), estimate_label.clone(), thumbnails.clone());
@@ -98,7 +110,7 @@ fn build_window(
     window.present();
 }
 
-fn build_top_controls(window: &ApplicationWindow) -> CenterBox {
+fn build_top_controls(window: &ApplicationWindow, file_stem: &str) -> CenterBox {
     let controls = CenterBox::new();
     controls.add_css_class("editor-toolbar");
     controls.add_css_class("recording-editor-window-controls");
@@ -123,7 +135,7 @@ fn build_top_controls(window: &ApplicationWindow) -> CenterBox {
     left.append(&traffic_lights);
     controls.set_start_widget(Some(&left));
 
-    let title = Label::new(Some("Recording Editor"));
+    let title = Label::new(Some(file_stem));
     title.add_css_class("recording-editor-title");
     controls.set_center_widget(Some(&title));
 
@@ -241,7 +253,7 @@ fn build_timeline(
     let play_button = Button::new();
     play_button.add_css_class("recording-editor-play-button");
     let play_icon = Image::from_icon_name("media-playback-start-symbolic");
-    play_icon.set_pixel_size(18);
+    play_icon.set_pixel_size(22);
     play_button.set_child(Some(&play_icon));
     play_button.set_valign(Align::Center);
 
@@ -254,13 +266,13 @@ fn build_timeline(
             media_play.pause();
             playing.set(false);
             let icon = Image::from_icon_name("media-playback-start-symbolic");
-            icon.set_pixel_size(18);
+            icon.set_pixel_size(22);
             play_button_ref.set_child(Some(&icon));
         } else {
             media_play.play();
             playing.set(true);
             let icon = Image::from_icon_name("media-playback-pause-symbolic");
-            icon.set_pixel_size(18);
+            icon.set_pixel_size(22);
             play_button_ref.set_child(Some(&icon));
         }
     });
@@ -439,20 +451,33 @@ fn build_timeline(
     drag.connect_drag_begin({
         let state = state.clone();
         let drag_kind = drag_kind.clone();
+        let media = media.clone();
+        let selection = selection.clone();
         move |gesture, x, _| {
             let width = gesture
                 .widget()
                 .and_then(|widget| widget.downcast::<DrawingArea>().ok())
                 .map(|area| area.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
-            let state = state.lock().unwrap();
+            let mut state = state.lock().unwrap();
             let duration = state.metadata.duration_seconds.max(0.001);
             let start_x = (state.trim_start_seconds / duration) * width;
             let end_x = (state.trim_end_seconds / duration) * width;
-            let kind = if (x - start_x).abs() <= (x - end_x).abs() {
+            let playhead_x = (state.playhead_seconds / duration) * width;
+            let handle_threshold = 12.0;
+            let kind = if (x - start_x).abs() <= handle_threshold
+                && (x - start_x).abs() <= (x - end_x).abs()
+            {
                 TrimDragKind::Start
-            } else {
+            } else if (x - end_x).abs() <= handle_threshold {
                 TrimDragKind::End
+            } else {
+                let seconds = (x.clamp(0.0, width) / width) * duration;
+                state.playhead_seconds = seconds;
+                media.seek((seconds * 1_000_000.0) as i64);
+                selection.queue_draw();
+                let _ = playhead_x;
+                TrimDragKind::Playhead
             };
             *drag_kind.borrow_mut() = Some(kind);
         }
@@ -474,6 +499,7 @@ fn build_timeline(
         let estimate_label = estimate_label.clone();
         let start_label = start_label.clone();
         let end_label = end_label.clone();
+        let media = media.clone();
         move |gesture, offset_x, _| {
             let Some(kind) = *drag_kind.borrow() else {
                 return;
@@ -493,11 +519,17 @@ fn build_timeline(
             match kind {
                 TrimDragKind::Start => state_guard.set_trim_start(seconds),
                 TrimDragKind::End => state_guard.set_trim_end(seconds),
+                TrimDragKind::Playhead => {
+                    state_guard.playhead_seconds = seconds;
+                    media.seek((seconds * 1_000_000.0) as i64);
+                }
             }
             drop(state_guard);
             selection.queue_draw();
-            update_estimate(&estimate_label, &state, false);
-            update_time_labels(&start_label, &end_label, &state);
+            if !matches!(kind, TrimDragKind::Playhead) {
+                update_estimate(&estimate_label, &state, false);
+                update_time_labels(&start_label, &end_label, &state);
+            }
         }
     });
     drag.connect_drag_end({
@@ -507,6 +539,41 @@ fn build_timeline(
         }
     });
     selection.add_controller(drag);
+
+    let motion = EventControllerMotion::new();
+    motion.connect_motion({
+        let state = state.clone();
+        move |controller, x, _| {
+            let Some(widget) = controller.widget() else {
+                return;
+            };
+            let width = widget.allocated_width().max(1) as f64;
+            let state = state.lock().unwrap();
+            let duration = state.metadata.duration_seconds.max(0.001);
+            let start_x = (state.trim_start_seconds / duration) * width;
+            let end_x = (state.trim_end_seconds / duration) * width;
+            let playhead_x = (state.playhead_seconds / duration) * width;
+            let handle_threshold = 12.0;
+            let playhead_threshold = 8.0;
+            let cursor_name = if (x - start_x).abs() <= handle_threshold {
+                Some("w-resize")
+            } else if (x - end_x).abs() <= handle_threshold {
+                Some("e-resize")
+            } else if (x - playhead_x).abs() <= playhead_threshold {
+                Some("pointer")
+            } else {
+                None
+            };
+            let cursor = cursor_name.and_then(|name| gdk::Cursor::from_name(name, None));
+            widget.set_cursor(cursor.as_ref());
+        }
+    });
+    motion.connect_leave(|controller| {
+        if let Some(widget) = controller.widget() {
+            widget.set_cursor(None);
+        }
+    });
+    selection.add_controller(motion);
 
     // Periodically sync playhead position from media and redraw
     let media_playhead = media.clone();
@@ -541,6 +608,7 @@ fn build_timeline(
 enum TrimDragKind {
     Start,
     End,
+    Playhead,
 }
 
 fn build_panels(
@@ -551,7 +619,7 @@ fn build_panels(
     panels.add_css_class("recording-editor-panels");
     panels.set_hexpand(true);
 
-    let dimensions = GtkBox::new(Orientation::Vertical, 10);
+    let dimensions = GtkBox::new(Orientation::Vertical, 0);
     dimensions.add_css_class("recording-editor-panel");
     dimensions.set_hexpand(true);
 
@@ -559,6 +627,9 @@ fn build_panels(
     dimensions_title.add_css_class("recording-editor-panel-title");
     dimensions_title.set_xalign(0.0);
     dimensions.append(&dimensions_title);
+
+    let dimensions_body = GtkBox::new(Orientation::Vertical, 8);
+    dimensions_body.add_css_class("recording-editor-panel-body");
 
     let original_label = {
         let state = state.lock().unwrap();
@@ -578,6 +649,7 @@ fn build_panels(
     let dimension_button = Button::new();
     dimension_button.set_has_frame(false);
     dimension_button.add_css_class("recording-editor-dropdown");
+    dimension_button.set_hexpand(true);
 
     let dimension_button_box = GtkBox::new(Orientation::Horizontal, 8);
     dimension_button_box.set_hexpand(true);
@@ -603,11 +675,15 @@ fn build_panels(
     dimension_popover.set_child(Some(&dimension_list));
 
     let dimension_popover_open = dimension_popover.clone();
+    let dimension_button_ref = dimension_button.clone();
+    let dimension_list_ref = dimension_list.clone();
     dimension_button.connect_clicked(move |_| {
+        let btn_width = dimension_button_ref.allocated_width();
+        dimension_list_ref.set_size_request(btn_width, -1);
         dimension_popover_open.popup();
     });
 
-    dimensions.append(&dimension_button);
+    dimensions_body.append(&dimension_button);
 
     let width_entry = Entry::new();
     let height_entry = Entry::new();
@@ -629,6 +705,7 @@ fn build_panels(
         item.add_css_class("editor-popover-list-item");
         item.add_css_class("flat");
         item.add_css_class("recording-editor-dropdown-item");
+        item.set_hexpand(true);
         let state_select = state.clone();
         let estimate_label_select = estimate_label.clone();
         let width_entry_select = width_entry.clone();
@@ -653,10 +730,11 @@ fn build_panels(
         dimension_list.append(&item);
     }
 
-    dimensions.append(&field_row("Width", &width_entry));
-    dimensions.append(&field_row("Height", &height_entry));
+    dimensions_body.append(&field_row("Width", &width_entry));
+    dimensions_body.append(&field_row("Height", &height_entry));
+    dimensions.append(&dimensions_body);
 
-    let settings = GtkBox::new(Orientation::Vertical, 10);
+    let settings = GtkBox::new(Orientation::Vertical, 0);
     settings.add_css_class("recording-editor-panel");
     settings.set_hexpand(true);
 
@@ -664,6 +742,9 @@ fn build_panels(
     quality_label.add_css_class("recording-editor-panel-title");
     quality_label.set_xalign(0.0);
     settings.append(&quality_label);
+
+    let quality_body = GtkBox::new(Orientation::Vertical, 8);
+    quality_body.add_css_class("recording-editor-panel-body");
 
     let quality_row = GtkBox::new(Orientation::Horizontal, 8);
     let low = Label::new(Some("Low"));
@@ -679,12 +760,15 @@ fn build_panels(
     quality_row.append(&low);
     quality_row.append(&quality_scale);
     quality_row.append(&high);
-    settings.append(&quality_row);
+    quality_body.append(&quality_row);
 
     let audio_label = Label::new(Some("Audio"));
     audio_label.add_css_class("recording-editor-panel-title");
     audio_label.set_xalign(0.0);
     settings.append(&audio_label);
+
+    let audio_body = GtkBox::new(Orientation::Vertical, 4);
+    audio_body.add_css_class("recording-editor-panel-body");
 
     let audio_unchanged = gtk4::CheckButton::with_label("Don't change");
     let audio_mono = gtk4::CheckButton::with_label("Convert to mono");
@@ -700,9 +784,11 @@ fn build_panels(
         audio_mono.set_sensitive(false);
         audio_muted.set_sensitive(false);
     }
-    settings.append(&audio_unchanged);
-    settings.append(&audio_mono);
-    settings.append(&audio_muted);
+    audio_body.append(&audio_unchanged);
+    audio_body.append(&audio_mono);
+    audio_body.append(&audio_muted);
+    settings.append(&quality_body);
+    settings.append(&audio_body);
 
     panels.append(&dimensions);
     panels.append(&settings);
