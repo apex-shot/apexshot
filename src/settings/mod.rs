@@ -100,26 +100,8 @@ fn build_settings_window(app: &Application) {
 
     // --- TOOLBAR ---
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
-    toolbar.add_css_class("editor-toolbar");
-
-    let left_box = GtkBox::new(Orientation::Horizontal, 8);
-    left_box.set_halign(Align::Start);
-    left_box.add_css_class("editor-toolbar-left");
-
-    let close_btn = traffic_light_button("traffic-light-red", "Close");
-    let win_clone = window.clone();
-    close_btn.connect_clicked(move |_| win_clone.close());
-
-    let min_btn = traffic_light_button("traffic-light-yellow", "Minimize");
-    let win_clone = window.clone();
-    min_btn.connect_clicked(move |_| win_clone.minimize());
-
-    let max_btn = traffic_light_button("traffic-light-green", "Maximize");
-
-    left_box.append(&close_btn);
-    left_box.append(&min_btn);
-    left_box.append(&max_btn);
-    toolbar.append(&left_box);
+    toolbar.add_css_class("settings-window-controls");
+    toolbar.set_size_request(-1, 30);
 
     let drag_handle = GtkBox::new(Orientation::Horizontal, 0);
     drag_handle.set_hexpand(true);
@@ -127,14 +109,37 @@ fn build_settings_window(app: &Application) {
     drag_handle.set_vexpand(false);
     toolbar.append(&drag_handle);
 
+    let close_btn = traffic_light_button("traffic-light-red", "Close");
+    close_btn.remove_css_class("recent-captures-wm-btn");
+    close_btn.remove_css_class("recent-captures-wm-close");
+    close_btn.add_css_class("recording-editor-traffic-btn");
+    let win_clone = window.clone();
+    close_btn.connect_clicked(move |_| win_clone.close());
+
+    let min_btn = traffic_light_button("traffic-light-yellow", "Minimize");
+    min_btn.remove_css_class("recent-captures-wm-btn");
+    min_btn.add_css_class("recording-editor-traffic-btn");
+    let win_clone = window.clone();
+    min_btn.connect_clicked(move |_| win_clone.minimize());
+
+    let max_btn = traffic_light_button("traffic-light-green", "Maximize");
+    max_btn.remove_css_class("recent-captures-wm-btn");
+    max_btn.add_css_class("recording-editor-traffic-btn");
+
+    for button in [&close_btn, &min_btn, &max_btn] {
+        button.set_size_request(24, 24);
+        button.set_valign(Align::Center);
+    }
+
+    let right_box = GtkBox::new(Orientation::Horizontal, 6);
+    right_box.set_halign(Align::End);
+    right_box.append(&min_btn);
+    right_box.append(&max_btn);
+    right_box.append(&close_btn);
+    toolbar.append(&right_box);
+
     let save_btn = Button::with_label("Save");
     save_btn.add_css_class("settings-primary-btn");
-
-    let right_box = GtkBox::new(Orientation::Horizontal, 12);
-    right_box.set_halign(Align::End);
-    right_box.add_css_class("editor-toolbar-right");
-    right_box.append(&save_btn);
-    toolbar.append(&right_box);
 
     let toast = Label::new(None);
     toast.add_css_class("settings-toast");
@@ -171,6 +176,22 @@ fn build_settings_window(app: &Application) {
 
     sidebar_scroller.set_child(Some(&nav_strip));
 
+    let sidebar_wrapper = GtkBox::new(Orientation::Vertical, 0);
+    sidebar_wrapper.add_css_class("settings-sidebar-wrapper");
+    sidebar_wrapper.set_vexpand(true);
+    sidebar_wrapper.append(&sidebar_scroller);
+
+    let save_box = GtkBox::new(Orientation::Vertical, 0);
+    save_box.add_css_class("settings-save-box");
+    save_box.set_halign(Align::Fill);
+    save_box.set_margin_start(8);
+    save_box.set_margin_end(8);
+    save_box.set_margin_bottom(10);
+    save_box.set_margin_top(6);
+    save_btn.set_hexpand(true);
+    save_box.append(&save_btn);
+    sidebar_wrapper.append(&save_box);
+
     let labels = [
         ("General", "preferences-system-symbolic"),
         ("Shortcuts", "input-keyboard-symbolic"),
@@ -190,14 +211,14 @@ fn build_settings_window(app: &Application) {
     let mut nav_items = Vec::new();
 
     for (i, (label_text, icon_name)) in labels.iter().enumerate() {
-        let item = GtkBox::new(Orientation::Horizontal, 12);
+        let item = GtkBox::new(Orientation::Horizontal, 8);
         item.add_css_class("settings-nav-item");
         item.set_halign(Align::Fill);
         item.set_valign(Align::Center);
 
         let icon = Image::from_icon_name(icon_name);
         icon.add_css_class("settings-nav-icon");
-        icon.set_pixel_size(18);
+        icon.set_pixel_size(16);
         icon.set_halign(Align::Start);
 
         let label = Label::new(Some(label_text));
@@ -248,7 +269,7 @@ fn build_settings_window(app: &Application) {
         nav_items.push((item, icon, label));
     }
 
-    content_split.append(&sidebar_scroller);
+    content_split.append(&sidebar_wrapper);
 
     // --- BODY (STACK) ---
     let body_frame = GtkBox::new(Orientation::Vertical, 0);
@@ -335,13 +356,13 @@ fn build_settings_window(app: &Application) {
         let scroller = ScrolledWindow::new();
         scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
         let vbox = GtkBox::new(Orientation::Vertical, 0);
-        vbox.set_margin_top(24);
-        vbox.set_margin_bottom(40);
-        vbox.set_margin_start(36);
-        vbox.set_margin_end(36);
+        vbox.set_margin_top(20);
+        vbox.set_margin_bottom(32);
+        vbox.set_margin_start(28);
+        vbox.set_margin_end(28);
 
         let header = GtkBox::new(Orientation::Vertical, 4);
-        header.set_margin_bottom(24);
+        header.set_margin_bottom(16);
 
         let title_lbl = Label::new(Some(title));
         title_lbl.add_css_class("settings-page-title");

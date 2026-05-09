@@ -123,20 +123,106 @@ pub fn install_recording_editor_css() {
             }
 
             .recording-editor-window-controls {
-                min-height: 44px;
+                min-height: 0 !important;
                 padding: 0;
-                background: #000000;
-                border-bottom: none;
+                background: rgba(20, 20, 20, 0.94);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .recording-editor-window-controls.editor-toolbar {
+                min-height: 0 !important;
             }
 
             .recording-editor-title {
                 color: rgba(245, 245, 247, 0.92);
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 700;
             }
 
             .recording-editor-window-controls .editor-toolbar-left {
-                margin-left: 12px;
+                margin-left: 8px;
+                min-height: 0 !important;
+            }
+
+            .recording-editor-root .editor-toolbar-left {
+                min-height: 0 !important;
+            }
+
+            .recording-editor-window-controls .editor-traffic-lights {
+                margin-right: 6px;
+                min-height: 0;
+            }
+
+            .recording-editor-traffic-btn {
+                min-width: 24px !important;
+                min-height: 24px !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                border-radius: 999px !important;
+                background: transparent !important;
+                background-image: none !important;
+                color: rgba(255, 255, 255, 0.65) !important;
+                border: none !important;
+                box-shadow: none !important;
+                outline: none !important;
+            }
+
+            .recording-editor-traffic-btn image {
+                -gtk-icon-size: 14px;
+            }
+
+            .recording-editor-traffic-btn:hover,
+            .recording-editor-traffic-btn:active {
+                background: rgba(255, 255, 255, 0.10);
+                background-image: none;
+                color: #ffffff;
+                border-radius: 999px;
+                border: none !important;
+                box-shadow: none;
+            }
+
+            .recording-editor-traffic-btn:hover image,
+            .recording-editor-traffic-btn:active image {
+                color: #ffffff;
+            }
+
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-btn {
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
+                padding: 0;
+                margin: 0;
+                border-radius: 999px !important;
+                background: transparent;
+                background-image: none;
+                color: rgba(255, 255, 255, 0.65);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-btn image {
+                -gtk-icon-size: 16px;
+            }
+
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-btn:hover,
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-btn:active,
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-close:hover,
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-close:active {
+                background: rgba(255, 255, 255, 0.10);
+                background-image: none;
+                color: #ffffff;
+                border-radius: 999px !important;
+                border: none;
+                box-shadow: none;
+            }
+
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-btn:hover image,
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-btn:active image,
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-close:hover image,
+            .recording-editor-root .recording-editor-window-controls button.recent-captures-wm-close:active image {
+                color: #ffffff;
             }
 
             .recording-editor-preview-frame {
@@ -388,12 +474,25 @@ pub fn install_recording_editor_css() {
             .recording-editor-secondary-button:hover label {
                 color: #ffffff;
             }
+
+            .recording-editor-drop-banner {
+                background: rgba(176, 92, 56, 0.92);
+                border-radius: 8px;
+                padding: 12px 24px;
+                margin: 80px 120px;
+            }
+
+            .recording-editor-drop-label {
+                color: #ffffff;
+                font-size: 15px;
+                font-weight: 600;
+            }
             ",
         );
         gtk4::style_context_add_provider_for_display(
             &display,
             &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
         );
     }
 }

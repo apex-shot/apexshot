@@ -2,11 +2,12 @@ use super::css::install_recording_editor_css;
 use super::ffmpeg;
 use super::model::{format_size, AudioMode, DimensionPreset, VideoEditState, VideoMetadata};
 use gtk4::gdk;
+use gtk4::gio;
 use gtk4::glib;
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, CenterBox,
-    DrawingArea, Entry, EventControllerMotion, GestureDrag, Image, Label, MediaFile, Orientation,
-    Overlay, Picture, Popover, Scale, Spinner,
+    DrawingArea, DropTarget, Entry, EventControllerMotion, GestureDrag, Image, Label, MediaFile,
+    Orientation, Overlay, Picture, Popover, Revealer, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -68,6 +69,111 @@ fn build_window(
         root.add_css_class("editor-reduced-transparency");
     }
 
+    let overlay = Overlay::new();
+    overlay.set_child(Some(&root));
+
+    // Drop feedback banner
+    let drop_banner = GtkBox::new(Orientation::Vertical, 0);
+    drop_banner.add_css_class("recording-editor-drop-banner");
+    drop_banner.set_can_target(false);
+    let drop_label = Label::new(Some("Drop video file to open"));
+    drop_label.add_css_class("recording-editor-drop-label");
+    drop_label.set_can_target(false);
+    drop_banner.append(&drop_label);
+    let drop_revealer = Revealer::new();
+    drop_revealer.set_can_target(false);
+    drop_revealer.set_halign(Align::Center);
+    drop_revealer.set_valign(Align::Start);
+    drop_revealer.set_child(Some(&drop_banner));
+    drop_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
+    drop_revealer.set_reveal_child(false);
+    overlay.add_overlay(&drop_revealer);
+
+    populate_root(&root, &window, state.clone(), thumbnails);
+    crate::capture::editor::ui_support::install_edge_resize(&root, &window);
+
+    // Drag-and-drop target for video files — attach to window so it doesn't eat events from root
+    let drop_target = DropTarget::new(gio::File::static_type(), gdk::DragAction::COPY);
+    let drop_revealer_enter = drop_revealer.clone();
+    let drop_revealer_leave = drop_revealer.clone();
+    drop_target.connect_enter(move |_, _x, _y| {
+        drop_revealer_enter.set_reveal_child(true);
+        gdk::DragAction::COPY
+    });
+    drop_target.connect_leave(move |_| {
+        drop_revealer_leave.set_reveal_child(false);
+    });
+    let root_ref = root.clone();
+    let window_ref = window.clone();
+    let state_ref = state.clone();
+    drop_target.connect_drop(move |_, value, _x, _y| {
+        drop_revealer.set_reveal_child(false);
+        let Ok(file) = value.get::<gio::File>() else {
+            return false;
+        };
+        let Some(path) = file.path() else {
+            return false;
+        };
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if ![
+            "mp4", "webm", "mkv", "avi", "mov", "flv", "wmv", "mpg", "mpeg",
+        ]
+        .contains(&ext.as_str())
+        {
+            return false;
+        }
+        let Ok(new_metadata) = ffmpeg::probe_metadata(&path) else {
+            return false;
+        };
+        let new_thumbnails = ffmpeg::generate_thumbnails(&new_metadata).unwrap_or_default();
+        // Update shared state
+        {
+            let mut s = state_ref.lock().unwrap();
+            s.metadata = new_metadata;
+            s.trim_start_seconds = 0.0;
+            s.trim_end_seconds = s.metadata.duration_seconds;
+            s.playhead_seconds = 0.0;
+            s.dimension_preset = DimensionPreset::Original;
+            s.custom_width = s.metadata.width;
+            s.custom_height = s.metadata.height;
+            s.quality = 70;
+            s.audio_mode = AudioMode::Unchanged;
+        }
+        // Clear and rebuild root contents
+        populate_root(&root_ref, &window_ref, state_ref.clone(), new_thumbnails);
+        true
+    });
+    window.add_controller(drop_target);
+
+    let exporting = Rc::new(Cell::new(false));
+    let exporting_for_close = exporting.clone();
+    window.connect_close_request(move |_| {
+        if exporting_for_close.get() {
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+
+    window.set_child(Some(&overlay));
+    window.present();
+}
+
+fn populate_root(
+    root: &GtkBox,
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    thumbnails: Vec<PathBuf>,
+) {
+    // Remove all existing children
+    while let Some(child) = root.first_child() {
+        root.remove(&child);
+    }
+
     let exporting = Rc::new(Cell::new(false));
     let estimate_label = Label::new(None);
     estimate_label.add_css_class("recording-editor-estimate");
@@ -84,59 +190,56 @@ fn build_window(
             .to_string()
     };
 
-    let top_controls = build_top_controls(&window, &file_stem);
+    let top_controls = build_top_controls(window, &file_stem);
     root.append(&top_controls);
 
-    let preview = build_video_preview(state.clone(), estimate_label.clone(), thumbnails.clone());
+    let preview = build_video_preview(state.clone(), estimate_label.clone(), thumbnails);
     root.append(&preview);
 
-    let bottom_tools =
-        build_bottom_tools(&window, state.clone(), estimate_label, exporting.clone());
+    let bottom_tools = build_bottom_tools(window, state.clone(), estimate_label, exporting.clone());
     root.append(&bottom_tools);
 
-    crate::capture::editor::ui_support::install_window_drag(&top_controls, &window);
-    crate::capture::editor::ui_support::install_edge_resize(&root, &window);
-
-    let exporting_for_close = exporting.clone();
-    window.connect_close_request(move |_| {
-        if exporting_for_close.get() {
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-
-    window.set_child(Some(&root));
-    window.present();
+    crate::capture::editor::ui_support::install_window_drag(&top_controls, window);
 }
 
 fn build_top_controls(window: &ApplicationWindow, file_stem: &str) -> CenterBox {
     let controls = CenterBox::new();
-    controls.add_css_class("editor-toolbar");
     controls.add_css_class("recording-editor-window-controls");
+    controls.set_can_target(true);
+    controls.set_size_request(-1, 30);
 
     let close =
         crate::capture::editor::ui_support::traffic_light_button("traffic-light-red", "Close");
+    close.remove_css_class("recent-captures-wm-btn");
+    close.remove_css_class("recent-captures-wm-close");
+    close.add_css_class("recording-editor-traffic-btn");
     let minimize = crate::capture::editor::ui_support::traffic_light_button(
         "traffic-light-yellow",
         "Minimize",
     );
+    minimize.remove_css_class("recent-captures-wm-btn");
+    minimize.add_css_class("recording-editor-traffic-btn");
     let zoom =
         crate::capture::editor::ui_support::traffic_light_button("traffic-light-green", "Zoom");
+    zoom.remove_css_class("recent-captures-wm-btn");
+    zoom.add_css_class("recording-editor-traffic-btn");
 
     let traffic_lights = GtkBox::new(Orientation::Horizontal, 6);
-    traffic_lights.add_css_class("editor-traffic-lights");
     traffic_lights.append(&close);
     traffic_lights.append(&minimize);
     traffic_lights.append(&zoom);
 
     let left = GtkBox::new(Orientation::Horizontal, 16);
-    left.add_css_class("editor-toolbar-left");
     left.append(&traffic_lights);
     controls.set_start_widget(Some(&left));
 
     let title = Label::new(Some(file_stem));
     title.add_css_class("recording-editor-title");
+    title.set_can_target(false);
+    title.set_hexpand(false);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title.set_width_request(1);
+    title.set_size_request(-1, 30);
     controls.set_center_widget(Some(&title));
 
     let window_close = window.clone();
@@ -889,13 +992,6 @@ fn build_footer(
     footer.add_css_class("recording-editor-footer");
     footer.set_hexpand(true);
 
-    let cancel = Button::with_label("Cancel");
-    cancel.set_has_frame(false);
-    cancel.add_css_class("editor-tool-button");
-    cancel.add_css_class("recording-editor-secondary-button");
-    let window_for_cancel = window.clone();
-    cancel.connect_clicked(move |_| window_for_cancel.close());
-
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
 
@@ -911,7 +1007,6 @@ fn build_footer(
     spinner.set_visible(false);
 
     let export_controls = vec![
-        cancel.clone().upcast::<gtk4::Widget>(),
         trim_only.clone().upcast::<gtk4::Widget>(),
         convert.clone().upcast::<gtk4::Widget>(),
         controls.dimension_button.clone().upcast::<gtk4::Widget>(),
@@ -943,7 +1038,6 @@ fn build_footer(
         exporting,
     );
 
-    footer.append(&cancel);
     footer.append(&spacer);
     footer.append(&estimate_label);
     footer.append(&spinner);
