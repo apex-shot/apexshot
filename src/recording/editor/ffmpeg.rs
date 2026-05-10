@@ -206,9 +206,8 @@ pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
 
 pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     let output_path = edited_output_path(&state.metadata.path);
-    let kept = kept_segments(state);
+    let kept = state.ordered_kept_segments();
     if kept.len() <= 1 {
-        // Single segment — simple trim
         let (start, end) = kept.first().copied().unwrap_or((
             state.trim_start_seconds,
             state.trim_end_seconds,
@@ -223,7 +222,7 @@ pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
 
 pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     let output_path = edited_output_path(&state.metadata.path);
-    let kept = kept_segments(state);
+    let kept = state.ordered_kept_segments();
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap_or((
             state.trim_start_seconds,
@@ -237,23 +236,13 @@ pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     Ok(output_path)
 }
 
-fn kept_segments(state: &VideoEditState) -> Vec<(f64, f64)> {
-    state
-        .segment_boundaries()
-        .into_iter()
-        .zip(state.segments_kept.iter())
-        .filter(|(_, kept)| **kept)
-        .map(|((start, end), _)| (start, end))
-        .collect()
-}
-
 fn build_single_trim_args(
     state: &VideoEditState,
     start: f64,
     end: f64,
     output_path: &Path,
 ) -> Vec<String> {
-    vec![
+    let mut args = vec![
         "-y".into(),
         "-ss".into(),
         format_seconds(start),
@@ -261,10 +250,23 @@ fn build_single_trim_args(
         format_seconds(end),
         "-i".into(),
         state.metadata.path.to_string_lossy().into_owned(),
-        "-c".into(),
+        "-c:v".into(),
         "copy".into(),
-        output_path.to_string_lossy().into_owned(),
-    ]
+    ];
+    // Apply audio mode (mute/mono work even with video stream copy)
+    match state.audio_mode {
+        AudioMode::Muted => args.push("-an".into()),
+        AudioMode::Mono => {
+            args.extend(["-c:a".into(), "aac".into(), "-ac".into(), "1".into(), "-b:a".into(), "128k".into()]);
+        }
+        AudioMode::Unchanged => {
+            if state.metadata.has_audio {
+                args.extend(["-c:a".into(), "copy".into()]);
+            }
+        }
+    }
+    args.push(output_path.to_string_lossy().into_owned());
+    args
 }
 
 fn build_single_convert_args(
@@ -402,7 +404,7 @@ mod tests {
         let s = state();
         let args = build_single_trim_args(&s, s.trim_start_seconds, s.trim_end_seconds, Path::new("/tmp/output.mp4"));
 
-        assert!(args.windows(2).any(|pair| pair == ["-c", "copy"]));
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "copy"]));
         assert!(args.windows(2).any(|pair| pair == ["-ss", "1.250"]));
         assert!(args.windows(2).any(|pair| pair == ["-to", "8.500"]));
         assert_eq!(args.last().map(String::as_str), Some("/tmp/output.mp4"));

@@ -480,12 +480,18 @@ const SETTINGS_CSS: &str = r#"
                 color: alpha(white, 0.42);
             }
 
-            .editor-root .settings-select popover,
+            .editor-root .settings-select popover {
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
             .editor-root .settings-select popover contents {
                 background-color: #141414;
                 color: #F1F1F3;
                 border: 1px solid alpha(white, 0.12);
                 border-radius: 8px;
+                box-shadow: none;
             }
 
             .editor-root .settings-select popover list,
@@ -607,11 +613,18 @@ const SETTINGS_CSS: &str = r#"
                 color: alpha(#17202a, 0.35);
             }
 
-            .editor-root.editor-theme-light .settings-select popover,
+            .editor-root.editor-theme-light .settings-select popover {
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
             .editor-root.editor-theme-light .settings-select popover contents {
                 background-color: #f6f7fb;
                 color: #17202a;
-                border-color: alpha(#111827, 0.12);
+                border: 1px solid alpha(#111827, 0.12);
+                border-radius: 8px;
+                box-shadow: none;
             }
 
             .editor-root.editor-theme-light .settings-select popover list,

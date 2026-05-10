@@ -40,8 +40,8 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
     body.set_wrap(true);
     body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
 
-    let button_row = GtkBox::new(Orientation::Horizontal, 8);
-    button_row.set_halign(Align::End);
+    let button_row = GtkBox::new(Orientation::Horizontal, 0);
+    button_row.set_hexpand(true);
     button_row.set_margin_top(8);
 
     let open_folder = Button::with_label("Open Folder");
@@ -66,7 +66,11 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
         dialog_open.close();
     });
 
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+
     button_row.append(&open_folder);
+    button_row.append(&spacer);
     button_row.append(&close);
 
     root.append(&title);
@@ -117,7 +121,7 @@ pub(super) fn show_error(
     body.set_wrap(true);
     body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
 
-    let button_row = GtkBox::new(Orientation::Horizontal, 8);
+    let button_row = GtkBox::new(Orientation::Horizontal, 12);
     button_row.set_halign(Align::End);
     button_row.set_margin_top(8);
 

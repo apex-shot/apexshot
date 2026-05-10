@@ -3,6 +3,8 @@ use crate::recording::editor::model::{AudioMode, DimensionPreset, VideoEditState
 use gtk4::{
     prelude::*, Box as GtkBox, Button, Entry, Label, MenuButton, Orientation, Popover, Scale,
 };
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -155,13 +157,8 @@ pub(super) fn build_panels(
     for button in [&audio_unchanged, &audio_mono, &audio_muted] {
         button.add_css_class("recording-editor-audio-choice");
     }
-    audio_mono.set_group(Some(&audio_unchanged));
-    audio_muted.set_group(Some(&audio_unchanged));
+    // No set_group — keeps square checkbox look; mutual exclusion handled in wire_controls
     audio_unchanged.set_active(true);
-    if !state.lock().unwrap().metadata.has_audio {
-        audio_mono.set_sensitive(false);
-        audio_muted.set_sensitive(false);
-    }
     audio_body.append(&audio_unchanged);
     audio_body.append(&audio_mono);
     audio_body.append(&audio_muted);
@@ -239,17 +236,39 @@ fn wire_controls(
         }
     });
 
-    for (button, mode) in [
+    // Manual mutual exclusion for audio checkboxes (square checkbox style)
+    let audio_buttons = [
         (controls.audio_unchanged.clone(), AudioMode::Unchanged),
         (controls.audio_mono.clone(), AudioMode::Mono),
         (controls.audio_muted.clone(), AudioMode::Muted),
-    ] {
+    ];
+    let updating_audio = Rc::new(Cell::new(false));
+    for (button, mode) in &audio_buttons {
         let state = state.clone();
         let estimate_label = estimate_label.clone();
-        button.connect_toggled(move |button| {
-            if button.is_active() {
+        let all_buttons: Vec<gtk4::CheckButton> = audio_buttons.iter().map(|(b, _)| b.clone()).collect();
+        let mode = *mode;
+        let button_clone = button.clone();
+        let updating = updating_audio.clone();
+        button.connect_toggled(move |btn| {
+            if updating.get() {
+                return;
+            }
+            if btn.is_active() {
+                updating.set(true);
+                for other in &all_buttons {
+                    if other != &button_clone {
+                        other.set_active(false);
+                    }
+                }
+                updating.set(false);
                 state.lock().unwrap().audio_mode = mode;
                 footer::update_estimate(&estimate_label, &state, false);
+            } else {
+                // Prevent unchecking the active one — force it back on
+                updating.set(true);
+                btn.set_active(true);
+                updating.set(false);
             }
         });
     }

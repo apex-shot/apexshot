@@ -57,6 +57,9 @@ pub struct VideoEditState {
     /// Whether each segment is kept (true) or removed (false).
     /// Length is always cuts.len() + 1.
     pub segments_kept: Vec<bool>,
+    /// Output order of segments (indices into segment_boundaries()).
+    /// Length is always cuts.len() + 1.
+    pub segment_order: Vec<usize>,
 }
 
 impl VideoEditState {
@@ -73,6 +76,7 @@ impl VideoEditState {
             audio_mode: AudioMode::Unchanged,
             cuts: Vec::new(),
             segments_kept: vec![true],
+            segment_order: vec![0],
         }
     }
 
@@ -102,12 +106,9 @@ impl VideoEditState {
 
     /// Duration of only the kept segments.
     pub fn kept_duration(&self) -> f64 {
-        let boundaries = self.segment_boundaries();
-        boundaries
+        self.ordered_kept_segments()
             .iter()
-            .zip(self.segments_kept.iter())
-            .filter(|(_, kept)| **kept)
-            .map(|((start, end), _)| (end - start).max(0.0))
+            .map(|(start, end)| (end - start).max(0.0))
             .sum()
     }
 
@@ -123,7 +124,7 @@ impl VideoEditState {
         boundaries
     }
 
-    /// Add a cut at the given time. Returns the segment index it split.
+    /// Add a cut at the given time.
     pub fn add_cut(&mut self, seconds: f64) {
         if seconds <= self.trim_start_seconds + 0.1 || seconds >= self.trim_end_seconds - 0.1 {
             return;
@@ -137,6 +138,16 @@ impl VideoEditState {
         // The segment at insert_pos gets split — new segment inherits kept state
         let was_kept = self.segments_kept.get(insert_pos).copied().unwrap_or(true);
         self.segments_kept.insert(insert_pos + 1, was_kept);
+        // Update segment_order: shift indices >= insert_pos+1, insert new segment after original
+        for idx in self.segment_order.iter_mut() {
+            if *idx > insert_pos {
+                *idx += 1;
+            }
+        }
+        // Find where insert_pos is in segment_order and insert insert_pos+1 right after
+        let order_pos = self.segment_order.iter().position(|&i| i == insert_pos)
+            .unwrap_or(self.segment_order.len());
+        self.segment_order.insert(order_pos + 1, insert_pos + 1);
     }
 
     /// Remove a cut point by index.
@@ -146,19 +157,20 @@ impl VideoEditState {
         }
         self.cuts.remove(cut_index);
         // Merge the two segments — keep if either was kept
-        let kept = self
-            .segments_kept
-            .get(cut_index)
-            .copied()
-            .unwrap_or(true)
-            || self
-                .segments_kept
-                .get(cut_index + 1)
-                .copied()
-                .unwrap_or(true);
-        self.segments_kept.remove(cut_index + 1);
-        if let Some(seg) = self.segments_kept.get_mut(cut_index) {
+        let merged_seg = cut_index; // segment that remains
+        let removed_seg = cut_index + 1; // segment that's absorbed
+        let kept = self.segments_kept.get(merged_seg).copied().unwrap_or(true)
+            || self.segments_kept.get(removed_seg).copied().unwrap_or(true);
+        self.segments_kept.remove(removed_seg);
+        if let Some(seg) = self.segments_kept.get_mut(merged_seg) {
             *seg = kept;
+        }
+        // Update segment_order: remove the absorbed segment, fix indices
+        self.segment_order.retain(|&i| i != removed_seg);
+        for idx in self.segment_order.iter_mut() {
+            if *idx > removed_seg {
+                *idx -= 1;
+            }
         }
     }
 
@@ -195,6 +207,34 @@ impl VideoEditState {
     pub fn clear_cuts(&mut self) {
         self.cuts.clear();
         self.segments_kept = vec![true];
+        self.segment_order = vec![0];
+    }
+
+    /// Move a segment from one position in the output order to another.
+    pub fn move_segment(&mut self, from_order_pos: usize, to_order_pos: usize) {
+        if from_order_pos >= self.segment_order.len()
+            || to_order_pos >= self.segment_order.len()
+            || from_order_pos == to_order_pos
+        {
+            return;
+        }
+        let seg = self.segment_order.remove(from_order_pos);
+        self.segment_order.insert(to_order_pos, seg);
+    }
+
+    /// Returns kept segments in the user-defined output order (for export).
+    pub fn ordered_kept_segments(&self) -> Vec<(f64, f64)> {
+        let boundaries = self.segment_boundaries();
+        self.segment_order
+            .iter()
+            .filter(|&&i| self.segments_kept.get(i).copied().unwrap_or(true))
+            .filter_map(|&i| boundaries.get(i).copied())
+            .collect()
+    }
+
+    /// Returns whether segments have been reordered from their default.
+    pub fn is_reordered(&self) -> bool {
+        self.segment_order.iter().enumerate().any(|(pos, &seg)| pos != seg)
     }
 
     pub fn target_dimensions(&self) -> (u32, u32) {

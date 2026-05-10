@@ -214,7 +214,6 @@ fn build_bottom_tools(
     exporting: Rc<Cell<bool>>,
 ) -> GtkBox {
     let root = GtkBox::new(Orientation::Vertical, 0);
-    root.add_css_class("editor-footer");
     root.add_css_class("recording-editor-bottom-tools");
 
     let (panels_widget, controls) = panels::build_panels(state.clone(), estimate_label.clone());

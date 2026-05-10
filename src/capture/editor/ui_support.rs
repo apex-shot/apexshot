@@ -2530,23 +2530,29 @@ pub fn install_edge_resize(root: &impl IsA<gtk4::Widget>, window: &gtk4::Applica
     let window_resize = window.downgrade();
     resize_click.connect_pressed(move |gesture, _, x, y| {
         let Some(window) = window_resize.upgrade() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let Some(event) = gesture.current_event() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let Some(device) = event.device() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let width = window.allocated_width() as f64;
         let height = window.allocated_height() as f64;
         let Some(edge) = edge_for_resize(x, y, width, height) else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let Some(surface) = window.surface() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let Ok(toplevel) = surface.downcast::<gdk::Toplevel>() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         toplevel.begin_resize(

@@ -88,16 +88,30 @@ pub fn install_recording_editor_css() {
             .recording-editor-root checkbutton check {
                 min-width: 16px;
                 min-height: 16px;
-                border-radius: 999px;
-                background: alpha(white, 0.06);
+                background-image: none;
+                background-color: alpha(white, 0.06);
                 border: 1px solid alpha(white, 0.16);
+                color: #ffffff;
                 box-shadow: none;
             }
 
-            .recording-editor-root checkbutton:checked check {
-                background: #b05c38;
+            .recording-editor-root checkbutton check:hover {
+                border-color: alpha(white, 0.28);
+                background-color: alpha(white, 0.10);
+            }
+
+            .recording-editor-root checkbutton:checked check,
+            .recording-editor-root checkbutton check:checked,
+            .recording-editor-root checkbutton.recording-editor-audio-choice check:checked {
+                background-color: #b05c38;
                 border-color: #b05c38;
-                color: white;
+                color: #ffffff;
+            }
+
+            .recording-editor-root checkbutton:disabled check {
+                background-color: alpha(white, 0.03);
+                border-color: alpha(white, 0.10);
+                color: alpha(white, 0.35);
             }
 
             .recording-editor-root checkbutton label {
@@ -236,7 +250,8 @@ pub fn install_recording_editor_css() {
             /* ── Bottom tools ── */
             .recording-editor-bottom-tools {
                 padding: 0;
-                background-color: #1a1a1a;
+                margin: 0;
+                background-color: #141414;
                 border-top: 1px solid alpha(white, 0.06);
                 border-radius: 0 0 10px 10px;
             }
@@ -334,9 +349,9 @@ pub fn install_recording_editor_css() {
 
             /* ── Panels ── */
             .recording-editor-panels {
-                padding: 10px 14px;
-                background: #1a1a1a;
-                border-top: 1px solid alpha(white, 0.04);
+                padding: 10px 14px 6px 14px;
+                background: transparent;
+                border: none;
             }
 
             .recording-editor-panel {
@@ -431,9 +446,10 @@ pub fn install_recording_editor_css() {
 
             /* ── Footer ── */
             .recording-editor-footer {
-                padding: 8px 14px 10px 14px;
-                background: #1a1a1a;
-                border-radius: 0 0 10px 10px;
+                padding: 6px 14px 8px 14px;
+                background: transparent;
+                border: none;
+                border-radius: 0;
             }
 
             .recording-editor-estimate {
