@@ -188,46 +188,6 @@ fn thumbnail_count(duration_seconds: f64) -> usize {
     }
 }
 
-pub fn build_trim_only_args(state: &VideoEditState, output_path: &Path) -> Vec<String> {
-    vec![
-        "-y".into(),
-        "-ss".into(),
-        format_seconds(state.trim_start_seconds),
-        "-to".into(),
-        format_seconds(state.trim_end_seconds),
-        "-i".into(),
-        state.metadata.path.to_string_lossy().into_owned(),
-        "-c".into(),
-        "copy".into(),
-        output_path.to_string_lossy().into_owned(),
-    ]
-}
-
-pub fn build_convert_args(state: &VideoEditState, output_path: &Path) -> Vec<String> {
-    let (width, height) = state.target_dimensions();
-    let mut args = vec![
-        "-y".into(),
-        "-ss".into(),
-        format_seconds(state.trim_start_seconds),
-        "-to".into(),
-        format_seconds(state.trim_end_seconds),
-        "-i".into(),
-        state.metadata.path.to_string_lossy().into_owned(),
-        "-vf".into(),
-        format!("scale={width}:{height}"),
-        "-c:v".into(),
-        "libx264".into(),
-        "-preset".into(),
-        "veryfast".into(),
-        "-crf".into(),
-        quality_to_crf(state.quality).to_string(),
-    ];
-
-    args.extend(audio_args(state.audio_mode, state.metadata.has_audio));
-    args.push(output_path.to_string_lossy().into_owned());
-    args
-}
-
 pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
     match mode {
         AudioMode::Unchanged if has_audio => vec!["-c:a".into(), "copy".into()],
@@ -246,14 +206,144 @@ pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
 
 pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     let output_path = edited_output_path(&state.metadata.path);
-    run_ffmpeg(build_trim_only_args(state, &output_path), &output_path)?;
+    let kept = kept_segments(state);
+    if kept.len() <= 1 {
+        // Single segment — simple trim
+        let (start, end) = kept.first().copied().unwrap_or((
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+        ));
+        let args = build_single_trim_args(state, start, end, &output_path);
+        run_ffmpeg(args, &output_path)?;
+    } else {
+        run_multi_segment_trim(state, &kept, &output_path, false)?;
+    }
     Ok(output_path)
 }
 
 pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     let output_path = edited_output_path(&state.metadata.path);
-    run_ffmpeg(build_convert_args(state, &output_path), &output_path)?;
+    let kept = kept_segments(state);
+    if kept.len() <= 1 {
+        let (start, end) = kept.first().copied().unwrap_or((
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+        ));
+        let args = build_single_convert_args(state, start, end, &output_path);
+        run_ffmpeg(args, &output_path)?;
+    } else {
+        run_multi_segment_trim(state, &kept, &output_path, true)?;
+    }
     Ok(output_path)
+}
+
+fn kept_segments(state: &VideoEditState) -> Vec<(f64, f64)> {
+    state
+        .segment_boundaries()
+        .into_iter()
+        .zip(state.segments_kept.iter())
+        .filter(|(_, kept)| **kept)
+        .map(|((start, end), _)| (start, end))
+        .collect()
+}
+
+fn build_single_trim_args(
+    state: &VideoEditState,
+    start: f64,
+    end: f64,
+    output_path: &Path,
+) -> Vec<String> {
+    vec![
+        "-y".into(),
+        "-ss".into(),
+        format_seconds(start),
+        "-to".into(),
+        format_seconds(end),
+        "-i".into(),
+        state.metadata.path.to_string_lossy().into_owned(),
+        "-c".into(),
+        "copy".into(),
+        output_path.to_string_lossy().into_owned(),
+    ]
+}
+
+fn build_single_convert_args(
+    state: &VideoEditState,
+    start: f64,
+    end: f64,
+    output_path: &Path,
+) -> Vec<String> {
+    let (width, height) = state.target_dimensions();
+    let mut args = vec![
+        "-y".into(),
+        "-ss".into(),
+        format_seconds(start),
+        "-to".into(),
+        format_seconds(end),
+        "-i".into(),
+        state.metadata.path.to_string_lossy().into_owned(),
+        "-vf".into(),
+        format!("scale={width}:{height}"),
+        "-c:v".into(),
+        "libx264".into(),
+        "-preset".into(),
+        "veryfast".into(),
+        "-crf".into(),
+        quality_to_crf(state.quality).to_string(),
+    ];
+    args.extend(audio_args(state.audio_mode, state.metadata.has_audio));
+    args.push(output_path.to_string_lossy().into_owned());
+    args
+}
+
+fn run_multi_segment_trim(
+    state: &VideoEditState,
+    segments: &[(f64, f64)],
+    output_path: &Path,
+    convert: bool,
+) -> anyhow::Result<()> {
+    let tmp_dir = std::env::temp_dir().join(format!("apexshot-segments-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp_dir)?;
+
+    let mut segment_files = Vec::new();
+    for (i, &(start, end)) in segments.iter().enumerate() {
+        let seg_path = tmp_dir.join(format!("seg_{i:04}.mp4"));
+        let args = if convert {
+            build_single_convert_args(state, start, end, &seg_path)
+        } else {
+            build_single_trim_args(state, start, end, &seg_path)
+        };
+        run_ffmpeg(args, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
+        segment_files.push(seg_path);
+    }
+
+    // Build concat list
+    let list_path = tmp_dir.join("concat.txt");
+    let list_content = segment_files
+        .iter()
+        .map(|p| format!("file '{}'", p.display()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&list_path, &list_content)?;
+
+    // Concat
+    let concat_args = vec![
+        "-y".into(),
+        "-f".into(),
+        "concat".into(),
+        "-safe".into(),
+        "0".into(),
+        "-i".into(),
+        list_path.to_string_lossy().into_owned(),
+        "-c".into(),
+        "copy".into(),
+        output_path.to_string_lossy().into_owned(),
+    ];
+    run_ffmpeg(concat_args, output_path)?;
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    Ok(())
 }
 
 fn run_ffmpeg(args: Vec<String>, output_path: &Path) -> anyhow::Result<()> {
@@ -309,7 +399,8 @@ mod tests {
 
     #[test]
     fn trim_only_command_uses_stream_copy() {
-        let args = build_trim_only_args(&state(), Path::new("/tmp/output.mp4"));
+        let s = state();
+        let args = build_single_trim_args(&s, s.trim_start_seconds, s.trim_end_seconds, Path::new("/tmp/output.mp4"));
 
         assert!(args.windows(2).any(|pair| pair == ["-c", "copy"]));
         assert!(args.windows(2).any(|pair| pair == ["-ss", "1.250"]));
@@ -322,7 +413,7 @@ mod tests {
         let mut state = state();
         state.quality = 70;
         state.audio_mode = AudioMode::Muted;
-        let args = build_convert_args(&state, Path::new("/tmp/output.mp4"));
+        let args = build_single_convert_args(&state, state.trim_start_seconds, state.trim_end_seconds, Path::new("/tmp/output.mp4"));
 
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
         assert!(args.windows(2).any(|pair| pair == ["-crf", "22"]));

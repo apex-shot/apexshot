@@ -52,6 +52,11 @@ pub struct VideoEditState {
     pub custom_height: u32,
     pub quality: u8,
     pub audio_mode: AudioMode,
+    /// Sorted list of cut points (seconds) within the trim range.
+    pub cuts: Vec<f64>,
+    /// Whether each segment is kept (true) or removed (false).
+    /// Length is always cuts.len() + 1.
+    pub segments_kept: Vec<bool>,
 }
 
 impl VideoEditState {
@@ -66,6 +71,8 @@ impl VideoEditState {
             dimension_preset: DimensionPreset::Original,
             quality: 70,
             audio_mode: AudioMode::Unchanged,
+            cuts: Vec::new(),
+            segments_kept: vec![true],
         }
     }
 
@@ -91,6 +98,103 @@ impl VideoEditState {
 
     pub fn trim_duration(&self) -> f64 {
         (self.trim_end_seconds - self.trim_start_seconds).max(0.0)
+    }
+
+    /// Duration of only the kept segments.
+    pub fn kept_duration(&self) -> f64 {
+        let boundaries = self.segment_boundaries();
+        boundaries
+            .iter()
+            .zip(self.segments_kept.iter())
+            .filter(|(_, kept)| **kept)
+            .map(|((start, end), _)| (end - start).max(0.0))
+            .sum()
+    }
+
+    /// Returns (start, end) pairs for each segment.
+    pub fn segment_boundaries(&self) -> Vec<(f64, f64)> {
+        let mut boundaries = Vec::with_capacity(self.cuts.len() + 1);
+        let mut prev = self.trim_start_seconds;
+        for &cut in &self.cuts {
+            boundaries.push((prev, cut));
+            prev = cut;
+        }
+        boundaries.push((prev, self.trim_end_seconds));
+        boundaries
+    }
+
+    /// Add a cut at the given time. Returns the segment index it split.
+    pub fn add_cut(&mut self, seconds: f64) {
+        if seconds <= self.trim_start_seconds + 0.1 || seconds >= self.trim_end_seconds - 0.1 {
+            return;
+        }
+        // Don't add duplicate cuts (within 0.1s of existing)
+        if self.cuts.iter().any(|&c| (c - seconds).abs() < 0.1) {
+            return;
+        }
+        let insert_pos = self.cuts.partition_point(|&c| c < seconds);
+        self.cuts.insert(insert_pos, seconds);
+        // The segment at insert_pos gets split — new segment inherits kept state
+        let was_kept = self.segments_kept.get(insert_pos).copied().unwrap_or(true);
+        self.segments_kept.insert(insert_pos + 1, was_kept);
+    }
+
+    /// Remove a cut point by index.
+    pub fn remove_cut(&mut self, cut_index: usize) {
+        if cut_index >= self.cuts.len() {
+            return;
+        }
+        self.cuts.remove(cut_index);
+        // Merge the two segments — keep if either was kept
+        let kept = self
+            .segments_kept
+            .get(cut_index)
+            .copied()
+            .unwrap_or(true)
+            || self
+                .segments_kept
+                .get(cut_index + 1)
+                .copied()
+                .unwrap_or(true);
+        self.segments_kept.remove(cut_index + 1);
+        if let Some(seg) = self.segments_kept.get_mut(cut_index) {
+            *seg = kept;
+        }
+    }
+
+    /// Move a cut point without crossing its neighboring cuts.
+    pub fn move_cut(&mut self, cut_index: usize, seconds: f64) {
+        if cut_index >= self.cuts.len() {
+            return;
+        }
+
+        let min = if cut_index == 0 {
+            self.trim_start_seconds + 0.1
+        } else {
+            self.cuts[cut_index - 1] + 0.1
+        };
+        let max = if cut_index + 1 >= self.cuts.len() {
+            self.trim_end_seconds - 0.1
+        } else {
+            self.cuts[cut_index + 1] - 0.1
+        };
+
+        if min <= max {
+            self.cuts[cut_index] = seconds.clamp(min, max);
+        }
+    }
+
+    /// Toggle keep/remove for a segment.
+    pub fn toggle_segment(&mut self, segment_index: usize) {
+        if let Some(kept) = self.segments_kept.get_mut(segment_index) {
+            *kept = !*kept;
+        }
+    }
+
+    /// Clear all cuts.
+    pub fn clear_cuts(&mut self) {
+        self.cuts.clear();
+        self.segments_kept = vec![true];
     }
 
     pub fn target_dimensions(&self) -> (u32, u32) {
@@ -133,7 +237,7 @@ pub fn estimate_size_bytes(state: &VideoEditState, trim_only: bool) -> u64 {
         return 0;
     }
 
-    let selected_duration_ratio = (state.trim_duration() / duration).clamp(0.0, 1.0);
+    let selected_duration_ratio = (state.kept_duration() / duration).clamp(0.0, 1.0);
     let base_size = state.metadata.file_size_bytes as f64 * selected_duration_ratio;
 
     if trim_only {
@@ -248,6 +352,24 @@ mod tests {
         assert_eq!(state.trim_start_seconds, 9.75);
         state.set_trim_end(9.8);
         assert_eq!(state.trim_end_seconds, 10.0);
+    }
+
+    #[test]
+    fn move_cut_keeps_cut_between_neighbors() {
+        let mut state = VideoEditState::new(metadata());
+        state.add_cut(3.0);
+        state.add_cut(7.0);
+
+        state.move_cut(0, 6.0);
+        assert_eq!(state.cuts, vec![6.0, 7.0]);
+
+        state.move_cut(0, 8.0);
+        assert!((state.cuts[0] - 6.9).abs() < f64::EPSILON);
+        assert_eq!(state.cuts[1], 7.0);
+
+        state.move_cut(1, 0.0);
+        assert!((state.cuts[0] - 6.9).abs() < f64::EPSILON);
+        assert_eq!(state.cuts[1], 7.0);
     }
 
     #[test]

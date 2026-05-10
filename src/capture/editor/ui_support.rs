@@ -1161,11 +1161,10 @@ pub fn install_editor_css() {
                 border-radius: 4px;
                 padding: 2px 6px;
                 min-width: 20px;
-                text-align: center;
             }
 
             .editor-footer-zoom-separator {
-                height: 1px;
+                min-height: 1px;
                 background: rgba(255, 255, 255, 0.05);
                 margin: 4px 12px;
             }
@@ -1237,8 +1236,6 @@ pub fn install_editor_css() {
 
             .editor-right-inspector {
                 min-width: 210px;
-                width: 210px;
-                max-width: 210px;
                 background: rgba(20, 20, 20, 0.94);
                 border-left: 1px solid rgba(255,255,255,0.08);
                 padding: 0;
@@ -1298,7 +1295,6 @@ pub fn install_editor_css() {
                 background: #000000;
                 border: 1px solid rgba(255, 255, 255, 0.11);
                 border-radius: 6px;
-                overflow: hidden;
             }
 
             .editor-inspector-option-list {
@@ -1500,10 +1496,6 @@ pub fn install_editor_css() {
                 color: #ff9900;
                 font-size: 13px;
                 font-weight: 700;
-            }
-
-            .editor-number-start-row {
-                spacing: 8px;
             }
 
             .editor-number-start-label {
@@ -2671,13 +2663,23 @@ mod tests {
     }
 
     #[test]
-    fn editor_css_avoids_web_only_alignment_properties() {
+    fn editor_css_avoids_unsupported_gtk_properties() {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
-        assert!(
-            !production_source.contains("align-items:"),
-            "editor CSS still contains unsupported GTK property align-items"
-        );
+        for property in [
+            "align-items:",
+            "text-align:",
+            "\n                height:",
+            "\n                width:",
+            "max-width:",
+            "overflow:",
+            "\n                spacing:",
+        ] {
+            assert!(
+                !production_source.contains(property),
+                "editor CSS still contains unsupported GTK property {property}"
+            );
+        }
     }
 
     #[test]
@@ -2732,7 +2734,7 @@ mod tests {
             production_source.contains("button.editor-inspector-tab-button {\n                min-height: 20px;\n                padding: 0;\n                border-radius: 0;\n                border: none;\n                background: transparent;")
                 && production_source.contains("button.editor-inspector-tab-button.active-inspector-tab {\n                background: transparent;\n                border: none;\n                color: #ff9900;")
                 && production_source.contains(".editor-inspector-tabs {\n                margin-top: 16px;\n                margin-bottom: 12px;")
-                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && production_source.contains(".editor-inspector-placeholder-shell {\n                min-width: 210px;")
                 && production_source.contains(".editor-background-sidebar {\n                min-width: 210px;")
                 && production_source.contains(".editor-colors-panel {\n                min-width: 210px;")
@@ -2760,7 +2762,7 @@ mod tests {
         assert!(
             production_source.contains("button.editor-text-inspector-option.editor-text-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
                 && production_source.contains(".editor-text-inspector-check {\n                color: #ff9900;")
-                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("TEXT_SIDEBAR_WIDTH"),
             "Text inspector rows should mirror Arrow selection styling without introducing a new sidepanel width path",
         );
@@ -2773,7 +2775,7 @@ mod tests {
         assert!(
             production_source.contains("button.editor-obfuscate-inspector-option.editor-obfuscate-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
                 && production_source.contains(".editor-obfuscate-inspector-check {\n                color: #ff9900;")
-                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("OBFUSCATE_SIDEBAR_WIDTH"),
             "Obfuscate inspector rows should use the shared sidepanel language without introducing a new width path",
         );
@@ -2787,7 +2789,7 @@ mod tests {
             production_source.contains("button.editor-number-style-option.editor-number-style-option-active {\n                background: rgba(255, 255, 255, 0.08);")
                 && production_source.contains("button.editor-number-size-option.editor-number-size-option-active {\n                background: rgba(255, 255, 255, 0.08);")
                 && production_source.contains(".editor-number-style-check,\n            .editor-number-size-check {\n                color: #ff9900;")
-                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("NUMBER_SIDEBAR_WIDTH"),
             "Number inspector rows should match the migrated sidepanel surface language without introducing a new width path",
         );
@@ -2798,8 +2800,7 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains(".editor-number-start-row {\n                spacing: 8px;")
-                && production_source.contains(".editor-number-start-label {\n                color: rgba(241, 241, 243, 0.9);")
+            production_source.contains(".editor-number-start-label {\n                color: rgba(241, 241, 243, 0.9);")
                 && production_source.contains(".editor-number-start-entry {\n                min-height: 34px;")
                 && production_source.contains("button.editor-number-start-stepper {\n                min-width: 30px;"),
             "Number inspector start controls should be styled as inspector-native sidebar fields",

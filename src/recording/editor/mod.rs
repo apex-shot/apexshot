@@ -1,7 +1,7 @@
-pub mod css;
+pub mod ui_support;
 pub mod ffmpeg;
 pub mod model;
-mod ui;
+mod window;
 
 use std::path::PathBuf;
 
@@ -22,5 +22,5 @@ pub fn open_recording_editor(path: PathBuf) -> anyhow::Result<()> {
 
     ffmpeg::ensure_tools_available()?;
     let metadata = ffmpeg::probe_metadata(&path)?;
-    ui::open(metadata)
+    window::open(metadata)
 }

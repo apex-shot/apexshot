@@ -23,6 +23,40 @@ const SETTINGS_CSS: &str = r#"
                 border-radius: 10px 10px 0 0;
             }
 
+            /* ── Scrollbar ── */
+            .editor-root scrollbar slider {
+                background-color: alpha(white, 0.18);
+                border-radius: 999px;
+                min-width: 4px;
+                min-height: 4px;
+                border: none;
+            }
+
+            .editor-root scrollbar slider:hover {
+                background-color: alpha(white, 0.28);
+            }
+
+            .editor-root scrollbar slider:active {
+                background-color: alpha(white, 0.35);
+            }
+
+            .editor-root scrollbar trough {
+                background: transparent;
+                border: none;
+            }
+
+            .editor-root.editor-theme-light scrollbar slider {
+                background-color: alpha(#111827, 0.18);
+            }
+
+            .editor-root.editor-theme-light scrollbar slider:hover {
+                background-color: alpha(#111827, 0.30);
+            }
+
+            .editor-root.editor-theme-light scrollbar slider:active {
+                background-color: alpha(#111827, 0.40);
+            }
+
             .settings-window-controls {
                 min-height: 0;
                 padding: 0;
@@ -82,6 +116,29 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root.editor-theme-light .editor-toolbar {
                 background-color: #f6f7fb;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls {
+                background: #f0f1f5;
+                border-bottom: 1px solid alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
+                color: alpha(#111827, 0.55);
+                background-color: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus {
+                background-color: alpha(#111827, 0.08);
+                color: #1d2129;
+                border: none;
+                border-radius: 999px;
+                box-shadow: none;
             }
 
             .editor-root.editor-reduced-transparency {
@@ -446,26 +503,29 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .editor-root scale trough {
+                min-height: 4px;
                 background-color: alpha(white, 0.08);
-                border: 1px solid alpha(white, 0.14);
+                border: none;
                 border-radius: 999px;
             }
 
             .editor-root scale highlight {
+                min-height: 4px;
                 background-color: #b05c38;
                 border-radius: 999px;
             }
 
             .editor-root scale slider {
+                min-width: 14px;
+                min-height: 14px;
                 background: #F1F1F3;
-                border: 1px solid alpha(white, 0.30);
+                border: none;
                 border-radius: 999px;
-                box-shadow: 0 1px 3px alpha(black, 0.3);
+                box-shadow: none;
             }
 
             .editor-root scale:disabled trough {
                 background-color: alpha(white, 0.04);
-                border-color: alpha(white, 0.08);
             }
 
             .editor-root scale:disabled highlight {
@@ -474,7 +534,6 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root scale:disabled slider {
                 background: alpha(#F1F1F3, 0.42);
-                border-color: alpha(white, 0.10);
             }
 
             .editor-root button {
@@ -578,26 +637,29 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .editor-root.editor-theme-light scale trough {
+                min-height: 4px;
                 background-color: alpha(#111827, 0.08);
-                border: 1px solid alpha(#111827, 0.14);
+                border: none;
                 border-radius: 999px;
             }
 
             .editor-root.editor-theme-light scale highlight {
+                min-height: 4px;
                 background-color: #b05c38;
                 border-radius: 999px;
             }
 
             .editor-root.editor-theme-light scale slider {
+                min-width: 14px;
+                min-height: 14px;
                 background: #ffffff;
-                border: 1px solid alpha(#111827, 0.18);
+                border: none;
                 border-radius: 999px;
-                box-shadow: 0 1px 3px alpha(black, 0.15);
+                box-shadow: none;
             }
 
             .editor-root.editor-theme-light scale:disabled trough {
                 background-color: alpha(#111827, 0.04);
-                border-color: alpha(#111827, 0.08);
             }
 
             .editor-root.editor-theme-light scale:disabled highlight {
@@ -606,7 +668,6 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root.editor-theme-light scale:disabled slider {
                 background: alpha(#ffffff, 0.62);
-                border-color: alpha(#111827, 0.10);
             }
 
             .editor-root.editor-theme-light button {
@@ -1041,10 +1102,33 @@ const SETTINGS_CSS: &str = r#"
                 color: #9a4c2c;
             }
 
-            /* Onboarding back button - same size as primary button with secondary styling */
+            /* Onboarding */
             .onboarding-back-button {
-                padding: 6px 20px;
-                min-height: 28px;
+                padding: 4px 14px;
+                min-height: 24px;
+                font-size: 12px;
+            }
+
+            .onboarding-dot {
+                min-width: 6px;
+                min-height: 6px;
+                border-radius: 999px;
+                background-color: alpha(white, 0.18);
+                padding: 0;
+                margin: 0 2px;
+            }
+
+            .onboarding-dot-active {
+                background-color: #b05c38;
+                min-width: 18px;
+            }
+
+            .editor-root.editor-theme-light .onboarding-dot {
+                background-color: alpha(#111827, 0.14);
+            }
+
+            .editor-root.editor-theme-light .onboarding-dot-active {
+                background-color: #b05c38;
             }
 
             .cloud-avatar {
@@ -1344,8 +1428,7 @@ const SETTINGS_CSS: &str = r#"
                 color: white;
             }
 
-            .editor-root .settings-window-controls button.recording-editor-traffic-btn,
-            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn {
                 min-width: 24px;
                 min-height: 24px;
                 padding: 0;
@@ -1358,15 +1441,31 @@ const SETTINGS_CSS: &str = r#"
                 box-shadow: none;
             }
 
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
+                color: #1d2129;
+                background: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+            }
+
             .editor-root .settings-window-controls button.recording-editor-traffic-btn:hover,
             .editor-root .settings-window-controls button.recording-editor-traffic-btn:active,
-            .editor-root .settings-window-controls button.recording-editor-traffic-btn:focus,
-            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover,
-            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active,
-            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus {
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn:focus {
                 background: alpha(white, 0.10);
                 background-image: none;
                 color: white;
+                border: none;
+                border-radius: 999px;
+                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus {
+                background: alpha(#111827, 0.10);
+                background-image: none;
+                color: #1d2129;
                 border: none;
                 border-radius: 999px;
                 box-shadow: none;
