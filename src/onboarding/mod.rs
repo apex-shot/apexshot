@@ -1,6 +1,4 @@
-use gtk4::{
-    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation,
-};
+use gtk4::{prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Orientation};
 use std::fs;
 use std::path::PathBuf;
 
@@ -9,7 +7,8 @@ mod complete;
 mod extensions;
 mod welcome;
 
-use crate::settings::ui_support::install_settings_css;
+use crate::settings::ui_support::{install_settings_css, traffic_light_button};
+use crate::settings::windowing::install_window_drag;
 
 const ONBOARDING_FLAG_FILE: &str = ".onboarding_complete";
 
@@ -95,8 +94,8 @@ fn build_onboarding_window(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Setup")
-        .default_width(1020)
-        .default_height(840)
+        .default_width(720)
+        .default_height(560)
         .decorated(false)
         .build();
 
@@ -104,36 +103,77 @@ fn build_onboarding_window(app: &Application) {
 
     let root_box = GtkBox::new(Orientation::Vertical, 0);
     root_box.add_css_class("editor-root");
-    root_box.set_margin_top(32);
-    root_box.set_margin_bottom(32);
-    root_box.set_margin_start(48);
-    root_box.set_margin_end(48);
+    let prefers_dark = crate::capture::editor::ui_support::prefers_dark_glass_theme();
+    if prefers_dark {
+        root_box.add_css_class("editor-theme-dark");
+    } else {
+        root_box.add_css_class("editor-theme-light");
+    }
 
-    // Top navigation (skip button + progress indicator)
+    // --- TOOLBAR ---
+    let toolbar = GtkBox::new(Orientation::Horizontal, 0);
+    toolbar.add_css_class("settings-window-controls");
+    toolbar.set_size_request(-1, 30);
+
+    let drag_handle = GtkBox::new(Orientation::Horizontal, 0);
+    drag_handle.set_hexpand(true);
+    drag_handle.set_halign(Align::Fill);
+    drag_handle.set_vexpand(false);
+    toolbar.append(&drag_handle);
+
+    let close_btn = traffic_light_button("traffic-light-red", "Close");
+    close_btn.remove_css_class("recent-captures-wm-btn");
+    close_btn.remove_css_class("recent-captures-wm-close");
+    close_btn.add_css_class("recording-editor-traffic-btn");
+    let win_clone = window.clone();
+    close_btn.connect_clicked(move |_| win_clone.close());
+
+    let min_btn = traffic_light_button("traffic-light-yellow", "Minimize");
+    min_btn.remove_css_class("recent-captures-wm-btn");
+    min_btn.add_css_class("recording-editor-traffic-btn");
+    let win_clone = window.clone();
+    min_btn.connect_clicked(move |_| win_clone.minimize());
+
+    for button in [&close_btn, &min_btn] {
+        button.set_size_request(24, 24);
+        button.set_valign(Align::Center);
+    }
+
+    let right_box = GtkBox::new(Orientation::Horizontal, 6);
+    right_box.set_halign(Align::End);
+    right_box.append(&min_btn);
+    right_box.append(&close_btn);
+    toolbar.append(&right_box);
+
+    root_box.append(&toolbar);
+
+    install_window_drag(&drag_handle, &window);
+
+    // Top navigation (back button + progress indicator)
     let top_nav_box = GtkBox::new(Orientation::Horizontal, 12);
     top_nav_box.set_halign(Align::Start);
-    top_nav_box.set_margin_top(24);
-    top_nav_box.set_margin_bottom(24);
+    top_nav_box.set_margin_top(16);
+    top_nav_box.set_margin_bottom(8);
     top_nav_box.set_margin_start(24);
 
     // Progress indicator
-    let progress_box = GtkBox::new(Orientation::Horizontal, 8);
+    let progress_box = GtkBox::new(Orientation::Horizontal, 6);
     progress_box.set_halign(Align::Center);
-    progress_box.set_margin_top(24);
-    progress_box.set_margin_bottom(24);
+    progress_box.set_margin_top(8);
+    progress_box.set_margin_bottom(16);
 
     // Content area (will be swapped per step)
-    let content_box = GtkBox::new(Orientation::Vertical, 16);
+    let content_box = GtkBox::new(Orientation::Vertical, 12);
     content_box.set_vexpand(true);
     content_box.set_halign(Align::Center);
     content_box.set_valign(Align::Center);
 
     // Bottom navigation buttons
-    let nav_box = GtkBox::new(Orientation::Horizontal, 16);
+    let nav_box = GtkBox::new(Orientation::Horizontal, 12);
     nav_box.set_halign(Align::End);
-    nav_box.set_margin_top(32);
+    nav_box.set_margin_top(20);
     nav_box.set_margin_bottom(16);
-    nav_box.set_margin_end(16);
+    nav_box.set_margin_end(24);
 
     root_box.append(&top_nav_box);
     root_box.append(&progress_box);
@@ -207,13 +247,13 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
     let current_idx = steps.iter().position(|s| *s == step).unwrap_or(0);
 
     for (idx, _) in steps.iter().enumerate() {
-        let dot = Label::new(Some(if idx == current_idx { "●" } else { "○" }));
-        dot.set_halign(Align::Center);
-        dot.add_css_class(if idx == current_idx {
-            "settings-group-title"
-        } else {
-            "settings-sub-option"
-        });
+        let dot = GtkBox::new(Orientation::Horizontal, 0);
+        dot.add_css_class("onboarding-dot");
+        if idx == current_idx {
+            dot.add_css_class("onboarding-dot-active");
+        }
+        dot.set_size_request(if idx == current_idx { 18 } else { 6 }, 6);
+        dot.set_valign(Align::Center);
         widgets.progress_box.append(&dot);
     }
 

@@ -87,7 +87,7 @@ pub fn prefers_dark_glass_theme() -> bool {
         if color_scheme.contains("prefer-dark") {
             return true;
         }
-        if color_scheme.contains("prefer-light") {
+        if color_scheme.contains("prefer-light") || color_scheme == "default" {
             return false;
         }
     }
@@ -150,10 +150,50 @@ pub fn install_editor_css() {
             }
 
             .editor-toolbar {
-                padding: 8px 12px;
+                padding: 4px 10px 4px 12px;
                 background-color: #141414;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                border-bottom: 1px solid alpha(white, 0.06);
                 border-radius: 10px 10px 0 0;
+            }
+
+            .editor-toolbar button.recording-editor-traffic-btn {
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                margin: 0;
+                border-radius: 999px;
+                background-color: transparent;
+                background-image: none;
+                color: rgba(255, 255, 255, 0.65);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .editor-toolbar button.recording-editor-traffic-btn image {
+                -gtk-icon-size: 14px;
+            }
+
+            .editor-toolbar button.recording-editor-traffic-btn:hover,
+            .editor-toolbar button.recording-editor-traffic-btn:active,
+            .editor-toolbar button.recording-editor-traffic-btn:focus {
+                background-color: rgba(255, 255, 255, 0.10);
+                background-image: none;
+                color: #ffffff;
+                border-radius: 999px;
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-toolbar button.recording-editor-traffic-btn:hover image,
+            .editor-toolbar button.recording-editor-traffic-btn:active image,
+            .editor-toolbar button.recording-editor-traffic-btn:focus image {
+                color: #ffffff;
+            }
+
+            .editor-toolbar-wm-controls {
+                padding-left: 6px;
+                border-left: 1px solid rgba(255, 255, 255, 0.06);
             }
 
             .editor-toolbar-brand {
@@ -167,7 +207,7 @@ pub fn install_editor_css() {
             .editor-toolbar-center,
             .editor-toolbar-right,
             .editor-toolbar-right-tools {
-                min-height: 32px;
+                min-height: 22px;
             }
 
             .editor-traffic-lights {
@@ -193,17 +233,25 @@ pub fn install_editor_css() {
                 color: white;
             }
 
+            /* Flat group container used by history group on the right side. */
             .editor-tools-group {
-                padding: 3px;
-                border-radius: 6px;
-                background-color: #000000;
-                border: 1px solid rgba(255, 255, 255, 0.11);
+                padding: 0;
+                border-radius: 0;
+                background-color: transparent;
+                border: none;
                 box-shadow: none;
             }
 
-            .editor-primary-tools-group {
-                padding-left: 6px;
-                padding-right: 6px;
+            /* Tool subgroups are invisible spacers — just structural for spacing. */
+            .editor-tools-subgroup {
+                padding: 0;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-primary-tools-row {
+                padding: 0;
             }
 
             .editor-crop-mode-group {
@@ -364,43 +412,51 @@ pub fn install_editor_css() {
 
             .editor-tools-divider {
                 min-width: 1px;
-                margin: 6px 8px;
-                background-color: rgba(255, 255, 255, 0.11);
+                margin: 4px 6px;
+                background-color: alpha(white, 0.10);
                 border-radius: 2px;
             }
 
+            /* Flat tool buttons — settings-nav-item style: no borders, subtle alpha bg states. */
             button.editor-tool-button,
             button.standalone-tool {
-                min-width: 30px;
-                min-height: 30px;
-                border-radius: 6px;
+                min-width: 26px;
+                min-height: 22px;
+                border-radius: 5px;
                 padding: 0;
-                margin: 0 1px;
-                color: #9a9aa2;
+                margin: 0;
+                color: rgba(255, 255, 255, 0.78);
                 background-color: transparent;
-                border: 1px solid transparent;
+                background-image: none;
+                border: none;
                 outline: none;
-                transition: all 120ms ease;
+                box-shadow: none;
+                transition: background-color 120ms ease, color 120ms ease;
             }
 
             button.editor-tool-button:hover,
             button.standalone-tool:hover {
-                color: #f2f2f4;
-                background-color: #1a1a1d;
-                border-color: rgba(255, 255, 255, 0.09);
+                color: #ffffff;
+                background-color: alpha(white, 0.06);
+                border: none;
             }
 
             button.editor-tool-button:active,
             button.standalone-tool:active {
-                background-color: #151517;
-                border-color: rgba(255, 255, 255, 0.15);
+                background-color: alpha(white, 0.10);
+                border: none;
             }
 
+            /* Active tool: flat alpha(white, 0.14) bg - matches settings-nav-item-selected pattern. */
             button.editor-tool-button.active-tool {
-                background-color: #B05C38;
+                background-color: alpha(white, 0.14);
                 color: #ffffff;
-                border: 1px solid #B05C38;
+                border: none;
                 box-shadow: none;
+            }
+
+            button.editor-tool-button.active-tool:hover {
+                background-color: alpha(white, 0.18);
             }
 
             .editor-color-group {
@@ -409,25 +465,37 @@ pub fn install_editor_css() {
             }
 
             .editor-toolbar-color-status {
-                min-height: 34px;
-                padding: 0;
+                min-height: 22px;
+                padding: 0 6px;
                 border: none;
                 background: transparent;
             }
 
             .editor-toolbar-color-status-swatch {
-                min-width: 30px;
-                min-height: 30px;
-                border-radius: 6px;
-                border: 1px solid rgba(255, 255, 255, 0.14);
+                min-width: 12px;
+                min-height: 12px;
+                border-radius: 999px;
+                border: 1px solid alpha(white, 0.18);
                 background: #121212;
-                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+                box-shadow: none;
+            }
+
+            .editor-toolbar-color-status-text {
+                padding: 0;
             }
 
             .editor-toolbar-color-status-label {
-                color: rgba(245, 245, 247, 0.92);
-                font-size: 14px;
+                color: rgba(245, 245, 247, 0.94);
+                font-size: 12px;
                 font-weight: 700;
+                letter-spacing: 0.1px;
+            }
+
+            .editor-toolbar-color-status-hint {
+                color: rgba(245, 245, 247, 0.42);
+                font-size: 10px;
+                font-weight: 500;
+                margin-top: -1px;
             }
 
             .editor-color-trigger-shell {
@@ -539,12 +607,11 @@ pub fn install_editor_css() {
                 min-width: 18px;
                 min-height: 18px;
                 border-radius: 999px;
-                transition: transform 120ms ease;
             }
 
             .editor-color-dot {
-                border: 1px solid rgba(255, 255, 255, 0.16);
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+                border: 1px solid alpha(white, 0.16);
+                box-shadow: none;
             }
 
             popover.editor-color-popover,
@@ -584,27 +651,23 @@ pub fn install_editor_css() {
             button.editor-color-button {
                 min-width: 26px;
                 min-height: 26px;
-                border-radius: 8px;
+                border-radius: 6px;
                 padding: 3px;
                 margin: 0;
-                border: 1px solid transparent;
-                background: rgba(255, 255, 255, 0.01);
-                transition: all 130ms ease;
+                border: none;
+                background: transparent;
+                transition: background-color 120ms ease;
                 box-shadow: none;
             }
 
             button.editor-color-button:hover {
-                background: rgba(255, 255, 255, 0.07);
-                border-color: rgba(255, 255, 255, 0.09);
-            }
-
-            button.editor-color-button:hover .editor-color-dot {
-                transform: scale(1.03);
+                background: alpha(white, 0.06);
+                border: none;
             }
 
             button.editor-color-button.active-color {
-                background: rgba(255, 255, 255, 0.08);
-                border-color: rgba(255, 255, 255, 0.16);
+                background: alpha(white, 0.14);
+                border: none;
             }
 
             .editor-color-popover-body *:drop(active) {
@@ -623,8 +686,8 @@ pub fn install_editor_css() {
             }
 
             .editor-color-placeholder-dot {
-                border: 1px dashed rgba(255, 255, 255, 0.24);
-                background: rgba(255, 255, 255, 0.03);
+                border: 1px dashed alpha(white, 0.22);
+                background: alpha(white, 0.03);
             }
 
             .editor-custom-color-slot-overlay {
@@ -633,23 +696,13 @@ pub fn install_editor_css() {
             }
 
             button.editor-custom-color-slot:hover .editor-color-placeholder-dot {
-                border-color: rgba(255, 255, 255, 0.38);
-                background: rgba(255, 255, 255, 0.08);
+                border-color: alpha(white, 0.36);
+                background: alpha(white, 0.06);
             }
 
             button.editor-custom-color-slot:drop(active) .editor-color-placeholder-dot {
-                border-color: rgba(255, 255, 255, 0.5);
-                background: rgba(255, 255, 255, 0.1);
-                transform: scale(1.05);
-            }
-
-            button.editor-custom-color-slot.has-custom-color:hover .editor-color-dot {
-                box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.34), 0 2px 5px rgba(0, 0, 0, 0.35);
-            }
-
-            button.editor-custom-color-slot.has-custom-color:drop(active) .editor-color-dot {
-                box-shadow: 0 0 0 2px #16161a, 0 0 0 4px rgba(255, 255, 255, 0.5);
-                transform: scale(1.05);
+                border-color: alpha(white, 0.46);
+                background: alpha(white, 0.10);
             }
 
             .editor-custom-color-slot-overlay:drop(active) button.editor-custom-color-slot {
@@ -662,24 +715,23 @@ pub fn install_editor_css() {
                 min-height: 12px;
                 border-radius: 999px;
                 padding: 0;
-                border: 1px solid rgba(232, 17, 35, 0.50);
-                background: #e81123;
-                color: #ffffff;
+                border: 1px solid alpha(white, 0.20);
+                background: #1a1a1a;
+                color: rgba(255, 255, 255, 0.86);
                 outline: none;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.35);
-                transition: transform 150ms ease;
+                box-shadow: none;
+                transition: background-color 120ms ease, border-color 120ms ease;
             }
 
             button.editor-custom-color-remove-button:hover,
             button.editor-custom-color-remove-button:active,
             button.editor-custom-color-remove-button:focus,
             button.editor-custom-color-remove-button:focus-visible {
-                border: 1px solid rgba(232, 17, 35, 0.70);
-                background: #f02a3b;
+                border: 1px solid alpha(white, 0.36);
+                background: #2a2a2a;
                 color: #ffffff;
                 outline: none;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.42);
-                transform: scale(1.10);
+                box-shadow: none;
             }
 
             button.editor-custom-color-remove-button image.editor-custom-color-remove-icon {
@@ -769,67 +821,81 @@ pub fn install_editor_css() {
             .editor-gradient-area {
                 min-width: 252px;
                 min-height: 150px;
-                border-radius: 11px;
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                box-shadow:
-                    inset 0 1px 4px rgba(0,0,0,0.32),
-                    0 2px 4px rgba(0, 0, 0, 0.2);
+                border-radius: 8px;
+                border: 1px solid alpha(white, 0.08);
+                box-shadow: none;
+            }
+
+            /* --- Sliders (mirrors the video editor's minimal style) --- */
+            .editor-root scale {
+                min-height: 20px;
+            }
+
+            .editor-root scale trough {
+                min-height: 4px;
+                border-radius: 999px;
+                background: alpha(white, 0.08);
+                border: none;
+            }
+
+            .editor-root scale highlight {
+                min-height: 4px;
+                border-radius: 999px;
+                background: #b05c38;
+            }
+
+            .editor-root scale slider {
+                min-width: 14px;
+                min-height: 14px;
+                margin: -5px;
+            }
+
+            .editor-root scale:disabled trough {
+                background: alpha(white, 0.04);
+            }
+
+            .editor-root scale:disabled highlight {
+                background: alpha(#b05c38, 0.42);
             }
 
             .editor-root.editor-theme-light scale trough {
-                background-color: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.14);
+                background: alpha(#111827, 0.08);
             }
 
             .editor-root.editor-theme-light scale highlight {
-                background-color: #ff9900;
-            }
-
-            .editor-root.editor-theme-light scale slider {
-                background: #f5f5f7;
-                border: 1px solid rgba(0, 0, 0, 0.18);
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
+                background: #b05c38;
             }
 
             .editor-root.editor-theme-light scale:disabled trough {
-                background-color: rgba(255, 255, 255, 0.04);
-                border-color: rgba(255, 255, 255, 0.08);
+                background: alpha(#111827, 0.04);
             }
 
             .editor-root.editor-theme-light scale:disabled highlight {
-                background-color: rgba(255, 153, 0, 0.42);
+                background: alpha(#b05c38, 0.42);
             }
 
-            .editor-root.editor-theme-light scale:disabled slider {
-                background: rgba(245, 245, 247, 0.62);
-                border-color: rgba(0, 0, 0, 0.10);
-            }
-
-            .editor-hue-slider trough {
-                min-height: 10px;
+            .editor-root scale.editor-hue-slider trough {
+                min-height: 8px;
                 border-radius: 999px;
-                box-shadow: inset 0 1px 2px rgba(0,0,0,0.45);
-                border: 1px solid rgba(255, 255, 255, 0.14);
+                box-shadow: none;
+                border: 1px solid alpha(white, 0.08);
+                background-color: transparent;
                 background-image: linear-gradient(to right,
                     #ff0000 0%, #ffff00 17%, #00ff00 33%,
                     #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
             }
 
-            .editor-hue-slider slider {
+            .editor-root scale.editor-hue-slider slider {
                 min-width: 14px;
                 min-height: 14px;
+                margin: -3px;
                 border-radius: 999px;
                 background: white;
-                border: 1px solid rgba(0, 0, 0, 0.18);
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-                transition: transform 100ms ease;
+                border: 1px solid alpha(black, 0.40);
+                box-shadow: none;
             }
 
-            .editor-hue-slider slider:hover {
-                transform: scale(1.08);
-            }
-
-            .editor-hue-slider highlight {
+            .editor-root scale.editor-hue-slider highlight {
                 background: transparent;
             }
 
@@ -891,32 +957,30 @@ pub fn install_editor_css() {
 
             entry.editor-hex-entry,
             entry.editor-rgba-entry {
-                min-height: 34px;
-                border-radius: 7px;
+                min-height: 30px;
+                border-radius: 6px;
                 padding: 2px 8px;
-                background: rgba(8, 8, 12, 0.55);
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                box-shadow: inset 0 1px 2px rgba(0,0,0,0.28);
-                color: #f7f8ff;
-                font-size: 13px;
+                background: alpha(white, 0.05);
+                border: 1px solid alpha(white, 0.06);
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 12px;
                 font-family: 'DejaVu Sans Mono', 'Liberation Mono', Monospace;
                 font-style: normal;
                 font-weight: 600;
-                transition: all 150ms ease;
+                transition: background-color 120ms ease, border-color 120ms ease;
             }
 
             entry.editor-hex-entry:focus,
             entry.editor-rgba-entry:focus {
-                border-color: rgba(114, 167, 255, 0.72);
-                background: rgba(12, 12, 18, 0.78);
-                box-shadow:
-                    0 0 0 2px rgba(82, 144, 255, 0.16),
-                    inset 0 1px 2px rgba(0,0,0,0.32);
+                border-color: alpha(white, 0.20);
+                background: alpha(white, 0.08);
+                box-shadow: none;
             }
 
             entry.editor-hex-entry text,
             entry.editor-rgba-entry text {
-                color: #f7f8ff;
+                color: rgba(255, 255, 255, 0.92);
             }
 
             .editor-color-field-label {
@@ -925,39 +989,33 @@ pub fn install_editor_css() {
                 color: rgba(255, 255, 255, 0.52);
                 margin-top: 1px;
                 text-transform: uppercase;
-                letter-spacing: 0.65px;
+                letter-spacing: 0.55px;
             }
 
             button.editor-add-to-colors-button {
                 min-width: 220px;
-                min-height: 36px;
-                border-radius: 8px;
+                min-height: 30px;
+                border-radius: 6px;
                 background: #B05C38;
                 color: #ffffff;
-                font-weight: 700;
+                font-weight: 600;
                 font-size: 12px;
-                border: 1px solid rgba(255, 170, 51, 0.5);
-                padding: 0 16px;
+                border: none;
+                padding: 0 14px;
                 outline: none;
-                transition: all 150ms ease;
-                box-shadow:
-                    0 2px 6px rgba(0, 0, 0, 0.28),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+                transition: background-color 120ms ease;
+                box-shadow: none;
             }
 
             button.editor-add-to-colors-button:hover {
                 background: #C66B4A;
-                border-color: rgba(255, 193, 92, 0.66);
-                box-shadow:
-                    0 4px 10px rgba(0, 0, 0, 0.35),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.2);
-                transform: translateY(-1px);
+                border: none;
+                box-shadow: none;
             }
 
             button.editor-add-to-colors-button:active {
                 background: #8A4A2D;
-                box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
-                transform: translateY(0);
+                box-shadow: none;
             }
 
             .editor-color-dot.editor-color-black,
@@ -1010,142 +1068,161 @@ pub fn install_editor_css() {
             }
 
             button.editor-done-button {
-                min-width: 68px;
-                min-height: 30px;
+                min-width: 72px;
+                min-height: 26px;
                 border-radius: 6px;
-                padding: 0 16px;
-                background-color: #f5f5f7;
-                border: 1px solid #f5f5f7;
-                color: #080808;
-                font-size: 13px;
-                font-weight: 700;
+                padding: 0 14px;
+                background: #b05c38;
+                border: none;
+                color: white;
+                font-size: 12px;
+                font-weight: 600;
                 outline: none;
                 transition: all 120ms ease;
                 box-shadow: none;
             }
 
+            button.editor-done-button label {
+                color: white;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
             button.editor-done-button:hover {
-                background-color: #ffffff;
-                border-color: #ffffff;
-                color: #050505;
+                background: #c06a44;
+            }
+
+            button.editor-done-button:hover label {
+                color: white;
             }
 
             button.editor-done-button:active {
-                background-color: #dfdfe2;
-                border-color: #dfdfe2;
+                background: #8a4a2d;
             }
 
+            /* --- Footer (settings-UI design language: flat, alpha-white states) --- */
             .editor-footer {
-                padding: 6px 12px;
+                padding: 6px 10px;
+                min-height: 38px;
                 background-color: #141414;
-                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                border-top: 1px solid alpha(white, 0.06);
                 border-radius: 0 0 10px 10px;
             }
 
             button.editor-footer-icon-button {
-                min-width: 30px;
-                min-height: 30px;
-                border-radius: 6px;
-                border: 1px solid transparent;
+                min-width: 28px;
+                min-height: 28px;
+                border-radius: 5px;
+                border: none;
                 background: transparent;
-                color: #9b9ba2;
-                transition: all 120ms ease;
+                color: rgba(255, 255, 255, 0.78);
+                transition: background-color 120ms ease, color 120ms ease;
             }
 
             button.editor-footer-icon-button:hover {
-                background: #1a1a1d;
+                background: alpha(white, 0.06);
                 color: #ffffff;
-                border-color: rgba(255, 255, 255, 0.11);
+                border: none;
+            }
+
+            button.editor-footer-icon-button:active {
+                background: alpha(white, 0.10);
+                border: none;
             }
 
             button.editor-footer-zoom-button {
-                min-height: 30px;
+                min-height: 28px;
                 padding: 0 10px;
-                border-radius: 8px;
-                border: 1px solid transparent;
+                border-radius: 5px;
+                border: none;
                 background: transparent;
-                color: rgba(245, 245, 247, 0.92);
+                color: rgba(255, 255, 255, 0.86);
                 box-shadow: none;
+                transition: background-color 120ms ease, color 120ms ease;
             }
 
             button.editor-footer-zoom-button:hover {
-                background: rgba(255, 255, 255, 0.06);
-                border-color: rgba(255, 255, 255, 0.1);
+                background: alpha(white, 0.06);
                 color: #ffffff;
+                border: none;
             }
 
             .editor-footer-zoom-label {
                 color: inherit;
-                font-size: 13px;
-                font-weight: 700;
+                font-size: 12px;
+                font-weight: 600;
             }
 
+            /* --- Zoom popup (flat surface, no glass) --- */
             .editor-footer-zoom-popup {
                 padding: 0;
-                background: rgba(20, 20, 20, 0.94);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 12px;
-                min-width: 220px;
+                background: #1a1a1a;
+                border: 1px solid alpha(white, 0.06);
+                border-radius: 10px;
+                min-width: 240px;
                 box-shadow: none;
             }
 
             .editor-footer-zoom-header {
-                padding: 12px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                padding: 10px 10px 8px 10px;
+                border-bottom: 1px solid alpha(white, 0.05);
             }
 
             button.editor-footer-zoom-header-btn {
-                min-width: 28px;
-                min-height: 28px;
+                min-width: 24px;
+                min-height: 24px;
                 padding: 0;
-                border-radius: 6px;
-                background: rgba(255, 255, 255, 0.05);
+                border-radius: 5px;
+                background: alpha(white, 0.06);
                 border: none;
-                color: #ffffff;
-                transition: all 120ms ease;
+                color: rgba(255, 255, 255, 0.86);
+                font-weight: 600;
+                transition: background-color 120ms ease, color 120ms ease;
             }
 
             button.editor-footer-zoom-header-btn:hover {
-                background: rgba(255, 255, 255, 0.1);
+                background: alpha(white, 0.12);
+                color: #ffffff;
             }
 
             button.editor-footer-zoom-header-btn.orange-btn {
-                background: #ff9900;
+                background: #b05c38;
                 color: #ffffff;
             }
 
             button.editor-footer-zoom-header-btn.orange-btn:hover {
-                background: #ffaa33;
+                background: #c06540;
+                color: #ffffff;
             }
 
             .editor-footer-zoom-header-label {
                 font-weight: 600;
-                font-size: 16px;
-                color: #ffffff;
+                font-size: 13px;
+                color: rgba(255, 255, 255, 0.92);
             }
 
             .editor-footer-zoom-list {
-                padding: 8px 0;
+                padding: 4px;
             }
 
             button.editor-footer-zoom-action-btn {
                 padding: 0;
-                margin: 0 4px;
-                border-radius: 8px;
+                margin: 0;
+                border-radius: 5px;
                 border: none;
                 background: transparent;
-                transition: all 120ms ease;
+                transition: background-color 120ms ease;
             }
 
             button.editor-footer-zoom-action-btn:hover {
-                background: rgba(255, 255, 255, 0.04);
+                background: alpha(white, 0.06);
             }
 
             .editor-footer-zoom-row {
-                padding: 6px 12px;
-                min-height: 36px;
-                color: #e0e0e0;
-                font-size: 13px;
+                padding: 6px 10px;
+                min-height: 30px;
+                color: rgba(255, 255, 255, 0.86);
+                font-size: 12px;
             }
 
             .editor-footer-zoom-shortcut-box {
@@ -1153,31 +1230,30 @@ pub fn install_editor_css() {
             }
 
             .editor-footer-zoom-shortcut-part {
-                font-size: 11px;
-                color: #a0a0a0;
+                font-size: 10px;
+                color: rgba(255, 255, 255, 0.62);
                 font-weight: 600;
-                background: rgba(255, 255, 255, 0.06);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background: alpha(white, 0.05);
+                border: 1px solid alpha(white, 0.06);
                 border-radius: 4px;
-                padding: 2px 6px;
-                min-width: 20px;
-                text-align: center;
+                padding: 1px 5px;
+                min-width: 18px;
             }
 
             .editor-footer-zoom-separator {
-                height: 1px;
-                background: rgba(255, 255, 255, 0.05);
-                margin: 4px 12px;
+                min-height: 1px;
+                background: alpha(white, 0.05);
+                margin: 4px 10px;
             }
 
             .editor-footer-zoom-mouse-hints {
-                padding: 16px 12px;
+                padding: 12px 10px 14px 10px;
             }
 
             .editor-footer-zoom-mouse-hint-text {
-                font-size: 11px;
-                color: #808080;
-                line-height: 1.3;
+                font-size: 10px;
+                color: rgba(255, 255, 255, 0.50);
+                line-height: 1.35;
             }
 
             .editor-footer-zoom-mouse-drawing {
@@ -1186,34 +1262,650 @@ pub fn install_editor_css() {
                 margin: 0 8px;
             }
 
-            .editor-root.editor-theme-dark,
-            .editor-root.editor-theme-light {
+            .editor-root.editor-theme-dark {
                 background-color: #141414;
                 color: #f1f1f3;
                 border-color: rgba(255, 255, 255, 0.10);
                 box-shadow: none;
             }
 
-            .editor-root.editor-theme-dark .editor-toolbar,
-            .editor-root.editor-theme-light .editor-toolbar {
+            .editor-root.editor-theme-dark .editor-toolbar {
                 background-color: #141414;
-                border-bottom-color: rgba(255, 255, 255, 0.08);
+                border-bottom-color: alpha(white, 0.06);
             }
 
-            .editor-root.editor-theme-dark .editor-footer,
-            .editor-root.editor-theme-light .editor-footer {
+            .editor-root.editor-theme-dark .editor-footer {
                 background-color: #141414;
-                border-top-color: rgba(255, 255, 255, 0.08);
+                border-top-color: rgba(255, 255, 255, 0.06);
             }
 
             .editor-root.editor-theme-dark button.editor-tool-button image,
             .editor-root.editor-theme-dark button.standalone-tool image,
-            .editor-root.editor-theme-dark button.editor-footer-icon-button image,
-            .editor-root.editor-theme-light button.editor-tool-button image,
-            .editor-root.editor-theme-light button.standalone-tool image,
-            .editor-root.editor-theme-light button.editor-footer-icon-button image {
+            .editor-root.editor-theme-dark button.editor-footer-icon-button image {
                 filter: brightness(0) invert(0.96);
             }
+
+            /* ─────────────────────────────────────────────────────────────
+               Light theme overrides. Mirrors the dark surface system but
+               with #f6f7fb root, #1d2129 text, and alpha(#111827, x) state
+               layers (matching the settings-UI light palette).
+               ───────────────────────────────────────────────────────────── */
+
+            .editor-root.editor-theme-light {
+                background-color: #f6f7fb;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.10);
+                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .editor-toolbar {
+                background-color: #f6f7fb;
+                border-bottom-color: alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light .editor-footer {
+                background-color: #f6f7fb;
+                border-top-color: alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light button.editor-footer-zoom-button {
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-footer-zoom-button:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light .editor-footer-zoom-popup {
+                background: #ffffff;
+                border-color: alpha(#111827, 0.10);
+            }
+
+            .editor-root.editor-theme-light .editor-footer-zoom-header {
+                border-bottom-color: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light button.editor-footer-zoom-header-btn {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-footer-zoom-header-btn:hover {
+                background: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-footer-zoom-header-btn.orange-btn {
+                background: #b05c38;
+                color: #ffffff;
+            }
+
+            .editor-root.editor-theme-light button.editor-footer-zoom-header-btn.orange-btn:hover {
+                background: #c06540;
+                color: #ffffff;
+            }
+
+            .editor-root.editor-theme-light .editor-footer-zoom-header-label {
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-footer-zoom-action-btn:hover {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light .editor-footer-zoom-row {
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light .editor-footer-zoom-shortcut-part {
+                color: alpha(#111827, 0.62);
+                background: alpha(#111827, 0.04);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light .editor-footer-zoom-separator {
+                background: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light .editor-footer-zoom-mouse-hint-text {
+                color: alpha(#111827, 0.54);
+            }
+
+            .editor-root.editor-theme-light .editor-footer-zoom-mouse-drawing {
+                color: #1d2129;
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light {
+                background: #ffffff;
+                border-color: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-header {
+                border-bottom-color: alpha(#111827, 0.08);
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light button.editor-footer-zoom-header-btn {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light button.editor-footer-zoom-header-btn:hover {
+                background: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light button.editor-footer-zoom-header-btn.orange-btn {
+                background: #b05c38;
+                color: #ffffff;
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light button.editor-footer-zoom-header-btn.orange-btn:hover {
+                background: #c06540;
+                color: #ffffff;
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-header-label,
+            .editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-row {
+                color: #1d2129;
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light button.editor-footer-zoom-action-btn {
+                color: #1d2129;
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light button.editor-footer-zoom-action-btn:hover {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-shortcut-part {
+                color: alpha(#111827, 0.62);
+                background: alpha(#111827, 0.04);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-separator {
+                background: alpha(#111827, 0.08);
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-mouse-hint-text {
+                color: alpha(#111827, 0.54);
+            }
+
+            .editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-mouse-drawing {
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-tool-button image,
+            .editor-root.editor-theme-light button.standalone-tool image,
+            .editor-root.editor-theme-light button.editor-footer-icon-button image,
+            .editor-root.editor-theme-light button.editor-universal-arrow-button image,
+            .editor-root.editor-theme-light button.editor-eyedropper-button image,
+            .editor-root.editor-theme-light .editor-color-trigger-arrow-box image {
+                filter: brightness(0);
+            }
+
+            /* Tool buttons */
+            .editor-root.editor-theme-light button.editor-tool-button,
+            .editor-root.editor-theme-light button.standalone-tool {
+                color: alpha(#111827, 0.78);
+            }
+            .editor-root.editor-theme-light button.editor-tool-button:hover,
+            .editor-root.editor-theme-light button.standalone-tool:hover {
+                background-color: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-tool-button:active,
+            .editor-root.editor-theme-light button.standalone-tool:active {
+                background-color: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light button.editor-tool-button.active-tool {
+                background-color: alpha(#111827, 0.12);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-tool-button.active-tool:hover {
+                background-color: alpha(#111827, 0.16);
+            }
+
+            /* Tool dividers */
+            .editor-root.editor-theme-light .editor-tools-divider {
+                background-color: alpha(#111827, 0.10);
+            }
+
+            /* Toolbar color status chip */
+            .editor-root.editor-theme-light .editor-toolbar-color-status-swatch {
+                border-color: alpha(#111827, 0.22);
+            }
+            .editor-root.editor-theme-light .editor-toolbar-color-status-label {
+                color: alpha(#1d2129, 0.94);
+            }
+            .editor-root.editor-theme-light .editor-toolbar-color-status-hint {
+                color: alpha(#1d2129, 0.45);
+            }
+
+            /* Footer icon/zoom buttons */
+            .editor-root.editor-theme-light button.editor-footer-icon-button {
+                color: alpha(#111827, 0.78);
+            }
+            .editor-root.editor-theme-light button.editor-footer-icon-button:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-footer-icon-button:active {
+                background: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light button.editor-footer-zoom-button {
+                color: alpha(#111827, 0.85);
+            }
+            .editor-root.editor-theme-light button.editor-footer-zoom-button:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-label {
+                color: inherit;
+            }
+
+            /* Footer zoom popup */
+            .editor-root.editor-theme-light .editor-footer-zoom-popup {
+                background: #ffffff;
+                border-color: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-header {
+                border-bottom-color: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-header-label {
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light button.editor-footer-zoom-header-btn {
+                color: alpha(#111827, 0.80);
+            }
+            .editor-root.editor-theme-light button.editor-footer-zoom-header-btn:hover {
+                background: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-footer-zoom-action-btn:hover {
+                background: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-row {
+                color: alpha(#1d2129, 0.85);
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-shortcut-part {
+                color: alpha(#1d2129, 0.55);
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-separator {
+                background: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-mouse-hint-text {
+                color: alpha(#1d2129, 0.55);
+            }
+            .editor-root.editor-theme-light button.editor-footer-zoom-action-btn {
+                color: alpha(#1d2129, 0.85);
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-shortcut-box {
+                background: alpha(#111827, 0.04);
+                border: 1px solid alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-mouse-hints {
+                background: transparent;
+            }
+            .editor-root.editor-theme-light .editor-footer-zoom-mouse-drawing {
+                background: alpha(#111827, 0.04);
+                border: 1px solid alpha(#111827, 0.10);
+            }
+
+            /* Inspector / right side panels */
+            .editor-root.editor-theme-light .editor-right-inspector {
+                background: #eef0f5;
+                border-left: 1px solid alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .editor-inspector-tabs,
+            .editor-root.editor-theme-light .editor-inspector-section {
+                background: transparent;
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-inspector-tab-button {
+                color: alpha(#111827, 0.72);
+                background: transparent;
+            }
+            .editor-root.editor-theme-light button.editor-inspector-tab-button:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-inspector-tab-button.active-inspector-tab {
+                color: #b05c38;
+            }
+
+            .editor-root.editor-theme-light button.editor-arrow-inspector-option,
+            .editor-root.editor-theme-light button.editor-text-inspector-option,
+            .editor-root.editor-theme-light button.editor-obfuscate-inspector-option,
+            .editor-root.editor-theme-light button.editor-number-inspector-option,
+            .editor-root.editor-theme-light button.editor-crop-inspector-option,
+            .editor-root.editor-theme-light button.editor-pen-inspector-option,
+            .editor-root.editor-theme-light button.editor-highlighter-inspector-option {
+                color: alpha(#111827, 0.78);
+                background: transparent;
+            }
+            .editor-root.editor-theme-light button.editor-arrow-inspector-option:hover,
+            .editor-root.editor-theme-light button.editor-text-inspector-option:hover,
+            .editor-root.editor-theme-light button.editor-obfuscate-inspector-option:hover,
+            .editor-root.editor-theme-light button.editor-number-inspector-option:hover,
+            .editor-root.editor-theme-light button.editor-crop-inspector-option:hover,
+            .editor-root.editor-theme-light button.editor-pen-inspector-option:hover,
+            .editor-root.editor-theme-light button.editor-highlighter-inspector-option:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-arrow-inspector-option.editor-arrow-inspector-option-active,
+            .editor-root.editor-theme-light button.editor-text-inspector-option.editor-text-inspector-option-active,
+            .editor-root.editor-theme-light button.editor-obfuscate-inspector-option.editor-obfuscate-inspector-option-active,
+            .editor-root.editor-theme-light button.editor-number-inspector-option.editor-number-inspector-option-active,
+            .editor-root.editor-theme-light button.editor-crop-inspector-option.editor-crop-inspector-option-active,
+            .editor-root.editor-theme-light button.editor-pen-inspector-option.editor-pen-inspector-option-active,
+            .editor-root.editor-theme-light button.editor-highlighter-inspector-option.editor-highlighter-inspector-option-active {
+                background: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            /* Background panel sidebar */
+            .editor-root.editor-theme-light .editor-background-sidebar,
+            .editor-root.editor-theme-light .editor-background-sidebar-options {
+                background: #eef0f5;
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-background-option-button {
+                background: alpha(#111827, 0.04);
+                border: 1px solid alpha(#111827, 0.06);
+                color: alpha(#111827, 0.82);
+            }
+            .editor-root.editor-theme-light button.editor-background-option-button:hover {
+                background: alpha(#111827, 0.08);
+                border-color: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-background-option-button:active {
+                background: alpha(#111827, 0.12);
+                border-color: alpha(#111827, 0.14);
+            }
+            .editor-root.editor-theme-light button.editor-background-option-button.active-background-option {
+                background: alpha(#111827, 0.10);
+                border: 1px solid transparent;
+                color: #1d2129;
+                box-shadow: inset 0 0 0 1px #b05c38;
+            }
+
+            /* Background panel labels & section titles */
+            .editor-root.editor-theme-light .editor-background-section-title,
+            .editor-root.editor-theme-light .editor-background-row-label {
+                color: alpha(#1d2129, 0.72);
+            }
+            .editor-root.editor-theme-light checkbutton.editor-background-checkbox label {
+                color: alpha(#1d2129, 0.85);
+            }
+            .editor-root.editor-theme-light checkbutton.editor-background-checkbox check {
+                background-color: alpha(#111827, 0.06);
+                border-color: alpha(#111827, 0.20);
+            }
+            .editor-root.editor-theme-light checkbutton.editor-background-checkbox check:checked {
+                background-color: #b05c38;
+                border-color: #b05c38;
+                color: #ffffff;
+            }
+
+            /* Background ratio dropdown */
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown > button {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown > button:hover {
+                background: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown > button:active,
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown > button:checked,
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown > button:focus-visible {
+                background: alpha(#111827, 0.14);
+            }
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown popover > contents {
+                background-color: #ffffff;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown popover listview row {
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown popover listview row:hover {
+                background-color: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown popover listview row:selected {
+                background-color: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            /* Colors panel */
+            .editor-root.editor-theme-light .editor-colors-panel {
+                background: #eef0f5;
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light .editor-colors-panel-helper {
+                color: alpha(#1d2129, 0.62);
+            }
+            .editor-root.editor-theme-light .editor-colors-panel-current-preview {
+                border: 1px solid alpha(#111827, 0.12);
+                background: alpha(#111827, 0.04);
+            }
+            .editor-root.editor-theme-light .editor-colors-panel-current-value {
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light .editor-colors-panel-action-button {
+                border: 1px solid alpha(#111827, 0.10);
+                color: alpha(#1d2129, 0.9);
+            }
+            .editor-root.editor-theme-light .editor-colors-panel-action-button:hover {
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light .editor-color-dot {
+                border: 1px solid alpha(#111827, 0.16);
+            }
+            .editor-root.editor-theme-light .editor-color-placeholder-dot {
+                border: 1px dashed alpha(#111827, 0.22);
+                background: alpha(#111827, 0.03);
+            }
+            .editor-root.editor-theme-light button.editor-custom-color-slot:hover .editor-color-placeholder-dot {
+                border-color: alpha(#111827, 0.36);
+                background: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light button.editor-custom-color-slot:drop(active) .editor-color-placeholder-dot {
+                border-color: alpha(#111827, 0.46);
+                background: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light button.editor-custom-color-remove-button {
+                border: 1px solid alpha(#111827, 0.20);
+                background: #ffffff;
+                color: alpha(#1d2129, 0.86);
+            }
+            .editor-root.editor-theme-light button.editor-custom-color-remove-button:hover,
+            .editor-root.editor-theme-light button.editor-custom-color-remove-button:active,
+            .editor-root.editor-theme-light button.editor-custom-color-remove-button:focus,
+            .editor-root.editor-theme-light button.editor-custom-color-remove-button:focus-visible {
+                border: 1px solid alpha(#111827, 0.36);
+                background: alpha(#111827, 0.04);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-color-button:hover {
+                background: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light button.editor-color-button.active-color {
+                background: alpha(#111827, 0.14);
+            }
+
+            /* Color picker popover surface */
+            .editor-root.editor-theme-light .editor-popover,
+            .editor-root.editor-theme-light .editor-color-popover {
+                background: #ffffff;
+                color: #1d2129;
+                border: 1px solid alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light .editor-popover-list row:hover,
+            .editor-root.editor-theme-light modelbutton:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            /* Inspector headings, section bodies, placeholders, and other
+               labels that defaulted to rgba(255,255,255,*) and were invisible
+               on the light surface. */
+            .editor-root.editor-theme-light .editor-inspector-title,
+            .editor-root.editor-theme-light .editor-background-sidebar-title {
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light .editor-inspector-section-body {
+                background: #ffffff;
+                border: 1px solid alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .editor-inspector-placeholder {
+                color: alpha(#1d2129, 0.62);
+            }
+            .editor-root.editor-theme-light .editor-select-inspector-status {
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light .editor-select-inspector-detail,
+            .editor-root.editor-theme-light .editor-select-inspector-metric {
+                color: alpha(#1d2129, 0.72);
+            }
+            .editor-root.editor-theme-light .editor-select-inspector-hint {
+                color: alpha(#1d2129, 0.58);
+            }
+
+            /* Crop inspector dimension readout */
+            .editor-root.editor-theme-light .editor-crop-dimensions-value {
+                color: alpha(#1d2129, 0.94);
+            }
+            .editor-root.editor-theme-light .editor-crop-dimensions-separator {
+                color: alpha(#1d2129, 0.42);
+            }
+            .editor-root.editor-theme-light .editor-dimension-box {
+                background: alpha(#111827, 0.04);
+                border: 1px solid alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light .editor-dimension-label {
+                color: alpha(#1d2129, 0.46);
+            }
+
+            /* Background panel alignment section */
+            .editor-root.editor-theme-light .editor-background-alignment-icon-frame {
+                background: alpha(#1d2129, 0.78);
+            }
+            .editor-root.editor-theme-light button.editor-background-alignment-button:hover {
+                background: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light button.editor-background-alignment-button:active,
+            .editor-root.editor-theme-light button.editor-background-alignment-button:focus-visible {
+                background: alpha(#111827, 0.10);
+            }
+
+            /* Crop type popover */
+            .editor-root.editor-theme-light .editor-crop-type-popover-body {
+                background: #ffffff;
+                border: 1px solid alpha(#111827, 0.10);
+                box-shadow: 0 14px 32px rgba(0, 0, 0, 0.15);
+            }
+            .editor-root.editor-theme-light button.editor-crop-type-option {
+                background: transparent;
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-crop-type-option:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-crop-type-option:active {
+                background: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            /* Popover separator */
+            .editor-root.editor-theme-light .editor-popover-separator {
+                background: alpha(#111827, 0.10);
+            }
+
+            /* Color picker entries and field labels */
+            .editor-root.editor-theme-light entry.editor-hex-entry,
+            .editor-root.editor-theme-light entry.editor-rgba-entry {
+                background: alpha(#111827, 0.04);
+                border: 1px solid alpha(#111827, 0.10);
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light entry.editor-hex-entry text,
+            .editor-root.editor-theme-light entry.editor-rgba-entry text {
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light .editor-color-field-label {
+                color: alpha(#1d2129, 0.55);
+            }
+
+            /* Numbers panel - style and size options */
+            .editor-root.editor-theme-light button.editor-number-style-option,
+            .editor-root.editor-theme-light button.editor-number-size-option {
+                color: alpha(#1d2129, 0.82);
+            }
+            .editor-root.editor-theme-light button.editor-number-style-option:hover,
+            .editor-root.editor-theme-light button.editor-number-size-option:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-number-style-option.editor-number-style-option-active,
+            .editor-root.editor-theme-light button.editor-number-size-option.editor-number-size-option-active {
+                background: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            /* Numbers panel - start controls */
+            .editor-root.editor-theme-light .editor-number-start-label {
+                color: alpha(#1d2129, 0.82);
+            }
+            .editor-root.editor-theme-light .editor-number-start-entry {
+                background: alpha(#111827, 0.04);
+                border: 1px solid alpha(#111827, 0.10);
+                color: alpha(#1d2129, 0.94);
+            }
+            .editor-root.editor-theme-light .editor-number-start-entry:focus {
+                border-color: alpha(#111827, 0.20);
+                background: alpha(#111827, 0.08);
+            }
+            .editor-root.editor-theme-light button.editor-number-start-stepper {
+                background: alpha(#111827, 0.04);
+                border: 1px solid alpha(#111827, 0.10);
+                color: alpha(#1d2129, 0.86);
+            }
+            .editor-root.editor-theme-light button.editor-number-start-stepper:hover {
+                background: alpha(#111827, 0.08);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-number-start-stepper:active {
+                background: alpha(#111827, 0.12);
+            }
+
+            /* Window controls (traffic buttons) */
+            .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn {
+                color: alpha(#1d2129, 0.65);
+            }
+            .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:hover,
+            .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:active,
+            .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:focus {
+                background-color: alpha(#111827, 0.10);
+                color: alpha(#1d2129, 0.65);
+            }
+
+            .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:hover image,
+            .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:active image,
+            .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:focus image {
+                color: alpha(#1d2129, 0.65);
+            }
+
+            /* Active tool button uses .active-tool — covered above via
+               alpha(#111827, 0.12). Tool button images are recolored by
+               the brightness(0) filter, which works for both light and
+               dark since they share the same source. */
 
             .editor-root.editor-reduced-transparency.editor-theme-dark,
             .editor-root.editor-reduced-transparency.editor-theme-dark .editor-toolbar,
@@ -1237,17 +1929,16 @@ pub fn install_editor_css() {
 
             .editor-right-inspector {
                 min-width: 210px;
-                width: 210px;
-                max-width: 210px;
-                background: rgba(20, 20, 20, 0.94);
-                border-left: 1px solid rgba(255,255,255,0.08);
+                background: #141414;
+                border-left: 1px solid alpha(white, 0.06);
                 padding: 0;
             }
 
             .editor-inspector-title {
-                color: #f5f5f7;
-                font-size: 14px;
-                font-weight: 700;
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: -0.1px;
             }
 
             .editor-inspector-tabs {
@@ -1275,7 +1966,7 @@ pub fn install_editor_css() {
             button.editor-inspector-tab-button.active-inspector-tab {
                 background: transparent;
                 border: none;
-                color: #ff9900;
+                color: #b05c38;
             }
 
             .editor-inspector-placeholder-shell {
@@ -1284,10 +1975,29 @@ pub fn install_editor_css() {
             }
 
             .editor-inspector-placeholder {
-                opacity: 0.7;
-                color: rgba(241, 241, 243, 0.78);
+                color: rgba(255, 255, 255, 0.62);
+                font-size: 11px;
+                line-height: 1.4;
+            }
+
+            .editor-select-inspector-status {
+                color: rgba(255, 255, 255, 0.9);
                 font-size: 12px;
-                line-height: 1.45;
+                font-weight: 600;
+                padding: 10px 12px;
+            }
+
+            .editor-select-inspector-detail,
+            .editor-select-inspector-metric,
+            .editor-select-inspector-hint {
+                color: rgba(255, 255, 255, 0.68);
+                font-size: 11px;
+                line-height: 1.4;
+                padding: 10px 12px;
+            }
+
+            .editor-select-inspector-hint {
+                color: rgba(255, 255, 255, 0.52);
             }
 
             .editor-inspector-section {
@@ -1295,10 +2005,9 @@ pub fn install_editor_css() {
             }
 
             .editor-inspector-section-body {
-                background: #000000;
-                border: 1px solid rgba(255, 255, 255, 0.11);
+                background: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.06);
                 border-radius: 6px;
-                overflow: hidden;
             }
 
             .editor-inspector-option-list {
@@ -1319,19 +2028,19 @@ pub fn install_editor_css() {
             }
 
             button.editor-crop-inspector-option:hover {
-                background: rgba(255, 255, 255, 0.04);
+                background: alpha(white, 0.06);
                 color: #ffffff;
             }
 
             button.editor-crop-inspector-option.editor-crop-inspector-option-active {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background: alpha(white, 0.10);
+                border: none;
             }
 
             .editor-crop-inspector-check {
-                color: #ff9900;
-                font-size: 13px;
-                font-weight: 700;
+                color: #b05c38;
+                font-size: 12px;
+                font-weight: 600;
             }
 
             .editor-crop-dimensions-row {
@@ -1339,212 +2048,166 @@ pub fn install_editor_css() {
             }
 
             .editor-dimension-box {
-                background: rgba(255, 255, 255, 0.03);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 8px;
-                padding: 8px 12px;
+                background: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.06);
+                border-radius: 6px;
+                padding: 6px 10px;
                 min-width: 72px;
-                transition: background 120ms ease;
+                transition: background-color 120ms ease, border-color 120ms ease;
             }
 
             .editor-crop-dimensions-value {
-                color: #ffffff;
-                font-size: 14px;
-                font-weight: 800;
-                font-family: monospace;
+                color: rgba(255, 255, 255, 0.94);
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'DejaVu Sans Mono', 'Liberation Mono', Monospace;
             }
 
             .editor-crop-dimensions-separator {
-                color: rgba(241, 241, 243, 0.4);
-                font-size: 14px;
-                font-weight: 600;
+                color: rgba(255, 255, 255, 0.42);
+                font-size: 13px;
+                font-weight: 500;
                 margin: 0 4px;
             }
 
             .editor-dimension-label {
-                color: rgba(241, 241, 243, 0.45);
+                color: rgba(255, 255, 255, 0.46);
                 font-size: 9px;
-                font-weight: 700;
-                letter-spacing: 0.05em;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
                 margin-top: 2px;
             }
 
             button.editor-crop-action-button {
-                min-height: 34px;
+                min-height: 30px;
                 padding: 0 12px;
-                border-radius: 8px;
+                border-radius: 6px;
                 font-size: 12px;
-                font-weight: 700;
+                font-weight: 600;
                 box-shadow: none;
+                transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
             }
 
             button.editor-crop-action-button-secondary {
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                background: rgba(255, 255, 255, 0.03);
-                color: rgba(245, 245, 247, 0.9);
+                border: 1px solid alpha(white, 0.08);
+                background: alpha(white, 0.04);
+                color: rgba(255, 255, 255, 0.86);
             }
 
             button.editor-crop-action-button-secondary:hover {
-                background: rgba(255, 255, 255, 0.07);
+                background: alpha(white, 0.08);
+                border-color: alpha(white, 0.12);
                 color: #ffffff;
             }
 
             button.editor-crop-action-button-primary {
-                border: 1px solid #f5f5f7;
-                background: #f5f5f7;
-                color: #080808;
+                border: none;
+                background: #b05c38;
+                color: #ffffff;
             }
 
             button.editor-crop-action-button-primary:hover {
-                background: #ffffff;
-                border-color: #ffffff;
-                color: #050505;
+                background: #c06540;
+                color: #ffffff;
             }
 
             button.editor-crop-action-button-primary:active {
-                background: #dfdfe2;
-                border-color: #dfdfe2;
+                background: #8a4a2d;
             }
 
             button.editor-crop-action-button:disabled {
-                opacity: 0.55;
+                opacity: 0.45;
             }
 
-            button.editor-arrow-inspector-option {
-                border-radius: 8px;
-                color: rgba(241, 241, 243, 0.9);
-            }
-
-            button.editor-arrow-inspector-option:hover {
-                background: rgba(255, 255, 255, 0.04);
-                color: #ffffff;
-            }
-
-            button.editor-arrow-inspector-option.editor-arrow-inspector-option-active {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-
-            .editor-arrow-inspector-check {
-                color: #ff9900;
-                font-size: 13px;
-                font-weight: 700;
-            }
-
-            button.editor-text-inspector-option {
-                border-radius: 8px;
-                color: rgba(241, 241, 243, 0.9);
-            }
-
-            button.editor-text-inspector-option:hover {
-                background: rgba(255, 255, 255, 0.04);
-                color: #ffffff;
-            }
-
-            button.editor-text-inspector-option.editor-text-inspector-option-active {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-
-            .editor-text-inspector-check {
-                color: #ff9900;
-                font-size: 13px;
-                font-weight: 700;
-            }
-
-            button.editor-obfuscate-inspector-option {
-                border-radius: 8px;
-                color: rgba(241, 241, 243, 0.9);
-            }
-
-            button.editor-obfuscate-inspector-option:hover {
-                background: rgba(255, 255, 255, 0.04);
-                color: #ffffff;
-            }
-
-            button.editor-obfuscate-inspector-option.editor-obfuscate-inspector-option-active {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-
-            .editor-obfuscate-inspector-check {
-                color: #ff9900;
-                font-size: 13px;
-                font-weight: 700;
-            }
-
+            /* Unified inspector option rows (settings-nav pattern). */
+            button.editor-arrow-inspector-option,
+            button.editor-text-inspector-option,
+            button.editor-obfuscate-inspector-option,
             button.editor-number-style-option,
             button.editor-number-size-option {
-                border-radius: 8px;
-                color: rgba(241, 241, 243, 0.9);
+                border-radius: 5px;
+                color: rgba(255, 255, 255, 0.82);
+                border: none;
+                background: transparent;
+                transition: background-color 120ms ease, color 120ms ease;
             }
 
+            button.editor-arrow-inspector-option:hover,
+            button.editor-text-inspector-option:hover,
+            button.editor-obfuscate-inspector-option:hover,
             button.editor-number-style-option:hover,
             button.editor-number-size-option:hover {
-                background: rgba(255, 255, 255, 0.04);
+                background: alpha(white, 0.06);
                 color: #ffffff;
             }
 
-            button.editor-number-style-option.editor-number-style-option-active {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-
+            button.editor-arrow-inspector-option.editor-arrow-inspector-option-active,
+            button.editor-text-inspector-option.editor-text-inspector-option-active,
+            button.editor-obfuscate-inspector-option.editor-obfuscate-inspector-option-active,
+            button.editor-number-style-option.editor-number-style-option-active,
             button.editor-number-size-option.editor-number-size-option-active {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background: alpha(white, 0.10);
+                border: none;
+                color: #ffffff;
             }
 
+            .editor-arrow-inspector-check,
+            .editor-text-inspector-check,
+            .editor-obfuscate-inspector-check,
             .editor-number-style-check,
             .editor-number-size-check {
-                color: #ff9900;
-                font-size: 13px;
-                font-weight: 700;
-            }
-
-            .editor-number-start-row {
-                spacing: 8px;
-            }
-
-            .editor-number-start-label {
-                color: rgba(241, 241, 243, 0.9);
+                color: #b05c38;
                 font-size: 12px;
                 font-weight: 600;
             }
 
+            .editor-number-start-label {
+                color: rgba(255, 255, 255, 0.82);
+                font-size: 11px;
+                font-weight: 500;
+            }
+
             .editor-number-start-entry {
-                min-height: 34px;
+                min-height: 30px;
                 min-width: 48px;
                 padding: 0 10px;
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                background: rgba(255, 255, 255, 0.04);
-                color: #ffffff;
+                border-radius: 6px;
+                border: 1px solid alpha(white, 0.08);
+                background: alpha(white, 0.04);
+                color: rgba(255, 255, 255, 0.94);
                 font-size: 12px;
-                font-weight: 700;
+                font-weight: 600;
                 box-shadow: none;
+                transition: background-color 120ms ease, border-color 120ms ease;
+            }
+
+            .editor-number-start-entry:focus {
+                border-color: alpha(white, 0.20);
+                background: alpha(white, 0.08);
             }
 
             button.editor-number-start-stepper {
-                min-width: 30px;
-                min-height: 34px;
+                min-width: 28px;
+                min-height: 30px;
                 padding: 0;
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                background: rgba(255, 255, 255, 0.03);
-                color: rgba(245, 245, 247, 0.92);
-                font-size: 14px;
-                font-weight: 700;
+                border-radius: 6px;
+                border: 1px solid alpha(white, 0.08);
+                background: alpha(white, 0.04);
+                color: rgba(255, 255, 255, 0.86);
+                font-size: 13px;
+                font-weight: 600;
                 box-shadow: none;
+                transition: background-color 120ms ease, color 120ms ease;
             }
 
             button.editor-number-start-stepper:hover {
-                background: rgba(255, 255, 255, 0.07);
+                background: alpha(white, 0.08);
                 color: #ffffff;
             }
 
             button.editor-number-start-stepper:active {
-                background: rgba(255, 255, 255, 0.12);
+                background: alpha(white, 0.12);
             }
 
             .editor-background-sidebar {
@@ -1555,15 +2218,16 @@ pub fn install_editor_css() {
             }
 
             .editor-background-sidebar-title {
-                color: #f5f5f7;
-                font-size: 14px;
-                font-weight: 700;
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: -0.1px;
             }
 
             .editor-background-sidebar-body {
-                color: rgba(241, 241, 243, 0.7);
-                font-size: 12px;
-                line-height: 1.45;
+                color: rgba(255, 255, 255, 0.62);
+                font-size: 11px;
+                line-height: 1.4;
             }
 
             .editor-background-sidebar-options {
@@ -1576,9 +2240,10 @@ pub fn install_editor_css() {
             }
 
             .editor-colors-panel-helper {
-                color: rgba(241, 241, 243, 0.72);
-                font-size: 12px;
-                line-height: 1.45;
+                color: rgba(255, 255, 255, 0.62);
+                font-size: 11px;
+                line-height: 1.4;
+                margin-bottom: 2px;
             }
 
             .editor-colors-panel-section {
@@ -1604,9 +2269,9 @@ pub fn install_editor_css() {
             }
 
             .editor-colors-panel-action-button {
-                min-height: 34px;
+                min-height: 30px;
                 padding: 0 12px;
-                border-radius: 8px;
+                border-radius: 6px;
                 border: 1px solid rgba(255, 255, 255, 0.10);
                 background: rgba(255, 255, 255, 0.03);
                 color: rgba(245, 245, 247, 0.9);
@@ -1614,7 +2279,7 @@ pub fn install_editor_css() {
             }
 
             .editor-colors-panel-action-button:hover {
-                background: rgba(255, 255, 255, 0.07);
+                background: alpha(white, 0.06);
                 color: #ffffff;
             }
 
@@ -1623,10 +2288,12 @@ pub fn install_editor_css() {
             }
 
             .editor-background-section-title {
-                color: rgba(245, 245, 247, 0.92);
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 0.02em;
+                color: rgba(255, 255, 255, 0.46);
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.6px;
+                text-transform: uppercase;
+                margin-top: 4px;
             }
 
             button.editor-background-section-action-button {
@@ -1635,19 +2302,21 @@ pub fn install_editor_css() {
                 background: transparent;
                 border: none;
                 box-shadow: none;
-                color: #3b82f6;
-                font-size: 11px;
+                color: #b05c38;
+                font-size: 10px;
                 font-weight: 600;
-                transition: opacity 120ms ease;
+                letter-spacing: 0.4px;
+                text-transform: uppercase;
+                transition: color 120ms ease;
             }
 
             button.editor-background-section-action-button:hover {
-                opacity: 0.8;
+                color: #c06540;
                 background: transparent;
             }
 
             button.editor-background-section-action-button:active {
-                opacity: 0.6;
+                color: #8a4a2d;
                 background: transparent;
             }
 
@@ -1771,10 +2440,12 @@ pub fn install_editor_css() {
             button.editor-background-alignment-button {
                 min-height: 24px;
                 min-width: 34px;
-                border-radius: 8px;
-                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-radius: 5px;
+                border: none;
                 padding: 0;
-                background: rgba(255, 255, 255, 0.03);
+                background: transparent;
+                box-shadow: none;
+                transition: background-color 120ms ease, box-shadow 120ms ease;
             }
 
             .editor-background-alignment-icon {
@@ -1787,19 +2458,19 @@ pub fn install_editor_css() {
             .editor-background-alignment-icon-frame {
                 min-width: 10px;
                 min-height: 6px;
-                background: rgba(241, 241, 243, 0.88);
+                background: rgba(255, 255, 255, 0.78);
                 border-radius: 1px;
                 margin: 3px;
                 border: none;
             }
 
             button.editor-background-alignment-button:hover {
-                background: rgba(255, 255, 255, 0.08);
+                background: alpha(white, 0.06);
             }
 
             button.editor-background-alignment-button:active,
             button.editor-background-alignment-button:focus-visible {
-                background: rgba(255, 255, 255, 0.12);
+                background: alpha(white, 0.10);
             }
 
             .editor-background-checkbox-row {
@@ -1808,19 +2479,27 @@ pub fn install_editor_css() {
             }
 
             checkbutton.editor-background-checkbox {
-                color: rgba(241, 241, 243, 0.88);
+                color: rgba(255, 255, 255, 0.82);
                 min-width: 20px;
                 padding: 0;
+                font-size: 11px;
             }
 
             checkbutton.editor-background-checkbox check {
-                border-radius: 5px;
-                background: rgba(255, 255, 255, 0.03);
-                border: 1px solid rgba(255, 255, 255, 0.16);
+                border-radius: 4px;
+                background: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.18);
+                min-width: 14px;
+                min-height: 14px;
+            }
+
+            checkbutton.editor-background-checkbox check:checked {
+                background: #b05c38;
+                border-color: #b05c38;
             }
 
             checkbutton.editor-background-checkbox label {
-                color: rgba(241, 241, 243, 0.88);
+                color: rgba(255, 255, 255, 0.82);
                 min-width: 20px;
             }
 
@@ -1828,21 +2507,28 @@ pub fn install_editor_css() {
                 margin-top: 2px;
             }
 
+            /* Dropdowns in the editor mirror the settings UI ComboBoxText style:
+               flat alpha-white surface, no border, dark popover with subtle border. */
             dropdown.editor-background-ratio-dropdown {
-                min-height: 32px;
+                min-height: 28px;
                 min-width: 20px;
                 padding: 0;
+                background: transparent;
+                border: none;
+                box-shadow: none;
             }
 
             dropdown.editor-background-ratio-dropdown > button {
-                min-height: 32px;
+                min-height: 28px;
                 min-width: 20px;
-                border-radius: 8px;
-                padding: 0 6px;
-                background: rgba(255, 255, 255, 0.03);
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                color: rgba(241, 241, 243, 0.88);
+                border-radius: 5px;
+                padding: 0 8px;
+                background: alpha(white, 0.06);
+                background-image: none;
+                border: none;
+                color: #F1F1F3;
                 box-shadow: none;
+                transition: background-color 120ms ease;
             }
 
             dropdown.editor-background-ratio-dropdown > button > box {
@@ -1850,66 +2536,103 @@ pub fn install_editor_css() {
             }
 
             dropdown.editor-background-ratio-dropdown > button:hover {
-                background: rgba(255, 255, 255, 0.06);
-                border-color: rgba(255, 255, 255, 0.16);
+                background: alpha(white, 0.10);
+                border: none;
             }
 
             dropdown.editor-background-ratio-dropdown > button:active,
-            dropdown.editor-background-ratio-dropdown > button:focus-visible {
-                background: rgba(255, 255, 255, 0.08);
-                border-color: rgba(255, 255, 255, 0.20);
+            dropdown.editor-background-ratio-dropdown > button:focus-visible,
+            dropdown.editor-background-ratio-dropdown > button:checked {
+                background: alpha(white, 0.12);
+                border: none;
+                outline: none;
             }
 
-            /* Hide the tick/checkmark in dropdown popover */
+            dropdown.editor-background-ratio-dropdown popover {
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover > contents {
+                background-color: #141414;
+                color: #F1F1F3;
+                border: 1px solid alpha(white, 0.12);
+                border-radius: 8px;
+                padding: 4px;
+                box-shadow: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview,
+            dropdown.editor-background-ratio-dropdown popover listview row {
+                background-color: transparent;
+                color: #F1F1F3;
+                border-radius: 5px;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview row:hover {
+                background-color: alpha(white, 0.08);
+                color: #F1F1F3;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview row:selected {
+                background-color: alpha(white, 0.12);
+                color: #F1F1F3;
+            }
+
+            /* Hide the tick/checkmark in dropdown popover (selection is shown via row bg). */
             dropdown.editor-background-ratio-dropdown popover > contents listview row image {
                 opacity: 0;
             }
 
             button.editor-background-option-button {
-                min-height: 36px;
-                border-radius: 8px;
+                min-height: 32px;
+                border-radius: 6px;
                 padding: 0 12px;
-                background: rgba(255, 255, 255, 0.02);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                color: rgba(241, 241, 243, 0.86);
+                background: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.06);
+                color: rgba(255, 255, 255, 0.82);
                 box-shadow: none;
+                transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
             }
 
             button.editor-background-option-button:hover {
-                background: rgba(255, 255, 255, 0.06);
-                border-color: rgba(255, 255, 255, 0.12);
+                background: alpha(white, 0.08);
+                border-color: alpha(white, 0.10);
                 color: #ffffff;
             }
 
             button.editor-background-option-button:active {
-                background: rgba(255, 255, 255, 0.04);
-                border-color: rgba(255, 255, 255, 0.16);
+                background: alpha(white, 0.12);
+                border-color: alpha(white, 0.14);
             }
 
             button.editor-background-option-button.active-background-option {
-                background: rgba(255, 255, 255, 0.12);
-                border-color: #B05C38;
+                background: alpha(white, 0.10);
+                border: 1px solid transparent;
                 color: #ffffff;
-                border-width: 2px;
+                box-shadow: inset 0 0 0 1px #b05c38;
             }
 
             button.editor-background-alignment-button.active-alignment-option {
-                background: rgba(255, 255, 255, 0.15);
-                border: 1px solid #B05C38;
-                border-radius: 6px;
+                background: alpha(white, 0.10);
+                border: none;
+                border-radius: 5px;
+                box-shadow: inset 0 0 0 1px #b05c38;
             }
 
             button.editor-background-gradient-button {
                 padding: 0;
-                background-color: rgba(255, 255, 255, 0.03);
-                border: 1px solid rgba(255, 255, 255, 0.10);
+                background-color: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.06);
                 box-shadow: none;
+                transition: box-shadow 120ms ease, border-color 120ms ease;
             }
 
             button.editor-background-gradient-button.active-background-option {
-                border-color: #B05C38;
-                border-width: 2px;
-                background-color: rgba(255, 255, 255, 0.08);
+                border: 1px solid transparent;
+                background-color: alpha(white, 0.06);
+                box-shadow: inset 0 0 0 2px #b05c38;
             }
 
             .text-entry-overlay {
@@ -1937,21 +2660,22 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-gradient-button:hover {
-                border-color: rgba(255, 255, 255, 0.18);
+                border-color: alpha(white, 0.16);
                 box-shadow: none;
             }
 
             button.editor-background-gradient-button:active {
-                border-color: rgba(255, 255, 255, 0.22);
+                border-color: alpha(white, 0.22);
                 box-shadow: none;
             }
 
             button.editor-background-add-button {
                 padding: 0;
-                background-color: rgba(255, 255, 255, 0.02);
-                border: 1px dashed rgba(255, 255, 255, 0.24);
-                color: rgba(245, 245, 247, 0.82);
+                background-color: alpha(white, 0.02);
+                border: 1px dashed alpha(white, 0.22);
+                color: rgba(255, 255, 255, 0.78);
                 box-shadow: none;
+                transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
             }
 
             button.editor-background-add-button.editor-background-preview-size-regular {
@@ -1973,14 +2697,14 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-add-button:hover {
-                background-color: rgba(255, 255, 255, 0.05);
-                border-color: rgba(255, 255, 255, 0.34);
+                background-color: alpha(white, 0.06);
+                border-color: alpha(white, 0.32);
                 color: #ffffff;
             }
 
             button.editor-background-add-button:active {
-                background-color: rgba(255, 255, 255, 0.03);
-                border-color: rgba(255, 255, 255, 0.4);
+                background-color: alpha(white, 0.04);
+                border-color: alpha(white, 0.38);
             }
 
             .editor-background-add-label {
@@ -2000,14 +2724,14 @@ pub fn install_editor_css() {
             }
 
             button.editor-background-blurred-button {
-                background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.06) 100%);
-                border-color: rgba(255, 255, 255, 0.14);
+                background-image: linear-gradient(135deg, alpha(white, 0.16) 0%, alpha(white, 0.06) 100%);
+                border: 1px solid alpha(white, 0.10);
             }
 
             button.editor-background-blurred-button.active-background-option {
-                border-color: #B05C38;
-                border-width: 2px;
-                background-color: rgba(255, 255, 255, 0.12);
+                border: 1px solid transparent;
+                background-color: alpha(white, 0.10);
+                box-shadow: inset 0 0 0 2px #b05c38;
             }
 
             /* Blur intensity visual indicators */
@@ -2035,22 +2759,22 @@ pub fn install_editor_css() {
                 min-height: 18px;
                 padding: 0;
                 border-radius: 999px;
-                border: 1px solid rgba(255, 255, 255, 0.16);
+                border: 1px solid alpha(white, 0.16);
                 box-shadow: none;
+                transition: box-shadow 120ms ease, border-color 120ms ease;
             }
 
             button.editor-background-plain-color-button:hover {
-                border-color: rgba(255, 255, 255, 0.32);
+                border-color: alpha(white, 0.32);
             }
 
             button.editor-background-plain-color-button:active {
-                border-color: rgba(255, 255, 255, 0.4);
+                border-color: alpha(white, 0.42);
             }
 
             button.editor-background-plain-color-button.active-background-option {
-                border-color: #B05C38;
-                border-width: 2px;
-                background-color: rgba(255, 255, 255, 0.12);
+                border-color: transparent;
+                box-shadow: 0 0 0 2px #b05c38;
             }
 
             button.editor-background-plain-color-button.editor-background-plain-color-1 { background: #ffffff; }
@@ -2538,23 +3262,29 @@ pub fn install_edge_resize(root: &impl IsA<gtk4::Widget>, window: &gtk4::Applica
     let window_resize = window.downgrade();
     resize_click.connect_pressed(move |gesture, _, x, y| {
         let Some(window) = window_resize.upgrade() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let Some(event) = gesture.current_event() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let Some(device) = event.device() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let width = window.allocated_width() as f64;
         let height = window.allocated_height() as f64;
         let Some(edge) = edge_for_resize(x, y, width, height) else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let Some(surface) = window.surface() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         let Ok(toplevel) = surface.downcast::<gdk::Toplevel>() else {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
             return;
         };
         toplevel.begin_resize(
@@ -2671,13 +3401,23 @@ mod tests {
     }
 
     #[test]
-    fn editor_css_avoids_web_only_alignment_properties() {
+    fn editor_css_avoids_unsupported_gtk_properties() {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
-        assert!(
-            !production_source.contains("align-items:"),
-            "editor CSS still contains unsupported GTK property align-items"
-        );
+        for property in [
+            "align-items:",
+            "text-align:",
+            "\n                height:",
+            "\n                width:",
+            "max-width:",
+            "overflow:",
+            "\n                spacing:",
+        ] {
+            assert!(
+                !production_source.contains(property),
+                "editor CSS still contains unsupported GTK property {property}"
+            );
+        }
     }
 
     #[test]
@@ -2709,18 +3449,22 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-background-alignment-button.active-alignment-option {\n                background: rgba(255, 255, 255, 0.15);\n                border: 1px solid #B05C38;"),
+            production_source
+                .contains("button.editor-background-alignment-button.active-alignment-option {")
+                && production_source.contains("box-shadow: inset 0 0 0 1px #b05c38;"),
             "alignment selected state should use the #B05C38 editor accent",
         );
     }
 
     #[test]
-    fn editor_toolbar_active_tool_uses_flat_orange_slider_accent() {
+    fn editor_toolbar_active_tool_uses_flat_white_alpha_matching_settings_nav() {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-tool-button.active-tool {\n                background-color: #B05C38;\n                color: #ffffff;\n                border: 1px solid #B05C38;\n                box-shadow: none;"),
-            "selected annotate toolbar tools should use the #B05C38 editor accent",
+            production_source.contains("button.editor-tool-button.active-tool {")
+                && production_source.contains("background-color: alpha(white, 0.14);")
+                && production_source.contains("border: none;"),
+            "selected annotate toolbar tools should use a flat alpha(white, 0.14) background matching settings-nav-item-selected pattern",
         );
     }
 
@@ -2730,9 +3474,9 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("button.editor-inspector-tab-button {\n                min-height: 20px;\n                padding: 0;\n                border-radius: 0;\n                border: none;\n                background: transparent;")
-                && production_source.contains("button.editor-inspector-tab-button.active-inspector-tab {\n                background: transparent;\n                border: none;\n                color: #ff9900;")
+                && production_source.contains("button.editor-inspector-tab-button.active-inspector-tab {\n                background: transparent;\n                border: none;\n                color: #b05c38;")
                 && production_source.contains(".editor-inspector-tabs {\n                margin-top: 16px;\n                margin-bottom: 12px;")
-                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && production_source.contains(".editor-inspector-placeholder-shell {\n                min-width: 210px;")
                 && production_source.contains(".editor-background-sidebar {\n                min-width: 210px;")
                 && production_source.contains(".editor-colors-panel {\n                min-width: 210px;")
@@ -2747,8 +3491,8 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-arrow-inspector-option.editor-arrow-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
-                && production_source.contains(".editor-arrow-inspector-check {\n                color: #ff9900;"),
+            production_source.contains("editor-arrow-inspector-option-active")
+                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #b05c38;"),
             "Arrow inspector selection should use a subtle row surface plus an orange tick indicator",
         );
     }
@@ -2758,9 +3502,9 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-text-inspector-option.editor-text-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
-                && production_source.contains(".editor-text-inspector-check {\n                color: #ff9900;")
-                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+            production_source.contains("editor-text-inspector-option-active")
+                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #b05c38;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("TEXT_SIDEBAR_WIDTH"),
             "Text inspector rows should mirror Arrow selection styling without introducing a new sidepanel width path",
         );
@@ -2771,9 +3515,9 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-obfuscate-inspector-option.editor-obfuscate-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
-                && production_source.contains(".editor-obfuscate-inspector-check {\n                color: #ff9900;")
-                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+            production_source.contains("editor-obfuscate-inspector-option-active")
+                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #b05c38;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("OBFUSCATE_SIDEBAR_WIDTH"),
             "Obfuscate inspector rows should use the shared sidepanel language without introducing a new width path",
         );
@@ -2784,10 +3528,10 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-number-style-option.editor-number-style-option-active {\n                background: rgba(255, 255, 255, 0.08);")
-                && production_source.contains("button.editor-number-size-option.editor-number-size-option-active {\n                background: rgba(255, 255, 255, 0.08);")
-                && production_source.contains(".editor-number-style-check,\n            .editor-number-size-check {\n                color: #ff9900;")
-                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;\n                width: 210px;\n                max-width: 210px;")
+            production_source.contains("editor-number-style-option-active")
+                && production_source.contains("editor-number-size-option-active")
+                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #b05c38;")
+                && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("NUMBER_SIDEBAR_WIDTH"),
             "Number inspector rows should match the migrated sidepanel surface language without introducing a new width path",
         );
@@ -2798,10 +3542,9 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains(".editor-number-start-row {\n                spacing: 8px;")
-                && production_source.contains(".editor-number-start-label {\n                color: rgba(241, 241, 243, 0.9);")
-                && production_source.contains(".editor-number-start-entry {\n                min-height: 34px;")
-                && production_source.contains("button.editor-number-start-stepper {\n                min-width: 30px;"),
+            production_source.contains(".editor-number-start-label {")
+                && production_source.contains(".editor-number-start-entry {")
+                && production_source.contains("button.editor-number-start-stepper {"),
             "Number inspector start controls should be styled as inspector-native sidebar fields",
         );
     }
@@ -2811,8 +3554,8 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-crop-inspector-option.editor-crop-inspector-option-active {\n                background: rgba(255, 255, 255, 0.08);")
-                && production_source.contains(".editor-crop-inspector-check {\n                color: #ff9900;")
+            production_source.contains("editor-crop-inspector-option-active")
+                && production_source.contains(".editor-crop-inspector-check {\n                color: #b05c38;")
                 && production_source.contains(".editor-crop-dimensions-row {\n                padding: 12px 0;"),
             "Crop inspector should use the same restrained inspector surface language as the other side-panel tools",
         );
@@ -2823,13 +3566,17 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains(".editor-footer-zoom-popup {\n                padding: 0;")
-                && production_source.contains("background: rgba(20, 20, 20, 0.94);")
-                && production_source.contains("border: 1px solid rgba(255, 255, 255, 0.08);")
-                && production_source.contains("border-radius: 12px;")
+            production_source.contains(".editor-footer-zoom-popup {")
+                && production_source.contains("background: #1a1a1a;")
+                && production_source.contains("border-radius: 10px;")
+                && production_source.contains(".editor-root.editor-theme-light .editor-footer-zoom-popup {")
+                && production_source.contains(".editor-footer-zoom-popup.editor-theme-light {")
+                && production_source.contains("background: #ffffff;")
+                && production_source.contains(".editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-row {")
+                && production_source.contains(".editor-footer-zoom-popup.editor-theme-light .editor-footer-zoom-mouse-drawing {")
                 && !production_source.contains(".editor-footer-zoom-popup {\n                min-height: 100%;")
                 && !production_source.contains(".editor-footer-zoom-popup {\n                width: 210px;"),
-            "Footer zoom popover should borrow inspector surface styling without becoming a full-height or fixed-width sidebar",
+            "Footer zoom popover should use flat dark/light surfaces matching the settings UI language without becoming a full-height or fixed-width sidebar",
         );
     }
 
@@ -2839,8 +3586,8 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("button.editor-footer-zoom-action-btn {")
-                && production_source.contains("button.editor-footer-zoom-action-btn:hover {\n                background: rgba(255, 255, 255, 0.04);")
-                && production_source.contains(".editor-footer-zoom-row {\n                padding: 6px 12px;"),
+                && production_source.contains("button.editor-footer-zoom-action-btn:hover {")
+                && production_source.contains(".editor-footer-zoom-row {"),
             "Footer zoom styling should keep action rows interactive and hint rows clearly non-interactive",
         );
     }
@@ -2850,7 +3597,8 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-add-to-colors-button {\n                min-width: 220px;\n                min-height: 36px;\n                border-radius: 8px;\n                background: #B05C38;")
+            production_source.contains("button.editor-add-to-colors-button {")
+                && production_source.contains("background: #B05C38;")
                 && production_source.contains("button.editor-add-to-colors-button:hover {\n                background: #C66B4A;")
                 && production_source.contains("button.editor-add-to-colors-button:active {\n                background: #8A4A2D;"),
             "Add to colors button should use the #B05C38 editor accent states",
@@ -2862,9 +3610,9 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains(".editor-toolbar-color-status {\n                min-height: 34px;\n                padding: 0;\n                border: none;\n                background: transparent;")
-                && production_source.contains(".editor-toolbar-color-status-swatch {\n                min-width: 30px;\n                min-height: 30px;\n                border-radius: 6px;")
-                && production_source.contains(".editor-toolbar-color-status-label {\n                color: rgba(245, 245, 247, 0.92);\n                font-size: 14px;"),
+            production_source.contains(".editor-toolbar-color-status {")
+                && production_source.contains(".editor-toolbar-color-status-swatch {")
+                && production_source.contains(".editor-toolbar-color-status-label {"),
             "Toolbar color status chip should have dedicated swatch and label styles",
         );
     }

@@ -12,7 +12,7 @@ mod state;
 #[allow(dead_code)]
 mod text_detect;
 pub mod types;
-mod ui_support;
+pub(crate) mod ui_support;
 #[path = "editor/window/mod.rs"]
 pub mod window;
 

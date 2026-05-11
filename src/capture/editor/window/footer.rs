@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Box as GtkBox, Button, Label, Orientation};
+use gtk4::{gdk, prelude::*, Box as GtkBox, Button, Label, Orientation};
 
 use super::super::ui_support::footer_icon_button;
 
@@ -16,6 +16,7 @@ pub(super) struct FooterParts {
     pub zoom_to_selection_btn: Button,
     pub copy_btn: Button,
     pub upload_btn: Button,
+    pub save_btn: Button,
 }
 
 fn build_zoom_row(label: &str, shortcut: &str) -> (Button, GtkBox) {
@@ -60,9 +61,20 @@ fn build_mouse_hints() -> GtkBox {
     drawing.add_css_class("editor-footer-zoom-mouse-drawing");
     drawing.set_content_width(60);
     drawing.set_content_height(60);
-    drawing.set_draw_func(move |_, cr, width, height| {
+    drawing.set_draw_func(move |widget, cr, width, height| {
         let w = f64::from(width);
         let h = f64::from(height);
+        let fg = widget.style_context().color();
+        let accent = widget
+            .style_context()
+            .lookup_color("accent_color")
+            .unwrap_or_else(|| gdk::RGBA::new(0.69, 0.36, 0.22, 1.0));
+        let fg_r = fg.red() as f64;
+        let fg_g = fg.green() as f64;
+        let fg_b = fg.blue() as f64;
+        let accent_r = accent.red() as f64;
+        let accent_g = accent.green() as f64;
+        let accent_b = accent.blue() as f64;
 
         // Draw mouse body (simple rounded rect)
         let mouse_w = 24.0;
@@ -71,7 +83,7 @@ fn build_mouse_hints() -> GtkBox {
         let mouse_y = h - mouse_h - 5.0;
         let radius = 10.0;
 
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.1);
+        cr.set_source_rgba(fg_r, fg_g, fg_b, 0.24);
         cr.set_line_width(1.0);
         cr.new_sub_path();
         cr.arc(
@@ -103,7 +115,7 @@ fn build_mouse_hints() -> GtkBox {
         let wheel_h = 10.0;
         let wheel_x = (w - wheel_w) / 2.0;
         let wheel_y = mouse_y + 8.0;
-        cr.set_source_rgba(0.0, 0.5, 1.0, 0.8);
+        cr.set_source_rgba(accent_r, accent_g, accent_b, 0.85);
         cr.new_sub_path();
         cr.arc(
             wheel_x + wheel_w / 2.0,
@@ -123,7 +135,7 @@ fn build_mouse_hints() -> GtkBox {
         let _ = cr.fill();
 
         // Draw lines pointing to hints
-        cr.set_source_rgba(0.0, 0.5, 1.0, 0.4);
+        cr.set_source_rgba(accent_r, accent_g, accent_b, 0.45);
         cr.set_line_width(0.8);
 
         // To scroll wheel
@@ -240,11 +252,18 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     footer_left.set_halign(gtk4::Align::Start);
     footer_left.append(&zoom_button);
 
-    let footer_right = GtkBox::new(Orientation::Horizontal, 6);
+    let save_btn = Button::with_label("Done");
+    save_btn.set_has_frame(false);
+    save_btn.add_css_class("editor-done-button");
+    save_btn.add_css_class("body");
+    save_btn.set_valign(gtk4::Align::Center);
+
+    let footer_right = GtkBox::new(Orientation::Horizontal, 8);
     footer_right.set_hexpand(true);
     footer_right.set_halign(gtk4::Align::End);
     footer_right.append(&copy_btn);
     footer_right.append(&upload_btn);
+    footer_right.append(&save_btn);
 
     root.append(&footer_left);
     root.append(&footer_right);
@@ -263,5 +282,6 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
         zoom_to_selection_btn,
         copy_btn,
         upload_btn,
+        save_btn,
     }
 }

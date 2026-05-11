@@ -1,6 +1,6 @@
 use gtk4::{
-    prelude::*, Box as GtkBox, Button, CenterBox, Entry, Image, Label, Orientation, Popover, Scale,
-    Stack,
+    prelude::*, Align, Box as GtkBox, Button, CenterBox, Entry, Image, Label, Orientation, Popover,
+    Scale, Stack,
 };
 use std::rc::Rc;
 
@@ -64,7 +64,6 @@ pub(super) struct ToolbarRightParts {
     pub undo_btn: Button,
     pub redo_btn: Button,
     pub delete_selected_btn: Button,
-    pub save_btn: Button,
 }
 
 pub(super) struct ToolbarModeParts {
@@ -129,24 +128,30 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     let root = CenterBox::new();
     root.add_css_class("editor-toolbar");
 
+    // Window controls on the right (created here, placed in right controls)
     let traffic_close = traffic_light_button("traffic-light-red", "Close");
+    traffic_close.remove_css_class("recent-captures-wm-btn");
+    traffic_close.remove_css_class("recent-captures-wm-close");
+    traffic_close.add_css_class("recording-editor-traffic-btn");
     let traffic_minimize = traffic_light_button("traffic-light-yellow", "Minimize");
+    traffic_minimize.remove_css_class("recent-captures-wm-btn");
+    traffic_minimize.add_css_class("recording-editor-traffic-btn");
     let traffic_zoom = traffic_light_button("traffic-light-green", "Zoom");
+    traffic_zoom.remove_css_class("recent-captures-wm-btn");
+    traffic_zoom.add_css_class("recording-editor-traffic-btn");
 
-    let traffic_lights = GtkBox::new(Orientation::Horizontal, 6);
-    traffic_lights.add_css_class("editor-traffic-lights");
-    traffic_lights.append(&traffic_close);
-    traffic_lights.append(&traffic_minimize);
-    traffic_lights.append(&traffic_zoom);
+    for button in [&traffic_close, &traffic_minimize, &traffic_zoom] {
+        button.set_size_request(24, 24);
+        button.set_valign(Align::Center);
+    }
 
-    let select_btn = icon_tool_button(icon_names::POINTER_PRIMARY_CLICK, "Select");
+    let select_btn = icon_tool_button(icon_names::custom::SELECT_MODE_SYMBOLIC, "Select");
     let crop_btn = icon_tool_button(icon_names.crop, "Crop");
-    let background_btn = icon_tool_button(icon_names::IMAGE_REGULAR, "Background");
+    let background_btn = icon_tool_button(icon_names::custom::IMAGE_ALT_SYMBOLIC, "Background");
     let draw_btn = icon_tool_button(icon_names.draw, "Pen");
 
-    let left_group = GtkBox::new(Orientation::Horizontal, 16);
+    let left_group = GtkBox::new(Orientation::Horizontal, 0);
     left_group.add_css_class("editor-toolbar-left");
-    left_group.append(&traffic_lights);
     root.set_start_widget(Some(&left_group));
 
     let arrow_btn = icon_tool_button(icon_names.arrow, "Arrow");
@@ -575,14 +580,15 @@ pub(super) fn build_toolbar_mode_controls(
     let color_group = GtkBox::new(Orientation::Horizontal, 0);
     color_group.add_css_class("editor-color-group");
 
-    let color_status = GtkBox::new(Orientation::Horizontal, 8);
+    // Color status chip - card-style: circle dot + stacked hex label + "Tab to copy" helper.
+    let color_status = GtkBox::new(Orientation::Horizontal, 10);
     color_status.add_css_class("editor-toolbar-color-status");
     color_status.set_valign(gtk4::Align::Center);
 
     let color_status_swatch = GtkBox::new(Orientation::Horizontal, 0);
     color_status_swatch.add_css_class("editor-toolbar-color-status-swatch");
     color_status_swatch.set_widget_name("editor-toolbar-color-status-swatch");
-    color_status_swatch.set_size_request(30, 30);
+    color_status_swatch.set_size_request(12, 12);
     color_status_swatch.set_halign(gtk4::Align::Center);
     color_status_swatch.set_valign(gtk4::Align::Center);
     color_status_swatch.set_hexpand(false);
@@ -848,24 +854,62 @@ pub(super) fn build_toolbar_mode_controls(
         number_size_list,
     ) = build_number_options_dropdown();
 
-    let primary_tools_group = GtkBox::new(Orientation::Horizontal, 2);
-    primary_tools_group.add_css_class("editor-tools-group");
-    primary_tools_group.add_css_class("editor-primary-tools-group");
-    primary_tools_group.append(select_btn);
-    primary_tools_group.append(crop_btn);
-    primary_tools_group.append(background_btn);
-    primary_tools_group.append(draw_btn);
+    // --- Semantic tool groups (senior-designer redesign) ---
+    // Each group is its own subtle pill container; the wrapping row provides breathing room.
+
+    // Group 1: Selection & canvas-level tools
+    let selection_group = GtkBox::new(Orientation::Horizontal, 1);
+    selection_group.add_css_class("editor-tools-subgroup");
+    selection_group.append(select_btn);
+    selection_group.append(crop_btn);
+    selection_group.append(background_btn);
+
+    // Group 2: Drawing tools (freehand marks)
+    let drawing_group = GtkBox::new(Orientation::Horizontal, 1);
+    drawing_group.add_css_class("editor-tools-subgroup");
+    drawing_group.append(draw_btn);
+    drawing_group.append(highlighter_btn);
+
+    // Group 3: Shapes
+    let shapes_group = GtkBox::new(Orientation::Horizontal, 1);
+    shapes_group.add_css_class("editor-tools-subgroup");
+    shapes_group.append(arrow_btn);
+    shapes_group.append(line_btn);
+    shapes_group.append(box_btn);
+    shapes_group.append(circle_btn);
+
+    // Group 4: Content (text & numbering)
+    let content_group = GtkBox::new(Orientation::Horizontal, 1);
+    content_group.add_css_class("editor-tools-subgroup");
+    content_group.append(text_btn);
+    content_group.append(number_btn);
+
+    // Group 5: Effects (redaction / emphasis)
+    let effects_group = GtkBox::new(Orientation::Horizontal, 1);
+    effects_group.add_css_class("editor-tools-subgroup");
+    effects_group.append(obfuscate_btn);
+    effects_group.append(focus_btn);
+
+    // Wrapper row: holds all five groups with vertical dividers between them.
+    let primary_tools_group = GtkBox::new(Orientation::Horizontal, 6);
+    primary_tools_group.add_css_class("editor-primary-tools-row");
+
+    let make_divider = || {
+        let d = GtkBox::new(Orientation::Vertical, 0);
+        d.add_css_class("editor-tools-divider");
+        d.set_vexpand(true);
+        d
+    };
+
+    primary_tools_group.append(&selection_group);
     primary_tools_group.append(sep_1);
-    primary_tools_group.append(box_btn);
-    primary_tools_group.append(circle_btn);
-    primary_tools_group.append(arrow_btn);
-    primary_tools_group.append(line_btn);
-    primary_tools_group.append(text_btn);
-    primary_tools_group.append(obfuscate_btn);
-    primary_tools_group.append(focus_btn);
-    primary_tools_group.append(number_btn);
-    primary_tools_group.append(highlighter_btn);
+    primary_tools_group.append(&drawing_group);
     primary_tools_group.append(sep_2);
+    primary_tools_group.append(&shapes_group);
+    primary_tools_group.append(&make_divider());
+    primary_tools_group.append(&content_group);
+    primary_tools_group.append(&make_divider());
+    primary_tools_group.append(&effects_group);
 
     let standard_mode_group = GtkBox::new(Orientation::Horizontal, 10);
     standard_mode_group.add_css_class("editor-toolbar-mode-group");
@@ -931,6 +975,9 @@ pub(super) fn build_toolbar_right_controls(
     undo_icon_name: &str,
     redo_icon_name: &str,
     delete_icon_name: &str,
+    traffic_minimize: &Button,
+    traffic_zoom: &Button,
+    traffic_close: &Button,
 ) -> ToolbarRightParts {
     let undo_btn = icon_tool_button(undo_icon_name, "Undo");
     let redo_btn = icon_tool_button(redo_icon_name, "Redo");
@@ -950,23 +997,25 @@ pub(super) fn build_toolbar_right_controls(
     right_tools.append(&history_group);
     right_tools.append(color_status);
 
-    let save_btn = Button::with_label("Done");
-    save_btn.set_has_frame(false);
-    save_btn.add_css_class("editor-done-button");
-    save_btn.add_css_class("body");
-    save_btn.set_valign(gtk4::Align::Center);
+    let wm_controls = GtkBox::new(Orientation::Horizontal, 6);
+    wm_controls.add_css_class("editor-toolbar-wm-controls");
+    wm_controls.set_valign(Align::Center);
+    wm_controls.set_margin_start(8);
+    wm_controls.set_margin_end(2);
+    wm_controls.append(traffic_minimize);
+    wm_controls.append(traffic_zoom);
+    wm_controls.append(traffic_close);
 
-    let root = GtkBox::new(Orientation::Horizontal, 16);
+    let root = GtkBox::new(Orientation::Horizontal, 0);
     root.add_css_class("editor-toolbar-right");
     root.append(&right_tools);
-    root.append(&save_btn);
+    root.append(&wm_controls);
 
     ToolbarRightParts {
         root,
         undo_btn,
         redo_btn,
         delete_selected_btn,
-        save_btn,
     }
 }
 
@@ -1023,6 +1072,7 @@ pub(super) fn build_toolbar_tool_updater(
 
         let primary_surface = match tool {
             Tool::Background => Some(("Background", "background")),
+            Tool::Select => Some(("Select", "select")),
             Tool::Crop => Some(("Crop", "crop")),
             Tool::Pen => Some(("Pen", "pen")),
             Tool::Arrow => Some(("Arrow", "arrow")),
@@ -1098,7 +1148,7 @@ mod tests {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("color_status_swatch.set_size_request(30, 30);")
+            production_source.contains("color_status_swatch.set_size_request(12, 12);")
                 && production_source.contains("color_status_swatch.set_halign(gtk4::Align::Center);")
                 && production_source.contains("color_status_swatch.set_valign(gtk4::Align::Center);")
                 && production_source.contains("color_status_swatch.set_hexpand(false);")
@@ -1135,15 +1185,29 @@ mod tests {
     }
 
     #[test]
-    fn toolbar_places_color_status_before_done_button_in_right_controls() {
+    fn toolbar_right_controls_contain_history_and_color_status() {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains(
                 "pub(super) fn build_toolbar_right_controls(\n    color_status: &GtkBox,"
             ) && production_source.contains("right_tools.append(color_status);")
-                && production_source.contains("root.append(&save_btn);"),
-            "Toolbar should place the color status in the right controls before the Done button",
+                && production_source.contains("right_tools.append(&history_group);"),
+            "Toolbar right controls should contain history group and color status",
+        );
+    }
+
+    #[test]
+    fn toolbar_includes_window_controls_on_right_with_traffic_btn_style() {
+        let source = include_str!("toolbar.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("recording-editor-traffic-btn")
+                && production_source.contains("wm_controls.append(traffic_minimize);")
+                && production_source.contains("wm_controls.append(traffic_zoom);")
+                && production_source.contains("wm_controls.append(traffic_close);")
+                && production_source.contains("root.append(&wm_controls);"),
+            "Toolbar should include window controls on the right using the same traffic-btn style as settings/video editor",
         );
     }
 
@@ -1211,10 +1275,10 @@ mod tests {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("primary_tools_group.append(crop_btn);")
+            production_source.contains("selection_group.append(crop_btn);")
                 && !production_source.contains("toolbar_mode_stack.add_named(&crop_mode_group, Some(\"crop\"));")
                 && production_source.contains("Tool::Crop => Some((\"Crop\", \"crop\"))"),
-            "Toolbar should keep the Crop tool button in primary_tools_group while routing Crop through the inspector instead of a toolbar mode stack",
+            "Toolbar should keep the Crop tool button in the selection group while routing Crop through the inspector instead of a toolbar mode stack",
         );
     }
 }

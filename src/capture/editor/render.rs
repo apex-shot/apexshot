@@ -2994,6 +2994,7 @@ pub fn draw_canvas_checkerboard_background(
     width: i32,
     height: i32,
     tint: Option<DrawColor>,
+    light: bool,
 ) {
     fn blend_channel(base: f64, overlay: f64, alpha: f64) -> f64 {
         base * (1.0 - alpha) + overlay * alpha
@@ -3003,8 +3004,11 @@ pub fn draw_canvas_checkerboard_background(
     let width = width.max(1) as f64;
     let height = height.max(1) as f64;
 
-    let base_dark = (0.075, 0.075, 0.081);
-    let tile_dark = (0.095, 0.095, 0.102);
+    let (base_dark, tile_dark) = if light {
+        ((0.965, 0.965, 0.972), (0.910, 0.910, 0.922))
+    } else {
+        ((0.075, 0.075, 0.081), (0.095, 0.095, 0.102))
+    };
     let (base_r, base_g, base_b, tile_r, tile_g, tile_b) = if let Some(color) = tint {
         let alpha = color.a.clamp(0.0, 1.0);
         (

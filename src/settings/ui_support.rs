@@ -23,6 +23,81 @@ const SETTINGS_CSS: &str = r#"
                 border-radius: 10px 10px 0 0;
             }
 
+            /* ── Scrollbar ── */
+            .editor-root scrollbar slider {
+                background-color: alpha(white, 0.18);
+                border-radius: 999px;
+                min-width: 4px;
+                min-height: 4px;
+                border: none;
+            }
+
+            .editor-root scrollbar slider:hover {
+                background-color: alpha(white, 0.28);
+            }
+
+            .editor-root scrollbar slider:active {
+                background-color: alpha(white, 0.35);
+            }
+
+            .editor-root scrollbar trough {
+                background: transparent;
+                border: none;
+            }
+
+            .editor-root.editor-theme-light scrollbar slider {
+                background-color: alpha(#111827, 0.18);
+            }
+
+            .editor-root.editor-theme-light scrollbar slider:hover {
+                background-color: alpha(#111827, 0.30);
+            }
+
+            .editor-root.editor-theme-light scrollbar slider:active {
+                background-color: alpha(#111827, 0.40);
+            }
+
+            .settings-window-controls {
+                min-height: 0;
+                padding: 0;
+                background: rgba(20, 20, 20, 0.94);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .settings-window-controls button.recording-editor-traffic-btn {
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                margin: 0;
+                border-radius: 999px;
+                background-color: transparent;
+                background-image: none;
+                color: rgba(255, 255, 255, 0.65);
+                border: none;
+                box-shadow: none;
+            }
+
+            .settings-window-controls button.recording-editor-traffic-btn image {
+                -gtk-icon-size: 14px;
+            }
+
+            .settings-window-controls button.recording-editor-traffic-btn:hover,
+            .settings-window-controls button.recording-editor-traffic-btn:active,
+            .settings-window-controls button.recording-editor-traffic-btn:focus {
+                background-color: rgba(255, 255, 255, 0.10);
+                background-image: none;
+                color: #ffffff;
+                border-radius: 999px;
+                border: none;
+                box-shadow: none;
+            }
+
+            .settings-window-controls button.recording-editor-traffic-btn:hover image,
+            .settings-window-controls button.recording-editor-traffic-btn:active image,
+            .settings-window-controls button.recording-editor-traffic-btn:focus image {
+                color: #ffffff;
+            }
+
             .editor-toolbar-left,
             .editor-toolbar-right {
                 min-height: 32px;
@@ -31,80 +106,6 @@ const SETTINGS_CSS: &str = r#"
             .editor-traffic-lights {
                 margin-left: 0;
                 margin-right: 10px;
-            }
-
-            button.traffic-light {
-                min-width: 14px;
-                min-height: 14px;
-                padding: 0;
-                margin: 0;
-                border: none;
-                border-radius: 0;
-                background-color: transparent;
-                background-image: none;
-            }
-
-            button.traffic-light:hover,
-            button.traffic-light:active,
-            button.traffic-light:focus {
-                background-color: transparent;
-                background-image: none;
-                border: none;
-                outline-width: 0;
-            }
-
-            .traffic-light-dot {
-                min-width: 12px;
-                min-height: 12px;
-                border-radius: 999px;
-                border: 1px solid alpha(black, 0.45);
-            }
-
-            .traffic-light-symbol {
-                font-size: 8px;
-                font-weight: 700;
-                color: alpha(black, 0.62);
-                margin: 0;
-                padding: 0;
-                min-width: 12px;
-                min-height: 12px;
-                opacity: 0;
-            }
-
-            button.traffic-light:hover .traffic-light-symbol,
-            button.traffic-light:active .traffic-light-symbol {
-                opacity: 1;
-            }
-
-            button.traffic-light:hover .traffic-light-dot {
-                opacity: 0.94;
-            }
-
-            .traffic-light-dot.traffic-light-red {
-                background-color: #ff5f57;
-                border-color: #d8463f;
-            }
-
-            .traffic-light-dot.traffic-light-yellow {
-                background-color: #febc2f;
-                border-color: #d39a25;
-            }
-
-            .traffic-light-dot.traffic-light-green {
-                background-color: #28c840;
-                border-color: #20a736;
-            }
-
-            .traffic-light-dot.traffic-light-red .traffic-light-symbol {
-                color: #5f1f1b;
-            }
-
-            .traffic-light-dot.traffic-light-yellow .traffic-light-symbol {
-                color: #6d4f13;
-            }
-
-            .traffic-light-dot.traffic-light-green .traffic-light-symbol {
-                color: #1a5f27;
             }
 
             .editor-root.editor-theme-light {
@@ -117,6 +118,34 @@ const SETTINGS_CSS: &str = r#"
                 background-color: #f6f7fb;
             }
 
+            .editor-root.editor-theme-light .settings-window-controls {
+                background: #f0f1f5;
+                border-bottom: 1px solid alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
+                color: alpha(#111827, 0.65);
+                background-color: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus {
+                background-color: alpha(#111827, 0.10);
+                color: alpha(#111827, 0.65);
+                border: none;
+                border-radius: 999px;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover image,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active image,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus image {
+                color: alpha(#111827, 0.65);
+            }
+
             .editor-root.editor-reduced-transparency {
                 background-color: #111318;
             }
@@ -125,72 +154,88 @@ const SETTINGS_CSS: &str = r#"
                 background-color: #ffffff;
             }
 
+            .settings-sidebar-wrapper {
+                background-color: alpha(black, 0.25);
+                border-right: 1px solid alpha(white, 0.06);
+                min-width: 170px;
+            }
+
             .settings-sidebar {
-                padding: 16px 12px;
-                border-right: 1px solid alpha(white, 0.08);
-                background-color: alpha(black, 0.15);
-                min-width: 190px;
+                padding: 10px 8px;
+                background-color: transparent;
+                border: none;
             }
 
             .settings-nav-item {
-                min-height: 28px;
-                padding: 6px 12px;
-                border-radius: 6px;
-                margin-bottom: 2px;
+                min-height: 24px;
+                padding: 5px 10px;
+                border-radius: 5px;
+                margin-bottom: 1px;
             }
 
             .settings-nav-item-hover {
-                background-color: alpha(white, 0.08);
+                background-color: alpha(white, 0.06);
             }
 
             .settings-nav-item-selected {
-                background-color: #b05c38;
-                box-shadow: 0 2px 6px alpha(black, 0.2);
+                background-color: alpha(white, 0.10);
+                box-shadow: none;
             }
 
             .settings-nav-icon {
-                opacity: 0.92;
+                opacity: 0.72;
+            }
+
+            .settings-nav-icon-selected {
+                opacity: 1;
+                color: #e8764a;
             }
 
             .settings-nav-label {
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 500;
                 margin-top: 0;
+                opacity: 0.78;
+            }
+
+            .settings-nav-label-selected {
+                opacity: 1;
+                color: #ffffff;
             }
 
             .settings-nav-icon-hover,
             .settings-nav-label-hover {
                 color: white;
-            }
-
-            .settings-nav-icon-selected,
-            .settings-nav-label-selected {
-                color: white;
+                opacity: 1;
             }
 
             button.settings-primary-btn {
                 background-image: none;
                 background-color: #b05c38;
-                border: 1px solid #9a4c2c;
+                border: none;
                 border-radius: 6px;
-                padding: 6px 20px;
-                font-size: 13px;
+                padding: 4px 16px;
+                font-size: 12px;
                 font-weight: 600;
                 color: white;
-                transition: all 0.2s;
-                min-height: 28px;
-                box-shadow: 0 1px 3px alpha(black, 0.2);
+                min-height: 24px;
+                box-shadow: none;
             }
 
             button.settings-primary-btn:hover {
                 background-image: none;
                 background-color: #c06540;
-                box-shadow: 0 2px 4px alpha(black, 0.3);
+                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .settings-sidebar-wrapper {
+                border-right-color: alpha(#111827, 0.06);
+                background-color: alpha(#111827, 0.04);
             }
 
             .editor-root.editor-theme-light .settings-sidebar {
-                border-right-color: alpha(#111827, 0.08);
-                background-color: alpha(#111827, 0.03);
+                background-color: transparent;
+                border: none;
             }
 
             .editor-root.editor-theme-light .settings-nav-item-hover {
@@ -198,26 +243,34 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .editor-root.editor-theme-light .settings-nav-item-selected {
-                background-color: #b05c38;
-                box-shadow: 0 2px 6px alpha(#b05c38, 0.3);
+                background-color: alpha(#111827, 0.08);
+                box-shadow: none;
             }
 
             .editor-root.editor-theme-light .settings-nav-icon {
                 color: #1d2129;
+                opacity: 0.62;
+            }
+
+            .editor-root.editor-theme-light .settings-nav-icon-selected {
+                color: #b05c38;
+                opacity: 1;
             }
 
             .editor-root.editor-theme-light .settings-nav-label {
                 color: #1d2129;
+                opacity: 0.72;
+            }
+
+            .editor-root.editor-theme-light .settings-nav-label-selected {
+                color: #1d2129;
+                opacity: 1;
             }
 
             .editor-root.editor-theme-light .settings-nav-icon-hover,
             .editor-root.editor-theme-light .settings-nav-label-hover {
                 color: #1d2129;
-            }
-
-            .editor-root.editor-theme-light .settings-nav-icon-selected,
-            .editor-root.editor-theme-light .settings-nav-label-selected {
-                color: white;
+                opacity: 1;
             }
 
             .editor-root.editor-theme-light button.settings-primary-btn {
@@ -231,56 +284,65 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .settings-toast {
-                padding: 12px 24px;
-                border-radius: 10px;
-                border: 1px solid alpha(white, 0.12);
-                background-color: alpha(#080808, 0.95);
-                color: white;
-                font-size: 13px;
-                font-weight: 600;
-                box-shadow: 0 12px 32px alpha(black, 0.60);
+                padding: 8px 20px;
+                border-radius: 8px;
+                border: none;
+                background-color: alpha(white, 0.08);
+                color: rgba(255,255,255,0.88);
+                font-size: 12px;
+                font-weight: 500;
+                box-shadow: none;
             }
 
             .settings-toast-success {
-                border-color: #b05c38;
-                color: white;
+                background-color: alpha(#b05c38, 0.18);
+                color: #e8a07a;
             }
 
             .settings-toast-error {
-                border-color: #cf433c;
-                color: white;
+                background-color: alpha(#cf433c, 0.18);
+                color: #e8807a;
             }
 
             .editor-root.editor-theme-light .settings-toast {
-                background: linear-gradient(to bottom, alpha(#ffffff, 0.97), alpha(#f4f6fa, 0.95));
+                background-color: alpha(#111827, 0.06);
                 color: #17202a;
-                border-color: alpha(#111827, 0.08);
+                border: none;
             }
 
             .editor-root.editor-theme-light .settings-toast-success {
-                border-color: alpha(#1f8a4c, 0.20);
-                color: #163423;
+                background-color: alpha(#b05c38, 0.12);
+                color: #8a4422;
             }
 
             .editor-root.editor-theme-light .settings-toast-error {
-                border-color: alpha(#c93d2b, 0.18);
-                color: #4a1f1a;
+                background-color: alpha(#cf433c, 0.12);
+                color: #8a2822;
             }
 
             .settings-page-title {
-                font-size: 24px;
-                font-weight: 700;
-                letter-spacing: -0.4px;
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: -0.1px;
+                opacity: 0.85;
             }
 
             .settings-group-title {
-                font-size: 15px;
-                font-weight: 700;
+                font-size: 11px;
+                font-weight: 600;
+                opacity: 0.45;
+                margin-top: 18px;
+                margin-bottom: 4px;
+                letter-spacing: 0.5px;
             }
 
             .settings-sub-option {
                 font-size: 12px;
-                opacity: 0.84;
+                opacity: 0.64;
+            }
+
+            .editor-root.editor-theme-light .settings-sub-option {
+                color: alpha(#1d2129, 0.64);
             }
 
             .settings-scale-caption {
@@ -295,24 +357,31 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .settings-table-frame {
-                border-radius: 14px;
-                border: 1px solid alpha(white, 0.10);
-            }
-
-            .editor-root.editor-theme-light .settings-table-frame {
-                border-color: alpha(#111827, 0.10);
-            }
-
-            .settings-table-row {
-                padding: 10px 16px;
-            }
-
-            .settings-table-row-muted {
+                border-radius: 10px;
+                border: none;
                 background-color: alpha(white, 0.04);
             }
 
-            .editor-root.editor-theme-light .settings-table-row-muted {
+            .editor-root.editor-theme-light .settings-table-frame {
+                border: none;
                 background-color: alpha(#111827, 0.04);
+            }
+
+            .settings-table-row {
+                padding: 8px 14px;
+                border-bottom: 1px solid alpha(white, 0.04);
+            }
+
+            .settings-table-row:last-child {
+                border-bottom: none;
+            }
+
+            .settings-table-row-muted {
+                background-color: transparent;
+            }
+
+            .editor-root.editor-theme-light .settings-table-row-muted {
+                background-color: transparent;
             }
 
             .editor-canvas-frame {
@@ -345,7 +414,7 @@ const SETTINGS_CSS: &str = r#"
                 background-image: none;
                 background-color: alpha(white, 0.06);
                 color: #F1F1F3;
-                border: 1px solid alpha(white, 0.14);
+                border: none;
                 border-radius: 6px;
             }
 
@@ -370,18 +439,18 @@ const SETTINGS_CSS: &str = r#"
             .editor-root checkbutton check {
                 background-image: none;
                 background-color: alpha(white, 0.06);
-                border: 1px solid alpha(white, 0.24);
+                border: 1px solid alpha(white, 0.16);
                 color: #ffffff;
             }
 
             .editor-root checkbutton check:hover {
-                border-color: alpha(white, 0.38);
+                border-color: alpha(white, 0.28);
                 background-color: alpha(white, 0.10);
             }
 
             .editor-root checkbutton:checked check {
                 background-color: #b05c38;
-                border-color: #9a4c2c;
+                border-color: #b05c38;
                 color: #ffffff;
             }
 
@@ -395,7 +464,7 @@ const SETTINGS_CSS: &str = r#"
                 background-image: none;
                 background-color: alpha(white, 0.06);
                 color: #F1F1F3;
-                border: 1px solid alpha(white, 0.14);
+                border: none;
             }
 
             .editor-root .settings-select button {
@@ -420,12 +489,18 @@ const SETTINGS_CSS: &str = r#"
                 color: alpha(white, 0.42);
             }
 
-            .editor-root .settings-select popover,
+            .editor-root .settings-select popover {
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
             .editor-root .settings-select popover contents {
                 background-color: #141414;
                 color: #F1F1F3;
                 border: 1px solid alpha(white, 0.12);
                 border-radius: 8px;
+                box-shadow: none;
             }
 
             .editor-root .settings-select popover list,
@@ -443,26 +518,29 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .editor-root scale trough {
+                min-height: 4px;
                 background-color: alpha(white, 0.08);
-                border: 1px solid alpha(white, 0.14);
+                border: none;
                 border-radius: 999px;
             }
 
             .editor-root scale highlight {
+                min-height: 4px;
                 background-color: #b05c38;
                 border-radius: 999px;
             }
 
             .editor-root scale slider {
+                min-width: 14px;
+                min-height: 14px;
                 background: #F1F1F3;
-                border: 1px solid alpha(white, 0.30);
+                border: none;
                 border-radius: 999px;
-                box-shadow: 0 1px 3px alpha(black, 0.3);
+                box-shadow: none;
             }
 
             .editor-root scale:disabled trough {
                 background-color: alpha(white, 0.04);
-                border-color: alpha(white, 0.08);
             }
 
             .editor-root scale:disabled highlight {
@@ -471,30 +549,27 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root scale:disabled slider {
                 background: alpha(#F1F1F3, 0.42);
-                border-color: alpha(white, 0.10);
             }
 
             .editor-root button {
                 background-image: none;
-                background-color: alpha(white, 0.08);
+                background-color: alpha(white, 0.06);
                 color: #F1F1F3;
-                border: 1px solid alpha(white, 0.12);
+                border: none;
                 border-radius: 6px;
             }
 
             .editor-root button:hover {
-                background-color: alpha(white, 0.12);
-                border-color: alpha(white, 0.18);
+                background-color: alpha(white, 0.10);
             }
 
             .editor-root button:active {
-                background-color: alpha(white, 0.18);
+                background-color: alpha(white, 0.14);
             }
 
             .editor-root button:disabled {
-                background-color: alpha(white, 0.04);
+                background-color: alpha(white, 0.03);
                 color: alpha(white, 0.42);
-                border-color: alpha(white, 0.08);
             }
 
             /* ── Light-mode native widget overrides ── */
@@ -547,11 +622,18 @@ const SETTINGS_CSS: &str = r#"
                 color: alpha(#17202a, 0.35);
             }
 
-            .editor-root.editor-theme-light .settings-select popover,
+            .editor-root.editor-theme-light .settings-select popover {
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
             .editor-root.editor-theme-light .settings-select popover contents {
                 background-color: #f6f7fb;
                 color: #17202a;
-                border-color: alpha(#111827, 0.12);
+                border: 1px solid alpha(#111827, 0.12);
+                border-radius: 8px;
+                box-shadow: none;
             }
 
             .editor-root.editor-theme-light .settings-select popover list,
@@ -577,26 +659,29 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .editor-root.editor-theme-light scale trough {
+                min-height: 4px;
                 background-color: alpha(#111827, 0.08);
-                border: 1px solid alpha(#111827, 0.14);
+                border: none;
                 border-radius: 999px;
             }
 
             .editor-root.editor-theme-light scale highlight {
+                min-height: 4px;
                 background-color: #b05c38;
                 border-radius: 999px;
             }
 
             .editor-root.editor-theme-light scale slider {
+                min-width: 14px;
+                min-height: 14px;
                 background: #ffffff;
-                border: 1px solid alpha(#111827, 0.18);
+                border: none;
                 border-radius: 999px;
-                box-shadow: 0 1px 3px alpha(black, 0.15);
+                box-shadow: none;
             }
 
             .editor-root.editor-theme-light scale:disabled trough {
                 background-color: alpha(#111827, 0.04);
-                border-color: alpha(#111827, 0.08);
             }
 
             .editor-root.editor-theme-light scale:disabled highlight {
@@ -605,29 +690,26 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root.editor-theme-light scale:disabled slider {
                 background: alpha(#ffffff, 0.62);
-                border-color: alpha(#111827, 0.10);
             }
 
             .editor-root.editor-theme-light button {
                 background-image: none;
-                background-color: #ffffff;
+                background-color: alpha(#111827, 0.04);
                 color: #17202a;
-                border-color: alpha(#111827, 0.18);
+                border: none;
             }
 
             .editor-root.editor-theme-light button:hover {
-                background-color: #f8fafc;
-                border-color: alpha(#111827, 0.28);
+                background-color: alpha(#111827, 0.08);
             }
 
             .editor-root.editor-theme-light button:active {
-                background-color: alpha(#111827, 0.06);
+                background-color: alpha(#111827, 0.10);
             }
 
             .editor-root.editor-theme-light button:disabled {
-                background-color: alpha(#111827, 0.04);
+                background-color: alpha(#111827, 0.02);
                 color: alpha(#17202a, 0.48);
-                border-color: alpha(#111827, 0.10);
             }
 
             .editor-root.editor-theme-light .recording-tab-switcher {
@@ -796,108 +878,112 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .shortcut-capture-dialog {
-                background: #2f2f2f;
-                border-radius: 18px;
+                background: #1a1a1a;
+                border-radius: 12px;
+                border: 1px solid alpha(white, 0.08);
             }
 
             .shortcut-capture-title {
-                font-size: 20px;
-                font-weight: 700;
+                font-size: 16px;
+                font-weight: 600;
                 color: white;
             }
 
             .shortcut-capture-subtitle {
-                font-size: 14px;
-                color: rgba(255,255,255,0.92);
+                font-size: 13px;
+                color: rgba(255,255,255,0.78);
                 line-height: 1.35;
             }
 
             .shortcut-capture-hint {
-                font-size: 12px;
-                color: rgba(255,255,255,0.64);
+                font-size: 11px;
+                color: rgba(255,255,255,0.45);
                 line-height: 1.35;
-                margin-top: 12px;
+                margin-top: 10px;
             }
 
             .shortcut-capture-listening-icon {
-                font-size: 76px;
-                color: white;
-                margin-top: 18px;
-                margin-bottom: 12px;
+                font-size: 56px;
+                color: #e8764a;
+                margin-top: 14px;
+                margin-bottom: 10px;
             }
 
             .shortcut-capture-keycaps-row {
-                margin-top: 18px;
+                margin-top: 14px;
             }
 
             .shortcut-capture-keycap {
-                background: #4a4a4a;
+                background: alpha(white, 0.08);
                 color: white;
-                border-radius: 8px;
-                padding: 8px 14px;
-                font-size: 14px;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 13px;
                 font-weight: 600;
             }
 
             .shortcut-capture-plus {
-                color: rgba(255,255,255,0.75);
-                font-size: 18px;
+                color: rgba(255,255,255,0.45);
+                font-size: 16px;
                 font-weight: 700;
-                margin-top: 7px;
+                margin-top: 5px;
             }
 
             .shortcut-capture-cleared-label {
-                color: rgba(255,255,255,0.82);
-                font-size: 14px;
+                color: rgba(255,255,255,0.64);
+                font-size: 13px;
             }
 
             .shortcut-capture-primary-btn {
-                background: #d95f1d;
+                background: #b05c38;
                 color: white;
-                border-radius: 10px;
-                padding: 8px 18px;
-                font-weight: 700;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-weight: 600;
+                font-size: 12px;
                 border: none;
             }
 
             .shortcut-capture-primary-btn:hover {
-                background: #e46d2f;
+                background: #c06540;
             }
 
             .shortcut-capture-primary-btn:disabled {
-                background: #5b5b5b;
-                color: rgba(255,255,255,0.45);
+                background: alpha(white, 0.06);
+                color: rgba(255,255,255,0.35);
             }
 
             .shortcut-capture-secondary-btn {
-                background: #4a4a4a;
+                background: alpha(white, 0.06);
                 color: white;
-                border-radius: 10px;
-                padding: 8px 18px;
+                border-radius: 6px;
+                padding: 6px 16px;
                 font-weight: 600;
+                font-size: 12px;
                 border: none;
             }
 
             .shortcut-capture-secondary-btn:hover {
-                background: #585858;
+                background: alpha(white, 0.10);
             }
 
             .secondary-settings-button {
-                background: none;
-                border: 1px solid alpha(white, 0.15);
+                background: alpha(white, 0.06);
+                border: none;
                 border-radius: 6px;
                 padding: 4px 12px;
                 font-size: 12px;
-                transition: all 0.2s;
+                color: rgba(255,255,255,0.78);
             }
 
-            .secondary-settings-button:hover { background: #e5e5e5; color: #1d2129; }
-            .secondary-settings-button:active { background: #d5d5d5; color: #1d2129; }
+            .secondary-settings-button:hover { background: alpha(white, 0.10); }
+            .secondary-settings-button:active { background: alpha(white, 0.14); }
 
             /* ── Light-mode shortcut capture dialog ── */
 
             .shortcut-capture-dialog.editor-theme-light {
                 background: #f6f7fb;
+                border: 1px solid alpha(#111827, 0.08);
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-title {
@@ -905,11 +991,11 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-subtitle {
-                color: rgba(29, 33, 41, 0.88);
+                color: rgba(29, 33, 41, 0.72);
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-hint {
-                color: rgba(29, 33, 41, 0.58);
+                color: rgba(29, 33, 41, 0.45);
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-listening-icon {
@@ -917,18 +1003,18 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-keycap {
-                background: #ffffff;
+                background: alpha(#111827, 0.06);
                 color: #17202a;
-                border: 1px solid alpha(#111827, 0.18);
-                box-shadow: 0 1px 3px alpha(black, 0.08);
+                border: none;
+                box-shadow: none;
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-plus {
-                color: rgba(29, 33, 41, 0.55);
+                color: rgba(29, 33, 41, 0.35);
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-cleared-label {
-                color: rgba(29, 33, 41, 0.72);
+                color: rgba(29, 33, 41, 0.55);
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-primary-btn {
@@ -941,18 +1027,18 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-primary-btn:disabled {
-                background: alpha(#111827, 0.10);
-                color: alpha(#17202a, 0.42);
+                background: alpha(#111827, 0.06);
+                color: alpha(#17202a, 0.35);
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-secondary-btn {
-                background: alpha(#111827, 0.06);
+                background: alpha(#111827, 0.04);
                 color: #17202a;
-                border: 1px solid alpha(#111827, 0.12);
+                border: none;
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-secondary-btn:hover {
-                background: alpha(#111827, 0.10);
+                background: alpha(#111827, 0.08);
             }
 
             .editor-root.editor-theme-light .secondary-settings-button {
@@ -1038,10 +1124,37 @@ const SETTINGS_CSS: &str = r#"
                 color: #9a4c2c;
             }
 
-            /* Onboarding back button - same size as primary button with secondary styling */
+            /* Onboarding */
             .onboarding-back-button {
-                padding: 6px 20px;
-                min-height: 28px;
+                padding: 4px 14px;
+                min-height: 24px;
+                font-size: 12px;
+            }
+
+            .editor-root.editor-theme-light .onboarding-back-button {
+                color: #1d2129;
+            }
+
+            .onboarding-dot {
+                min-width: 6px;
+                min-height: 6px;
+                border-radius: 999px;
+                background-color: alpha(white, 0.18);
+                padding: 0;
+                margin: 0 2px;
+            }
+
+            .onboarding-dot-active {
+                background-color: #b05c38;
+                min-width: 18px;
+            }
+
+            .editor-root.editor-theme-light .onboarding-dot {
+                background-color: alpha(#111827, 0.14);
+            }
+
+            .editor-root.editor-theme-light .onboarding-dot-active {
+                background-color: #b05c38;
             }
 
             .cloud-avatar {
@@ -1339,6 +1452,49 @@ const SETTINGS_CSS: &str = r#"
             .editor-root.editor-theme-light button.recent-captures-wm-close:hover {
                 background: alpha(#e34a4a, 0.82);
                 color: white;
+            }
+
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn {
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                margin: 0;
+                border-radius: 999px;
+                background: transparent;
+                background-image: none;
+                color: alpha(white, 0.65);
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
+                color: alpha(#111827, 0.65);
+                background: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn:hover,
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn:active,
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn:focus {
+                background: alpha(white, 0.10);
+                background-image: none;
+                color: white;
+                border: none;
+                border-radius: 999px;
+                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus {
+                background: alpha(#111827, 0.10);
+                background-image: none;
+                color: alpha(#111827, 0.65);
+                border: none;
+                border-radius: 999px;
+                box-shadow: none;
             }
 
             .recent-captures-segmented-control {
