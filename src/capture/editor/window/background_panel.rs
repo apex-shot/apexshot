@@ -741,6 +741,12 @@ pub(super) fn build_background_panel(
             );
 
             if let Some(win) = window_weak.upgrade() {
+                if !is_collapsed {
+                    // Collapsing: force the toplevel to shrink to its new natural size.
+                    // queue_resize() alone won't shrink a realized window, so we reset the
+                    // default size to (1, 1) which makes GTK reflow to the natural minimum.
+                    win.set_default_size(1, 1);
+                }
                 win.queue_resize();
             }
         }

@@ -625,18 +625,22 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         &sep_1,
         &sep_2,
     );
-    toolbar.set_center_widget(Some(&center_group));
+    // Left-align tools: mount the center_group as the start widget so there's no
+    // empty space on the left of the toolbar.
+    toolbar.set_start_widget(Some(&center_group));
 
     let toolbar_right_parts = toolbar::build_toolbar_right_controls(
         &color_status,
         icon_names::ARROW_UNDO_REGULAR,
         icon_names::ARROW_REDO_REGULAR,
         icon_names::DELETE_REGULAR,
+        &traffic_minimize,
+        &traffic_zoom,
+        &traffic_close,
     );
     let undo_btn = toolbar_right_parts.undo_btn;
     let redo_btn = toolbar_right_parts.redo_btn;
     let delete_selected_btn = toolbar_right_parts.delete_selected_btn;
-    let save_btn = toolbar_right_parts.save_btn;
     toolbar.set_end_widget(Some(&toolbar_right_parts.root));
 
     let crop_ratio_list = GtkBox::new(Orientation::Vertical, 0);
@@ -1011,6 +1015,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let zoom_to_selection_btn = footer_parts.zoom_to_selection_btn;
     let copy_btn = footer_parts.copy_btn;
     let upload_btn = footer_parts.upload_btn;
+    let save_btn = footer_parts.save_btn;
 
     let tracked_window_id = next_tracked_window_id("annotate-editor");
     let window_title = "ApexShot Editor";

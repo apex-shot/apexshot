@@ -16,6 +16,7 @@ pub(super) struct FooterParts {
     pub zoom_to_selection_btn: Button,
     pub copy_btn: Button,
     pub upload_btn: Button,
+    pub save_btn: Button,
 }
 
 fn build_zoom_row(label: &str, shortcut: &str) -> (Button, GtkBox) {
@@ -240,11 +241,18 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     footer_left.set_halign(gtk4::Align::Start);
     footer_left.append(&zoom_button);
 
-    let footer_right = GtkBox::new(Orientation::Horizontal, 6);
+    let save_btn = Button::with_label("Done");
+    save_btn.set_has_frame(false);
+    save_btn.add_css_class("editor-done-button");
+    save_btn.add_css_class("body");
+    save_btn.set_valign(gtk4::Align::Center);
+
+    let footer_right = GtkBox::new(Orientation::Horizontal, 8);
     footer_right.set_hexpand(true);
     footer_right.set_halign(gtk4::Align::End);
     footer_right.append(&copy_btn);
     footer_right.append(&upload_btn);
+    footer_right.append(&save_btn);
 
     root.append(&footer_left);
     root.append(&footer_right);
@@ -263,5 +271,6 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
         zoom_to_selection_btn,
         copy_btn,
         upload_btn,
+        save_btn,
     }
 }
