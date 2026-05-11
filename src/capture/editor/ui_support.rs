@@ -420,8 +420,8 @@ pub fn install_editor_css() {
             /* Flat tool buttons — settings-nav-item style: no borders, subtle alpha bg states. */
             button.editor-tool-button,
             button.standalone-tool {
-                min-width: 28px;
-                min-height: 28px;
+                min-width: 26px;
+                min-height: 22px;
                 border-radius: 5px;
                 padding: 0;
                 margin: 0;
