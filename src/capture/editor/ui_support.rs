@@ -150,7 +150,7 @@ pub fn install_editor_css() {
             }
 
             .editor-toolbar {
-                padding: 2px 10px 2px 12px;
+                padding: 6px 10px 6px 12px;
                 background-color: #141414;
                 border-bottom: 1px solid alpha(white, 0.06);
                 border-radius: 10px 10px 0 0;
