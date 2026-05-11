@@ -150,7 +150,7 @@ pub fn install_editor_css() {
             }
 
             .editor-toolbar {
-                padding: 6px 10px 6px 12px;
+                padding: 2px 10px 2px 12px;
                 background-color: #141414;
                 border-bottom: 1px solid alpha(white, 0.06);
                 border-radius: 10px 10px 0 0;
@@ -207,7 +207,7 @@ pub fn install_editor_css() {
             .editor-toolbar-center,
             .editor-toolbar-right,
             .editor-toolbar-right-tools {
-                min-height: 32px;
+                min-height: 26px;
             }
 
             .editor-traffic-lights {
@@ -1754,7 +1754,6 @@ pub fn install_editor_css() {
 
             .editor-toolbar-size-slider {
                 margin: 0 4px;
-                min-height: 14px;
             }
 
             .editor-background-compact-controls {
