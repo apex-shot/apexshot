@@ -465,15 +465,15 @@ pub fn install_editor_css() {
             }
 
             .editor-toolbar-color-status {
-                min-height: 34px;
+                min-height: 22px;
                 padding: 0 6px;
                 border: none;
                 background: transparent;
             }
 
             .editor-toolbar-color-status-swatch {
-                min-width: 14px;
-                min-height: 14px;
+                min-width: 12px;
+                min-height: 12px;
                 border-radius: 999px;
                 border: 1px solid alpha(white, 0.18);
                 background: #121212;

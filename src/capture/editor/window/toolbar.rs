@@ -588,7 +588,7 @@ pub(super) fn build_toolbar_mode_controls(
     let color_status_swatch = GtkBox::new(Orientation::Horizontal, 0);
     color_status_swatch.add_css_class("editor-toolbar-color-status-swatch");
     color_status_swatch.set_widget_name("editor-toolbar-color-status-swatch");
-    color_status_swatch.set_size_request(14, 14);
+    color_status_swatch.set_size_request(12, 12);
     color_status_swatch.set_halign(gtk4::Align::Center);
     color_status_swatch.set_valign(gtk4::Align::Center);
     color_status_swatch.set_hexpand(false);
