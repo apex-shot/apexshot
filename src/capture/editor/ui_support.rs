@@ -1754,6 +1754,7 @@ pub fn install_editor_css() {
 
             .editor-toolbar-size-slider {
                 margin: 0 4px;
+                min-height: 14px;
             }
 
             .editor-background-compact-controls {
