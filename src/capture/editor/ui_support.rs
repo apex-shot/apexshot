@@ -1973,9 +1973,9 @@ pub fn install_editor_css() {
 
             button.editor-background-option-button.active-background-option {
                 background: alpha(white, 0.10);
-                border: 1px solid alpha(white, 0.06);
+                border: 1px solid transparent;
                 color: #ffffff;
-                box-shadow: none;
+                box-shadow: inset 0 0 0 1px #b05c38;
             }
 
             button.editor-background-alignment-button.active-alignment-option {

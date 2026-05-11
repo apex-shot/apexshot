@@ -1259,6 +1259,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let background_inspector = background_panel_parts.root;
     let start_background_gradient_preview_loading =
         background_panel_parts.start_gradient_preview_loading;
+    let sync_background_active_classes = background_panel_parts.sync_active_classes;
 
     let colors_panel_parts = colors_panel::build_colors_panel(
         state.clone(),
@@ -1317,10 +1318,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let sync_toolbar_color_status = sync_toolbar_color_status.clone();
         let sync_picker_for_active_tool = sync_picker_for_active_tool.clone();
         let sync_colors_panel_for_active_tool = sync_colors_panel_for_active_tool.clone();
+        let sync_background_active_classes = sync_background_active_classes.clone();
         move || {
             sync_toolbar_color_status();
             sync_picker_for_active_tool();
             sync_colors_panel_for_active_tool();
+            sync_background_active_classes();
         }
     });
     register_color_panel_sync(sync_shared_colors_for_active_tool.clone());

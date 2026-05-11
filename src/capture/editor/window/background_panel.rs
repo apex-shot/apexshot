@@ -598,6 +598,7 @@ fn rebuild_wallpaper_preview_grid(
 pub(super) struct BackgroundPanelParts {
     pub root: GtkBox,
     pub start_gradient_preview_loading: Rc<dyn Fn()>,
+    pub sync_active_classes: Rc<dyn Fn()>,
 }
 
 pub(super) fn build_background_panel(
@@ -1430,9 +1431,26 @@ pub(super) fn build_background_panel(
 
     background_sidebar.append(&background_sidebar_options);
 
+    let sync_active_classes: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let sidebar = background_sidebar.clone();
+        let none_btn = background_none_btn.clone();
+        Rc::new(move || {
+            let style = state.lock().unwrap().background_style.clone();
+            // Clear every active marker in the sidebar; per-button click
+            // handlers re-apply theirs on user interaction. The current
+            // state's button (if represented) is re-marked below.
+            clear_active_background_classes(sidebar.upcast_ref());
+            if matches!(style, BackgroundStyle::None) {
+                none_btn.add_css_class("active-background-option");
+            }
+        })
+    };
+
     BackgroundPanelParts {
         root: background_sidebar,
         start_gradient_preview_loading: start_background_gradient_preview_loading,
+        sync_active_classes,
     }
 }
 

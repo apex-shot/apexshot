@@ -1406,22 +1406,28 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let color_class_names_group = color_class_names.clone();
         let color_popover_group = color_popover.clone();
         let sync_picker_from_color_group = sync_picker_from_color.clone();
+        let sync_picker_for_active_tool_group = sync_picker_for_active_tool.clone();
         button.connect_clicked(move |_| {
-            let has_active_text = {
+            let (has_active_text, switched_background) = {
                 let mut st = state_color.lock().unwrap();
                 let has_active_text = st.active_text_input.is_some();
+                let mut switched_background = false;
                 if st.selected_tool == Tool::Crop {
                     st.set_crop_background_color(DRAW_COLORS[index]);
                 } else if st.selected_tool == Tool::Background {
                     st.background_style = BackgroundStyle::PlainColor(DRAW_COLORS[index]);
                     st.mark_working_image_dirty();
+                    switched_background = true;
                 } else {
                     st.set_color_index(index);
                 }
-                has_active_text
+                (has_active_text, switched_background)
             };
 
             sync_picker_from_color_group(DRAW_COLORS[index]);
+            if switched_background {
+                sync_picker_for_active_tool_group();
+            }
 
             color_picker::set_active_color_picker_state(
                 &color_buttons_group,
