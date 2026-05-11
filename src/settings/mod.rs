@@ -201,16 +201,17 @@ fn build_settings_window(app: &Application) {
     save_box.append(&save_btn);
     sidebar_wrapper.append(&save_box);
 
+    use crate::capture::editor::window::icon_names::custom;
     let labels = [
-        ("General", "settings-symbolic"),
-        ("Shortcuts", "keyboard-shortcuts-symbolic"),
-        ("Quick Access", "app-icon-design-symbolic"),
-        ("Recording", "record-screen-symbolic"),
-        ("Screenshots", "screenshooter-symbolic"),
-        ("Annotate", "pencil-symbolic"),
-        ("Cloud", "cloud-outline-thin-symbolic"),
-        ("Advanced", "overlapping-windows-symbolic"),
-        ("About", "info-symbolic"),
+        ("General", custom::SETTINGS_SYMBOLIC),
+        ("Shortcuts", custom::KEYBOARD_SHORTCUTS_SYMBOLIC),
+        ("Quick Access", custom::APP_ICON_DESIGN_SYMBOLIC),
+        ("Recording", custom::RECORD_SCREEN_SYMBOLIC),
+        ("Screenshots", custom::SCREENSHOOTER_SYMBOLIC),
+        ("Annotate", custom::PENCIL_SYMBOLIC),
+        ("Cloud", custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
+        ("Advanced", custom::OVERLAPPING_WINDOWS_SYMBOLIC),
+        ("About", custom::INFO_SYMBOLIC),
     ];
 
     let stack = gtk4::Stack::new();
