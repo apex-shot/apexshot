@@ -412,8 +412,8 @@ pub fn install_editor_css() {
 
             .editor-tools-divider {
                 min-width: 1px;
-                margin: 6px 8px;
-                background-color: rgba(255, 255, 255, 0.11);
+                margin: 4px 6px;
+                background-color: alpha(white, 0.10);
                 border-radius: 2px;
             }
 

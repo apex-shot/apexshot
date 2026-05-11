@@ -890,19 +890,26 @@ pub(super) fn build_toolbar_mode_controls(
     effects_group.append(obfuscate_btn);
     effects_group.append(focus_btn);
 
-    // Wrapper row: holds all five groups with consistent inter-group spacing.
-    let primary_tools_group = GtkBox::new(Orientation::Horizontal, 14);
+    // Wrapper row: holds all five groups with vertical dividers between them.
+    let primary_tools_group = GtkBox::new(Orientation::Horizontal, 6);
     primary_tools_group.add_css_class("editor-primary-tools-row");
-    primary_tools_group.append(&selection_group);
-    primary_tools_group.append(&drawing_group);
-    primary_tools_group.append(&shapes_group);
-    primary_tools_group.append(&content_group);
-    primary_tools_group.append(&effects_group);
 
-    // sep_1 and sep_2 are retained as widgets for struct compatibility but are no longer
-    // appended; the new groups provide visual separation via spacing instead of dividers.
-    let _ = sep_1;
-    let _ = sep_2;
+    let make_divider = || {
+        let d = GtkBox::new(Orientation::Vertical, 0);
+        d.add_css_class("editor-tools-divider");
+        d.set_vexpand(true);
+        d
+    };
+
+    primary_tools_group.append(&selection_group);
+    primary_tools_group.append(sep_1);
+    primary_tools_group.append(&drawing_group);
+    primary_tools_group.append(sep_2);
+    primary_tools_group.append(&shapes_group);
+    primary_tools_group.append(&make_divider());
+    primary_tools_group.append(&content_group);
+    primary_tools_group.append(&make_divider());
+    primary_tools_group.append(&effects_group);
 
     let standard_mode_group = GtkBox::new(Orientation::Horizontal, 10);
     standard_mode_group.add_css_class("editor-toolbar-mode-group");

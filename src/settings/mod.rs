@@ -72,6 +72,15 @@ pub fn show_settings_window() -> anyhow::Result<()> {
 }
 
 fn build_settings_window(app: &Application) {
+    use std::sync::Once;
+    static INIT_ICONS: Once = Once::new();
+    INIT_ICONS.call_once(|| {
+        relm4_icons::initialize_icons(
+            crate::capture::editor::window::icon_names::GRESOURCE_BYTES,
+            crate::capture::editor::window::icon_names::RESOURCE_PREFIX,
+        );
+    });
+
     install_settings_css();
 
     let config = load_config().sanitized();
@@ -193,15 +202,15 @@ fn build_settings_window(app: &Application) {
     sidebar_wrapper.append(&save_box);
 
     let labels = [
-        ("General", "preferences-system-symbolic"),
-        ("Shortcuts", "input-keyboard-symbolic"),
-        ("Quick Access", "starred-symbolic"),
-        ("Recording", "camera-video-symbolic"),
-        ("Screenshots", "camera-photo-symbolic"),
-        ("Annotate", "draw-freehand-symbolic"),
-        ("Cloud", "goa-panel-symbolic"),
-        ("Advanced", "applications-system-symbolic"),
-        ("About", "help-about-symbolic"),
+        ("General", "settings-symbolic"),
+        ("Shortcuts", "keyboard-shortcuts-symbolic"),
+        ("Quick Access", "app-icon-design-symbolic"),
+        ("Recording", "record-screen-symbolic"),
+        ("Screenshots", "screenshooter-symbolic"),
+        ("Annotate", "pencil-symbolic"),
+        ("Cloud", "cloud-outline-thin-symbolic"),
+        ("Advanced", "overlapping-windows-symbolic"),
+        ("About", "info-symbolic"),
     ];
 
     let stack = gtk4::Stack::new();

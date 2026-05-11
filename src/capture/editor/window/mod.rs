@@ -519,7 +519,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         sep_1,
         sep_2,
     } = toolbar::build_toolbar_base(toolbar::ToolbarBaseIconNames {
-        crop: icon_names::CROP,
+        crop: icon_names::custom::CROP_SYMBOLIC,
         draw: icon_names::custom::PENCIL_SYMBOLIC,
         arrow: icon_names::custom::ARROW2_TOP_RIGHT_SYMBOLIC,
         line: icon_names::custom::FUNCTION_LINEAR_SYMBOLIC,
