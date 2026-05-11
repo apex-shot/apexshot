@@ -1863,21 +1863,28 @@ pub fn install_editor_css() {
                 margin-top: 2px;
             }
 
+            /* Dropdowns in the editor mirror the settings UI ComboBoxText style:
+               flat alpha-white surface, no border, dark popover with subtle border. */
             dropdown.editor-background-ratio-dropdown {
-                min-height: 32px;
+                min-height: 28px;
                 min-width: 20px;
                 padding: 0;
+                background: transparent;
+                border: none;
+                box-shadow: none;
             }
 
             dropdown.editor-background-ratio-dropdown > button {
                 min-height: 28px;
                 min-width: 20px;
-                border-radius: 6px;
-                padding: 0 6px;
-                background: rgba(255, 255, 255, 0.03);
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                color: rgba(241, 241, 243, 0.88);
+                border-radius: 5px;
+                padding: 0 8px;
+                background: alpha(white, 0.06);
+                background-image: none;
+                border: none;
+                color: #F1F1F3;
                 box-shadow: none;
+                transition: background-color 120ms ease;
             }
 
             dropdown.editor-background-ratio-dropdown > button > box {
@@ -1885,17 +1892,51 @@ pub fn install_editor_css() {
             }
 
             dropdown.editor-background-ratio-dropdown > button:hover {
-                background: alpha(white, 0.06);
-                border-color: alpha(white, 0.12);
+                background: alpha(white, 0.10);
+                border: none;
             }
 
             dropdown.editor-background-ratio-dropdown > button:active,
-            dropdown.editor-background-ratio-dropdown > button:focus-visible {
-                background: alpha(white, 0.10);
-                border-color: alpha(white, 0.18);
+            dropdown.editor-background-ratio-dropdown > button:focus-visible,
+            dropdown.editor-background-ratio-dropdown > button:checked {
+                background: alpha(white, 0.12);
+                border: none;
+                outline: none;
             }
 
-            /* Hide the tick/checkmark in dropdown popover */
+            dropdown.editor-background-ratio-dropdown popover {
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover > contents {
+                background-color: #141414;
+                color: #F1F1F3;
+                border: 1px solid alpha(white, 0.12);
+                border-radius: 8px;
+                padding: 4px;
+                box-shadow: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview,
+            dropdown.editor-background-ratio-dropdown popover listview row {
+                background-color: transparent;
+                color: #F1F1F3;
+                border-radius: 5px;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview row:hover {
+                background-color: alpha(white, 0.08);
+                color: #F1F1F3;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview row:selected {
+                background-color: alpha(white, 0.12);
+                color: #F1F1F3;
+            }
+
+            /* Hide the tick/checkmark in dropdown popover (selection is shown via row bg). */
             dropdown.editor-background-ratio-dropdown popover > contents listview row image {
                 opacity: 0;
             }
