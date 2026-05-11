@@ -87,7 +87,7 @@ pub fn prefers_dark_glass_theme() -> bool {
         if color_scheme.contains("prefer-dark") {
             return true;
         }
-        if color_scheme.contains("prefer-light") {
+        if color_scheme.contains("prefer-light") || color_scheme == "default" {
             return false;
         }
     }
