@@ -844,6 +844,12 @@ pub fn install_editor_css() {
                 background: #b05c38;
             }
 
+            .editor-root scale slider {
+                min-width: 14px;
+                min-height: 14px;
+                margin: -5px;
+            }
+
             .editor-root scale:disabled trough {
                 background: alpha(white, 0.04);
             }
@@ -868,26 +874,28 @@ pub fn install_editor_css() {
                 background: alpha(#b05c38, 0.42);
             }
 
-            .editor-hue-slider trough {
+            .editor-root scale.editor-hue-slider trough {
                 min-height: 8px;
                 border-radius: 999px;
                 box-shadow: none;
                 border: 1px solid alpha(white, 0.08);
+                background-color: transparent;
                 background-image: linear-gradient(to right,
                     #ff0000 0%, #ffff00 17%, #00ff00 33%,
                     #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
             }
 
-            .editor-hue-slider slider {
+            .editor-root scale.editor-hue-slider slider {
                 min-width: 14px;
                 min-height: 14px;
+                margin: -3px;
                 border-radius: 999px;
                 background: white;
                 border: 1px solid alpha(black, 0.40);
                 box-shadow: none;
             }
 
-            .editor-hue-slider highlight {
+            .editor-root scale.editor-hue-slider highlight {
                 background: transparent;
             }
 
