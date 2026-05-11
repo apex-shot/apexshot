@@ -105,6 +105,12 @@ fn build_onboarding_window(app: &Application) {
 
     let root_box = GtkBox::new(Orientation::Vertical, 0);
     root_box.add_css_class("editor-root");
+    let prefers_dark = crate::capture::editor::ui_support::prefers_dark_glass_theme();
+    if prefers_dark {
+        root_box.add_css_class("editor-theme-dark");
+    } else {
+        root_box.add_css_class("editor-theme-light");
+    }
 
     // --- TOOLBAR ---
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);

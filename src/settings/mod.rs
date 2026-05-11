@@ -131,11 +131,7 @@ fn build_settings_window(app: &Application) {
     let win_clone = window.clone();
     min_btn.connect_clicked(move |_| win_clone.minimize());
 
-    let max_btn = traffic_light_button("traffic-light-green", "Maximize");
-    max_btn.remove_css_class("recent-captures-wm-btn");
-    max_btn.add_css_class("recording-editor-traffic-btn");
-
-    for button in [&close_btn, &min_btn, &max_btn] {
+    for button in [&close_btn, &min_btn] {
         button.set_size_request(24, 24);
         button.set_valign(Align::Center);
     }
@@ -143,7 +139,6 @@ fn build_settings_window(app: &Application) {
     let right_box = GtkBox::new(Orientation::Horizontal, 6);
     right_box.set_halign(Align::End);
     right_box.append(&min_btn);
-    right_box.append(&max_btn);
     right_box.append(&close_btn);
     toolbar.append(&right_box);
 

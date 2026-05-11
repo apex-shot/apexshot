@@ -69,7 +69,12 @@ fn build_window(
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("editor-root");
     root.add_css_class("recording-editor-root");
-    root.add_css_class("editor-theme-dark");
+    let prefers_dark = crate::capture::editor::ui_support::prefers_dark_glass_theme();
+    if prefers_dark {
+        root.add_css_class("editor-theme-dark");
+    } else {
+        root.add_css_class("editor-theme-light");
+    }
     if crate::capture::editor::ui_support::prefers_reduced_transparency() {
         root.add_css_class("editor-reduced-transparency");
     }

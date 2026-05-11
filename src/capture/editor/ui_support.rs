@@ -150,7 +150,7 @@ pub fn install_editor_css() {
             }
 
             .editor-toolbar {
-                padding: 6px 10px 6px 12px;
+                padding: 4px 10px 4px 12px;
                 background-color: #141414;
                 border-bottom: 1px solid alpha(white, 0.06);
                 border-radius: 10px 10px 0 0;
@@ -207,7 +207,7 @@ pub fn install_editor_css() {
             .editor-toolbar-center,
             .editor-toolbar-right,
             .editor-toolbar-right-tools {
-                min-height: 26px;
+                min-height: 22px;
             }
 
             .editor-traffic-lights {
@@ -1893,12 +1893,13 @@ pub fn install_editor_css() {
             .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:active,
             .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:focus {
                 background-color: alpha(#111827, 0.10);
-                color: #1d2129;
+                color: alpha(#1d2129, 0.65);
             }
+
             .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:hover image,
             .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:active image,
             .editor-root.editor-theme-light .editor-toolbar button.recording-editor-traffic-btn:focus image {
-                color: #1d2129;
+                color: alpha(#1d2129, 0.65);
             }
 
             /* Active tool button uses .active-tool — covered above via

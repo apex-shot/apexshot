@@ -124,7 +124,7 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
-                color: alpha(#111827, 0.55);
+                color: alpha(#111827, 0.65);
                 background-color: transparent;
                 background-image: none;
                 border: none;
@@ -134,11 +134,16 @@ const SETTINGS_CSS: &str = r#"
             .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover,
             .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active,
             .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus {
-                background-color: alpha(#111827, 0.08);
-                color: #1d2129;
+                background-color: alpha(#111827, 0.10);
+                color: alpha(#111827, 0.65);
                 border: none;
                 border-radius: 999px;
-                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover image,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active image,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus image {
+                color: alpha(#111827, 0.65);
             }
 
             .editor-root.editor-reduced-transparency {
@@ -334,6 +339,10 @@ const SETTINGS_CSS: &str = r#"
             .settings-sub-option {
                 font-size: 12px;
                 opacity: 0.64;
+            }
+
+            .editor-root.editor-theme-light .settings-sub-option {
+                color: alpha(#1d2129, 0.64);
             }
 
             .settings-scale-caption {
@@ -1122,6 +1131,10 @@ const SETTINGS_CSS: &str = r#"
                 font-size: 12px;
             }
 
+            .editor-root.editor-theme-light .onboarding-back-button {
+                color: #1d2129;
+            }
+
             .onboarding-dot {
                 min-width: 6px;
                 min-height: 6px;
@@ -1455,7 +1468,7 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
-                color: #1d2129;
+                color: alpha(#111827, 0.65);
                 background: transparent;
                 background-image: none;
                 border: none;
@@ -1478,7 +1491,7 @@ const SETTINGS_CSS: &str = r#"
             .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus {
                 background: alpha(#111827, 0.10);
                 background-image: none;
-                color: #1d2129;
+                color: alpha(#111827, 0.65);
                 border: none;
                 border-radius: 999px;
                 box-shadow: none;
