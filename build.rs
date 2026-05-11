@@ -97,11 +97,14 @@ fn build_capture_overlay() {
 fn main() {
     build_capture_overlay();
 
+    // Rebuild whenever a custom SVG is added/modified in data/icons.
+    println!("cargo:rerun-if-changed=data/icons");
+
     relm4_icons_build::bundle_icons(
         "icon_names.rs",
         Some("com.apexshot.editor"),
         None::<&str>,
-        None::<&str>,
+        Some("data/icons"),
         [
             "crop",
             "go-next",
@@ -112,7 +115,6 @@ fn main() {
             "highlight-regular",
             "text-t-regular",
             "text-italic-regular",
-            "fog",
             "view-grid",
             "blur",
             "shield-regular",

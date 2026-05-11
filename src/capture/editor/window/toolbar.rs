@@ -145,9 +145,9 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         button.set_valign(Align::Center);
     }
 
-    let select_btn = icon_tool_button(icon_names::POINTER_PRIMARY_CLICK, "Select");
+    let select_btn = icon_tool_button(icon_names::custom::SELECT_MODE_SYMBOLIC, "Select");
     let crop_btn = icon_tool_button(icon_names.crop, "Crop");
-    let background_btn = icon_tool_button(icon_names::IMAGE_REGULAR, "Background");
+    let background_btn = icon_tool_button(icon_names::custom::IMAGE_ALT_SYMBOLIC, "Background");
     let draw_btn = icon_tool_button(icon_names.draw, "Pen");
 
     let left_group = GtkBox::new(Orientation::Horizontal, 0);
