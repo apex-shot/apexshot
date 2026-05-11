@@ -1561,6 +1561,44 @@ pub fn install_editor_css() {
                 color: #1d2129;
             }
 
+            /* Inspector headings, section bodies, placeholders, and other
+               labels that defaulted to rgba(255,255,255,*) and were invisible
+               on the light surface. */
+            .editor-root.editor-theme-light .editor-inspector-title,
+            .editor-root.editor-theme-light .editor-background-sidebar-title {
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light .editor-inspector-section-body {
+                background: #ffffff;
+                border: 1px solid alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .editor-inspector-placeholder {
+                color: alpha(#1d2129, 0.62);
+            }
+
+            /* Crop inspector dimension readout */
+            .editor-root.editor-theme-light .editor-crop-dimensions-value {
+                color: alpha(#1d2129, 0.94);
+            }
+            .editor-root.editor-theme-light .editor-crop-dimensions-separator {
+                color: alpha(#1d2129, 0.42);
+            }
+
+            /* Color picker entries and field labels */
+            .editor-root.editor-theme-light entry.editor-hex-entry,
+            .editor-root.editor-theme-light entry.editor-rgba-entry {
+                background: alpha(#111827, 0.04);
+                border: 1px solid alpha(#111827, 0.10);
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light entry.editor-hex-entry text,
+            .editor-root.editor-theme-light entry.editor-rgba-entry text {
+                color: alpha(#1d2129, 0.92);
+            }
+            .editor-root.editor-theme-light .editor-color-field-label {
+                color: alpha(#1d2129, 0.55);
+            }
+
             /* Active tool button uses .active-tool — covered above via
                alpha(#111827, 0.12). Tool button images are recolored by
                the brightness(0) filter, which works for both light and
