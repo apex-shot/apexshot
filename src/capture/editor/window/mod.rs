@@ -631,9 +631,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
     let toolbar_right_parts = toolbar::build_toolbar_right_controls(
         &color_status,
-        icon_names::ARROW_UNDO_REGULAR,
-        icon_names::ARROW_REDO_REGULAR,
-        icon_names::DELETE_REGULAR,
+        icon_names::custom::EDIT_UNDO_SYMBOLIC,
+        icon_names::custom::EDIT_UNDO_RTL_SYMBOLIC,
+        icon_names::custom::USER_TRASH_SYMBOLIC,
         &traffic_minimize,
         &traffic_zoom,
         &traffic_close,
