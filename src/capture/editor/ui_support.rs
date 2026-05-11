@@ -151,8 +151,8 @@ pub fn install_editor_css() {
 
             .editor-toolbar {
                 padding: 6px 10px 6px 12px;
-                background-color: #1a1a1a;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+                background-color: #141414;
+                border-bottom: 1px solid alpha(white, 0.06);
                 border-radius: 10px 10px 0 0;
             }
 
@@ -1251,8 +1251,8 @@ pub fn install_editor_css() {
 
             .editor-root.editor-theme-dark .editor-toolbar,
             .editor-root.editor-theme-light .editor-toolbar {
-                background-color: #1a1a1a;
-                border-bottom-color: rgba(255, 255, 255, 0.06);
+                background-color: #141414;
+                border-bottom-color: alpha(white, 0.06);
             }
 
             .editor-root.editor-theme-dark .editor-footer,
