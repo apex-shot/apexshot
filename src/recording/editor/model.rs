@@ -145,7 +145,10 @@ impl VideoEditState {
             }
         }
         // Find where insert_pos is in segment_order and insert insert_pos+1 right after
-        let order_pos = self.segment_order.iter().position(|&i| i == insert_pos)
+        let order_pos = self
+            .segment_order
+            .iter()
+            .position(|&i| i == insert_pos)
             .unwrap_or(self.segment_order.len());
         self.segment_order.insert(order_pos + 1, insert_pos + 1);
     }
@@ -234,7 +237,10 @@ impl VideoEditState {
 
     /// Returns whether segments have been reordered from their default.
     pub fn is_reordered(&self) -> bool {
-        self.segment_order.iter().enumerate().any(|(pos, &seg)| pos != seg)
+        self.segment_order
+            .iter()
+            .enumerate()
+            .any(|(pos, &seg)| pos != seg)
     }
 
     pub fn target_dimensions(&self) -> (u32, u32) {

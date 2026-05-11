@@ -246,7 +246,8 @@ fn wire_controls(
     for (button, mode) in &audio_buttons {
         let state = state.clone();
         let estimate_label = estimate_label.clone();
-        let all_buttons: Vec<gtk4::CheckButton> = audio_buttons.iter().map(|(b, _)| b.clone()).collect();
+        let all_buttons: Vec<gtk4::CheckButton> =
+            audio_buttons.iter().map(|(b, _)| b.clone()).collect();
         let mode = *mode;
         let button_clone = button.clone();
         let updating = updating_audio.clone();

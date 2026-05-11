@@ -162,7 +162,11 @@ fn selected_action_detail(action: &AnnotationAction) -> String {
             font.size as i32,
             font.family,
             draw_color_to_hex(*color),
-            if text.is_empty() { "Empty" } else { text.as_str() }
+            if text.is_empty() {
+                "Empty"
+            } else {
+                text.as_str()
+            }
         ),
         AnnotationAction::Number {
             number,
@@ -177,7 +181,11 @@ fn selected_action_detail(action: &AnnotationAction) -> String {
             draw_color_to_hex(*color)
         ),
         AnnotationAction::Obfuscate { method, amount, .. } => {
-            format!("{} · {}%", method.display_name(), (*amount * 100.0).round() as i32)
+            format!(
+                "{} · {}%",
+                method.display_name(),
+                (*amount * 100.0).round() as i32
+            )
         }
         AnnotationAction::Focus { intensity, .. } => {
             format!("Intensity {}%", (*intensity * 100.0).round() as i32)
@@ -1107,8 +1115,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         number_size_list.append(&btn);
     }
 
-    let footer_parts =
-        footer::build_footer(icon_names::custom::COPY_SYMBOLIC, icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC);
+    let footer_parts = footer::build_footer(
+        icon_names::custom::COPY_SYMBOLIC,
+        icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
+    );
     let zoom_button = footer_parts.zoom_button;
     let zoom_label = footer_parts.zoom_label;
     let zoom_header_label = footer_parts.zoom_header_label;

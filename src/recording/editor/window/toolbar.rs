@@ -1,6 +1,4 @@
-use gtk4::{
-    prelude::*, Align, ApplicationWindow, Box as GtkBox, CenterBox, Label, Orientation,
-};
+use gtk4::{prelude::*, Align, ApplicationWindow, Box as GtkBox, CenterBox, Label, Orientation};
 
 pub(super) fn build_toolbar(window: &ApplicationWindow, file_stem: &str) -> CenterBox {
     let controls = CenterBox::new();

@@ -775,11 +775,7 @@ fn draw_trim_overlay(
 
         // Draw removed segments indicator at bottom
         let boundaries = state.segment_boundaries();
-        let removed_count = state
-            .segments_kept
-            .iter()
-            .filter(|&&k| !k)
-            .count();
+        let removed_count = state.segments_kept.iter().filter(|&&k| !k).count();
         if removed_count > 0 {
             cr.set_font_size(9.0);
             cr.set_source_rgba(1.0, 0.4, 0.4, 0.7);
@@ -822,10 +818,34 @@ fn draw_trim_overlay(
         cr.set_source_rgba(0.69, 0.36, 0.22, 0.85);
         cr.set_line_width(1.5);
         let _ = cr.new_sub_path();
-        cr.arc(start_x + r, r, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
-        cr.arc(start_x + range_width - r, r, r, -0.5 * std::f64::consts::PI, 0.0);
-        cr.arc(start_x + range_width - r, h - r, r, 0.0, 0.5 * std::f64::consts::PI);
-        cr.arc(start_x + r, h - r, r, 0.5 * std::f64::consts::PI, std::f64::consts::PI);
+        cr.arc(
+            start_x + r,
+            r,
+            r,
+            std::f64::consts::PI,
+            1.5 * std::f64::consts::PI,
+        );
+        cr.arc(
+            start_x + range_width - r,
+            r,
+            r,
+            -0.5 * std::f64::consts::PI,
+            0.0,
+        );
+        cr.arc(
+            start_x + range_width - r,
+            h - r,
+            r,
+            0.0,
+            0.5 * std::f64::consts::PI,
+        );
+        cr.arc(
+            start_x + r,
+            h - r,
+            r,
+            0.5 * std::f64::consts::PI,
+            std::f64::consts::PI,
+        );
         cr.close_path();
         let _ = cr.stroke();
 
@@ -871,11 +891,7 @@ fn draw_trim_overlay(
     }
 }
 
-fn update_time_labels(
-    start_label: &Label,
-    end_label: &Label,
-    state: &Arc<Mutex<VideoEditState>>,
-) {
+fn update_time_labels(start_label: &Label, end_label: &Label, state: &Arc<Mutex<VideoEditState>>) {
     let state = state.lock().unwrap();
     start_label.set_text(&format!(
         "Start {}",

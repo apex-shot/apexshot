@@ -5,20 +5,22 @@ mod preview;
 mod timeline;
 mod toolbar;
 
-use super::ui_support::install_recording_editor_css;
 use super::ffmpeg;
-use super::model::{AudioMode, DimensionPreset, VideoEditState, VideoMetadata};
+use super::model::{AudioMode, VideoEditState, VideoMetadata};
+use super::ui_support::install_recording_editor_css;
 use gtk4::gdk;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, DropTarget, Label,
-    Orientation, Overlay, Revealer,
+    Orientation, Overlay, Revealer, Spinner,
 };
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 pub fn open(metadata: VideoMetadata) -> anyhow::Result<()> {
     let state = Arc::new(Mutex::new(VideoEditState::new(metadata)));
@@ -82,6 +84,8 @@ fn build_window(
     let overlay = Overlay::new();
     overlay.set_child(Some(&root));
 
+    let exporting = Rc::new(Cell::new(false));
+
     // Drop feedback banner
     let drop_banner = GtkBox::new(Orientation::Vertical, 0);
     drop_banner.add_css_class("recording-editor-drop-banner");
@@ -99,7 +103,29 @@ fn build_window(
     drop_revealer.set_reveal_child(false);
     overlay.add_overlay(&drop_revealer);
 
-    populate_root(&root, &window, state.clone(), thumbnails);
+    // Loading banner for async drop handling
+    let loading_box = GtkBox::new(Orientation::Horizontal, 8);
+    loading_box.add_css_class("recording-editor-drop-banner");
+    loading_box.set_can_target(false);
+    loading_box.set_halign(Align::Center);
+    let loading_spinner = Spinner::new();
+    loading_spinner.set_size_request(16, 16);
+    loading_spinner.set_can_target(false);
+    let loading_label = Label::new(Some("Loading video…"));
+    loading_label.add_css_class("recording-editor-drop-label");
+    loading_label.set_can_target(false);
+    loading_box.append(&loading_spinner);
+    loading_box.append(&loading_label);
+    let loading_revealer = Revealer::new();
+    loading_revealer.set_can_target(false);
+    loading_revealer.set_halign(Align::Center);
+    loading_revealer.set_valign(Align::Start);
+    loading_revealer.set_child(Some(&loading_box));
+    loading_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
+    loading_revealer.set_reveal_child(false);
+    overlay.add_overlay(&loading_revealer);
+
+    populate_root(&root, &window, state.clone(), thumbnails, exporting.clone());
     crate::capture::editor::ui_support::install_edge_resize(&root, &window);
 
     // Drag-and-drop target for video files — attach to window so it doesn't eat events from root
@@ -116,6 +142,9 @@ fn build_window(
     let root_ref = root.clone();
     let window_ref = window.clone();
     let state_ref = state.clone();
+    let exporting_for_drop = exporting.clone();
+    let loading_revealer_drop = loading_revealer.clone();
+    let loading_spinner_drop = loading_spinner.clone();
     drop_target.connect_drop(move |_, value, _x, _y| {
         drop_revealer.set_reveal_child(false);
         let Ok(file) = value.get::<gio::File>() else {
@@ -136,30 +165,68 @@ fn build_window(
         {
             return false;
         }
-        let Ok(new_metadata) = ffmpeg::probe_metadata(&path) else {
-            return false;
-        };
-        let new_thumbnails = ffmpeg::generate_thumbnails(&new_metadata).unwrap_or_default();
-        // Update shared state
-        {
-            let mut s = state_ref.lock().unwrap();
-            s.metadata = new_metadata;
-            s.trim_start_seconds = 0.0;
-            s.trim_end_seconds = s.metadata.duration_seconds;
-            s.playhead_seconds = 0.0;
-            s.dimension_preset = DimensionPreset::Original;
-            s.custom_width = s.metadata.width;
-            s.custom_height = s.metadata.height;
-            s.quality = 70;
-            s.audio_mode = AudioMode::Unchanged;
-        }
-        // Clear and rebuild root contents
-        populate_root(&root_ref, &window_ref, state_ref.clone(), new_thumbnails);
+
+        // Show loading state
+        loading_revealer_drop.set_reveal_child(true);
+        loading_spinner_drop.start();
+
+        let path = path.to_path_buf();
+        let (sender, receiver) = mpsc::channel::<Result<(VideoMetadata, Vec<PathBuf>), String>>();
+        std::thread::spawn(move || {
+            let result = (|| -> anyhow::Result<_> {
+                let metadata = ffmpeg::probe_metadata(&path)?;
+                let thumbnails = ffmpeg::generate_thumbnails(&metadata)?;
+                Ok((metadata, thumbnails))
+            })();
+            let _ = sender.send(result.map_err(|e| e.to_string()));
+        });
+
+        let root = root_ref.clone();
+        let window = window_ref.clone();
+        let state = state_ref.clone();
+        let exporting = exporting_for_drop.clone();
+        let loading_revealer = loading_revealer_drop.clone();
+        let loading_spinner = loading_spinner_drop.clone();
+        glib::timeout_add_local(Duration::from_millis(100), move || {
+            match receiver.try_recv() {
+                Ok(Ok((metadata, thumbnails))) => {
+                    loading_revealer.set_reveal_child(false);
+                    loading_spinner.stop();
+                    loading_spinner.set_visible(false);
+                    {
+                        let mut s = state.lock().unwrap();
+                        *s = VideoEditState::new(metadata);
+                        s.quality = 70;
+                        s.audio_mode = AudioMode::Unchanged;
+                    }
+                    populate_root(&root, &window, state.clone(), thumbnails, exporting.clone());
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(err)) => {
+                    loading_revealer.set_reveal_child(false);
+                    loading_spinner.stop();
+                    loading_spinner.set_visible(false);
+                    dialogs::show_error(
+                        &window,
+                        "Failed to open video",
+                        "ApexShot could not open this video file.",
+                        Some(&err),
+                    );
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    loading_revealer.set_reveal_child(false);
+                    loading_spinner.stop();
+                    loading_spinner.set_visible(false);
+                    glib::ControlFlow::Break
+                }
+            }
+        });
         true
     });
     window.add_controller(drop_target);
 
-    let exporting = Rc::new(Cell::new(false));
     let exporting_for_close = exporting.clone();
     window.connect_close_request(move |_| {
         if exporting_for_close.get() {
@@ -178,13 +245,13 @@ fn populate_root(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     thumbnails: Vec<PathBuf>,
+    exporting: Rc<Cell<bool>>,
 ) {
     // Remove all existing children
     while let Some(child) = root.first_child() {
         root.remove(&child);
     }
 
-    let exporting = Rc::new(Cell::new(false));
     let estimate_label = Label::new(None);
     estimate_label.add_css_class("recording-editor-estimate");
     footer::update_estimate(&estimate_label, &state, false);

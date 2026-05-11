@@ -1,5 +1,7 @@
 use crate::recording::editor::model::format_size;
-use gtk4::{prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Window};
+use gtk4::{
+    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Window,
+};
 use std::path::PathBuf;
 
 pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
@@ -30,11 +32,12 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
     title.add_css_class("recording-editor-dialog-title");
     title.set_xalign(0.0);
 
-    let file_name = path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("file");
-    let body = Label::new(Some(&format!("Saved {} ({})", file_name, format_size(size))));
+    let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("file");
+    let body = Label::new(Some(&format!(
+        "Saved {} ({})",
+        file_name,
+        format_size(size)
+    )));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);
     body.set_wrap(true);

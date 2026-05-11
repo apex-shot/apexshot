@@ -3449,7 +3449,8 @@ mod tests {
         let source = include_str!("ui_support.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("button.editor-background-alignment-button.active-alignment-option {")
+            production_source
+                .contains("button.editor-background-alignment-button.active-alignment-option {")
                 && production_source.contains("box-shadow: inset 0 0 0 1px #b05c38;"),
             "alignment selected state should use the #B05C38 editor accent",
         );

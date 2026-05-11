@@ -3,8 +3,7 @@ use super::panels::EditorControls;
 use crate::recording::editor::ffmpeg;
 use crate::recording::editor::model::{format_size, VideoEditState};
 use gtk4::{
-    glib,
-    prelude::*, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Spinner,
+    glib, prelude::*, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Spinner,
 };
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -74,11 +73,7 @@ pub(super) fn build_footer(
     footer
 }
 
-pub(super) fn update_estimate(
-    label: &Label,
-    state: &Arc<Mutex<VideoEditState>>,
-    trim_only: bool,
-) {
+pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, trim_only: bool) {
     let state = state.lock().unwrap();
     label.set_text(&format!(
         "Estimated file size: ~{}",

@@ -76,4 +76,3 @@ pub(super) fn build_preview(
 
     root
 }
-

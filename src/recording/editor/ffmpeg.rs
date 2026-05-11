@@ -11,7 +11,7 @@ pub fn ensure_tools_available() -> anyhow::Result<()> {
 }
 
 fn ensure_tool(name: &str) -> anyhow::Result<()> {
-    Command::new(name)
+    let out = Command::new(name)
         .arg("-version")
         .output()
         .with_context(|| {
@@ -19,6 +19,14 @@ fn ensure_tool(name: &str) -> anyhow::Result<()> {
                 "{name} is required for the recording editor. Install ffmpeg to use this feature."
             )
         })?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        anyhow::bail!(
+            "{name} exited with error (status: {}):\nstdout: {stdout}\nstderr: {stderr}",
+            out.status,
+        );
+    }
     Ok(())
 }
 
@@ -207,11 +215,11 @@ pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
 pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     let output_path = edited_output_path(&state.metadata.path);
     let kept = state.ordered_kept_segments();
+    if kept.is_empty() {
+        anyhow::bail!("no segments selected for export");
+    }
     if kept.len() <= 1 {
-        let (start, end) = kept.first().copied().unwrap_or((
-            state.trim_start_seconds,
-            state.trim_end_seconds,
-        ));
+        let (start, end) = kept.first().copied().unwrap();
         let args = build_single_trim_args(state, start, end, &output_path);
         run_ffmpeg(args, &output_path)?;
     } else {
@@ -223,11 +231,11 @@ pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
 pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     let output_path = edited_output_path(&state.metadata.path);
     let kept = state.ordered_kept_segments();
+    if kept.is_empty() {
+        anyhow::bail!("no segments selected for export");
+    }
     if kept.len() <= 1 {
-        let (start, end) = kept.first().copied().unwrap_or((
-            state.trim_start_seconds,
-            state.trim_end_seconds,
-        ));
+        let (start, end) = kept.first().copied().unwrap();
         let args = build_single_convert_args(state, start, end, &output_path);
         run_ffmpeg(args, &output_path)?;
     } else {
@@ -257,7 +265,14 @@ fn build_single_trim_args(
     match state.audio_mode {
         AudioMode::Muted => args.push("-an".into()),
         AudioMode::Mono => {
-            args.extend(["-c:a".into(), "aac".into(), "-ac".into(), "1".into(), "-b:a".into(), "128k".into()]);
+            args.extend([
+                "-c:a".into(),
+                "aac".into(),
+                "-ac".into(),
+                "1".into(),
+                "-b:a".into(),
+                "128k".into(),
+            ]);
         }
         AudioMode::Unchanged => {
             if state.metadata.has_audio {
@@ -402,7 +417,12 @@ mod tests {
     #[test]
     fn trim_only_command_uses_stream_copy() {
         let s = state();
-        let args = build_single_trim_args(&s, s.trim_start_seconds, s.trim_end_seconds, Path::new("/tmp/output.mp4"));
+        let args = build_single_trim_args(
+            &s,
+            s.trim_start_seconds,
+            s.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
 
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "copy"]));
         assert!(args.windows(2).any(|pair| pair == ["-ss", "1.250"]));
@@ -415,7 +435,12 @@ mod tests {
         let mut state = state();
         state.quality = 70;
         state.audio_mode = AudioMode::Muted;
-        let args = build_single_convert_args(&state, state.trim_start_seconds, state.trim_end_seconds, Path::new("/tmp/output.mp4"));
+        let args = build_single_convert_args(
+            &state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
 
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
         assert!(args.windows(2).any(|pair| pair == ["-crf", "22"]));

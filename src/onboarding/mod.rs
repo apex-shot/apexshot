@@ -1,6 +1,4 @@
-use gtk4::{
-    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Orientation,
-};
+use gtk4::{prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Orientation};
 use std::fs;
 use std::path::PathBuf;
 
