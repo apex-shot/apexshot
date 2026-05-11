@@ -491,9 +491,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("editor-root");
 
-    let _dark_glass = prefers_dark_glass_theme();
+    let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
-    root.add_css_class("editor-theme-dark");
+    if prefers_dark {
+        root.add_css_class("editor-theme-dark");
+    } else {
+        root.add_css_class("editor-theme-light");
+    }
     if reduced_transparency {
         root.add_css_class("editor-reduced-transparency");
     }
@@ -2547,6 +2551,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             } else {
                 None
             },
+            !prefers_dark,
         );
 
         if has_background {
