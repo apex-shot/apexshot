@@ -205,12 +205,12 @@ fn build_settings_window(app: &Application) {
     let labels = [
         ("General", custom::SETTINGS_SYMBOLIC),
         ("Shortcuts", custom::KEYBOARD_SHORTCUTS_SYMBOLIC),
-        ("Quick Access", custom::APP_ICON_DESIGN_SYMBOLIC),
+        ("Quick Access", custom::OVERLAPPING_WINDOWS_SYMBOLIC),
         ("Recording", custom::RECORD_SCREEN_SYMBOLIC),
         ("Screenshots", custom::SCREENSHOOTER_SYMBOLIC),
-        ("Annotate", custom::PENCIL_SYMBOLIC),
+        ("Annotate", custom::APP_ICON_DESIGN_SYMBOLIC),
         ("Cloud", custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
-        ("Advanced", custom::OVERLAPPING_WINDOWS_SYMBOLIC),
+        ("Advanced", custom::SETTINGS_SYMBOLIC),
         ("About", custom::INFO_SYMBOLIC),
     ];
 

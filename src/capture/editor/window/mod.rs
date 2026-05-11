@@ -1002,7 +1002,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     }
 
     let footer_parts =
-        footer::build_footer(icon_names::COPY_REGULAR, icon_names::CLOUD_ARROW_UP_REGULAR);
+        footer::build_footer(icon_names::custom::COPY_SYMBOLIC, icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC);
     let zoom_button = footer_parts.zoom_button;
     let zoom_label = footer_parts.zoom_label;
     let zoom_header_label = footer_parts.zoom_header_label;
