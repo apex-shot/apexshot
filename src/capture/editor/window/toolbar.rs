@@ -1148,7 +1148,7 @@ mod tests {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("color_status_swatch.set_size_request(14, 14);")
+            production_source.contains("color_status_swatch.set_size_request(12, 12);")
                 && production_source.contains("color_status_swatch.set_halign(gtk4::Align::Center);")
                 && production_source.contains("color_status_swatch.set_valign(gtk4::Align::Center);")
                 && production_source.contains("color_status_swatch.set_hexpand(false);")
