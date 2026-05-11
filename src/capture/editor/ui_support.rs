@@ -826,33 +826,46 @@ pub fn install_editor_css() {
                 box-shadow: none;
             }
 
+            /* --- Sliders (mirrors the video editor's minimal style) --- */
+            .editor-root scale {
+                min-height: 20px;
+            }
+
+            .editor-root scale trough {
+                min-height: 4px;
+                border-radius: 999px;
+                background: alpha(white, 0.08);
+                border: none;
+            }
+
+            .editor-root scale highlight {
+                min-height: 4px;
+                border-radius: 999px;
+                background: #b05c38;
+            }
+
+            .editor-root scale:disabled trough {
+                background: alpha(white, 0.04);
+            }
+
+            .editor-root scale:disabled highlight {
+                background: alpha(#b05c38, 0.42);
+            }
+
             .editor-root.editor-theme-light scale trough {
-                background-color: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.14);
+                background: alpha(#111827, 0.08);
             }
 
             .editor-root.editor-theme-light scale highlight {
-                background-color: #ff9900;
-            }
-
-            .editor-root.editor-theme-light scale slider {
-                background: #f5f5f7;
-                border: 1px solid rgba(0, 0, 0, 0.18);
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
+                background: #b05c38;
             }
 
             .editor-root.editor-theme-light scale:disabled trough {
-                background-color: rgba(255, 255, 255, 0.04);
-                border-color: rgba(255, 255, 255, 0.08);
+                background: alpha(#111827, 0.04);
             }
 
             .editor-root.editor-theme-light scale:disabled highlight {
-                background-color: rgba(255, 153, 0, 0.42);
-            }
-
-            .editor-root.editor-theme-light scale:disabled slider {
-                background: rgba(245, 245, 247, 0.62);
-                border-color: rgba(0, 0, 0, 0.10);
+                background: alpha(#b05c38, 0.42);
             }
 
             .editor-hue-slider trough {
