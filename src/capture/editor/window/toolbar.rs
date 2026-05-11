@@ -1072,6 +1072,7 @@ pub(super) fn build_toolbar_tool_updater(
 
         let primary_surface = match tool {
             Tool::Background => Some(("Background", "background")),
+            Tool::Select => Some(("Select", "select")),
             Tool::Crop => Some(("Crop", "crop")),
             Tool::Pen => Some(("Pen", "pen")),
             Tool::Arrow => Some(("Arrow", "arrow")),

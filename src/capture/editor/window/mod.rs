@@ -52,7 +52,7 @@ impl AnnotateRuntimeConfig {
     }
 }
 
-fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight) -> DrawingArea {
+fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight, light: bool) -> DrawingArea {
     let preview = DrawingArea::new();
     preview.set_content_width(22);
     preview.set_content_height(16);
@@ -63,7 +63,11 @@ fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight) -> Drawin
             PenWeight::Large => 7.0,
             PenWeight::ExtraLarge => 10.0,
         };
-        context.set_source_rgba(241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 0.92);
+        if light {
+            context.set_source_rgba(29.0 / 255.0, 33.0 / 255.0, 41.0 / 255.0, 0.92);
+        } else {
+            context.set_source_rgba(241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 0.92);
+        }
         context.set_line_cap(gtk4::cairo::LineCap::Round);
         context.set_line_width(stroke_width);
         let center_y = f64::from(height) / 2.0;
@@ -92,6 +96,104 @@ fn pen_weight_option_index(stroke_size: f64) -> usize {
         32 => 3,
         _ => 1,
     }
+}
+
+fn selected_action_kind(action: &AnnotationAction) -> &'static str {
+    match action {
+        AnnotationAction::Pen { .. } => "Pen Stroke",
+        AnnotationAction::Highlighter { .. } => "Highlighter",
+        AnnotationAction::Circle { .. } => "Circle",
+        AnnotationAction::Line { .. } => "Line",
+        AnnotationAction::Arrow { .. } => "Arrow",
+        AnnotationAction::Box { .. } => "Box",
+        AnnotationAction::Text { .. } => "Text",
+        AnnotationAction::Number { .. } => "Number Marker",
+        AnnotationAction::Obfuscate { .. } => "Obfuscate Region",
+        AnnotationAction::Focus { .. } => "Focus Region",
+    }
+}
+
+fn selected_action_detail(action: &AnnotationAction) -> String {
+    match action {
+        AnnotationAction::Pen {
+            points,
+            color,
+            stroke_size,
+        } => format!(
+            "{} points · {}px · #{}",
+            points.len(),
+            *stroke_size as i32,
+            draw_color_to_hex(*color)
+        ),
+        AnnotationAction::Highlighter {
+            points,
+            color,
+            stroke_size,
+        } => format!(
+            "{} points · {}px · #{}",
+            points.len(),
+            *stroke_size as i32,
+            draw_color_to_hex(*color)
+        ),
+        AnnotationAction::Circle {
+            color, stroke_size, ..
+        }
+        | AnnotationAction::Box {
+            color, stroke_size, ..
+        }
+        | AnnotationAction::Line {
+            color, stroke_size, ..
+        } => format!("{}px · #{}", *stroke_size as i32, draw_color_to_hex(*color)),
+        AnnotationAction::Arrow {
+            color,
+            stroke_size,
+            style,
+            ..
+        } => format!(
+            "{} · {}px · #{}",
+            style.display_name(),
+            *stroke_size as i32,
+            draw_color_to_hex(*color)
+        ),
+        AnnotationAction::Text {
+            text, color, font, ..
+        } => format!(
+            "{}pt {} · #{} · {}",
+            font.size as i32,
+            font.family,
+            draw_color_to_hex(*color),
+            if text.is_empty() { "Empty" } else { text.as_str() }
+        ),
+        AnnotationAction::Number {
+            number,
+            color,
+            style,
+            size,
+            ..
+        } => format!(
+            "{} · {} · #{}",
+            style.format(*number),
+            size.label(),
+            draw_color_to_hex(*color)
+        ),
+        AnnotationAction::Obfuscate { method, amount, .. } => {
+            format!("{} · {}%", method.display_name(), (*amount * 100.0).round() as i32)
+        }
+        AnnotationAction::Focus { intensity, .. } => {
+            format!("Intensity {}%", (*intensity * 100.0).round() as i32)
+        }
+    }
+}
+
+fn selected_action_geometry(action: &AnnotationAction) -> String {
+    action_bounds_with_padding(action, 0.0)
+        .map(|rect| {
+            format!(
+                "X {} · Y {} · {} x {}",
+                rect.x, rect.y, rect.width, rect.height
+            )
+        })
+        .unwrap_or_else(|| "Geometry unavailable".to_string())
 }
 
 use super::ui_support::{
@@ -793,7 +895,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let icon = build_arrow_thickness_preview(weight);
+        let icon = build_arrow_thickness_preview(weight, !prefers_dark);
         let label_widget = Label::new(Some(label));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
@@ -837,7 +939,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             btn_box.set_margin_top(4);
             btn_box.set_margin_bottom(4);
 
-            let icon = build_arrow_thickness_preview(weight);
+            let icon = build_arrow_thickness_preview(weight, !prefers_dark);
             let label_widget = Label::new(Some(weight.label()));
             label_widget.set_hexpand(true);
             label_widget.set_xalign(0.0);
@@ -879,7 +981,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let icon = build_arrow_thickness_preview(weight);
+        let icon = build_arrow_thickness_preview(weight, !prefers_dark);
         let label_widget = Label::new(Some(label));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
@@ -1011,6 +1113,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let zoom_label = footer_parts.zoom_label;
     let zoom_header_label = footer_parts.zoom_header_label;
     let zoom_popup = footer_parts.zoom_popup;
+    if prefers_dark {
+        zoom_popup.add_css_class("editor-theme-dark");
+    } else {
+        zoom_popup.add_css_class("editor-theme-light");
+    }
     let zoom_minus_btn = footer_parts.zoom_minus_btn;
     let zoom_plus_btn = footer_parts.zoom_plus_btn;
     let zoom_in_btn = footer_parts.zoom_in_btn;
@@ -1350,6 +1457,55 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     placeholder_inspector.append(&placeholder_title);
     placeholder_inspector.append(&placeholder);
 
+    let select_status_label = Label::new(None);
+    select_status_label.add_css_class("editor-select-inspector-status");
+    select_status_label.set_xalign(0.0);
+    select_status_label.set_wrap(true);
+    select_status_label.set_max_width_chars(20);
+
+    let select_detail_label = Label::new(None);
+    select_detail_label.add_css_class("editor-select-inspector-detail");
+    select_detail_label.set_xalign(0.0);
+    select_detail_label.set_wrap(true);
+    select_detail_label.set_max_width_chars(20);
+
+    let select_geometry_label = Label::new(None);
+    select_geometry_label.add_css_class("editor-select-inspector-metric");
+    select_geometry_label.set_xalign(0.0);
+    select_geometry_label.set_wrap(true);
+    select_geometry_label.set_max_width_chars(20);
+
+    let select_hint_label = Label::new(Some(
+        "Click an object to select it. Drag the selected object to move it, use visible handles to resize, or press Delete to remove it.",
+    ));
+    select_hint_label.add_css_class("editor-select-inspector-hint");
+    select_hint_label.set_xalign(0.0);
+    select_hint_label.set_wrap(true);
+    select_hint_label.set_max_width_chars(20);
+
+    let sync_select_inspector: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let select_status_label = select_status_label.clone();
+        let select_detail_label = select_detail_label.clone();
+        let select_geometry_label = select_geometry_label.clone();
+        move || {
+            let selected = {
+                let st = state.lock().unwrap();
+                st.selected_action().cloned()
+            };
+
+            if let Some(action) = selected {
+                select_status_label.set_label(selected_action_kind(&action));
+                select_detail_label.set_label(&selected_action_detail(&action));
+                select_geometry_label.set_label(&selected_action_geometry(&action));
+            } else {
+                select_status_label.set_label("No object selected");
+                select_detail_label.set_label("Select any annotation on the canvas to inspect it.");
+                select_geometry_label.set_label("No geometry");
+            }
+        }
+    });
+
     if let Some(parent) = text_size_list.parent() {
         if let Ok(popover) = parent.downcast::<Popover>() {
             popover.set_child(Option::<&gtk4::Widget>::None);
@@ -1408,18 +1564,46 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let append_inspector_section = |content: &GtkBox, title: &str, widget: &gtk4::Widget| {
         let section = GtkBox::new(Orientation::Vertical, 8);
         section.add_css_class("editor-inspector-section");
+        section.set_hexpand(false);
+        section.set_halign(gtk4::Align::Fill);
 
         let section_title = Label::new(Some(title));
         section_title.add_css_class("editor-background-section-title");
         section_title.set_xalign(0.0);
+        section_title.set_hexpand(false);
+        section_title.set_halign(gtk4::Align::Fill);
 
         let section_body = GtkBox::new(Orientation::Vertical, 0);
+        section_body.set_hexpand(false);
+        section_body.set_halign(gtk4::Align::Fill);
         section_body.append(widget);
 
         section.append(&section_title);
         section.append(&section_body);
         content.append(&section);
     };
+
+    let (select_inspector, select_inspector_content) = build_tool_inspector();
+    append_inspector_section(
+        &select_inspector_content,
+        "Selection",
+        select_status_label.upcast_ref(),
+    );
+    append_inspector_section(
+        &select_inspector_content,
+        "Details",
+        select_detail_label.upcast_ref(),
+    );
+    append_inspector_section(
+        &select_inspector_content,
+        "Geometry",
+        select_geometry_label.upcast_ref(),
+    );
+    append_inspector_section(
+        &select_inspector_content,
+        "Actions",
+        select_hint_label.upcast_ref(),
+    );
 
     let (crop_inspector, crop_inspector_content) = build_tool_inspector();
     crop_ratio_list.add_css_class("editor-inspector-option-list");
@@ -1560,7 +1744,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     number_inspector.set_visible(true);
     colors_inspector.set_visible(true);
     placeholder_inspector.set_visible(true);
+    select_inspector.set_visible(true);
     inspector_stack.add_named(&background_inspector, Some("background"));
+    inspector_stack.add_named(&select_inspector, Some("select"));
     inspector_stack.add_named(&crop_inspector, Some("crop"));
     inspector_stack.add_named(&pen_inspector, Some("pen"));
     inspector_stack.add_named(&arrow_inspector, Some("arrow"));
@@ -1662,7 +1848,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let background_tab_btn = background_tab_btn.clone();
         let colors_tab_btn = colors_tab_btn.clone();
         move |surface| {
-            let show_background = !matches!(surface, "colors" | "placeholder");
+            let show_background = !matches!(surface, "colors" | "placeholder" | "select");
             let show_colors = surface == "colors";
             inspector_stack.set_visible_child_name(surface);
             if show_background {
@@ -1684,6 +1870,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         move |_| {
             let surface = match state.lock().unwrap().selected_tool {
                 Tool::Background => Some("background"),
+                Tool::Select => Some("select"),
                 Tool::Crop => Some("crop"),
                 Tool::Pen => Some("pen"),
                 Tool::Arrow => Some("arrow"),
@@ -2377,6 +2564,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     });
     sync_size_control();
     let initial_tool = state.lock().unwrap().selected_tool;
+    sync_select_inspector();
     update_toolbar_for_tool(initial_tool);
 
     let state_draw = state.clone();
@@ -3112,6 +3300,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             }
         }),
         set_picker_panel_visibility: set_picker_panel_visibility.clone(),
+        sync_select_inspector: sync_select_inspector.clone(),
         sync_size_control: sync_size_control.clone(),
         rebuild_effects_async: rebuild_effects_async.clone(),
         obfuscate_method_button: obfuscate_method_button.clone(),
@@ -3249,6 +3438,7 @@ mod tests {
             production_source.contains("let inspector_stack = Stack::new();")
                 && production_source.contains("inspector_stack.set_hhomogeneous(true);")
                 && production_source.contains("background_inspector.set_visible(true);")
+                && production_source.contains("select_inspector.set_visible(true);")
                 && production_source.contains("crop_inspector.set_visible(true);")
                 && production_source.contains("pen_inspector.set_visible(true);")
                 && production_source.contains("arrow_inspector.set_visible(true);")
@@ -3259,6 +3449,7 @@ mod tests {
                 && production_source.contains("colors_inspector.set_visible(true);")
                 && production_source.contains("placeholder_inspector.set_visible(true);")
                 && production_source.contains("inspector_stack.add_named(&background_inspector, Some(\"background\"));")
+                && production_source.contains("inspector_stack.add_named(&select_inspector, Some(\"select\"));")
                 && production_source.contains("inspector_stack.add_named(&crop_inspector, Some(\"crop\"));")
                 && production_source.contains("inspector_stack.add_named(&pen_inspector, Some(\"pen\"));")
                 && production_source.contains("inspector_stack.add_named(&arrow_inspector, Some(\"arrow\"));")
@@ -3291,7 +3482,9 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("Tool::Crop")
+                && production_source.contains("Tool::Select")
                 && production_source.contains("Tool::Pen")
+                && production_source.contains("\"select\"")
                 && production_source.contains("\"crop\"")
                 && production_source.contains("\"pen\"")
                 && production_source.contains("Tool::Arrow")
@@ -3306,6 +3499,20 @@ mod tests {
                 && production_source.contains("\"highlighter\"")
                 && production_source.contains("\"colors\""),
             "Inspector routing should expose Pen, Arrow, Line, Text, Number, and Highlighter primary panels alongside the shared Colors surface",
+        );
+    }
+
+    #[test]
+    fn select_tool_has_real_inspector_content() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("let (select_inspector, select_inspector_content) = build_tool_inspector();")
+                && production_source.contains("sync_select_inspector")
+                && production_source.contains("\"No object selected\"")
+                && production_source.contains("selected_action_kind(&action)")
+                && !production_source.contains("Tool::Select => Some(\"placeholder\")"),
+            "Select tool should render a real selection inspector instead of the generic placeholder",
         );
     }
 
@@ -3376,8 +3583,8 @@ mod tests {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight) -> DrawingArea")
-                && production_source.contains("let icon = build_arrow_thickness_preview(weight);")
+            production_source.contains("fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight, light: bool) -> DrawingArea")
+                && production_source.contains("let icon = build_arrow_thickness_preview(weight, !prefers_dark);")
                 && !production_source.contains("let icon = Image::from_icon_name(weight.icon_name());\n        icon.set_pixel_size(weight.icon_pixel_size());\n        let label_widget = Label::new(Some(label));"),
             "Arrow thickness inspector options should use dedicated stroke previews instead of stock symbolic icons",
         );

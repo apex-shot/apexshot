@@ -211,6 +211,7 @@ pub(super) struct EventContext {
     pub apply_picker_color_to_editor: Rc<dyn Fn(DrawColor)>,
     pub add_color_to_custom_slots: Rc<dyn Fn(DrawColor)>,
     pub set_picker_panel_visibility: Rc<dyn Fn(bool)>,
+    pub sync_select_inspector: Rc<dyn Fn()>,
     pub sync_size_control: Rc<dyn Fn()>,
     pub rebuild_effects_async: Rc<dyn Fn()>,
     pub obfuscate_method_button: Button,
@@ -300,6 +301,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         apply_picker_color_to_editor,
         add_color_to_custom_slots,
         set_picker_panel_visibility,
+        sync_select_inspector,
         sync_size_control,
         rebuild_effects_async,
         obfuscate_method_button,
@@ -329,6 +331,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let apply_crop_btn_select = apply_crop_btn.clone();
     let update_toolbar_for_tool_select = update_toolbar_for_tool.clone();
     let sync_size_control_select = sync_size_control.clone();
+    let sync_select_inspector_select = sync_select_inspector.clone();
     let rebuild_effects_async_select = rebuild_effects_async.clone();
     select_btn.connect_clicked(move |_| {
         set_active_tool_button(&buttons_select, 2);
@@ -340,6 +343,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             rebuild_effects_async_select();
         }
         update_toolbar_for_tool_select(Tool::Select);
+        sync_select_inspector_select();
         sync_size_control_select();
         set_crop_apply_button_state(&apply_crop_btn_select, false, false);
         if let Some(area) = drawing_area_select.upgrade() {
@@ -1542,6 +1546,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let state_delete_selected = state.clone();
     let drawing_area_delete_selected = drawing_area.downgrade();
     let rebuild_effects_async_delete = rebuild_effects_async.clone();
+    let sync_select_inspector_delete = sync_select_inspector.clone();
     delete_selected_btn.connect_clicked(move |_| {
         if state_delete_selected
             .lock()
@@ -1549,6 +1554,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             .remove_selected_action_without_rebuild()
         {
             rebuild_effects_async_delete();
+            sync_select_inspector_delete();
             if let Some(area) = drawing_area_delete_selected.upgrade() {
                 area.queue_draw();
             }
@@ -2288,6 +2294,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let apply_crop_btn_drag_end = apply_crop_btn.clone();
     let update_crop_size_fields_drag_end = update_crop_size_fields.clone();
     let sync_size_control_drag_end = sync_size_control.clone();
+    let sync_select_inspector_drag_end = sync_select_inspector.clone();
     let rebuild_effects_async_drag_end = rebuild_effects_async.clone();
     drag.connect_drag_end(move |gesture, offset_x, offset_y| {
         if eyedropper_mode_drag_end.get() {
@@ -2336,6 +2343,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 drop(st);
 
                 sync_size_control_drag_end();
+                sync_select_inspector_drag_end();
                 if let Some(area) = drawing_area_end.upgrade() {
                     area.queue_draw();
                 }
@@ -2450,6 +2458,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let font_family_label_click = font_family_label.clone();
     let text_size_list_click = text_size_list.clone();
     let font_family_list_click = font_family_list.clone();
+    let sync_select_inspector_canvas_click = sync_select_inspector.clone();
     click.connect_pressed(move |_gesture, n_press, x, y| {
         let t = *transform_click.lock().unwrap();
         let view_point = Point { x, y };
@@ -2679,6 +2688,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 };
 
                 sync_size_control_canvas_click();
+                sync_select_inspector_canvas_click();
                 if let Some(size) = selected_text_size {
                     text_size_label_click.set_label(&format!("{}pt", size as i32));
                     sync_text_option_selection(
@@ -3210,6 +3220,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let update_toolbar_for_tool_keys = update_toolbar_for_tool.clone();
     let update_crop_size_fields_keys = update_crop_size_fields.clone();
     let sync_picker_for_active_tool_keys = sync_picker_for_active_tool.clone();
+    let sync_select_inspector_keys = sync_select_inspector.clone();
     let eyedropper_mode_keys = eyedropper_mode.clone();
     let eyedropper_point_keys = eyedropper_point.clone();
     let eyedropper_rendered_keys = eyedropper_rendered.clone();
@@ -3292,6 +3303,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 state_keys.lock().unwrap().undo()
             };
             if changed {
+                sync_select_inspector_keys();
                 if let Some(area) = drawing_area_keys.upgrade() {
                     area.queue_draw();
                 }
@@ -3301,6 +3313,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         if ctrl && (pressed == Some('y') || pressed == Some('Y')) {
             if state_keys.lock().unwrap().redo() {
+                sync_select_inspector_keys();
                 if let Some(area) = drawing_area_keys.upgrade() {
                     area.queue_draw();
                 }
@@ -3352,6 +3365,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     st.crop_selection.is_some()
                 };
                 update_toolbar_for_tool_keys(tool);
+                sync_select_inspector_keys();
                 sync_picker_for_active_tool_keys();
                 set_crop_apply_button_state(
                     &apply_crop_btn_keys,
@@ -3369,6 +3383,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         if (key == gdk::Key::Delete || key == gdk::Key::BackSpace)
             && state_keys.lock().unwrap().remove_selected_action()
         {
+            sync_select_inspector_keys();
             if let Some(area) = drawing_area_keys.upgrade() {
                 area.queue_draw();
             }
