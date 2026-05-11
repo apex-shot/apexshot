@@ -212,11 +212,11 @@ fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: Str
     image_frame.append(&preview_area);
 
     let (edit_btn, _) = icon_button(
-        crate::capture::editor::window::icon_names::PEN_REGULAR,
+        crate::capture::editor::window::icon_names::custom::PENCIL_SYMBOLIC,
         "Edit",
     );
     let (copy_btn, _) = icon_button(
-        crate::capture::editor::window::icon_names::COPY_REGULAR,
+        crate::capture::editor::window::icon_names::custom::COPY_SYMBOLIC,
         "Copy",
     );
     let (save_btn, _) = icon_button(
@@ -224,7 +224,7 @@ fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: Str
         "Save",
     );
     let (upload_btn, _) = icon_button(
-        crate::capture::editor::window::icon_names::CLOUD_ARROW_UP_REGULAR,
+        crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
         "Cloud upload (coming soon)",
     );
     upload_btn.set_sensitive(false);
