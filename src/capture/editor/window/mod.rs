@@ -1162,6 +1162,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         Rc::new(std::cell::RefCell::new(None::<gtk4::cairo::ImageSurface>));
     let cached_background_style = Rc::new(std::cell::RefCell::new(None::<BackgroundStyle>));
     let cached_blurred_revision = Rc::new(Cell::new(0u64));
+    let cached_shadow_surface = Rc::new(std::cell::RefCell::new(None::<gtk4::cairo::ImageSurface>));
+    let cached_shadow_revision = Rc::new(Cell::new(0u64));
 
     let gradient_surfaces = Rc::new(RefCell::new(vec![
             None::<gtk4::cairo::ImageSurface>;
@@ -2588,7 +2590,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let cached_background_surface_draw = cached_background_surface.clone();
     let cached_background_style_draw = cached_background_style.clone();
     let cached_blurred_revision_draw = cached_blurred_revision.clone();
+    let cached_shadow_surface_draw = cached_shadow_surface.clone();
+    let cached_shadow_revision_draw = cached_shadow_revision.clone();
     let canvas_padding_draw = canvas_padding as f64;
+
     let gradient_surfaces_draw = gradient_surfaces.clone();
     let wallpaper_cache_draw = wallpaper_cache.clone();
     drawing_area.set_draw_func(move |_, context, width, height| {
@@ -2872,26 +2877,31 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 t.scale = canvas_t.scale * layout.draw_scale;
 
                 if let Some(shadow) = layout.shadow {
-                    let shadow_blur = (shadow.blur * canvas_t.scale).max(1.0);
-                    let shadow_corner = background_corner_radius * layout.scale_factor * t.scale;
-                    let shadow_width = (image_width * t.scale).round().max(1.0) as u32;
-                    let shadow_height = (image_height * t.scale).round().max(1.0) as u32;
+                    let current_revision = working_image_revision;
+                    let mut shadow_surface_cache = cached_shadow_surface_draw.borrow_mut();
+                    let needs_recompute = cached_shadow_revision_draw.get() != current_revision
+                        || shadow_surface_cache.is_none();
 
-                    if let Ok(mut shadow_image) = render_shadow_layer(
-                        shadow_width,
-                        shadow_height,
-                        shadow_blur,
-                        shadow.opacity,
-                        shadow_corner,
-                    ) {
-                        if shadow_blur > 0.0 {
+                    if needs_recompute {
+                        let base_blur = shadow.blur.max(1.0);
+                        let base_corner = background_corner_radius * layout.scale_factor;
+                        let base_w = (image_width).round().max(1.0) as u32;
+                        let base_h = (image_height).round().max(1.0) as u32;
+
+                        if let Ok(mut shadow_image) = render_shadow_layer(
+                            base_w,
+                            base_h,
+                            base_blur,
+                            shadow.opacity,
+                            base_corner,
+                        ) {
                             let blur_rect = Rect {
                                 x: 0,
                                 y: 0,
                                 width: shadow_image.width() as i32,
                                 height: shadow_image.height() as i32,
                             };
-                            let pass_radius = (shadow_blur / 2.0).max(1.0);
+                            let pass_radius = (base_blur / 2.0).max(1.0);
                             for _ in 0..3 {
                                 super::render::apply_blur_rect(
                                     &mut shadow_image,
@@ -2900,16 +2910,29 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                                     true,
                                 );
                             }
+                            *shadow_surface_cache = rgba_image_to_surface(&shadow_image);
+                            cached_shadow_revision_draw.set(current_revision);
                         }
-                        if let Some(shadow_surface) = rgba_image_to_surface(&shadow_image) {
-                            super::render::paint_surface_with_filter(
-                                context,
-                                &shadow_surface,
-                                canvas_t.offset_x + shadow.rect.x * canvas_t.scale,
-                                canvas_t.offset_y + shadow.rect.y * canvas_t.scale,
-                                gtk4::cairo::Filter::Good,
-                            );
-                        }
+                    }
+
+                    if let Some(surface) = shadow_surface_cache.as_ref() {
+                        let sw = surface.width() as f64;
+                        let sh = surface.height() as f64;
+                        let shadow_scale = t.scale;
+                        let target_w = image_width * shadow_scale;
+                        let target_h = image_height * shadow_scale;
+                        let spread_px = (shadow.blur * 1.35).ceil().max(0.0);
+                        let sx = (target_w + spread_px * 2.0) / sw;
+                        let sy = (target_h + spread_px * 2.0) / sh;
+                        let _ = context.save();
+                        context.translate(
+                            canvas_t.offset_x + shadow.rect.x * canvas_t.scale,
+                            canvas_t.offset_y + shadow.rect.y * canvas_t.scale,
+                        );
+                        context.scale(sx, sy);
+                        context.set_source_surface(surface, 0.0, 0.0).unwrap();
+                        let _ = context.paint();
+                        let _ = context.restore();
                     }
                 }
             } else {
