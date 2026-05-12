@@ -534,9 +534,7 @@ pub fn draw_arrow_selection_outline(
         ArrowStyle::Curved => {
             build_thorn_arrow_path(context, start, end, stroke_size, false, &control_points)
         }
-        _ => {
-            build_thorn_arrow_path(context, start, end, stroke_size, true, &control_points)
-        }
+        _ => build_thorn_arrow_path(context, start, end, stroke_size, true, &control_points),
     };
 
     if path_built {

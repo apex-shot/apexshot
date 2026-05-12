@@ -189,13 +189,7 @@ pub fn action_resize_handles(action: &AnnotationAction) -> Vec<(SelectHandle, Po
                         y: cy - b * sqrt2_2,
                     },
                 ),
-                (
-                    SelectHandle::Top,
-                    Point {
-                        x: cx,
-                        y: cy - b,
-                    },
-                ),
+                (SelectHandle::Top, Point { x: cx, y: cy - b }),
                 (
                     SelectHandle::TopRight,
                     Point {
@@ -203,20 +197,8 @@ pub fn action_resize_handles(action: &AnnotationAction) -> Vec<(SelectHandle, Po
                         y: cy - b * sqrt2_2,
                     },
                 ),
-                (
-                    SelectHandle::Left,
-                    Point {
-                        x: cx - a,
-                        y: cy,
-                    },
-                ),
-                (
-                    SelectHandle::Right,
-                    Point {
-                        x: cx + a,
-                        y: cy,
-                    },
-                ),
+                (SelectHandle::Left, Point { x: cx - a, y: cy }),
+                (SelectHandle::Right, Point { x: cx + a, y: cy }),
                 (
                     SelectHandle::BottomLeft,
                     Point {
@@ -224,13 +206,7 @@ pub fn action_resize_handles(action: &AnnotationAction) -> Vec<(SelectHandle, Po
                         y: cy + b * sqrt2_2,
                     },
                 ),
-                (
-                    SelectHandle::Bottom,
-                    Point {
-                        x: cx,
-                        y: cy + b,
-                    },
-                ),
+                (SelectHandle::Bottom, Point { x: cx, y: cy + b }),
                 (
                     SelectHandle::BottomRight,
                     Point {
