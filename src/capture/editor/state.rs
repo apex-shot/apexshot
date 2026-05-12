@@ -1683,7 +1683,12 @@ impl EditorState {
         match self.active_size_control_mode() {
             Some(SizeControlMode::Stroke) => {
                 let changed = self.set_stroke_size(size);
-                let _ = self.set_selected_action_stroke_size(self.stroke_size);
+                let is_highlighter = self
+                    .selected_action()
+                    .is_some_and(|a| matches!(a, AnnotationAction::Highlighter { .. }));
+                if !is_highlighter {
+                    let _ = self.set_selected_action_stroke_size(self.stroke_size);
+                }
                 changed
             }
             Some(SizeControlMode::Obfuscate) => {

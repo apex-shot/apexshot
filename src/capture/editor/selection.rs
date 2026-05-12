@@ -170,8 +170,77 @@ pub fn action_contains_point_with_padding(
 
 pub fn action_resize_handles(action: &AnnotationAction) -> Vec<(SelectHandle, Point)> {
     match action {
-        AnnotationAction::Circle { rect, .. }
-        | AnnotationAction::Box { rect, .. }
+        AnnotationAction::Circle { rect, .. } => {
+            let left = rect.x as f64;
+            let top = rect.y as f64;
+            let right = left + rect.width as f64;
+            let bottom = top + rect.height as f64;
+            let cx = (left + right) * 0.5;
+            let cy = (top + bottom) * 0.5;
+            let a = rect.width as f64 * 0.5;
+            let b = rect.height as f64 * 0.5;
+            let sqrt2_2 = std::f64::consts::FRAC_1_SQRT_2;
+
+            vec![
+                (
+                    SelectHandle::TopLeft,
+                    Point {
+                        x: cx - a * sqrt2_2,
+                        y: cy - b * sqrt2_2,
+                    },
+                ),
+                (
+                    SelectHandle::Top,
+                    Point {
+                        x: cx,
+                        y: cy - b,
+                    },
+                ),
+                (
+                    SelectHandle::TopRight,
+                    Point {
+                        x: cx + a * sqrt2_2,
+                        y: cy - b * sqrt2_2,
+                    },
+                ),
+                (
+                    SelectHandle::Left,
+                    Point {
+                        x: cx - a,
+                        y: cy,
+                    },
+                ),
+                (
+                    SelectHandle::Right,
+                    Point {
+                        x: cx + a,
+                        y: cy,
+                    },
+                ),
+                (
+                    SelectHandle::BottomLeft,
+                    Point {
+                        x: cx - a * sqrt2_2,
+                        y: cy + b * sqrt2_2,
+                    },
+                ),
+                (
+                    SelectHandle::Bottom,
+                    Point {
+                        x: cx,
+                        y: cy + b,
+                    },
+                ),
+                (
+                    SelectHandle::BottomRight,
+                    Point {
+                        x: cx + a * sqrt2_2,
+                        y: cy + b * sqrt2_2,
+                    },
+                ),
+            ]
+        }
+        AnnotationAction::Box { rect, .. }
         | AnnotationAction::Obfuscate { rect, .. }
         | AnnotationAction::Focus { rect, .. } => {
             let left = rect.x as f64;

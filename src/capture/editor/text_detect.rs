@@ -31,7 +31,7 @@ const GRID_CELL_SIZE: i32 = 50;
 /// Extra hit padding around detected text to make text-aware highlighting
 /// easier to start and stop exactly at word boundaries without requiring
 /// pixel-perfect pointer placement.
-const TEXT_GUIDE_MARGIN: i32 = 6;
+const TEXT_GUIDE_MARGIN: i32 = 24;
 
 /// Default text detection model URL (ocrs - pure Rust)
 const DEFAULT_DETECTION_MODEL_URL: &str =
@@ -300,7 +300,7 @@ impl TextDetector {
     /// Find the text height using a small guided zone around detected text bounds.
     pub fn best_text_height_at_point(&self, point: Point) -> Option<f64> {
         self.guided_hit_test_point(point)
-            .map(|region| region.text_height)
+            .map(|region| region.text_height + 8.0)
     }
 
     /// Find all text regions intersecting the given path.

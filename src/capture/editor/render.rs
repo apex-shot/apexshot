@@ -531,8 +531,10 @@ pub fn draw_arrow_selection_outline(
         ArrowStyle::Fancy => {
             build_thorn_arrow_path(context, start, end, stroke_size, false, &control_points)
         }
+        ArrowStyle::Curved => {
+            build_thorn_arrow_path(context, start, end, stroke_size, false, &control_points)
+        }
         _ => {
-            // Standard and Curved both use is_smooth = true
             build_thorn_arrow_path(context, start, end, stroke_size, true, &control_points)
         }
     };
@@ -879,7 +881,7 @@ pub fn draw_highlighter(
         (color.a * HIGHLIGHTER_ALPHA_SCALE).clamp(0.05, 0.95),
     );
     context.set_line_width(stroke);
-    context.set_line_cap(gtk4::cairo::LineCap::Butt);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
     context.set_line_join(gtk4::cairo::LineJoin::Round);
     context.move_to(points[0].x, points[0].y);
 
@@ -1651,7 +1653,7 @@ fn draw_arrow_internal(
         if matches!(style, ArrowStyle::Double) {
             draw_double_arrow(context, start, end, color, stroke_size, control_points);
         } else {
-            let is_smooth = matches!(style, ArrowStyle::Standard | ArrowStyle::Curved);
+            let is_smooth = matches!(style, ArrowStyle::Standard);
             draw_thorn_arrow(
                 context,
                 start,

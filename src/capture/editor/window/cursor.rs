@@ -383,8 +383,7 @@ pub fn set_highlighter_cursor(
 ) {
     if let Some(surface) = create_highlighter_cursor_surface(height, color) {
         if let Some(texture) = surface_to_texture(surface) {
-            let pad = 6;
-            let hotspot_x = pad;
+            let hotspot_x = (texture.width() as f64 * 0.35).ceil() as i32;
             let hotspot_y = texture.height() / 2;
             let cursor = Cursor::from_texture(&texture, hotspot_x, hotspot_y, None);
             if let Some(surface) = window.surface() {

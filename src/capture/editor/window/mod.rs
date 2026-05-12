@@ -3137,7 +3137,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     if let Some(bounds) =
                         action_bounds_with_padding(selected_action, selection_padding)
                     {
-                        draw_selection_outline(context, bounds, t.scale);
+                        if !matches!(selected_action, AnnotationAction::Box { .. } | AnnotationAction::Circle { .. }) {
+                            draw_selection_outline(context, bounds, t.scale);
+                        }
                     }
 
                     let handles = action_resize_handles(selected_action);

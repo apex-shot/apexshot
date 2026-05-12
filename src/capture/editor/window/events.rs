@@ -935,13 +935,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
         if matches!(next_tool, Tool::Highlighter) {
             set_active_tool_button(&buttons_highlighter, 11);
-            let st = state_highlighter.lock().unwrap();
-            super::cursor::update_cursor_for_position(
-                &window_highlighter,
-                &st,
-                Point { x: 0.0, y: 0.0 },
-                1.0,
-            );
         } else {
             set_active_tool_button(&buttons_highlighter, 6);
             set_window_cursor_name(&window_highlighter, Some("default"));
@@ -2169,7 +2162,11 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 x: start_view.x + offset_x,
                 y: start_view.y + offset_y,
             };
-            let image_point = t.view_to_image_clamped(current_view);
+            let image_point = if handle_idx == 1 {
+                t.view_to_image(current_view)
+            } else {
+                t.view_to_image_clamped(current_view)
+            };
             st.move_arrow_control_handle(handle_idx, image_point);
             drop(st);
             if let Some(area) = drawing_area_update.upgrade() {
