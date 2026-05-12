@@ -2657,7 +2657,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     }
 
                     let mut began_reedit = false;
-                    if st.selected_tool == Tool::Text {
+                    if n_press >= 2 {
                         began_reedit = st.begin_editing_selected_text();
                     }
                     let selected_color = if began_reedit {
@@ -2742,6 +2742,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     });
 
                     if let Some(index) = hit_index {
+                        // Select the action and sync color/size state.
                         st.selected_action_index = Some(index);
                         if let Some(color) = st.selected_action_color() {
                             st.selected_color = color;
@@ -2752,7 +2753,80 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                         if let Some(fam) = st.selected_text_font_family() {
                             st.text_font_family = fam;
                         }
-                        st.begin_editing_selected_text();
+
+                        if n_press >= 2 {
+                            // Double-click: begin re-editing.
+                            st.begin_editing_selected_text();
+                        } else {
+                            // Single-click: first check if the click is on a
+                            // TextEditBounds handle (circles / resize box).
+                            // If yes → active_text_is_dragging path (motion handler).
+                            // If no  → select_drag_anchor path (GestureDrag move).
+                            let bounds_opt = if let Some(
+                                super::super::types::AnnotationAction::Text {
+                                    position, text, font, max_width, ..
+                                }
+                            ) = st.actions.get(index) {
+                                let surface = gtk4::cairo::ImageSurface::create(
+                                    gtk4::cairo::Format::ARgb32, 1, 1,
+                                ).ok();
+                                surface.as_ref()
+                                    .and_then(|s| gtk4::cairo::Context::new(s).ok())
+                                    .map(|c| {
+                                        let aw = max_width.unwrap_or_else(|| {
+                                            (st.base_image.width() as f64 - position.x)
+                                                .max(font.size * 1.8)
+                                        });
+                                        super::super::render::text_action_bounds(
+                                            &c, *position, text, font, Some(aw),
+                                        )
+                                    })
+                            } else { None };
+
+                            let mut handle_drag_started = false;
+                            if let Some(bounds) = bounds_opt {
+                                let handle_hit = bounds.move_handles.iter().find_map(|(h, center)| {
+                                    let cv = Point {
+                                        x: center.x * t.scale + t.offset_x,
+                                        y: center.y * t.scale + t.offset_y,
+                                    };
+                                    let dx = x - cv.x;
+                                    let dy = y - cv.y;
+                                    if (dx*dx + dy*dy).sqrt() < MOVE_HANDLE_DRAG_RADIUS * 1.5 {
+                                        Some(h.clone())
+                                    } else { None }
+                                });
+                                let resize_hit = bounds.resize_handle.as_ref().is_some_and(
+                                    |(_, rp)| {
+                                        let rv = Point {
+                                            x: rp.x * t.scale + t.offset_x,
+                                            y: rp.y * t.scale + t.offset_y,
+                                        };
+                                        (x - rv.x).abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5
+                                            && (y - rv.y).abs() < RESIZE_HANDLE_DRAG_SIZE * 1.5
+                                    }
+                                );
+
+                                if handle_hit.is_some() || resize_hit {
+                                    // Set up exactly like the active-edit handle path.
+                                    // The motion handler and click_released handle the rest.
+                                    st.active_text_bounds = Some(bounds);
+                                    st.active_text_is_dragging = true;
+                                    st.active_text_drag_handle = handle_hit;
+                                    st.active_text_drag_start = Some(image_point);
+                                    st.active_text_drag_start_bounds =
+                                        st.active_text_bounds.as_ref().map(|b| b.rect);
+                                    st.active_text_is_resizing = resize_hit;
+                                    handle_drag_started = true;
+                                }
+                            }
+
+                            if !handle_drag_started {
+                                // No handle hit — set anchor for GestureDrag move.
+                                st.select_drag_anchor = Some(image_point);
+                                st.select_resize_handle = None;
+                            }
+                        }
                     } else {
                         // Click on empty area: deselect and start a new text box.
                         st.selected_action_index = None;
