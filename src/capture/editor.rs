@@ -368,6 +368,7 @@ mod tests {
             },
             max_width: None,
             shadow: false,
+            background_color: None,
         });
 
         state.selected_action_index = Some(0);
@@ -392,6 +393,7 @@ mod tests {
             },
             max_width: None,
             shadow: false,
+            background_color: None,
         });
 
         state.selected_action_index = Some(0);
@@ -753,6 +755,7 @@ mod tests {
             },
             max_width: None,
             shadow: false,
+            background_color: None,
         });
         state.selected_action_index = Some(0);
 
@@ -772,6 +775,7 @@ mod tests {
                 },
                 None,
                 Point { x: 18.0, y: 22.0 },
+                None,
             ))
         );
     }
@@ -792,6 +796,7 @@ mod tests {
             },
             max_width: None,
             shadow: false,
+            background_color: None,
         });
         state.selected_action_index = Some(0);
 

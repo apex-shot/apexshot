@@ -367,6 +367,7 @@ fn action_to_serializable(action: &AnnotationAction) -> Option<SerializableAnnot
             font,
             max_width,
             shadow,
+            background_color,
         } => Some(SerializableAnnotation::Text {
             position: Point::from_editor(*position),
             text: text.clone(),
@@ -374,6 +375,7 @@ fn action_to_serializable(action: &AnnotationAction) -> Option<SerializableAnnot
             font: font_settings_to_serializable(font),
             max_width: *max_width,
             shadow: *shadow,
+            background_color: background_color.map(color_to_serializable),
         }),
 
         AnnotationAction::Number {
@@ -497,6 +499,7 @@ pub fn serializable_to_action(ann: &SerializableAnnotation) -> AnnotationAction 
             font,
             max_width,
             shadow,
+            background_color,
         } => AnnotationAction::Text {
             position: position.to_editor(),
             text: text.clone(),
@@ -504,6 +507,7 @@ pub fn serializable_to_action(ann: &SerializableAnnotation) -> AnnotationAction 
             font: serializable_to_font_settings(font),
             max_width: *max_width,
             shadow: *shadow,
+            background_color: background_color.map(color_from_serializable),
         },
 
         SerializableAnnotation::Number {

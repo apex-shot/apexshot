@@ -473,6 +473,7 @@ pub enum AnnotationAction {
         font: FontSettings,
         max_width: Option<f64>,
         shadow: bool,
+        background_color: Option<DrawColor>,
     },
     Number {
         position: Point,

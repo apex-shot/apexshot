@@ -48,6 +48,7 @@ pub struct EditorState {
     pub inverse_arrow_direction: bool,
     pub text_size: f64,
     pub text_font_family: String,
+    pub text_background_color: Option<DrawColor>,
     pub obfuscate_method: ObfuscateMethod,
     pub obfuscate_pixelate_amount: f64,
     pub obfuscate_blur_amount: f64,
@@ -115,6 +116,7 @@ pub struct TextInputState {
     pub cursor_visible: bool,
     pub cursor_blink_timer: u32,
     pub color: DrawColor,
+    pub background_color: Option<DrawColor>,
     pub editing_action_index: Option<usize>,
 }
 
@@ -387,6 +389,7 @@ impl EditorState {
             inverse_arrow_direction: false,
             text_size: TEXT_SIZE,
             text_font_family: String::from("Sans"),
+            text_background_color: None,
             obfuscate_method: ObfuscateMethod::Pixelate,
             obfuscate_pixelate_amount: DEFAULT_OBFUSCATE_AMOUNT,
             obfuscate_blur_amount: DEFAULT_OBFUSCATE_AMOUNT,
@@ -537,6 +540,7 @@ impl EditorState {
             cursor_visible: true,
             cursor_blink_timer: 0,
             color: self.selected_color,
+            background_color: self.text_background_color,
             editing_action_index: None,
         });
     }
@@ -648,8 +652,11 @@ impl EditorState {
                         return None;
                     };
                     position.x = b.rect.x as f64;
-                    position.y = (b.rect.y as f64 + self.text_size + 8.0)
-                        .clamp(self.text_size + 8.0, self.base_image.height() as f64 - 8.0);
+                    position.y = (b.rect.y as f64 + self.text_size + 8.0).clamp(
+                        self.text_size + 8.0,
+                        (self.base_image.height() as f64 - self.text_size * 0.5)
+                            .max(self.text_size + 8.0),
+                    );
                     *text = trimmed_text;
                     *color = input_state.color;
                     font.family = self.text_font_family.clone();
@@ -687,7 +694,10 @@ impl EditorState {
                         0.0,
                         (self.base_image.width() as f64 - font.size * 1.8).max(0.0),
                     ),
-                    y: position.y.clamp(font.size, self.base_image.height() as f64),
+                    y: position.y.clamp(
+                        font.size,
+                        (self.base_image.height() as f64 - font.size * 0.5).max(font.size),
+                    ),
                 };
                 let clamped_width = (b.rect.width as f64).min(
                     (self.base_image.width() as f64 - clamped_position.x).max(font.size * 1.8),
@@ -699,6 +709,7 @@ impl EditorState {
                     font,
                     max_width: Some(clamped_width),
                     shadow: self.draw_object_shadow,
+                    background_color: input_state.background_color,
                 });
             }
         }
@@ -1951,7 +1962,15 @@ impl EditorState {
 
     pub fn selected_text_action_data(
         &self,
-    ) -> Option<(usize, String, DrawColor, FontSettings, Option<f64>, Point)> {
+    ) -> Option<(
+        usize,
+        String,
+        DrawColor,
+        FontSettings,
+        Option<f64>,
+        Point,
+        Option<DrawColor>,
+    )> {
         let index = self.selected_action_index?;
         let AnnotationAction::Text {
             position,
@@ -1959,6 +1978,7 @@ impl EditorState {
             color,
             font,
             max_width,
+            background_color,
             ..
         } = self.actions.get(index)?
         else {
@@ -1972,6 +1992,7 @@ impl EditorState {
             font.clone(),
             *max_width,
             *position,
+            *background_color,
         ))
     }
 
@@ -1985,7 +2006,7 @@ impl EditorState {
     }
 
     pub fn begin_editing_selected_text(&mut self) -> bool {
-        let Some((index, text, color, font, max_width, position)) =
+        let Some((index, text, color, font, max_width, position, background_color)) =
             self.selected_text_action_data()
         else {
             return false;
@@ -2022,6 +2043,7 @@ impl EditorState {
             cursor_visible: true,
             cursor_blink_timer: 0,
             color,
+            background_color,
             editing_action_index: Some(index),
         });
         self.active_text_is_dragging = false;
@@ -2030,6 +2052,7 @@ impl EditorState {
         self.text_font_family = font.family.clone();
         self.text_size = font.size;
         self.selected_color = color;
+        self.text_background_color = background_color;
         true
     }
 
@@ -2403,6 +2426,7 @@ impl EditorState {
             font,
             max_width: Some(bounds.rect.width as f64),
             shadow: self.draw_object_shadow,
+            background_color: None,
         });
 
         self.active_text_edit = None;

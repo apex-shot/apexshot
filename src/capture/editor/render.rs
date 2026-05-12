@@ -193,6 +193,8 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             font,
             max_width,
             shadow,
+            background_color,
+            ..
         } => {
             let available_width = max_width
                 .unwrap_or_else(|| {
@@ -216,6 +218,7 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
                 font,
                 Some(available_width),
                 *shadow,
+                *background_color,
             );
         }
         AnnotationAction::Number {
@@ -318,6 +321,8 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             font,
             max_width,
             shadow,
+            background_color,
+            ..
         } => {
             let available_width = max_width
                 .unwrap_or_else(|| {
@@ -341,6 +346,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
                 font,
                 Some(available_width),
                 *shadow,
+                *background_color,
             );
         }
         AnnotationAction::Number {
@@ -2018,6 +2024,66 @@ pub fn draw_text(
     }
 }
 
+fn draw_text_background(
+    context: &gtk4::cairo::Context,
+    position: Point,
+    text: &str,
+    font: &FontSettings,
+    max_width: Option<f64>,
+    bg_color: DrawColor,
+) {
+    let allowed_width = max_width
+        .unwrap_or(f64::INFINITY)
+        .max(font.size * 0.8)
+        .max(1.0);
+    let layout = layout_wrapped_text(context, text, font, allowed_width);
+    let line_height = (font.size * 1.2).max(font.size + 4.0);
+    let total_height = layout.lines.len() as f64 * line_height;
+    let pad = 4.0_f64;
+    let corner = 3.0_f64;
+    let bg_x = position.x - pad;
+    let bg_y = position.y - pad;
+    let bg_w = layout.max_width + pad * 2.0;
+    let bg_h = total_height + pad * 2.0;
+    let r = corner.min(bg_w / 2.0).min(bg_h / 2.0);
+    let _ = context.save();
+    context.set_source_rgba(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
+    context.new_path();
+    context.move_to(bg_x + r, bg_y);
+    context.line_to(bg_x + bg_w - r, bg_y);
+    context.arc(
+        bg_x + bg_w - r,
+        bg_y + r,
+        r,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    );
+    context.arc(
+        bg_x + bg_w - r,
+        bg_y + bg_h - r,
+        r,
+        0.0,
+        std::f64::consts::FRAC_PI_2,
+    );
+    context.arc(
+        bg_x + r,
+        bg_y + bg_h - r,
+        r,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    context.arc(
+        bg_x + r,
+        bg_y + r,
+        r,
+        std::f64::consts::PI,
+        -std::f64::consts::FRAC_PI_2,
+    );
+    context.close_path();
+    let _ = context.fill();
+    let _ = context.restore();
+}
+
 pub fn draw_wrapped_text(
     context: &gtk4::cairo::Context,
     position: Point,
@@ -2026,23 +2092,24 @@ pub fn draw_wrapped_text(
     font: &FontSettings,
     max_width: Option<f64>,
 ) {
-    if let Some(max_width) = max_width {
-        let layout = layout_wrapped_text(context, text, font, max_width.max(1.0));
-        let line_height = (font.size * 1.2).max(font.size + 4.0);
-        for (index, line) in layout.lines.iter().enumerate() {
-            draw_text(
-                context,
-                Point {
-                    x: position.x,
-                    y: position.y + index as f64 * line_height,
-                },
-                &line.text,
-                color,
-                font,
-            );
-        }
-    } else {
-        draw_text(context, position, text, color, font);
+    let allowed_width = max_width
+        .unwrap_or(f64::INFINITY)
+        .max(font.size * 0.8)
+        .max(1.0);
+    let layout = layout_wrapped_text(context, text, font, allowed_width);
+    let line_height = (font.size * 1.2).max(font.size + 4.0);
+
+    for (index, line) in layout.lines.iter().enumerate() {
+        draw_text(
+            context,
+            Point {
+                x: position.x,
+                y: position.y + index as f64 * line_height,
+            },
+            &line.text,
+            color,
+            font,
+        );
     }
 }
 
@@ -2054,7 +2121,11 @@ fn draw_text_with_shadow(
     font: &FontSettings,
     max_width: Option<f64>,
     shadow: bool,
+    background_color: Option<DrawColor>,
 ) {
+    if let Some(bg) = background_color {
+        draw_text_background(context, position, text, font, max_width, bg);
+    }
     draw_shadow_layer(context, shadow, color, |ctx, draw_color| {
         draw_wrapped_text(ctx, position, text, draw_color, font, max_width);
     });

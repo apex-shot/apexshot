@@ -308,6 +308,8 @@ pub enum SerializableAnnotation {
         font: FontSettings,
         max_width: Option<f64>,
         shadow: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        background_color: Option<Color>,
     },
     Number {
         position: Point,

@@ -1680,6 +1680,41 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         font_family_list.upcast_ref(),
     );
 
+    let text_bg_btn = Button::with_label("Background");
+    text_bg_btn.set_has_frame(false);
+    text_bg_btn.add_css_class("editor-inspector-tab-button");
+    text_bg_btn.set_halign(gtk4::Align::Start);
+    {
+        let state_bg = state.clone();
+        let drawing_area_bg = drawing_area.downgrade();
+        text_bg_btn.connect_clicked(move |btn| {
+            let mut st = state_bg.lock().unwrap();
+            let new_bg = if st.text_background_color.is_some() {
+                None
+            } else {
+                Some(st.selected_color)
+            };
+            if new_bg.is_some() {
+                btn.set_label("✓ Background");
+            } else {
+                btn.set_label("Background");
+            }
+            st.text_background_color = new_bg;
+            if let Some(ref mut input) = st.active_text_input {
+                input.background_color = new_bg;
+            }
+            drop(st);
+            if let Some(area) = drawing_area_bg.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+    append_inspector_section(
+        &text_inspector_content,
+        "Background",
+        text_bg_btn.upcast_ref(),
+    );
+
     let (obfuscate_inspector, obfuscate_inspector_content) = build_tool_inspector();
     obfuscate_method_list.add_css_class("editor-inspector-option-list");
     append_inspector_section(
