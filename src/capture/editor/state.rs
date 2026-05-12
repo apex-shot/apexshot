@@ -540,7 +540,7 @@ impl EditorState {
             cursor_visible: true,
             cursor_blink_timer: 0,
             color: self.selected_color,
-            background_color: self.text_background_color,
+            background_color: None,
             editing_action_index: None,
         });
     }
@@ -2052,7 +2052,6 @@ impl EditorState {
         self.text_font_family = font.family.clone();
         self.text_size = font.size;
         self.selected_color = color;
-        self.text_background_color = background_color;
         true
     }
 

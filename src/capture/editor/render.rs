@@ -2042,7 +2042,7 @@ fn draw_text_background(
     let pad = 4.0_f64;
     let corner = 3.0_f64;
     let bg_x = position.x - pad;
-    let bg_y = position.y - pad;
+    let bg_y = position.y - font.size - pad;
     let bg_w = layout.max_width + pad * 2.0;
     let bg_h = total_height + pad * 2.0;
     let r = corner.min(bg_w / 2.0).min(bg_h / 2.0);
