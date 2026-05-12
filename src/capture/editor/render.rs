@@ -69,6 +69,18 @@ pub fn editor_image_filter_for_scale(_scale: f64) -> gtk4::cairo::Filter {
     gtk4::cairo::Filter::Good
 }
 
+fn flatten_pixel_over_white(pixel: image::Rgba<u8>) -> image::Rgba<u8> {
+    let alpha = pixel[3] as u32;
+    if alpha == 255 {
+        return pixel;
+    }
+
+    let blend =
+        |channel: u8| -> u8 { ((channel as u32 * alpha + 255 * (255 - alpha) + 127) / 255) as u8 };
+
+    image::Rgba([blend(pixel[0]), blend(pixel[1]), blend(pixel[2]), 255])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +122,80 @@ mod tests {
             editor_image_filter_for_scale(2.0),
             gtk4::cairo::Filter::Good
         );
+    }
+
+    #[test]
+    fn hybrid_blur_flattens_transparency_to_canvas_backdrop() {
+        let mut image = RgbaImage::new(20, 20);
+        for y in 0..20 {
+            for x in 0..20 {
+                let pixel = if (6..14).contains(&x) && (6..14).contains(&y) {
+                    image::Rgba([255, 255, 255, 255])
+                } else {
+                    image::Rgba([0, 0, 0, 0])
+                };
+                image.put_pixel(x, y, pixel);
+            }
+        }
+
+        apply_hybrid_blur(
+            &mut image,
+            Rect {
+                x: 2,
+                y: 2,
+                width: 16,
+                height: 16,
+            },
+            20.0,
+        );
+
+        let corner = *image.get_pixel(2, 2);
+        assert!(
+            corner[3] == 255 && corner[0] > 220 && corner[1] > 220 && corner[2] > 220,
+            "transparent pixels should flatten to the visible white canvas, got {corner:?}"
+        );
+
+        let edge = *image.get_pixel(6, 6);
+        assert!(
+            edge[3] == 255 && edge[0] > 220 && edge[1] > 220 && edge[2] > 220,
+            "blurred white content should not pick up transparent black, got {edge:?}"
+        );
+    }
+
+    #[test]
+    fn downsampled_blur_buffer_updates_columns_across_rect() {
+        let mut image = RgbaImage::new(24, 12);
+        for y in 0..12 {
+            for x in 0..24 {
+                let value = if x < 12 { 0 } else { 255 };
+                image.put_pixel(x, y, image::Rgba([value, value, value, 255]));
+            }
+        }
+
+        apply_blur_rect_to_buffer(
+            &mut image,
+            Rect {
+                x: 4,
+                y: 2,
+                width: 16,
+                height: 8,
+            },
+            2,
+        );
+
+        let left_of_edge = *image.get_pixel(10, 6);
+        let right_of_edge = *image.get_pixel(13, 6);
+        let outside = *image.get_pixel(0, 0);
+
+        assert!(
+            left_of_edge[0] > 0,
+            "left side near edge should receive blurred bright pixels, got {left_of_edge:?}"
+        );
+        assert!(
+            right_of_edge[0] < 255,
+            "right side near edge should receive blurred dark pixels, got {right_of_edge:?}"
+        );
+        assert_eq!(outside, image::Rgba([0, 0, 0, 255]));
     }
 
     #[test]
@@ -1956,7 +2042,8 @@ pub fn layout_wrapped_text(
         }
     }
 
-    if !current.is_empty() || lines.is_empty() {
+    let ends_with_newline = text.ends_with('\n');
+    if !current.is_empty() || lines.is_empty() || ends_with_newline {
         max_line_width = max_line_width.max(measure_text_width(context, &current, font));
         lines.push(TextLayoutLine {
             text: current,
@@ -2385,102 +2472,7 @@ pub fn apply_blur_rect(image: &mut RgbaImage, rect: Rect, radius: f64, preserve_
         }
     }
 
-    // Horizontal pass
-    let mut temp_buffer: Vec<[u32; 4]> = vec![[0; 4]; work_width * work_height];
-
-    for y in 0..work_height {
-        let row_start = y * work_width;
-
-        // Compute running sum for this row
-        let mut sum = [0u32; 4];
-
-        // Initialize with first radius+1 pixels
-        for x in 0..=radius.min(work_width - 1) {
-            let pixel = work_buffer[row_start + x];
-            sum[0] += pixel[0] as u32;
-            sum[1] += pixel[1] as u32;
-            sum[2] += pixel[2] as u32;
-            sum[3] += pixel[3] as u32;
-        }
-
-        // Slide the window
-        for x in 0..work_width {
-            let left = x.saturating_sub(radius);
-            let right = (x + radius + 1).min(work_width);
-            let count = (right - left) as u32;
-
-            temp_buffer[row_start + x] = [
-                sum[0] / count,
-                sum[1] / count,
-                sum[2] / count,
-                sum[3] / count,
-            ];
-
-            // Remove left pixel from sum
-            if left > 0 {
-                let left_idx = row_start + left - 1;
-                sum[0] = sum[0].saturating_sub(work_buffer[left_idx][0] as u32);
-                sum[1] = sum[1].saturating_sub(work_buffer[left_idx][1] as u32);
-                sum[2] = sum[2].saturating_sub(work_buffer[left_idx][2] as u32);
-                sum[3] = sum[3].saturating_sub(work_buffer[left_idx][3] as u32);
-            }
-
-            // Add right pixel to sum
-            if right < work_width {
-                let right_idx = row_start + right;
-                sum[0] += work_buffer[right_idx][0] as u32;
-                sum[1] += work_buffer[right_idx][1] as u32;
-                sum[2] += work_buffer[right_idx][2] as u32;
-                sum[3] += work_buffer[right_idx][3] as u32;
-            }
-        }
-    }
-
-    // Vertical pass - write directly back to work_buffer
-    for x in 0..work_width {
-        let mut sum = [0u32; 4];
-
-        // Initialize with first radius+1 pixels
-        for y in 0..=radius.min(work_height - 1) {
-            let pixel = temp_buffer[y * work_width + x];
-            sum[0] += pixel[0];
-            sum[1] += pixel[1];
-            sum[2] += pixel[2];
-            sum[3] += pixel[3];
-        }
-
-        // Slide the window
-        for y in 0..work_height {
-            let top = y.saturating_sub(radius);
-            let bottom = (y + radius + 1).min(work_height);
-            let count = (bottom - top) as u32;
-
-            work_buffer[y * work_width + x] = [
-                (sum[0] / count) as u8,
-                (sum[1] / count) as u8,
-                (sum[2] / count) as u8,
-                (sum[3] / count) as u8,
-            ];
-
-            // Remove top pixel from sum
-            if top > 0 {
-                let top_idx = (top - 1) * work_width + x;
-                sum[0] = sum[0].saturating_sub(temp_buffer[top_idx][0]);
-                sum[1] = sum[1].saturating_sub(temp_buffer[top_idx][1]);
-                sum[2] = sum[2].saturating_sub(temp_buffer[top_idx][2]);
-                sum[3] = sum[3].saturating_sub(temp_buffer[top_idx][3]);
-            }
-
-            // Add bottom pixel to sum
-            if bottom < work_height {
-                let bottom_idx = bottom * work_width + x;
-                sum[0] += temp_buffer[bottom_idx][0];
-                sum[1] += temp_buffer[bottom_idx][1];
-                sum[2] += temp_buffer[bottom_idx][2];
-                sum[3] += temp_buffer[bottom_idx][3];
-            }
-        }
-    }
+    box_blur_buffer(&mut work_buffer, work_width, work_height, radius);
 
     // Write back only the rect area (not the expanded sample area)
     for y in y0..y1 {
@@ -2572,8 +2564,6 @@ fn apply_blur_rect_downsampled(
 }
 
 fn apply_blur_rect_to_buffer(image: &mut image::RgbaImage, rect: Rect, radius: usize) {
-    use image::Rgba;
-
     let (img_width, img_height) = image.dimensions();
     let x0 = rect.x.max(0) as u32;
     let y0 = rect.y.max(0) as u32;
@@ -2605,101 +2595,73 @@ fn apply_blur_rect_to_buffer(image: &mut image::RgbaImage, rect: Rect, radius: u
         }
     }
 
-    let mut temp_buffer: Vec<[u32; 4]> = vec![[0; 4]; work_width * work_height];
+    box_blur_buffer(&mut work_buffer, work_width, work_height, radius);
 
-    for y in 0..work_height {
-        let row_start = y * work_width;
-        let mut sum = [0u32; 4];
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let work_x = (x - sample_x0) as usize;
+            let work_y = (y - sample_y0) as usize;
+            image.put_pixel(x, y, image::Rgba(work_buffer[work_y * work_width + work_x]));
+        }
+    }
+}
 
-        for x in 0..=radius.min(work_width - 1) {
-            let pixel = work_buffer[row_start + x];
-            sum[0] += pixel[0] as u32;
-            sum[1] += pixel[1] as u32;
-            sum[2] += pixel[2] as u32;
-            sum[3] += pixel[3] as u32;
+fn box_blur_buffer(buffer: &mut [[u8; 4]], width: usize, height: usize, radius: usize) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let mut temp = vec![[0u8; 4]; width * height];
+    let mut prefix = vec![[0u32; 4]; width.max(height) + 1];
+
+    for y in 0..height {
+        prefix[0] = [0; 4];
+        let row_start = y * width;
+        for x in 0..width {
+            let pixel = buffer[row_start + x];
+            prefix[x + 1] = [
+                prefix[x][0] + pixel[0] as u32,
+                prefix[x][1] + pixel[1] as u32,
+                prefix[x][2] + pixel[2] as u32,
+                prefix[x][3] + pixel[3] as u32,
+            ];
         }
 
-        for x in 0..work_width {
+        for x in 0..width {
             let left = x.saturating_sub(radius);
-            let right = (x + radius + 1).min(work_width);
+            let right = (x + radius + 1).min(width);
             let count = (right - left) as u32;
-
-            temp_buffer[row_start + x] = [
-                sum[0] / count,
-                sum[1] / count,
-                sum[2] / count,
-                sum[3] / count,
+            temp[row_start + x] = [
+                ((prefix[right][0] - prefix[left][0]) / count) as u8,
+                ((prefix[right][1] - prefix[left][1]) / count) as u8,
+                ((prefix[right][2] - prefix[left][2]) / count) as u8,
+                ((prefix[right][3] - prefix[left][3]) / count) as u8,
             ];
-
-            if left > 0 {
-                let idx = row_start + left - 1;
-                sum[0] = sum[0].saturating_sub(work_buffer[idx][0] as u32);
-                sum[1] = sum[1].saturating_sub(work_buffer[idx][1] as u32);
-                sum[2] = sum[2].saturating_sub(work_buffer[idx][2] as u32);
-                sum[3] = sum[3].saturating_sub(work_buffer[idx][3] as u32);
-            }
-
-            if right < work_width {
-                let idx = row_start + right;
-                sum[0] += work_buffer[idx][0] as u32;
-                sum[1] += work_buffer[idx][1] as u32;
-                sum[2] += work_buffer[idx][2] as u32;
-                sum[3] += work_buffer[idx][3] as u32;
-            }
         }
     }
 
-    for _y in 0..work_height {
-        let mut sum = [0u32; 4];
-
-        for i in 0..=radius.min(work_height - 1) {
-            let idx = i * work_width;
-            sum[0] += temp_buffer[idx][0];
-            sum[1] += temp_buffer[idx][1];
-            sum[2] += temp_buffer[idx][2];
-            sum[3] += temp_buffer[idx][3];
+    for x in 0..width {
+        prefix[0] = [0; 4];
+        for y in 0..height {
+            let pixel = temp[y * width + x];
+            prefix[y + 1] = [
+                prefix[y][0] + pixel[0] as u32,
+                prefix[y][1] + pixel[1] as u32,
+                prefix[y][2] + pixel[2] as u32,
+                prefix[y][3] + pixel[3] as u32,
+            ];
         }
 
-        for y_out in 0..work_height {
-            let top = y_out.saturating_sub(radius);
-            let bottom = (y_out + radius + 1).min(work_height);
+        for y in 0..height {
+            let top = y.saturating_sub(radius);
+            let bottom = (y + radius + 1).min(height);
             let count = (bottom - top) as u32;
-
-            let target_x0 = sample_x0 as i32;
-            let target_y0 = sample_y0 as i32 + y_out as i32;
-
-            if target_x0 >= x0 as i32
-                && target_y0 >= y0 as i32
-                && target_x0 < x1 as i32
-                && target_y0 < y1 as i32
-            {
-                image.put_pixel(
-                    target_x0 as u32,
-                    target_y0 as u32,
-                    Rgba([
-                        (sum[0] / count) as u8,
-                        (sum[1] / count) as u8,
-                        (sum[2] / count) as u8,
-                        (sum[3] / count) as u8,
-                    ]),
-                );
-            }
-
-            if top > 0 {
-                let idx = (top - 1) * work_width;
-                sum[0] = sum[0].saturating_sub(temp_buffer[idx][0]);
-                sum[1] = sum[1].saturating_sub(temp_buffer[idx][1]);
-                sum[2] = sum[2].saturating_sub(temp_buffer[idx][2]);
-                sum[3] = sum[3].saturating_sub(temp_buffer[idx][3]);
-            }
-
-            if bottom < work_height {
-                let idx = bottom * work_width;
-                sum[0] += temp_buffer[idx][0];
-                sum[1] += temp_buffer[idx][1];
-                sum[2] += temp_buffer[idx][2];
-                sum[3] += temp_buffer[idx][3];
-            }
+            buffer[y * width + x] = [
+                ((prefix[bottom][0] - prefix[top][0]) / count) as u8,
+                ((prefix[bottom][1] - prefix[top][1]) / count) as u8,
+                ((prefix[bottom][2] - prefix[top][2]) / count) as u8,
+                ((prefix[bottom][3] - prefix[top][3]) / count) as u8,
+            ];
         }
     }
 }
@@ -2908,8 +2870,7 @@ pub fn apply_secure_pixelate(image: &mut RgbaImage, rect: Rect, block_size: f64)
     }
 }
 
-/// Hybrid blur: low values look smoother, while high values become more
-/// destructive by downsampling harder before blurring.
+/// Apply blur to a rectangular region.
 pub fn apply_hybrid_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
     let Some(rect) = rect.clamp_to(image.width(), image.height()) else {
         return;
@@ -2920,45 +2881,6 @@ pub fn apply_hybrid_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
     }
 
     let normalized = (amount / 25.0).clamp(0.0, 1.0);
-
-    // Lower values preserve more structure with a gentle blur.
-    // Higher values downsample more aggressively so detail is destroyed.
-    let base_factor = 2.0 + normalized * 14.0; // 2x at min, 16x at max
-    let factor = (base_factor as u32)
-        .max(2)
-        .min((rect.width.min(rect.height) as u32 / 2).max(2));
-
-    let thumb_w = (rect.width as u32 / factor).max(2);
-    let thumb_h = (rect.height as u32 / factor).max(2);
-
-    // 1) Crop the region
-    let cropped = image::imageops::crop_imm(
-        image,
-        rect.x.max(0) as u32,
-        rect.y.max(0) as u32,
-        rect.width as u32,
-        rect.height as u32,
-    )
-    .to_image();
-
-    // 2) Downsample based on intensity (higher = more destructive)
-    let thumb = image::imageops::resize(
-        &cropped,
-        thumb_w,
-        thumb_h,
-        image::imageops::FilterType::Triangle,
-    );
-
-    // 3) Upsample back to original size
-    let upscaled = image::imageops::resize(
-        &thumb,
-        rect.width as u32,
-        rect.height as u32,
-        image::imageops::FilterType::Triangle,
-    );
-
-    // 4) Apply blur passes. Low intensity stays soft; high intensity gets
-    //    stronger radius and more passes.
     let blur_radius = (1.2 + normalized * 7.8).max(1.2);
     let passes = if amount > 17.0 {
         3
@@ -2967,31 +2889,44 @@ pub fn apply_hybrid_blur(image: &mut RgbaImage, rect: Rect, amount: f64) {
     } else {
         1
     };
-    let mut blurred = upscaled;
-    for _ in 0..passes {
-        apply_blur_rect(
-            &mut blurred,
-            Rect {
-                x: 0,
-                y: 0,
-                width: rect.width,
-                height: rect.height,
-            },
-            blur_radius,
-            false,
-        );
-    }
 
-    // 5) Write back — force alpha=255 to prevent checkerboard bleed
+    let pad = blur_radius.ceil() as u32;
     let x0 = rect.x.max(0) as u32;
     let y0 = rect.y.max(0) as u32;
-    for y in 0..rect.height as u32 {
-        for x in 0..rect.width as u32 {
-            if x0 + x < image.width() && y0 + y < image.height() {
-                let mut p = *blurred.get_pixel(x, y);
-                p[3] = 255;
-                image.put_pixel(x0 + x, y0 + y, p);
-            }
+    let iw = image.width();
+    let ih = image.height();
+
+    // Expand the crop by the blur radius so edge pixels sample correctly
+    let sx = x0.saturating_sub(pad);
+    let sy = y0.saturating_sub(pad);
+    let sw = (rect.width as u32 + pad * 2).min(iw - sx);
+    let sh = (rect.height as u32 + pad * 2).min(ih - sy);
+
+    let mut work = image::imageops::crop_imm(image, sx, sy, sw, sh).to_image();
+
+    for y in 0..work.height() {
+        for x in 0..work.width() {
+            let pixel = flatten_pixel_over_white(*work.get_pixel(x, y));
+            work.put_pixel(x, y, pixel);
+        }
+    }
+
+    let inner = Rect {
+        x: (x0 - sx) as i32,
+        y: (y0 - sy) as i32,
+        width: rect.width.min(image.width() as i32 - x0 as i32),
+        height: rect.height.min(image.height() as i32 - y0 as i32),
+    };
+
+    for _ in 0..passes {
+        apply_blur_rect(&mut work, inner, blur_radius, true);
+    }
+
+    for y in inner.y..(inner.y + inner.height) {
+        for x in inner.x..(inner.x + inner.width) {
+            let mut p = *work.get_pixel(x as u32, y as u32);
+            p[3] = 255;
+            image.put_pixel(sx + x as u32, sy + y as u32, p);
         }
     }
 }
