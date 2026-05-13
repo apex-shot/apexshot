@@ -12,7 +12,7 @@ the official ApexShot GitHub repository.
 ApexShot is independent and is not affiliated with ShareX, Flameshot, or
 CleanShot X.
 
-![Image editor tutorial](image-editor-tutorial.gif)
+![Image editor tutorial](media/image-editor-tutorial.gif)
 
 [**▶ Install in one command**](#quick-install-recommended) ·
 [GitHub Repository](https://github.com/apex-shot/apexshot) ·
@@ -86,26 +86,26 @@ support is improving over time.
 
 ### Screenshots
 - **Multiple Capture Modes** — Full screen, area selection, window capture, and crosshair mode
-  ![Crosshair capture to preview overlay](capture-workflow.gif)
-  ![Capture area selection](capture-area.png)
+  ![Crosshair capture to preview overlay](media/capture-workflow.gif)
+  ![Capture area selection](media/capture-area.png)
 - **Image Editor** — Annotate with arrows, shapes, text, blur, pixelate, highlighter, and more
 - **OCR** — Extract text from images using Tesseract and ocrs dual-engine OCR
 - **QR Code Detection** — Automatically detect and copy QR codes from screenshots
 
 ### Screen Recording
 - **Flexible Recording** — Area or full-screen recording with MP4/GIF output
-  ![Video recording UI](video-recording.png)
+  ![Video recording UI](media/video-recording.png)
 - **Audio Monitoring** — Real-time mic and speaker level monitoring via PipeWire
 - **Webcam PiP** — Picture-in-picture webcam overlay during recording
 - **Recording Controls** — Pause, resume, and stop recording with on-screen controls
 - **Runtime Click Overlay** — On-screen click animations during recording, rendered by the GNOME extension and visually matched to the configuration preview (filled or outlined marker, soft halo, optional expanding pulse ring)
 - **Keystroke Overlay** — *Temporarily disabled.* The keystroke tile in the recording UI is shown as a non-interactive "SOON" badge; the underlying recorder hook is still being implemented and will be re-enabled in a future release
 - **Video Editor** — Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings. Open from the tray menu, CLI (`apexshot video-editor`), or a global hotkey. Supports drag-and-drop and file chooser for loading videos.
-  ![Video editor UI](video-editor.png)
+  ![Video editor UI](media/video-editor.png)
 
 ### Integration
 - **Daemon Mode** — Background service with system tray and global hotkeys for instant capture
-  ![Settings and tray](setting-tray.png)
+  ![Settings and tray](media/setting-tray.png)
 - **Dual Display Support** — Wayland (including GNOME) is fully tested; X11 implementations exist but are not yet thoroughly tested
 - **Browser Integration** — Full-page scroll capture via Chrome/Chromium extension
 - **GNOME Integration** — Always-on-top previews and shell-managed recording overlays
