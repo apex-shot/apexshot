@@ -9,10 +9,16 @@
 #include <QRect>
 #include <QTimer>
 #include <QCursor>
+#include <QVector>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
 #include <QtMath>
+#if defined(Q_OS_LINUX)
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
+#undef None
+#endif
 
 void CaptureOverlay::onMicLevelUpdated(double) { /* unused — using polling */ }
 
@@ -34,11 +40,106 @@ bool desktopBounds(bool available, QRect& outBounds)
     return outBounds.width() > 0 && outBounds.height() > 0;
 }
 
+bool x11RootCardinalProperty(const char* name, QVector<unsigned long>& values)
+{
+#if defined(Q_OS_LINUX)
+    Display* display = XOpenDisplay(nullptr);
+    if (!display) {
+        return false;
+    }
+
+    const Atom property = XInternAtom(display, name, True);
+    if (property == 0) {
+        XCloseDisplay(display);
+        return false;
+    }
+
+    Atom actualType = 0;
+    int actualFormat = 0;
+    unsigned long itemCount = 0;
+    unsigned long bytesAfter = 0;
+    unsigned char* data = nullptr;
+    const int status = XGetWindowProperty(display,
+                                          DefaultRootWindow(display),
+                                          property,
+                                          0,
+                                          1024,
+                                          False,
+                                          XA_CARDINAL,
+                                          &actualType,
+                                          &actualFormat,
+                                          &itemCount,
+                                          &bytesAfter,
+                                          &data);
+    if (status != Success || !data || actualType != XA_CARDINAL || actualFormat != 32) {
+        if (data) {
+            XFree(data);
+        }
+        XCloseDisplay(display);
+        return false;
+    }
+
+    const auto* raw = reinterpret_cast<unsigned long*>(data);
+    values.clear();
+    values.reserve(static_cast<int>(itemCount));
+    for (unsigned long i = 0; i < itemCount; ++i) {
+        values.push_back(raw[i]);
+    }
+
+    XFree(data);
+    XCloseDisplay(display);
+    return !values.isEmpty();
+#else
+    Q_UNUSED(name);
+    Q_UNUSED(values);
+    return false;
+#endif
+}
+
+bool x11CurrentDesktop(unsigned long& desktop)
+{
+    QVector<unsigned long> values;
+    if (!x11RootCardinalProperty("_NET_CURRENT_DESKTOP", values) || values.isEmpty()) {
+        return false;
+    }
+    desktop = values.first();
+    return true;
+}
+
+bool x11NetWorkArea(QRect& outWorkArea)
+{
+    QVector<unsigned long> values;
+    if (!x11RootCardinalProperty("_NET_WORKAREA", values) || values.size() < 4) {
+        return false;
+    }
+
+    unsigned long desktop = 0;
+    if (x11CurrentDesktop(desktop)) {
+        const int offset = static_cast<int>(desktop) * 4;
+        if (offset >= 0 && offset + 3 < values.size()) {
+            outWorkArea = QRect(static_cast<int>(values[offset]),
+                                static_cast<int>(values[offset + 1]),
+                                static_cast<int>(values[offset + 2]),
+                                static_cast<int>(values[offset + 3]));
+            return outWorkArea.width() > 0 && outWorkArea.height() > 0;
+        }
+    }
+
+    outWorkArea = QRect(static_cast<int>(values[0]),
+                        static_cast<int>(values[1]),
+                        static_cast<int>(values[2]),
+                        static_cast<int>(values[3]));
+    return outWorkArea.width() > 0 && outWorkArea.height() > 0;
+}
+
 QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
 {
     QRect desktop;
     QRect available;
-    if (!desktopBounds(false, desktop) || !desktopBounds(true, available)) {
+    if (!desktopBounds(false, desktop)) {
+        return overlayRect.topLeft();
+    }
+    if (!x11NetWorkArea(available) && !desktopBounds(true, available)) {
         return overlayRect.topLeft();
     }
 
@@ -53,6 +154,14 @@ QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
         origin.setX(available.x());
     }
 
+    const bool heightMatchesAvailable =
+        available.height() > 0 &&
+        qAbs(overlayRect.height() - available.height()) <= tolerance &&
+        available.height() < desktop.height();
+    if (heightMatchesAvailable) {
+        origin.setY(available.y());
+    }
+
     return origin;
 }
 
@@ -60,7 +169,7 @@ QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
 
 QPoint CaptureOverlay::desktopOriginForLocalCoordinates() const
 {
-    if (m_hasEventDesktopOrigin) {
+    if (!qEnvironmentVariableIsSet("WAYLAND_DISPLAY") && m_hasEventDesktopOrigin) {
         return m_eventDesktopOrigin;
     }
     return overlayLocalOriginForDesktop(QRect(mapToGlobal(QPoint(0, 0)), size()));
