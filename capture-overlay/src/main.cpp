@@ -751,6 +751,17 @@ int main(int argc, char* argv[])
         overlay.openRecordingPanelForShortcut();
     }
     overlay.show();
+    overlay.raise();
+    QApplication::processEvents();
+
+    // Capture the overlay's true global position. On Wayland,
+    // overlay.geometry() returns (0,0) even when the compositor
+    // positions the window after docks/panels (Ubuntu left sidebar, etc.).
+    // mapToGlobal gives us the real position the compositor assigned.
+    const QPoint overlayGlobalOrigin = overlay.mapToGlobal(QPoint(0, 0));
+    // Short-lived alias for the corrected origin — in scope for all
+    // post-event-loop code paths that need it.
+    const QPoint& ogo = overlayGlobalOrigin;
 
     const int ret = app.exec();
     if (interactiveOverlayMode) {
@@ -765,12 +776,7 @@ int main(int argc, char* argv[])
     if (ret == kExitRecordConfigUpdated) {
         if (areaInitMode && overlay.recordConfigRequested()) {
             const QRect sel = overlay.selection();
-            int screenHeight = 0;
-            for (QScreen* screen : QGuiApplication::screens()) {
-                screenHeight = std::max(screenHeight, screen->geometry().height());
-            }
-            const int yOffset = screenHeight - overlay.height();
-            const QRect selGlobal = sel.translated(overlay.geometry().x(), yOffset);
+            const QRect selGlobal = sel.translated(ogo.x(), ogo.y());
             const char* recordType = "video";
             if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
                 recordType = "gif";
@@ -843,23 +849,13 @@ int main(int argc, char* argv[])
         return 2;
     }
 
-    // Calculate Y offset: the overlay may not cover the full screen height
-    // (e.g., GNOME top bar is not covered on Wayland without Layer Shell)
-    int screenHeight = 0;
-    for (QScreen* screen : QGuiApplication::screens()) {
-        screenHeight = std::max(screenHeight, screen->geometry().height());
-    }
-    const int yOffset = screenHeight - overlay.height();
-
     // Handle recording request
     if (overlay.recordRequested()) {
         const char* recordType = "video";
         if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
             recordType = "gif";
         }
-        // Translate from local overlay coords to global screen coords
-        // Include yOffset because overlay doesn't cover the top bar
-        const QRect selGlobal = sel.translated(overlay.geometry().x(), yOffset);
+        const QRect selGlobal = sel.translated(ogo.x(), ogo.y());
         printRecordingJson(selGlobal, "record", recordType,
                            overlay.recordControlsEnabled(),
                            overlay.recordMicEnabled(),
@@ -905,9 +901,7 @@ int main(int argc, char* argv[])
     if (areaInitMode || crosshairCaptureMode) {
         const bool ocrRequested = overlay.ocrRequested();
         const bool fullscreenRequested = overlay.recordFullscreen();
-        // Translate from local overlay coords to global screen coords
-        // Include yOffset because overlay doesn't cover the top bar
-        const QRect selGlobal = sel.translated(overlay.geometry().x(), yOffset);
+        const QRect selGlobal = sel.translated(ogo.x(), ogo.y());
         const bool isWayland = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
         const QString desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
         const bool isGnomeWayland =
@@ -920,10 +914,13 @@ int main(int argc, char* argv[])
         QString error;
         bool ok = false;
 
+        const QRect overlayGlobalGeometry(ogo.x(), ogo.y(),
+                                          overlay.geometry().width(),
+                                          overlay.geometry().height());
         if (crosshairCaptureMode) {
             if (isGnomeWayland) {
                 ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-                  sel, overlay.geometry(), imagePath, imageSize, error);
+                  sel, overlayGlobalGeometry, imagePath, imageSize, error);
             } else {
                 ok =
                   ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
@@ -932,7 +929,7 @@ int main(int argc, char* argv[])
             ok = ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error);
         } else if (isGnomeWayland) {
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-              sel, overlay.geometry(), imagePath, imageSize, error);
+              sel, overlayGlobalGeometry, imagePath, imageSize, error);
         } else {
             ok =
               ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
@@ -941,7 +938,7 @@ int main(int argc, char* argv[])
         if (!ok && isWayland && !isGnomeWayland) {
             QString fallbackError;
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-              sel, overlay.geometry(), imagePath, imageSize, fallbackError);
+              sel, overlayGlobalGeometry, imagePath, imageSize, fallbackError);
             if (!ok) {
                 error = QStringLiteral("%1; overlay-local fallback failed (%2)")
                           .arg(error, fallbackError);
