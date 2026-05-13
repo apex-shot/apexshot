@@ -181,6 +181,10 @@ cargo run --release -- ocr /path/to/image.png
 # Annotation editor
 cargo run --release -- edit /path/to/image.png
 
+# Video editor
+cargo run --release -- video-editor
+cargo run --release -- video-editor /path/to/recording.mp4
+
 # Hotkey management
 cargo run --release -- hotkeys install
 cargo run --release -- hotkeys uninstall

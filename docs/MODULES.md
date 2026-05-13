@@ -99,6 +99,7 @@ This document provides detailed information about every module and submodule in 
 
 **Submodules:**
 - `mod.rs` — GStreamer pipeline setup, codec detection, recording loop, GIF encoding
+- `editor/` — GTK4 video editor for trimming, conversion, and export
 - `control_session.rs` — Active recording session tracking and D-Bus control commands
 - `stop_overlay.rs` — GTK4 floating control bar (pause, stop, timer) during recording
 - `countdown_overlay.rs` — Fullscreen 3-2-1 countdown with Escape cancellation
@@ -146,6 +147,40 @@ This document provides detailed information about every module and submodule in 
 
 **Key Functions (`runtime_keystrokes.rs`):**
 - `spawn_runtime_keystroke_forwarder(session_id, filter_mode)` — Spawns EI portal keystroke listener
+
+#### Recording Editor (`recording/editor/`)
+
+**Purpose:** GTK4-based video editor for trimming, dimension conversion, quality adjustment, and audio mode changes. Only supports MP4 files in this version.
+
+**Submodules:**
+- `mod.rs` — Module root with `open_recording_editor(path)` and `open_empty_recording_editor()` entry points
+- `model.rs` — Core types: `VideoEditState`, `VideoMetadata`, `AudioMode`, `DimensionPreset`
+- `ui_support.rs` — GTK4 CSS loading, custom styling classes for editor and empty workspace
+- `ffmpeg.rs` — FFmpeg subprocess wrapper for probe, thumbnail, and transcode operations
+- `dialogs.rs` — Error dialog and confirm dialog helpers
+- `window/mod.rs` — Main GTK4 editor window with timeline, panels, preview, drag-and-drop, export
+
+**Key Types (`model.rs`):**
+- `VideoEditState` — Mutable editing state (trim in/out, dimensions, quality, audio mode)
+- `VideoMetadata` — Read-only video metadata (path, duration, width, height, codec, fps, bitrate)
+- `AudioMode` — `Unchanged`, `Mono`, `Muted`
+- `DimensionPreset` — Named presets like `Original`, `Square1x1`, `Vertical9x16`, etc.
+
+**Key Functions (`window/mod.rs`):**
+- `open(metadata)` — Opens the editor window with a loaded video
+- `open_empty()` — Opens the editor window with empty workspace and drop zone
+
+**Capabilities:**
+- Timeline scrub with thumbnail strip
+- Trim in/out point selection
+- Dimension preset or custom resolution
+- Quality slider (0–100)
+- Audio mode (unchanged, mono, muted)
+- Export via FFmpeg with progress tracking
+- Drag-and-drop video file loading
+- Re-encoding is skipped when only trimming
+- Empty workspace with drop zone and file chooser dialog
+- Accessible from tray menu, CLI (`apexshot video-editor`), and global hotkey
 
 ---
 
@@ -307,7 +342,7 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 
 **Key Types:**
 - `TrayAction` — Enum of actions triggerable from tray menu:
-  `CaptureArea`, `CaptureCrosshair`, `CaptureScreen`, `CaptureWindow`, `OpenRecordingUi`, `RecordScreen`, `StopRecordingSave`, `ShowLastPreview`, `OpenLastCapture`, `OpenSettings`, `Quit`
+  `CaptureArea`, `CaptureCrosshair`, `CaptureScreen`, `CaptureWindow`, `OpenRecordingUi`, `OpenVideoEditor`, `RecordScreen`, `StopRecordingSave`, `ShowLastPreview`, `OpenLastCapture`, `OpenSettings`, `Quit`
 - `ApexShotTray` — ksni tray icon state struct
 - `TrayPresentation` — `Idle` or `Recording { elapsed_text }`
 
@@ -429,7 +464,7 @@ thoroughly tested.
 - `DaemonAction` — Enum of all actions the daemon can execute:
   `CaptureArea`, `CaptureCrosshair`, `CaptureScreen`, `CaptureWindow`,
   `OpenFile`, `OpenFromClipboard`, `RestoreRecentlyClosed`, `ToggleOverlays`,
-  `RecordScreen`, `RecordArea`, `OpenRecordingUi`,
+  `RecordScreen`, `RecordArea`, `OpenRecordingUi`, `OpenVideoEditor`,
   `ToggleRecordingPause`, `StopRecordingSave`, `RestartRecording`, `DiscardRecording`,
   `ShowLastPreview`, `ShowPreviewForPath(PathBuf)`, `OpenLastCapture`, `OpenSettings`,
   `SetTrayVisible(bool)`, `RecordingSessionStarted`/`Paused`/`Resumed`/`Restarted`/`Ended`,

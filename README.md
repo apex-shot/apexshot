@@ -38,6 +38,7 @@ quick clipboard actions in one open-source app.
 | ShareX-style capture | Full screen, area, window, and crosshair screenshots |
 | Annotation and editing | Arrows, shapes, text, blur, pixelate, crop, highlighter, and color picker |
 | Screen recording | Area or full-screen recording with MP4/GIF output, audio monitoring, and webcam PiP |
+| Video editing | Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings |
 | Text and code extraction | OCR plus automatic QR code detection from captured regions |
 | Linux desktop integration | GNOME Wayland support, portal-backed capture paths, tray, daemon mode, and global hotkeys |
 | Open-source project | GPL-3.0 source code, GitHub releases, issues, and discussions at https://github.com/apex-shot/apexshot |
@@ -95,6 +96,7 @@ support is improving over time.
 - **Recording Controls** — Pause, resume, and stop recording with on-screen controls
 - **Runtime Click Overlay** — On-screen click animations during recording, rendered by the GNOME extension and visually matched to the configuration preview (filled or outlined marker, soft halo, optional expanding pulse ring)
 - **Keystroke Overlay** — *Temporarily disabled.* The keystroke tile in the recording UI is shown as a non-interactive "SOON" badge; the underlying recorder hook is still being implemented and will be re-enabled in a future release
+- **Video Editor** — Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings. Open from the tray menu, CLI (`apexshot video-editor`), or a global hotkey. Supports drag-and-drop and file chooser for loading videos.
 
 ### Integration
 - **Daemon Mode** — Background service with system tray and global hotkeys for instant capture
@@ -386,6 +388,10 @@ apexshot ocr <image-path>        # Extract text from image
 
 # Editor (requires image path)
 apexshot edit <image-path>       # Open image in annotation editor
+
+# Video Editor
+apexshot video-editor            # Open video editor (with optional MP4 path)
+apexshot video-editor <video>    # Open video editor with a specific video
 
 # Settings
 apexshot settings                # Open settings window

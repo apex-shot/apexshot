@@ -2547,7 +2547,10 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                         st.obfuscate_method
                     };
                     if matches!(method, super::types::ObfuscateMethod::Blackout) {
-                        size_group.set_visible(false);
+                        size_group.set_visible(true);
+                        size_group.add_css_class("size-group-inactive");
+                        size_slider.set_sensitive(false);
+                        size_slider.set_tooltip_text(Some("Blackout has no intensity control"));
                     } else {
                         size_group.set_visible(true);
                         size_group.remove_css_class("size-group-inactive");

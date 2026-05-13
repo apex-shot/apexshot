@@ -319,7 +319,7 @@ fn build_empty_preview_area(
     let title = Label::new(Some("Drop a video here"));
     title.add_css_class("recording-editor-empty-title");
 
-    let hint = Label::new(Some("MP4, WebM, MKV, MOV, AVI, FLV, WMV, MPG, or MPEG"));
+    let hint = Label::new(Some("MP4 files"));
     hint.add_css_class("recording-editor-empty-hint");
     hint.set_wrap(true);
     hint.set_justify(gtk4::Justification::Center);
@@ -585,24 +585,9 @@ fn show_open_video_dialog(
     );
 
     let filter = FileFilter::new();
-    filter.set_name(Some("Videos"));
-    for mime_type in [
-        "video/mp4",
-        "video/webm",
-        "video/x-matroska",
-        "video/quicktime",
-        "video/x-msvideo",
-        "video/x-flv",
-        "video/x-ms-wmv",
-        "video/mpeg",
-    ] {
-        filter.add_mime_type(mime_type);
-    }
-    for pattern in [
-        "*.mp4", "*.webm", "*.mkv", "*.avi", "*.mov", "*.flv", "*.wmv", "*.mpg", "*.mpeg",
-    ] {
-        filter.add_pattern(pattern);
-    }
+    filter.set_name(Some("MP4 files"));
+    filter.add_mime_type("video/mp4");
+    filter.add_pattern("*.mp4");
     chooser.add_filter(&filter);
 
     let root_ref = root.clone();
@@ -698,15 +683,10 @@ fn load_video_async(
 }
 
 fn is_supported_video_path(path: &std::path::Path) -> bool {
-    let ext = path
-        .extension()
+    path.extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    [
-        "mp4", "webm", "mkv", "avi", "mov", "flv", "wmv", "mpg", "mpeg",
-    ]
-    .contains(&ext.as_str())
+        .map(|e| e.eq_ignore_ascii_case("mp4"))
+        .unwrap_or(false)
 }
 
 fn build_bottom_tools(

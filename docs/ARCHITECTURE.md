@@ -89,6 +89,7 @@ Entry point handling CLI arguments, mode selection, and subprocess delegation:
 - `record {screen|area|ui}` — screen recording
 - `ocr <path>` — text extraction
 - `edit <path>` — open annotation editor
+- `video-editor [path]` — open video editor (with optional MP4 path)
 - `settings` — open settings window
 - `hotkeys {install|uninstall|reset}` — hotkey management
 - `show-last-preview`, `open-file`, `open-from-clipboard`, `restore-recently-closed`, `toggle-overlays` — daemon-triggered actions
@@ -138,10 +139,11 @@ Screen recording with GStreamer:
 - `stop_overlay.rs` — GTK4 floating control bar during recording (pause, stop, timer, position)
 - `countdown_overlay.rs` — fullscreen 3-2-1 countdown with Escape cancellation
 - `dim_overlay.rs` — fullscreen dim mask during countdown
+- `editor/` — GTK4 video editor for trimming, dimension conversion, quality, and audio mode (MP4 only)
 - `runtime_keystrokes.rs` — EI (Emulation Input) portal keystroke capture for runtime overlays
 - `dnd.rs` — Do Not Disturb mode during recording
 
-**Features:** MP4/WebM/OGV/GIF output, mic + speaker audio, webcam overlay, click display, keystroke display, recording mask, pause/resume/restart, countdown timer.
+**Features:** MP4/WebM/OGV/GIF output, mic + speaker audio, webcam overlay, click display, keystroke display, recording mask, pause/resume/restart, countdown timer, post-recording video editor.
 
 ### 6. X11/Wayland Area Selector (`src/overlay.rs`)
 GTK4 overlay for interactive area selection:
@@ -200,7 +202,7 @@ Global hotkey management:
 ### 12. Tray (`src/tray/`)
 System tray via `ksni` (StatusNotifierItem):
 - Idle and recording states with elapsed timer
-- Menu: Capture (screen/area/window), Record, Show Last Preview, Open Last Capture, Settings, Quit
+- Menu: Capture (screen/area/window), Record, Video Editor, Show Last Preview, Open Last Capture, Settings, Quit
 - Procedural Cairo-drawn "A-Mark" icon at multiple resolutions
 
 ### 13. Onboarding (`src/onboarding/`)
