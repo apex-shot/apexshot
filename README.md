@@ -94,6 +94,7 @@ support is improving over time.
 
 ### Screen Recording
 - **Flexible Recording** — Area or full-screen recording with MP4/GIF output
+  ![Video recording UI](video-recording.png)
 - **Audio Monitoring** — Real-time mic and speaker level monitoring via PipeWire
 - **Webcam PiP** — Picture-in-picture webcam overlay during recording
 - **Recording Controls** — Pause, resume, and stop recording with on-screen controls
