@@ -12,7 +12,7 @@ the official ApexShot GitHub repository.
 ApexShot is independent and is not affiliated with ShareX, Flameshot, or
 CleanShot X.
 
-![Crosshair capture to preview overlay](capture-workflow.gif)
+![Image editor tutorial](image-editor-tutorial.gif)
 
 [**▶ Install in one command**](#quick-install-recommended) ·
 [GitHub Repository](https://github.com/apex-shot/apexshot) ·
@@ -86,9 +86,9 @@ support is improving over time.
 
 ### Screenshots
 - **Multiple Capture Modes** — Full screen, area selection, window capture, and crosshair mode
+  ![Crosshair capture to preview overlay](capture-workflow.gif)
   ![Capture area selection](capture-area.png)
 - **Image Editor** — Annotate with arrows, shapes, text, blur, pixelate, highlighter, and more
-  ![Image editor tutorial](image-editor-tutorial.gif)
 - **OCR** — Extract text from images using Tesseract and ocrs dual-engine OCR
 - **QR Code Detection** — Automatically detect and copy QR codes from screenshots
 
