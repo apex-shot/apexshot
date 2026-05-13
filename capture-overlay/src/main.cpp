@@ -774,7 +774,7 @@ int main(int argc, char* argv[])
     if (ret == kExitRecordConfigUpdated) {
         if (areaInitMode && overlay.recordConfigRequested()) {
             const QRect sel = overlay.selection();
-            const QRect selGlobal = sel.translated(ogo.x(), ogo.y());
+            const QRect selGlobal = overlay.desktopSelection();
             const char* recordType = "video";
             if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
                 recordType = "gif";
@@ -853,7 +853,7 @@ int main(int argc, char* argv[])
         if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
             recordType = "gif";
         }
-        const QRect selGlobal = sel.translated(ogo.x(), ogo.y());
+        const QRect selGlobal = overlay.desktopSelection();
         printRecordingJson(selGlobal, "record", recordType,
                            overlay.recordControlsEnabled(),
                            overlay.recordMicEnabled(),
@@ -899,7 +899,7 @@ int main(int argc, char* argv[])
     if (areaInitMode || crosshairCaptureMode) {
         const bool ocrRequested = overlay.ocrRequested();
         const bool fullscreenRequested = overlay.recordFullscreen();
-        const QRect selGlobal = sel.translated(ogo.x(), ogo.y());
+        const QRect selGlobal = overlay.desktopSelection();
         const bool isWayland = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
         const QString desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
         const bool isGnomeWayland =
@@ -912,29 +912,21 @@ int main(int argc, char* argv[])
         QString error;
         bool ok = false;
 
-        const QRect overlayGlobalGeometry(ogo.x(), ogo.y(),
-                                          overlay.geometry().width(),
-                                          overlay.geometry().height());
         if (crosshairCaptureMode) {
-            if (isGnomeWayland) {
-                ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-                  sel, overlayGlobalGeometry, imagePath, imageSize, error);
-            } else {
-                ok =
-                  ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
-            }
+            ok = ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
         } else if (fullscreenRequested) {
             ok = ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error);
-        } else if (isGnomeWayland) {
-            ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-              sel, overlayGlobalGeometry, imagePath, imageSize, error);
         } else {
-            ok =
-              ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
+            ok = ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
         }
 
         if (!ok && isWayland && !isGnomeWayland) {
             QString fallbackError;
+            const QPoint fallbackOrigin = overlay.desktopOriginForLocalCoordinates();
+            const QRect overlayGlobalGeometry(fallbackOrigin.x(),
+                                              fallbackOrigin.y(),
+                                              overlay.geometry().width(),
+                                              overlay.geometry().height());
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
               sel, overlayGlobalGeometry, imagePath, imageSize, fallbackError);
             if (!ok) {
@@ -953,7 +945,7 @@ int main(int argc, char* argv[])
           imageSize,
           crosshairCaptureMode ? "area" : (ocrRequested ? "ocr" : "area"));
     } else {
-        const QRect selGlobal = sel.translated(ogo.x(), ogo.y());
+        const QRect selGlobal = overlay.desktopSelection();
         std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d}\n",
                     selGlobal.x(),
                     selGlobal.y(),

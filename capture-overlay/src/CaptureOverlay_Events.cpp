@@ -97,6 +97,7 @@ static QString keyEventToPreviewText(QKeyEvent* event)
 
 void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 {
+    updateDesktopOriginFromMouseEvent(event);
     const QPoint pos = event->pos();
     m_pointerPos = pos;
 
@@ -871,6 +872,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 
 void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 {
+    updateDesktopOriginFromMouseEvent(event);
     const QPoint pos = event->pos();
     m_pointerPos = pos;
 
@@ -1322,6 +1324,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) return;
+    updateDesktopOriginFromMouseEvent(event);
     m_pointerPos = event->pos();
 
     if (isCrosshairMode()) {
@@ -1384,6 +1387,7 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
 void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) return;
+    updateDesktopOriginFromMouseEvent(event);
     if (isCrosshairMode()) return;
     if (!m_hasSelection) return;
 

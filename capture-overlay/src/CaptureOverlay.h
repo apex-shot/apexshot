@@ -74,6 +74,7 @@ public:
     /// Returns the selected rectangle in overlay-local logical pixels.
     /// Only valid when QApplication exits with code 0.
     QRect selection() const { return m_selection.normalized(); }
+    QRect desktopSelection() const;
     QPoint desktopOriginForLocalCoordinates() const;
     void setInitialSelection(const QRect& rect) { m_selection = rect; }
     bool ocrRequested() const { return m_captureIntent == CaptureIntent::Ocr; }
@@ -323,6 +324,7 @@ private:
     void cancelSelection();
     void resetRecordingPanelToAreaMode(bool keepSelection = true);
     bool isCrosshairMode() const { return m_overlayMode == OverlayMode::CrosshairCapture; }
+    void updateDesktopOriginFromMouseEvent(QMouseEvent* event);
 
     struct WindowInfo {
         QRect   rect;
@@ -338,6 +340,8 @@ private:
     QImage    m_blurredBg;          // 1/4-res blurred bg for frosted glass
     OverlayMode m_overlayMode;
     QRect     m_selection;
+    QPoint    m_eventDesktopOrigin;
+    bool      m_hasEventDesktopOrigin;
     bool      m_hasSelection;
     bool      m_dragging;
     bool      m_moving;

@@ -207,7 +207,7 @@ void CaptureOverlay::startAutoScrollCapture()
     m_scrollStage = ScrollStage::Capturing;
     m_scrollSimilarCount = 0;
     m_scrollFrameCount = 0;
-    m_scrollCaptureArea = m_selection.normalized().translated(desktopOriginForLocalCoordinates());
+    m_scrollCaptureArea = desktopSelection();
     m_manualScrollAssistMode = shouldUseManualScrollAssistMode();
 
     if (m_manualScrollAssistMode) {

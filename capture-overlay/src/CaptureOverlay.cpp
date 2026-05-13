@@ -5,6 +5,7 @@
 #include <QScreen>
 #include <QWindow>
 #include <QImage>
+#include <QMouseEvent>
 #include <QRect>
 #include <QTimer>
 #include <QCursor>
@@ -59,7 +60,24 @@ QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
 
 QPoint CaptureOverlay::desktopOriginForLocalCoordinates() const
 {
+    if (m_hasEventDesktopOrigin) {
+        return m_eventDesktopOrigin;
+    }
     return overlayLocalOriginForDesktop(QRect(mapToGlobal(QPoint(0, 0)), size()));
+}
+
+QRect CaptureOverlay::desktopSelection() const
+{
+    return m_selection.normalized().translated(desktopOriginForLocalCoordinates());
+}
+
+void CaptureOverlay::updateDesktopOriginFromMouseEvent(QMouseEvent* event)
+{
+    if (!event) {
+        return;
+    }
+    m_eventDesktopOrigin = event->globalPos() - event->pos();
+    m_hasEventDesktopOrigin = true;
 }
 
 QSizeF CaptureOverlay::webcamPreviewSize(double selW, double selH) const
@@ -201,6 +219,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     : QWidget(parent)
     , m_background(background)
     , m_overlayMode(overlayMode)
+    , m_eventDesktopOrigin(0, 0)
+    , m_hasEventDesktopOrigin(false)
     , m_hasSelection(false)
     , m_dragging(false)
     , m_moving(false)
