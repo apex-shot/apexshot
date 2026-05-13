@@ -404,14 +404,6 @@ QPoint overlayLocalOriginForDesktopCapture(const QRect& overlayGeometry,
         origin.setX(availableBounds.x());
     }
 
-    const bool heightMatchesAvailable =
-        availableBounds.height() > 0 &&
-        qAbs(overlayGeometry.height() - availableBounds.height()) <= tolerance &&
-        availableBounds.height() < desktopBounds.height();
-    if (heightMatchesAvailable) {
-        origin.setY(availableBounds.y());
-    }
-
     return origin;
 }
 

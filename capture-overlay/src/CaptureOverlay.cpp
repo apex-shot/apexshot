@@ -52,14 +52,6 @@ QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
         origin.setX(available.x());
     }
 
-    const bool heightMatchesAvailable =
-        available.height() > 0 &&
-        qAbs(overlayRect.height() - available.height()) <= tolerance &&
-        available.height() < desktop.height();
-    if (heightMatchesAvailable) {
-        origin.setY(available.y());
-    }
-
     return origin;
 }
 
