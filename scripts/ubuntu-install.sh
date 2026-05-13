@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # ============================================================================
-# ApexShot Ubuntu/Debian Installer
+# ApexShot Ubuntu/Debian/Pop!_OS Installer
 # A stylish terminal UI for installing ApexShot and its dependencies.
 # Usage: curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-install.sh | bash
 # ============================================================================
@@ -86,8 +86,14 @@ spinner() {
         i=$(( (i + 1) % 10 ))
         sleep 0.08
     done
-    printf "\r  ${GREEN}✔${RESET} %s\n" "$msg"
     wait "$pid"
+    local rc=$?
+    if [[ $rc -eq 0 ]]; then
+        printf "\r  ${GREEN}✔${RESET} %s\n" "$msg"
+    else
+        printf "\r  ${RED}✖${RESET} %s\n" "$msg"
+    fi
+    return $rc
 }
 
 run_spinner() {
@@ -187,7 +193,7 @@ check_prereqs() {
     if command -v apt >/dev/null 2>&1; then
         ok "apt package manager found"
     else
-        err "This installer currently supports Debian/Ubuntu (apt)."
+        err "This installer currently supports Debian/Ubuntu/Pop!_OS (apt)."
         err "For Arch Linux, use: scripts/arch-install.sh"
         err "Please install manually or open an issue: https://github.com/${REPO}/issues"
         exit 1
@@ -319,7 +325,12 @@ install_deb() {
 
     local deb_file="${TMPDIR}/apexshot_${VERSION}_amd64.deb"
     prime_sudo
-    run_spinner "Installing package..." bash -c "${SUDO} dpkg -i '${deb_file}' && ${SUDO} apt install -f -y -qq"
+    if ! run_spinner "Installing package..." bash -c "${SUDO} dpkg -i '${deb_file}' && ${SUDO} apt install -f -y -qq"; then
+        err "Package installation failed."
+        err "Try manual install: ${SUDO} dpkg -i '${deb_file}'"
+        err "Then resolve deps: ${SUDO} apt install -f"
+        exit 1
+    fi
 
     ok "ApexShot installed"
 }

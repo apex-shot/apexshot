@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # ============================================================================
-# ApexShot Ubuntu/Debian Updater
+# ApexShot Ubuntu/Debian/Pop!_OS Updater
 # A stylish terminal UI for updating ApexShot to the latest release.
 # Usage: curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-update.sh | bash
 # ============================================================================
@@ -86,8 +86,14 @@ spinner() {
         i=$(( (i + 1) % 10 ))
         sleep 0.08
     done
-    printf "\r  ${GREEN}✔${RESET} %s\n" "$msg"
     wait "$pid"
+    local rc=$?
+    if [[ $rc -eq 0 ]]; then
+        printf "\r  ${GREEN}✔${RESET} %s\n" "$msg"
+    else
+        printf "\r  ${RED}✖${RESET} %s\n" "$msg"
+    fi
+    return $rc
 }
 
 run_spinner() {
@@ -376,7 +382,12 @@ install_update() {
     killall -9 apexshot 2>/dev/null || true
 
     prime_sudo
-    run_spinner "Upgrading package..." bash -c "${SUDO} dpkg -i '${deb_file}' && ${SUDO} apt install -f -y -qq"
+    if ! run_spinner "Upgrading package..." bash -c "${SUDO} dpkg -i '${deb_file}' && ${SUDO} apt install -f -y -qq"; then
+        err "Package installation failed."
+        err "Try manual install: ${SUDO} dpkg -i '${deb_file}'"
+        err "Then resolve deps: ${SUDO} apt install -f"
+        exit 1
+    fi
 
     ok "ApexShot updated to ${VERSION}"
 }

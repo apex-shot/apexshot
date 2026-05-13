@@ -67,6 +67,7 @@ backend/target
 .worktrees/
 
 # Personal planning documents
+scripts/youtube-video-script.md
 flameshot/
 reddit-opensource-post.md
 src/capture/editor/window-refactor-plan.md
