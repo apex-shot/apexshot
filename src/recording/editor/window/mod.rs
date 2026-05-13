@@ -12,9 +12,9 @@ use gtk4::gdk;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::{
-    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, DropTarget,
-    Entry, FileChooserAction, FileChooserNative, FileFilter, Image, Label, MenuButton,
-    Orientation, Overlay, Revealer, ResponseType, Scale, Spinner,
+    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, DropTarget, Entry,
+    FileChooserAction, FileChooserNative, FileFilter, Image, Label, MenuButton, Orientation,
+    Overlay, ResponseType, Revealer, Scale, Spinner,
 };
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -658,39 +658,41 @@ fn load_video_async(
     let window = window.clone();
     let loading_revealer = loading_revealer.clone();
     let loading_spinner = loading_spinner.clone();
-    glib::timeout_add_local(Duration::from_millis(100), move || match receiver.try_recv() {
-        Ok(Ok((metadata, thumbnails))) => {
-            loading_revealer.set_reveal_child(false);
-            loading_spinner.stop();
-            loading_spinner.set_visible(false);
+    glib::timeout_add_local(Duration::from_millis(100), move || {
+        match receiver.try_recv() {
+            Ok(Ok((metadata, thumbnails))) => {
+                loading_revealer.set_reveal_child(false);
+                loading_spinner.stop();
+                loading_spinner.set_visible(false);
 
-            let state = Arc::new(Mutex::new(VideoEditState::new(metadata)));
-            {
-                let mut state = state.lock().unwrap();
-                state.quality = 70;
-                state.audio_mode = AudioMode::Unchanged;
+                let state = Arc::new(Mutex::new(VideoEditState::new(metadata)));
+                {
+                    let mut state = state.lock().unwrap();
+                    state.quality = 70;
+                    state.audio_mode = AudioMode::Unchanged;
+                }
+                populate_loaded_root(&root, &window, state, thumbnails, exporting.clone());
+                glib::ControlFlow::Break
             }
-            populate_loaded_root(&root, &window, state, thumbnails, exporting.clone());
-            glib::ControlFlow::Break
-        }
-        Ok(Err(err)) => {
-            loading_revealer.set_reveal_child(false);
-            loading_spinner.stop();
-            loading_spinner.set_visible(false);
-            dialogs::show_error(
-                &window,
-                "Failed to open video",
-                "ApexShot could not open this video file.",
-                Some(&err),
-            );
-            glib::ControlFlow::Break
-        }
-        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-        Err(mpsc::TryRecvError::Disconnected) => {
-            loading_revealer.set_reveal_child(false);
-            loading_spinner.stop();
-            loading_spinner.set_visible(false);
-            glib::ControlFlow::Break
+            Ok(Err(err)) => {
+                loading_revealer.set_reveal_child(false);
+                loading_spinner.stop();
+                loading_spinner.set_visible(false);
+                dialogs::show_error(
+                    &window,
+                    "Failed to open video",
+                    "ApexShot could not open this video file.",
+                    Some(&err),
+                );
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                loading_revealer.set_reveal_child(false);
+                loading_spinner.stop();
+                loading_spinner.set_visible(false);
+                glib::ControlFlow::Break
+            }
         }
     });
 }
