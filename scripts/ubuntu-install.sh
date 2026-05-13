@@ -359,6 +359,24 @@ cleanup() {
     fi
 }
 
+remove_stale_home_binary() {
+    local name=$1
+    local candidate="$2"
+    [[ -x "$candidate" ]] || return 0
+    if ! "$candidate" --version 2>/dev/null | grep -Eq '^apexshot [0-9]+\.[0-9]+\.[0-9]+'; then
+        return 0
+    fi
+    local backup="${candidate}.pre-install.$(date +%Y%m%d%H%M%S)"
+    mv "$candidate" "$backup"
+    ok "Moved stale ${candidate} to ${backup}"
+}
+
+cleanup_shadowing_home_binaries() {
+    remove_stale_home_binary apexshot "${HOME}/.cargo/bin/apexshot"
+    remove_stale_home_binary apexshot "${HOME}/.local/bin/apexshot"
+    hash -r 2>/dev/null || true
+}
+
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is ready!${RESET}\n"
@@ -389,6 +407,7 @@ main() {
     download_deb
     install_deb
     setup_browser_host
+    cleanup_shadowing_home_binaries
     summary
 }
 

@@ -211,6 +211,19 @@ move_shadowing_local_binary() {
     ok "Moved stale ${local_path} to ${backup}"
 }
 
+remove_stale_home_binary() {
+    local name=$1
+    local candidate="$2"
+    [[ -x "$candidate" ]] || return 0
+    if ! is_apexshot_binary "$candidate"; then
+        warn "Leaving ${candidate} in place because it does not look like an ApexShot binary."
+        return 0
+    fi
+    local backup="${candidate}.pre-package-update.$(date +%Y%m%d%H%M%S)"
+    mv "$candidate" "$backup"
+    ok "Moved stale ${candidate} to ${backup}"
+}
+
 cleanup_shadowing_local_binaries() {
     step "Checking command path"
 
@@ -218,10 +231,18 @@ cleanup_shadowing_local_binaries() {
     move_shadowing_local_binary apexshot-capture
     move_shadowing_local_binary apexshot-native-host
 
+    remove_stale_home_binary apexshot "${HOME}/.cargo/bin/apexshot"
+    remove_stale_home_binary apexshot "${HOME}/.local/bin/apexshot"
+    remove_stale_home_binary apexshot-capture "${HOME}/.cargo/bin/apexshot-capture"
+    remove_stale_home_binary apexshot-capture "${HOME}/.local/bin/apexshot-capture"
+
     hash -r 2>/dev/null || true
-    if [[ "$(command -v apexshot 2>/dev/null || true)" != "/usr/bin/apexshot" ]]; then
-        warn "apexshot still resolves to $(command -v apexshot 2>/dev/null || echo '<not found>')"
-        info "Check your PATH for another stale ApexShot binary."
+    local resolved
+    resolved=$(command -v apexshot 2>/dev/null || true)
+    if [[ "$resolved" != "/usr/bin/apexshot" ]]; then
+        warn "apexshot still resolves to ${resolved}"
+        info "Removed stale binaries from ~/.cargo/bin and ~/.local/bin."
+        info "Check your PATH for other directories that may contain an old apexshot."
     else
         ok "apexshot now resolves to /usr/bin/apexshot"
     fi
