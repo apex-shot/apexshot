@@ -709,9 +709,6 @@ int main(int argc, char* argv[])
     overlay.setShowZoomPreview(showZoomPreview);
     overlay.setFreezeSelectionBackground(freezeSelectionBackground);
     overlay.setInitialCaptureDelaySeconds(initialCaptureDelaySeconds);
-    if (!restoreSel.isNull() && restoreSel.isValid()) {
-        overlay.setInitialSelection(restoreSel);
-    }
     overlay.setInitialGifFps(initialGifFps);
     overlay.setInitialGifQuality(initialGifQuality);
     overlay.setInitialGifSizeIdx(initialGifSizeIdx);
@@ -754,14 +751,15 @@ int main(int argc, char* argv[])
     overlay.raise();
     QApplication::processEvents();
 
-    // Capture the overlay's true global position. On Wayland,
-    // overlay.geometry() returns (0,0) even when the compositor
-    // positions the window after docks/panels (Ubuntu left sidebar, etc.).
-    // mapToGlobal gives us the real position the compositor assigned.
-    const QPoint overlayGlobalOrigin = overlay.mapToGlobal(QPoint(0, 0));
-    // Short-lived alias for the corrected origin — in scope for all
-    // post-event-loop code paths that need it.
+    // Capture the overlay's local-to-desktop origin after the compositor has
+    // placed it. Fixed panels/docks can make the overlay local coordinate
+    // space start inside the full desktop instead of at (0,0).
+    const QPoint overlayGlobalOrigin = overlay.desktopOriginForLocalCoordinates();
     const QPoint& ogo = overlayGlobalOrigin;
+    if (!restoreSel.isNull() && restoreSel.isValid()) {
+        overlay.setInitialSelection(restoreSel.translated(-ogo.x(), -ogo.y()));
+        overlay.update();
+    }
 
     const int ret = app.exec();
     if (interactiveOverlayMode) {
@@ -955,11 +953,12 @@ int main(int argc, char* argv[])
           imageSize,
           crosshairCaptureMode ? "area" : (ocrRequested ? "ocr" : "area"));
     } else {
+        const QRect selGlobal = sel.translated(ogo.x(), ogo.y());
         std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d}\n",
-                    sel.x(),
-                    sel.y(),
-                    sel.width(),
-                    sel.height());
+                    selGlobal.x(),
+                    selGlobal.y(),
+                    selGlobal.width(),
+                    selGlobal.height());
         std::fflush(stdout);
     }
 

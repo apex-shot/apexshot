@@ -71,9 +71,10 @@ public:
                              bool initialSpeaker = false,
                              OverlayMode overlayMode = OverlayMode::StandardArea);
 
-    /// Returns the selected rectangle in screen (logical pixel) coordinates.
+    /// Returns the selected rectangle in overlay-local logical pixels.
     /// Only valid when QApplication exits with code 0.
     QRect selection() const { return m_selection.normalized(); }
+    QPoint desktopOriginForLocalCoordinates() const;
     void setInitialSelection(const QRect& rect) { m_selection = rect; }
     bool ocrRequested() const { return m_captureIntent == CaptureIntent::Ocr; }
     bool scrollCaptureCompleted() const { return m_scrollCaptureReady; }

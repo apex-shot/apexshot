@@ -371,6 +371,50 @@ bool logicalDesktopBounds(QRect& outBounds)
     return outBounds.width() > 0 && outBounds.height() > 0;
 }
 
+bool logicalAvailableDesktopBounds(QRect& outBounds)
+{
+    const auto screens = QGuiApplication::screens();
+    if (screens.isEmpty()) {
+        return false;
+    }
+
+    outBounds = screens.first()->availableGeometry();
+    for (QScreen* screen : screens) {
+        outBounds = outBounds.united(screen->availableGeometry());
+    }
+    return outBounds.width() > 0 && outBounds.height() > 0;
+}
+
+QPoint overlayLocalOriginForDesktopCapture(const QRect& overlayGeometry,
+                                           const QRect& desktopBounds)
+{
+    QRect availableBounds;
+    if (!logicalAvailableDesktopBounds(availableBounds)) {
+        return overlayGeometry.topLeft();
+    }
+
+    QPoint origin = overlayGeometry.topLeft();
+    constexpr int tolerance = 2;
+
+    const bool widthMatchesAvailable =
+        availableBounds.width() > 0 &&
+        qAbs(overlayGeometry.width() - availableBounds.width()) <= tolerance &&
+        availableBounds.width() < desktopBounds.width();
+    if (widthMatchesAvailable) {
+        origin.setX(availableBounds.x());
+    }
+
+    const bool heightMatchesAvailable =
+        availableBounds.height() > 0 &&
+        qAbs(overlayGeometry.height() - availableBounds.height()) <= tolerance &&
+        availableBounds.height() < desktopBounds.height();
+    if (heightMatchesAvailable) {
+        origin.setY(availableBounds.y());
+    }
+
+    return origin;
+}
+
 bool saveCroppedToTemp(const QImage& fullImage,
                        const QRect& cropRect,
                        QString& outPath,
@@ -1019,8 +1063,8 @@ bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
         return false;
     }
 
-    const int topInset = qMax(0, desktopBounds.height() - overlayGeometry.height());
-    const QPoint overlayOrigin(overlayGeometry.x(), overlayGeometry.y() + topInset);
+    const QPoint overlayOrigin =
+      overlayLocalOriginForDesktopCapture(overlayGeometry, desktopBounds);
     const QRect selectedGlobal = selected.translated(overlayOrigin);
     const QRect bounded = selectedGlobal.intersected(desktopBounds);
     if (bounded.width() <= 0 || bounded.height() <= 0) {

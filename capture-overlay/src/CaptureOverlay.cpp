@@ -11,8 +11,64 @@
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
+#include <QtMath>
 
 void CaptureOverlay::onMicLevelUpdated(double) { /* unused — using polling */ }
+
+namespace {
+
+bool desktopBounds(bool available, QRect& outBounds)
+{
+    const auto screens = QGuiApplication::screens();
+    if (screens.isEmpty()) {
+        return false;
+    }
+
+    outBounds = available ? screens.first()->availableGeometry()
+                          : screens.first()->geometry();
+    for (QScreen* screen : screens) {
+        outBounds = outBounds.united(available ? screen->availableGeometry()
+                                               : screen->geometry());
+    }
+    return outBounds.width() > 0 && outBounds.height() > 0;
+}
+
+QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
+{
+    QRect desktop;
+    QRect available;
+    if (!desktopBounds(false, desktop) || !desktopBounds(true, available)) {
+        return overlayRect.topLeft();
+    }
+
+    QPoint origin = overlayRect.topLeft();
+    constexpr int tolerance = 2;
+
+    const bool widthMatchesAvailable =
+        available.width() > 0 &&
+        qAbs(overlayRect.width() - available.width()) <= tolerance &&
+        available.width() < desktop.width();
+    if (widthMatchesAvailable) {
+        origin.setX(available.x());
+    }
+
+    const bool heightMatchesAvailable =
+        available.height() > 0 &&
+        qAbs(overlayRect.height() - available.height()) <= tolerance &&
+        available.height() < desktop.height();
+    if (heightMatchesAvailable) {
+        origin.setY(available.y());
+    }
+
+    return origin;
+}
+
+} // namespace
+
+QPoint CaptureOverlay::desktopOriginForLocalCoordinates() const
+{
+    return overlayLocalOriginForDesktop(QRect(mapToGlobal(QPoint(0, 0)), size()));
+}
 
 QSizeF CaptureOverlay::webcamPreviewSize(double selW, double selH) const
 {
