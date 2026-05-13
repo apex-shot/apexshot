@@ -59,6 +59,7 @@ pub enum DaemonAction {
     RecordScreen,
     RecordArea,
     OpenRecordingUi,
+    OpenVideoEditor,
     ToggleRecordingPause,
     StopRecordingSave,
     RestartRecording,
@@ -91,6 +92,7 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::CaptureScreen => DaemonAction::CaptureScreen,
             TrayAction::CaptureWindow => DaemonAction::CaptureWindow,
             TrayAction::OpenRecordingUi => DaemonAction::OpenRecordingUi,
+            TrayAction::OpenVideoEditor => DaemonAction::OpenVideoEditor,
             TrayAction::RecordScreen => DaemonAction::RecordScreen,
             TrayAction::StopRecordingSave => DaemonAction::StopRecordingSave,
             TrayAction::ShowLastPreview => DaemonAction::ShowLastPreview,
@@ -693,6 +695,9 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
             DaemonAction::OpenRecordingUi => {
                 tokio::spawn(handle_open_recording_ui(action_tx_clone));
             }
+            DaemonAction::OpenVideoEditor => {
+                tokio::task::spawn_blocking(spawn_empty_video_editor_subprocess);
+            }
             DaemonAction::ToggleRecordingPause => {
                 if !crate::recording::toggle_active_recording_pause() {
                     eprintln!("[daemon] No active recording available for pause/resume.");
@@ -1168,6 +1173,7 @@ impl DaemonIpc {
             "record_screen" => DaemonAction::RecordScreen,
             "record_area" => DaemonAction::RecordArea,
             "open_recording_ui" => DaemonAction::OpenRecordingUi,
+            "open_video_editor" => DaemonAction::OpenVideoEditor,
             "recording_pause_resume" => DaemonAction::ToggleRecordingPause,
             "recording_stop_save" => DaemonAction::StopRecordingSave,
             "recording_restart" => DaemonAction::RestartRecording,
@@ -2080,6 +2086,9 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
             "open_recording_ui" | "open-recording-ui" => {
                 return Some(DaemonAction::OpenRecordingUi);
             }
+            "open_video_editor" | "open-video-editor" => {
+                return Some(DaemonAction::OpenVideoEditor);
+            }
             "recording_pause_resume" | "recording-pause-resume" => {
                 return Some(DaemonAction::ToggleRecordingPause);
             }
@@ -2685,6 +2694,15 @@ fn show_settings_subprocess() {
 
     if let Err(e) = std::process::Command::new(&exe).arg("settings").spawn() {
         eprintln!("[daemon] Failed to spawn settings window: {e}");
+    }
+}
+
+/// Spawn the recording editor without an initial video.
+fn spawn_empty_video_editor_subprocess() {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+
+    if let Err(e) = std::process::Command::new(&exe).arg("video-editor").spawn() {
+        eprintln!("[daemon] Failed to spawn video editor: {e}");
     }
 }
 

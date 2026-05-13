@@ -131,8 +131,8 @@ pub fn install_recording_editor_css() {
             .recording-editor-root scrollbar slider {
                 background-color: alpha(white, 0.18);
                 border-radius: 999px;
-                min-width: 4px;
-                min-height: 4px;
+                min-width: 12px;
+                min-height: 12px;
                 border: none;
             }
 
@@ -234,6 +234,41 @@ pub fn install_recording_editor_css() {
                 box-shadow: none;
                 margin: 0;
                 padding: 0;
+            }
+
+            .recording-editor-empty-workspace {
+                min-height: 260px;
+            }
+
+            .recording-editor-empty-dropzone {
+                min-width: 360px;
+                padding: 0;
+                background: transparent;
+            }
+
+            .recording-editor-empty-icon {
+                color: alpha(white, 0.38);
+            }
+
+            .recording-editor-empty-title {
+                color: #F1F1F3;
+                font-size: 16px;
+                font-weight: 700;
+            }
+
+            .recording-editor-empty-hint {
+                color: alpha(white, 0.52);
+                font-size: 12px;
+            }
+
+            .recording-editor-empty-open-button {
+                min-width: 132px;
+                margin-top: 6px;
+            }
+
+            .recording-editor-empty-thumbnail-strip {
+                background: alpha(white, 0.035);
+                border: 1px dashed alpha(white, 0.10);
             }
 
             .recording-editor-dim-badge {
@@ -521,15 +556,17 @@ pub fn install_recording_editor_css() {
             }
 
             .recording-editor-drop-banner {
-                background: alpha(#b05c38, 0.88);
+                background: #1d1d1d;
                 border-radius: 8px;
-                padding: 12px 24px;
-                margin: 80px 120px;
+                border: 1px solid alpha(white, 0.10);
+                padding: 8px 14px;
+                margin: 46px 120px;
+                box-shadow: 0 10px 28px alpha(black, 0.36);
             }
 
             .recording-editor-drop-label {
-                color: #ffffff;
-                font-size: 14px;
+                color: alpha(white, 0.88);
+                font-size: 12px;
                 font-weight: 600;
             }
 
@@ -693,6 +730,41 @@ pub fn install_recording_editor_css() {
 
             .editor-theme-light .recording-editor-video {
                 background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-empty-workspace {
+                background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-empty-icon {
+                color: alpha(#1d2129, 0.34);
+            }
+
+            .editor-theme-light .recording-editor-empty-title {
+                color: #1d2129;
+            }
+
+            .editor-theme-light .recording-editor-empty-hint {
+                color: alpha(#1d2129, 0.52);
+            }
+
+            .editor-theme-light .recording-editor-empty-thumbnail-strip {
+                background: alpha(#111827, 0.025);
+                border-color: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-drop-banner {
+                background: #ffffff;
+                border-color: alpha(#111827, 0.10);
+                box-shadow: 0 10px 28px alpha(#111827, 0.16);
+            }
+
+            .editor-theme-light .recording-editor-drop-label {
+                color: alpha(#1d2129, 0.82);
+            }
+
+            .editor-theme-light .recording-editor-drop-banner spinner {
+                color: #1d2129;
             }
 
             .editor-theme-light .recording-editor-dim-badge {

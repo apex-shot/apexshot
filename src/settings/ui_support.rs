@@ -27,8 +27,8 @@ const SETTINGS_CSS: &str = r#"
             .editor-root scrollbar slider {
                 background-color: alpha(white, 0.18);
                 border-radius: 999px;
-                min-width: 4px;
-                min-height: 4px;
+                min-width: 12px;
+                min-height: 12px;
                 border: none;
             }
 
@@ -284,39 +284,39 @@ const SETTINGS_CSS: &str = r#"
             }
 
             .settings-toast {
-                padding: 8px 20px;
+                padding: 8px 14px;
                 border-radius: 8px;
-                border: none;
-                background-color: alpha(white, 0.08);
-                color: rgba(255,255,255,0.88);
+                border: 1px solid alpha(white, 0.10);
+                background: #1d1d1d;
+                color: alpha(white, 0.88);
                 font-size: 12px;
-                font-weight: 500;
-                box-shadow: none;
+                font-weight: 600;
+                box-shadow: 0 10px 28px alpha(black, 0.36);
             }
 
             .settings-toast-success {
-                background-color: alpha(#b05c38, 0.18);
-                color: #e8a07a;
+                color: alpha(white, 0.88);
             }
 
             .settings-toast-error {
-                background-color: alpha(#cf433c, 0.18);
-                color: #e8807a;
+                color: #f0a09a;
             }
 
+            .editor-theme-light .settings-toast,
             .editor-root.editor-theme-light .settings-toast {
-                background-color: alpha(#111827, 0.06);
-                color: #17202a;
-                border: none;
+                background: #ffffff;
+                color: alpha(#1d2129, 0.82);
+                border: 1px solid alpha(#111827, 0.10);
+                box-shadow: 0 10px 28px alpha(#111827, 0.16);
             }
 
+            .editor-theme-light .settings-toast-success,
             .editor-root.editor-theme-light .settings-toast-success {
-                background-color: alpha(#b05c38, 0.12);
-                color: #8a4422;
+                color: alpha(#1d2129, 0.82);
             }
 
+            .editor-theme-light .settings-toast-error,
             .editor-root.editor-theme-light .settings-toast-error {
-                background-color: alpha(#cf433c, 0.12);
                 color: #8a2822;
             }
 
@@ -1402,10 +1402,10 @@ const SETTINGS_CSS: &str = r#"
             }
 
             button.recent-captures-wm-btn {
-                min-width: 28px;
-                min-height: 28px;
-                padding: 4px;
-                border-radius: 6px;
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                border-radius: 999px;
                 background: transparent;
                 background-image: none;
                 color: alpha(white, 0.65);
@@ -1413,6 +1413,9 @@ const SETTINGS_CSS: &str = r#"
                 box-shadow: none;
                 outline: none;
                 transition: background 0.15s, color 0.15s;
+            }
+            button.recent-captures-wm-btn image {
+                -gtk-icon-size: 14px;
             }
             button.recent-captures-wm-btn:hover,
             button.recent-captures-wm-btn:active,
@@ -1465,6 +1468,10 @@ const SETTINGS_CSS: &str = r#"
                 color: alpha(white, 0.65);
                 border: none;
                 box-shadow: none;
+            }
+
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn image {
+                -gtk-icon-size: 14px;
             }
 
             .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
@@ -1703,6 +1710,7 @@ pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
     if color_class == "traffic-light-red" {
         button.add_css_class("recent-captures-wm-close");
     }
+    button.set_size_request(24, 24);
 
     button
 }

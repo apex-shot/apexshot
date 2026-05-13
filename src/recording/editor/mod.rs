@@ -7,6 +7,10 @@ use std::path::PathBuf;
 
 pub use model::{AudioMode, DimensionPreset, VideoEditState, VideoMetadata};
 
+pub fn open_empty_recording_editor() -> anyhow::Result<()> {
+    window::open_empty()
+}
+
 pub fn open_recording_editor(path: PathBuf) -> anyhow::Result<()> {
     if !path.exists() {
         anyhow::bail!("recording does not exist: {}", path.display());

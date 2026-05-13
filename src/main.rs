@@ -40,9 +40,9 @@ use apexshot::{
     ocr::{extract_text_from_path, OcrConfig},
     onboarding::{is_onboarding_complete, show_onboarding_window},
     recording::{
-        editor::open_recording_editor, run_overlay_recording_request, run_recording_countdown_bar,
-        run_recording_with_controls, start_recording, RecordingConfig, RecordingControlsParams,
-        StopAction,
+        editor::{open_empty_recording_editor, open_recording_editor},
+        run_overlay_recording_request, run_recording_countdown_bar, run_recording_with_controls,
+        start_recording, RecordingConfig, RecordingControlsParams, StopAction,
     },
     settings::show_settings_window,
 };
@@ -87,11 +87,12 @@ fn main() {
             return;
         }
         "video-editor" => {
-            if args.len() < 3 {
-                eprintln!("Error: video-editor requires an MP4 file path");
-                std::process::exit(1);
-            }
-            if let Err(e) = open_recording_editor(PathBuf::from(&args[2])) {
+            let result = if args.len() < 3 {
+                open_empty_recording_editor()
+            } else {
+                open_recording_editor(PathBuf::from(&args[2]))
+            };
+            if let Err(e) = result {
                 eprintln!("Recording editor failed: {e}");
                 std::process::exit(1);
             }
@@ -1204,7 +1205,7 @@ fn print_usage() {
     println!("  recent-captures   Open the recent captures gallery");
     println!("  settings          Open settings window");
     println!("  native-host <sub> Install/uninstall native messaging host");
-    println!("  video-editor <mp4> Open the recording editor for an MP4 file");
+    println!("  video-editor [mp4] Open the recording editor");
     println!("  install           Install local binary and set up autostart");
     println!("  --version / -V    Print version");
     println!("  uninstall         Remove local install, autostart, and native host manifests");

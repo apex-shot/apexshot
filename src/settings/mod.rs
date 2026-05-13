@@ -153,6 +153,12 @@ fn build_settings_window(app: &Application) {
     toast.set_visible(false);
 
     let window_overlay = GtkOverlay::new();
+    if !prefers_dark {
+        window_overlay.add_css_class("editor-theme-light");
+    }
+    if reduced_transparency {
+        window_overlay.add_css_class("editor-reduced-transparency");
+    }
     window_overlay.set_child(Some(&root_box));
     window_overlay.add_overlay(&toast);
 

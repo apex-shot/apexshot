@@ -216,13 +216,16 @@ pub fn install_editor_css() {
             }
 
             .recent-captures-wm-btn {
-                min-width: 28px;
-                min-height: 28px;
-                padding: 4px;
-                border-radius: 6px;
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                border-radius: 999px;
                 background: transparent;
                 color: alpha(white, 0.65);
                 transition: background 0.15s, color 0.15s;
+            }
+            .recent-captures-wm-btn image {
+                -gtk-icon-size: 14px;
             }
             .recent-captures-wm-btn:hover {
                 background: alpha(white, 0.1);
@@ -844,12 +847,6 @@ pub fn install_editor_css() {
                 background: #b05c38;
             }
 
-            .editor-root scale slider {
-                min-width: 14px;
-                min-height: 14px;
-                margin: -5px;
-            }
-
             .editor-root scale:disabled trough {
                 background: alpha(white, 0.04);
             }
@@ -883,16 +880,6 @@ pub fn install_editor_css() {
                 background-image: linear-gradient(to right,
                     #ff0000 0%, #ffff00 17%, #00ff00 33%,
                     #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
-            }
-
-            .editor-root scale.editor-hue-slider slider {
-                min-width: 14px;
-                min-height: 14px;
-                margin: -3px;
-                border-radius: 999px;
-                background: white;
-                border: 1px solid alpha(black, 0.40);
-                box-shadow: none;
             }
 
             .editor-root scale.editor-hue-slider highlight {
@@ -3093,6 +3080,7 @@ pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
     if color_class == "traffic-light-red" {
         button.add_css_class("recent-captures-wm-close");
     }
+    button.set_size_request(24, 24);
 
     button
 }
@@ -3638,6 +3626,16 @@ mod tests {
                 && !production_source.contains(".editor-opacity-slider highlight")
                 && !production_source.contains(".editor-opacity-slider slider"),
             "editor opacity slider CSS still styles internal GTK slider nodes"
+        );
+    }
+
+    #[test]
+    fn editor_scale_css_does_not_style_internal_slider_nodes() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains("scale slider"),
+            "editor CSS should not style GTK scale slider nodes"
         );
     }
 }
