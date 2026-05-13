@@ -29,8 +29,6 @@ sudo apt install -y \
     qtbase5-dev \
     libqt5widgets5 \
     libqt5x11extras5-dev \
-    libqt5network5-dev \
-    libqt5dbus5-dev \
     libgstreamer1.0-dev \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \

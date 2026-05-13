@@ -210,7 +210,7 @@ The C++ Qt5 overlay is automatically compiled via CMake during the Rust build.
 sudo apt install \
   build-essential cmake pkg-config \
   libx11-dev libxext6 libxtst-dev \
-  qtbase5-dev libqt5widgets5 libqt5x11extras5-dev libqt5network5-dev libqt5dbus5-dev \
+  qtbase5-dev libqt5widgets5 libqt5x11extras5-dev \
   libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
   libpipewire-0.3-dev \
