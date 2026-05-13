@@ -1,6 +1,6 @@
 [package]
 name = "apexshot"
-version = "0.2.26"
+version = "0.2.27"
 edition = "2021"
 description = "Open-source Linux screenshot, annotation, and screen recording tool with OCR, QR detection, and ShareX-style workflows"
 license = "GPL-3.0"
