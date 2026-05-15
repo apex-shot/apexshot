@@ -76,11 +76,6 @@ pub enum DaemonAction {
     RecordingSessionEnded,
     RecordingTimerTick,
     SetHotkeySuppressed(bool),
-    ImportWebScrollCapture {
-        png_base64: String,
-        page_url: String,
-        page_title: String,
-    },
     Quit,
 }
 
@@ -185,7 +180,7 @@ pub fn is_hotkey_suppressed() -> bool {
 /// Set hotkey suppression via D-Bus. Returns `true` if the daemon was found.
 pub fn set_daemon_hotkey_suppressed(suppressed: bool) -> bool {
     let Ok(conn) = zbus::blocking::Connection::session() else {
-        return false;
+        return true;
     };
     let proxy = match zbus::blocking::Proxy::new(
         &conn,
@@ -580,10 +575,11 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     }
 
     // ── D-Bus IPC server ─────────────────────────────────────────────────────
-    let dbus_tx = action_tx.clone();
     let dbus_conn_clone = dbus_conn.clone();
+    let dbus_state = state.clone();
+    let dbus_tx = action_tx.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_dbus_server(dbus_conn_clone, dbus_tx).await {
+        if let Err(e) = run_dbus_server(dbus_conn_clone, dbus_tx, dbus_state).await {
             eprintln!("[daemon] D-Bus server error: {e}");
         }
     });
@@ -827,15 +823,6 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
                     if suppressed { "enabled" } else { "disabled" }
                 );
             }
-            DaemonAction::ImportWebScrollCapture {
-                png_base64,
-                page_url,
-                page_title,
-            } => {
-                tokio::task::spawn_blocking(move || {
-                    handle_import_web_scroll_capture(png_base64, page_url, page_title, state_clone)
-                });
-            }
             DaemonAction::Quit => {
                 eprintln!("[daemon] Quit requested.");
                 break;
@@ -1063,6 +1050,7 @@ impl ScrollInjector {
 
 struct DaemonIpc {
     tx: std::sync::mpsc::Sender<DaemonAction>,
+    state: Arc<Mutex<DaemonState>>,
     scroll_injector: tokio::sync::Mutex<ScrollInjector>,
 }
 async fn try_gnome_shell_capture_area(
@@ -1320,7 +1308,7 @@ impl DaemonIpc {
         Ok(())
     }
 
-    fn import_web_scroll_capture(
+    async fn import_web_scroll_capture(
         &self,
         png_base64: String,
         page_url: String,
@@ -1330,16 +1318,12 @@ impl DaemonIpc {
             "[daemon] D-Bus import_web_scroll_capture called (url={})",
             page_url
         );
-        self.tx
-            .send(DaemonAction::ImportWebScrollCapture {
-                png_base64,
-                page_url,
-                page_title,
-            })
-            .map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
-            })?;
-        Ok(true)
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || {
+            handle_import_web_scroll_capture(png_base64, page_url, page_title, state)
+        })
+        .await
+        .map_err(|e| zbus::fdo::Error::Failed(format!("Web capture import task failed: {e}")))
     }
 
     /// Show preview for a specific path (used by editor to coordinate single-instance)
@@ -1599,9 +1583,11 @@ fn find_physical_input_device() -> Option<String> {
 async fn run_dbus_server(
     conn: zbus::Connection,
     tx: std::sync::mpsc::Sender<DaemonAction>,
+    state: Arc<Mutex<DaemonState>>,
 ) -> anyhow::Result<()> {
     let ipc = DaemonIpc {
         tx,
+        state,
         scroll_injector: tokio::sync::Mutex::new(ScrollInjector::default()),
     };
 
@@ -2392,7 +2378,7 @@ fn copy_screenshot_to_clipboard(path: &std::path::Path, config: &crate::config::
     }
 }
 
-fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonState>>) {
+fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonState>>) -> bool {
     let config = load_config().sanitized();
 
     if !config.after_capture_save {
@@ -2412,7 +2398,7 @@ fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonSt
             "Screenshot not saved",
             "Save is disabled in After capture settings",
         );
-        return;
+        return true;
     }
 
     match save_capture(&capture, &screenshot_save_config()) {
@@ -2421,8 +2407,12 @@ fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonSt
             eprintln!("[daemon] Saved: {}", path.display());
             play_shutter_sound_if_enabled();
             apply_screenshot_after_capture_actions(path, state);
+            true
         }
-        Err(e) => eprintln!("[daemon] Save error: {e}"),
+        Err(e) => {
+            eprintln!("[daemon] Save error: {e}");
+            false
+        }
     }
 }
 
@@ -2460,7 +2450,7 @@ fn handle_import_web_scroll_capture(
     page_url: String,
     page_title: String,
     state: Arc<Mutex<DaemonState>>,
-) {
+) -> bool {
     use crate::backend::{CaptureData, PixelFormat};
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
@@ -2468,7 +2458,7 @@ fn handle_import_web_scroll_capture(
         Ok(bytes) => bytes,
         Err(e) => {
             eprintln!("[daemon] Web scroll import failed: invalid base64 payload: {e}");
-            return;
+            return false;
         }
     };
 
@@ -2476,7 +2466,7 @@ fn handle_import_web_scroll_capture(
         Ok(img) => img,
         Err(e) => {
             eprintln!("[daemon] Web scroll import failed: invalid image payload: {e}");
-            return;
+            return false;
         }
     };
 
@@ -2487,7 +2477,7 @@ fn handle_import_web_scroll_capture(
 
     if width == 0 || height == 0 {
         eprintln!("[daemon] Web scroll import failed: empty image");
-        return;
+        return false;
     }
 
     eprintln!(
@@ -2496,7 +2486,7 @@ fn handle_import_web_scroll_capture(
     );
 
     let capture = CaptureData::new(pixels, width, height, PixelFormat::RGBA32);
-    save_and_open(capture, state);
+    save_and_open(capture, state)
 }
 
 fn run_ocr_and_report(capture: crate::backend::CaptureData) {
