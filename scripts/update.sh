@@ -4,6 +4,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+is_gnome_session() {
+    local desktop="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}"
+    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] || [[ "${desktop,,}" == *gnome* ]]
+}
+
+if ! is_gnome_session; then
+    export APEXSHOT_SKIP_GNOME_EXTENSION=1
+fi
+
 if command -v pacman >/dev/null 2>&1; then
     if [[ -f "${SCRIPT_DIR}/arch-update.sh" ]]; then
         exec bash "${SCRIPT_DIR}/arch-update.sh" "$@"

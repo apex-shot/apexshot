@@ -176,6 +176,50 @@ download_file() {
     fi
 }
 
+latest_release_tag() {
+    local effective tag
+    effective=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "${RELEASES_URL}/latest" || true)
+    tag="${effective##*/}"
+
+    if [[ -z "$tag" ]] || [[ "$tag" == "latest" ]]; then
+        printf '%s' "${VERSION}"
+    else
+        printf '%s' "$tag"
+    fi
+}
+
+resolve_latest_gnome_extension_url() {
+    local extension_version
+    extension_version=$(latest_release_tag)
+    if [[ -z "$extension_version" ]]; then
+        return 1
+    fi
+
+    local zip_path
+    zip_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${extension_version}" |
+               grep -oE "/${REPO}/releases/download/${extension_version}/[^\"]*apexshot-gnome-integration\.zip" |
+               head -n 1 || true)
+
+    if [[ -z "$zip_path" ]]; then
+        return 1
+    fi
+
+    printf 'https://github.com%s' "$zip_path"
+}
+
+is_gnome_session() {
+    local desktop="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}"
+    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] || [[ "${desktop,,}" == *gnome* ]]
+}
+
+should_skip_gnome_extension() {
+    case "${APEXSHOT_SKIP_GNOME_EXTENSION:-}" in
+        1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    esac
+
+    ! is_gnome_session
+}
+
 # Prompt the user for their sudo password up front so the subsequent
 # commands inside a spinner don't have their prompt clobbered by the
 # spinner output. No-op when running as root.
@@ -418,26 +462,31 @@ install_update() {
 update_gnome_extension() {
     step "Updating GNOME Shell extension"
 
-    if ! command -v gnome-extensions >/dev/null 2>&1; then
-        warn "gnome-extensions CLI not found - package files were updated, but the active extension could not be refreshed."
+    if should_skip_gnome_extension; then
+        info "Skipping GNOME extension update because this does not look like a GNOME session."
         return
     fi
 
-    local zip_path
-    zip_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
-               grep -oE "/${REPO}/releases/download/${VERSION}/[^\"]*apexshot-gnome-integration\.zip" |
-               head -n 1)
-    local zip_url=""
-    [[ -n "$zip_path" ]] && zip_url="https://github.com${zip_path}"
-
-    if [[ -z "$zip_url" ]]; then
-        warn "GNOME extension zip not found in releases — skipping."
+    local zip_url
+    if ! zip_url=$(resolve_latest_gnome_extension_url); then
+        warn "Latest GNOME extension zip not found in releases - package files were updated, but the user extension was not refreshed."
         return
     fi
 
     local zip_file="${TMPDIR}/apexshot-gnome-integration.zip"
     info "Downloading GNOME extension with progress:"
     download_file "$zip_url" "$zip_file" "gnome_extension"
+
+    if ! command -v gnome-extensions >/dev/null 2>&1; then
+        warn "gnome-extensions CLI not found - installing extension files directly."
+        if install_gnome_extension_files "${zip_file}"; then
+            ok "GNOME extension files updated"
+            info "Log out and back in, then run: gnome-extensions enable ${EXT_UUID}"
+        else
+            warn "Could not update GNOME extension files automatically."
+        fi
+        return
+    fi
 
     local was_enabled=0
     if run_gnome_extensions list --enabled 2>/dev/null | grep -Fxq "${EXT_UUID}"; then
