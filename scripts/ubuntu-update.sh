@@ -465,6 +465,54 @@ update_gnome_extension() {
     fi
 }
 
+# --- Fix user-level autostart entries ----------------------------------------
+# After a .deb upgrade the system autostart at /etc/xdg/autostart/ is correct,
+# but user-level ~/.config/autostart/ entries (created by settings or
+# `apexshot install`) can shadow it and may point to a stale binary path.
+
+fixup_user_autostart() {
+    step "Fixing up user autostart entries"
+
+    local autostart_dir="${HOME}/.config/autostart"
+    local desktop_path="${autostart_dir}/apexshot.desktop"
+    local daemon_desktop_path="${autostart_dir}/apexshot-daemon.desktop"
+
+    local rewritten=0
+
+    rewrite_autostart_file() {
+        local path=$1
+        cat > "$path" <<- AUTOSTART_EOF
+			[Desktop Entry]
+			Type=Application
+			Name=ApexShot Daemon
+			Comment=ApexShot screenshot daemon — tray icon and hotkey listener
+			Exec=/usr/bin/apexshot daemon
+			Icon=io.github.codegoddy.apexshot
+			Categories=Utility;
+			Keywords=screenshot;capture;record;
+			StartupNotify=false
+			X-GNOME-Autostart-enabled=true
+			X-GNOME-Autostart-Delay=2
+			Hidden=false
+			NoDisplay=true
+		AUTOSTART_EOF
+        rewritten=$((rewritten + 1))
+    }
+
+    if [[ -f "$desktop_path" ]]; then
+        rewrite_autostart_file "$desktop_path"
+    fi
+    if [[ -f "$daemon_desktop_path" ]]; then
+        rewrite_autostart_file "$daemon_desktop_path"
+    fi
+
+    if [[ $rewritten -gt 0 ]]; then
+        ok "Fixed $rewritten autostart entry to use /usr/bin/apexshot"
+    else
+        info "No stale user autostart entries found"
+    fi
+}
+
 # --- Cleanup & summary -------------------------------------------------------
 
 cleanup() {
@@ -499,6 +547,7 @@ main() {
     download_latest
     install_update
     cleanup_shadowing_local_binaries
+    fixup_user_autostart
     update_gnome_extension
     summary
 }

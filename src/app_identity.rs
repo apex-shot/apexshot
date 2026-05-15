@@ -4,7 +4,6 @@ pub const OFFICIAL_APP_ID: &str = "io.github.codegoddy.apexshot";
 pub const DEV_APP_ID: &str = "io.github.codegoddy.apexshot.dev";
 
 pub const OFFICIAL_BINARY: &str = "/usr/bin/apexshot";
-pub const LEGACY_LOCAL_BINARY: &str = "/usr/local/bin/apexshot";
 pub const DEV_WRAPPER: &str = "/usr/local/bin/apexshot-dev";
 
 pub const OFFICIAL_DESKTOP_FILE: &str =
@@ -94,9 +93,6 @@ pub fn preferred_command_path() -> PathBuf {
     }
     if !is_dev() && Path::new(OFFICIAL_BINARY).exists() {
         return PathBuf::from(OFFICIAL_BINARY);
-    }
-    if !is_dev() && Path::new(LEGACY_LOCAL_BINARY).exists() {
-        return PathBuf::from(LEGACY_LOCAL_BINARY);
     }
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"))
 }
