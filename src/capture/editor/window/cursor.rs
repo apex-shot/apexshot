@@ -18,7 +18,7 @@ pub const DEFAULT_HIGHLIGHTER_CURSOR_SIZE: f64 = 16.0;
 pub const DEFAULT_PEN_CURSOR_SIZE: f64 = 8.0;
 
 /// Cursor width ratio relative to height
-const CURSOR_WIDTH_RATIO: f64 = 1.5;
+const CURSOR_WIDTH_RATIO: f64 = 1.0;
 
 /// Corner radius for highlighter cursor
 const CURSOR_CORNER_RADIUS: f64 = 4.0;
