@@ -144,7 +144,7 @@ jobs:
         run: cargo build --release --verbose
 
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --jobs 2 -- --test-threads=1
 
   release:
     name: Build .deb & Release

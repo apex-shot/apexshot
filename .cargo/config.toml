@@ -1,0 +1,23 @@
+# Memory-friendly Cargo configuration
+# Prevents OOM during compilation and testing on systems with limited RAM
+
+[build]
+# Limit parallel compilation jobs to reduce memory pressure
+# Adjust based on your system: generally (available_RAM_MB / 2000) is safe
+# For 14GB systems with other processes: 4 is a good balance
+jobs = 4
+
+[target.x86_64-unknown-linux-gnu]
+# Reduce debug info size for faster builds and less memory
+# "line-tables-only" keeps debug info for backtraces but is much smaller
+rustflags = ["-C", "debuginfo=line-tables-only"]
+
+[profile.dev]
+# Reduce memory usage during dev builds
+debug = "line-tables-only"
+# Disable incremental compilation if memory is tight (uncomment if needed)
+# incremental = false
+
+[profile.test]
+# Same memory-friendly settings for test builds
+debug = "line-tables-only"
