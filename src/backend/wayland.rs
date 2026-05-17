@@ -14,7 +14,7 @@
 //! 1. **`org.freedesktop.portal.Screenshot`** — retained only for the explicit
 //!    interactive screenshot-selector helper.
 
-use super::{CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};
+use super::{screencopy, CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};
 use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SourceType},
     screenshot::Screenshot,
@@ -270,6 +270,63 @@ fn crop_capture(
 // ──────────────────────────────────────────────────────────────────────────────
 
 impl WaylandBackend {
+    fn should_try_native_screencopy() -> bool {
+        if std::env::var_os("APEXSHOT_DISABLE_WLR_SCREENCOPY").is_some() {
+            return false;
+        }
+
+        if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+            || std::env::var_os("SWAYSOCK").is_some()
+        {
+            return true;
+        }
+
+        std::env::var("XDG_CURRENT_DESKTOP")
+            .unwrap_or_default()
+            .split([':', ';', ','])
+            .map(|part| part.trim().to_ascii_lowercase())
+            .any(|part| {
+                [
+                    "hyprland", "sway", "river", "dwl", "wayfire", "labwc", "niri",
+                ]
+                .iter()
+                .any(|needle| part.contains(needle))
+            })
+    }
+
+    fn capture_monitor_via_native_screencopy() -> Option<DisplayResult<CaptureData>> {
+        if !Self::should_try_native_screencopy() {
+            return None;
+        }
+
+        let start = std::time::Instant::now();
+        match screencopy::capture() {
+            Ok(Some(capture)) => {
+                eprintln!(
+                    "[capture] Native wlr-screencopy succeeded in {:.0}ms ({}x{}).",
+                    start.elapsed().as_millis(),
+                    capture.width,
+                    capture.height
+                );
+                Some(Ok(capture))
+            }
+            Ok(None) => {
+                eprintln!(
+                    "[capture] Native wlr-screencopy unavailable ({:.0}ms); falling back to ScreenCast portal.",
+                    start.elapsed().as_millis()
+                );
+                None
+            }
+            Err(err) => {
+                eprintln!(
+                    "[capture] Native wlr-screencopy failed ({:.0}ms): {err}; falling back to ScreenCast portal.",
+                    start.elapsed().as_millis()
+                );
+                None
+            }
+        }
+    }
+
     /// Screenshot portal capture.
     ///
     /// `interactive=true` opens the desktop's selector UI first.
@@ -537,6 +594,10 @@ impl WaylandBackend {
     /// Always uses the ScreenCast path for full customization and cross-distro
     /// consistency. wlr-screencopy, grim, and the Screenshot portal are bypassed.
     pub fn capture_screen_impl(&self) -> DisplayResult<CaptureData> {
+        if let Some(result) = Self::capture_monitor_via_native_screencopy() {
+            return result;
+        }
+
         Self::capture_monitor_via_screencast()
     }
 
@@ -573,6 +634,10 @@ impl WaylandBackend {
     /// Uses ScreenCast portal + PipeWire for cross-distro consistency.
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
         eprintln!("[capture] capture_screen_for_selection_impl: called (Wayland selector background capture)");
+        if let Some(result) = Self::capture_monitor_via_native_screencopy() {
+            return result;
+        }
+
         Self::capture_monitor_via_screencast()
     }
 }

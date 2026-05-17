@@ -128,6 +128,28 @@ telemetry_distro() {
     fi
 }
 
+current_desktop_id() {
+    local desktop="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}"
+    printf '%s' "${desktop,,}"
+}
+
+arch_portal_backend_package() {
+    local desktop
+    desktop=$(current_desktop_id)
+
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || [[ "$desktop" == *hyprland* ]]; then
+        printf '%s' "xdg-desktop-portal-hyprland"
+    elif [[ -n "${SWAYSOCK:-}" ]] || [[ "$desktop" == *sway* || "$desktop" == *river* || "$desktop" == *dwl* || "$desktop" == *wayfire* || "$desktop" == *labwc* || "$desktop" == *niri* ]]; then
+        printf '%s' "xdg-desktop-portal-wlr"
+    elif [[ "$desktop" == *kde* || "$desktop" == *plasma* ]]; then
+        printf '%s' "xdg-desktop-portal-kde"
+    elif [[ "$desktop" == *gnome* ]]; then
+        printf '%s' "xdg-desktop-portal-gnome"
+    else
+        printf '%s' "xdg-desktop-portal-gtk"
+    fi
+}
+
 send_download_telemetry() {
     telemetry_enabled || return 0
 
@@ -445,15 +467,25 @@ install_from_source() {
         libcamera
         libcamera-ipa
         tesseract
+        tesseract-data-eng
+        leptonica
         qt5-base
         qt5-x11extras
+        qt5-wayland
         libxtst
         wl-clipboard
         xclip
         libnotify
+        xdg-utils
         ffmpeg
         grim
+        slurp
+        xdg-desktop-portal
     )
+
+    local portal_backend
+    portal_backend=$(arch_portal_backend_package)
+    deps+=("$portal_backend")
     
     info "Installing build dependencies..."
     run_spinner "Installing dependencies..." \

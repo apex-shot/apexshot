@@ -35,10 +35,12 @@ depends=(
     # OCR
     'tesseract'
     'tesseract-data-eng'
+    'leptonica'
 
     # Qt5 (for bundled C++ capture overlay binary)
     'qt5-base'
     'qt5-x11extras'
+    'qt5-wayland'
 
     # X11 libs (capture overlay input handling)
     'libxtst'
@@ -63,6 +65,7 @@ optdepends=(
     'gnome-shell-extension-appindicator: system tray icon on GNOME'
     'xclip: clipboard support on X11'
     'grim: faster screenshot fallback on wlroots compositors'
+    'slurp: region selection helper for wlroots compositors'
 )
 makedepends=(
     'rust'

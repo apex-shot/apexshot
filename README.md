@@ -220,7 +220,7 @@ sudo apt install \
   libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
   libpipewire-0.3-dev \
-  tesseract-ocr \
+  tesseract-ocr libtesseract-dev libleptonica-dev \
   libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
 ```
 
@@ -232,10 +232,10 @@ sudo pacman -S --needed \
   gtk4 libadwaita gtk4-layer-shell \
   gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav gst-plugin-pipewire \
   pipewire pipewire-pulse libpipewire \
-  tesseract tesseract-data-eng \
+  tesseract tesseract-data-eng leptonica \
   qt5-base qt5-x11extras libxtst \
   wl-clipboard xclip libnotify xdg-utils ffmpeg grim \
-  xdg-desktop-portal xdg-desktop-portal-gnome
+  xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-wlr
 ```
 
 ### First-Time Setup

@@ -107,7 +107,7 @@ Arch-specific functionality:
 - **Desktop environment detection**: Hyprland, Sway, i3, etc.
 - **Portal backend preference**: `xdg-desktop-portal-hyprland`, `xdg-desktop-portal-wlr`, `xdg-desktop-portal-kde`, or GNOME based on session detection
 - **Dependency checking**: Verify pacman packages
-- **Capture policy**: Use the shared XDG ScreenCast portal + PipeWire path, matching the current Wayland backend
+- **Capture policy**: Hyprland/wlroots sessions try native `wlr-screencopy` first for non-interactive monitor frames, then fall back to the shared XDG ScreenCast portal + PipeWire path
 
 ## Implementation Roadmap
 
@@ -147,7 +147,7 @@ Arch-specific functionality:
 | Aspect | Ubuntu | Arch |
 |--------|--------|------|
 | Package Manager | apt/dpkg | pacman |
-| Desktop Portal | xdg-desktop-portal-gnome | xdg-desktop-portal-wlr (common) |
+| Desktop Portal | xdg-desktop-portal-gnome | xdg-desktop-portal-hyprland / xdg-desktop-portal-wlr |
 | Clipboard | wl-clipboard | wl-clipboard (same) |
 | OCR | tesseract-ocr | tesseract |
 | Build Deps | build-essential | base-devel |
@@ -158,11 +158,12 @@ Arch-specific functionality:
 
 For other Flameshot-compatible Linux distros, ApexShot should keep the same Wayland capture method instead of adding distro-specific screenshot backends:
 
-1. Use `org.freedesktop.portal.ScreenCast` to request a shared monitor/window stream.
-2. Read the selected PipeWire node through GStreamer.
-3. Reuse restore tokens where the portal backend supports them.
-4. Keep `org.freedesktop.portal.Screenshot` only for explicit interactive selector helpers.
-5. Leave GNOME Shell extension features behind GNOME session gates so non-GNOME desktops use portal-backed capture without requiring the extension.
+1. On Hyprland, Sway, and wlroots-like sessions, try direct `zwlr_screencopy_manager_v1` capture for non-interactive monitor frames.
+2. Fall back to `org.freedesktop.portal.ScreenCast` to request a shared monitor/window stream.
+3. Read the selected PipeWire node through GStreamer.
+4. Reuse restore tokens where the portal backend supports them.
+5. Keep `org.freedesktop.portal.Screenshot` only for explicit interactive selector helpers.
+6. Leave GNOME Shell extension features behind GNOME session gates so non-GNOME desktops use portal-backed capture without requiring the extension.
 
 The distro work that remains is packaging, dependency naming, portal backend installation defaults, and manual testing on each distro/desktop combination.
 
