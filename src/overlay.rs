@@ -3235,6 +3235,16 @@ fn setup_window(
                 st.hover_record_tile = None;
                 ("pointer".to_string(), changed, true)
             } else if st.settings_menu_open {
+                if st.settings_dropdown_open.is_some() {
+                    st.hovered_settings_item = -1;
+                    st.hovered_capture_crop_menu_item = -1;
+                    st.hovered_crop_menu_item = -1;
+                    st.hover_tool_index = None;
+                    st.hover_size_panel = false;
+                    st.hover_crop_panel = false;
+                    st.hover_record_tile = None;
+                    ("pointer".to_string(), false, true)
+                } else {
                 let item = settings_menu_hit_item(
                     rect.left, rect.top, rect.width(), rect.height(),
                     screen_width as f64, screen_height as f64, x, y,
@@ -3250,6 +3260,7 @@ fn setup_window(
                 st.hover_crop_panel = false;
                 st.hover_record_tile = None;
                 ("pointer".to_string(), changed, true)
+                }
             } else {
                 let record_hit = if st.recording_panel_open {
                     recording_tile_at(
@@ -3517,12 +3528,19 @@ fn setup_window(
                     }
                 } else if matches!(st.settings_tab, SettingsTab::Gif) {
                     let gif_idx = item - 3;
+                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                    let value_x = menu_x + 130.0;
                     match gif_idx {
-                        0 => { // FPS slider
-                            st.gif_fps = if st.gif_fps >= 55.0 { 5.0 } else { st.gif_fps + 5.0 };
+                        0 => { // FPS slider — click-to-position
+                            let slider_x = value_x + 55.0;
+                            let slider_w = 220.0;
+                            let click_x = x.clamp(slider_x, slider_x + slider_w);
+                            st.gif_fps = 5.0 + (click_x - slider_x) / slider_w * 55.0;
                         }
-                        1 => { // Quality slider
-                            st.gif_quality = if st.gif_quality >= 0.9 { 0.1 } else { st.gif_quality + 0.1 };
+                        1 => { // Quality slider — click-to-position
+                            let q_slider_w = 160.0;
+                            let click_x = x.clamp(value_x, value_x + q_slider_w);
+                            st.gif_quality = 0.1 + (click_x - value_x) / q_slider_w * 0.8;
                         }
                         2 => st.optimize_gif = !st.optimize_gif,
                         3 => st.settings_dropdown_open = Some(6), // size dropdown
