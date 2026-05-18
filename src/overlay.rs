@@ -2120,41 +2120,44 @@ fn draw_settings_general_tab(
     remember_selection: bool, dim_screen: bool, show_countdown: bool,
     _accent_r: f64, _accent_g: f64, _accent_b: f64,
 ) {
-    let value_x = menu_x + 160.0;
+    let label_x = menu_x + 25.0;
+    let value_x = menu_x + 140.0;
+    let check_area_w = menu_w - (value_x - menu_x) - 20.0; // 280
+    let desc_x = value_x + 28.0;
     let row_h = 32.0;
-    let mut y = menu_y + 112.0;
+    let mut y = menu_y + 110.0;
     let mut idx = 3;
 
-    macro_rules! draw_general_setting {
-        ($label:expr, $desc:expr, $checked:expr) => {
-            draw_general_setting(context, menu_x, menu_w, value_x, y, row_h, $label, $desc, $checked, false, hovered_item == idx);
+    macro_rules! s {
+        ($label:expr, $desc:expr, $checked:expr) => {{
+            draw_general_row(context, label_x, value_x, desc_x, check_area_w, y, row_h, $label, $desc, $checked, false, hovered_item == idx);
             idx += 1;
             y += row_h;
-        };
-        ($label:expr, $desc:expr, $checked:expr, $gap:expr) => {
+        }};
+        ($label:expr, $desc:expr, $checked:expr, $gap:expr) => {{
             y += $gap;
-            draw_general_setting(context, menu_x, menu_w, value_x, y, row_h, $label, $desc, $checked, false, hovered_item == idx);
+            draw_general_row(context, label_x, value_x, desc_x, check_area_w, y, row_h, $label, $desc, $checked, false, hovered_item == idx);
             idx += 1;
             y += row_h;
-        };
+        }};
     }
 
-    draw_general_setting!("Controls", "Use keyboard shortcuts", rec_controls);
-    draw_general_setting!("Menu bar", "Display time in top bar", display_rec_time);
-    draw_general_setting!("HiDPI", "Record at display scale res", hidpi);
-    draw_general_setting!("Notifications", "DND while recording", do_not_disturb);
-    draw_general_setting!("Cursor", "Show cursor", show_cursor, 10.0);
-    draw_general_setting!("", "Highlight clicks", rec_clicks);
-    draw_general_setting!("Keyboard", "Show keystrokes", rec_keystrokes, 10.0);
-    draw_general_setting!("Recording area", "Remember last selection", remember_selection, 10.0);
-    draw_general_setting!("", "Dim screen while recording", dim_screen);
-    draw_general_setting!("", "Show countdown", show_countdown);
+    s!("Controls", "Use keyboard shortcuts", rec_controls);
+    s!("Menu bar", "Display time in top bar", display_rec_time);
+    s!("HiDPI", "Record at display scale res", hidpi);
+    s!("Notifications", "DND while recording", do_not_disturb);
+    s!("Cursor", "Show cursor", show_cursor, 10.0);
+    s!("", "Highlight clicks", rec_clicks);
+    s!("Keyboard", "Show keystrokes", rec_keystrokes, 10.0);
+    s!("Recording area", "Remember last selection", remember_selection, 10.0);
+    s!("", "Dim screen while recording", dim_screen);
+    s!("", "Show countdown", show_countdown);
     let _ = y; let _ = idx;
 }
 
-fn draw_general_setting(
+fn draw_general_row(
     context: &gtk4::cairo::Context,
-    menu_x: f64, menu_w: f64, value_x: f64,
+    label_x: f64, value_x: f64, desc_x: f64, _check_area_w: f64,
     y: f64, row_h: f64,
     label: &str, desc: &str, checked: bool, disabled: bool, hover: bool,
 ) {
@@ -2163,12 +2166,14 @@ fn draw_general_setting(
         context.set_font_size(13.3);
         context.set_source_rgba(1.0, 1.0, 1.0, if disabled { 110.0 / 255.0 } else { 200.0 / 255.0 });
         if let Ok(extents) = context.text_extents(label) {
-            context.move_to(value_x - 132.0 - extents.width() - extents.x_bearing(), y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            // Right-aligned in 110px area starting at label_x
+            let tx = label_x + 110.0 - extents.width() - extents.x_bearing();
+            context.move_to(tx, y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
             context.show_text(label).ok();
         }
     }
     if hover {
-        rounded_rect_path(context, value_x - 5.0, y, menu_w - (value_x - menu_x) - 20.0 + 10.0, row_h, 6.0);
+        rounded_rect_path(context, value_x - 5.0, y, 290.0, row_h, 6.0);
         context.set_source_rgba(1.0, 1.0, 1.0, 12.0 / 255.0);
         context.fill().ok();
     }
@@ -2178,21 +2183,31 @@ fn draw_general_setting(
     context.set_font_size(13.3);
     context.set_source_rgba(1.0, 1.0, 1.0, if disabled { 110.0 / 255.0 } else { 1.0 });
     if let Ok(extents) = context.text_extents(desc) {
-        context.move_to(value_x + cb_size + 10.0 - extents.x_bearing(), y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+        // Clip description to available width (252px like C++)
+        let max_desc_w = 252.0;
+        if extents.width() > max_desc_w {
+            let _ = context.save();
+            context.rectangle(desc_x, y, max_desc_w, row_h);
+            context.clip();
+        }
+        context.move_to(desc_x - extents.x_bearing(), y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
         context.show_text(desc).ok();
+        if extents.width() > max_desc_w {
+            let _ = context.restore();
+        }
     }
 }
 
 fn draw_settings_video_tab(
     context: &gtk4::cairo::Context,
-    menu_x: f64, menu_y: f64, _menu_w: f64,
+    menu_x: f64, menu_y: f64, menu_w: f64,
     hovered_item: i32,
     video_max_res: usize, video_fps: usize, record_mono: bool, open_editor: bool,
     _accent_r: f64, _accent_g: f64, _accent_b: f64,
 ) {
     let label_x = menu_x + 20.0;
-    let value_x = menu_x + 140.0;
-    let mut curr_y = menu_y + 112.0;
+    let value_x = menu_x + 130.0;
+    let mut curr_y = menu_y + 110.0;
 
     let draw_label = |context: &gtk4::cairo::Context, txt: &str, y: f64| {
         context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
@@ -2212,10 +2227,15 @@ fn draw_settings_video_tab(
     context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
     context.set_font_size(12.0);
     context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
+    // Clip subtext to prevent overflow
+    let _ = context.save();
+    context.rectangle(value_x, curr_y, menu_w - (value_x - menu_x) - 25.0, 80.0);
+    context.clip();
     if let Ok(extents) = context.text_extents("Set max res to reduce file size") {
         context.move_to(value_x - extents.x_bearing(), curr_y + 16.0 - extents.height() / 2.0 - extents.y_bearing());
         context.show_text("Set max res to reduce file size").ok();
     }
+    let _ = context.restore();
     curr_y += 50.0;
 
     // Video FPS
@@ -2259,6 +2279,20 @@ fn draw_settings_video_tab(
         context.move_to(value_x + 28.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
         context.show_text("Open editor after recording").ok();
     }
+    // Clip remaining editor subtext
+    curr_y += 35.0;
+    let _ = context.save();
+    context.rectangle(value_x, curr_y, menu_w - (value_x - menu_x) - 25.0, 80.0);
+    context.clip();
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.set_font_size(12.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
+    if let Ok(extents) = context.text_extents("Use editor to change quality and audio") {
+        context.move_to(value_x - extents.x_bearing(), curr_y + 16.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.show_text("Use editor to change quality and audio").ok();
+    }
+    let _ = context.restore();
+    let _ = curr_y;
 }
 
 fn draw_settings_gif_tab(
@@ -2269,8 +2303,8 @@ fn draw_settings_gif_tab(
     _accent_r: f64, _accent_g: f64, _accent_b: f64,
 ) {
     let label_x = menu_x + 20.0;
-    let value_x = menu_x + 140.0;
-    let mut curr_y = menu_y + 112.0;
+    let value_x = menu_x + 130.0;
+    let mut curr_y = menu_y + 110.0;
 
     let draw_label = |context: &gtk4::cairo::Context, txt: &str, y: f64| {
         context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
