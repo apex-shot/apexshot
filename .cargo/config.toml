@@ -15,8 +15,8 @@ rustflags = ["-C", "debuginfo=line-tables-only"]
 [profile.dev]
 # Reduce memory usage during dev builds
 debug = "line-tables-only"
-# Disable incremental compilation if memory is tight (uncomment if needed)
-# incremental = false
+# Disable incremental compilation to save ~50% target/ space
+incremental = false
 
 [profile.test]
 # Same memory-friendly settings for test builds

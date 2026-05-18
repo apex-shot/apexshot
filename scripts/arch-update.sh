@@ -18,12 +18,16 @@ SCRIPT_NAME="arch-update"
 TELEMETRY_CHANNEL="update"
 TELEMETRY_URL="${APEXSHOT_TELEMETRY_URL:-https://apexshot.org/api/download-telemetry}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [[ -n "$SCRIPT_SOURCE" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+fi
 
 handoff_if_wrong_distro() {
     if ! command -v pacman >/dev/null 2>&1 && { command -v apt >/dev/null 2>&1 || command -v dpkg >/dev/null 2>&1; }; then
         echo "Ubuntu/Debian detected; switching to the Ubuntu/Debian updater."
-        if [[ -f "${SCRIPT_DIR}/ubuntu-update.sh" ]]; then
+        if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/ubuntu-update.sh" ]]; then
             exec bash "${SCRIPT_DIR}/ubuntu-update.sh" "$@"
         fi
         exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/ubuntu-update.sh)"

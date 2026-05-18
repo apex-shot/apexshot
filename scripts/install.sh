@@ -2,7 +2,11 @@
 # Backward-compatible installer entrypoint.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [[ -n "$SCRIPT_SOURCE" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+fi
 
 is_gnome_session() {
     local desktop="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}"
@@ -14,14 +18,14 @@ if ! is_gnome_session; then
 fi
 
 if command -v pacman >/dev/null 2>&1; then
-    if [[ -f "${SCRIPT_DIR}/arch-install.sh" ]]; then
+    if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/arch-install.sh" ]]; then
         exec bash "${SCRIPT_DIR}/arch-install.sh" "$@"
     fi
     exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-install.sh)"
 fi
 
 if command -v apt >/dev/null 2>&1 || command -v dpkg >/dev/null 2>&1; then
-    if [[ -f "${SCRIPT_DIR}/ubuntu-install.sh" ]]; then
+    if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/ubuntu-install.sh" ]]; then
         exec bash "${SCRIPT_DIR}/ubuntu-install.sh" "$@"
     fi
     exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-install.sh)"
