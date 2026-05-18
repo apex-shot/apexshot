@@ -1942,7 +1942,7 @@ fn draw_recording_panel(
             8.4,
         );
         if primary || hovered {
-            context.set_source_rgba(255.0 / 255.0, 212.0 / 255.0, 178.0 / 255.0, 152.0 / 255.0);
+            context.set_source_rgba(1.0, 212.0 / 255.0, 178.0 / 255.0, 152.0 / 255.0);
         } else {
             context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
         }
