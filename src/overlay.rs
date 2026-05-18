@@ -1153,16 +1153,13 @@ fn recording_crop_menu_hit_item(
 }
 
 fn settings_menu_hit_item(
-    selection_x: f64, selection_y: f64, selection_width: f64, selection_height: f64,
+    selection_x: f64, selection_y: f64, selection_width: f64, _selection_height: f64,
     screen_width: f64, screen_height: f64, x: f64, y: f64,
 ) -> Option<i32> {
-    let deck = compute_recording_deck_layout(selection_x, selection_y, selection_width, selection_height, screen_width, screen_height);
-    let panel_x = deck.left_toggle_rail.x;
-    let panel_y = deck.left_toggle_rail.y;
     let menu_w = 440.0;
     let menu_h = 560.0;
-    let menu_x = panel_x.clamp(10.0, screen_width - menu_w - 10.0);
-    let menu_y = panel_y.clamp(10.0, screen_height - menu_h - 10.0);
+    let menu_x = (selection_x + (selection_width - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
+    let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - 570.0);
 
     let menu_rect = RectF { x: menu_x, y: menu_y, width: menu_w, height: menu_h };
     if !menu_rect.contains(x, y) {
@@ -1814,10 +1811,12 @@ fn draw_recording_panel(
         );
     }
 
-    // Settings menu (replaces panel content)
+    // Settings menu (replaces panel content) — positioned like C++:
+    // contextualX = clamp(selX + (selW - 440) / 2, 10, screenW - 450)
+    // contextualY = clamp(selY + 24, 10, screenH - 570)
     if settings_menu_open {
-        let panel_x = deck.left_toggle_rail.x;
-        let panel_y = deck.left_toggle_rail.y;
+        let panel_x = (selection_x + (selection_width - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
+        let panel_y = (selection_y + 24.0).clamp(10.0, screen_height - 570.0);
         draw_settings_menu(
             context, panel_x, panel_y,
             screen_width, screen_height, background,
