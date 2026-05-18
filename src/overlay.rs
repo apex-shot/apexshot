@@ -1512,38 +1512,50 @@ fn draw_recording_panel(
             false,
         ),
     ] {
-        accent(context, rect, primary || hover_tile == Some(tile));
-        draw_toolbar_icon(
-            context,
-            icon,
-            rect.x + 28.6,
-            rect.y + rect.height / 2.0 + 0.8,
-            (0.0, 0.0, 0.0, 0.38),
-        );
-        draw_toolbar_icon(
-            context,
-            icon,
-            rect.x + 28.0,
-            rect.y + rect.height / 2.0,
-            (1.0, 1.0, 1.0, 1.0),
-        );
-        draw_text_centered(
-            context,
-            RectF {
-                x: rect.x + 48.0,
-                y: rect.y,
-                width: rect.width - 52.0,
-                height: rect.height,
-            },
-            label,
-            11.8,
-            true,
-            if primary {
-                (1.0, 232.0 / 255.0, 214.0 / 255.0, 1.0)
-            } else {
-                (0.96, 0.96, 0.97, 1.0)
-            },
-        );
+        let hovered = hover_tile == Some(tile);
+        if hovered {
+            let hr = RectF { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+            rounded_rect_path(context, hr.x, hr.y, hr.width, hr.height, 10.0);
+            context.set_source_rgba(1.0, 1.0, 1.0, 0.09);
+            let _ = context.fill();
+        }
+        let (path_x, path_y, path_w, path_h) = (rect.x + 3.0, rect.y + 3.0, rect.width - 6.0, rect.height - 6.0);
+        rounded_rect_path(context, path_x, path_y, path_w, path_h, 9.0);
+        if primary || hovered {
+            context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 88.0 / 255.0);
+        } else {
+            context.set_source_rgba(1.0, 1.0, 1.0, 18.0 / 255.0);
+        }
+        let _ = context.fill();
+        let _ = context.save();
+        rounded_rect_path(context, path_x, path_y, path_w, path_h, 9.0);
+        context.clip();
+        rounded_rect_path(context, rect.x + 3.8, rect.y + 3.8, rect.width - 7.6, rect.height - 7.6, 8.4);
+        if primary || hovered {
+            context.set_source_rgba(255.0 / 255.0, 212.0 / 255.0, 178.0 / 255.0, 152.0 / 255.0);
+        } else {
+            context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
+        }
+        context.set_line_width(1.1);
+        let _ = context.stroke();
+        let _ = context.restore();
+        let icon_alpha = if hovered || primary { 1.0 } else { 0.94 };
+        let shadow_alpha = if hovered { 0.24 } else if primary { 0.32 } else { 0.50 };
+        let icon_y = rect.y + rect.height / 2.0 - if hovered { 0.5 } else { 0.0 };
+        draw_toolbar_icon(context, icon, rect.x + 28.6, icon_y + 0.8, (0.0, 0.0, 0.0, shadow_alpha));
+        draw_toolbar_icon(context, icon, rect.x + 28.0, icon_y, (1.0, 1.0, 1.0, icon_alpha));
+        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.set_font_size(15.7);
+        context.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
+        context.move_to(rect.x + 50.6, rect.y + 30.8);
+        let _ = context.show_text(label);
+        if primary {
+            context.set_source_rgba(1.0, 232.0 / 255.0, 214.0 / 255.0, icon_alpha);
+        } else {
+            context.set_source_rgba(245.0 / 255.0, 245.0 / 255.0, 246.0 / 255.0, icon_alpha);
+        }
+        context.move_to(rect.x + 50.0, rect.y + 30.0);
+        let _ = context.show_text(label);
     }
 }
 
