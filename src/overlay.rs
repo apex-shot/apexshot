@@ -1145,9 +1145,14 @@ fn compute_aspect_menu_rects(
     let menu_h = (ASPECT_RATIO_OPTIONS.len() as f64 * item_h) + 10.0;
     let menu_x = (anchor_rect.x + anchor_rect.width / 2.0 - menu_w / 2.0)
         .clamp(10.0, screen_width - menu_w - 10.0);
-    let menu_y = (anchor_rect.y + anchor_rect.height + 8.0)
-        .clamp(10.0, screen_height - menu_h - 10.0);
-    let panel_rect = RectF { x: menu_x, y: menu_y, width: menu_w, height: menu_h };
+    let menu_y =
+        (anchor_rect.y + anchor_rect.height + 8.0).clamp(10.0, screen_height - menu_h - 10.0);
+    let panel_rect = RectF {
+        x: menu_x,
+        y: menu_y,
+        width: menu_w,
+        height: menu_h,
+    };
     let mut item_rects = Vec::with_capacity(ASPECT_RATIO_OPTIONS.len());
     for i in 0..ASPECT_RATIO_OPTIONS.len() {
         item_rects.push(RectF {
@@ -1161,20 +1166,46 @@ fn compute_aspect_menu_rects(
 }
 
 fn capture_crop_menu_hit_item(
-    selection_x: f64, selection_y: f64, selection_width: f64, selection_height: f64,
-    screen_width: f64, screen_height: f64, x: f64, y: f64,
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    selection_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
 ) -> Option<usize> {
-    let layout = compute_toolbar_layout(selection_x, selection_y, selection_width, selection_height, screen_width, screen_height);
+    let layout = compute_toolbar_layout(
+        selection_x,
+        selection_y,
+        selection_width,
+        selection_height,
+        screen_width,
+        screen_height,
+    );
     let anchor = layout.crop_panel;
     let (_panel, items) = compute_aspect_menu_rects(anchor, screen_width, screen_height);
     items.iter().position(|r| r.contains(x, y))
 }
 
 fn recording_crop_menu_hit_item(
-    selection_x: f64, selection_y: f64, selection_width: f64, selection_height: f64,
-    screen_width: f64, screen_height: f64, x: f64, y: f64,
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    selection_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
 ) -> Option<usize> {
-    let deck = compute_recording_deck_layout(selection_x, selection_y, selection_width, selection_height, screen_width, screen_height);
+    let deck = compute_recording_deck_layout(
+        selection_x,
+        selection_y,
+        selection_width,
+        selection_height,
+        screen_width,
+        screen_height,
+    );
     let top = deck.top_cluster;
     let anchor = RectF {
         x: top.x + 62.0 + 8.0 + 152.0 + 8.0,
@@ -1190,7 +1221,7 @@ fn compute_dropdown_popup_y(menu_y: f64, item_idx: usize, tab: SettingsTab) -> f
     let start_y = menu_y + 110.0;
     match tab {
         SettingsTab::Video => match item_idx {
-            3 => start_y,              // res dropdown button at curr_y=110
+            3 => start_y,               // res dropdown button at curr_y=110
             4 => start_y + 35.0 + 50.0, // fps dropdown at curr_y=195
             _ => start_y,
         },
@@ -1203,8 +1234,14 @@ fn compute_dropdown_popup_y(menu_y: f64, item_idx: usize, tab: SettingsTab) -> f
 }
 
 fn settings_menu_hit_item(
-    selection_x: f64, selection_y: f64, selection_width: f64, _selection_height: f64,
-    screen_width: f64, screen_height: f64, x: f64, y: f64,
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    _selection_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
     tab: SettingsTab,
 ) -> Option<i32> {
     let menu_w = 440.0;
@@ -1217,7 +1254,12 @@ fn settings_menu_hit_item(
     let tab_start_x = menu_x + (menu_w - 3.0 * tab_w) / 2.0;
     let tab_y = menu_y + 64.0;
     for i in 0..3 {
-        let tr = RectF { x: tab_start_x + i as f64 * tab_w, y: tab_y, width: tab_w, height: tab_h };
+        let tr = RectF {
+            x: tab_start_x + i as f64 * tab_w,
+            y: tab_y,
+            width: tab_w,
+            height: tab_h,
+        };
         if tr.contains(x, y) {
             return Some(i);
         }
@@ -1225,39 +1267,97 @@ fn settings_menu_hit_item(
 
     let row_at = |cy: f64| -> bool {
         let w = menu_w - (130.0 - menu_x) - 25.0;
-        RectF { x: menu_x + 130.0, y: cy, width: w, height: 32.0 }.contains(x, y)
+        RectF {
+            x: menu_x + 130.0,
+            y: cy,
+            width: w,
+            height: 32.0,
+        }
+        .contains(x, y)
     };
 
     match tab {
         SettingsTab::General => {
             let check_area_at = |cy: f64| -> bool {
                 let value_x = menu_x + 140.0;
-                RectF { x: value_x, y: cy, width: menu_w - 160.0, height: 32.0 }.contains(x, y)
+                RectF {
+                    x: value_x,
+                    y: cy,
+                    width: menu_w - 160.0,
+                    height: 32.0,
+                }
+                .contains(x, y)
             };
             let mut cy = menu_y + 110.0;
             let mut idx = 3;
-            for _ in 0..4 { if check_area_at(cy) { return Some(idx); } idx += 1; cy += 32.0; }
+            for _ in 0..4 {
+                if check_area_at(cy) {
+                    return Some(idx);
+                }
+                idx += 1;
+                cy += 32.0;
+            }
             cy += 10.0;
-            for _ in 0..2 { if check_area_at(cy) { return Some(idx); } idx += 1; cy += 32.0; }
+            for _ in 0..2 {
+                if check_area_at(cy) {
+                    return Some(idx);
+                }
+                idx += 1;
+                cy += 32.0;
+            }
             cy += 10.0;
-            { if check_area_at(cy) { return Some(idx); } idx += 1; cy += 32.0; }
+            {
+                if check_area_at(cy) {
+                    return Some(idx);
+                }
+                idx += 1;
+                cy += 32.0;
+            }
             cy += 10.0;
-            for _ in 0..3 { if check_area_at(cy) { return Some(idx); } idx += 1; cy += 32.0; }
+            for _ in 0..3 {
+                if check_area_at(cy) {
+                    return Some(idx);
+                }
+                idx += 1;
+                cy += 32.0;
+            }
         }
         SettingsTab::Video => {
             let mut cy = menu_y + 110.0;
-            if row_at(cy) { return Some(3); } cy += 35.0;
+            if row_at(cy) {
+                return Some(3);
+            }
+            cy += 35.0;
             cy += 50.0;
-            if row_at(cy) { return Some(4); } cy += 45.0;
-            if row_at(cy) { return Some(5); } cy += 50.0;
-            if row_at(cy) { return Some(6); }
+            if row_at(cy) {
+                return Some(4);
+            }
+            cy += 45.0;
+            if row_at(cy) {
+                return Some(5);
+            }
+            cy += 50.0;
+            if row_at(cy) {
+                return Some(6);
+            }
         }
         SettingsTab::Gif => {
             let mut cy = menu_y + 110.0;
-            if row_at(cy) { return Some(3); } cy += 50.0;
-            if row_at(cy) { return Some(4); } cy += 60.0;
-            if row_at(cy) { return Some(5); } cy += 45.0;
-            if row_at(cy) { return Some(6); }
+            if row_at(cy) {
+                return Some(3);
+            }
+            cy += 50.0;
+            if row_at(cy) {
+                return Some(4);
+            }
+            cy += 60.0;
+            if row_at(cy) {
+                return Some(5);
+            }
+            cy += 45.0;
+            if row_at(cy) {
+                return Some(6);
+            }
         }
     }
 
@@ -1645,7 +1745,12 @@ fn draw_recording_panel(
             "Speaker",
             false,
         ),
-        (RecordPanelTile::Webcam, ToolbarIcon::Webcam, "Cam", rec_webcam),
+        (
+            RecordPanelTile::Webcam,
+            ToolbarIcon::Webcam,
+            "Cam",
+            rec_webcam,
+        ),
         (
             RecordPanelTile::Clicks,
             ToolbarIcon::Clicks,
@@ -1802,12 +1907,22 @@ fn draw_recording_panel(
     ] {
         let hovered = hover_tile == Some(tile);
         if hovered {
-            let hr = RectF { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+            let hr = RectF {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+            };
             rounded_rect_path(context, hr.x, hr.y, hr.width, hr.height, 10.0);
             context.set_source_rgba(1.0, 1.0, 1.0, 0.09);
             let _ = context.fill();
         }
-        let (path_x, path_y, path_w, path_h) = (rect.x + 3.0, rect.y + 3.0, rect.width - 6.0, rect.height - 6.0);
+        let (path_x, path_y, path_w, path_h) = (
+            rect.x + 3.0,
+            rect.y + 3.0,
+            rect.width - 6.0,
+            rect.height - 6.0,
+        );
         rounded_rect_path(context, path_x, path_y, path_w, path_h, 9.0);
         if primary || hovered {
             context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 88.0 / 255.0);
@@ -1818,7 +1933,14 @@ fn draw_recording_panel(
         let _ = context.save();
         rounded_rect_path(context, path_x, path_y, path_w, path_h, 9.0);
         context.clip();
-        rounded_rect_path(context, rect.x + 3.8, rect.y + 3.8, rect.width - 7.6, rect.height - 7.6, 8.4);
+        rounded_rect_path(
+            context,
+            rect.x + 3.8,
+            rect.y + 3.8,
+            rect.width - 7.6,
+            rect.height - 7.6,
+            8.4,
+        );
         if primary || hovered {
             context.set_source_rgba(255.0 / 255.0, 212.0 / 255.0, 178.0 / 255.0, 152.0 / 255.0);
         } else {
@@ -1828,11 +1950,33 @@ fn draw_recording_panel(
         let _ = context.stroke();
         let _ = context.restore();
         let icon_alpha = if hovered || primary { 1.0 } else { 0.94 };
-        let shadow_alpha = if hovered { 0.24 } else if primary { 0.32 } else { 0.50 };
+        let shadow_alpha = if hovered {
+            0.24
+        } else if primary {
+            0.32
+        } else {
+            0.50
+        };
         let icon_y = rect.y + rect.height / 2.0 - if hovered { 0.5 } else { 0.0 };
-        draw_toolbar_icon(context, icon, rect.x + 28.6, icon_y + 0.8, (0.0, 0.0, 0.0, shadow_alpha));
-        draw_toolbar_icon(context, icon, rect.x + 28.0, icon_y, (1.0, 1.0, 1.0, icon_alpha));
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        draw_toolbar_icon(
+            context,
+            icon,
+            rect.x + 28.6,
+            icon_y + 0.8,
+            (0.0, 0.0, 0.0, shadow_alpha),
+        );
+        draw_toolbar_icon(
+            context,
+            icon,
+            rect.x + 28.0,
+            icon_y,
+            (1.0, 1.0, 1.0, icon_alpha),
+        );
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(15.7);
         context.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
         context.move_to(rect.x + 50.6, rect.y + 30.8);
@@ -1863,18 +2007,42 @@ fn draw_recording_panel(
     // contextualX = clamp(selX + (selW - 440) / 2, 10, screenW - 450)
     // contextualY = clamp(selY + 24, 10, screenH - 570)
     if settings_menu_open {
-        let panel_x = (selection_x + (selection_width - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
+        let panel_x =
+            (selection_x + (selection_width - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
         let panel_y = (selection_y + 24.0).clamp(10.0, screen_height - 570.0);
         draw_settings_menu(
-            context, panel_x, panel_y,
-            screen_width, screen_height, background,
-            settings_tab, hovered_settings_item, settings_dropdown_open,
-            video_max_res, video_fps, record_mono, open_editor,
-            rec_controls, display_rec_time, hidpi, do_not_disturb,
-            show_cursor, rec_clicks, rec_keystrokes, rec_webcam,
-            remember_selection, dim_screen, show_countdown,
-            gif_fps, gif_quality, optimize_gif, gif_size_idx,
-            176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, (1.0, 214.0 / 255.0, 186.0 / 255.0),
+            context,
+            panel_x,
+            panel_y,
+            screen_width,
+            screen_height,
+            background,
+            settings_tab,
+            hovered_settings_item,
+            settings_dropdown_open,
+            video_max_res,
+            video_fps,
+            record_mono,
+            open_editor,
+            rec_controls,
+            display_rec_time,
+            hidpi,
+            do_not_disturb,
+            show_cursor,
+            rec_clicks,
+            rec_keystrokes,
+            rec_webcam,
+            remember_selection,
+            dim_screen,
+            show_countdown,
+            gif_fps,
+            gif_quality,
+            optimize_gif,
+            gif_size_idx,
+            176.0 / 255.0,
+            92.0 / 255.0,
+            56.0 / 255.0,
+            (1.0, 214.0 / 255.0, 186.0 / 255.0),
         );
     }
 }
@@ -1893,25 +2061,54 @@ fn draw_aspect_ratio_menu(
     let menu_h = (ASPECT_RATIO_OPTIONS.len() as f64 * item_h) + 10.0;
     let menu_x = (anchor_rect.x + anchor_rect.width / 2.0 - menu_w / 2.0)
         .clamp(10.0, screen_width - menu_w - 10.0);
-    let menu_y = (anchor_rect.y + anchor_rect.height + 8.0)
-        .clamp(10.0, screen_height - menu_h - 10.0);
+    let menu_y =
+        (anchor_rect.y + anchor_rect.height + 8.0).clamp(10.0, screen_height - menu_h - 10.0);
 
-    draw_frosted_panel(context, menu_x, menu_y, menu_w, menu_h, 12.0, screen_width, screen_height, background);
+    draw_frosted_panel(
+        context,
+        menu_x,
+        menu_y,
+        menu_w,
+        menu_h,
+        12.0,
+        screen_width,
+        screen_height,
+        background,
+    );
 
     let mut item_rects = Vec::with_capacity(ASPECT_RATIO_OPTIONS.len());
     for i in 0..ASPECT_RATIO_OPTIONS.len() {
-        let item_rect = RectF { x: menu_x + 5.0, y: menu_y + 5.0 + i as f64 * item_h, width: menu_w - 10.0, height: item_h };
+        let item_rect = RectF {
+            x: menu_x + 5.0,
+            y: menu_y + 5.0 + i as f64 * item_h,
+            width: menu_w - 10.0,
+            height: item_h,
+        };
         let indicator_x = item_rect.x + 8.0;
 
         if i as i32 == hovered_item {
-            rounded_rect_path(context, item_rect.x, item_rect.y, item_rect.width, item_rect.height, 7.0);
+            rounded_rect_path(
+                context,
+                item_rect.x,
+                item_rect.y,
+                item_rect.width,
+                item_rect.height,
+                7.0,
+            );
             context.set_source_rgba(1.0, 1.0, 1.0, 18.0 / 255.0);
             let _ = context.fill();
         }
 
         let selected = i == selected_index;
         if selected {
-            rounded_rect_path(context, item_rect.x + 1.0, item_rect.y + 1.0, item_rect.width - 2.0, item_rect.height - 2.0, 7.0);
+            rounded_rect_path(
+                context,
+                item_rect.x + 1.0,
+                item_rect.y + 1.0,
+                item_rect.width - 2.0,
+                item_rect.height - 2.0,
+                7.0,
+            );
             context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 94.0 / 255.0);
             let _ = context.fill();
             context.set_source_rgba(1.0, 238.0 / 255.0, 224.0 / 255.0, 1.0);
@@ -1923,14 +2120,26 @@ fn draw_aspect_ratio_menu(
             context.stroke().ok();
         }
 
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal,
-            if selected { gtk4::cairo::FontWeight::Bold } else { gtk4::cairo::FontWeight::Normal });
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            if selected {
+                gtk4::cairo::FontWeight::Bold
+            } else {
+                gtk4::cairo::FontWeight::Normal
+            },
+        );
         context.set_font_size(13.3);
         let label = ASPECT_RATIO_OPTIONS[i];
         if let Ok(extents) = context.text_extents(label) {
             let label_x = item_rect.x + 30.0 - extents.x_bearing();
-            let label_y = item_rect.y + item_rect.height / 2.0 - extents.height() / 2.0 - extents.y_bearing();
-            let label_color = if selected { (1.0, 240.0 / 255.0, 226.0 / 255.0, 1.0) } else { (242.0 / 255.0, 242.0 / 255.0, 244.0 / 255.0, 1.0) };
+            let label_y =
+                item_rect.y + item_rect.height / 2.0 - extents.height() / 2.0 - extents.y_bearing();
+            let label_color = if selected {
+                (1.0, 240.0 / 255.0, 226.0 / 255.0, 1.0)
+            } else {
+                (242.0 / 255.0, 242.0 / 255.0, 244.0 / 255.0, 1.0)
+            };
             context.set_source_rgba(label_color.0, label_color.1, label_color.2, label_color.3);
             context.move_to(label_x, label_y);
             let _ = context.show_text(label);
@@ -1950,7 +2159,15 @@ fn draw_capture_crop_menu(
     screen_height: f64,
     background: Option<&BackgroundFrame>,
 ) -> Vec<RectF> {
-    draw_aspect_ratio_menu(context, crop_card_rect, hovered_item, selected_index, screen_width, screen_height, background)
+    draw_aspect_ratio_menu(
+        context,
+        crop_card_rect,
+        hovered_item,
+        selected_index,
+        screen_width,
+        screen_height,
+        background,
+    )
 }
 
 fn draw_recording_crop_menu(
@@ -1962,7 +2179,15 @@ fn draw_recording_crop_menu(
     screen_height: f64,
     background: Option<&BackgroundFrame>,
 ) -> Vec<RectF> {
-    draw_aspect_ratio_menu(context, crop_tile_rect, hovered_item, selected_index, screen_width, screen_height, background)
+    draw_aspect_ratio_menu(
+        context,
+        crop_tile_rect,
+        hovered_item,
+        selected_index,
+        screen_width,
+        screen_height,
+        background,
+    )
 }
 
 fn draw_checkbox(
@@ -2018,11 +2243,18 @@ fn draw_dropdown_button(
     rounded_rect_path(context, x, y, w, h, 6.0);
     context.stroke().ok();
 
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
     context.set_font_size(13.3);
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
     if let Ok(extents) = context.text_extents(label) {
-        context.move_to(x + 10.0 - extents.x_bearing(), y + h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.move_to(
+            x + 10.0 - extents.x_bearing(),
+            y + h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
         context.show_text(label).ok();
     }
     // Chevron
@@ -2090,10 +2322,24 @@ fn draw_settings_menu(
     let _ = context.fill();
     let _ = context.restore();
 
-    draw_frosted_panel(context, menu_x, menu_y, menu_w, menu_h, 12.0, screen_width, screen_height, background);
+    draw_frosted_panel(
+        context,
+        menu_x,
+        menu_y,
+        menu_w,
+        menu_h,
+        12.0,
+        screen_width,
+        screen_height,
+        background,
+    );
 
     // Header
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
     context.set_font_size(10.7);
     context.set_source_rgba(1.0, 224.0 / 255.0, 196.0 / 255.0, 176.0 / 255.0);
     if let Ok(_ext) = context.text_extents("RECORDING CONTROLS") {
@@ -2115,7 +2361,12 @@ fn draw_settings_menu(
     let tab_y = menu_y + 64.0;
 
     for (i, tab_label) in tabs.iter().enumerate() {
-        let tr = RectF { x: tab_start_x + i as f64 * tab_w, y: tab_y, width: tab_w, height: tab_h };
+        let tr = RectF {
+            x: tab_start_x + i as f64 * tab_w,
+            y: tab_y,
+            width: tab_w,
+            height: tab_h,
+        };
         let is_active_tab = (i == 0 && matches!(tab, SettingsTab::General))
             || (i == 1 && matches!(tab, SettingsTab::Video))
             || (i == 2 && matches!(tab, SettingsTab::Gif));
@@ -2132,7 +2383,14 @@ fn draw_settings_menu(
                 let _ = context.save();
                 rounded_rect_path(context, tr.x, tr.y, tr.width, tr.height, 9.0);
                 context.clip();
-                rounded_rect_path(context, tr.x + 0.5, tr.y + 0.5, tr.width - 1.0, tr.height - 1.0, 8.5);
+                rounded_rect_path(
+                    context,
+                    tr.x + 0.5,
+                    tr.y + 0.5,
+                    tr.width - 1.0,
+                    tr.height - 1.0,
+                    8.5,
+                );
                 context.set_source_rgba(accent_rim.0, accent_rim.1, accent_rim.2, 1.0);
                 context.set_line_width(1.0);
                 context.stroke().ok();
@@ -2144,43 +2402,122 @@ fn draw_settings_menu(
         } else {
             (1.0, 1.0, 1.0, 150.0 / 255.0)
         };
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal,
-            if is_active_tab || tab_hovered { gtk4::cairo::FontWeight::Bold } else { gtk4::cairo::FontWeight::Normal });
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            if is_active_tab || tab_hovered {
+                gtk4::cairo::FontWeight::Bold
+            } else {
+                gtk4::cairo::FontWeight::Normal
+            },
+        );
         context.set_font_size(13.7);
-        context.set_source_rgba(tab_text_color.0, tab_text_color.1, tab_text_color.2, tab_text_color.3);
+        context.set_source_rgba(
+            tab_text_color.0,
+            tab_text_color.1,
+            tab_text_color.2,
+            tab_text_color.3,
+        );
         if let Ok(extents) = context.text_extents(tab_label) {
-            context.move_to(tr.x + tr.width / 2.0 - extents.width() / 2.0 - extents.x_bearing(),
-                tr.y + tr.height / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                tr.x + tr.width / 2.0 - extents.width() / 2.0 - extents.x_bearing(),
+                tr.y + tr.height / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(tab_label).ok();
         }
     }
 
     match tab {
-        SettingsTab::General => draw_settings_general_tab(context, menu_x, menu_y, menu_w, hovered_item,
-            rec_controls, display_rec_time, hidpi, do_not_disturb, show_cursor, rec_clicks, rec_keystrokes, rec_webcam,
-            remember_selection, dim_screen, show_countdown, accent_r, accent_g, accent_b),
-        SettingsTab::Video => draw_settings_video_tab(context, menu_x, menu_y, menu_w, hovered_item,
-            video_max_res, video_fps, record_mono, open_editor, accent_r, accent_g, accent_b),
-        SettingsTab::Gif => draw_settings_gif_tab(context, menu_x, menu_y, menu_w, hovered_item,
-            gif_fps, gif_quality, optimize_gif, gif_size_idx, accent_r, accent_g, accent_b),
+        SettingsTab::General => draw_settings_general_tab(
+            context,
+            menu_x,
+            menu_y,
+            menu_w,
+            hovered_item,
+            rec_controls,
+            display_rec_time,
+            hidpi,
+            do_not_disturb,
+            show_cursor,
+            rec_clicks,
+            rec_keystrokes,
+            rec_webcam,
+            remember_selection,
+            dim_screen,
+            show_countdown,
+            accent_r,
+            accent_g,
+            accent_b,
+        ),
+        SettingsTab::Video => draw_settings_video_tab(
+            context,
+            menu_x,
+            menu_y,
+            menu_w,
+            hovered_item,
+            video_max_res,
+            video_fps,
+            record_mono,
+            open_editor,
+            accent_r,
+            accent_g,
+            accent_b,
+        ),
+        SettingsTab::Gif => draw_settings_gif_tab(
+            context,
+            menu_x,
+            menu_y,
+            menu_w,
+            hovered_item,
+            gif_fps,
+            gif_quality,
+            optimize_gif,
+            gif_size_idx,
+            accent_r,
+            accent_g,
+            accent_b,
+        ),
     }
 
     if let Some(drop_idx) = dropdown_open {
-        draw_settings_dropdown_popup(context, menu_x, menu_y, menu_w, tab, drop_idx,
-            hovered_item, video_max_res, video_fps, gif_size_idx, accent_r, accent_g, accent_b);
+        draw_settings_dropdown_popup(
+            context,
+            menu_x,
+            menu_y,
+            menu_w,
+            tab,
+            drop_idx,
+            hovered_item,
+            video_max_res,
+            video_fps,
+            gif_size_idx,
+            accent_r,
+            accent_g,
+            accent_b,
+        );
     }
 }
 
 fn draw_settings_general_tab(
     context: &gtk4::cairo::Context,
-    menu_x: f64, menu_y: f64, menu_w: f64,
+    menu_x: f64,
+    menu_y: f64,
+    menu_w: f64,
     hovered_item: i32,
-    rec_controls: bool, display_rec_time: bool, hidpi: bool, do_not_disturb: bool,
-    show_cursor: bool, rec_clicks: bool,
+    rec_controls: bool,
+    display_rec_time: bool,
+    hidpi: bool,
+    do_not_disturb: bool,
+    show_cursor: bool,
+    rec_clicks: bool,
     rec_keystrokes: bool,
     _rec_webcam: bool,
-    remember_selection: bool, dim_screen: bool, show_countdown: bool,
-    _accent_r: f64, _accent_g: f64, _accent_b: f64,
+    remember_selection: bool,
+    dim_screen: bool,
+    show_countdown: bool,
+    _accent_r: f64,
+    _accent_g: f64,
+    _accent_b: f64,
 ) {
     let label_x = menu_x + 25.0;
     let value_x = menu_x + 140.0;
@@ -2192,13 +2529,39 @@ fn draw_settings_general_tab(
 
     macro_rules! s {
         ($label:expr, $desc:expr, $checked:expr) => {{
-            draw_general_row(context, label_x, value_x, desc_x, check_area_w, y, row_h, $label, $desc, $checked, false, hovered_item == idx);
+            draw_general_row(
+                context,
+                label_x,
+                value_x,
+                desc_x,
+                check_area_w,
+                y,
+                row_h,
+                $label,
+                $desc,
+                $checked,
+                false,
+                hovered_item == idx,
+            );
             idx += 1;
             y += row_h;
         }};
         ($label:expr, $desc:expr, $checked:expr, $gap:expr) => {{
             y += $gap;
-            draw_general_row(context, label_x, value_x, desc_x, check_area_w, y, row_h, $label, $desc, $checked, false, hovered_item == idx);
+            draw_general_row(
+                context,
+                label_x,
+                value_x,
+                desc_x,
+                check_area_w,
+                y,
+                row_h,
+                $label,
+                $desc,
+                $checked,
+                false,
+                hovered_item == idx,
+            );
             idx += 1;
             y += row_h;
         }};
@@ -2211,26 +2574,56 @@ fn draw_settings_general_tab(
     s!("Cursor", "Show cursor", show_cursor, 10.0);
     s!("", "Highlight clicks", rec_clicks);
     s!("Keyboard", "Show keystrokes", rec_keystrokes, 10.0);
-    s!("Recording area", "Remember last selection", remember_selection, 10.0);
+    s!(
+        "Recording area",
+        "Remember last selection",
+        remember_selection,
+        10.0
+    );
     s!("", "Dim screen while recording", dim_screen);
     s!("", "Show countdown", show_countdown);
-    let _ = y; let _ = idx;
+    let _ = y;
+    let _ = idx;
 }
 
 fn draw_general_row(
     context: &gtk4::cairo::Context,
-    label_x: f64, value_x: f64, desc_x: f64, _check_area_w: f64,
-    y: f64, row_h: f64,
-    label: &str, desc: &str, checked: bool, disabled: bool, hover: bool,
+    label_x: f64,
+    value_x: f64,
+    desc_x: f64,
+    _check_area_w: f64,
+    y: f64,
+    row_h: f64,
+    label: &str,
+    desc: &str,
+    checked: bool,
+    disabled: bool,
+    hover: bool,
 ) {
     if !label.is_empty() {
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
-        context.set_source_rgba(1.0, 1.0, 1.0, if disabled { 110.0 / 255.0 } else { 200.0 / 255.0 });
+        context.set_source_rgba(
+            1.0,
+            1.0,
+            1.0,
+            if disabled {
+                110.0 / 255.0
+            } else {
+                200.0 / 255.0
+            },
+        );
         if let Ok(extents) = context.text_extents(label) {
             // Right-aligned in 110px area starting at label_x
             let tx = label_x + 110.0 - extents.width() - extents.x_bearing();
-            context.move_to(tx, y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                tx,
+                y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(label).ok();
         }
     }
@@ -2240,8 +2633,22 @@ fn draw_general_row(
         context.fill().ok();
     }
     let cb_size = 18.0;
-    draw_checkbox(context, value_x, y + (row_h - cb_size) / 2.0, cb_size, checked, disabled, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0);
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    draw_checkbox(
+        context,
+        value_x,
+        y + (row_h - cb_size) / 2.0,
+        cb_size,
+        checked,
+        disabled,
+        176.0 / 255.0,
+        92.0 / 255.0,
+        56.0 / 255.0,
+    );
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
     context.set_font_size(13.3);
     context.set_source_rgba(1.0, 1.0, 1.0, if disabled { 110.0 / 255.0 } else { 1.0 });
     if let Ok(extents) = context.text_extents(desc) {
@@ -2252,7 +2659,10 @@ fn draw_general_row(
             context.rectangle(desc_x, y, max_desc_w, row_h);
             context.clip();
         }
-        context.move_to(desc_x - extents.x_bearing(), y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.move_to(
+            desc_x - extents.x_bearing(),
+            y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
         context.show_text(desc).ok();
         if extents.width() > max_desc_w {
             let _ = context.restore();
@@ -2262,21 +2672,35 @@ fn draw_general_row(
 
 fn draw_settings_video_tab(
     context: &gtk4::cairo::Context,
-    menu_x: f64, menu_y: f64, menu_w: f64,
+    menu_x: f64,
+    menu_y: f64,
+    menu_w: f64,
     hovered_item: i32,
-    video_max_res: usize, video_fps: usize, record_mono: bool, open_editor: bool,
-    _accent_r: f64, _accent_g: f64, _accent_b: f64,
+    video_max_res: usize,
+    video_fps: usize,
+    record_mono: bool,
+    open_editor: bool,
+    _accent_r: f64,
+    _accent_g: f64,
+    _accent_b: f64,
 ) {
     let label_x = menu_x + 20.0;
     let value_x = menu_x + 130.0;
     let mut curr_y = menu_y + 110.0;
 
     let draw_label = |context: &gtk4::cairo::Context, txt: &str, y: f64| {
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(1.0, 1.0, 1.0, 200.0 / 255.0);
         if let Ok(extents) = context.text_extents(txt) {
-            context.move_to(label_x + 100.0 - extents.width() - extents.x_bearing(), y + 20.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                label_x + 100.0 - extents.width() - extents.x_bearing(),
+                y + 20.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(txt).ok();
         }
     };
@@ -2284,9 +2708,21 @@ fn draw_settings_video_tab(
     // Max resolution
     draw_label(context, "Max resolution:", curr_y);
     let res_options = ["Original", "1080p", "720p"];
-    draw_dropdown_button(context, value_x, curr_y, 140.0, 30.0, res_options[video_max_res], hovered_item == 3);
+    draw_dropdown_button(
+        context,
+        value_x,
+        curr_y,
+        140.0,
+        30.0,
+        res_options[video_max_res],
+        hovered_item == 3,
+    );
     curr_y += 35.0;
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
     context.set_font_size(12.0);
     context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
     // Clip subtext to prevent overflow
@@ -2294,7 +2730,10 @@ fn draw_settings_video_tab(
     context.rectangle(value_x, curr_y, menu_w - (value_x - menu_x) - 25.0, 80.0);
     context.clip();
     if let Ok(extents) = context.text_extents("Set max res to reduce file size") {
-        context.move_to(value_x - extents.x_bearing(), curr_y + 16.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.move_to(
+            value_x - extents.x_bearing(),
+            curr_y + 16.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
         context.show_text("Set max res to reduce file size").ok();
     }
     let _ = context.restore();
@@ -2303,23 +2742,53 @@ fn draw_settings_video_tab(
     // Video FPS
     draw_label(context, "Video FPS:", curr_y);
     let fps_options = ["24", "30", "50", "60"];
-    draw_dropdown_button(context, value_x, curr_y, 80.0, 30.0, fps_options[video_fps], hovered_item == 4);
+    draw_dropdown_button(
+        context,
+        value_x,
+        curr_y,
+        80.0,
+        30.0,
+        fps_options[video_fps],
+        hovered_item == 4,
+    );
     curr_y += 45.0;
 
     // Record mono
     let mono_hovered = hovered_item == 5;
     if mono_hovered {
-        let r = RectF { x: value_x, y: curr_y, width: 200.0, height: 30.0 };
+        let r = RectF {
+            x: value_x,
+            y: curr_y,
+            width: 200.0,
+            height: 30.0,
+        };
         rounded_rect_path(context, r.x - 5.0, r.y, r.width + 10.0, r.height, 6.0);
         context.set_source_rgba(1.0, 1.0, 1.0, 12.0 / 255.0);
         context.fill().ok();
     }
-    draw_checkbox(context, value_x, curr_y + (30.0 - 18.0) / 2.0, 18.0, record_mono, false, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0);
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    draw_checkbox(
+        context,
+        value_x,
+        curr_y + (30.0 - 18.0) / 2.0,
+        18.0,
+        record_mono,
+        false,
+        176.0 / 255.0,
+        92.0 / 255.0,
+        56.0 / 255.0,
+    );
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
     context.set_font_size(13.3);
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
     if let Ok(extents) = context.text_extents("Record audio in mono") {
-        context.move_to(value_x + 28.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.move_to(
+            value_x + 28.0 - extents.x_bearing(),
+            curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
         context.show_text("Record audio in mono").ok();
     }
     curr_y += 50.0;
@@ -2328,17 +2797,39 @@ fn draw_settings_video_tab(
     draw_label(context, "Video Encoder:", curr_y);
     let encoder_hovered = hovered_item == 6;
     if encoder_hovered {
-        let r = RectF { x: value_x, y: curr_y, width: 250.0, height: 30.0 };
+        let r = RectF {
+            x: value_x,
+            y: curr_y,
+            width: 250.0,
+            height: 30.0,
+        };
         rounded_rect_path(context, r.x - 5.0, r.y, r.width + 10.0, r.height, 6.0);
         context.set_source_rgba(1.0, 1.0, 1.0, 12.0 / 255.0);
         context.fill().ok();
     }
-    draw_checkbox(context, value_x, curr_y + (30.0 - 18.0) / 2.0, 18.0, open_editor, false, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0);
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    draw_checkbox(
+        context,
+        value_x,
+        curr_y + (30.0 - 18.0) / 2.0,
+        18.0,
+        open_editor,
+        false,
+        176.0 / 255.0,
+        92.0 / 255.0,
+        56.0 / 255.0,
+    );
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
     context.set_font_size(13.3);
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
     if let Ok(extents) = context.text_extents("Open editor after recording") {
-        context.move_to(value_x + 28.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.move_to(
+            value_x + 28.0 - extents.x_bearing(),
+            curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
         context.show_text("Open editor after recording").ok();
     }
     // Clip remaining editor subtext
@@ -2346,12 +2837,21 @@ fn draw_settings_video_tab(
     let _ = context.save();
     context.rectangle(value_x, curr_y, menu_w - (value_x - menu_x) - 25.0, 80.0);
     context.clip();
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
     context.set_font_size(12.0);
     context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
     if let Ok(extents) = context.text_extents("Use editor to change quality and audio") {
-        context.move_to(value_x - extents.x_bearing(), curr_y + 16.0 - extents.height() / 2.0 - extents.y_bearing());
-        context.show_text("Use editor to change quality and audio").ok();
+        context.move_to(
+            value_x - extents.x_bearing(),
+            curr_y + 16.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
+        context
+            .show_text("Use editor to change quality and audio")
+            .ok();
     }
     let _ = context.restore();
     let _ = curr_y;
@@ -2359,21 +2859,35 @@ fn draw_settings_video_tab(
 
 fn draw_settings_gif_tab(
     context: &gtk4::cairo::Context,
-    menu_x: f64, menu_y: f64, _menu_w: f64,
+    menu_x: f64,
+    menu_y: f64,
+    _menu_w: f64,
     hovered_item: i32,
-    gif_fps: f64, gif_quality: f64, optimize_gif: bool, gif_size_idx: usize,
-    _accent_r: f64, _accent_g: f64, _accent_b: f64,
+    gif_fps: f64,
+    gif_quality: f64,
+    optimize_gif: bool,
+    gif_size_idx: usize,
+    _accent_r: f64,
+    _accent_g: f64,
+    _accent_b: f64,
 ) {
     let label_x = menu_x + 20.0;
     let value_x = menu_x + 130.0;
     let mut curr_y = menu_y + 110.0;
 
     let draw_label = |context: &gtk4::cairo::Context, txt: &str, y: f64| {
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(1.0, 1.0, 1.0, 200.0 / 255.0);
         if let Ok(extents) = context.text_extents(txt) {
-            context.move_to(label_x + 100.0 - extents.width() - extents.x_bearing(), y + 20.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                label_x + 100.0 - extents.width() - extents.x_bearing(),
+                y + 20.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(txt).ok();
         }
     };
@@ -2389,10 +2903,17 @@ fn draw_settings_gif_tab(
     rounded_rect_path(context, value_x, curr_y, 45.0, 30.0, 6.0);
     context.stroke().ok();
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
     context.set_font_size(13.3);
     if let Ok(extents) = context.text_extents(&fps_label) {
-        context.move_to(value_x + 22.5 - extents.width() / 2.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.move_to(
+            value_x + 22.5 - extents.width() / 2.0 - extents.x_bearing(),
+            curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
         context.show_text(&fps_label).ok();
     }
     // FPS slider
@@ -2432,7 +2953,14 @@ fn draw_settings_gif_tab(
     // Quality handle
     let q_handle_x = value_x + gif_quality * q_slider_w;
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-    rounded_rect_path(context, q_handle_x - 5.0, curr_y + (30.0 - 18.0) / 2.0, 10.0, 18.0, 3.0);
+    rounded_rect_path(
+        context,
+        q_handle_x - 5.0,
+        curr_y + (30.0 - 18.0) / 2.0,
+        10.0,
+        18.0,
+        3.0,
+    );
     context.fill().ok();
     context.set_font_size(10.7);
     context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
@@ -2447,12 +2975,29 @@ fn draw_settings_gif_tab(
     curr_y += 60.0;
 
     // Optimize checkbox
-    draw_checkbox(context, value_x, curr_y + (30.0 - 18.0) / 2.0, 18.0, optimize_gif, false, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0);
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    draw_checkbox(
+        context,
+        value_x,
+        curr_y + (30.0 - 18.0) / 2.0,
+        18.0,
+        optimize_gif,
+        false,
+        176.0 / 255.0,
+        92.0 / 255.0,
+        56.0 / 255.0,
+    );
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
     context.set_font_size(13.3);
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
     if let Ok(extents) = context.text_extents("Optimize GIFs") {
-        context.move_to(value_x + 25.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.move_to(
+            value_x + 25.0 - extents.x_bearing(),
+            curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
         context.show_text("Optimize GIFs").ok();
     }
     curr_y += 45.0;
@@ -2460,45 +3005,85 @@ fn draw_settings_gif_tab(
     // GIF size
     draw_label(context, "GIF size:", curr_y);
     let size_options = ["800 x auto", "640 x auto", "480 x auto", "Original"];
-    draw_dropdown_button(context, value_x, curr_y, 180.0, 30.0, size_options[gif_size_idx], hovered_item == 6);
+    draw_dropdown_button(
+        context,
+        value_x,
+        curr_y,
+        180.0,
+        30.0,
+        size_options[gif_size_idx],
+        hovered_item == 6,
+    );
 }
 
 fn draw_settings_dropdown_popup(
     context: &gtk4::cairo::Context,
-    menu_x: f64, menu_y: f64, _menu_w: f64,
+    menu_x: f64,
+    menu_y: f64,
+    _menu_w: f64,
     tab: SettingsTab,
     drop_idx: usize,
     _hovered_item: i32,
-    video_max_res: usize, video_fps: usize, gif_size_idx: usize,
-    accent_r: f64, accent_g: f64, accent_b: f64,
+    video_max_res: usize,
+    video_fps: usize,
+    gif_size_idx: usize,
+    accent_r: f64,
+    accent_g: f64,
+    accent_b: f64,
 ) {
     let (options, current_val): (&[&str], usize) = match (tab, drop_idx) {
         (SettingsTab::Video, 3) => (&["Original", "1080p", "720p"], video_max_res),
         (SettingsTab::Video, 4) => (&["24", "30", "50", "60"], video_fps),
-        (SettingsTab::Gif, 6) => (&["800 x auto", "640 x auto", "480 x auto", "Original"], gif_size_idx),
+        (SettingsTab::Gif, 6) => (
+            &["800 x auto", "640 x auto", "480 x auto", "Original"],
+            gif_size_idx,
+        ),
         _ => return,
     };
     let value_x = menu_x + 130.0;
     let popup_y = compute_dropdown_popup_y(menu_y, drop_idx, tab);
     let item_h = 30.0;
     let popup_w = 140.0;
-    if options.is_empty() { return; }
+    if options.is_empty() {
+        return;
+    }
     let popup_h = options.len() as f64 * item_h;
-    draw_frosted_panel(context, value_x, popup_y, popup_w, popup_h, 8.0, 0.0, 0.0, None);
+    draw_frosted_panel(
+        context, value_x, popup_y, popup_w, popup_h, 8.0, 0.0, 0.0, None,
+    );
     for (i, opt) in options.iter().enumerate() {
-        let r = RectF { x: value_x, y: popup_y + i as f64 * item_h, width: popup_w, height: item_h };
+        let r = RectF {
+            x: value_x,
+            y: popup_y + i as f64 * item_h,
+            width: popup_w,
+            height: item_h,
+        };
         if i == current_val {
             let _ = context.save();
-            rounded_rect_path(context, r.x + 2.0, r.y + 2.0, r.width - 4.0, r.height - 2.0, 5.0);
+            rounded_rect_path(
+                context,
+                r.x + 2.0,
+                r.y + 2.0,
+                r.width - 4.0,
+                r.height - 2.0,
+                5.0,
+            );
             context.set_source_rgba(accent_r, accent_g, accent_b, 84.0 / 255.0);
             context.fill().ok();
             let _ = context.restore();
         }
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Normal,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
         if let Ok(extents) = context.text_extents(opt) {
-            context.move_to(r.x + 10.0 - extents.x_bearing(), r.y + item_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                r.x + 10.0 - extents.x_bearing(),
+                r.y + item_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(opt).ok();
         }
     }
@@ -2524,11 +3109,16 @@ const CLICK_COLORS_LEN: usize = 9;
 
 fn draw_click_options(
     context: &gtk4::cairo::Context,
-    panel_x: f64, panel_y: f64,
-    screen_width: f64, screen_height: f64,
+    panel_x: f64,
+    panel_y: f64,
+    screen_width: f64,
+    screen_height: f64,
     background: Option<&BackgroundFrame>,
     hovered_item: i32,
-    click_size: f64, click_color: usize, click_style: usize, click_animate: bool,
+    click_size: f64,
+    click_color: usize,
+    click_style: usize,
+    click_animate: bool,
 ) {
     let menu_w = 440.0;
     let menu_h = 500.0;
@@ -2551,10 +3141,24 @@ fn draw_click_options(
     let _ = context.fill();
     let _ = context.restore();
 
-    draw_frosted_panel(context, menu_x, menu_y, menu_w, menu_h, 12.0, screen_width, screen_height, background);
+    draw_frosted_panel(
+        context,
+        menu_x,
+        menu_y,
+        menu_w,
+        menu_h,
+        12.0,
+        screen_width,
+        screen_height,
+        background,
+    );
 
     // Header
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
     context.set_font_size(10.7);
     context.set_source_rgba(1.0, 224.0 / 255.0, 196.0 / 255.0, 176.0 / 255.0);
     if let Ok(_ext) = context.text_extents("CLICK HIGHLIGHTS") {
@@ -2581,11 +3185,18 @@ fn draw_click_options(
 
     // ── Helper: draw label ──
     let draw_label = |context: &gtk4::cairo::Context, txt: &str, y: f64| {
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(1.0, 1.0, 1.0, 210.0 / 255.0);
         if let Ok(extents) = context.text_extents(txt) {
-            context.move_to(label_x + 90.0 - extents.width() - extents.x_bearing(), y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                label_x + 90.0 - extents.width() - extents.x_bearing(),
+                y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(txt).ok();
         }
     };
@@ -2610,7 +3221,12 @@ fn draw_click_options(
         let track_y = curr_y + (row_h - slider_track_h) / 2.0;
 
         // Track background
-        context.set_source_rgba(1.0, 1.0, 1.0, if hovered_item == 0 { 36.0 } else { 28.0 } / 255.0);
+        context.set_source_rgba(
+            1.0,
+            1.0,
+            1.0,
+            if hovered_item == 0 { 36.0 } else { 28.0 } / 255.0,
+        );
         rounded_rect_path(context, slider_x, track_y, slider_w, slider_track_h, 3.0);
         let _ = context.fill();
 
@@ -2618,8 +3234,15 @@ fn draw_click_options(
         let filled_w = click_size.clamp(0.0, 1.0) * slider_w;
         if filled_w > 1.0 {
             let _ = context.save();
-            let fill_grad = gtk4::cairo::LinearGradient::new(slider_x, 0.0, slider_x + slider_w, 0.0);
-            fill_grad.add_color_stop_rgba(0.0, 204.0 / 255.0, 122.0 / 255.0, 80.0 / 255.0, 235.0 / 255.0);
+            let fill_grad =
+                gtk4::cairo::LinearGradient::new(slider_x, 0.0, slider_x + slider_w, 0.0);
+            fill_grad.add_color_stop_rgba(
+                0.0,
+                204.0 / 255.0,
+                122.0 / 255.0,
+                80.0 / 255.0,
+                235.0 / 255.0,
+            );
             fill_grad.add_color_stop_rgba(1.0, 1.0, 178.0 / 255.0, 122.0 / 255.0, 235.0 / 255.0);
             let _ = context.set_source(&fill_grad);
             rounded_rect_path(context, slider_x, track_y, filled_w, slider_track_h, 3.0);
@@ -2647,7 +3270,14 @@ fn draw_click_options(
         let handle_x = slider_x + filled_w - handle_w / 2.0;
         let handle_y = curr_y + (row_h - handle_h) / 2.0;
         context.set_source_rgba(0.0, 0.0, 0.0, 90.0 / 255.0);
-        rounded_rect_path(context, handle_x + 0.6, handle_y + 1.4, handle_w, handle_h, 6.0);
+        rounded_rect_path(
+            context,
+            handle_x + 0.6,
+            handle_y + 1.4,
+            handle_w,
+            handle_h,
+            6.0,
+        );
         let _ = context.fill();
         let _ = context.save();
         let handle_grad = gtk4::cairo::LinearGradient::new(0.0, handle_y, 0.0, handle_y + handle_h);
@@ -2660,12 +3290,19 @@ fn draw_click_options(
 
         // Percentage badge
         let pct = (click_size * 100.0).round() as i32;
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(11.0);
         context.set_source_rgba(1.0, 232.0 / 255.0, 214.0 / 255.0, 220.0 / 255.0);
         let pct_text = format!("{}%", pct);
         if let Ok(extents) = context.text_extents(&pct_text) {
-            context.move_to(slider_x + slider_w - extents.width() - extents.x_bearing(), curr_y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                slider_x + slider_w - extents.width() - extents.x_bearing(),
+                curr_y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(&pct_text).ok();
         }
     }
@@ -2682,13 +3319,33 @@ fn draw_click_options(
 
         // Dropdown button bg
         let _ = context.save();
-        let bg_grad = gtk4::cairo::LinearGradient::new(0.0, color_btn_y, 0.0, color_btn_y + color_btn_h);
-        bg_grad.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, if hovered { 32.0 } else { 20.0 } / 255.0);
-        bg_grad.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, if hovered { 70.0 } else { 92.0 } / 255.0);
+        let bg_grad =
+            gtk4::cairo::LinearGradient::new(0.0, color_btn_y, 0.0, color_btn_y + color_btn_h);
+        bg_grad.add_color_stop_rgba(
+            0.0,
+            1.0,
+            1.0,
+            1.0,
+            if hovered { 32.0 } else { 20.0 } / 255.0,
+        );
+        bg_grad.add_color_stop_rgba(
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            if hovered { 70.0 } else { 92.0 } / 255.0,
+        );
         let _ = context.set_source(&bg_grad);
         context.set_line_width(1.0);
         context.set_source_rgba(1.0, 1.0, 1.0, if hovered { 70.0 } else { 38.0 } / 255.0);
-        rounded_rect_path(context, color_btn_x, color_btn_y, color_btn_w, color_btn_h, 8.0);
+        rounded_rect_path(
+            context,
+            color_btn_x,
+            color_btn_y,
+            color_btn_w,
+            color_btn_h,
+            8.0,
+        );
         let _ = context.stroke_preserve();
         let _ = context.set_source(&bg_grad);
         let _ = context.fill();
@@ -2714,16 +3371,27 @@ fn draw_click_options(
 
         // Color name text
         let color_name = CLICK_COLOR_NAMES[click_color.min(CLICK_COLORS_LEN - 1)];
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(245.0 / 255.0, 245.0 / 255.0, 246.0 / 255.0, 1.0);
         if let Ok(extents) = context.text_extents(color_name) {
-            context.move_to(color_btn_x + 32.0 - extents.x_bearing(), color_btn_y + color_btn_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                color_btn_x + 32.0 - extents.x_bearing(),
+                color_btn_y + color_btn_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(color_name).ok();
         }
 
         // Chevron
-        draw_chevron(context, color_btn_x + color_btn_w - 13.0, color_btn_y + color_btn_h / 2.0 + 1.0);
+        draw_chevron(
+            context,
+            color_btn_x + color_btn_w - 13.0,
+            color_btn_y + color_btn_h / 2.0 + 1.0,
+        );
     }
     curr_y += row_h;
 
@@ -2737,26 +3405,57 @@ fn draw_click_options(
         let hovered = hovered_item == 2;
 
         let _ = context.save();
-        let bg_grad = gtk4::cairo::LinearGradient::new(0.0, style_btn_y, 0.0, style_btn_y + style_btn_h);
-        bg_grad.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, if hovered { 32.0 } else { 20.0 } / 255.0);
-        bg_grad.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, if hovered { 70.0 } else { 92.0 } / 255.0);
+        let bg_grad =
+            gtk4::cairo::LinearGradient::new(0.0, style_btn_y, 0.0, style_btn_y + style_btn_h);
+        bg_grad.add_color_stop_rgba(
+            0.0,
+            1.0,
+            1.0,
+            1.0,
+            if hovered { 32.0 } else { 20.0 } / 255.0,
+        );
+        bg_grad.add_color_stop_rgba(
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            if hovered { 70.0 } else { 92.0 } / 255.0,
+        );
         let _ = context.set_source(&bg_grad);
         context.set_line_width(1.0);
         context.set_source_rgba(1.0, 1.0, 1.0, if hovered { 70.0 } else { 38.0 } / 255.0);
-        rounded_rect_path(context, style_btn_x, style_btn_y, style_btn_w, style_btn_h, 8.0);
+        rounded_rect_path(
+            context,
+            style_btn_x,
+            style_btn_y,
+            style_btn_w,
+            style_btn_h,
+            8.0,
+        );
         let _ = context.stroke_preserve();
         let _ = context.set_source(&bg_grad);
         let _ = context.fill();
         let _ = context.restore();
 
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(245.0 / 255.0, 245.0 / 255.0, 246.0 / 255.0, 1.0);
         if let Ok(extents) = context.text_extents(style_name) {
-            context.move_to(style_btn_x + 14.0 - extents.x_bearing(), style_btn_y + style_btn_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                style_btn_x + 14.0 - extents.x_bearing(),
+                style_btn_y + style_btn_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(style_name).ok();
         }
-        draw_chevron(context, style_btn_x + style_btn_w - 13.0, style_btn_y + style_btn_h / 2.0 + 1.0);
+        draw_chevron(
+            context,
+            style_btn_x + style_btn_w - 13.0,
+            style_btn_y + style_btn_h / 2.0 + 1.0,
+        );
     }
     curr_y += row_h;
 
@@ -2767,33 +3466,78 @@ fn draw_click_options(
         let anim_w = control_w;
         let hovered = hovered_item == 3;
         if hovered {
-            rounded_rect_path(context, anim_x - 4.0, curr_y + 4.0, anim_w + 8.0, row_h - 8.0, 8.0);
+            rounded_rect_path(
+                context,
+                anim_x - 4.0,
+                curr_y + 4.0,
+                anim_w + 8.0,
+                row_h - 8.0,
+                8.0,
+            );
             context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
             let _ = context.fill();
         }
-        draw_checkbox(context, anim_x, curr_y + (row_h - 20.0) / 2.0, 20.0, click_animate, false, accent_r, accent_g, accent_b);
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        draw_checkbox(
+            context,
+            anim_x,
+            curr_y + (row_h - 20.0) / 2.0,
+            20.0,
+            click_animate,
+            false,
+            accent_r,
+            accent_g,
+            accent_b,
+        );
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(245.0 / 255.0, 245.0 / 255.0, 246.0 / 255.0, 1.0);
-        let anim_text = if click_animate { "Animate clicks  ·  ON" } else { "Animate clicks" };
+        let anim_text = if click_animate {
+            "Animate clicks  ·  ON"
+        } else {
+            "Animate clicks"
+        };
         if let Ok(extents) = context.text_extents(anim_text) {
-            context.move_to(anim_x + 30.0 - extents.x_bearing(), curr_y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.move_to(
+                anim_x + 30.0 - extents.x_bearing(),
+                curr_y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+            );
             context.show_text(anim_text).ok();
         }
     }
     curr_y += row_h + 10.0;
 
     // ── 5. Preview area ──
-    let preview_area = RectF { x: menu_x + 20.0, y: curr_y, width: menu_w - 40.0, height: 138.0 };
+    let preview_area = RectF {
+        x: menu_x + 20.0,
+        y: curr_y,
+        width: menu_w - 40.0,
+        height: 138.0,
+    };
     {
         let _ = context.save();
-        let bg_grad = gtk4::cairo::LinearGradient::new(0.0, preview_area.y, 0.0, preview_area.y + preview_area.height);
+        let bg_grad = gtk4::cairo::LinearGradient::new(
+            0.0,
+            preview_area.y,
+            0.0,
+            preview_area.y + preview_area.height,
+        );
         bg_grad.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 14.0 / 255.0);
         bg_grad.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 96.0 / 255.0);
         let _ = context.set_source(&bg_grad);
         context.set_line_width(1.0);
         context.set_source_rgba(1.0, 1.0, 1.0, 36.0 / 255.0);
-        rounded_rect_path(context, preview_area.x, preview_area.y, preview_area.width, preview_area.height, 12.0);
+        rounded_rect_path(
+            context,
+            preview_area.x,
+            preview_area.y,
+            preview_area.width,
+            preview_area.height,
+            12.0,
+        );
         let _ = context.stroke_preserve();
         let _ = context.set_source(&bg_grad);
         let _ = context.fill();
@@ -2814,18 +3558,27 @@ fn draw_click_options(
         }
 
         // Placeholder text
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(1.0, 1.0, 1.0, 160.0 / 255.0);
         if let Ok(ext) = context.text_extents("Click anywhere to preview") {
-            context.move_to(preview_area.x + preview_area.width / 2.0 - ext.width() / 2.0 - ext.x_bearing(),
-                preview_area.y + preview_area.height / 2.0 - ext.height() / 2.0 - ext.y_bearing());
+            context.move_to(
+                preview_area.x + preview_area.width / 2.0 - ext.width() / 2.0 - ext.x_bearing(),
+                preview_area.y + preview_area.height / 2.0 - ext.height() / 2.0 - ext.y_bearing(),
+            );
             context.show_text("Click anywhere to preview").ok();
         }
         context.set_font_size(10.7);
         context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
         if let Ok(_ext) = context.text_extents("Preview updates live") {
-            context.move_to(preview_area.x + preview_area.width / 2.0 - 60.0, preview_area.y + preview_area.height / 2.0 + 18.0);
+            context.move_to(
+                preview_area.x + preview_area.width / 2.0 - 60.0,
+                preview_area.y + preview_area.height / 2.0 + 18.0,
+            );
             context.show_text("Preview updates live").ok();
         }
         let _ = context.restore();
@@ -2863,12 +3616,18 @@ fn draw_click_options(
         let _ = context.fill();
         let _ = context.restore();
 
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
         context.set_font_size(13.3);
         context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
         if let Ok(ext) = context.text_extents("Done") {
-            context.move_to(ok_x + ok_w / 2.0 - ext.width() / 2.0 - ext.x_bearing(),
-                ok_y + ok_h / 2.0 - ext.height() / 2.0 - ext.y_bearing());
+            context.move_to(
+                ok_x + ok_w / 2.0 - ext.width() / 2.0 - ext.x_bearing(),
+                ok_y + ok_h / 2.0 - ext.height() / 2.0 - ext.y_bearing(),
+            );
             context.show_text("Done").ok();
         }
     }
@@ -2876,11 +3635,16 @@ fn draw_click_options(
 
 fn draw_webcam_options(
     context: &gtk4::cairo::Context,
-    menu_x: f64, menu_y: f64,
-    screen_width: f64, screen_height: f64,
+    menu_x: f64,
+    menu_y: f64,
+    screen_width: f64,
+    screen_height: f64,
     _background: Option<&BackgroundFrame>,
     hovered_item: i32,
-    webcam_device: i32, webcam_size: usize, webcam_shape: usize, webcam_flip: bool,
+    webcam_device: i32,
+    webcam_size: usize,
+    webcam_shape: usize,
+    webcam_flip: bool,
 ) {
     let menu_w = 320.0;
     let item_h = 28.0;
@@ -2889,9 +3653,24 @@ fn draw_webcam_options(
 
     let sections: &[&[(&str, bool, i32)]] = &[
         &[("Camera", false, -1), ("None", true, 0)],
-        &[("Size", false, -1), ("Small", true, 1), ("Medium", true, 2), ("Large", true, 3), ("Huge", true, 4)],
-        &[("Click on camera to toggle Full Screen", false, -1), ("Full Screen", true, 5)],
-        &[("Shape", false, -1), ("Circle", true, 6), ("Square", true, 7), ("Rectangle", true, 8), ("Vertical", true, 9)],
+        &[
+            ("Size", false, -1),
+            ("Small", true, 1),
+            ("Medium", true, 2),
+            ("Large", true, 3),
+            ("Huge", true, 4),
+        ],
+        &[
+            ("Click on camera to toggle Full Screen", false, -1),
+            ("Full Screen", true, 5),
+        ],
+        &[
+            ("Shape", false, -1),
+            ("Circle", true, 6),
+            ("Square", true, 7),
+            ("Rectangle", true, 8),
+            ("Vertical", true, 9),
+        ],
         &[("Options", false, -1), ("Flip Camera", true, 10)],
     ];
 
@@ -2919,7 +3698,11 @@ fn draw_webcam_options(
         for (ii, (label, _is_clickable, item_idx)) in section.iter().enumerate() {
             if ii == 0 {
                 // Section header — dimmed, bold, smaller text
-                context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+                context.select_font_face(
+                    "Sans",
+                    gtk4::cairo::FontSlant::Normal,
+                    gtk4::cairo::FontWeight::Bold,
+                );
                 context.set_font_size(11.0);
                 context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
                 context.move_to(popup_x + 18.0, curr_y + 14.0);
@@ -2927,26 +3710,52 @@ fn draw_webcam_options(
                 curr_y += header_h;
             } else {
                 // Clickable item
-                let item_rect = RectF { x: popup_x + 4.0, y: curr_y + 1.0, width: menu_w - 8.0, height: item_h - 2.0 };
+                let item_rect = RectF {
+                    x: popup_x + 4.0,
+                    y: curr_y + 1.0,
+                    width: menu_w - 8.0,
+                    height: item_h - 2.0,
+                };
                 let hovered = *item_idx == hovered_item;
 
                 if hovered {
-                    rounded_rect_path(context, item_rect.x, item_rect.y, item_rect.width, item_rect.height, 6.0);
-                    context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 220.0 / 255.0);
+                    rounded_rect_path(
+                        context,
+                        item_rect.x,
+                        item_rect.y,
+                        item_rect.width,
+                        item_rect.height,
+                        6.0,
+                    );
+                    context.set_source_rgba(
+                        176.0 / 255.0,
+                        92.0 / 255.0,
+                        56.0 / 255.0,
+                        220.0 / 255.0,
+                    );
                     let _ = context.fill();
                 }
 
                 let is_selected = match *item_idx {
                     0 => webcam_device == -1,
-                    1 => webcam_size == 0, 2 => webcam_size == 1, 3 => webcam_size == 2,
-                    4 => webcam_size == 3, 5 => webcam_size == 4,
-                    6 => webcam_shape == 0, 7 => webcam_shape == 1, 8 => webcam_shape == 2,
+                    1 => webcam_size == 0,
+                    2 => webcam_size == 1,
+                    3 => webcam_size == 2,
+                    4 => webcam_size == 3,
+                    5 => webcam_size == 4,
+                    6 => webcam_shape == 0,
+                    7 => webcam_shape == 1,
+                    8 => webcam_shape == 2,
                     9 => webcam_shape == 3,
                     10 => webcam_flip,
                     _ => false,
                 };
 
-                let text_color = if hovered { (1.0, 234.0 / 255.0, 214.0 / 255.0, 1.0) } else { (241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 1.0) };
+                let text_color = if hovered {
+                    (1.0, 234.0 / 255.0, 214.0 / 255.0, 1.0)
+                } else {
+                    (241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 1.0)
+                };
 
                 // Checkmark
                 if is_selected {
@@ -2960,7 +3769,11 @@ fn draw_webcam_options(
                 }
 
                 // Item text
-                context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+                context.select_font_face(
+                    "Sans",
+                    gtk4::cairo::FontSlant::Normal,
+                    gtk4::cairo::FontWeight::Normal,
+                );
                 context.set_font_size(13.0);
                 context.set_source_rgba(text_color.0, text_color.1, text_color.2, text_color.3);
                 context.move_to(popup_x + 32.0, curr_y + item_h / 2.0 + 4.5);
@@ -2973,15 +3786,28 @@ fn draw_webcam_options(
 }
 
 fn click_options_hit_item(
-    selection_x: f64, selection_y: f64, selection_width: f64, _selection_height: f64,
-    screen_width: f64, screen_height: f64, x: f64, y: f64,
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    _selection_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
 ) -> Option<i32> {
     let menu_w = 440.0;
     let menu_h = 500.0;
     let menu_x = (selection_x + (selection_width - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
     let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - (menu_h + 30.0));
-    let menu_rect = RectF { x: menu_x, y: menu_y, width: menu_w, height: menu_h };
-    if !menu_rect.contains(x, y) { return None; }
+    let menu_rect = RectF {
+        x: menu_x,
+        y: menu_y,
+        width: menu_w,
+        height: menu_h,
+    };
+    if !menu_rect.contains(x, y) {
+        return None;
+    }
 
     let value_x = menu_x + 130.0;
     let control_w = 280.0;
@@ -2989,37 +3815,95 @@ fn click_options_hit_item(
     let mut curr_y = menu_y + 78.0;
 
     // 0: slider
-    if (RectF { x: value_x, y: curr_y, width: control_w, height: row_h }).contains(x, y) { return Some(0); }
+    if (RectF {
+        x: value_x,
+        y: curr_y,
+        width: control_w,
+        height: row_h,
+    })
+    .contains(x, y)
+    {
+        return Some(0);
+    }
     curr_y += row_h;
 
     // 1: color dropdown
     let color_btn_y = curr_y + (row_h - 32.0) / 2.0;
-    if (RectF { x: value_x, y: color_btn_y, width: 168.0, height: 32.0 }).contains(x, y) { return Some(1); }
+    if (RectF {
+        x: value_x,
+        y: color_btn_y,
+        width: 168.0,
+        height: 32.0,
+    })
+    .contains(x, y)
+    {
+        return Some(1);
+    }
     curr_y += row_h;
 
     // 2: style dropdown
     let style_btn_y = curr_y + (row_h - 32.0) / 2.0;
-    if (RectF { x: value_x, y: style_btn_y, width: 110.0, height: 32.0 }).contains(x, y) { return Some(2); }
+    if (RectF {
+        x: value_x,
+        y: style_btn_y,
+        width: 110.0,
+        height: 32.0,
+    })
+    .contains(x, y)
+    {
+        return Some(2);
+    }
     curr_y += row_h;
 
     // 3: animation toggle
-    if (RectF { x: value_x, y: curr_y, width: control_w, height: row_h }).contains(x, y) { return Some(3); }
+    if (RectF {
+        x: value_x,
+        y: curr_y,
+        width: control_w,
+        height: row_h,
+    })
+    .contains(x, y)
+    {
+        return Some(3);
+    }
     curr_y += row_h + 10.0;
 
     // 4: preview area
     let preview_h = 138.0;
-    if (RectF { x: menu_x + 20.0, y: curr_y, width: menu_w - 40.0, height: preview_h }).contains(x, y) { return Some(4); }
+    if (RectF {
+        x: menu_x + 20.0,
+        y: curr_y,
+        width: menu_w - 40.0,
+        height: preview_h,
+    })
+    .contains(x, y)
+    {
+        return Some(4);
+    }
 
     // 5: OK button
-    let ok_rect = RectF { x: menu_x + menu_w - 96.0, y: menu_y + menu_h - 48.0, width: 76.0, height: 32.0 };
-    if ok_rect.contains(x, y) { return Some(5); }
+    let ok_rect = RectF {
+        x: menu_x + menu_w - 96.0,
+        y: menu_y + menu_h - 48.0,
+        width: 76.0,
+        height: 32.0,
+    };
+    if ok_rect.contains(x, y) {
+        return Some(5);
+    }
 
     None
 }
 
 fn webcam_options_hit_item(
-    selection_x: f64, selection_y: f64, selection_width: f64, _selection_height: f64,
-    screen_width: f64, screen_height: f64, x: f64, y: f64,
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    _selection_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
 ) -> Option<i32> {
     let menu_w = 320.0;
     let item_h = 28.0;
@@ -3033,17 +3917,34 @@ fn webcam_options_hit_item(
         total_h += header_h + c as f64 * item_h;
     }
 
-    let menu_x = (selection_x + (selection_width - menu_w) / 2.0).clamp(10.0, screen_width - menu_w - 10.0);
+    let menu_x =
+        (selection_x + (selection_width - menu_w) / 2.0).clamp(10.0, screen_width - menu_w - 10.0);
     let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - total_h - 10.0);
-    if !(RectF { x: menu_x, y: menu_y, width: menu_w, height: total_h }).contains(x, y) { return None; }
+    if !(RectF {
+        x: menu_x,
+        y: menu_y,
+        width: menu_w,
+        height: total_h,
+    })
+    .contains(x, y)
+    {
+        return None;
+    }
 
     let mut curr_y = menu_y + pad;
     let mut running_idx = 0i32;
     for &count in item_counts {
         curr_y += header_h; // skip header
         for _ in 0..count {
-            let item_rect = RectF { x: menu_x + 4.0, y: curr_y + 1.0, width: menu_w - 8.0, height: item_h - 2.0 };
-            if item_rect.contains(x, y) { return Some(running_idx); }
+            let item_rect = RectF {
+                x: menu_x + 4.0,
+                y: curr_y + 1.0,
+                width: menu_w - 8.0,
+                height: item_h - 2.0,
+            };
+            if item_rect.contains(x, y) {
+                return Some(running_idx);
+            }
             curr_y += item_h;
             running_idx += 1;
         }
@@ -3792,7 +4693,8 @@ fn setup_window(
             // GIF slider dragging — update value from X position
             if let Some(slider) = st.gif_slider_dragging {
                 if st.settings_menu_open {
-                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                        .clamp(10.0, screen_width as f64 - 450.0);
                     let value_x = menu_x + 130.0;
                     if slider == 0 {
                         let slider_x = value_x + 55.0;
@@ -3813,14 +4715,17 @@ fn setup_window(
                 st.hover_crop_panel = false;
                 st.hover_record_tile = None;
                 drop(st);
-                if let Some(da) = drawing_area_weak_motion.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_motion.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
 
             // Click slider dragging
             if st.click_slider_dragging && st.click_options_open {
                 let rect = current_selection_rect(&st);
-                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                    .clamp(10.0, screen_width as f64 - 450.0);
                 let value_x = menu_x + 130.0;
                 let slider_x = value_x;
                 let slider_w = 280.0;
@@ -3835,19 +4740,29 @@ fn setup_window(
                 st.hover_crop_panel = false;
                 st.hover_record_tile = None;
                 drop(st);
-                if let Some(da) = drawing_area_weak_motion.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_motion.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
 
             // Capture crop menu hover check
             if st.capture_crop_menu_open {
                 let item = capture_crop_menu_hit_item(
-                    rect.left, rect.top, rect.width(), rect.height(),
-                    screen_width as f64, screen_height as f64, x, y,
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    x,
+                    y,
                 );
                 let next = item.map(|i| i as i32).unwrap_or(-1);
                 let changed = next != st.hovered_capture_crop_menu_item;
-                if changed { st.hovered_capture_crop_menu_item = next; }
+                if changed {
+                    st.hovered_capture_crop_menu_item = next;
+                }
                 st.hovered_crop_menu_item = -1;
                 st.hovered_settings_item = -1;
                 // Clear other hovers
@@ -3858,12 +4773,20 @@ fn setup_window(
                 ("pointer".to_string(), changed, true)
             } else if st.crop_menu_open {
                 let item = recording_crop_menu_hit_item(
-                    rect.left, rect.top, rect.width(), rect.height(),
-                    screen_width as f64, screen_height as f64, x, y,
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    x,
+                    y,
                 );
                 let next = item.map(|i| i as i32).unwrap_or(-1);
                 let changed = next != st.hovered_crop_menu_item;
-                if changed { st.hovered_crop_menu_item = next; }
+                if changed {
+                    st.hovered_crop_menu_item = next;
+                }
                 st.hovered_capture_crop_menu_item = -1;
                 st.hovered_settings_item = -1;
                 st.hover_tool_index = None;
@@ -3882,30 +4805,46 @@ fn setup_window(
                     st.hover_record_tile = None;
                     ("pointer".to_string(), false, true)
                 } else {
-                let item = settings_menu_hit_item(
-                    rect.left, rect.top, rect.width(), rect.height(),
-                    screen_width as f64, screen_height as f64, x, y,
-                    st.settings_tab,
-                );
-                let next = item.unwrap_or(-1);
-                let changed = next != st.hovered_settings_item;
-                if changed { st.hovered_settings_item = next; }
-                st.hovered_capture_crop_menu_item = -1;
-                st.hovered_crop_menu_item = -1;
-                st.hover_tool_index = None;
-                st.hover_size_panel = false;
-                st.hover_crop_panel = false;
-                st.hover_record_tile = None;
-                ("pointer".to_string(), changed, true)
+                    let item = settings_menu_hit_item(
+                        rect.left,
+                        rect.top,
+                        rect.width(),
+                        rect.height(),
+                        screen_width as f64,
+                        screen_height as f64,
+                        x,
+                        y,
+                        st.settings_tab,
+                    );
+                    let next = item.unwrap_or(-1);
+                    let changed = next != st.hovered_settings_item;
+                    if changed {
+                        st.hovered_settings_item = next;
+                    }
+                    st.hovered_capture_crop_menu_item = -1;
+                    st.hovered_crop_menu_item = -1;
+                    st.hover_tool_index = None;
+                    st.hover_size_panel = false;
+                    st.hover_crop_panel = false;
+                    st.hover_record_tile = None;
+                    ("pointer".to_string(), changed, true)
                 }
             } else if st.click_options_open {
                 let item = click_options_hit_item(
-                    rect.left, rect.top, rect.width(), rect.height(),
-                    screen_width as f64, screen_height as f64, x, y,
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    x,
+                    y,
                 );
                 let next = item.unwrap_or(-1);
                 let changed = next != st.hovered_click_item;
-                if changed { st.hovered_click_item = next; }
+                if changed {
+                    st.hovered_click_item = next;
+                }
                 st.hovered_settings_item = -1;
                 st.hovered_capture_crop_menu_item = -1;
                 st.hovered_crop_menu_item = -1;
@@ -3916,12 +4855,20 @@ fn setup_window(
                 ("pointer".to_string(), changed, true)
             } else if st.webcam_options_open {
                 let item = webcam_options_hit_item(
-                    rect.left, rect.top, rect.width(), rect.height(),
-                    screen_width as f64, screen_height as f64, x, y,
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    x,
+                    y,
                 );
                 let next = item.unwrap_or(-1);
                 let changed = next != st.hovered_webcam_item;
-                if changed { st.hovered_webcam_item = next; }
+                if changed {
+                    st.hovered_webcam_item = next;
+                }
                 st.hovered_settings_item = -1;
                 st.hovered_capture_crop_menu_item = -1;
                 st.hovered_crop_menu_item = -1;
@@ -3933,8 +4880,14 @@ fn setup_window(
             } else {
                 let record_hit = if st.recording_panel_open {
                     recording_tile_at(
-                        rect.left, rect.top, rect.width(), rect.height(),
-                        screen_width as f64, screen_height as f64, x, y,
+                        rect.left,
+                        rect.top,
+                        rect.width(),
+                        rect.height(),
+                        screen_width as f64,
+                        screen_height as f64,
+                        x,
+                        y,
                     )
                 } else {
                     None
@@ -3943,8 +4896,14 @@ fn setup_window(
                     None
                 } else {
                     toolbar_hit_at(
-                        rect.left, rect.top, rect.width(), rect.height(),
-                        screen_width as f64, screen_height as f64, x, y,
+                        rect.left,
+                        rect.top,
+                        rect.width(),
+                        rect.height(),
+                        screen_width as f64,
+                        screen_height as f64,
+                        x,
+                        y,
                     )
                 };
 
@@ -3972,7 +4931,11 @@ fn setup_window(
                                 detect_resize_handle(x, y, rect)
                                     .map(cursor_name_for_handle)
                                     .unwrap_or_else(|| {
-                                        if is_inside_selection(x, y, rect) { "fleur" } else { "crosshair" }
+                                        if is_inside_selection(x, y, rect) {
+                                            "fleur"
+                                        } else {
+                                            "crosshair"
+                                        }
                                     })
                             } else {
                                 "crosshair"
@@ -4071,40 +5034,60 @@ fn setup_window(
         // Capture crop menu (non-recording mode)
         if st.capture_crop_menu_open {
             if let Some(item) = capture_crop_menu_hit_item(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, x, y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
             ) {
                 st.capture_aspect_ratio_index = item;
                 st.capture_crop_menu_open = false;
                 st.hovered_capture_crop_menu_item = -1;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
             st.capture_crop_menu_open = false;
             st.hovered_capture_crop_menu_item = -1;
             drop(st);
-            if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
             return;
         }
 
         // Recording crop menu
         if st.crop_menu_open {
             if let Some(item) = recording_crop_menu_hit_item(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, x, y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
             ) {
                 st.record_aspect_ratio_index = item;
                 st.crop_menu_open = false;
                 st.hovered_crop_menu_item = -1;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
             st.crop_menu_open = false;
             st.hovered_crop_menu_item = -1;
             drop(st);
-            if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
             return;
         }
 
@@ -4122,43 +5105,77 @@ fn setup_window(
                 } else if tab == 1 && drop_idx == 4 {
                     (&["24", "30", "50", "60"], &mut st.video_fps)
                 } else if tab == 2 && drop_idx == 6 {
-                    (&["800 x auto", "640 x auto", "480 x auto", "Original"], &mut st.gif_size_idx)
+                    (
+                        &["800 x auto", "640 x auto", "480 x auto", "Original"],
+                        &mut st.gif_size_idx,
+                    )
                 } else {
                     (&[], &mut 0)
                 };
                 // Compute dropdown popup rect
-                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                    .clamp(10.0, screen_width as f64 - 450.0);
                 let menu_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - 570.0);
-                let popup_y = compute_dropdown_popup_y(menu_y, drop_idx, match tab { 1 => SettingsTab::Video, 2 => SettingsTab::Gif, _ => SettingsTab::General });
-                let popup_rect = RectF { x: menu_x + 130.0, y: popup_y, width: 140.0, height: options.len() as f64 * 30.0 };
+                let popup_y = compute_dropdown_popup_y(
+                    menu_y,
+                    drop_idx,
+                    match tab {
+                        1 => SettingsTab::Video,
+                        2 => SettingsTab::Gif,
+                        _ => SettingsTab::General,
+                    },
+                );
+                let popup_rect = RectF {
+                    x: menu_x + 130.0,
+                    y: popup_y,
+                    width: 140.0,
+                    height: options.len() as f64 * 30.0,
+                };
                 // Check if clicked outside popup
                 if !popup_rect.contains(x, y) {
                     st.settings_dropdown_open = None;
                     drop(st);
-                    if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                    if let Some(da) = drawing_area_weak_click.upgrade() {
+                        da.queue_draw();
+                    }
                     return;
                 }
                 // Check item clicks
                 for (oi, _opt) in options.iter().enumerate() {
-                    let item_rect = RectF { x: popup_rect.x, y: popup_rect.y + oi as f64 * 30.0, width: popup_rect.width, height: 30.0 };
+                    let item_rect = RectF {
+                        x: popup_rect.x,
+                        y: popup_rect.y + oi as f64 * 30.0,
+                        width: popup_rect.width,
+                        height: 30.0,
+                    };
                     if item_rect.contains(x, y) {
                         *value_ptr = oi;
                         st.settings_dropdown_open = None;
                         st.hovered_settings_item = -1;
                         drop(st);
-                        if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                        if let Some(da) = drawing_area_weak_click.upgrade() {
+                            da.queue_draw();
+                        }
                         return;
                     }
                 }
                 st.settings_dropdown_open = None;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
 
             if let Some(item) = settings_menu_hit_item(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, x, y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
                 st.settings_tab,
             ) {
                 // Tab clicks
@@ -4197,22 +5214,25 @@ fn setup_window(
                     }
                 } else if matches!(st.settings_tab, SettingsTab::Gif) {
                     let gif_idx = item - 3;
-                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                        .clamp(10.0, screen_width as f64 - 450.0);
                     let value_x = menu_x + 130.0;
                     match gif_idx {
-                        0 => { // FPS slider — click-to-position + start drag
-                             let slider_x = value_x + 55.0;
-                             let slider_w = 220.0;
-                             let click_x = x.clamp(slider_x, slider_x + slider_w);
-                             st.gif_fps = 5.0 + (click_x - slider_x) / slider_w * 55.0;
-                             st.gif_slider_dragging = Some(0);
-                         }
-                        1 => { // Quality slider — click-to-position + start drag
-                             let q_slider_w = 160.0;
-                             let click_x = x.clamp(value_x, value_x + q_slider_w);
-                             st.gif_quality = 0.1 + (click_x - value_x) / q_slider_w * 0.8;
-                             st.gif_slider_dragging = Some(1);
-                         }
+                        0 => {
+                            // FPS slider — click-to-position + start drag
+                            let slider_x = value_x + 55.0;
+                            let slider_w = 220.0;
+                            let click_x = x.clamp(slider_x, slider_x + slider_w);
+                            st.gif_fps = 5.0 + (click_x - slider_x) / slider_w * 55.0;
+                            st.gif_slider_dragging = Some(0);
+                        }
+                        1 => {
+                            // Quality slider — click-to-position + start drag
+                            let q_slider_w = 160.0;
+                            let click_x = x.clamp(value_x, value_x + q_slider_w);
+                            st.gif_quality = 0.1 + (click_x - value_x) / q_slider_w * 0.8;
+                            st.gif_slider_dragging = Some(1);
+                        }
                         2 => st.optimize_gif = !st.optimize_gif,
                         3 => st.settings_dropdown_open = Some(6), // size dropdown
                         _ => {}
@@ -4220,7 +5240,9 @@ fn setup_window(
                 }
                 st.hovered_settings_item = -1;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
             // Click outside settings menu closes it
@@ -4228,19 +5250,29 @@ fn setup_window(
             st.hovered_settings_item = -1;
             st.settings_dropdown_open = None;
             drop(st);
-            if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
             return;
         }
 
         // ── Click options menu click handling ──
         if st.click_options_open {
             if let Some(item) = click_options_hit_item(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, x, y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
             ) {
                 match item {
-                    0 => { // Size slider — start drag
-                        let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                    0 => {
+                        // Size slider — start drag
+                        let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                            .clamp(10.0, screen_width as f64 - 450.0);
                         let value_x = menu_x + 130.0;
                         let slider_x = value_x;
                         let slider_w = 280.0;
@@ -4248,24 +5280,30 @@ fn setup_window(
                         st.click_size = ((click_x - slider_x) / slider_w).clamp(0.0, 1.0);
                         st.click_slider_dragging = true;
                     }
-                    1 => { // Color dropdown — cycle
+                    1 => {
+                        // Color dropdown — cycle
                         st.click_color = (st.click_color + 1) % CLICK_COLORS_LEN;
                     }
-                    2 => { // Style dropdown — toggle
+                    2 => {
+                        // Style dropdown — toggle
                         st.click_style = if st.click_style == 0 { 1 } else { 0 };
                     }
-                    3 => { // Animation toggle
+                    3 => {
+                        // Animation toggle
                         st.click_animate = !st.click_animate;
                     }
                     4 => (), // Preview area — no action
-                    5 | _ => { // Done button — close
+                    5 | _ => {
+                        // Done button — close
                         st.click_options_open = false;
                         st.hovered_click_item = -1;
                     }
                 }
                 st.hovered_click_item = -1;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
             // Click outside click options closes it
@@ -4273,15 +5311,23 @@ fn setup_window(
             st.hovered_click_item = -1;
             st.click_slider_dragging = false;
             drop(st);
-            if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
             return;
         }
 
         // ── Webcam options menu click handling ──
         if st.webcam_options_open {
             if let Some(item) = webcam_options_hit_item(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, x, y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
             ) {
                 match item {
                     0 => st.webcam_device = -1,
@@ -4299,21 +5345,31 @@ fn setup_window(
                 }
                 st.hovered_webcam_item = -1;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
             st.webcam_options_open = false;
             st.hovered_webcam_item = -1;
             drop(st);
-            if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
             return;
         }
 
         // ── Normal click handling (no menus open) ──
         let record_hit = if recording_panel_open {
             recording_tile_at(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, x, y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
             )
         } else {
             None
@@ -4322,8 +5378,14 @@ fn setup_window(
             None
         } else {
             toolbar_hit_at(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, x, y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
             )
         };
         let clicked = match hit {
@@ -4354,13 +5416,19 @@ fn setup_window(
                 st.is_dragging = false;
                 st.fullscreen_mode = true;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
             }
             Some(ToolbarIcon::Area) => {
                 let screen_w = screen_width as f64;
                 let screen_h = screen_height as f64;
-                let sel_w = DEFAULT_SELECTION_WIDTH.min(screen_w).max(MIN_SELECTION_WIDTH.min(screen_w));
-                let sel_h = DEFAULT_SELECTION_HEIGHT.min(screen_h).max(MIN_SELECTION_HEIGHT.min(screen_h));
+                let sel_w = DEFAULT_SELECTION_WIDTH
+                    .min(screen_w)
+                    .max(MIN_SELECTION_WIDTH.min(screen_w));
+                let sel_h = DEFAULT_SELECTION_HEIGHT
+                    .min(screen_h)
+                    .max(MIN_SELECTION_HEIGHT.min(screen_h));
                 let sel_x = ((screen_w - sel_w) / 2.0).max(0.0);
                 let sel_y = ((screen_h - sel_h) / 2.0).max(0.0);
                 st.start_x = sel_x;
@@ -4372,7 +5440,9 @@ fn setup_window(
                 st.fullscreen_mode = false;
                 st.recording_panel_open = false;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
             }
             Some(ToolbarIcon::Recording) => {
                 st.recording_panel_open = true;
@@ -4380,7 +5450,9 @@ fn setup_window(
                 st.hover_size_panel = false;
                 st.hover_crop_panel = false;
                 drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
             }
             _ => {
                 // Crop card clicked — open toolbar crop menu
@@ -4389,7 +5461,9 @@ fn setup_window(
                     st.hovered_capture_crop_menu_item = -1;
                     st.hover_tool_index = None;
                     drop(st);
-                    if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                    if let Some(da) = drawing_area_weak_click.upgrade() {
+                        da.queue_draw();
+                    }
                     return;
                 }
 
@@ -4430,7 +5504,9 @@ fn setup_window(
                             _ => {}
                         }
                         drop(st);
-                        if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                        if let Some(da) = drawing_area_weak_click.upgrade() {
+                            da.queue_draw();
+                        }
                         return;
                     }
                 }
@@ -4438,7 +5514,8 @@ fn setup_window(
                 if n_press == 2 {
                     drop(st);
                     let st = state_click.lock().unwrap();
-                    let inside_selection = st.completed && is_inside_selection(x, y, current_selection_rect(&st));
+                    let inside_selection =
+                        st.completed && is_inside_selection(x, y, current_selection_rect(&st));
                     drop(st);
 
                     if inside_selection {
@@ -4474,8 +5551,14 @@ fn setup_window(
         let recording_panel_open = st.recording_panel_open;
         if recording_panel_open {
             if let Some(tile) = recording_tile_at(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, x, y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
             ) {
                 match tile {
                     RecordPanelTile::Clicks => {
@@ -4494,7 +5577,9 @@ fn setup_window(
                     _ => {}
                 }
                 drop(st);
-                if let Some(da) = drawing_area_weak_rc.upgrade() { da.queue_draw(); }
+                if let Some(da) = drawing_area_weak_rc.upgrade() {
+                    da.queue_draw();
+                }
                 return;
             }
         }
@@ -4525,9 +5610,16 @@ fn setup_window(
 
             // Suppress drag when clicking toolbar tools, size/crop panels
             if toolbar_item_at(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, start_x, start_y,
-            ).is_some()
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                start_x,
+                start_y,
+            )
+            .is_some()
             {
                 st.is_dragging = false;
                 st.drag_mode = None;
@@ -4537,10 +5629,19 @@ fn setup_window(
             }
 
             let hit = toolbar_hit_at(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, start_x, start_y,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                start_x,
+                start_y,
             );
-            if matches!(hit, Some(ToolbarHit::CropPanel) | Some(ToolbarHit::SizePanel)) {
+            if matches!(
+                hit,
+                Some(ToolbarHit::CropPanel) | Some(ToolbarHit::SizePanel)
+            ) {
                 st.is_dragging = false;
                 st.drag_mode = None;
                 st.initial_rect = None;
@@ -4549,10 +5650,19 @@ fn setup_window(
             }
 
             // Suppress drag when clicking recording panel tiles
-            if st.recording_panel_open && recording_tile_at(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, start_x, start_y,
-            ).is_some() {
+            if st.recording_panel_open
+                && recording_tile_at(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    start_x,
+                    start_y,
+                )
+                .is_some()
+            {
                 st.is_dragging = false;
                 st.drag_mode = None;
                 st.initial_rect = None;
@@ -4561,20 +5671,38 @@ fn setup_window(
             }
 
             // Suppress drag when clicking any open menu
-            if st.capture_crop_menu_open && capture_crop_menu_hit_item(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, start_x, start_y,
-            ).is_some() {
+            if st.capture_crop_menu_open
+                && capture_crop_menu_hit_item(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    start_x,
+                    start_y,
+                )
+                .is_some()
+            {
                 st.is_dragging = false;
                 st.drag_mode = None;
                 st.initial_rect = None;
                 drop(st);
                 return;
             }
-            if st.crop_menu_open && recording_crop_menu_hit_item(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, start_x, start_y,
-            ).is_some() {
+            if st.crop_menu_open
+                && recording_crop_menu_hit_item(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    start_x,
+                    start_y,
+                )
+                .is_some()
+            {
                 st.is_dragging = false;
                 st.drag_mode = None;
                 st.initial_rect = None;
@@ -4583,10 +5711,17 @@ fn setup_window(
             }
             // Check if drag started inside settings menu or click options (suppress selection drag)
             if (st.settings_menu_open && st.gif_slider_dragging.is_none())
-                || (st.click_options_open && !st.click_slider_dragging) {
-                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                || (st.click_options_open && !st.click_slider_dragging)
+            {
+                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                    .clamp(10.0, screen_width as f64 - 450.0);
                 let menu_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - 570.0);
-                let menu_rect = RectF { x: menu_x, y: menu_y, width: 440.0, height: 560.0 };
+                let menu_rect = RectF {
+                    x: menu_x,
+                    y: menu_y,
+                    width: 440.0,
+                    height: 560.0,
+                };
                 if menu_rect.contains(start_x, start_y) {
                     st.is_dragging = false;
                     st.drag_mode = None;
@@ -4978,8 +6113,14 @@ fn draw_overlay(
         // ── Step 3: toolbar + resize markers on top ──
         if st.recording_panel_open {
             draw_recording_panel(
-                context, x, y, sel_w, sel_h,
-                screen_width, screen_height, background,
+                context,
+                x,
+                y,
+                sel_w,
+                sel_h,
+                screen_width,
+                screen_height,
+                background,
                 st.hover_record_tile,
                 st.crop_menu_open,
                 st.record_aspect_ratio_index,
@@ -4988,21 +6129,42 @@ fn draw_overlay(
                 st.settings_tab,
                 st.hovered_settings_item,
                 st.settings_dropdown_open,
-                st.video_max_res, st.video_fps, st.record_mono, st.open_editor,
-                st.rec_controls, st.display_rec_time, st.hidpi, st.do_not_disturb,
-                st.show_cursor, st.rec_clicks, st.rec_keystrokes, st.rec_webcam,
-                st.remember_selection, st.dim_screen, st.show_countdown,
-                st.gif_fps, st.gif_quality, st.optimize_gif, st.gif_size_idx,
+                st.video_max_res,
+                st.video_fps,
+                st.record_mono,
+                st.open_editor,
+                st.rec_controls,
+                st.display_rec_time,
+                st.hidpi,
+                st.do_not_disturb,
+                st.show_cursor,
+                st.rec_clicks,
+                st.rec_keystrokes,
+                st.rec_webcam,
+                st.remember_selection,
+                st.dim_screen,
+                st.show_countdown,
+                st.gif_fps,
+                st.gif_quality,
+                st.optimize_gif,
+                st.gif_size_idx,
             );
             // Click options menu (on top of recording panel)
             if st.click_options_open {
                 let panel_x = (x + (sel_w - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
                 let panel_y = (y + 24.0).clamp(10.0, screen_height - 530.0);
                 draw_click_options(
-                    context, panel_x, panel_y,
-                    screen_width, screen_height, background,
+                    context,
+                    panel_x,
+                    panel_y,
+                    screen_width,
+                    screen_height,
+                    background,
                     st.hovered_click_item,
-                    st.click_size, st.click_color, st.click_style, st.click_animate,
+                    st.click_size,
+                    st.click_color,
+                    st.click_style,
+                    st.click_animate,
                 );
             }
             // Webcam options menu
@@ -5010,17 +6172,32 @@ fn draw_overlay(
                 let panel_x = (x + (sel_w - 320.0) / 2.0).clamp(10.0, screen_width - 330.0);
                 let panel_y = (y + 24.0).clamp(10.0, screen_height - 350.0);
                 draw_webcam_options(
-                    context, panel_x, panel_y,
-                    screen_width, screen_height, background,
+                    context,
+                    panel_x,
+                    panel_y,
+                    screen_width,
+                    screen_height,
+                    background,
                     st.hovered_webcam_item,
-                    st.webcam_device, st.webcam_size, st.webcam_shape, st.webcam_flip,
+                    st.webcam_device,
+                    st.webcam_size,
+                    st.webcam_shape,
+                    st.webcam_flip,
                 );
             }
         } else {
             draw_feature_toolbar(
-                context, x, y, sel_w, sel_h,
-                screen_width, screen_height, background,
-                st.hover_tool_index, st.hover_size_panel, st.hover_crop_panel,
+                context,
+                x,
+                y,
+                sel_w,
+                sel_h,
+                screen_width,
+                screen_height,
+                background,
+                st.hover_tool_index,
+                st.hover_size_panel,
+                st.hover_crop_panel,
                 st.capture_crop_menu_open,
                 st.capture_aspect_ratio_index,
                 st.hovered_capture_crop_menu_item,
