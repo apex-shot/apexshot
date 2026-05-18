@@ -282,6 +282,7 @@ struct SelectorState {
     hovered_crop_menu_item: i32,
     settings_tab: SettingsTab,
     hovered_settings_item: i32,
+    settings_dropdown_open: Option<usize>,
     // Recording toggles (mic/speaker referenced in click handler)
     mic_toggle: bool,
     speaker_toggle: bool,
@@ -337,6 +338,7 @@ impl Default for SelectorState {
             hovered_crop_menu_item: -1,
             settings_tab: SettingsTab::General,
             hovered_settings_item: -1,
+            settings_dropdown_open: None,
             mic_toggle: true,
             speaker_toggle: false,
             rec_controls: true,
@@ -1152,21 +1154,33 @@ fn recording_crop_menu_hit_item(
     items.iter().position(|r| r.contains(x, y))
 }
 
+fn compute_dropdown_popup_y(menu_y: f64, item_idx: usize, tab: SettingsTab) -> f64 {
+    let start_y = menu_y + 110.0;
+    match tab {
+        SettingsTab::Video => match item_idx {
+            3 => start_y,              // res dropdown button at curr_y=110
+            4 => start_y + 35.0 + 50.0, // fps dropdown at curr_y=195
+            _ => start_y,
+        },
+        SettingsTab::Gif => match item_idx {
+            6 => start_y + 50.0 + 60.0 + 45.0, // size dropdown at curr_y=265
+            _ => start_y,
+        },
+        _ => start_y,
+    }
+}
+
 fn settings_menu_hit_item(
     selection_x: f64, selection_y: f64, selection_width: f64, _selection_height: f64,
     screen_width: f64, screen_height: f64, x: f64, y: f64,
+    tab: SettingsTab,
 ) -> Option<i32> {
     let menu_w = 440.0;
     let menu_h = 560.0;
     let menu_x = (selection_x + (selection_width - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
     let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - 570.0);
 
-    let menu_rect = RectF { x: menu_x, y: menu_y, width: menu_w, height: menu_h };
-    if !menu_rect.contains(x, y) {
-        return None;
-    }
-
-    // Tab rects
+    // Tab rects (always check, any tab)
     let tab_w = 78.0;
     let tab_h = 32.0;
     let tab_start_x = menu_x + (menu_w - 3.0 * tab_w) / 2.0;
@@ -1178,44 +1192,45 @@ fn settings_menu_hit_item(
         }
     }
 
-    // General tab items
-    let value_x = menu_x + 160.0;
-    let row_h = 32.0;
-    let mut idx = 3;
-    let mut cy = menu_y + 112.0;
+    let row_at = |cy: f64| -> bool {
+        let w = menu_w - (130.0 - menu_x) - 25.0;
+        RectF { x: menu_x + 130.0, y: cy, width: w, height: 32.0 }.contains(x, y)
+    };
 
-    // Controls, Menu bar, HiDPI, Notifications (4 items)
-    for _ in 0..4 {
-        let check_area = RectF { x: value_x, y: cy, width: menu_w - (value_x - menu_x) - 20.0, height: row_h };
-        if check_area.contains(x, y) { return Some(idx); }
-        idx += 1; cy += row_h;
-    }
-    cy += 10.0; // gap
-    // Cursor, Clicks (2 items)
-    for _ in 0..2 {
-        let check_area = RectF { x: value_x, y: cy, width: menu_w - (value_x - menu_x) - 20.0, height: row_h };
-        if check_area.contains(x, y) { return Some(idx); }
-        idx += 1; cy += row_h;
-    }
-    cy += 10.0; // gap
-    // Keyboard (1 item)
-    {
-        let check_area = RectF { x: value_x, y: cy, width: menu_w - (value_x - menu_x) - 20.0, height: row_h };
-        if check_area.contains(x, y) { return Some(idx); }
-        idx += 1; cy += row_h;
-    }
-    cy += 10.0; // gap
-    // Recording area, dim, countdown (3 items)
-    for _ in 0..3 {
-        let check_area = RectF { x: value_x, y: cy, width: menu_w - (value_x - menu_x) - 20.0, height: row_h };
-        if check_area.contains(x, y) { return Some(idx); }
-        idx += 1; cy += row_h;
+    match tab {
+        SettingsTab::General => {
+            let check_area_at = |cy: f64| -> bool {
+                let value_x = menu_x + 140.0;
+                RectF { x: value_x, y: cy, width: menu_w - 160.0, height: 32.0 }.contains(x, y)
+            };
+            let mut cy = menu_y + 110.0;
+            let mut idx = 3;
+            for _ in 0..4 { if check_area_at(cy) { return Some(idx); } idx += 1; cy += 32.0; }
+            cy += 10.0;
+            for _ in 0..2 { if check_area_at(cy) { return Some(idx); } idx += 1; cy += 32.0; }
+            cy += 10.0;
+            { if check_area_at(cy) { return Some(idx); } idx += 1; cy += 32.0; }
+            cy += 10.0;
+            for _ in 0..3 { if check_area_at(cy) { return Some(idx); } idx += 1; cy += 32.0; }
+        }
+        SettingsTab::Video => {
+            let mut cy = menu_y + 110.0;
+            if row_at(cy) { return Some(3); } cy += 35.0;
+            cy += 50.0;
+            if row_at(cy) { return Some(4); } cy += 45.0;
+            if row_at(cy) { return Some(5); } cy += 50.0;
+            if row_at(cy) { return Some(6); }
+        }
+        SettingsTab::Gif => {
+            let mut cy = menu_y + 110.0;
+            if row_at(cy) { return Some(3); } cy += 50.0;
+            if row_at(cy) { return Some(4); } cy += 60.0;
+            if row_at(cy) { return Some(5); } cy += 45.0;
+            if row_at(cy) { return Some(6); }
+        }
     }
 
-    // Video tab: res dropdown (3), fps dropdown (4), mono checkbox (5), editor checkbox (6)
-    // GIF tab: fps slider (3), quality slider (4), optimize checkbox (5), size dropdown (6)
-    // Return approximate idx; click handler will interpret based on active tab
-    Some(idx - 1)
+    None
 }
 
 fn toolbar_item_at(
@@ -1507,6 +1522,7 @@ fn draw_recording_panel(
     settings_menu_open: bool,
     settings_tab: SettingsTab,
     hovered_settings_item: i32,
+    settings_dropdown_open: Option<usize>,
     video_max_res: usize,
     video_fps: usize,
     record_mono: bool,
@@ -1820,7 +1836,7 @@ fn draw_recording_panel(
         draw_settings_menu(
             context, panel_x, panel_y,
             screen_width, screen_height, background,
-            settings_tab, hovered_settings_item,
+            settings_tab, hovered_settings_item, settings_dropdown_open,
             video_max_res, video_fps, record_mono, open_editor,
             rec_controls, display_rec_time, hidpi, do_not_disturb,
             show_cursor, rec_clicks, rec_keystrokes,
@@ -1994,6 +2010,7 @@ fn draw_settings_menu(
     background: Option<&BackgroundFrame>,
     tab: SettingsTab,
     hovered_item: i32,
+    dropdown_open: Option<usize>,
     video_max_res: usize,
     video_fps: usize,
     record_mono: bool,
@@ -2108,6 +2125,11 @@ fn draw_settings_menu(
             video_max_res, video_fps, record_mono, open_editor, accent_r, accent_g, accent_b),
         SettingsTab::Gif => draw_settings_gif_tab(context, menu_x, menu_y, menu_w, hovered_item,
             gif_fps, gif_quality, optimize_gif, gif_size_idx, accent_r, accent_g, accent_b),
+    }
+
+    if let Some(drop_idx) = dropdown_open {
+        draw_settings_dropdown_popup(context, menu_x, menu_y, menu_w, tab, drop_idx,
+            hovered_item, video_max_res, video_fps, gif_size_idx, accent_r, accent_g, accent_b);
     }
 }
 
@@ -2399,6 +2421,47 @@ fn draw_settings_gif_tab(
     draw_label(context, "GIF size:", curr_y);
     let size_options = ["800 x auto", "640 x auto", "480 x auto", "Original"];
     draw_dropdown_button(context, value_x, curr_y, 180.0, 30.0, size_options[gif_size_idx], hovered_item == 6);
+}
+
+fn draw_settings_dropdown_popup(
+    context: &gtk4::cairo::Context,
+    menu_x: f64, menu_y: f64, _menu_w: f64,
+    tab: SettingsTab,
+    drop_idx: usize,
+    _hovered_item: i32,
+    video_max_res: usize, video_fps: usize, gif_size_idx: usize,
+    accent_r: f64, accent_g: f64, accent_b: f64,
+) {
+    let (options, current_val): (&[&str], usize) = match (tab, drop_idx) {
+        (SettingsTab::Video, 3) => (&["Original", "1080p", "720p"], video_max_res),
+        (SettingsTab::Video, 4) => (&["24", "30", "50", "60"], video_fps),
+        (SettingsTab::Gif, 6) => (&["800 x auto", "640 x auto", "480 x auto", "Original"], gif_size_idx),
+        _ => return,
+    };
+    let value_x = menu_x + 130.0;
+    let popup_y = compute_dropdown_popup_y(menu_y, drop_idx, tab);
+    let item_h = 30.0;
+    let popup_w = 140.0;
+    if options.is_empty() { return; }
+    let popup_h = options.len() as f64 * item_h;
+    draw_frosted_panel(context, value_x, popup_y, popup_w, popup_h, 8.0, 0.0, 0.0, None);
+    for (i, opt) in options.iter().enumerate() {
+        let r = RectF { x: value_x, y: popup_y + i as f64 * item_h, width: popup_w, height: item_h };
+        if i == current_val {
+            let _ = context.save();
+            rounded_rect_path(context, r.x + 2.0, r.y + 2.0, r.width - 4.0, r.height - 2.0, 5.0);
+            context.set_source_rgba(accent_r, accent_g, accent_b, 84.0 / 255.0);
+            context.fill().ok();
+            let _ = context.restore();
+        }
+        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+        context.set_font_size(13.3);
+        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        if let Ok(extents) = context.text_extents(opt) {
+            context.move_to(r.x + 10.0 - extents.x_bearing(), r.y + item_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.show_text(opt).ok();
+        }
+    }
 }
 
 fn draw_toolbar_icon(
@@ -3175,6 +3238,7 @@ fn setup_window(
                 let item = settings_menu_hit_item(
                     rect.left, rect.top, rect.width(), rect.height(),
                     screen_width as f64, screen_height as f64, x, y,
+                    st.settings_tab,
                 );
                 let next = item.unwrap_or(-1);
                 let changed = next != st.hovered_settings_item;
@@ -3366,9 +3430,56 @@ fn setup_window(
 
         // Settings menu
         if st.settings_menu_open {
+            // If a dropdown is open, check dropdown item clicks first
+            if let Some(drop_idx) = st.settings_dropdown_open {
+                let tab = match st.settings_tab {
+                    SettingsTab::Video => 1,
+                    SettingsTab::Gif => 2,
+                    _ => 0,
+                };
+                let (options, value_ptr): (&[&str], &mut usize) = if tab == 1 && drop_idx == 3 {
+                    (&["Original", "1080p", "720p"], &mut st.video_max_res)
+                } else if tab == 1 && drop_idx == 4 {
+                    (&["24", "30", "50", "60"], &mut st.video_fps)
+                } else if tab == 2 && drop_idx == 6 {
+                    (&["800 x auto", "640 x auto", "480 x auto", "Original"], &mut st.gif_size_idx)
+                } else {
+                    (&[], &mut 0)
+                };
+                // Compute dropdown popup rect
+                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                let menu_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - 570.0);
+                let popup_y = compute_dropdown_popup_y(menu_y, drop_idx, match tab { 1 => SettingsTab::Video, 2 => SettingsTab::Gif, _ => SettingsTab::General });
+                let popup_rect = RectF { x: menu_x + 130.0, y: popup_y, width: 140.0, height: options.len() as f64 * 30.0 };
+                // Check if clicked outside popup
+                if !popup_rect.contains(x, y) {
+                    st.settings_dropdown_open = None;
+                    drop(st);
+                    if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                    return;
+                }
+                // Check item clicks
+                for (oi, _opt) in options.iter().enumerate() {
+                    let item_rect = RectF { x: popup_rect.x, y: popup_rect.y + oi as f64 * 30.0, width: popup_rect.width, height: 30.0 };
+                    if item_rect.contains(x, y) {
+                        *value_ptr = oi;
+                        st.settings_dropdown_open = None;
+                        st.hovered_settings_item = -1;
+                        drop(st);
+                        if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                        return;
+                    }
+                }
+                st.settings_dropdown_open = None;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                return;
+            }
+
             if let Some(item) = settings_menu_hit_item(
                 rect.left, rect.top, rect.width(), rect.height(),
                 screen_width as f64, screen_height as f64, x, y,
+                st.settings_tab,
             ) {
                 // Tab clicks
                 if item < 3 {
@@ -3378,6 +3489,7 @@ fn setup_window(
                         _ => SettingsTab::Gif,
                     };
                     st.hovered_settings_item = -1;
+                    st.settings_dropdown_open = None;
                 } else if matches!(st.settings_tab, SettingsTab::General) {
                     let general_idx = item - 3;
                     match general_idx {
@@ -3393,11 +3505,12 @@ fn setup_window(
                         9 => st.show_countdown = !st.show_countdown,
                         _ => {}
                     }
+                    st.settings_dropdown_open = None;
                 } else if matches!(st.settings_tab, SettingsTab::Video) {
                     let video_idx = item - 3;
                     match video_idx {
-                        0 => st.video_max_res = (st.video_max_res + 1) % 3,
-                        1 => st.video_fps = (st.video_fps + 1) % 4,
+                        0 => st.settings_dropdown_open = Some(3), // res dropdown
+                        1 => st.settings_dropdown_open = Some(4), // fps dropdown
                         2 => st.record_mono = !st.record_mono,
                         3 => st.open_editor = !st.open_editor,
                         _ => {}
@@ -3405,16 +3518,14 @@ fn setup_window(
                 } else if matches!(st.settings_tab, SettingsTab::Gif) {
                     let gif_idx = item - 3;
                     match gif_idx {
-                        // FPS slider - cycle through values
-                        3 => {
+                        0 => { // FPS slider
                             st.gif_fps = if st.gif_fps >= 55.0 { 5.0 } else { st.gif_fps + 5.0 };
                         }
-                        // Quality slider - cycle
-                        4 => {
+                        1 => { // Quality slider
                             st.gif_quality = if st.gif_quality >= 0.9 { 0.1 } else { st.gif_quality + 0.1 };
                         }
-                        5 => st.optimize_gif = !st.optimize_gif,
-                        6 => st.gif_size_idx = (st.gif_size_idx + 1) % 4,
+                        2 => st.optimize_gif = !st.optimize_gif,
+                        3 => st.settings_dropdown_open = Some(6), // size dropdown
                         _ => {}
                     }
                 }
@@ -3426,6 +3537,7 @@ fn setup_window(
             // Click outside settings menu closes it
             st.settings_menu_open = false;
             st.hovered_settings_item = -1;
+            st.settings_dropdown_open = None;
             drop(st);
             if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
             return;
@@ -3509,6 +3621,7 @@ fn setup_window(
                 if !recording_panel_open && hit == Some(ToolbarHit::CropPanel) {
                     st.capture_crop_menu_open = !st.capture_crop_menu_open;
                     st.hovered_capture_crop_menu_item = -1;
+                    st.hover_tool_index = None;
                     drop(st);
                     if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
                     return;
@@ -3521,10 +3634,14 @@ fn setup_window(
                             RecordPanelTile::Crop => {
                                 st.crop_menu_open = !st.crop_menu_open;
                                 st.hovered_crop_menu_item = -1;
+                                st.hover_tool_index = None;
                             }
                             RecordPanelTile::Controls => {
                                 st.settings_menu_open = !st.settings_menu_open;
                                 st.hovered_settings_item = -1;
+                                st.settings_dropdown_open = None;
+                                st.hover_record_tile = None;
+                                st.hover_tool_index = None;
                             }
                             RecordPanelTile::Mic => st.mic_toggle = !st.mic_toggle,
                             RecordPanelTile::Speaker => st.speaker_toggle = !st.speaker_toggle,
@@ -3641,15 +3758,18 @@ fn setup_window(
                 drop(st);
                 return;
             }
-            if st.settings_menu_open && settings_menu_hit_item(
-                rect.left, rect.top, rect.width(), rect.height(),
-                screen_width as f64, screen_height as f64, start_x, start_y,
-            ).is_some() {
-                st.is_dragging = false;
-                st.drag_mode = None;
-                st.initial_rect = None;
-                drop(st);
-                return;
+            // Check if drag started inside settings menu (suppress selection drag)
+            if st.settings_menu_open {
+                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                let menu_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - 570.0);
+                let menu_rect = RectF { x: menu_x, y: menu_y, width: 440.0, height: 560.0 };
+                if menu_rect.contains(start_x, start_y) {
+                    st.is_dragging = false;
+                    st.drag_mode = None;
+                    st.initial_rect = None;
+                    drop(st);
+                    return;
+                }
             }
 
             st.drag_origin_x = start_x;
@@ -4030,6 +4150,7 @@ fn draw_overlay(
                 st.settings_menu_open,
                 st.settings_tab,
                 st.hovered_settings_item,
+                st.settings_dropdown_open,
                 st.video_max_res, st.video_fps, st.record_mono, st.open_editor,
                 st.rec_controls, st.display_rec_time, st.hidpi, st.do_not_disturb,
                 st.show_cursor, st.rec_clicks, st.rec_keystrokes,
