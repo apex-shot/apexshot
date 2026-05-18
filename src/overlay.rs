@@ -283,6 +283,7 @@ struct SelectorState {
     settings_tab: SettingsTab,
     hovered_settings_item: i32,
     settings_dropdown_open: Option<usize>,
+    gif_slider_dragging: Option<u8>,
     // Recording toggles (mic/speaker referenced in click handler)
     mic_toggle: bool,
     speaker_toggle: bool,
@@ -339,6 +340,7 @@ impl Default for SelectorState {
             settings_tab: SettingsTab::General,
             hovered_settings_item: -1,
             settings_dropdown_open: None,
+            gif_slider_dragging: None,
             mic_toggle: true,
             speaker_toggle: false,
             rec_controls: true,
@@ -3202,6 +3204,34 @@ fn setup_window(
             let mut st = state_motion.lock().unwrap();
             let rect = current_selection_rect(&st);
 
+            // GIF slider dragging — update value from X position
+            if let Some(slider) = st.gif_slider_dragging {
+                if st.settings_menu_open {
+                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
+                    let value_x = menu_x + 130.0;
+                    if slider == 0 {
+                        let slider_x = value_x + 55.0;
+                        let slider_w = 220.0;
+                        let click_x = x.clamp(slider_x, slider_x + slider_w);
+                        st.gif_fps = 5.0 + (click_x - slider_x) / slider_w * 55.0;
+                    } else {
+                        let q_slider_w = 160.0;
+                        let click_x = x.clamp(value_x, value_x + q_slider_w);
+                        st.gif_quality = 0.1 + (click_x - value_x) / q_slider_w * 0.8;
+                    }
+                }
+                st.hovered_settings_item = -1;
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_crop_menu_item = -1;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                drop(st);
+                if let Some(da) = drawing_area_weak_motion.upgrade() { da.queue_draw(); }
+                return;
+            }
+
             // Capture crop menu hover check
             if st.capture_crop_menu_open {
                 let item = capture_crop_menu_hit_item(
@@ -3531,17 +3561,19 @@ fn setup_window(
                     let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
                     let value_x = menu_x + 130.0;
                     match gif_idx {
-                        0 => { // FPS slider — click-to-position
-                            let slider_x = value_x + 55.0;
-                            let slider_w = 220.0;
-                            let click_x = x.clamp(slider_x, slider_x + slider_w);
-                            st.gif_fps = 5.0 + (click_x - slider_x) / slider_w * 55.0;
-                        }
-                        1 => { // Quality slider — click-to-position
-                            let q_slider_w = 160.0;
-                            let click_x = x.clamp(value_x, value_x + q_slider_w);
-                            st.gif_quality = 0.1 + (click_x - value_x) / q_slider_w * 0.8;
-                        }
+                        0 => { // FPS slider — click-to-position + start drag
+                             let slider_x = value_x + 55.0;
+                             let slider_w = 220.0;
+                             let click_x = x.clamp(slider_x, slider_x + slider_w);
+                             st.gif_fps = 5.0 + (click_x - slider_x) / slider_w * 55.0;
+                             st.gif_slider_dragging = Some(0);
+                         }
+                        1 => { // Quality slider — click-to-position + start drag
+                             let q_slider_w = 160.0;
+                             let click_x = x.clamp(value_x, value_x + q_slider_w);
+                             st.gif_quality = 0.1 + (click_x - value_x) / q_slider_w * 0.8;
+                             st.gif_slider_dragging = Some(1);
+                         }
                         2 => st.optimize_gif = !st.optimize_gif,
                         3 => st.settings_dropdown_open = Some(6), // size dropdown
                         _ => {}
@@ -3777,7 +3809,7 @@ fn setup_window(
                 return;
             }
             // Check if drag started inside settings menu (suppress selection drag)
-            if st.settings_menu_open {
+            if st.settings_menu_open && st.gif_slider_dragging.is_none() {
                 let menu_x = (rect.left + (rect.width() - 440.0) / 2.0).clamp(10.0, screen_width as f64 - 450.0);
                 let menu_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - 570.0);
                 let menu_rect = RectF { x: menu_x, y: menu_y, width: 440.0, height: 560.0 };
@@ -3836,6 +3868,10 @@ fn setup_window(
         drawing_area_weak,
         move |_gesture, x, y| {
             let mut st = state_drag.lock().unwrap();
+            if st.gif_slider_dragging.is_some() {
+                drop(st);
+                return;
+            }
             update_selection_for_drag(&mut st, x, y, screen_width as f64, screen_height as f64);
             drop(st);
 
@@ -3852,6 +3888,14 @@ fn setup_window(
         drawing_area_weak,
         move |_gesture, x, y| {
             let mut st = state_drag.lock().unwrap();
+            if st.gif_slider_dragging.is_some() {
+                st.gif_slider_dragging = None;
+                drop(st);
+                if let Some(drawing_area) = drawing_area_weak.upgrade() {
+                    drawing_area.queue_draw();
+                }
+                return;
+            }
             update_selection_for_drag(&mut st, x, y, screen_width as f64, screen_height as f64);
             st.is_dragging = false;
             st.completed = true;
