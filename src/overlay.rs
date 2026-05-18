@@ -3549,18 +3549,69 @@ fn setup_window(
                 clamp_point_to_bounds(x, y, screen_width as f64, screen_height as f64);
 
             let rect = current_selection_rect(&st);
+
+            // Suppress drag when clicking toolbar tools, size/crop panels
             if toolbar_item_at(
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-                screen_width as f64,
-                screen_height as f64,
-                start_x,
-                start_y,
-            )
-            .is_some()
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, start_x, start_y,
+            ).is_some()
             {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+
+            let hit = toolbar_hit_at(
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, start_x, start_y,
+            );
+            if matches!(hit, Some(ToolbarHit::CropPanel) | Some(ToolbarHit::SizePanel)) {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+
+            // Suppress drag when clicking recording panel tiles
+            if st.recording_panel_open && recording_tile_at(
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, start_x, start_y,
+            ).is_some() {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+
+            // Suppress drag when clicking any open menu
+            if st.capture_crop_menu_open && capture_crop_menu_hit_item(
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, start_x, start_y,
+            ).is_some() {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+            if st.crop_menu_open && recording_crop_menu_hit_item(
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, start_x, start_y,
+            ).is_some() {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+            if st.settings_menu_open && settings_menu_hit_item(
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, start_x, start_y,
+            ).is_some() {
                 st.is_dragging = false;
                 st.drag_mode = None;
                 st.initial_rect = None;
