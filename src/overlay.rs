@@ -1227,27 +1227,26 @@ fn draw_frosted_panel(
             let _ = context.paint();
         }
         let _ = context.restore();
+
+        // Dark glass tint matching editor root background (#141414 at ~90% opacity)
+        context.set_source_rgba(20.0 / 255.0, 20.0 / 255.0, 20.0 / 255.0, 230.0 / 255.0);
+        let _ = context.paint();
     } else {
         // No screenshot (X11 transparent overlay): solid dark base.
         context.set_source_rgba(0.08, 0.08, 0.08, 1.0);
         let _ = context.paint();
     }
 
-    // Dark tint — strong enough to guarantee icon/label contrast on white.
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.52);
+    // Subtle white sheen (0.04 alpha) for a polished feel
+    context.set_source_rgba(1.0, 1.0, 1.0, 10.0 / 255.0);
     let _ = context.paint();
 
-    // Frosted-glass white sheen
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.10);
-    let _ = context.paint();
-
-    let _ = context.restore();
-
-    // Inner border — thin bright rim for depth
-    let _ = context.save();
-    rounded_rect_path(context, x + 0.5, y + 0.5, width - 1.0, height - 1.0, radius);
+    // Panel border (matching editor's .editor-root border: 1px solid rgba(255, 255, 255, 0.10))
+    // Drawn inside clip so the outer half is clipped away (C++ behavior)
     context.set_source_rgba(1.0, 1.0, 1.0, 0.10);
     context.set_line_width(1.0);
+    context.set_antialias(gtk4::cairo::Antialias::Default);
+    rounded_rect_path(context, x, y, width, height, radius);
     let _ = context.stroke();
     let _ = context.restore();
 }
