@@ -1178,7 +1178,6 @@ fn settings_menu_hit_item(
     tab: SettingsTab,
 ) -> Option<i32> {
     let menu_w = 440.0;
-    let menu_h = 560.0;
     let menu_x = (selection_x + (selection_width - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
     let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - 570.0);
 
