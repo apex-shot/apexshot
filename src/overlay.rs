@@ -209,6 +209,27 @@ impl SelectionRectF {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsTab {
+    General,
+    Video,
+    Gif,
+}
+
+const ASPECT_RATIO_OPTIONS: &[&str] = &[
+    "Freeform",
+    "1 : 1 (Square)",
+    "5 : 4 (10 : 8)",
+    "4 : 3",
+    "7 : 5",
+    "3 : 2",
+    "16 : 10",
+    "16 : 9",
+    "2.35 : 1",
+    "2 : 3",
+    "9 : 16",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResizeHandle {
     North,
     South,
@@ -251,6 +272,40 @@ struct SelectorState {
     /// True when the user clicked Fullscreen — selection covers the whole screen,
     /// waiting for Enter to confirm the capture.
     fullscreen_mode: bool,
+    // Menu state
+    capture_crop_menu_open: bool,
+    crop_menu_open: bool,
+    settings_menu_open: bool,
+    capture_aspect_ratio_index: usize,
+    record_aspect_ratio_index: usize,
+    hovered_capture_crop_menu_item: i32,
+    hovered_crop_menu_item: i32,
+    settings_tab: SettingsTab,
+    hovered_settings_item: i32,
+    // Recording toggles (mic/speaker referenced in click handler)
+    mic_toggle: bool,
+    speaker_toggle: bool,
+    // Recording settings
+    rec_controls: bool,
+    display_rec_time: bool,
+    hidpi: bool,
+    do_not_disturb: bool,
+    show_cursor: bool,
+    rec_clicks: bool,
+    rec_keystrokes: bool,
+    remember_selection: bool,
+    dim_screen: bool,
+    show_countdown: bool,
+    // Video tab settings
+    video_max_res: usize,
+    video_fps: usize,
+    record_mono: bool,
+    open_editor: bool,
+    // GIF tab settings
+    gif_fps: f64,
+    gif_quality: f64,
+    optimize_gif: bool,
+    gif_size_idx: usize,
 }
 
 impl Default for SelectorState {
@@ -273,6 +328,35 @@ impl Default for SelectorState {
             recording_panel_open: false,
             hover_record_tile: None,
             fullscreen_mode: false,
+            capture_crop_menu_open: false,
+            crop_menu_open: false,
+            settings_menu_open: false,
+            capture_aspect_ratio_index: 0,
+            record_aspect_ratio_index: 0,
+            hovered_capture_crop_menu_item: -1,
+            hovered_crop_menu_item: -1,
+            settings_tab: SettingsTab::General,
+            hovered_settings_item: -1,
+            mic_toggle: true,
+            speaker_toggle: false,
+            rec_controls: true,
+            display_rec_time: true,
+            hidpi: false,
+            do_not_disturb: true,
+            show_cursor: true,
+            rec_clicks: true,
+            rec_keystrokes: false,
+            remember_selection: false,
+            dim_screen: false,
+            show_countdown: true,
+            video_max_res: 0,
+            video_fps: 1,
+            record_mono: false,
+            open_editor: false,
+            gif_fps: 15.0,
+            gif_quality: 0.9,
+            optimize_gif: true,
+            gif_size_idx: 0,
         }
     }
 }
@@ -657,6 +741,9 @@ fn draw_feature_toolbar(
     hover_tool_index: Option<usize>,
     hover_size_panel: bool,
     hover_crop_panel: bool,
+    capture_crop_menu_open: bool,
+    capture_aspect_ratio_index: usize,
+    hovered_capture_crop_menu_item: i32,
 ) {
     let layout = compute_toolbar_layout(
         selection_x,
@@ -873,6 +960,18 @@ fn draw_feature_toolbar(
         crop_y,
         (1.0, 1.0, 1.0, 0.95),
     );
+
+    if capture_crop_menu_open {
+        draw_capture_crop_menu(
+            context,
+            crop_panel,
+            hovered_capture_crop_menu_item,
+            capture_aspect_ratio_index,
+            screen_width,
+            screen_height,
+            background,
+        );
+    }
 }
 
 fn compute_toolbar_layout(
@@ -1000,6 +1099,126 @@ fn compute_recording_deck_layout(
             height: REC_ACTION_HEIGHT,
         },
     }
+}
+
+fn compute_aspect_menu_rects(
+    anchor_rect: RectF,
+    screen_width: f64,
+    screen_height: f64,
+) -> (RectF, Vec<RectF>) {
+    let item_h = 34.0;
+    let menu_w = 196.0;
+    let menu_h = (ASPECT_RATIO_OPTIONS.len() as f64 * item_h) + 10.0;
+    let menu_x = (anchor_rect.x + anchor_rect.width / 2.0 - menu_w / 2.0)
+        .clamp(10.0, screen_width - menu_w - 10.0);
+    let menu_y = (anchor_rect.y + anchor_rect.height + 8.0)
+        .clamp(10.0, screen_height - menu_h - 10.0);
+    let panel_rect = RectF { x: menu_x, y: menu_y, width: menu_w, height: menu_h };
+    let mut item_rects = Vec::with_capacity(ASPECT_RATIO_OPTIONS.len());
+    for i in 0..ASPECT_RATIO_OPTIONS.len() {
+        item_rects.push(RectF {
+            x: menu_x + 5.0,
+            y: menu_y + 5.0 + i as f64 * item_h,
+            width: menu_w - 10.0,
+            height: item_h,
+        });
+    }
+    (panel_rect, item_rects)
+}
+
+fn capture_crop_menu_hit_item(
+    selection_x: f64, selection_y: f64, selection_width: f64, selection_height: f64,
+    screen_width: f64, screen_height: f64, x: f64, y: f64,
+) -> Option<usize> {
+    let layout = compute_toolbar_layout(selection_x, selection_y, selection_width, selection_height, screen_width, screen_height);
+    let anchor = layout.crop_panel;
+    let (_panel, items) = compute_aspect_menu_rects(anchor, screen_width, screen_height);
+    items.iter().position(|r| r.contains(x, y))
+}
+
+fn recording_crop_menu_hit_item(
+    selection_x: f64, selection_y: f64, selection_width: f64, selection_height: f64,
+    screen_width: f64, screen_height: f64, x: f64, y: f64,
+) -> Option<usize> {
+    let deck = compute_recording_deck_layout(selection_x, selection_y, selection_width, selection_height, screen_width, screen_height);
+    let top = deck.top_cluster;
+    let anchor = RectF {
+        x: top.x + 62.0 + 8.0 + 152.0 + 8.0,
+        y: top.y,
+        width: 62.0,
+        height: top.height,
+    };
+    let (_panel, items) = compute_aspect_menu_rects(anchor, screen_width, screen_height);
+    items.iter().position(|r| r.contains(x, y))
+}
+
+fn settings_menu_hit_item(
+    selection_x: f64, selection_y: f64, selection_width: f64, selection_height: f64,
+    screen_width: f64, screen_height: f64, x: f64, y: f64,
+) -> Option<i32> {
+    let deck = compute_recording_deck_layout(selection_x, selection_y, selection_width, selection_height, screen_width, screen_height);
+    let panel_x = deck.left_toggle_rail.x;
+    let panel_y = deck.left_toggle_rail.y;
+    let menu_w = 440.0;
+    let menu_h = 560.0;
+    let menu_x = panel_x.clamp(10.0, screen_width - menu_w - 10.0);
+    let menu_y = panel_y.clamp(10.0, screen_height - menu_h - 10.0);
+
+    let menu_rect = RectF { x: menu_x, y: menu_y, width: menu_w, height: menu_h };
+    if !menu_rect.contains(x, y) {
+        return None;
+    }
+
+    // Tab rects
+    let tab_w = 78.0;
+    let tab_h = 32.0;
+    let tab_start_x = menu_x + (menu_w - 3.0 * tab_w) / 2.0;
+    let tab_y = menu_y + 64.0;
+    for i in 0..3 {
+        let tr = RectF { x: tab_start_x + i as f64 * tab_w, y: tab_y, width: tab_w, height: tab_h };
+        if tr.contains(x, y) {
+            return Some(i);
+        }
+    }
+
+    // General tab items
+    let value_x = menu_x + 160.0;
+    let row_h = 32.0;
+    let mut idx = 3;
+    let mut cy = menu_y + 112.0;
+
+    // Controls, Menu bar, HiDPI, Notifications (4 items)
+    for _ in 0..4 {
+        let check_area = RectF { x: value_x, y: cy, width: menu_w - (value_x - menu_x) - 20.0, height: row_h };
+        if check_area.contains(x, y) { return Some(idx); }
+        idx += 1; cy += row_h;
+    }
+    cy += 10.0; // gap
+    // Cursor, Clicks (2 items)
+    for _ in 0..2 {
+        let check_area = RectF { x: value_x, y: cy, width: menu_w - (value_x - menu_x) - 20.0, height: row_h };
+        if check_area.contains(x, y) { return Some(idx); }
+        idx += 1; cy += row_h;
+    }
+    cy += 10.0; // gap
+    // Keyboard (1 item)
+    {
+        let check_area = RectF { x: value_x, y: cy, width: menu_w - (value_x - menu_x) - 20.0, height: row_h };
+        if check_area.contains(x, y) { return Some(idx); }
+        idx += 1; cy += row_h;
+    }
+    cy += 10.0; // gap
+    // Recording area, dim, countdown (3 items)
+    for _ in 0..3 {
+        let check_area = RectF { x: value_x, y: cy, width: menu_w - (value_x - menu_x) - 20.0, height: row_h };
+        if check_area.contains(x, y) { return Some(idx); }
+        idx += 1; cy += row_h;
+    }
+
+    // Video tab: res dropdown (3), fps dropdown (4), mono checkbox (5), editor checkbox (6)
+    // GIF tab: fps slider (3), quality slider (4), optimize checkbox (5), size dropdown (6)
+    // Return approximate idx; click handler will interpret based on active tab
+    Some(idx - 1)
 }
 
 fn toolbar_item_at(
@@ -1285,6 +1504,30 @@ fn draw_recording_panel(
     screen_height: f64,
     background: Option<&BackgroundFrame>,
     hover_tile: Option<RecordPanelTile>,
+    crop_menu_open: bool,
+    record_aspect_ratio_index: usize,
+    hovered_crop_menu_item: i32,
+    settings_menu_open: bool,
+    settings_tab: SettingsTab,
+    hovered_settings_item: i32,
+    video_max_res: usize,
+    video_fps: usize,
+    record_mono: bool,
+    open_editor: bool,
+    rec_controls: bool,
+    display_rec_time: bool,
+    hidpi: bool,
+    do_not_disturb: bool,
+    show_cursor: bool,
+    rec_clicks: bool,
+    rec_keystrokes: bool,
+    remember_selection: bool,
+    dim_screen: bool,
+    show_countdown: bool,
+    gif_fps: f64,
+    gif_quality: f64,
+    optimize_gif: bool,
+    gif_size_idx: usize,
 ) {
     let deck = compute_recording_deck_layout(
         selection_x,
@@ -1557,6 +1800,572 @@ fn draw_recording_panel(
         context.move_to(rect.x + 50.0, rect.y + 30.0);
         let _ = context.show_text(label);
     }
+
+    // Recording crop menu dropdown
+    if crop_menu_open {
+        draw_recording_crop_menu(
+            context,
+            crop,
+            hovered_crop_menu_item,
+            record_aspect_ratio_index,
+            screen_width,
+            screen_height,
+            background,
+        );
+    }
+
+    // Settings menu (replaces panel content)
+    if settings_menu_open {
+        let panel_x = deck.left_toggle_rail.x;
+        let panel_y = deck.left_toggle_rail.y;
+        draw_settings_menu(
+            context, panel_x, panel_y,
+            screen_width, screen_height, background,
+            settings_tab, hovered_settings_item,
+            video_max_res, video_fps, record_mono, open_editor,
+            rec_controls, display_rec_time, hidpi, do_not_disturb,
+            show_cursor, rec_clicks, rec_keystrokes,
+            remember_selection, dim_screen, show_countdown,
+            gif_fps, gif_quality, optimize_gif, gif_size_idx,
+        );
+    }
+}
+
+fn draw_aspect_ratio_menu(
+    context: &gtk4::cairo::Context,
+    anchor_rect: RectF,
+    hovered_item: i32,
+    selected_index: usize,
+    screen_width: f64,
+    screen_height: f64,
+    background: Option<&BackgroundFrame>,
+) -> Vec<RectF> {
+    let item_h = 34.0;
+    let menu_w = 196.0;
+    let menu_h = (ASPECT_RATIO_OPTIONS.len() as f64 * item_h) + 10.0;
+    let menu_x = (anchor_rect.x + anchor_rect.width / 2.0 - menu_w / 2.0)
+        .clamp(10.0, screen_width - menu_w - 10.0);
+    let menu_y = (anchor_rect.y + anchor_rect.height + 8.0)
+        .clamp(10.0, screen_height - menu_h - 10.0);
+
+    draw_frosted_panel(context, menu_x, menu_y, menu_w, menu_h, 12.0, screen_width, screen_height, background);
+
+    let mut item_rects = Vec::with_capacity(ASPECT_RATIO_OPTIONS.len());
+    for i in 0..ASPECT_RATIO_OPTIONS.len() {
+        let item_rect = RectF { x: menu_x + 5.0, y: menu_y + 5.0 + i as f64 * item_h, width: menu_w - 10.0, height: item_h };
+        let indicator_x = item_rect.x + 8.0;
+
+        if i as i32 == hovered_item {
+            rounded_rect_path(context, item_rect.x, item_rect.y, item_rect.width, item_rect.height, 7.0);
+            context.set_source_rgba(1.0, 1.0, 1.0, 18.0 / 255.0);
+            let _ = context.fill();
+        }
+
+        let selected = i == selected_index;
+        if selected {
+            rounded_rect_path(context, item_rect.x + 1.0, item_rect.y + 1.0, item_rect.width - 2.0, item_rect.height - 2.0, 7.0);
+            context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 94.0 / 255.0);
+            let _ = context.fill();
+            context.set_source_rgba(1.0, 238.0 / 255.0, 224.0 / 255.0, 1.0);
+            context.set_line_width(1.5);
+            let cy = item_rect.y + item_rect.height / 2.0;
+            context.move_to(indicator_x + 3.5, cy);
+            context.line_to(indicator_x + 6.5, cy + 3.0);
+            context.line_to(indicator_x + 12.5, cy - 4.0);
+            context.stroke().ok();
+        }
+
+        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal,
+            if selected { gtk4::cairo::FontWeight::Bold } else { gtk4::cairo::FontWeight::Normal });
+        context.set_font_size(13.3);
+        let label = ASPECT_RATIO_OPTIONS[i];
+        if let Ok(extents) = context.text_extents(label) {
+            let label_x = item_rect.x + 30.0 - extents.x_bearing();
+            let label_y = item_rect.y + item_rect.height / 2.0 - extents.height() / 2.0 - extents.y_bearing();
+            let label_color = if selected { (1.0, 240.0 / 255.0, 226.0 / 255.0, 1.0) } else { (242.0 / 255.0, 242.0 / 255.0, 244.0 / 255.0, 1.0) };
+            context.set_source_rgba(label_color.0, label_color.1, label_color.2, label_color.3);
+            context.move_to(label_x, label_y);
+            let _ = context.show_text(label);
+        }
+
+        item_rects.push(item_rect);
+    }
+    item_rects
+}
+
+fn draw_capture_crop_menu(
+    context: &gtk4::cairo::Context,
+    crop_card_rect: RectF,
+    hovered_item: i32,
+    selected_index: usize,
+    screen_width: f64,
+    screen_height: f64,
+    background: Option<&BackgroundFrame>,
+) -> Vec<RectF> {
+    draw_aspect_ratio_menu(context, crop_card_rect, hovered_item, selected_index, screen_width, screen_height, background)
+}
+
+fn draw_recording_crop_menu(
+    context: &gtk4::cairo::Context,
+    crop_tile_rect: RectF,
+    hovered_item: i32,
+    selected_index: usize,
+    screen_width: f64,
+    screen_height: f64,
+    background: Option<&BackgroundFrame>,
+) -> Vec<RectF> {
+    draw_aspect_ratio_menu(context, crop_tile_rect, hovered_item, selected_index, screen_width, screen_height, background)
+}
+
+fn draw_checkbox(
+    context: &gtk4::cairo::Context,
+    x: f64,
+    y: f64,
+    size: f64,
+    checked: bool,
+    disabled: bool,
+    accent_r: f64,
+    accent_g: f64,
+    accent_b: f64,
+) {
+    context.new_path();
+    rounded_rect_path(context, x, y, size, size, 4.0);
+    if checked && !disabled {
+        context.set_source_rgba(accent_r, accent_g, accent_b, 1.0);
+        context.fill().ok();
+        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        context.set_line_width(2.0);
+        context.move_to(x + 4.0, y + size * 0.5);
+        context.line_to(x + 8.0, y + size * 0.75);
+        context.line_to(x + size - 3.5, y + size * 0.3);
+        context.stroke().ok();
+    } else {
+        let alpha = if disabled { 35.0 / 255.0 } else { 60.0 / 255.0 };
+        let bg_alpha = if disabled { 25.0 / 255.0 } else { 40.0 / 255.0 };
+        context.set_source_rgba(0.0, 0.0, 0.0, bg_alpha);
+        context.fill().ok();
+        context.set_source_rgba(1.0, 1.0, 1.0, alpha);
+        context.set_line_width(1.5);
+        context.stroke().ok();
+    }
+}
+
+fn draw_dropdown_button(
+    context: &gtk4::cairo::Context,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    label: &str,
+    hovered: bool,
+) {
+    context.set_source_rgba(0.0, 0.0, 0.0, 60.0 / 255.0);
+    rounded_rect_path(context, x, y, w, h, 6.0);
+    if hovered {
+        context.set_source_rgba(1.0, 1.0, 1.0, 20.0 / 255.0);
+    }
+    context.fill().ok();
+    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
+    context.set_line_width(1.0);
+    rounded_rect_path(context, x, y, w, h, 6.0);
+    context.stroke().ok();
+
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.set_font_size(13.3);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    if let Ok(extents) = context.text_extents(label) {
+        context.move_to(x + 10.0 - extents.x_bearing(), y + h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.show_text(label).ok();
+    }
+    // Chevron
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    context.set_line_width(1.5);
+    context.move_to(x + w - 15.0, y + h / 2.0 - 3.0);
+    context.line_to(x + w - 11.0, y + h / 2.0 + 1.0);
+    context.line_to(x + w - 7.0, y + h / 2.0 - 3.0);
+    context.stroke().ok();
+}
+
+fn draw_settings_menu(
+    context: &gtk4::cairo::Context,
+    panel_x: f64,
+    panel_y: f64,
+    screen_width: f64,
+    screen_height: f64,
+    background: Option<&BackgroundFrame>,
+    tab: SettingsTab,
+    hovered_item: i32,
+    video_max_res: usize,
+    video_fps: usize,
+    record_mono: bool,
+    open_editor: bool,
+    rec_controls: bool,
+    display_rec_time: bool,
+    hidpi: bool,
+    do_not_disturb: bool,
+    show_cursor: bool,
+    rec_clicks: bool,
+    rec_keystrokes: bool,
+    remember_selection: bool,
+    dim_screen: bool,
+    show_countdown: bool,
+    gif_fps: f64,
+    gif_quality: f64,
+    optimize_gif: bool,
+    gif_size_idx: usize,
+) {
+    let menu_w = 440.0;
+    let menu_h = 560.0;
+    let menu_x = panel_x.clamp(10.0, screen_width - menu_w - 10.0);
+    let menu_y = panel_y.clamp(10.0, screen_height - menu_h - 10.0);
+
+    let accent_r = 176.0 / 255.0;
+    let accent_g = 92.0 / 255.0;
+    let accent_b = 56.0 / 255.0;
+    let accent_rim = (1.0, 214.0 / 255.0, 186.0 / 255.0);
+
+    // Glow
+    let _ = context.save();
+    let glow_cx = menu_x + menu_w / 2.0;
+    let glow_cy = menu_y + menu_h / 2.0;
+    let glow = gtk4::cairo::RadialGradient::new(glow_cx, glow_cy, 0.0, glow_cx, glow_cy, menu_w);
+    glow.add_color_stop_rgba(0.0, accent_r, accent_g, accent_b, 40.0 / 255.0);
+    glow.add_color_stop_rgba(0.6, 0.0, 0.0, 0.0, 0.0);
+    let _ = context.set_source(&glow);
+    context.rectangle(menu_x - 40.0, menu_y - 40.0, menu_w + 80.0, menu_h + 80.0);
+    let _ = context.fill();
+    let _ = context.restore();
+
+    draw_frosted_panel(context, menu_x, menu_y, menu_w, menu_h, 12.0, screen_width, screen_height, background);
+
+    // Header
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+    context.set_font_size(10.7);
+    context.set_source_rgba(1.0, 224.0 / 255.0, 196.0 / 255.0, 176.0 / 255.0);
+    if let Ok(_ext) = context.text_extents("RECORDING CONTROLS") {
+        context.move_to(menu_x + 18.0, menu_y + 28.0);
+        context.show_text("RECORDING CONTROLS").ok();
+    }
+    context.set_font_size(18.7);
+    context.set_source_rgba(245.0 / 255.0, 245.0 / 255.0, 246.0 / 255.0, 1.0);
+    if let Ok(_ext) = context.text_extents("Recording Setup") {
+        context.move_to(menu_x + 18.0, menu_y + 48.0);
+        context.show_text("Recording Setup").ok();
+    }
+
+    // Tabs
+    let tabs = ["General", "Video", "GIF"];
+    let tab_w = 78.0;
+    let tab_h = 32.0;
+    let tab_start_x = menu_x + (menu_w - tabs.len() as f64 * tab_w) / 2.0;
+    let tab_y = menu_y + 64.0;
+
+    for (i, tab_label) in tabs.iter().enumerate() {
+        let tr = RectF { x: tab_start_x + i as f64 * tab_w, y: tab_y, width: tab_w, height: tab_h };
+        let is_active_tab = (i == 0 && matches!(tab, SettingsTab::General))
+            || (i == 1 && matches!(tab, SettingsTab::Video))
+            || (i == 2 && matches!(tab, SettingsTab::Gif));
+        let tab_hovered = hovered_item == i as i32;
+        if is_active_tab || tab_hovered {
+            if is_active_tab {
+                context.set_source_rgba(accent_r, accent_g, accent_b, 84.0 / 255.0);
+            } else {
+                context.set_source_rgba(1.0, 1.0, 1.0, 14.0 / 255.0);
+            }
+            rounded_rect_path(context, tr.x, tr.y, tr.width, tr.height, 9.0);
+            context.fill().ok();
+            if is_active_tab {
+                let _ = context.save();
+                rounded_rect_path(context, tr.x, tr.y, tr.width, tr.height, 9.0);
+                context.clip();
+                rounded_rect_path(context, tr.x + 0.5, tr.y + 0.5, tr.width - 1.0, tr.height - 1.0, 8.5);
+                context.set_source_rgba(accent_rim.0, accent_rim.1, accent_rim.2, 1.0);
+                context.set_line_width(1.0);
+                context.stroke().ok();
+                let _ = context.restore();
+            }
+        }
+        let tab_text_color = if is_active_tab || tab_hovered {
+            (1.0, 236.0 / 255.0, 220.0 / 255.0, 1.0)
+        } else {
+            (1.0, 1.0, 1.0, 150.0 / 255.0)
+        };
+        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal,
+            if is_active_tab || tab_hovered { gtk4::cairo::FontWeight::Bold } else { gtk4::cairo::FontWeight::Normal });
+        context.set_font_size(13.7);
+        context.set_source_rgba(tab_text_color.0, tab_text_color.1, tab_text_color.2, tab_text_color.3);
+        if let Ok(extents) = context.text_extents(tab_label) {
+            context.move_to(tr.x + tr.width / 2.0 - extents.width() / 2.0 - extents.x_bearing(),
+                tr.y + tr.height / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.show_text(tab_label).ok();
+        }
+    }
+
+    match tab {
+        SettingsTab::General => draw_settings_general_tab(context, menu_x, menu_y, menu_w, hovered_item,
+            rec_controls, display_rec_time, hidpi, do_not_disturb, show_cursor, rec_clicks, rec_keystrokes,
+            remember_selection, dim_screen, show_countdown, accent_r, accent_g, accent_b),
+        SettingsTab::Video => draw_settings_video_tab(context, menu_x, menu_y, menu_w, hovered_item,
+            video_max_res, video_fps, record_mono, open_editor, accent_r, accent_g, accent_b),
+        SettingsTab::Gif => draw_settings_gif_tab(context, menu_x, menu_y, menu_w, hovered_item,
+            gif_fps, gif_quality, optimize_gif, gif_size_idx, accent_r, accent_g, accent_b),
+    }
+}
+
+fn draw_settings_general_tab(
+    context: &gtk4::cairo::Context,
+    menu_x: f64, menu_y: f64, menu_w: f64,
+    hovered_item: i32,
+    rec_controls: bool, display_rec_time: bool, hidpi: bool, do_not_disturb: bool,
+    show_cursor: bool, rec_clicks: bool, rec_keystrokes: bool,
+    remember_selection: bool, dim_screen: bool, show_countdown: bool,
+    _accent_r: f64, _accent_g: f64, _accent_b: f64,
+) {
+    let value_x = menu_x + 160.0;
+    let row_h = 32.0;
+    let mut y = menu_y + 112.0;
+    let mut idx = 3;
+
+    macro_rules! draw_general_setting {
+        ($label:expr, $desc:expr, $checked:expr) => {
+            draw_general_setting(context, menu_x, menu_w, value_x, y, row_h, $label, $desc, $checked, false, hovered_item == idx);
+            idx += 1;
+            y += row_h;
+        };
+        ($label:expr, $desc:expr, $checked:expr, $gap:expr) => {
+            y += $gap;
+            draw_general_setting(context, menu_x, menu_w, value_x, y, row_h, $label, $desc, $checked, false, hovered_item == idx);
+            idx += 1;
+            y += row_h;
+        };
+    }
+
+    draw_general_setting!("Controls", "Use keyboard shortcuts", rec_controls);
+    draw_general_setting!("Menu bar", "Display time in top bar", display_rec_time);
+    draw_general_setting!("HiDPI", "Record at display scale res", hidpi);
+    draw_general_setting!("Notifications", "DND while recording", do_not_disturb);
+    draw_general_setting!("Cursor", "Show cursor", show_cursor, 10.0);
+    draw_general_setting!("", "Highlight clicks", rec_clicks);
+    draw_general_setting!("Keyboard", "Show keystrokes", rec_keystrokes, 10.0);
+    draw_general_setting!("Recording area", "Remember last selection", remember_selection, 10.0);
+    draw_general_setting!("", "Dim screen while recording", dim_screen);
+    draw_general_setting!("", "Show countdown", show_countdown);
+    let _ = y; let _ = idx;
+}
+
+fn draw_general_setting(
+    context: &gtk4::cairo::Context,
+    menu_x: f64, menu_w: f64, value_x: f64,
+    y: f64, row_h: f64,
+    label: &str, desc: &str, checked: bool, disabled: bool, hover: bool,
+) {
+    if !label.is_empty() {
+        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.set_font_size(13.3);
+        context.set_source_rgba(1.0, 1.0, 1.0, if disabled { 110.0 / 255.0 } else { 200.0 / 255.0 });
+        if let Ok(extents) = context.text_extents(label) {
+            context.move_to(value_x - 132.0 - extents.width() - extents.x_bearing(), y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.show_text(label).ok();
+        }
+    }
+    if hover {
+        rounded_rect_path(context, value_x - 5.0, y, menu_w - (value_x - menu_x) - 20.0 + 10.0, row_h, 6.0);
+        context.set_source_rgba(1.0, 1.0, 1.0, 12.0 / 255.0);
+        context.fill().ok();
+    }
+    let cb_size = 18.0;
+    draw_checkbox(context, value_x, y + (row_h - cb_size) / 2.0, cb_size, checked, disabled, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0);
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.set_font_size(13.3);
+    context.set_source_rgba(1.0, 1.0, 1.0, if disabled { 110.0 / 255.0 } else { 1.0 });
+    if let Ok(extents) = context.text_extents(desc) {
+        context.move_to(value_x + cb_size + 10.0 - extents.x_bearing(), y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.show_text(desc).ok();
+    }
+}
+
+fn draw_settings_video_tab(
+    context: &gtk4::cairo::Context,
+    menu_x: f64, menu_y: f64, _menu_w: f64,
+    hovered_item: i32,
+    video_max_res: usize, video_fps: usize, record_mono: bool, open_editor: bool,
+    _accent_r: f64, _accent_g: f64, _accent_b: f64,
+) {
+    let label_x = menu_x + 20.0;
+    let value_x = menu_x + 140.0;
+    let mut curr_y = menu_y + 112.0;
+
+    let draw_label = |context: &gtk4::cairo::Context, txt: &str, y: f64| {
+        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.set_font_size(13.3);
+        context.set_source_rgba(1.0, 1.0, 1.0, 200.0 / 255.0);
+        if let Ok(extents) = context.text_extents(txt) {
+            context.move_to(label_x + 100.0 - extents.width() - extents.x_bearing(), y + 20.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.show_text(txt).ok();
+        }
+    };
+
+    // Max resolution
+    draw_label(context, "Max resolution:", curr_y);
+    let res_options = ["Original", "1080p", "720p"];
+    draw_dropdown_button(context, value_x, curr_y, 140.0, 30.0, res_options[video_max_res], hovered_item == 3);
+    curr_y += 35.0;
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.set_font_size(12.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
+    if let Ok(extents) = context.text_extents("Set max res to reduce file size") {
+        context.move_to(value_x - extents.x_bearing(), curr_y + 16.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.show_text("Set max res to reduce file size").ok();
+    }
+    curr_y += 50.0;
+
+    // Video FPS
+    draw_label(context, "Video FPS:", curr_y);
+    let fps_options = ["24", "30", "50", "60"];
+    draw_dropdown_button(context, value_x, curr_y, 80.0, 30.0, fps_options[video_fps], hovered_item == 4);
+    curr_y += 45.0;
+
+    // Record mono
+    let mono_hovered = hovered_item == 5;
+    if mono_hovered {
+        let r = RectF { x: value_x, y: curr_y, width: 200.0, height: 30.0 };
+        rounded_rect_path(context, r.x - 5.0, r.y, r.width + 10.0, r.height, 6.0);
+        context.set_source_rgba(1.0, 1.0, 1.0, 12.0 / 255.0);
+        context.fill().ok();
+    }
+    draw_checkbox(context, value_x, curr_y + (30.0 - 18.0) / 2.0, 18.0, record_mono, false, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0);
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.set_font_size(13.3);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    if let Ok(extents) = context.text_extents("Record audio in mono") {
+        context.move_to(value_x + 28.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.show_text("Record audio in mono").ok();
+    }
+    curr_y += 50.0;
+
+    // Open editor
+    draw_label(context, "Video Encoder:", curr_y);
+    let encoder_hovered = hovered_item == 6;
+    if encoder_hovered {
+        let r = RectF { x: value_x, y: curr_y, width: 250.0, height: 30.0 };
+        rounded_rect_path(context, r.x - 5.0, r.y, r.width + 10.0, r.height, 6.0);
+        context.set_source_rgba(1.0, 1.0, 1.0, 12.0 / 255.0);
+        context.fill().ok();
+    }
+    draw_checkbox(context, value_x, curr_y + (30.0 - 18.0) / 2.0, 18.0, open_editor, false, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0);
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.set_font_size(13.3);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    if let Ok(extents) = context.text_extents("Open editor after recording") {
+        context.move_to(value_x + 28.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.show_text("Open editor after recording").ok();
+    }
+}
+
+fn draw_settings_gif_tab(
+    context: &gtk4::cairo::Context,
+    menu_x: f64, menu_y: f64, _menu_w: f64,
+    hovered_item: i32,
+    gif_fps: f64, gif_quality: f64, optimize_gif: bool, gif_size_idx: usize,
+    _accent_r: f64, _accent_g: f64, _accent_b: f64,
+) {
+    let label_x = menu_x + 20.0;
+    let value_x = menu_x + 140.0;
+    let mut curr_y = menu_y + 112.0;
+
+    let draw_label = |context: &gtk4::cairo::Context, txt: &str, y: f64| {
+        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Bold);
+        context.set_font_size(13.3);
+        context.set_source_rgba(1.0, 1.0, 1.0, 200.0 / 255.0);
+        if let Ok(extents) = context.text_extents(txt) {
+            context.move_to(label_x + 100.0 - extents.width() - extents.x_bearing(), y + 20.0 - extents.height() / 2.0 - extents.y_bearing());
+            context.show_text(txt).ok();
+        }
+    };
+
+    // GIF FPS
+    draw_label(context, "GIF FPS:", curr_y);
+    let fps_label = format!("{:.0}", gif_fps);
+    context.set_source_rgba(0.0, 0.0, 0.0, 80.0 / 255.0);
+    rounded_rect_path(context, value_x, curr_y, 45.0, 30.0, 6.0);
+    context.fill().ok();
+    context.set_source_rgba(1.0, 1.0, 1.0, 28.0 / 255.0);
+    context.set_line_width(1.0);
+    rounded_rect_path(context, value_x, curr_y, 45.0, 30.0, 6.0);
+    context.stroke().ok();
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.set_font_size(13.3);
+    if let Ok(extents) = context.text_extents(&fps_label) {
+        context.move_to(value_x + 22.5 - extents.width() / 2.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.show_text(&fps_label).ok();
+    }
+    // FPS slider
+    let slider_x = value_x + 55.0;
+    let slider_w = 220.0;
+    let track_y = curr_y + (30.0 - 4.0) / 2.0;
+    let progress = ((gif_fps - 5.0) / 55.0).clamp(0.0, 1.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 30.0 / 255.0);
+    rounded_rect_path(context, slider_x, track_y, slider_w, 4.0, 2.0);
+    context.fill().ok();
+    context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 1.0);
+    rounded_rect_path(context, slider_x, track_y, slider_w * progress, 4.0, 2.0);
+    context.fill().ok();
+    let handle_x = slider_x + progress * slider_w;
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    context.new_path();
+    context.arc(handle_x, curr_y + 15.0, 10.0, 0.0, PI * 2.0);
+    context.fill().ok();
+    curr_y += 50.0;
+
+    // GIF Quality
+    draw_label(context, "GIF quality:", curr_y);
+    let q_slider_w = 160.0;
+    let q_track_y = curr_y + (30.0 - 4.0) / 2.0;
+    context.set_source_rgba(1.0, 1.0, 1.0, 30.0 / 255.0);
+    rounded_rect_path(context, value_x, q_track_y, q_slider_w, 4.0, 2.0);
+    context.fill().ok();
+    // Ticks
+    context.set_source_rgba(1.0, 1.0, 1.0, 60.0 / 255.0);
+    context.set_line_width(1.0);
+    for i in 0..=8 {
+        let tx = value_x + (q_slider_w / 8.0) * i as f64;
+        context.move_to(tx, curr_y + 15.0 - 5.0);
+        context.line_to(tx, curr_y + 15.0 + 5.0);
+        context.stroke().ok();
+    }
+    // Quality handle
+    let q_handle_x = value_x + gif_quality * q_slider_w;
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    rounded_rect_path(context, q_handle_x - 5.0, curr_y + (30.0 - 18.0) / 2.0, 10.0, 18.0, 3.0);
+    context.fill().ok();
+    context.set_font_size(10.7);
+    context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
+    if let Ok(_ext) = context.text_extents("Low") {
+        context.move_to(value_x, curr_y + 46.0);
+        context.show_text("Low").ok();
+    }
+    if let Ok(_ext) = context.text_extents("High") {
+        context.move_to(value_x + q_slider_w - 40.0, curr_y + 46.0);
+        context.show_text("High").ok();
+    }
+    curr_y += 60.0;
+
+    // Optimize checkbox
+    draw_checkbox(context, value_x, curr_y + (30.0 - 18.0) / 2.0, 18.0, optimize_gif, false, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0);
+    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+    context.set_font_size(13.3);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    if let Ok(extents) = context.text_extents("Optimize GIFs") {
+        context.move_to(value_x + 25.0 - extents.x_bearing(), curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing());
+        context.show_text("Optimize GIFs").ok();
+    }
+    curr_y += 45.0;
+
+    // GIF size
+    draw_label(context, "GIF size:", curr_y);
+    let size_options = ["800 x auto", "640 x auto", "480 x auto", "Original"];
+    draw_dropdown_button(context, value_x, curr_y, 180.0, 30.0, size_options[gif_size_idx], hovered_item == 6);
 }
 
 fn draw_toolbar_icon(
@@ -2293,96 +3102,130 @@ fn setup_window(
     let drawing_area_weak_motion = drawing_area.downgrade();
     let window_weak_motion = window.downgrade();
     motion_controller.connect_motion(move |_, x, y| {
-        let (cursor_name, hover_changed) = {
+        let (cursor_name, hover_changed, _done) = {
             let mut st = state_motion.lock().unwrap();
             let rect = current_selection_rect(&st);
 
-            let record_hit = if st.recording_panel_open {
-                recording_tile_at(
-                    rect.left,
-                    rect.top,
-                    rect.width(),
-                    rect.height(),
-                    screen_width as f64,
-                    screen_height as f64,
-                    x,
-                    y,
-                )
+            // Capture crop menu hover check
+            if st.capture_crop_menu_open {
+                let item = capture_crop_menu_hit_item(
+                    rect.left, rect.top, rect.width(), rect.height(),
+                    screen_width as f64, screen_height as f64, x, y,
+                );
+                let next = item.map(|i| i as i32).unwrap_or(-1);
+                let changed = next != st.hovered_capture_crop_menu_item;
+                if changed { st.hovered_capture_crop_menu_item = next; }
+                st.hovered_crop_menu_item = -1;
+                st.hovered_settings_item = -1;
+                // Clear other hovers
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                ("pointer".to_string(), changed, true)
+            } else if st.crop_menu_open {
+                let item = recording_crop_menu_hit_item(
+                    rect.left, rect.top, rect.width(), rect.height(),
+                    screen_width as f64, screen_height as f64, x, y,
+                );
+                let next = item.map(|i| i as i32).unwrap_or(-1);
+                let changed = next != st.hovered_crop_menu_item;
+                if changed { st.hovered_crop_menu_item = next; }
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_settings_item = -1;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                ("pointer".to_string(), changed, true)
+            } else if st.settings_menu_open {
+                let item = settings_menu_hit_item(
+                    rect.left, rect.top, rect.width(), rect.height(),
+                    screen_width as f64, screen_height as f64, x, y,
+                );
+                let next = item.unwrap_or(-1);
+                let changed = next != st.hovered_settings_item;
+                if changed { st.hovered_settings_item = next; }
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_crop_menu_item = -1;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                ("pointer".to_string(), changed, true)
             } else {
-                None
-            };
-            let hit = if st.recording_panel_open {
-                None
-            } else {
-                toolbar_hit_at(
-                    rect.left,
-                    rect.top,
-                    rect.width(),
-                    rect.height(),
-                    screen_width as f64,
-                    screen_height as f64,
-                    x,
-                    y,
-                )
-            };
+                let record_hit = if st.recording_panel_open {
+                    recording_tile_at(
+                        rect.left, rect.top, rect.width(), rect.height(),
+                        screen_width as f64, screen_height as f64, x, y,
+                    )
+                } else {
+                    None
+                };
+                let hit = if st.recording_panel_open {
+                    None
+                } else {
+                    toolbar_hit_at(
+                        rect.left, rect.top, rect.width(), rect.height(),
+                        screen_width as f64, screen_height as f64, x, y,
+                    )
+                };
 
-            let (
-                next_hover_tool_index,
-                next_hover_size_panel,
-                next_hover_crop_panel,
-                next_hover_record_tile,
-                cursor_name,
-            ) = match hit {
-                Some(ToolbarHit::Tool(index)) if !st.recording_panel_open => {
-                    (Some(index), false, false, None, "pointer")
-                }
-                Some(ToolbarHit::SizePanel) if !st.recording_panel_open => {
-                    (None, true, false, None, "default")
-                }
-                Some(ToolbarHit::CropPanel) if !st.recording_panel_open => {
-                    (None, false, true, None, "pointer")
-                }
-                None => {
-                    if let Some(tile) = record_hit {
-                        (None, false, false, Some(tile), "pointer")
-                    } else {
-                        let cursor_name = if st.completed || st.is_dragging {
-                            detect_resize_handle(x, y, rect)
-                                .map(cursor_name_for_handle)
-                                .unwrap_or_else(|| {
-                                    if is_inside_selection(x, y, rect) {
-                                        // Inside the selection: indicate the area can be moved.
-                                        "fleur"
-                                    } else {
-                                        "crosshair"
-                                    }
-                                })
-                        } else {
-                            "crosshair"
-                        };
-                        (None, false, false, None, cursor_name)
+                let (
+                    next_hover_tool_index,
+                    next_hover_size_panel,
+                    next_hover_crop_panel,
+                    next_hover_record_tile,
+                    cursor_name,
+                ) = match hit {
+                    Some(ToolbarHit::Tool(index)) if !st.recording_panel_open => {
+                        (Some(index), false, false, None, "pointer")
                     }
-                }
-                _ => (None, false, false, None, "crosshair"),
-            };
+                    Some(ToolbarHit::SizePanel) if !st.recording_panel_open => {
+                        (None, true, false, None, "default")
+                    }
+                    Some(ToolbarHit::CropPanel) if !st.recording_panel_open => {
+                        (None, false, true, None, "pointer")
+                    }
+                    None => {
+                        if let Some(tile) = record_hit {
+                            (None, false, false, Some(tile), "pointer")
+                        } else {
+                            let c = if st.completed || st.is_dragging {
+                                detect_resize_handle(x, y, rect)
+                                    .map(cursor_name_for_handle)
+                                    .unwrap_or_else(|| {
+                                        if is_inside_selection(x, y, rect) { "fleur" } else { "crosshair" }
+                                    })
+                            } else {
+                                "crosshair"
+                            };
+                            (None, false, false, None, c)
+                        }
+                    }
+                    _ => (None, false, false, None, "crosshair"),
+                };
 
-            let hover_changed = st.hover_tool_index != next_hover_tool_index
-                || st.hover_size_panel != next_hover_size_panel
-                || st.hover_crop_panel != next_hover_crop_panel
-                || st.hover_record_tile != next_hover_record_tile;
+                let hover_changed = st.hover_tool_index != next_hover_tool_index
+                    || st.hover_size_panel != next_hover_size_panel
+                    || st.hover_crop_panel != next_hover_crop_panel
+                    || st.hover_record_tile != next_hover_record_tile;
 
-            st.hover_tool_index = next_hover_tool_index;
-            st.hover_size_panel = next_hover_size_panel;
-            st.hover_crop_panel = next_hover_crop_panel;
-            st.hover_record_tile = next_hover_record_tile;
+                st.hover_tool_index = next_hover_tool_index;
+                st.hover_size_panel = next_hover_size_panel;
+                st.hover_crop_panel = next_hover_crop_panel;
+                st.hover_record_tile = next_hover_record_tile;
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_crop_menu_item = -1;
+                st.hovered_settings_item = -1;
 
-            (cursor_name, hover_changed)
+                (cursor_name.to_string(), hover_changed, false)
+            }
         };
 
-        // Fetch surface lazily from the window (works after present())
         if let Some(win) = window_weak_motion.upgrade() {
             if let Some(surf) = win.surface() {
-                let cursor = gdk::Cursor::from_name(cursor_name, None);
+                let cursor = gdk::Cursor::from_name(&cursor_name, None);
                 surf.set_cursor(cursor.as_ref());
             }
         }
@@ -2401,11 +3244,17 @@ fn setup_window(
         let was_hovering = st.hover_tool_index.is_some()
             || st.hover_size_panel
             || st.hover_crop_panel
-            || st.hover_record_tile.is_some();
+            || st.hover_record_tile.is_some()
+            || st.hovered_capture_crop_menu_item != -1
+            || st.hovered_crop_menu_item != -1
+            || st.hovered_settings_item != -1;
         st.hover_tool_index = None;
         st.hover_size_panel = false;
         st.hover_crop_panel = false;
         st.hover_record_tile = None;
+        st.hovered_capture_crop_menu_item = -1;
+        st.hovered_crop_menu_item = -1;
+        st.hovered_settings_item = -1;
         drop(st);
 
         // Reset cursor
@@ -2436,21 +3285,124 @@ fn setup_window(
     let window_weak_click = window.downgrade();
     let background_click = background.clone();
     click_gesture.connect_pressed(move |_, n_press, x, y| {
-        let st = state_click.lock().unwrap();
+        let mut st = state_click.lock().unwrap();
         let rect = current_selection_rect(&st);
         let recording_panel_open = st.recording_panel_open;
-        drop(st);
 
+        // ── Menu click handling ──
+
+        // Capture crop menu (non-recording mode)
+        if st.capture_crop_menu_open {
+            if let Some(item) = capture_crop_menu_hit_item(
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, x, y,
+            ) {
+                st.capture_aspect_ratio_index = item;
+                st.capture_crop_menu_open = false;
+                st.hovered_capture_crop_menu_item = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                return;
+            }
+            st.capture_crop_menu_open = false;
+            st.hovered_capture_crop_menu_item = -1;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+            return;
+        }
+
+        // Recording crop menu
+        if st.crop_menu_open {
+            if let Some(item) = recording_crop_menu_hit_item(
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, x, y,
+            ) {
+                st.record_aspect_ratio_index = item;
+                st.crop_menu_open = false;
+                st.hovered_crop_menu_item = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                return;
+            }
+            st.crop_menu_open = false;
+            st.hovered_crop_menu_item = -1;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+            return;
+        }
+
+        // Settings menu
+        if st.settings_menu_open {
+            if let Some(item) = settings_menu_hit_item(
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, x, y,
+            ) {
+                // Tab clicks
+                if item < 3 {
+                    st.settings_tab = match item {
+                        0 => SettingsTab::General,
+                        1 => SettingsTab::Video,
+                        _ => SettingsTab::Gif,
+                    };
+                    st.hovered_settings_item = -1;
+                } else if matches!(st.settings_tab, SettingsTab::General) {
+                    let general_idx = item - 3;
+                    match general_idx {
+                        0 => st.rec_controls = !st.rec_controls,
+                        1 => st.display_rec_time = !st.display_rec_time,
+                        2 => st.hidpi = !st.hidpi,
+                        3 => st.do_not_disturb = !st.do_not_disturb,
+                        4 => st.show_cursor = !st.show_cursor,
+                        5 => st.rec_clicks = !st.rec_clicks,
+                        6 => st.rec_keystrokes = !st.rec_keystrokes,
+                        7 => st.remember_selection = !st.remember_selection,
+                        8 => st.dim_screen = !st.dim_screen,
+                        9 => st.show_countdown = !st.show_countdown,
+                        _ => {}
+                    }
+                } else if matches!(st.settings_tab, SettingsTab::Video) {
+                    let video_idx = item - 3;
+                    match video_idx {
+                        0 => st.video_max_res = (st.video_max_res + 1) % 3,
+                        1 => st.video_fps = (st.video_fps + 1) % 4,
+                        2 => st.record_mono = !st.record_mono,
+                        3 => st.open_editor = !st.open_editor,
+                        _ => {}
+                    }
+                } else if matches!(st.settings_tab, SettingsTab::Gif) {
+                    let gif_idx = item - 3;
+                    match gif_idx {
+                        // FPS slider - cycle through values
+                        3 => {
+                            st.gif_fps = if st.gif_fps >= 55.0 { 5.0 } else { st.gif_fps + 5.0 };
+                        }
+                        // Quality slider - cycle
+                        4 => {
+                            st.gif_quality = if st.gif_quality >= 0.9 { 0.1 } else { st.gif_quality + 0.1 };
+                        }
+                        5 => st.optimize_gif = !st.optimize_gif,
+                        6 => st.gif_size_idx = (st.gif_size_idx + 1) % 4,
+                        _ => {}
+                    }
+                }
+                st.hovered_settings_item = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                return;
+            }
+            // Click outside settings menu closes it
+            st.settings_menu_open = false;
+            st.hovered_settings_item = -1;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+            return;
+        }
+
+        // ── Normal click handling (no menus open) ──
         let record_hit = if recording_panel_open {
             recording_tile_at(
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-                screen_width as f64,
-                screen_height as f64,
-                x,
-                y,
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, x, y,
             )
         } else {
             None
@@ -2459,14 +3411,8 @@ fn setup_window(
             None
         } else {
             toolbar_hit_at(
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-                screen_width as f64,
-                screen_height as f64,
-                x,
-                y,
+                rect.left, rect.top, rect.width(), rect.height(),
+                screen_width as f64, screen_height as f64, x, y,
             )
         };
         let clicked = match hit {
@@ -2476,6 +3422,7 @@ fn setup_window(
 
         match clicked {
             Some(ToolbarIcon::Capture) => {
+                drop(st);
                 if let Some(window) = window_weak_click.upgrade() {
                     send_selection_result(
                         &state_click,
@@ -2488,8 +3435,6 @@ fn setup_window(
                 }
             }
             Some(ToolbarIcon::Fullscreen) => {
-                // Expand selection to cover the entire screen and wait for Enter
-                let mut st = state_click.lock().unwrap();
                 st.start_x = 0.0;
                 st.start_y = 0.0;
                 st.current_x = screen_width as f64;
@@ -2498,25 +3443,15 @@ fn setup_window(
                 st.is_dragging = false;
                 st.fullscreen_mode = true;
                 drop(st);
-
-                if let Some(drawing_area) = drawing_area_weak_click.upgrade() {
-                    drawing_area.queue_draw();
-                }
+                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
             }
             Some(ToolbarIcon::Area) => {
-                // Return to area selection mode: exit fullscreen, restore default centered rect
                 let screen_w = screen_width as f64;
                 let screen_h = screen_height as f64;
-                let sel_w = DEFAULT_SELECTION_WIDTH
-                    .min(screen_w)
-                    .max(MIN_SELECTION_WIDTH.min(screen_w));
-                let sel_h = DEFAULT_SELECTION_HEIGHT
-                    .min(screen_h)
-                    .max(MIN_SELECTION_HEIGHT.min(screen_h));
+                let sel_w = DEFAULT_SELECTION_WIDTH.min(screen_w).max(MIN_SELECTION_WIDTH.min(screen_w));
+                let sel_h = DEFAULT_SELECTION_HEIGHT.min(screen_h).max(MIN_SELECTION_HEIGHT.min(screen_h));
                 let sel_x = ((screen_w - sel_w) / 2.0).max(0.0);
                 let sel_y = ((screen_h - sel_h) / 2.0).max(0.0);
-
-                let mut st = state_click.lock().unwrap();
                 st.start_x = sel_x;
                 st.start_y = sel_y;
                 st.current_x = sel_x + sel_w;
@@ -2526,32 +3461,52 @@ fn setup_window(
                 st.fullscreen_mode = false;
                 st.recording_panel_open = false;
                 drop(st);
-
-                if let Some(drawing_area) = drawing_area_weak_click.upgrade() {
-                    drawing_area.queue_draw();
-                }
+                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
             }
             Some(ToolbarIcon::Recording) => {
-                let mut st = state_click.lock().unwrap();
                 st.recording_panel_open = true;
                 st.hover_tool_index = None;
                 st.hover_size_panel = false;
                 st.hover_crop_panel = false;
                 drop(st);
-
-                if let Some(drawing_area) = drawing_area_weak_click.upgrade() {
-                    drawing_area.queue_draw();
-                }
+                if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
             }
             _ => {
-                if recording_panel_open && record_hit.is_some() {
+                // Crop card clicked — open toolbar crop menu
+                if !recording_panel_open && hit == Some(ToolbarHit::CropPanel) {
+                    st.capture_crop_menu_open = !st.capture_crop_menu_open;
+                    st.hovered_capture_crop_menu_item = -1;
+                    drop(st);
+                    if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
                     return;
                 }
 
-                if n_press == 2 && clicked.is_none() && hit.is_none() {
+                // Recording panel tile clicks
+                if recording_panel_open {
+                    if let Some(tile) = record_hit {
+                        match tile {
+                            RecordPanelTile::Crop => {
+                                st.crop_menu_open = !st.crop_menu_open;
+                                st.hovered_crop_menu_item = -1;
+                            }
+                            RecordPanelTile::Controls => {
+                                st.settings_menu_open = !st.settings_menu_open;
+                                st.hovered_settings_item = -1;
+                            }
+                            RecordPanelTile::Mic => st.mic_toggle = !st.mic_toggle,
+                            RecordPanelTile::Speaker => st.speaker_toggle = !st.speaker_toggle,
+                            _ => {}
+                        }
+                        drop(st);
+                        if let Some(da) = drawing_area_weak_click.upgrade() { da.queue_draw(); }
+                        return;
+                    }
+                }
+
+                if n_press == 2 {
+                    drop(st);
                     let st = state_click.lock().unwrap();
-                    let rect = current_selection_rect(&st);
-                    let inside_selection = st.completed && is_inside_selection(x, y, rect);
+                    let inside_selection = st.completed && is_inside_selection(x, y, current_selection_rect(&st));
                     drop(st);
 
                     if inside_selection {
@@ -2566,6 +3521,8 @@ fn setup_window(
                             );
                         }
                     }
+                } else {
+                    drop(st);
                 }
             }
         }
@@ -2914,6 +3871,9 @@ fn draw_overlay(
             st.hover_tool_index,
             st.hover_size_panel,
             st.hover_crop_panel,
+            st.capture_crop_menu_open,
+            st.capture_aspect_ratio_index,
+            st.hovered_capture_crop_menu_item,
         );
     } else if st.is_dragging || st.completed {
         // ── Normal area-selection mode ──
@@ -2977,29 +3937,29 @@ fn draw_overlay(
         // ── Step 3: toolbar + resize markers on top ──
         if st.recording_panel_open {
             draw_recording_panel(
-                context,
-                x,
-                y,
-                sel_w,
-                sel_h,
-                screen_width,
-                screen_height,
-                background,
+                context, x, y, sel_w, sel_h,
+                screen_width, screen_height, background,
                 st.hover_record_tile,
+                st.crop_menu_open,
+                st.record_aspect_ratio_index,
+                st.hovered_crop_menu_item,
+                st.settings_menu_open,
+                st.settings_tab,
+                st.hovered_settings_item,
+                st.video_max_res, st.video_fps, st.record_mono, st.open_editor,
+                st.rec_controls, st.display_rec_time, st.hidpi, st.do_not_disturb,
+                st.show_cursor, st.rec_clicks, st.rec_keystrokes,
+                st.remember_selection, st.dim_screen, st.show_countdown,
+                st.gif_fps, st.gif_quality, st.optimize_gif, st.gif_size_idx,
             );
         } else {
             draw_feature_toolbar(
-                context,
-                x,
-                y,
-                sel_w,
-                sel_h,
-                screen_width,
-                screen_height,
-                background,
-                st.hover_tool_index,
-                st.hover_size_panel,
-                st.hover_crop_panel,
+                context, x, y, sel_w, sel_h,
+                screen_width, screen_height, background,
+                st.hover_tool_index, st.hover_size_panel, st.hover_crop_panel,
+                st.capture_crop_menu_open,
+                st.capture_aspect_ratio_index,
+                st.hovered_capture_crop_menu_item,
             );
         }
     }
