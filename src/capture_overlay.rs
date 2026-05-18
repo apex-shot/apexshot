@@ -52,6 +52,38 @@ pub enum OverlayExitCode {
     BlockedByBuiltinOverlay = 11,
 }
 
+fn current_desktop_contains(needle: &str) -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .split([':', ';', ','])
+        .any(|part| part.trim().eq_ignore_ascii_case(needle))
+}
+
+fn should_use_gtk_layer_shell_selector() -> bool {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+        || std::env::var_os("SWAYSOCK").is_some()
+        || current_desktop_contains("Hyprland")
+        || current_desktop_contains("sway")
+}
+
+fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, SelectionError> {
+    let backend = WaylandBackend::new()
+        .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
+    let full_capture = backend
+        .capture_screen_for_selection_impl()
+        .or_else(|_| backend.capture_screen())
+        .map_err(|err| {
+            SelectionError::InitError(format!("Wayland background capture failed: {err}"))
+        })?;
+    let area = crate::overlay::select_area_from_capture_with_gtk(&full_capture)?
+        .ok_or(SelectionError::Cancelled)?;
+
+    backend
+        .capture_area(area.x, area.y, area.width, area.height)
+        .map(AreaCaptureResult::Captured)
+        .map_err(|err| SelectionError::InitError(format!("Wayland area capture failed: {err}")))
+}
+
 #[derive(Debug)]
 pub struct CaptureSessionCoordinator {
     state: Mutex<CaptureSessionState>,
@@ -1110,6 +1142,13 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
 }
 
 pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
+    if should_use_gtk_layer_shell_selector() {
+        eprintln!(
+            "[capture_overlay] Using ApexShot GTK layer-shell selector on wlroots compositor"
+        );
+        return capture_area_via_gtk_layer_shell_wlroots();
+    }
+
     match capture_area_file_via_cpp()? {
         AreaCapturePathResult::Captured(path) => {
             let capture = load_capture_data_from_path(&path);
@@ -1157,6 +1196,13 @@ pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
 }
 
 pub fn capture_crosshair_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
+    if should_use_gtk_layer_shell_selector() {
+        eprintln!(
+            "[capture_overlay] Using ApexShot GTK layer-shell selector on wlroots compositor"
+        );
+        return capture_area_via_gtk_layer_shell_wlroots();
+    }
+
     let path = capture_crosshair_file_via_cpp()?;
     let capture = load_capture_data_from_path(&path);
     let _ = std::fs::remove_file(&path);

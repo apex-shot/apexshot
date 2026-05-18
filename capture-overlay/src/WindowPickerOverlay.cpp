@@ -590,6 +590,7 @@ WindowPickerOverlay::WindowPickerOverlay(QWidget* parent)
     : QWidget(parent)
 {
     setWindowFlags(windowPickerWindowFlags());
+    setWindowTitle(QStringLiteral("ApexShot Capture Overlay"));
     setAttribute(Qt::WA_TranslucentBackground, true);
     setAttribute(Qt::WA_StaticContents, true);
     setMouseTracking(true);

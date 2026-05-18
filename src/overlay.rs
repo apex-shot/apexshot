@@ -2393,6 +2393,12 @@ pub fn select_area_from_capture(capture: &CaptureData) -> SelectionResult {
     selector.run_with_background(Some(background))
 }
 
+pub fn select_area_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
+    let selector = AreaSelector::new();
+    let background = background_frame_from_capture(capture)?;
+    selector.run_with_background(Some(background))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
