@@ -213,22 +213,44 @@ async fn async_main(args: Vec<String>) {
                 std::process::exit(1);
             }
 
-            let daemon_action = match args[2].as_str() {
-                "pause-resume" => Some("recording_pause_resume"),
-                "stop-save" => Some("recording_stop_save"),
-                "restart" => Some("recording_restart"),
-                "discard" => Some("recording_discard"),
-                _ => None,
-            };
-
-            if let Some(action) = daemon_action {
-                if trigger_daemon_action(action).await {
-                    return;
+            match args[2].as_str() {
+                "pause-resume" => {
+                    trigger_daemon_action("recording_pause_resume").await;
+                }
+                "stop-save" => {
+                    trigger_daemon_action("recording_stop_save").await;
+                }
+                "restart" => {
+                    trigger_daemon_action("recording_restart").await;
+                }
+                "discard" => {
+                    trigger_daemon_action("recording_discard").await;
+                }
+                "move-webcam" => {
+                    if args.len() < 5 {
+                        eprintln!("Error: move-webcam requires x and y coordinates");
+                        std::process::exit(1);
+                    }
+                    let x: f64 = args[3].parse().unwrap_or(0.0);
+                    let y: f64 = args[4].parse().unwrap_or(0.0);
+                    if let Ok(conn) = zbus::Connection::session().await {
+                        if let Ok(proxy) = zbus::Proxy::new(
+                            &conn,
+                            apexshot::daemon::DAEMON_BUS_NAME,
+                            apexshot::daemon::DAEMON_OBJECT_PATH,
+                            apexshot::daemon::DAEMON_INTERFACE,
+                        )
+                        .await
+                        {
+                            let _ = proxy.call::<_, _, ()>("move_webcam", &(x, y)).await;
+                        }
+                    }
+                }
+                _ => {
+                    eprintln!("Error: unknown recording control action '{}'", args[2]);
+                    std::process::exit(1);
                 }
             }
-
-            eprintln!("Recording control requires a running ApexShot daemon.");
-            std::process::exit(1);
         }
 
         "capture" => {
@@ -318,20 +340,39 @@ async fn async_main(args: Vec<String>) {
             if args.len() < 3 {
                 std::process::exit(1);
             }
-            let params: apexshot::recording::RecordingControlsParams = serde_json::from_str(&args[2]).unwrap();
+            let params: apexshot::recording::RecordingControlsParams =
+                serde_json::from_str(&args[2]).unwrap();
+
+            // Optional session ID and bus name for D-Bus communication
+            let _session_id = args.get(3).cloned();
+            let _bus_name = args.get(4).cloned();
+
             let (tx, rx) = tokio::sync::oneshot::channel();
-            
-            // We run the controls in the main thread (or a dedicated thread)
-            // since this process is dedicated to the GTK loop.
-            apexshot::recording::run_recording_controls(params, tx).expect("Failed to run recording controls");
-            
-            // Wait for user action (Save/Discard)
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-            let action = rt.block_on(rx).unwrap_or(apexshot::recording::StopAction::Save);
+            apexshot::recording::run_recording_controls(params, _session_id, _bus_name, tx)
+                .expect("Failed to run recording controls");
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let action = rt
+                .block_on(rx)
+                .unwrap_or(apexshot::recording::StopAction::Save);
             match action {
                 apexshot::recording::StopAction::Save => std::process::exit(0),
                 apexshot::recording::StopAction::Discard => std::process::exit(2),
             }
+        }
+        "recording-countdown-internal" => {
+            if args.len() < 4 {
+                std::process::exit(1);
+            }
+            let params: apexshot::recording::RecordingControlsParams =
+                serde_json::from_str(&args[2]).unwrap();
+            let seconds: u32 = args[3].parse().unwrap_or(3);
+            apexshot::recording::run_recording_countdown_bar(params, seconds)
+                .expect("Failed to run recording countdown");
+            std::process::exit(0);
         }
         "native-host" => {
             if args.len() >= 3 {
@@ -1158,7 +1199,9 @@ fn run_daemon_with_gtk_on_main_thread() {
             }
             GtkWork::RunRecordingControls { params, stop_tx } => {
                 eprintln!("[gtk] RunRecordingControls received — launching recording controls");
-                if let Err(err) = apexshot::recording::run_recording_controls(params, stop_tx) {
+                if let Err(err) =
+                    apexshot::recording::run_recording_controls(params, None, None, stop_tx)
+                {
                     eprintln!("[gtk] Recording controls failed: {err}");
                 }
             }
@@ -1338,7 +1381,9 @@ fn run_hotkeys_command(args: &[String]) -> anyhow::Result<()> {
                     let output = apexshot::hotkeys::export_hotkeys_for_river()?;
                     println!("{}", output);
                 }
-                _ => anyhow::bail!("Unknown export format '{format}' (expected hyprland|sway|niri|river)"),
+                _ => anyhow::bail!(
+                    "Unknown export format '{format}' (expected hyprland|sway|niri|river)"
+                ),
             }
         }
         _ => {
@@ -1971,6 +2016,17 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             webcam_shape: 0,
             webcam_rel_x: 0.0,
             webcam_rel_y: 0.0,
+            webcam_flip: false,
+            show_clicks: false,
+            click_size: 1.0,
+            click_color: 0,
+            click_style: 0,
+            click_animate: false,
+            show_keys: false,
+            key_size: 1.0,
+            key_position: 0,
+            countdown_enabled: false,
+            countdown_seconds: 3,
         };
 
         let controls_outcome = run_recording_with_controls(config, params)

@@ -534,7 +534,7 @@ pub fn export_hotkeys_for_hyprland() -> anyhow::Result<String> {
     let exe = resolve_action_exe()?;
     let exe_str = exe.to_string_lossy();
     let bindings = default_hotkey_bindings();
-    
+
     let mut output = String::new();
     output.push_str("# ApexShot Hotkeys for Hyprland\n");
     output.push_str("# Add these lines to your hyprland.conf\n\n");
@@ -558,7 +558,7 @@ pub fn export_hotkeys_for_hyprland() -> anyhow::Result<String> {
         let mods_str = if mods.is_empty() { "" } else { &mods.join("_") };
         let name = binding.name.as_deref().unwrap_or("unknown");
         let args = binding.args.join(" ");
-        
+
         output.push_str(&format!(
             "bind = {}, {}, exec, {} {} # {}\n",
             mods_str, key, exe_str, args, name
@@ -572,7 +572,7 @@ pub fn export_hotkeys_for_sway() -> anyhow::Result<String> {
     let exe = resolve_action_exe()?;
     let exe_str = exe.to_string_lossy();
     let bindings = default_hotkey_bindings();
-    
+
     let mut output = String::new();
     output.push_str("# ApexShot Hotkeys for Sway/i3\n");
     output.push_str("# Add these lines to your sway config (e.g. ~/.config/sway/config)\n\n");
@@ -580,7 +580,7 @@ pub fn export_hotkeys_for_sway() -> anyhow::Result<String> {
     for binding in bindings {
         let name = binding.name.as_deref().unwrap_or("unknown");
         let args = binding.args.join(" ");
-        
+
         output.push_str(&format!(
             "bindsym {} exec {} {} # {}\n",
             binding.accelerator, exe_str, args, name
@@ -594,7 +594,7 @@ pub fn export_hotkeys_for_niri() -> anyhow::Result<String> {
     let exe = resolve_action_exe()?;
     let exe_str = exe.to_string_lossy();
     let bindings = default_hotkey_bindings();
-    
+
     let mut output = String::new();
     output.push_str("// ApexShot Hotkeys for Niri\n");
     output.push_str("// Add these to your config.niri binds { ... } block\n\n");
@@ -614,10 +614,14 @@ pub fn export_hotkeys_for_niri() -> anyhow::Result<String> {
             }
         }
 
-        let mods_str = if mods.is_empty() { "".to_string() } else { format!("{}+", mods.join("+")) };
+        let mods_str = if mods.is_empty() {
+            "".to_string()
+        } else {
+            format!("{}+", mods.join("+"))
+        };
         let name = binding.name.as_deref().unwrap_or("unknown");
         let args = binding.args.join(" ");
-        
+
         output.push_str(&format!(
             "    \"{}{}\" {{ spawn \"{}\" \"{}\"; }} // {}\n",
             mods_str, key, exe_str, args, name
@@ -631,7 +635,7 @@ pub fn export_hotkeys_for_river() -> anyhow::Result<String> {
     let exe = resolve_action_exe()?;
     let exe_str = exe.to_string_lossy();
     let bindings = default_hotkey_bindings();
-    
+
     let mut output = String::new();
     output.push_str("# ApexShot Hotkeys for River\n");
     output.push_str("# Add these to your river init script\n\n");
@@ -651,10 +655,14 @@ pub fn export_hotkeys_for_river() -> anyhow::Result<String> {
             }
         }
 
-        let mods_str = if mods.is_empty() { "None".to_string() } else { mods.join("+") };
+        let mods_str = if mods.is_empty() {
+            "None".to_string()
+        } else {
+            mods.join("+")
+        };
         let name = binding.name.as_deref().unwrap_or("unknown");
         let args = binding.args.join(" ");
-        
+
         output.push_str(&format!(
             "riverctl map normal {} {} spawn \"{} {}\" # {}\n",
             mods_str, key, exe_str, args, name
@@ -1350,7 +1358,8 @@ pub fn setup_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyhow
         match comp.name() {
             "Hyprland" => {
                 if let Ok(output) = export_hotkeys_for_hyprland() {
-                    let mut hypr_path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
+                    let mut hypr_path =
+                        dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
                     hypr_path.push("hypr");
                     hypr_path.push("apexshot.conf");
                     let _ = std::fs::create_dir_all(hypr_path.parent().unwrap());
@@ -1384,7 +1393,10 @@ pub fn setup_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyhow
                 }
             }
             _ => {
-                println!("Config saved, but automatic installation for {} is not yet implemented.", comp.name());
+                println!(
+                    "Config saved, but automatic installation for {} is not yet implemented.",
+                    comp.name()
+                );
             }
         }
     } else {

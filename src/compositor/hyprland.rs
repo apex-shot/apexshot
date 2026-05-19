@@ -8,6 +8,12 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct Hyprland;
 
+impl Default for Hyprland {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Hyprland {
     pub fn new() -> Self {
         Self
@@ -28,7 +34,8 @@ impl Hyprland {
     }
 
     fn send_command(&self, cmd: &str) -> anyhow::Result<String> {
-        let path = Self::socket_path().ok_or_else(|| anyhow::anyhow!("Hyprland socket not found"))?;
+        let path =
+            Self::socket_path().ok_or_else(|| anyhow::anyhow!("Hyprland socket not found"))?;
         let mut stream = UnixStream::connect(path)?;
         stream.write_all(cmd.as_bytes())?;
         let mut response = String::new();
@@ -62,18 +69,21 @@ impl Compositor for Hyprland {
     fn get_windows(&self) -> anyhow::Result<Vec<WindowInfo>> {
         let response = self.send_command("j/clients")?;
         let clients: Vec<HyprlandClient> = serde_json::from_str(&response)?;
-        
-        Ok(clients.into_iter().map(|c| WindowInfo {
-            id: c.address,
-            title: c.title,
-            class: c.class,
-            x: c.at[0],
-            y: c.at[1],
-            width: c.size[0],
-            height: c.size[1],
-            workspace: c.workspace.name,
-            is_active: c.focus_history_id == 0,
-        }).collect())
+
+        Ok(clients
+            .into_iter()
+            .map(|c| WindowInfo {
+                id: c.address,
+                title: c.title,
+                class: c.class,
+                x: c.at[0],
+                y: c.at[1],
+                width: c.size[0],
+                height: c.size[1],
+                workspace: c.workspace.name,
+                is_active: c.focus_history_id == 0,
+            })
+            .collect())
     }
 
     fn get_active_window(&self) -> anyhow::Result<Option<WindowInfo>> {

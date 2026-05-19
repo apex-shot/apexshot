@@ -8,6 +8,12 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct Sway;
 
+impl Default for Sway {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sway {
     pub fn new() -> Self {
         Self
@@ -18,31 +24,34 @@ impl Sway {
     }
 
     fn socket_path() -> Option<PathBuf> {
-        env::var_os("SWAYSOCK").or_else(|| env::var_os("I3SOCK")).map(PathBuf::from)
+        env::var_os("SWAYSOCK")
+            .or_else(|| env::var_os("I3SOCK"))
+            .map(PathBuf::from)
     }
 
     fn send_ipc(&self, msg_type: u32, payload: &str) -> anyhow::Result<String> {
-        let path = Self::socket_path().ok_or_else(|| anyhow::anyhow!("Sway/i3 socket not found"))?;
+        let path =
+            Self::socket_path().ok_or_else(|| anyhow::anyhow!("Sway/i3 socket not found"))?;
         let mut stream = UnixStream::connect(path)?;
-        
+
         let magic = b"i3-ipc";
         let len = payload.len() as u32;
-        
+
         let mut header = Vec::new();
         header.extend_from_slice(magic);
         header.extend_from_slice(&len.to_ne_bytes());
         header.extend_from_slice(&msg_type.to_ne_bytes());
-        
+
         stream.write_all(&header)?;
         stream.write_all(payload.as_bytes())?;
-        
+
         let mut resp_header = [0u8; 14];
         stream.read_exact(&mut resp_header)?;
-        
+
         let resp_len = u32::from_ne_bytes(resp_header[6..10].try_into().unwrap());
         let mut resp_payload = vec![0u8; resp_len as usize];
         stream.read_exact(&mut resp_payload)?;
-        
+
         Ok(String::from_utf8(resp_payload)?)
     }
 }
@@ -86,11 +95,19 @@ impl Sway {
 
         if node.node_type == "con" || node.node_type == "floating_con" {
             if let Some(ref _props) = node.window_properties {
-                 // It's a window
-                 windows.push(WindowInfo {
+                // It's a window
+                windows.push(WindowInfo {
                     id: node.id.to_string(),
                     title: node.name.clone().unwrap_or_default(),
-                    class: node.app_id.clone().or_else(|| node.window_properties.as_ref().and_then(|p| p.class.clone())).unwrap_or_default(),
+                    class: node
+                        .app_id
+                        .clone()
+                        .or_else(|| {
+                            node.window_properties
+                                .as_ref()
+                                .and_then(|p| p.class.clone())
+                        })
+                        .unwrap_or_default(),
                     x: node.rect.x,
                     y: node.rect.y,
                     width: node.rect.width,

@@ -7,13 +7,14 @@ use anyhow::Context;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 pub const RECORDING_CONTROL_OBJECT_PATH: &str = "/org/apexshot/RecordingControl";
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RecordingControlCommand {
     Pause,
     Resume,
     Restart,
     StopSave,
     StopDiscard,
+    WebcamMoved(f64, f64),
 }
 
 impl RecordingControlCommand {
@@ -55,6 +56,7 @@ fn notify_shell_overlay(command: RecordingControlCommand, session_id: &str) {
         RecordingControlCommand::StopSave | RecordingControlCommand::StopDiscard => {
             crate::gnome_shell::end_recording_ui(session_id)
         }
+        RecordingControlCommand::WebcamMoved(_, _) => Ok(()),
     };
     let _ = result;
 }
@@ -69,7 +71,8 @@ fn apply_command_side_effects(
         RecordingControlCommand::Resume
         | RecordingControlCommand::Restart
         | RecordingControlCommand::StopSave
-        | RecordingControlCommand::StopDiscard => paused.store(false, Ordering::Relaxed),
+        | RecordingControlCommand::StopDiscard
+        | RecordingControlCommand::WebcamMoved(_, _) => paused.store(false, Ordering::Relaxed),
     }
 
     notify_shell_overlay(command, session_id);
@@ -190,6 +193,10 @@ impl RecordingControlIface {
 
     async fn restart(&self, session_id: &str) -> zbus::fdo::Result<bool> {
         self.send(session_id, RecordingControlCommand::Restart)
+    }
+
+    async fn move_webcam(&self, session_id: &str, x: f64, y: f64) -> zbus::fdo::Result<bool> {
+        self.send(session_id, RecordingControlCommand::WebcamMoved(x, y))
     }
 }
 

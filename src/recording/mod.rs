@@ -60,7 +60,6 @@ pub enum RecordError {
 
 pub type RecordResult<T> = Result<T, RecordError>;
 
-
 fn daemon_event_for_terminal_action(action: RecordingTerminalAction) -> Option<&'static str> {
     match action {
         RecordingTerminalAction::Restart => Some("recording_session_restarted"),
@@ -1977,6 +1976,17 @@ pub fn prepare_overlay_recording_request(
         webcam_shape: request.webcam_shape as usize,
         webcam_rel_x: request.webcam_rel_x,
         webcam_rel_y: request.webcam_rel_y,
+        webcam_flip: request.webcam_flip,
+        show_clicks: request.clicks,
+        click_size: request.click_size,
+        click_color: request.click_color,
+        click_style: request.click_style,
+        click_animate: request.click_animate,
+        show_keys: request.keystrokes,
+        key_size: request.key_size,
+        key_position: request.key_position,
+        countdown_enabled: request.countdown,
+        countdown_seconds: 3, // Default to 3s for now, or fetch from config
     });
 
     PreparedOverlayRecordingRequest {
@@ -2011,7 +2021,8 @@ async fn run_recording_with_controls_with_runtime_overlay(
             config,
             params,
             runtime_overlay_snapshot,
-            visibility_policy.unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
+            visibility_policy
+                .unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
         )
         .await;
     }
@@ -2036,6 +2047,14 @@ pub async fn run_recording_with_native_controls(
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
     let params_json = serde_json::to_string(&params)?;
 
+    if params.countdown_enabled {
+        let _ = std::process::Command::new(&exe)
+            .arg("recording-countdown-internal")
+            .arg(&params_json)
+            .arg(params.countdown_seconds.to_string())
+            .status();
+    }
+
     let mut child = std::process::Command::new(&exe)
         .arg("recording-controls-internal")
         .arg(&params_json)
@@ -2048,7 +2067,7 @@ pub async fn run_recording_with_native_controls(
         let (recording_command_tx, command_rx) = mpsc::unbounded_channel();
         let (control_command_tx, mut control_command_rx) =
             mpsc::unbounded_channel::<RecordingControlCommand>();
-        
+
         let forward_commands = tokio::spawn(async move {
             while let Some(command) = control_command_rx.recv().await {
                 if recording_command_tx.send(command).is_err() {
@@ -2061,7 +2080,7 @@ pub async fn run_recording_with_native_controls(
         let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
         control_server.clear_command_sender();
         forward_commands.abort();
-        
+
         let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -2310,6 +2329,17 @@ pub fn run_overlay_recording_request_with_gtk(
 }
 
 #[cfg(test)]
+fn reap_child_if_exited(child: &mut Option<std::process::Child>) -> bool {
+    if let Some(c) = child {
+        if let Ok(Some(_)) = c.try_wait() {
+            *child = None;
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::capture_overlay::{RecordingRequest, RecordingType};
@@ -2470,9 +2500,20 @@ mod tests {
                 show_webcam: false,
                 webcam_device: -1,
                 webcam_size: 1,
-                webcam_shape: 0,
+                webcam_shape: 3,
                 webcam_rel_x: 0.0,
                 webcam_rel_y: 0.0,
+                webcam_flip: false,
+                show_clicks: true,
+                click_size: 0.3,
+                click_color: 0,
+                click_style: 0,
+                click_animate: true,
+                show_keys: false,
+                key_size: 0.32,
+                key_position: 0,
+                countdown_enabled: false,
+                countdown_seconds: 3,
             })
         );
         assert_eq!(prepared.use_shell_mask, false);
@@ -2596,9 +2637,20 @@ mod tests {
                 show_webcam: false,
                 webcam_device: -1,
                 webcam_size: 1,
-                webcam_shape: 0,
+                webcam_shape: 3,
                 webcam_rel_x: 0.0,
                 webcam_rel_y: 0.0,
+                webcam_flip: false,
+                show_clicks: false,
+                click_size: 0.3,
+                click_color: 0,
+                click_style: 0,
+                click_animate: true,
+                show_keys: false,
+                key_size: 0.32,
+                key_position: 0,
+                countdown_enabled: true,
+                countdown_seconds: 3,
             })
         );
     }
@@ -3162,9 +3214,20 @@ mod tests {
                 show_webcam: false,
                 webcam_device: -1,
                 webcam_size: 1,
-                webcam_shape: 0,
+                webcam_shape: 3,
                 webcam_rel_x: 0.0,
                 webcam_rel_y: 0.0,
+                webcam_flip: false,
+                show_clicks: false,
+                click_size: 0.3,
+                click_color: 0,
+                click_style: 0,
+                click_animate: true,
+                show_keys: false,
+                key_size: 0.32,
+                key_position: 0,
+                countdown_enabled: false,
+                countdown_seconds: 3,
             })
         );
         assert_eq!(prepared.use_shell_mask, shell_supported);
@@ -3236,9 +3299,20 @@ mod tests {
                 show_webcam: false,
                 webcam_device: -1,
                 webcam_size: 1,
-                webcam_shape: 0,
+                webcam_shape: 3,
                 webcam_rel_x: 0.0,
                 webcam_rel_y: 0.0,
+                webcam_flip: false,
+                show_clicks: false,
+                click_size: 0.3,
+                click_color: 0,
+                click_style: 0,
+                click_animate: true,
+                show_keys: false,
+                key_size: 0.32,
+                key_position: 0,
+                countdown_enabled: false,
+                countdown_seconds: 3,
             })
         );
     }

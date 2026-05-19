@@ -46,7 +46,7 @@ use crate::{
 // Daemon action
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DaemonAction {
     CaptureArea,
     CaptureCrosshair,
@@ -75,6 +75,7 @@ pub enum DaemonAction {
     RecordingSessionRestarted,
     RecordingSessionEnded,
     RecordingTimerTick,
+    RecordingWebcamMoved(f64, f64),
     SetHotkeySuppressed(bool),
     Quit,
 }
@@ -816,6 +817,12 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
                     update_tray_recording_state(&tray_handle, Some(state));
                 }
             }
+            DaemonAction::RecordingWebcamMoved(x, y) => {
+                let mut config = crate::config::load_config();
+                config.rec_webcam_rel_x = x;
+                config.rec_webcam_rel_y = y;
+                let _ = crate::config::save_config(&config);
+            }
             DaemonAction::SetHotkeySuppressed(suppressed) => {
                 HOTKEY_SUPPRESSED.store(suppressed, std::sync::atomic::Ordering::Relaxed);
                 eprintln!(
@@ -1190,6 +1197,14 @@ impl DaemonIpc {
             zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
         })?;
         Ok(())
+    }
+
+    fn move_webcam(&self, x: f64, y: f64) -> zbus::fdo::Result<()> {
+        self.tx
+            .send(DaemonAction::RecordingWebcamMoved(x, y))
+            .map_err(|e| {
+                zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
+            })
     }
 
     /// Returns the current mic level as a normalized f64 (0.0 to 1.0).
@@ -2995,6 +3010,17 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         webcam_shape: 0,
         webcam_rel_x: 0.0,
         webcam_rel_y: 0.0,
+        webcam_flip: false,
+        show_clicks: false,
+        click_size: 1.0,
+        click_color: 0,
+        click_style: 0,
+        click_animate: false,
+        show_keys: false,
+        key_size: 1.0,
+        key_position: 0,
+        countdown_enabled: false,
+        countdown_seconds: 3,
     };
 
     match run_recording_with_controls(config, params).await {
@@ -3100,6 +3126,17 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         webcam_shape: 0,
         webcam_rel_x: 0.0,
         webcam_rel_y: 0.0,
+        webcam_flip: false,
+        show_clicks: false,
+        click_size: 1.0,
+        click_color: 0,
+        click_style: 0,
+        click_animate: false,
+        show_keys: false,
+        key_size: 1.0,
+        key_position: 0,
+        countdown_enabled: false,
+        countdown_seconds: 3,
     };
     match run_recording_with_controls(config, params).await {
         Ok((path, StopAction::Discard)) => {

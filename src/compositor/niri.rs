@@ -8,6 +8,12 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct Niri;
 
+impl Default for Niri {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Niri {
     pub fn new() -> Self {
         Self
@@ -26,7 +32,7 @@ impl Niri {
         let mut stream = UnixStream::connect(path)?;
         stream.write_all(req.as_bytes())?;
         stream.write_all(b"\n")?;
-        
+
         let mut response = String::new();
         stream.read_to_string(&mut response)?;
         Ok(response)
@@ -64,22 +70,25 @@ impl Compositor for Niri {
 
     fn get_windows(&self) -> anyhow::Result<Vec<WindowInfo>> {
         let response = self.send_request(r#"{"Windows":{}}"#)?;
-        
+
         // Niri returns a "Reply" which is an enum
         let reply: NiriReply = serde_json::from_str(&response)?;
         let NiriReply::Handled(NiriResponse::Windows(windows)) = reply;
 
-        Ok(windows.into_iter().map(|w| WindowInfo {
-            id: w.id.to_string(),
-            title: w.title.unwrap_or_default(),
-            class: w.app_id.unwrap_or_default(),
-            x: w.x,
-            y: w.y,
-            width: w.width,
-            height: w.height,
-            workspace: w.workspace_id.map(|id| id.to_string()).unwrap_or_default(),
-            is_active: w.is_focused,
-        }).collect())
+        Ok(windows
+            .into_iter()
+            .map(|w| WindowInfo {
+                id: w.id.to_string(),
+                title: w.title.unwrap_or_default(),
+                class: w.app_id.unwrap_or_default(),
+                x: w.x,
+                y: w.y,
+                width: w.width,
+                height: w.height,
+                workspace: w.workspace_id.map(|id| id.to_string()).unwrap_or_default(),
+                is_active: w.is_focused,
+            })
+            .collect())
     }
 
     fn get_active_window(&self) -> anyhow::Result<Option<WindowInfo>> {

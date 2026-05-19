@@ -1,5 +1,6 @@
 use gdk4x11::X11Surface;
-use serde::{Deserialize, Serialize};
+use gst::prelude::*;
+use gstreamer as gst;
 use gtk4::cairo;
 use gtk4::gdk::{self, Key};
 use gtk4::{
@@ -9,6 +10,7 @@ use gtk4::{
     EventControllerKey, GestureDrag, Label, Orientation, Separator,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -54,10 +56,54 @@ pub struct RecordingControlsParams {
     pub webcam_shape: usize,
     pub webcam_rel_x: f64,
     pub webcam_rel_y: f64,
+    pub webcam_flip: bool,
+    pub show_clicks: bool,
+    pub click_size: f64,
+    pub click_color: u8,
+    pub click_style: u8,
+    pub click_animate: bool,
+    pub show_keys: bool,
+    pub key_size: f64,
+    pub key_position: u8,
+    pub countdown_enabled: bool,
+    pub countdown_seconds: u32,
+}
+
+impl Default for RecordingControlsParams {
+    fn default() -> Self {
+        Self {
+            capture_x: 0,
+            capture_y: 0,
+            capture_w: 0,
+            capture_h: 0,
+            is_fullscreen: false,
+            show_timer: true,
+            use_shell_mask: false,
+            show_webcam: false,
+            webcam_device: -1,
+            webcam_size: 1,
+            webcam_shape: 3,
+            webcam_rel_x: 0.0,
+            webcam_rel_y: 0.0,
+            webcam_flip: false,
+            show_clicks: false,
+            click_size: 0.3,
+            click_color: 0,
+            click_style: 0,
+            click_animate: true,
+            show_keys: false,
+            key_size: 0.32,
+            key_position: 0,
+            countdown_enabled: false,
+            countdown_seconds: 3,
+        }
+    }
 }
 
 pub fn run_recording_controls(
     params: RecordingControlsParams,
+    session_id: Option<String>,
+    _bus_name: Option<String>,
     stop_tx: oneshot::Sender<StopAction>,
 ) -> Result<(), StopOverlayError> {
     let stop_tx: Arc<Mutex<Option<oneshot::Sender<StopAction>>>> =
@@ -77,6 +123,17 @@ pub fn run_recording_controls(
         webcam_shape: params.webcam_shape,
         webcam_rel_x: params.webcam_rel_x,
         webcam_rel_y: params.webcam_rel_y,
+        webcam_flip: params.webcam_flip,
+        show_clicks: params.show_clicks,
+        click_size: params.click_size,
+        click_color: params.click_color,
+        click_style: params.click_style,
+        click_animate: params.click_animate,
+        show_keys: params.show_keys,
+        key_size: params.key_size,
+        key_position: params.key_position,
+        countdown_enabled: params.countdown_enabled,
+        countdown_seconds: params.countdown_seconds,
     };
 
     let app = Application::builder()
@@ -84,10 +141,11 @@ pub fn run_recording_controls(
         .build();
 
     let stop_tx_activate = stop_tx.clone();
+    let session_id_clone = session_id.clone();
     app.connect_activate(move |application| {
         let dim_windows = setup_dim_windows(application, params);
         let _webcam_window = if params.show_webcam {
-            setup_webcam_window(application, params)
+            setup_webcam_window(application, params, session_id_clone.clone())
         } else {
             None
         };
@@ -133,7 +191,20 @@ pub fn run_recording_stop_overlay(
             webcam_shape: 0,
             webcam_rel_x: 0.0,
             webcam_rel_y: 0.0,
+            webcam_flip: false,
+            show_clicks: false,
+            click_size: 1.0,
+            click_color: 0,
+            click_style: 0,
+            click_animate: false,
+            show_keys: false,
+            key_size: 1.0,
+            key_position: 0,
+            countdown_enabled: false,
+            countdown_seconds: 3,
         },
+        None,
+        None,
         stop_tx,
     )
 }
@@ -456,24 +527,29 @@ fn setup_countdown_window(
 
     let label = Label::new(Some(&seconds.to_string()));
     label.add_css_class("rec-timer");
-    label.set_margin_end(14);
+    label.add_css_class("countdown-label");
 
-    let bar = GtkBox::new(Orientation::Horizontal, 0);
-    bar.add_css_class("recording-controls-bar");
+    let progress_inner = GtkBox::new(Orientation::Horizontal, 0);
+    progress_inner.add_css_class("countdown-progress-inner");
+    progress_inner.set_size_request(BAR_W - 40, -1);
+
+    let progress_outer = GtkBox::new(Orientation::Horizontal, 0);
+    progress_outer.add_css_class("countdown-progress");
+    progress_outer.append(&progress_inner);
+
+    let bar = GtkBox::new(Orientation::Vertical, 0);
+    bar.add_css_class("countdown-bar-container");
     bar.set_valign(gtk4::Align::Center);
+    bar.set_halign(gtk4::Align::Center);
+    bar.append(&label);
+    bar.append(&progress_outer);
 
-    let stop_btn = icon_button_with_stop();
-    stop_btn.set_sensitive(false);
-
-    let stop_container = GtkBox::new(Orientation::Horizontal, 0);
-    stop_container.append(&stop_btn);
-    stop_container.append(&label);
-    bar.append(&stop_container);
     window.set_child(Some(&bar));
 
-    let remaining = Rc::new(Cell::new(seconds));
-    let remaining_tick = remaining.clone();
+    let remaining = Rc::new(Cell::new(seconds as f32));
+    let total = seconds as f32;
     let label_weak = label.downgrade();
+    let progress_inner_weak = progress_inner.downgrade();
     let window_weak = window.downgrade();
     let app_weak = app.downgrade();
     let dim_window_weaks: Vec<_> = dim_windows
@@ -481,9 +557,10 @@ fn setup_countdown_window(
         .map(|window| window.downgrade())
         .collect();
 
-    glib::timeout_add_local(Duration::from_secs(1), move || {
-        let current = remaining_tick.get();
-        if current <= 1 {
+    // Smoother tick at 60fps for progress bar
+    glib::timeout_add_local(Duration::from_millis(16), move || {
+        let current = remaining.get();
+        if current <= 0.0 {
             for dim_window in &dim_window_weaks {
                 if let Some(window) = dim_window.upgrade() {
                     window.close();
@@ -501,14 +578,20 @@ fn setup_countdown_window(
             return glib::ControlFlow::Break;
         }
 
-        let next = current - 1;
-        remaining_tick.set(next);
+        let next = current - 0.016;
+        remaining.set(next);
+
         if let Some(label) = label_weak.upgrade() {
-            label.set_text(&next.to_string());
-            glib::ControlFlow::Continue
-        } else {
-            glib::ControlFlow::Break
+            let display_secs = next.ceil() as u32;
+            label.set_text(&display_secs.to_string());
         }
+
+        if let Some(progress) = progress_inner_weak.upgrade() {
+            let width = ((next / total) * (BAR_W - 40) as f32) as i32;
+            progress.set_size_request(width.max(0), -1);
+        }
+
+        glib::ControlFlow::Continue
     });
 
     window.present();
@@ -695,6 +778,37 @@ fn install_controls_css() {
                 min-width: 1px;
                 margin-top: 18px;
                 margin-bottom: 18px;
+            }
+            .countdown-bar-container {
+                background-color: #141414;
+                border-radius: 12px;
+                padding: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+            }
+            .countdown-label {
+                color: white;
+                font-size: 24pt;
+                font-weight: 800;
+                margin-bottom: 8px;
+            }
+            .countdown-progress {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+                min-height: 8px;
+            }
+            .countdown-progress-inner {
+                background: linear-gradient(to right, #f46357, #ff9b8a);
+                border-radius: 4px;
+                min-height: 8px;
+            }
+            .webcam-window {
+                border-radius: 1000px; /* Overridden for square */
+                overflow: hidden;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+                border: 2px solid rgba(255, 255, 255, 0.2);
+            }
+            .webcam-picture {
+                background-color: #000;
             }",
         );
         gtk4::style_context_add_provider_for_display(
@@ -1091,11 +1205,12 @@ fn send_net_wm_state_client_message<C: Connection>(
 }
 
 fn setup_webcam_window(
-    app: &Application,
+    application: &Application,
     params: RecordingControlsParams,
+    _session_id: Option<String>,
 ) -> Option<ApplicationWindow> {
     let window = ApplicationWindow::builder()
-        .application(app)
+        .application(application)
         .title("ApexShot Webcam")
         .default_width(240)
         .default_height(240)
@@ -1103,6 +1218,8 @@ fn setup_webcam_window(
         .resizable(false)
         .focusable(false)
         .build();
+
+    window.add_css_class("webcam-window");
 
     let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
     let size_map = [160, 240, 320, 480];
@@ -1147,30 +1264,73 @@ fn setup_webcam_window(
         );
     }
 
-    let drawing_area = DrawingArea::new();
-    drawing_area.set_content_width(size);
-    drawing_area.set_content_height(size);
-    
-    drawing_area.set_draw_func(move |_, cr, w, h| {
-        cr.set_source_rgb(0.05, 0.05, 0.05);
-        if params.webcam_shape == 1 {
-            cr.arc(w as f64 / 2.0, h as f64 / 2.0, (w as f64 / 2.0).min(h as f64 / 2.0), 0.0, 2.0 * std::f64::consts::PI);
-        } else {
-            cr.rectangle(0.0, 0.0, w as f64, h as f64);
-        }
-        let _ = cr.fill();
+    // Use gtk4-paintable-sink for real webcam feed if device is set
+    let video_widget = if params.webcam_device >= 0 {
+        let picture = gtk4::Picture::new();
+        picture.add_css_class("webcam-picture");
+        let sink = gst::ElementFactory::make("gtk4paintablesink").build().ok();
+        if let Some(sink) = sink {
+            let paintable = sink.property::<gdk::Paintable>("paintable");
+            picture.set_paintable(Some(&paintable));
 
-        cr.set_source_rgb(0.3, 0.3, 0.3);
-        cr.set_line_width(2.0);
-        let cx = w as f64 / 2.0;
-        let cy = h as f64 / 2.0;
-        cr.arc(cx, cy - 10.0, 15.0, 0.0, 2.0 * std::f64::consts::PI);
-        let _ = cr.stroke();
-        cr.move_to(cx - 20.0, cy + 20.0);
-        cr.line_to(cx + 20.0, cy + 20.0);
-        let _ = cr.stroke();
-    });
-    window.set_child(Some(&drawing_area));
+            let device_str = format!("/dev/video{}", params.webcam_device);
+            let flip_str = if params.webcam_flip {
+                " ! videoflip method=horizontal-flip"
+            } else {
+                ""
+            };
+            let pipeline_str = format!(
+                "v4l2src device={} ! videoconvert{} ! videoscale ! video/x-raw,width={},height={} ! {}",
+                device_str,
+                flip_str,
+                size,
+                size,
+                sink.name()
+            );
+
+            if let Ok(pipeline) = gst::parse::launch(&pipeline_str) {
+                let _ = pipeline.set_state(gst::State::Playing);
+            }
+        }
+        Some(picture.upcast::<gtk4::Widget>())
+    } else {
+        None
+    };
+
+    if let Some(widget) = video_widget {
+        window.set_child(Some(&widget));
+    } else {
+        let drawing_area = DrawingArea::new();
+        drawing_area.set_content_width(size);
+        drawing_area.set_content_height(size);
+
+        drawing_area.set_draw_func(move |_, cr, w, h| {
+            cr.set_source_rgb(0.05, 0.05, 0.05);
+            if params.webcam_shape == 1 {
+                cr.arc(
+                    w as f64 / 2.0,
+                    h as f64 / 2.0,
+                    (w as f64 / 2.0).min(h as f64 / 2.0),
+                    0.0,
+                    2.0 * std::f64::consts::PI,
+                );
+            } else {
+                cr.rectangle(0.0, 0.0, w as f64, h as f64);
+            }
+            let _ = cr.fill();
+
+            cr.set_source_rgb(0.3, 0.3, 0.3);
+            cr.set_line_width(2.0);
+            let cx = w as f64 / 2.0;
+            let cy = h as f64 / 2.0;
+            cr.arc(cx, cy - 10.0, 15.0, 0.0, 2.0 * std::f64::consts::PI);
+            let _ = cr.stroke();
+            cr.move_to(cx - 20.0, cy + 20.0);
+            cr.line_to(cx + 20.0, cy + 20.0);
+            let _ = cr.stroke();
+        });
+        window.set_child(Some(&drawing_area));
+    }
 
     let drag = GestureDrag::new();
     let current_x = Rc::new(Cell::new(x));
@@ -1178,23 +1338,57 @@ fn setup_webcam_window(
     let drag_start_x = Rc::new(Cell::new(x));
     let drag_start_y = Rc::new(Cell::new(y));
 
-    drag.connect_drag_begin(clone!(#[strong] current_x, #[strong] current_y, #[strong] drag_start_x, #[strong] drag_start_y, move |_, _, _| {
-        drag_start_x.set(current_x.get());
-        drag_start_y.set(current_y.get());
-    }));
-
-    drag.connect_drag_update(clone!(#[weak] window, #[strong] current_x, #[strong] current_y, #[strong] drag_start_x, #[strong] drag_start_y, move |_, dx, dy| {
-        let next_x = (drag_start_x.get() + dx as i32).clamp(0, screen_w - size);
-        let next_y = (drag_start_y.get() + dy as i32).clamp(0, screen_h - size);
-        current_x.set(next_x);
-        current_y.set(next_y);
-        if layer_shell_active {
-            window.set_margin(Edge::Left, next_x);
-            window.set_margin(Edge::Top, next_y);
-        } else {
-            let _ = position_x11_window(&window, next_x, next_y);
+    drag.connect_drag_begin(clone!(
+        #[strong]
+        current_x,
+        #[strong]
+        current_y,
+        #[strong]
+        drag_start_x,
+        #[strong]
+        drag_start_y,
+        move |_, _, _| {
+            drag_start_x.set(current_x.get());
+            drag_start_y.set(current_y.get());
         }
-    }));
+    ));
+
+    drag.connect_drag_update(clone!(
+        #[weak]
+        window,
+        #[strong]
+        current_x,
+        #[strong]
+        current_y,
+        #[strong]
+        drag_start_x,
+        #[strong]
+        drag_start_y,
+        move |_, dx, dy| {
+            let next_x = (drag_start_x.get() + dx as i32).clamp(0, screen_w - size);
+            let next_y = (drag_start_y.get() + dy as i32).clamp(0, screen_h - size);
+            current_x.set(next_x);
+            current_y.set(next_y);
+            if layer_shell_active {
+                window.set_margin(Edge::Left, next_x);
+                window.set_margin(Edge::Top, next_y);
+            } else {
+                let _ = position_x11_window(&window, next_x, next_y);
+            }
+
+            // Notify daemon of webcam move
+            let rel_x = next_x as f64 / screen_w as f64;
+            let rel_y = next_y as f64 / screen_h as f64;
+            let exe =
+                std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+            let _ = std::process::Command::new(exe)
+                .arg("recording-control")
+                .arg("move-webcam")
+                .arg(rel_x.to_string())
+                .arg(rel_y.to_string())
+                .spawn();
+        }
+    ));
     window.add_controller(drag);
 
     window.present();

@@ -18,9 +18,10 @@ use super::layout::{
     MIN_SELECTION_WIDTH,
 };
 use super::recording::hit_testing::{
-    click_dropdown_hit_item, click_options_hit_item, recording_crop_menu_contains,
-    recording_crop_menu_hit_item, recording_tile_at, settings_menu_contains, settings_menu_hit_item,
-    webcam_options_menu_contains, webcam_options_hit_item, click_options_menu_contains,
+    click_dropdown_hit_item, click_options_hit_item, click_options_menu_contains,
+    recording_crop_menu_contains, recording_crop_menu_hit_item, recording_tile_at,
+    settings_menu_contains, settings_menu_hit_item, webcam_options_hit_item,
+    webcam_options_menu_contains,
 };
 use super::recording::layout::{compute_dropdown_popup_y, RecordPanelTile};
 use super::recording::state::{OverlayIntent, SettingsTab};
@@ -1239,28 +1240,33 @@ pub(crate) fn setup_window(
                     }
                     4 => {
                         let was_empty = st.recording.click_previews.is_empty();
-                        st.recording.click_previews.push((x, y, std::time::Instant::now()));
+                        st.recording
+                            .click_previews
+                            .push((x, y, std::time::Instant::now()));
                         if st.recording.click_previews.len() > 10 {
                             st.recording.click_previews.remove(0);
                         }
                         if was_empty {
                             let state_timer = state_click.clone();
                             let drawing_area_timer = drawing_area_weak_click.clone();
-                            glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
-                                let mut st = state_timer.lock().unwrap();
-                                let click_lifetime = std::time::Duration::from_millis(1500);
-                                st.recording.click_previews.retain(|&(_, _, birth_time)| {
-                                    birth_time.elapsed() < click_lifetime
-                                });
-                                if let Some(da) = drawing_area_timer.upgrade() {
-                                    da.queue_draw();
-                                }
-                                if st.recording.click_previews.is_empty() {
-                                    glib::ControlFlow::Break
-                                } else {
-                                    glib::ControlFlow::Continue
-                                }
-                            });
+                            glib::timeout_add_local(
+                                std::time::Duration::from_millis(16),
+                                move || {
+                                    let mut st = state_timer.lock().unwrap();
+                                    let click_lifetime = std::time::Duration::from_millis(1500);
+                                    st.recording.click_previews.retain(|&(_, _, birth_time)| {
+                                        birth_time.elapsed() < click_lifetime
+                                    });
+                                    if let Some(da) = drawing_area_timer.upgrade() {
+                                        da.queue_draw();
+                                    }
+                                    if st.recording.click_previews.is_empty() {
+                                        glib::ControlFlow::Break
+                                    } else {
+                                        glib::ControlFlow::Continue
+                                    }
+                                },
+                            );
                         }
                     }
                     _ => {
@@ -1872,7 +1878,12 @@ pub(crate) fn setup_window(
             if matches!(drag_mode, DragMode::NewSelection) {
                 if let Some(win_idx) = st.hovered_window {
                     let win = &st.windows[win_idx];
-                    let (wx, wy, ww, wh) = (win.x as f64, win.y as f64, win.width as f64, win.height as f64);
+                    let (wx, wy, ww, wh) = (
+                        win.x as f64,
+                        win.y as f64,
+                        win.width as f64,
+                        win.height as f64,
+                    );
                     st.start_x = wx;
                     st.start_y = wy;
                     st.current_x = wx + ww;
