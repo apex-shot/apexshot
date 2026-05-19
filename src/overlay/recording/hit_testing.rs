@@ -275,11 +275,16 @@ pub(crate) fn settings_menu_hit_item(
             if row_at(cy) {
                 return Some(4);
             }
-            cy += 60.0;
-            if row_at(cy) {
+            let optimize_rect = RectF {
+                x: menu_x + 130.0 + 160.0 + 10.0,
+                y: cy,
+                width: 120.0,
+                height: 30.0,
+            };
+            if optimize_rect.contains(x, y) {
                 return Some(5);
             }
-            cy += 45.0;
+            cy += 115.0;
             if row_at(cy) {
                 return Some(6);
             }
@@ -287,6 +292,40 @@ pub(crate) fn settings_menu_hit_item(
     }
 
     None
+}
+
+pub(crate) fn click_dropdown_hit_item(
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    _selection_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
+    dropdown: i32,
+) -> Option<usize> {
+    let menu_h = 500.0;
+    let menu_x = (selection_x + (selection_width - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
+    let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - (menu_h + 30.0));
+    let value_x = menu_x + 130.0;
+    let row_h = 46.0;
+    let (popup_x, popup_y, popup_w, count) = match dropdown {
+        1 => (value_x, menu_y + 78.0 + row_h + 39.0, 168.0, 9),
+        2 => (value_x, menu_y + 78.0 + row_h * 2.0 + 39.0, 110.0, 2),
+        _ => return None,
+    };
+    let item_h = 30.0;
+    let popup_rect = RectF {
+        x: popup_x,
+        y: popup_y,
+        width: popup_w,
+        height: count as f64 * item_h,
+    };
+    if !popup_rect.contains(x, y) {
+        return None;
+    }
+    Some(((y - popup_y) / item_h).floor() as usize)
 }
 
 pub(crate) fn click_options_hit_item(
@@ -454,4 +493,108 @@ pub(crate) fn webcam_options_hit_item(
         }
     }
     None
+}
+
+pub(crate) fn recording_crop_menu_contains(
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    selection_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
+) -> bool {
+    let deck = compute_recording_deck_layout(
+        selection_x,
+        selection_y,
+        selection_width,
+        selection_height,
+        screen_width,
+        screen_height,
+    );
+    let top = deck.top_cluster;
+    let anchor = RectF {
+        x: top.x + 62.0 + 8.0 + 152.0 + 8.0,
+        y: top.y,
+        width: 62.0,
+        height: top.height,
+    };
+    let (panel, _items) = compute_aspect_menu_rects(anchor, screen_width, screen_height);
+    panel.contains(x, y)
+}
+
+pub(crate) fn settings_menu_contains(
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
+) -> bool {
+    let menu_w = 440.0;
+    let menu_x = (selection_x + (selection_width - menu_w) / 2.0).clamp(10.0, screen_width - 450.0);
+    let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - 570.0);
+    RectF {
+        x: menu_x,
+        y: menu_y,
+        width: menu_w,
+        height: 560.0,
+    }
+    .contains(x, y)
+}
+
+pub(crate) fn click_options_menu_contains(
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
+) -> bool {
+    let menu_w = 440.0;
+    let menu_h = 500.0;
+    let menu_x = (selection_x + (selection_width - menu_w) / 2.0).clamp(10.0, screen_width - 450.0);
+    let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - (menu_h + 30.0));
+    RectF {
+        x: menu_x,
+        y: menu_y,
+        width: menu_w,
+        height: menu_h,
+    }
+    .contains(x, y)
+}
+
+pub(crate) fn webcam_options_menu_contains(
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
+) -> bool {
+    let menu_w = 320.0;
+    let item_h = 28.0;
+    let header_h = 30.0;
+    let pad = 8.0;
+
+    let item_counts: &[usize] = &[1, 4, 1, 4, 1];
+    let mut total_h = pad * 2.0;
+    for &c in item_counts {
+        total_h += header_h + c as f64 * item_h;
+    }
+
+    let menu_x =
+        (selection_x + (selection_width - menu_w) / 2.0).clamp(10.0, screen_width - menu_w - 10.0);
+    let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - total_h - 10.0);
+    RectF {
+        x: menu_x,
+        y: menu_y,
+        width: menu_w,
+        height: total_h,
+    }
+    .contains(x, y)
 }

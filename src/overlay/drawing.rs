@@ -1034,7 +1034,7 @@ pub(crate) fn draw_checkbox(
         let alpha = if disabled { 35.0 / 255.0 } else { 60.0 / 255.0 };
         let bg_alpha = if disabled { 25.0 / 255.0 } else { 40.0 / 255.0 };
         context.set_source_rgba(0.0, 0.0, 0.0, bg_alpha);
-        context.fill().ok();
+        context.fill_preserve().ok();
         context.set_source_rgba(1.0, 1.0, 1.0, alpha);
         context.set_line_width(1.5);
         context.stroke().ok();
@@ -1790,13 +1790,13 @@ pub(crate) fn draw_settings_gif_tab(
         context.move_to(value_x + q_slider_w - 40.0, curr_y + 46.0);
         context.show_text("High").ok();
     }
-    curr_y += 60.0;
-
     // Optimize checkbox
+    let optimize_x = value_x + q_slider_w + 10.0;
+    let optimize_y = curr_y;
     draw_checkbox(
         context,
-        value_x,
-        curr_y + (30.0 - 18.0) / 2.0,
+        optimize_x,
+        optimize_y + (30.0 - 18.0) / 2.0,
         18.0,
         optimize_gif,
         false,
@@ -1813,12 +1813,12 @@ pub(crate) fn draw_settings_gif_tab(
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
     if let Ok(extents) = context.text_extents("Optimize GIFs") {
         context.move_to(
-            value_x + 25.0 - extents.x_bearing(),
-            curr_y + 15.0 - extents.height() / 2.0 - extents.y_bearing(),
+            optimize_x + 25.0 - extents.x_bearing(),
+            optimize_y + 15.0 - extents.height() / 2.0 - extents.y_bearing(),
         );
         context.show_text("Optimize GIFs").ok();
     }
-    curr_y += 45.0;
+    curr_y += 115.0;
 
     // GIF size
     draw_label(context, "GIF size:", curr_y);
@@ -1937,6 +1937,8 @@ pub(crate) fn draw_click_options(
     click_color: usize,
     click_style: usize,
     click_animate: bool,
+    click_dropdown_open: Option<i32>,
+    click_previews: &[(f64, f64, std::time::Instant)],
 ) {
     let menu_w = 440.0;
     let menu_h = 500.0;
@@ -2375,29 +2377,94 @@ pub(crate) fn draw_click_options(
             gy += grid_step;
         }
 
-        // Placeholder text
-        context.select_font_face(
-            "Sans",
-            gtk4::cairo::FontSlant::Normal,
-            gtk4::cairo::FontWeight::Bold,
-        );
-        context.set_font_size(13.3);
-        context.set_source_rgba(1.0, 1.0, 1.0, 160.0 / 255.0);
-        if let Ok(ext) = context.text_extents("Click anywhere to preview") {
-            context.move_to(
-                preview_area.x + preview_area.width / 2.0 - ext.width() / 2.0 - ext.x_bearing(),
-                preview_area.y + preview_area.height / 2.0 - ext.height() / 2.0 - ext.y_bearing(),
+        if click_previews.is_empty() {
+            context.select_font_face(
+                "Sans",
+                gtk4::cairo::FontSlant::Normal,
+                gtk4::cairo::FontWeight::Bold,
             );
-            context.show_text("Click anywhere to preview").ok();
-        }
-        context.set_font_size(10.7);
-        context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
-        if let Ok(_ext) = context.text_extents("Preview updates live") {
-            context.move_to(
-                preview_area.x + preview_area.width / 2.0 - 60.0,
-                preview_area.y + preview_area.height / 2.0 + 18.0,
-            );
-            context.show_text("Preview updates live").ok();
+            context.set_font_size(13.3);
+            context.set_source_rgba(1.0, 1.0, 1.0, 160.0 / 255.0);
+            if let Ok(ext) = context.text_extents("Click anywhere to preview") {
+                context.move_to(
+                    preview_area.x + preview_area.width / 2.0 - ext.width() / 2.0 - ext.x_bearing(),
+                    preview_area.y + preview_area.height / 2.0
+                        - ext.height() / 2.0
+                        - ext.y_bearing(),
+                );
+                context.show_text("Click anywhere to preview").ok();
+            }
+            context.set_font_size(10.7);
+            context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
+            if let Ok(_ext) = context.text_extents("Settings update live with each click") {
+                context.move_to(
+                    preview_area.x + preview_area.width / 2.0 - 102.0,
+                    preview_area.y + preview_area.height - 18.0,
+                );
+                context
+                    .show_text("Settings update live with each click")
+                    .ok();
+            }
+        } else {
+            let base_radius = 6.0 + click_size * 28.0;
+            let click_lifetime = std::time::Duration::from_millis(1500);
+
+            for &(px, py, birth_time) in click_previews {
+                if !preview_area.contains(px, py) {
+                    continue;
+                }
+
+                let age = birth_time.elapsed();
+                if age >= click_lifetime {
+                    continue;
+                }
+
+                let progress = (age.as_secs_f64() / 1.5).min(1.0);
+                let fade_alpha = 1.0 - progress;
+                if fade_alpha <= 0.01 {
+                    continue;
+                }
+
+                let mut marker_radius = base_radius;
+                if click_animate {
+                    let press_phase = (age.as_secs_f64() / 0.11).min(1.0);
+                    let press_scale = 0.85 + 0.15 * press_phase;
+                    marker_radius = base_radius * press_scale;
+                }
+
+                if click_style == 1 {
+                    context.set_source_rgba(
+                        click_color_rgb.0,
+                        click_color_rgb.1,
+                        click_color_rgb.2,
+                        fade_alpha,
+                    );
+                    context.new_path();
+                    context.arc(px, py, marker_radius, 0.0, PI * 2.0);
+                    let _ = context.fill_preserve();
+                    context.set_source_rgba(1.0, 1.0, 1.0, 160.0 / 255.0 * fade_alpha);
+                    context.set_line_width(1.4);
+                    let _ = context.stroke();
+                } else {
+                    context.set_source_rgba(
+                        click_color_rgb.0,
+                        click_color_rgb.1,
+                        click_color_rgb.2,
+                        40.0 / 255.0 * fade_alpha,
+                    );
+                    context.new_path();
+                    context.arc(px, py, marker_radius, 0.0, PI * 2.0);
+                    let _ = context.fill_preserve();
+                    context.set_source_rgba(
+                        click_color_rgb.0,
+                        click_color_rgb.1,
+                        click_color_rgb.2,
+                        fade_alpha,
+                    );
+                    context.set_line_width(if click_animate { 3.0 } else { 2.4 });
+                    let _ = context.stroke();
+                }
+            }
         }
         let _ = context.restore();
     }
@@ -2447,6 +2514,77 @@ pub(crate) fn draw_click_options(
                 ok_y + ok_h / 2.0 - ext.height() / 2.0 - ext.y_bearing(),
             );
             context.show_text("Done").ok();
+        }
+    }
+
+    if let Some(dropdown) = click_dropdown_open {
+        let (options, current, popup_y, popup_w): (&[&str], usize, f64, f64) = match dropdown {
+            1 => (
+                CLICK_COLOR_NAMES,
+                click_color.min(CLICK_COLORS_LEN - 1),
+                menu_y + 78.0 + row_h + 39.0,
+                168.0,
+            ),
+            2 => (
+                &["Outline", "Filled"],
+                click_style.min(1),
+                menu_y + 78.0 + row_h * 2.0 + 39.0,
+                110.0,
+            ),
+            _ => return,
+        };
+        let item_h = 30.0;
+        draw_frosted_panel(
+            context,
+            value_x,
+            popup_y,
+            popup_w,
+            options.len() as f64 * item_h,
+            8.0,
+            screen_width,
+            screen_height,
+            background,
+        );
+        for (i, option) in options.iter().enumerate() {
+            let item_y = popup_y + i as f64 * item_h;
+            if i == current {
+                rounded_rect_path(
+                    context,
+                    value_x + 2.0,
+                    item_y + 2.0,
+                    popup_w - 4.0,
+                    item_h - 4.0,
+                    5.0,
+                );
+                context.set_source_rgba(accent_r, accent_g, accent_b, 84.0 / 255.0);
+                let _ = context.fill();
+            }
+            if dropdown == 1 {
+                let (r, g, b) = CLICK_COLORS[i.min(CLICK_COLORS_LEN - 1)];
+                context.set_source_rgba(r, g, b, 1.0);
+                context.new_path();
+                context.arc(value_x + 15.0, item_y + item_h / 2.0, 6.0, 0.0, PI * 2.0);
+                let _ = context.fill();
+            }
+            context.select_font_face(
+                "Sans",
+                gtk4::cairo::FontSlant::Normal,
+                gtk4::cairo::FontWeight::Normal,
+            );
+            context.set_font_size(13.3);
+            context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+            let text_x = if dropdown == 1 {
+                value_x + 28.0
+            } else {
+                value_x + 10.0
+            };
+            if let Ok(extents) = context.text_extents(option) {
+                context.move_to(
+                    text_x - extents.x_bearing(),
+                    item_y + item_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+                );
+                context.show_text(option).ok();
+            }
         }
     }
 }
@@ -2973,6 +3111,8 @@ pub(crate) fn draw_overlay(
                     st.recording.click_color,
                     st.recording.click_style,
                     st.recording.click_animate,
+                    st.recording.click_dropdown_open,
+                    &st.recording.click_previews,
                 );
             }
             // Countdown bubble for timer capture

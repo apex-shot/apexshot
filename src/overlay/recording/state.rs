@@ -75,6 +75,8 @@ pub(crate) struct RecordingState {
     pub(crate) click_style: usize,
     pub(crate) click_animate: bool,
     pub(crate) click_slider_dragging: bool,
+    pub(crate) click_dropdown_open: Option<i32>,
+    pub(crate) click_previews: Vec<(f64, f64, std::time::Instant)>,
 
     // Webcam options menu
     pub(crate) webcam_options_open: bool,
@@ -131,6 +133,8 @@ impl Default for RecordingState {
             click_style: 0,
             click_animate: true,
             click_slider_dragging: false,
+            click_dropdown_open: None,
+            click_previews: Vec::new(),
             webcam_options_open: false,
             hovered_webcam_item: -1,
             webcam_device: -1,

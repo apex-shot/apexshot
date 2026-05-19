@@ -84,3 +84,26 @@ pub(crate) fn toolbar_hit_at(
 
     None
 }
+
+pub(crate) fn capture_crop_menu_contains(
+    selection_x: f64,
+    selection_y: f64,
+    selection_width: f64,
+    selection_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    x: f64,
+    y: f64,
+) -> bool {
+    let layout = compute_toolbar_layout(
+        selection_x,
+        selection_y,
+        selection_width,
+        selection_height,
+        screen_width,
+        screen_height,
+    );
+    let anchor = layout.crop_panel;
+    let (panel, _items) = compute_aspect_menu_rects(anchor, screen_width, screen_height);
+    panel.contains(x, y)
+}
