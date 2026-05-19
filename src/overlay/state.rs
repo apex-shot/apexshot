@@ -30,6 +30,12 @@ pub(crate) enum DragMode {
     Resize(ResizeHandle),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverlayMode {
+    StandardArea,
+    CrosshairCapture,
+}
+
 /// State for the area selector overlay
 pub(crate) struct SelectorState {
     pub(crate) start_x: f64,
@@ -103,6 +109,7 @@ pub(crate) struct SelectorState {
     pub(crate) webcam_size: usize,
     pub(crate) webcam_shape: usize,
     pub(crate) webcam_flip: bool,
+    pub(crate) overlay_mode: OverlayMode,
 }
 
 impl Default for SelectorState {
@@ -170,6 +177,7 @@ impl Default for SelectorState {
             webcam_size: 1,
             webcam_shape: 0,
             webcam_flip: false,
+            overlay_mode: OverlayMode::StandardArea,
         }
     }
 }

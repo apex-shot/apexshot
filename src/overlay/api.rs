@@ -1,7 +1,7 @@
 use super::background::{
     background_frame_from_capture, background_frame_from_image, BackgroundFrame,
 };
-use super::state::SelectorState;
+use super::state::{OverlayMode, SelectorState};
 use super::window::setup_window;
 use crate::backend::CaptureData;
 use gtk4::{prelude::*, Application};
@@ -61,6 +61,12 @@ impl AreaSelector {
         Self {
             state: Arc::new(Mutex::new(SelectorState::default())),
         }
+    }
+
+    fn new_with_mode(mode: OverlayMode) -> Self {
+        let selector = Self::new();
+        selector.state.lock().unwrap().overlay_mode = mode;
+        selector
     }
 
     /// Run the area selection dialog
@@ -250,6 +256,12 @@ pub fn select_area_from_capture(capture: &CaptureData) -> SelectionResult {
 
 pub fn select_area_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
     let selector = AreaSelector::new();
+    let background = background_frame_from_capture(capture)?;
+    selector.run_with_background(Some(background))
+}
+
+pub(crate) fn select_crosshair_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
+    let selector = AreaSelector::new_with_mode(OverlayMode::CrosshairCapture);
     let background = background_frame_from_capture(capture)?;
     selector.run_with_background(Some(background))
 }

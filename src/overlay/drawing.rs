@@ -2,7 +2,7 @@ use super::background::{paint_surface_clipped, paint_surface_fullscreen, Backgro
 use super::geometry::current_selection_rect;
 use super::icons::{draw_toolbar_icon, ToolbarIcon, TOOLBAR_ICONS, TOOLBAR_LABELS};
 use super::layout::*;
-use super::state::{SelectorState, SettingsTab};
+use super::state::{OverlayMode, SelectorState, SettingsTab};
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
@@ -2565,6 +2565,76 @@ pub(crate) fn draw_overlay(
     let screen_width = width.max(1) as f64;
     let screen_height = height.max(1) as f64;
 
+    if st.overlay_mode == OverlayMode::CrosshairCapture {
+        if let Some(bg) = background {
+            paint_surface_fullscreen(
+                context,
+                &bg.surface,
+                bg.width,
+                bg.height,
+                screen_width,
+                screen_height,
+            );
+        }
+
+        let guide_x = st.current_x.clamp(0.0, screen_width);
+        let guide_y = st.current_y.clamp(0.0, screen_height);
+
+        context.set_source_rgba(
+            BRAND_ORANGE_R,
+            BRAND_ORANGE_G,
+            BRAND_ORANGE_B,
+            200.0 / 255.0,
+        );
+        context.set_line_width(1.0);
+        context.move_to(0.0, guide_y);
+        context.line_to(screen_width, guide_y);
+        context.move_to(guide_x, 0.0);
+        context.line_to(guide_x, screen_height);
+        let _ = context.stroke();
+
+        let label = if st.is_dragging || st.completed {
+            let rect = current_selection_rect(&st);
+            let x = rect.left;
+            let y = rect.top;
+            let sel_w = rect.width();
+            let sel_h = rect.height();
+
+            context.set_source_rgba(
+                BRAND_ORANGE_R,
+                BRAND_ORANGE_G,
+                BRAND_ORANGE_B,
+                240.0 / 255.0,
+            );
+            context.set_line_width(2.0);
+            context.rectangle(
+                x + 0.5,
+                y + 0.5,
+                (sel_w - 1.0).max(0.0),
+                (sel_h - 1.0).max(0.0),
+            );
+            let _ = context.stroke();
+
+            context.set_source_rgba(BRAND_ORANGE_R, BRAND_ORANGE_G, BRAND_ORANGE_B, 40.0 / 255.0);
+            context.rectangle(x, y, sel_w, sel_h);
+            let _ = context.fill();
+
+            format!("{} × {}", sel_w as i32, sel_h as i32)
+        } else {
+            format!("{}, {}", guide_x as i32, guide_y as i32)
+        };
+
+        draw_crosshair_mode_bubble(
+            context,
+            guide_x,
+            guide_y,
+            &label,
+            screen_width,
+            screen_height,
+        );
+        return;
+    }
+
     // ── Step 1: paint the background across the entire screen ──
     // Paint the original screenshot (if available) then darken it with a
     // semi-transparent overlay. No blur — this keeps opening instant.
@@ -2634,16 +2704,6 @@ pub(crate) fn draw_overlay(
         let sel_w = rect.width();
         let sel_h = rect.height();
 
-        if st.is_dragging {
-            context.set_source_rgba(BRAND_ORANGE_R, BRAND_ORANGE_G, BRAND_ORANGE_B, 0.63);
-            context.set_line_width(1.0);
-            context.move_to(0.0, st.current_y);
-            context.line_to(screen_width, st.current_y);
-            context.move_to(st.current_x, 0.0);
-            context.line_to(st.current_x, screen_height);
-            let _ = context.stroke();
-        }
-
         // ── Step 2: reveal the original (sharp) image inside the selection ──
         if let Some(bg) = background {
             paint_surface_clipped(
@@ -2672,15 +2732,6 @@ pub(crate) fn draw_overlay(
             context.set_source_rgba(BRAND_ORANGE_R, BRAND_ORANGE_G, BRAND_ORANGE_B, 30.0 / 255.0);
             context.rectangle(x, y, sel_w, sel_h);
             let _ = context.fill();
-        }
-
-        if st.is_dragging {
-            draw_crosshair_bubble(
-                context,
-                st.current_x,
-                st.current_y,
-                &format!("{} × {}", sel_w as i32, sel_h as i32),
-            );
         }
 
         draw_resize_markers(context, x, y, sel_w, sel_h);
@@ -2782,24 +2833,43 @@ pub(crate) fn draw_overlay(
     // else: idle state — the darkened background painted in Step 1 is enough.
 }
 
-pub(crate) fn draw_crosshair_bubble(context: &gtk4::cairo::Context, x: f64, y: f64, label: &str) {
+fn draw_crosshair_mode_bubble(
+    context: &gtk4::cairo::Context,
+    x: f64,
+    y: f64,
+    label: &str,
+    screen_width: f64,
+    screen_height: f64,
+) {
     context.select_font_face(
         "Sans",
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
     context.set_font_size(12.0);
+
     let (text_w, text_h) = context
         .text_extents(label)
         .map(|e| (e.width(), e.height()))
         .unwrap_or((64.0, 14.0));
     let bubble_w = text_w + 22.0;
     let bubble_h = text_h + 14.0;
-    let bx = x + 14.0;
-    let by = y + 14.0;
+    let mut bx = x + 14.0;
+    let mut by = y + 14.0;
+
+    if bx + bubble_w > screen_width - 8.0 {
+        bx = x - bubble_w - 14.0;
+    }
+    if by + bubble_h > screen_height - 8.0 {
+        by = y - bubble_h - 14.0;
+    }
+    bx = bx.clamp(8.0, (screen_width - bubble_w - 8.0).max(8.0));
+    by = by.clamp(8.0, (screen_height - bubble_h - 8.0).max(8.0));
+
     rounded_rect_path(context, bx, by, bubble_w, bubble_h, 6.0);
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.70);
+    context.set_source_rgba(0.0, 0.0, 0.0, 180.0 / 255.0);
     let _ = context.fill();
+
     rounded_rect_path(
         context,
         bx + 0.5,
@@ -2808,9 +2878,10 @@ pub(crate) fn draw_crosshair_bubble(context: &gtk4::cairo::Context, x: f64, y: f
         bubble_h - 1.0,
         6.0,
     );
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.16);
+    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
     context.set_line_width(1.0);
     let _ = context.stroke();
+
     draw_text_centered(
         context,
         RectF {

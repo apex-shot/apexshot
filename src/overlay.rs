@@ -20,3 +20,5 @@ pub use api::{
     select_area, select_area_from_capture, select_area_from_capture_with_gtk,
     select_area_from_image, AreaSelector, SelectionArea, SelectionError, SelectionResult,
 };
+
+pub(crate) use api::select_crosshair_from_capture_with_gtk;

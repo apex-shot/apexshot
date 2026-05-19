@@ -84,6 +84,31 @@ fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, Selec
         .map_err(|err| SelectionError::InitError(format!("Wayland area capture failed: {err}")))
 }
 
+fn capture_crosshair_file_via_gtk_layer_shell_wlroots() -> Result<PathBuf, SelectionError> {
+    let backend = WaylandBackend::new()
+        .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
+    let full_capture = backend
+        .capture_screen_for_selection_impl()
+        .or_else(|_| backend.capture_screen())
+        .map_err(|err| {
+            SelectionError::InitError(format!("Wayland background capture failed: {err}"))
+        })?;
+    let area = crate::overlay::select_crosshair_from_capture_with_gtk(&full_capture)?
+        .ok_or(SelectionError::Cancelled)?;
+    let capture = backend
+        .capture_area(area.x, area.y, area.width, area.height)
+        .map_err(|err| SelectionError::InitError(format!("Wayland area capture failed: {err}")))?;
+
+    save_capture_to_temp_png(&capture)
+}
+
+fn capture_crosshair_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, SelectionError> {
+    let path = capture_crosshair_file_via_gtk_layer_shell_wlroots()?;
+    let capture = load_capture_data_from_path(&path);
+    let _ = std::fs::remove_file(&path);
+    capture.map(AreaCaptureResult::Captured)
+}
+
 #[derive(Debug)]
 pub struct CaptureSessionCoordinator {
     state: Mutex<CaptureSessionState>,
@@ -1178,6 +1203,13 @@ fn build_crosshair_args(config: &crate::config::AppConfig) -> Vec<String> {
 }
 
 pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
+    if should_use_gtk_layer_shell_selector() {
+        eprintln!(
+            "[capture_overlay] Using ApexShot GTK layer-shell crosshair selector on wlroots compositor"
+        );
+        return capture_crosshair_file_via_gtk_layer_shell_wlroots();
+    }
+
     let config = crate::config::load_config();
     let args = build_crosshair_args(&config);
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -1198,9 +1230,9 @@ pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
 pub fn capture_crosshair_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
     if should_use_gtk_layer_shell_selector() {
         eprintln!(
-            "[capture_overlay] Using ApexShot GTK layer-shell selector on wlroots compositor"
+            "[capture_overlay] Using ApexShot GTK layer-shell crosshair selector on wlroots compositor"
         );
-        return capture_area_via_gtk_layer_shell_wlroots();
+        return capture_crosshair_via_gtk_layer_shell_wlroots();
     }
 
     let path = capture_crosshair_file_via_cpp()?;

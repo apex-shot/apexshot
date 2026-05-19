@@ -667,15 +667,6 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
         p.fillRect(widgetRect, QColor(0, 0, 0, 51)); // 0.20 alpha
     }
 
-    // ── Dragging Crosshair (Standard Mode) ────────────────────────────────────
-    if (m_dragging || m_moving || m_resizing != HandlePos::None) {
-        p.save();
-        p.setPen(QPen(QColor(255, 102, 0, 160), 1.0));
-        p.drawLine(QPoint(0, m_pointerPos.y()), QPoint(widgetRect.width(), m_pointerPos.y()));
-        p.drawLine(QPoint(m_pointerPos.x(), 0), QPoint(m_pointerPos.x(), widgetRect.height()));
-        p.restore();
-    }
-
     // ── Window mode ───────────────────────────────────────────────────────────
     if (m_windowMode) {
         p.fillRect(widgetRect, QColor(0, 0, 0, 80));
