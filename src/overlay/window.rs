@@ -21,7 +21,7 @@ use super::recording::hit_testing::{
 };
 use super::recording::layout::{compute_dropdown_popup_y, RecordPanelTile};
 use super::recording::state::{OverlayIntent, SettingsTab};
-use super::state::{DragMode, OverlayMode, SelectorState};
+use super::state::{DragMode, OverlayMode, SelectorState, WindowInfo};
 use gtk4::gdk::Key;
 use gtk4::{
     gdk,
@@ -32,7 +32,9 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::sync::{Arc, Mutex};
-use x11rb::wrapper::ConnectionExt;
+use x11rb::connection::Connection as _;
+use x11rb::protocol::xproto::ConnectionExt as _;
+use x11rb::wrapper::ConnectionExt as _;
 
 pub(crate) fn send_selection_result(
     state: &Arc<Mutex<SelectorState>>,
@@ -412,10 +414,25 @@ pub(crate) fn setup_window(
     motion_controller.connect_motion(move |_, x, y| {
         let (cursor_name, hover_changed, _done) = {
             let mut st = state_motion.lock().unwrap();
-            if st.overlay_mode == OverlayMode::CrosshairCapture {
-                let (x, y) = clamp_point_to_bounds(x, y, screen_width as f64, screen_height as f64);
-                st.current_x = x;
-                st.current_y = y;
+            let (cx, cy) = clamp_point_to_bounds(x, y, screen_width as f64, screen_height as f64);
+            st.current_x = cx;
+            st.current_y = cy;
+
+            if st.window_mode {
+                let mut found_idx = -1;
+                for (idx, win) in st.windows.iter().enumerate() {
+                    let rect = win.rect;
+                    if cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom {
+                        found_idx = idx as i32;
+                        break;
+                    }
+                }
+                let changed = st.hovered_window != found_idx;
+                if changed {
+                    st.hovered_window = found_idx;
+                }
+                ("pointer".to_string(), changed, true)
+            } else if st.overlay_mode == OverlayMode::CrosshairCapture {
                 drop(st);
                 if let Some(da) = drawing_area_weak_motion.upgrade() {
                     da.queue_draw();
@@ -1202,6 +1219,7 @@ pub(crate) fn setup_window(
 
         match clicked {
             Some(ToolbarIcon::Fullscreen) => {
+                st.window_mode = false;
                 st.active_tool_index = TOOLBAR_FULLSCREEN_INDEX;
                 st.intent = OverlayIntent::Area;
                 st.start_x = 0.0;
@@ -1217,6 +1235,7 @@ pub(crate) fn setup_window(
                 }
             }
             Some(ToolbarIcon::Area) => {
+                st.window_mode = false;
                 st.active_tool_index = TOOLBAR_AREA_INDEX;
                 st.intent = OverlayIntent::Area;
                 let screen_w = screen_width as f64;
@@ -1242,7 +1261,23 @@ pub(crate) fn setup_window(
                     da.queue_draw();
                 }
             }
+            Some(ToolbarIcon::Window) => {
+                st.window_mode = true;
+                st.active_tool_index = 2; // ToolbarIcon::Window index
+                st.intent = OverlayIntent::Area;
+                st.completed = false;
+                st.is_dragging = false;
+                st.fullscreen_mode = false;
+                st.recording.panel_open = false;
+                st.hovered_window = -1;
+                st.windows = enumerate_windows();
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+            }
             Some(ToolbarIcon::Recording) => {
+                st.window_mode = false;
                 st.active_tool_index = TOOLBAR_RECORDING_INDEX;
                 st.recording.panel_open = true;
                 st.intent = OverlayIntent::Record;
@@ -1255,6 +1290,7 @@ pub(crate) fn setup_window(
                 }
             }
             Some(ToolbarIcon::Timer) => {
+                st.window_mode = false;
                 // Cycle capture delay: 0 -> 3 -> 5 -> 10 -> 0
                 st.capture_delay_seconds = match st.capture_delay_seconds {
                     0 => 3,
@@ -1271,6 +1307,7 @@ pub(crate) fn setup_window(
                 }
             }
             Some(ToolbarIcon::Scroll) => {
+                st.window_mode = false;
                 // Open scroll capture Chrome extension popup
                 st.scroll_popup_open = true;
                 st.active_tool_index = 3;
@@ -1281,6 +1318,7 @@ pub(crate) fn setup_window(
                 }
             }
             Some(ToolbarIcon::Ocr) => {
+                st.window_mode = false;
                 st.active_tool_index = 5;
                 st.intent = OverlayIntent::Ocr;
                 st.hover_tool_index = None;
@@ -1445,10 +1483,42 @@ pub(crate) fn setup_window(
         state_drag,
         #[strong]
         drawing_area_weak,
+        #[strong]
+        result_tx_drag,
+        #[strong]
+        window_weak_drag,
+        #[strong]
+        background_drag,
         move |_gesture, x, y| {
             let mut st = state_drag.lock().unwrap();
             let (start_x, start_y) =
                 clamp_point_to_bounds(x, y, screen_width as f64, screen_height as f64);
+
+            if st.window_mode
+                && st.hovered_window >= 0
+                && (st.hovered_window as usize) < st.windows.len()
+            {
+                let win = st.windows[st.hovered_window as usize].clone();
+                st.start_x = win.rect.left;
+                st.start_y = win.rect.top;
+                st.current_x = win.rect.right;
+                st.current_y = win.rect.bottom;
+                st.completed = true;
+                st.is_dragging = false;
+                drop(st);
+
+                if let Some(window) = window_weak_drag.upgrade() {
+                    send_selection_result(
+                        &state_drag,
+                        &result_tx_drag,
+                        &window,
+                        screen_width,
+                        screen_height,
+                        background_drag.as_ref(),
+                    );
+                }
+                return;
+            }
 
             if st.overlay_mode == OverlayMode::CrosshairCapture {
                 st.drag_origin_x = start_x;
@@ -1818,3 +1888,135 @@ pub(crate) fn setup_window(
     let _ = window.grab_focus();
     window.present();
 }
+
+pub(crate) fn enumerate_windows() -> Vec<WindowInfo> {
+    // 1. Try Wayland / Hyprland first
+    if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok() {
+        if let Ok(output) = std::process::Command::new("hyprctl").args(["clients", "-j"]).output() {
+            if let Ok(json_str) = String::from_utf8(output.stdout) {
+                #[derive(serde::Deserialize)]
+                struct HyprWindow {
+                    at: [i32; 2],
+                    size: [i32; 2],
+                    title: String,
+                    #[serde(default)]
+                    hidden: bool,
+                }
+
+                if let Ok(clients) = serde_json::from_str::<Vec<HyprWindow>>(&json_str) {
+                    let mut list = Vec::new();
+                    for c in clients {
+                        if c.hidden || c.size[0] < 50 || c.size[1] < 50 {
+                            continue;
+                        }
+                        if c.at[0] + c.size[0] < 0 || c.at[1] + c.size[1] < 0 {
+                            continue;
+                        }
+                        list.push(WindowInfo {
+                            rect: SelectionRectF {
+                                left: c.at[0] as f64,
+                                top: c.at[1] as f64,
+                                right: (c.at[0] + c.size[0]) as f64,
+                                bottom: (c.at[1] + c.size[1]) as f64,
+                            },
+                            title: if c.title.is_empty() { "(Unnamed)".to_string() } else { c.title },
+                        });
+                    }
+                    return list;
+                }
+            }
+        }
+    }
+
+    // 2. Try X11 fallback (if DISPLAY is present)
+    if std::env::var("DISPLAY").is_ok() {
+        if let Ok((conn, screen_num)) = x11rb::connect(None) {
+            let setup = conn.setup();
+            let screen = &setup.roots[screen_num];
+            let root = screen.root;
+
+            if let (Ok(net_client_list_cookie), Ok(utf8_string_cookie), Ok(net_wm_name_cookie)) = (
+                conn.intern_atom(false, b"_NET_CLIENT_LIST"),
+                conn.intern_atom(false, b"UTF8_STRING"),
+                conn.intern_atom(false, b"_NET_WM_NAME"),
+            ) {
+                if let (Ok(net_client_list_reply), Ok(utf8_string_reply), Ok(net_wm_name_reply)) = (
+                    net_client_list_cookie.reply(),
+                    utf8_string_cookie.reply(),
+                    net_wm_name_cookie.reply(),
+                ) {
+                    if let Ok(prop_cookie) = conn.get_property(
+                        false,
+                        root,
+                        net_client_list_reply.atom,
+                        x11rb::protocol::xproto::AtomEnum::WINDOW,
+                        0,
+                        1024,
+                    ) {
+                        if let Ok(prop_reply) = prop_cookie.reply() {
+                            if prop_reply.format == 32 {
+                                let mut list = Vec::new();
+                                let windows: Vec<u32> = prop_reply.value
+                                    .chunks_exact(4)
+                                    .map(|chunk| u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                                    .collect();
+
+                                for win in windows {
+                                    if let (Ok(geom_cookie), Ok(trans_cookie)) = (
+                                        conn.get_geometry(win),
+                                        conn.translate_coordinates(win, root, 0, 0),
+                                    ) {
+                                        if let (Ok(geom), Ok(trans)) = (geom_cookie.reply(), trans_cookie.reply()) {
+                                            let rx = trans.dst_x as f64;
+                                            let ry = trans.dst_y as f64;
+                                            let rw = geom.width as f64;
+                                            let rh = geom.height as f64;
+
+                                            if rw < 50.0 || rh < 50.0 {
+                                                continue;
+                                            }
+
+                                            // Get window title
+                                            let mut title = "(Unnamed)".to_string();
+                                            if let Ok(title_cookie) = conn.get_property(
+                                                false,
+                                                win,
+                                                net_wm_name_reply.atom,
+                                                utf8_string_reply.atom,
+                                                0,
+                                                256,
+                                            ) {
+                                                if let Ok(title_prop) = title_cookie.reply() {
+                                                    if !title_prop.value.is_empty() {
+                                                        if let Ok(t) = String::from_utf8(title_prop.value) {
+                                                            title = t;
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            list.push(WindowInfo {
+                                                rect: SelectionRectF {
+                                                    left: rx,
+                                                    top: ry,
+                                                    right: rx + rw,
+                                                    bottom: ry + rh,
+                                                },
+                                                title,
+                                            });
+                                        }
+                                    }
+                                }
+                                list.reverse();
+                                return list;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Vec::new()
+}
+

@@ -75,6 +75,18 @@ pub(crate) struct SelectorState {
     pub(crate) recording: RecordingState,
     // ── Capture intent (mirrors C++ CaptureIntent) ──
     pub(crate) intent: OverlayIntent,
+    // ── Zoom / Magnifier state ──
+    pub(crate) show_zoom_preview: bool,
+    // ── Window Mode state ──
+    pub(crate) window_mode: bool,
+    pub(crate) hovered_window: i32,
+    pub(crate) windows: Vec<WindowInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WindowInfo {
+    pub(crate) rect: SelectionRectF,
+    pub(crate) title: String,
 }
 
 impl Default for SelectorState {
@@ -110,6 +122,10 @@ impl Default for SelectorState {
             hovered_scroll_popup_close: false,
             recording: RecordingState::default(),
             intent: OverlayIntent::default(),
+            show_zoom_preview: true,
+            window_mode: false,
+            hovered_window: -1,
+            windows: Vec::new(),
         }
     }
 }

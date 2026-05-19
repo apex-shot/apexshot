@@ -6,7 +6,7 @@ use super::recording::layout::{
     compute_dropdown_popup_y, compute_recording_deck_layout, RecordPanelTile, REC_ACTION_WIDTH,
 };
 use super::recording::state::{OverlayIntent, SettingsTab};
-use super::state::{OverlayMode, SelectorState};
+use super::state::{OverlayMode, SelectorState, WindowInfo};
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
@@ -2767,6 +2767,75 @@ pub(crate) fn draw_overlay(
             screen_width,
             screen_height,
         );
+        if st.show_zoom_preview {
+            draw_magnifier_bubble(
+                context,
+                guide_x,
+                guide_y,
+                screen_width,
+                screen_height,
+                background,
+            );
+        }
+        return;
+    }
+
+    if st.window_mode {
+        if let Some(bg) = background {
+            paint_surface_fullscreen(
+                context,
+                &bg.surface,
+                bg.width,
+                bg.height,
+                screen_width,
+                screen_height,
+            );
+            context.set_source_rgba(0.0, 0.0, 0.0, 140.0 / 255.0);
+            let _ = context.paint();
+        } else {
+            context.set_source_rgba(0.0, 0.0, 0.0, 0.20);
+            let _ = context.paint();
+        }
+
+        if st.hovered_window >= 0 && (st.hovered_window as usize) < st.windows.len() {
+            let win = &st.windows[st.hovered_window as usize];
+            draw_window_mode_highlight(context, win, screen_width, screen_height);
+        }
+
+        if st.show_zoom_preview {
+            draw_magnifier_bubble(
+                context,
+                st.current_x,
+                st.current_y,
+                screen_width,
+                screen_height,
+                background,
+            );
+        }
+
+        let tb_w = 400.0;
+        let tb_h = 36.0;
+        let tb_x = (screen_width - tb_w) / 2.0;
+        let tb_y = screen_height - tb_h - 60.0;
+
+        draw_feature_toolbar(
+            context,
+            tb_x,
+            tb_y - 20.0,
+            tb_w,
+            tb_h,
+            screen_width,
+            screen_height,
+            background,
+            st.active_tool_index,
+            st.hover_tool_index,
+            st.hover_size_panel,
+            st.hover_crop_panel,
+            st.capture_crop_menu_open,
+            st.capture_aspect_ratio_index,
+            st.hovered_capture_crop_menu_item,
+        );
+
         return;
     }
 
@@ -3006,6 +3075,16 @@ pub(crate) fn draw_overlay(
                 st.capture_crop_menu_open,
                 st.capture_aspect_ratio_index,
                 st.hovered_capture_crop_menu_item,
+            );
+        }
+        if st.show_zoom_preview && st.is_dragging {
+            draw_magnifier_bubble(
+                context,
+                st.current_x,
+                st.current_y,
+                screen_width,
+                screen_height,
+                background,
             );
         }
     }
@@ -3311,4 +3390,226 @@ fn draw_crosshair_mode_bubble(
         false,
         (1.0, 1.0, 1.0, 1.0),
     );
+}
+
+pub(crate) fn draw_magnifier_bubble(
+    context: &gtk4::cairo::Context,
+    cx: f64,
+    cy: f64,
+    screen_width: f64,
+    _screen_height: f64,
+    background: Option<&BackgroundFrame>,
+) {
+    let radius = 64.0;
+    let diameter = radius * 2.0;
+
+    // Bubble center offset from cursor
+    let mut bx = cx + 40.0;
+    let mut by = cy - 120.0;
+
+    // Boundary collision checks to prevent magnifier from going offscreen
+    if bx + radius > screen_width - 15.0 {
+        bx = cx - 40.0 - diameter;
+    }
+    if by - radius < 15.0 {
+        by = cy + 40.0 + radius;
+    }
+
+    let bubble_cx = bx + radius;
+    let bubble_cy = by;
+
+    let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
+
+    // 1. Draw circular shadow
+    context.new_path();
+    context.arc(bubble_cx, bubble_cy, radius + 2.0, 0.0, PI * 2.0);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.35);
+    let _ = context.fill();
+
+    // 2. Draw circular window content (magnified screenshot)
+    context.new_path();
+    context.arc(bubble_cx, bubble_cy, radius, 0.0, PI * 2.0);
+    context.clip_preserve();
+
+    if let Some(bg) = background {
+        let _ = context.save();
+        context.translate(bubble_cx, bubble_cy);
+        context.scale(3.0, 3.0);
+        context.translate(-cx, -cy);
+
+        context.set_source_surface(&bg.surface, 0.0, 0.0).ok();
+        context.set_operator(gtk4::cairo::Operator::Source);
+        let _ = context.paint();
+        let _ = context.restore();
+    } else {
+        context.set_source_rgba(15.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 0.9);
+        let _ = context.fill();
+    }
+
+    // 3. Draw magnified pixel grid
+    let grid_size = 3.0; // 1 source pixel = 3 destination pixels
+    context.set_line_width(0.4);
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.12);
+
+    // Vertical grid lines
+    let mut x_offset = -radius;
+    while x_offset <= radius {
+        context.move_to(bubble_cx + x_offset, bubble_cy - radius);
+        context.line_to(bubble_cx + x_offset, bubble_cy + radius);
+        let _ = context.stroke();
+        x_offset += grid_size;
+    }
+    // Horizontal grid lines
+    let mut y_offset = -radius;
+    while y_offset <= radius {
+        context.move_to(bubble_cx - radius, bubble_cy + y_offset);
+        context.line_to(bubble_cx + radius, bubble_cy + y_offset);
+        let _ = context.stroke();
+        y_offset += grid_size;
+    }
+
+    // 4. Draw circular border rim
+    context.new_path();
+    context.arc(bubble_cx, bubble_cy, radius, 0.0, PI * 2.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.8);
+    context.set_line_width(2.5);
+    let _ = context.stroke();
+
+    // 5. Draw central crosshair
+    context.new_path();
+    context.set_source_rgba(240.0 / 255.0, 96.0 / 255.0, 36.0 / 255.0, 1.0); // Brand Orange
+    context.set_line_width(1.2);
+    // Vertical center line
+    context.move_to(bubble_cx, bubble_cy - 8.0);
+    context.line_to(bubble_cx, bubble_cy + 8.0);
+    // Horizontal center line
+    context.move_to(bubble_cx - 8.0, bubble_cy);
+    context.line_to(bubble_cx + 8.0, bubble_cy);
+    let _ = context.stroke();
+
+    // Draw central pixel boundary square
+    context.new_path();
+    context.rectangle(bubble_cx - 1.5, bubble_cy - 1.5, 3.0, 3.0);
+    let _ = context.stroke();
+
+    // 6. Draw coordinate text overlay
+    let coords_text = format!("{}, {}", cx as i32, cy as i32);
+    let label_w = 90.0;
+    let label_h = 18.0;
+    let label_x = bubble_cx - label_w / 2.0;
+    let label_y = bubble_cy + radius - 24.0;
+
+    context.new_path();
+    rounded_rect_path(context, label_x, label_y, label_w, label_h, 6.0);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.65);
+    let _ = context.fill();
+
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size(9.5);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    if let Ok(ext) = context.text_extents(&coords_text) {
+        context.move_to(
+            label_x + label_w / 2.0 - ext.width() / 2.0 - ext.x_bearing(),
+            label_y + label_h / 2.0 - ext.height() / 2.0 - ext.y_bearing(),
+        );
+        let _ = context.show_text(&coords_text);
+    }
+
+    let _ = context.restore();
+}
+
+pub(crate) fn draw_window_mode_highlight(
+    context: &gtk4::cairo::Context,
+    win: &WindowInfo,
+    screen_width: f64,
+    _screen_height: f64,
+) {
+    let rect = win.rect;
+    let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
+
+    // 1. Draw glowing neon border
+    context.new_path();
+    context.rectangle(
+        rect.left + 1.0,
+        rect.top + 1.0,
+        (rect.width() - 2.0).max(0.0),
+        (rect.height() - 2.0).max(0.0),
+    );
+    context.set_source_rgba(
+        BRAND_ORANGE_R,
+        BRAND_ORANGE_G,
+        BRAND_ORANGE_B,
+        240.0 / 255.0,
+    );
+    context.set_line_width(2.0);
+    let _ = context.stroke();
+
+    // 2. Draw soft neon color fill
+    context.new_path();
+    context.rectangle(rect.left, rect.top, rect.width(), rect.height());
+    context.set_source_rgba(
+        BRAND_ORANGE_R,
+        BRAND_ORANGE_G,
+        BRAND_ORANGE_B,
+        35.0 / 255.0,
+    );
+    let _ = context.fill();
+
+    // 3. Draw a premium floating tooltip for the window title
+    let label = &win.title;
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size(10.0);
+    if let Ok(ext) = context.text_extents(label) {
+        let pad_x = 12.0;
+        let pad_y = 6.0;
+        let tooltip_w = ext.width() + pad_x * 2.0;
+        let tooltip_h = ext.height() + pad_y * 2.0;
+
+        // Position tooltip centered on top of the window, or inside if too close to top screen edge
+        let tooltip_x = (rect.left + rect.width() / 2.0 - tooltip_w / 2.0)
+            .clamp(15.0, screen_width - tooltip_w - 15.0);
+        let tooltip_y = if rect.top - tooltip_h - 10.0 > 15.0 {
+            rect.top - tooltip_h - 8.0
+        } else {
+            rect.top + 8.0
+        };
+
+        // Draw tooltip background shadow
+        context.new_path();
+        rounded_rect_path(context, tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w, tooltip_h, 6.0);
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.25);
+        let _ = context.fill();
+
+        // Draw tooltip background pill
+        context.new_path();
+        rounded_rect_path(context, tooltip_x, tooltip_y, tooltip_w, tooltip_h, 6.0);
+        context.set_source_rgba(25.0 / 255.0, 25.0 / 255.0, 30.0 / 255.0, 0.95);
+        let _ = context.fill();
+
+        // Draw white subtle border around pill
+        context.new_path();
+        rounded_rect_path(context, tooltip_x + 0.5, tooltip_y + 0.5, tooltip_w - 1.0, tooltip_h - 1.0, 6.0);
+        context.set_source_rgba(1.0, 1.0, 1.0, 0.12);
+        let _ = context.stroke();
+
+        // Draw window title text inside the pill
+        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        context.move_to(
+            tooltip_x + pad_x - ext.x_bearing(),
+            tooltip_y + pad_y + ext.height() - ext.y_bearing() / 2.0 - 1.0,
+        );
+        let _ = context.show_text(label);
+    }
+
+    let _ = context.restore();
 }
