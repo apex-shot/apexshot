@@ -55,6 +55,22 @@ pub(crate) struct SelectorState {
     pub(crate) capture_aspect_ratio_index: usize,
     pub(crate) hovered_capture_crop_menu_item: i32,
     pub(crate) overlay_mode: OverlayMode,
+    // ── Timer capture state ──
+    #[allow(dead_code)]
+    pub(crate) timer_delay_active: bool,
+    #[allow(dead_code)]
+    pub(crate) capture_delay_seconds: i32, // 0, 3, 5, or 10
+    #[allow(dead_code)]
+    pub(crate) countdown_active: bool,
+    #[allow(dead_code)]
+    pub(crate) countdown_value: i32,
+    #[allow(dead_code)]
+    pub(crate) countdown_cancel_requested: bool,
+    #[allow(dead_code)]
+    pub(crate) hovered_countdown_cancel: bool,
+    // ── Scroll popup state ──
+    pub(crate) scroll_popup_open: bool,
+    pub(crate) hovered_scroll_popup_close: bool,
     // ── Recording panel state (separated) ──
     pub(crate) recording: RecordingState,
     // ── Capture intent (mirrors C++ CaptureIntent) ──
@@ -84,6 +100,14 @@ impl Default for SelectorState {
             capture_aspect_ratio_index: 0,
             hovered_capture_crop_menu_item: -1,
             overlay_mode: OverlayMode::StandardArea,
+            timer_delay_active: false,
+            capture_delay_seconds: 5,
+            countdown_active: false,
+            countdown_value: 0,
+            countdown_cancel_requested: false,
+            hovered_countdown_cancel: false,
+            scroll_popup_open: false,
+            hovered_scroll_popup_close: false,
             recording: RecordingState::default(),
             intent: OverlayIntent::default(),
         }

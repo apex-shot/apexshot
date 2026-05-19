@@ -5,7 +5,7 @@ use super::layout::*;
 use super::recording::layout::{
     compute_dropdown_popup_y, compute_recording_deck_layout, RecordPanelTile, REC_ACTION_WIDTH,
 };
-use super::recording::state::SettingsTab;
+use super::recording::state::{OverlayIntent, SettingsTab};
 use super::state::{OverlayMode, SelectorState};
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
@@ -2943,6 +2943,34 @@ pub(crate) fn draw_overlay(
                     st.recording.click_animate,
                 );
             }
+            // Countdown bubble for timer capture
+            if st.countdown_active {
+                draw_countdown_bubble(
+                    context,
+                    x,
+                    y,
+                    sel_w,
+                    sel_h,
+                    screen_width,
+                    screen_height,
+                    st.countdown_value,
+                    st.hovered_countdown_cancel,
+                    st.intent,
+                );
+            }
+            // Scroll capture Chrome extension popup
+            if st.scroll_popup_open {
+                draw_scroll_popup(
+                    context,
+                    x,
+                    y,
+                    sel_w,
+                    sel_h,
+                    screen_width,
+                    screen_height,
+                    st.hovered_scroll_popup_close,
+                );
+            }
             // Webcam options menu
             if st.recording.webcam_options_open {
                 let panel_x = (x + (sel_w - 320.0) / 2.0).clamp(10.0, screen_width - 330.0);
@@ -2961,27 +2989,264 @@ pub(crate) fn draw_overlay(
                     st.recording.webcam_flip,
                 );
             }
-        } else {
-            draw_feature_toolbar(
-                context,
-                x,
-                y,
-                sel_w,
-                sel_h,
-                screen_width,
-                screen_height,
-                background,
-                st.active_tool_index,
-                st.hover_tool_index,
-                st.hover_size_panel,
-                st.hover_crop_panel,
-                st.capture_crop_menu_open,
-                st.capture_aspect_ratio_index,
-                st.hovered_capture_crop_menu_item,
-            );
         }
+        // Always draw toolbar (even when recording panel is open for Timer/Scroll access)
+        draw_feature_toolbar(
+            context,
+            x,
+            y,
+            sel_w,
+            sel_h,
+            screen_width,
+            screen_height,
+            background,
+            st.active_tool_index,
+            st.hover_tool_index,
+            st.hover_size_panel,
+            st.hover_crop_panel,
+            st.capture_crop_menu_open,
+            st.capture_aspect_ratio_index,
+            st.hovered_capture_crop_menu_item,
+        );
     }
     // else: idle state — the darkened background painted in Step 1 is enough.
+}
+
+fn draw_countdown_bubble(
+    context: &gtk4::cairo::Context,
+    _sel_x: f64,
+    _sel_y: f64,
+    _sel_w: f64,
+    _sel_h: f64,
+    screen_width: f64,
+    screen_height: f64,
+    countdown_value: i32,
+    hovered_cancel: bool,
+    intent: OverlayIntent,
+) {
+    let _ = context.save();
+
+    if intent == OverlayIntent::Record {
+        // Pill-shaped bubble for recording (like C++)
+        let pill_w = 100.0;
+        let pill_h = 38.0;
+        let pill_x = (screen_width - pill_w) / 2.0;
+        let pill_y = 28.0;
+
+        // Draw pill background
+        if hovered_cancel {
+            context.set_source_rgba(0.78, 0.24, 0.16, 0.95);
+        } else {
+            context.set_source_rgba(0.91, 0.33, 0.13, 0.92);
+        }
+        rounded_rect_path(context, pill_x, pill_y, pill_w, pill_h, pill_h / 2.0);
+        let _ = context.fill();
+
+        // Draw clock icon on the left
+        let icon_cx = pill_x + 22.0;
+        let icon_cy = pill_y + pill_h / 2.0;
+        let icon_r = 11.0;
+        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        context.set_line_width(2.2);
+        context.set_line_cap(gtk4::cairo::LineCap::Round);
+        context.arc(icon_cx, icon_cy, icon_r, 0.0, PI * 2.0);
+        let _ = context.stroke();
+        // Clock hands
+        context.move_to(icon_cx, icon_cy);
+        context.line_to(icon_cx, icon_cy - 5.5);
+        context.move_to(icon_cx, icon_cy);
+        context.line_to(icon_cx + 5.0, icon_cy + 2.0);
+        let _ = context.stroke();
+
+        // Draw countdown number
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
+        context.set_font_size(if hovered_cancel { 13.0 } else { 22.0 });
+        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        let text = countdown_value.to_string();
+        if let Ok(extents) = context.text_extents(&text) {
+            let text_x =
+                pill_x + 40.0 + (pill_w - 44.0 - extents.width()) / 2.0 - extents.x_bearing();
+            let text_y = pill_y + (pill_h + extents.height()) / 2.0 - extents.y_bearing();
+            context.move_to(text_x, text_y);
+            let _ = context.show_text(&text);
+        }
+    } else {
+        // Circle bubble for capture (like C++)
+        let bubble_size = 120.0;
+        let bubble_x = (screen_width - bubble_size) / 2.0;
+        let bubble_y = (screen_height - bubble_size) / 2.0;
+
+        // Draw circle background
+        if hovered_cancel {
+            context.set_source_rgba(0.52, 0.15, 0.09, 0.95);
+        } else {
+            context.set_source_rgba(0.0, 0.0, 0.0, 0.94);
+        }
+        context.arc(
+            bubble_x + bubble_size / 2.0,
+            bubble_y + bubble_size / 2.0,
+            bubble_size / 2.0,
+            0.0,
+            PI * 2.0,
+        );
+        let _ = context.fill();
+
+        // Draw countdown number or "Cancel"
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
+        context.set_font_size(if hovered_cancel { 34.0 } else { 72.0 });
+        if hovered_cancel {
+            context.set_source_rgba(1.0, 0.89, 0.84, 1.0);
+        } else {
+            context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        }
+
+        let text = if hovered_cancel {
+            "Cancel".to_string()
+        } else {
+            countdown_value.to_string()
+        };
+        if let Ok(extents) = context.text_extents(&text) {
+            let text_x = bubble_x + (bubble_size - extents.width()) / 2.0 - extents.x_bearing();
+            let text_y = bubble_y + (bubble_size + extents.height()) / 2.0 - extents.y_bearing();
+            context.move_to(text_x, text_y);
+            let _ = context.show_text(&text);
+        }
+    }
+
+    let _ = context.restore();
+}
+
+fn draw_scroll_popup(
+    context: &gtk4::cairo::Context,
+    _sel_x: f64,
+    _sel_y: f64,
+    _sel_w: f64,
+    _sel_h: f64,
+    screen_width: f64,
+    screen_height: f64,
+    hovered_close: bool,
+) {
+    let _ = context.save();
+
+    let popup_w = 400.0;
+    let popup_h = 200.0;
+    let popup_x = (screen_width - popup_w) / 2.0;
+    let popup_y = (screen_height - popup_h) / 2.0;
+
+    // Draw popup background
+    context.set_source_rgba(0.08, 0.08, 0.09, 0.96);
+    rounded_rect_path(context, popup_x, popup_y, popup_w, popup_h, 12.0);
+    let _ = context.fill();
+
+    // Draw border
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.15);
+    context.set_line_width(1.0);
+    rounded_rect_path(
+        context,
+        popup_x + 0.5,
+        popup_y + 0.5,
+        popup_w - 1.0,
+        popup_h - 1.0,
+        11.5,
+    );
+    let _ = context.stroke();
+
+    // Draw close button
+    let close_size = 24.0;
+    let close_x = popup_x + popup_w - close_size - 12.0;
+    let close_y = popup_y + 12.0;
+    if hovered_close {
+        context.set_source_rgba(0.8, 0.25, 0.15, 1.0);
+    } else {
+        context.set_source_rgba(0.4, 0.4, 0.4, 1.0);
+    }
+    rounded_rect_path(context, close_x, close_y, close_size, close_size, 6.0);
+    let _ = context.fill();
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    context.set_line_width(2.0);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.move_to(close_x + 7.0, close_y + 7.0);
+    context.line_to(close_x + close_size - 7.0, close_y + close_size - 7.0);
+    context.move_to(close_x + close_size - 7.0, close_y + 7.0);
+    context.line_to(close_x + 7.0, close_y + close_size - 7.0);
+    let _ = context.stroke();
+
+    // Draw title
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size(16.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    let title = "Scroll Capture";
+    if let Ok(extents) = context.text_extents(title) {
+        let text_x = popup_x + 20.0;
+        let text_y = popup_y + 30.0 - extents.y_bearing();
+        context.move_to(text_x, text_y);
+        let _ = context.show_text(title);
+    }
+
+    // Draw description
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    context.set_font_size(13.0);
+    context.set_source_rgba(0.9, 0.9, 0.9, 0.9);
+    let desc = "Scroll capture requires a browser extension.";
+    if let Ok(extents) = context.text_extents(desc) {
+        let text_x = popup_x + 20.0;
+        let text_y = popup_y + 60.0 - extents.y_bearing();
+        context.move_to(text_x, text_y);
+        let _ = context.show_text(desc);
+    }
+
+    // Draw extension info
+    context.set_font_size(12.0);
+    context.set_source_rgba(0.7, 0.7, 0.7, 0.8);
+    let info = "Install the ApexShot Chrome extension to enable scroll capture.";
+    if let Ok(extents) = context.text_extents(info) {
+        let text_x = popup_x + 20.0;
+        let text_y = popup_y + 85.0 - extents.y_bearing();
+        context.move_to(text_x, text_y);
+        let _ = context.show_text(info);
+    }
+
+    // Draw download button
+    let btn_w = 140.0;
+    let btn_h = 36.0;
+    let btn_x = popup_x + (popup_w - btn_w) / 2.0;
+    let btn_y = popup_y + 120.0;
+    context.set_source_rgba(0.91, 0.33, 0.13, 0.92);
+    rounded_rect_path(context, btn_x, btn_y, btn_w, btn_h, 8.0);
+    let _ = context.fill();
+
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size(14.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    let btn_text = "Download Extension";
+    if let Ok(extents) = context.text_extents(btn_text) {
+        let text_x = btn_x + (btn_w - extents.width()) / 2.0 - extents.x_bearing();
+        let text_y = btn_y + (btn_h + extents.height()) / 2.0 - extents.y_bearing();
+        context.move_to(text_x, text_y);
+        let _ = context.show_text(btn_text);
+    }
+
+    let _ = context.restore();
 }
 
 fn draw_crosshair_mode_bubble(

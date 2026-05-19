@@ -611,6 +611,53 @@ pub(crate) fn setup_window(
                     st.hover_crop_panel = false;
                     st.recording.hover_record_tile = None;
                     ("pointer".to_string(), changed, true)
+                } else if st.scroll_popup_open {
+                    // Scroll popup hover handling
+                    let popup_w = 400.0;
+                    let popup_h = 200.0;
+                    let popup_x = (screen_width as f64 - popup_w) / 2.0;
+                    let popup_y = (screen_height as f64 - popup_h) / 2.0;
+                    let close_size = 24.0;
+                    let close_x = popup_x + popup_w - close_size - 12.0;
+                    let close_y = popup_y + 12.0;
+
+                    let next_hover_close = x >= close_x
+                        && x <= close_x + close_size
+                        && y >= close_y
+                        && y <= close_y + close_size;
+                    let changed = st.hovered_scroll_popup_close != next_hover_close;
+                    if changed {
+                        st.hovered_scroll_popup_close = next_hover_close;
+                    }
+                    st.hover_tool_index = None;
+                    st.hover_size_panel = false;
+                    st.hover_crop_panel = false;
+                    st.recording.hover_record_tile = None;
+                    ("pointer".to_string(), true, true)
+                } else if st.recording.webcam_options_open {
+                    let item = webcam_options_hit_item(
+                        rect.left,
+                        rect.top,
+                        rect.width(),
+                        rect.height(),
+                        screen_width as f64,
+                        screen_height as f64,
+                        x,
+                        y,
+                    );
+                    let next = item.unwrap_or(-1);
+                    let changed = next != st.recording.hovered_webcam_item;
+                    if changed {
+                        st.recording.hovered_webcam_item = next;
+                    }
+                    st.recording.hovered_settings_item = -1;
+                    st.hovered_capture_crop_menu_item = -1;
+                    st.recording.hovered_crop_menu_item = -1;
+                    st.hover_tool_index = None;
+                    st.hover_size_panel = false;
+                    st.hover_crop_panel = false;
+                    st.recording.hover_record_tile = None;
+                    ("pointer".to_string(), changed, true)
                 } else {
                     let record_hit = if st.recording.panel_open {
                         recording_tile_at(
@@ -1064,6 +1111,43 @@ pub(crate) fn setup_window(
             return;
         }
 
+        // ── Scroll popup click handling ──
+        if st.scroll_popup_open {
+            let popup_w = 400.0;
+            let popup_h = 200.0;
+            let popup_x = (screen_width as f64 - popup_w) / 2.0;
+            let popup_y = (screen_height as f64 - popup_h) / 2.0;
+            let close_size = 24.0;
+            let close_x = popup_x + popup_w - close_size - 12.0;
+            let close_y = popup_y + 12.0;
+
+            // Check if close button clicked
+            if x >= close_x
+                && x <= close_x + close_size
+                && y >= close_y
+                && y <= close_y + close_size
+            {
+                st.scroll_popup_open = false;
+                st.hovered_scroll_popup_close = false;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+
+            // Click outside popup closes it
+            if !(x >= popup_x && x <= popup_x + popup_w && y >= popup_y && y <= popup_y + popup_h) {
+                st.scroll_popup_open = false;
+                st.hovered_scroll_popup_close = false;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+        }
+
         // ── Webcam options menu click handling ──
         if st.recording.webcam_options_open {
             if let Some(item) = webcam_options_hit_item(
@@ -1121,22 +1205,19 @@ pub(crate) fn setup_window(
         } else {
             None
         };
-        let hit = if recording_panel_open {
-            None
-        } else {
-            toolbar_hit_at(
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-                screen_width as f64,
-                screen_height as f64,
-                x,
-                y,
-            )
-        };
+        // Always check toolbar hit (even when recording panel is open for Timer/Scroll)
+        let hit = toolbar_hit_at(
+            rect.left,
+            rect.top,
+            rect.width(),
+            rect.height(),
+            screen_width as f64,
+            screen_height as f64,
+            x,
+            y,
+        );
         let clicked = match hit {
-            Some(ToolbarHit::Tool(index)) if !recording_panel_open => Some(TOOLBAR_ICONS[index]),
+            Some(ToolbarHit::Tool(index)) => Some(TOOLBAR_ICONS[index]),
             _ => None,
         };
 
@@ -1189,6 +1270,34 @@ pub(crate) fn setup_window(
                 st.hover_tool_index = None;
                 st.hover_size_panel = false;
                 st.hover_crop_panel = false;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+            }
+            Some(ToolbarIcon::Timer) => {
+                // Cycle capture delay: 0 -> 3 -> 5 -> 10 -> 0
+                st.capture_delay_seconds = match st.capture_delay_seconds {
+                    0 => 3,
+                    3 => 5,
+                    5 => 10,
+                    _ => 0,
+                };
+                st.timer_delay_active = st.capture_delay_seconds > 0;
+                st.active_tool_index = 4;
+                st.hover_tool_index = None;
+                st.recording.panel_open = false; // Close recording panel
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+            }
+            Some(ToolbarIcon::Scroll) => {
+                // Open scroll capture Chrome extension popup
+                st.scroll_popup_open = true;
+                st.active_tool_index = 3;
+                st.hover_tool_index = None;
+                st.recording.panel_open = false; // Close recording panel
                 drop(st);
                 if let Some(da) = drawing_area_weak_click.upgrade() {
                     da.queue_draw();

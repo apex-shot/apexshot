@@ -1,7 +1,7 @@
 use super::drawing::rounded_rect_path;
 use std::f64::consts::PI;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum ToolbarIcon {
     Area,
     Fullscreen,
