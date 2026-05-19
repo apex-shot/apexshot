@@ -2,7 +2,11 @@ use super::background::{paint_surface_clipped, paint_surface_fullscreen, Backgro
 use super::geometry::current_selection_rect;
 use super::icons::{draw_toolbar_icon, ToolbarIcon, TOOLBAR_ICONS, TOOLBAR_LABELS};
 use super::layout::*;
-use super::state::{OverlayMode, SelectorState, SettingsTab};
+use super::recording::layout::{
+    compute_dropdown_popup_y, compute_recording_deck_layout, RecordPanelTile, REC_ACTION_WIDTH,
+};
+use super::recording::state::SettingsTab;
+use super::state::{OverlayMode, SelectorState};
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
@@ -2869,7 +2873,7 @@ pub(crate) fn draw_overlay(
         draw_resize_markers(context, x, y, sel_w, sel_h);
 
         // ── Step 3: toolbar + resize markers on top ──
-        if st.recording_panel_open {
+        if st.recording.panel_open {
             draw_recording_panel(
                 context,
                 x,
@@ -2879,50 +2883,50 @@ pub(crate) fn draw_overlay(
                 screen_width,
                 screen_height,
                 background,
-                st.hover_record_tile,
-                st.crop_menu_open,
-                st.record_aspect_ratio_index,
-                st.hovered_crop_menu_item,
-                st.settings_menu_open,
-                st.settings_tab,
-                st.hovered_settings_item,
-                st.settings_dropdown_open,
-                st.video_max_res,
-                st.video_fps,
-                st.record_mono,
-                st.open_editor,
-                st.rec_controls,
-                st.display_rec_time,
-                st.hidpi,
-                st.do_not_disturb,
-                st.show_cursor,
-                st.rec_clicks,
-                st.rec_keystrokes,
-                st.rec_webcam,
-                st.remember_selection,
-                st.dim_screen,
-                st.show_countdown,
-                st.gif_fps,
-                st.gif_quality,
-                st.optimize_gif,
-                st.gif_size_idx,
+                st.recording.hover_record_tile,
+                st.recording.crop_menu_open,
+                st.recording.record_aspect_ratio_index,
+                st.recording.hovered_crop_menu_item,
+                st.recording.settings_menu_open,
+                st.recording.settings_tab,
+                st.recording.hovered_settings_item,
+                st.recording.settings_dropdown_open,
+                st.recording.video_max_res,
+                st.recording.video_fps,
+                st.recording.record_mono,
+                st.recording.open_editor,
+                st.recording.rec_controls,
+                st.recording.display_rec_time,
+                st.recording.hidpi,
+                st.recording.do_not_disturb,
+                st.recording.show_cursor,
+                st.recording.rec_clicks,
+                st.recording.rec_keystrokes,
+                st.recording.rec_webcam,
+                st.recording.remember_selection,
+                st.recording.dim_screen,
+                st.recording.show_countdown,
+                st.recording.gif_fps,
+                st.recording.gif_quality,
+                st.recording.optimize_gif,
+                st.recording.gif_size_idx,
             );
-            if st.rec_webcam {
+            if st.recording.rec_webcam {
                 draw_webcam_preview(
                     context,
                     x,
                     y,
                     sel_w,
                     sel_h,
-                    st.webcam_size,
-                    st.webcam_shape,
-                    st.webcam_rel_x,
-                    st.webcam_rel_y,
-                    st.webcam_device,
+                    st.recording.webcam_size,
+                    st.recording.webcam_shape,
+                    st.recording.webcam_rel_x,
+                    st.recording.webcam_rel_y,
+                    st.recording.webcam_device,
                 );
             }
             // Click options menu (on top of recording panel)
-            if st.click_options_open {
+            if st.recording.click_options_open {
                 let panel_x = (x + (sel_w - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
                 let panel_y = (y + 24.0).clamp(10.0, screen_height - 530.0);
                 draw_click_options(
@@ -2932,15 +2936,15 @@ pub(crate) fn draw_overlay(
                     screen_width,
                     screen_height,
                     background,
-                    st.hovered_click_item,
-                    st.click_size,
-                    st.click_color,
-                    st.click_style,
-                    st.click_animate,
+                    st.recording.hovered_click_item,
+                    st.recording.click_size,
+                    st.recording.click_color,
+                    st.recording.click_style,
+                    st.recording.click_animate,
                 );
             }
             // Webcam options menu
-            if st.webcam_options_open {
+            if st.recording.webcam_options_open {
                 let panel_x = (x + (sel_w - 320.0) / 2.0).clamp(10.0, screen_width - 330.0);
                 let panel_y = (y + 24.0).clamp(10.0, screen_height - 350.0);
                 draw_webcam_options(
@@ -2950,11 +2954,11 @@ pub(crate) fn draw_overlay(
                     screen_width,
                     screen_height,
                     background,
-                    st.hovered_webcam_item,
-                    st.webcam_device,
-                    st.webcam_size,
-                    st.webcam_shape,
-                    st.webcam_flip,
+                    st.recording.hovered_webcam_item,
+                    st.recording.webcam_device,
+                    st.recording.webcam_size,
+                    st.recording.webcam_shape,
+                    st.recording.webcam_flip,
                 );
             }
         } else {

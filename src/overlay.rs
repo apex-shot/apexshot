@@ -10,6 +10,7 @@ mod geometry;
 mod hit_testing;
 mod icons;
 mod layout;
+pub(crate) mod recording;
 mod state;
 mod window;
 
