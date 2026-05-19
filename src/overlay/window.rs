@@ -1,0 +1,1553 @@
+use super::api::{SelectionError, SelectionResult};
+use super::background::BackgroundFrame;
+use super::drawing::{draw_overlay, CLICK_COLORS_LEN};
+use super::geometry::{
+    clamp_point_to_bounds, current_selection_rect, cursor_name_for_handle, detect_resize_handle,
+    is_inside_selection, selection_area_from_state, set_selection_rect, update_selection_for_drag,
+    SelectionRectF,
+};
+use super::hit_testing::{
+    capture_crop_menu_hit_item, click_options_hit_item, recording_crop_menu_hit_item,
+    recording_tile_at, settings_menu_hit_item, toolbar_hit_at, toolbar_item_at,
+    webcam_options_hit_item,
+};
+use super::icons::{ToolbarIcon, TOOLBAR_ICONS};
+use super::layout::{
+    compute_dropdown_popup_y, RecordPanelTile, RectF, ToolbarHit, DEFAULT_SELECTION_HEIGHT,
+    DEFAULT_SELECTION_WIDTH, MIN_SELECTION_HEIGHT, MIN_SELECTION_WIDTH,
+};
+use super::state::{DragMode, SelectorState, SettingsTab};
+use gtk4::gdk::Key;
+use gtk4::{
+    gdk,
+    glib::{self, clone},
+    prelude::*,
+    Application, ApplicationWindow, CssProvider, EventControllerKey, EventControllerMotion,
+    GestureClick, GestureDrag,
+};
+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use std::sync::{Arc, Mutex};
+use x11rb::wrapper::ConnectionExt;
+
+pub(crate) fn send_selection_result(
+    state: &Arc<Mutex<SelectorState>>,
+    result_tx: &std::sync::mpsc::Sender<SelectionResult>,
+    window: &ApplicationWindow,
+    screen_width: i32,
+    screen_height: i32,
+    background: Option<&BackgroundFrame>,
+) {
+    let st = state.lock().unwrap();
+    let area = selection_area_from_state(&st, screen_width, screen_height, background);
+    drop(st);
+
+    let result = if area.is_valid() {
+        Ok(Some(area))
+    } else {
+        Ok(None)
+    };
+    let _ = result_tx.send(result);
+    window.close();
+}
+
+pub(crate) fn install_overlay_css() {
+    if let Some(display) = gdk::Display::default() {
+        let provider = CssProvider::new();
+        provider.load_from_data(
+            "
+            window.overlay {
+                background-color: transparent;
+                transition: none;
+                transition-duration: 0s;
+                animation: none;
+                animation-duration: 0s;
+            }
+
+            window.overlay > * {
+                background-color: transparent;
+            }
+
+            drawingarea {
+                background-color: transparent;
+            }
+            ",
+        );
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_USER,
+        );
+    }
+}
+
+/// On X11, tell the compositor to treat this window as a transient system
+/// overlay (no open/close animation, no taskbar entry, no pager entry).
+///
+/// This is called from `connect_realize` — i.e. the XID exists but the
+/// window has not been mapped yet — so the compositor sees all hints on
+/// the very first MapNotify and never starts an animation.
+pub(crate) fn suppress_x11_compositor_animation(window: &ApplicationWindow) {
+    use gdk4x11::X11Surface;
+    use x11rb::{
+        connection::Connection,
+        protocol::xproto::{self, ConnectionExt as _},
+    };
+
+    let Some(surface) = window.surface() else {
+        return;
+    };
+    let Ok(x11_surface) = surface.downcast::<X11Surface>() else {
+        return; // Wayland – nothing to do
+    };
+    let Ok(xid) = u32::try_from(x11_surface.xid()) else {
+        return;
+    };
+    let Ok((conn, _)) = x11rb::connect(None) else {
+        return;
+    };
+
+    // _NET_WM_BYPASS_COMPOSITOR = 1
+    // Asks the compositor to skip compositing this window entirely, which
+    // also disables any open/close transition effects.
+    if let Ok(cookie) = conn.intern_atom(false, b"_NET_WM_BYPASS_COMPOSITOR") {
+        if let Ok(reply) = cookie.reply() {
+            let _ = conn.change_property32(
+                xproto::PropMode::REPLACE,
+                xid,
+                reply.atom,
+                xproto::AtomEnum::CARDINAL,
+                &[1u32],
+            );
+        }
+    }
+
+    // _NET_WM_WINDOW_TYPE = _NET_WM_WINDOW_TYPE_UTILITY
+    // UTILITY windows are never animated by compositors (Mutter, KWin, Picom).
+    // We prefer UTILITY over SPLASH because SPLASH can cause focus/stacking
+    // issues on some window managers.
+    if let (Ok(type_cookie), Ok(util_cookie)) = (
+        conn.intern_atom(false, b"_NET_WM_WINDOW_TYPE"),
+        conn.intern_atom(false, b"_NET_WM_WINDOW_TYPE_UTILITY"),
+    ) {
+        if let (Ok(type_reply), Ok(util_reply)) = (type_cookie.reply(), util_cookie.reply()) {
+            let _ = conn.change_property32(
+                xproto::PropMode::REPLACE,
+                xid,
+                type_reply.atom,
+                xproto::AtomEnum::ATOM,
+                &[util_reply.atom],
+            );
+        }
+    }
+
+    // _NET_WM_STATE: add SKIP_TASKBAR + SKIP_PAGER so the overlay never
+    // appears in the taskbar or workspace switcher.
+    if let (Ok(state_cookie), Ok(skip_taskbar_cookie), Ok(skip_pager_cookie)) = (
+        conn.intern_atom(false, b"_NET_WM_STATE"),
+        conn.intern_atom(false, b"_NET_WM_STATE_SKIP_TASKBAR"),
+        conn.intern_atom(false, b"_NET_WM_STATE_SKIP_PAGER"),
+    ) {
+        if let (Ok(state_reply), Ok(skip_taskbar_reply), Ok(skip_pager_reply)) = (
+            state_cookie.reply(),
+            skip_taskbar_cookie.reply(),
+            skip_pager_cookie.reply(),
+        ) {
+            let _ = conn.change_property32(
+                xproto::PropMode::REPLACE,
+                xid,
+                state_reply.atom,
+                xproto::AtomEnum::ATOM,
+                &[skip_taskbar_reply.atom, skip_pager_reply.atom],
+            );
+        }
+    }
+
+    let _ = conn.flush();
+}
+
+pub(crate) fn setup_window(
+    app: &Application,
+    state: Arc<Mutex<SelectorState>>,
+    result_tx: std::sync::mpsc::Sender<SelectionResult>,
+    background: Option<BackgroundFrame>,
+) {
+    // Suppress GTK-side animations so the overlay appears/disappears instantly.
+    install_overlay_css();
+
+    // Get the display and monitor for screen dimensions
+    let display = match gdk::Display::default() {
+        Some(d) => d,
+        None => {
+            let _ = result_tx.send(Err(SelectionError::InitError("No display found".into())));
+            return;
+        }
+    };
+
+    // Get screen dimensions from the first monitor
+    let monitor = {
+        let monitors = display.monitors();
+        let n = monitors.n_items();
+        if n == 0 {
+            let _ = result_tx.send(Err(SelectionError::InitError("No monitor found".into())));
+            return;
+        }
+        // Get the first monitor from the list model
+        match monitors.item(0) {
+            Some(obj) => match obj.downcast::<gdk::Monitor>() {
+                Ok(m) => m,
+                Err(_) => {
+                    let _ = result_tx.send(Err(SelectionError::InitError(
+                        "Failed to get monitor".into(),
+                    )));
+                    return;
+                }
+            },
+            None => {
+                let _ = result_tx.send(Err(SelectionError::InitError(
+                    "No monitor at index 0".into(),
+                )));
+                return;
+            }
+        }
+    };
+
+    let geometry = monitor.geometry();
+    let screen_width = geometry.width();
+    let screen_height = geometry.height();
+
+    // Create the window
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .default_width(screen_width)
+        .default_height(screen_height)
+        .decorated(false)
+        .resizable(false)
+        .css_classes(["overlay", "transparent"])
+        .build();
+
+    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    // On Wayland, layer-shell gives a true transparent overlay surface.
+    // Without this, some compositors show a black backing surface.
+    let wayland_layer_shell = is_wayland && gtk4_layer_shell::is_supported();
+
+    // NOTE: We no longer bail out when background.is_none() && Wayland-without-layer-shell.
+    // Instead we fall through to window.set_fullscreened(true) which works on GNOME Wayland.
+    // The drawing code already handles background=None by painting a dark semi-transparent
+    // overlay — this is the "capture after selection" (Option B) path.
+
+    if wayland_layer_shell {
+        window.init_layer_shell();
+        window.set_layer(Layer::Overlay);
+        window.set_anchor(Edge::Top, true);
+        window.set_anchor(Edge::Bottom, true);
+        window.set_anchor(Edge::Left, true);
+        window.set_anchor(Edge::Right, true);
+        window.set_keyboard_mode(KeyboardMode::Exclusive);
+        window.set_monitor(Some(&monitor));
+        window.set_namespace(Some("apexshot-area-selector"));
+    } else {
+        // X11 or Wayland-without-layer-shell (e.g. GNOME Wayland):
+        // Use a regular fullscreen window. The compositor will grant it
+        // focus via the XDG activation token embedded in DESKTOP_STARTUP_ID.
+        window.set_fullscreened(true);
+        window.set_decorated(false);
+    }
+
+    // Get the surface for cursor control
+    let surface = window.surface();
+
+    // Set cursor to crosshair when hovering over the window
+    if let Some(ref surface) = surface {
+        let cursor = gdk::Cursor::from_name("crosshair", None);
+        surface.set_cursor(cursor.as_ref());
+    }
+
+    // Create a drawing area for rendering the selection
+    let drawing_area = gtk4::DrawingArea::builder()
+        .hexpand(true)
+        .vexpand(true)
+        .build();
+
+    let state_draw = state.clone();
+    let background_draw = background.clone();
+    drawing_area.set_draw_func(move |_, context, width, height| {
+        draw_overlay(
+            context,
+            width,
+            height,
+            &state_draw,
+            background_draw.as_ref(),
+        );
+    });
+
+    {
+        let mut st = state.lock().unwrap();
+        let screen_width_f = screen_width.max(1) as f64;
+        let screen_height_f = screen_height.max(1) as f64;
+        let initial_width = DEFAULT_SELECTION_WIDTH
+            .min(screen_width_f)
+            .max(MIN_SELECTION_WIDTH.min(screen_width_f));
+        let initial_height = DEFAULT_SELECTION_HEIGHT
+            .min(screen_height_f)
+            .max(MIN_SELECTION_HEIGHT.min(screen_height_f));
+        let initial_left = ((screen_width_f - initial_width) / 2.0).max(0.0);
+        let initial_top = ((screen_height_f - initial_height) / 2.0).max(0.0);
+
+        st.start_x = initial_left;
+        st.start_y = initial_top;
+        st.current_x = initial_left + initial_width;
+        st.current_y = initial_top + initial_height;
+        st.completed = true;
+        st.cancelled = false;
+        st.is_dragging = false;
+    }
+
+    // Set the drawing area as the child
+    window.set_child(Some(&drawing_area));
+
+    let motion_controller = EventControllerMotion::new();
+    let state_motion = state.clone();
+    let drawing_area_weak_motion = drawing_area.downgrade();
+    let window_weak_motion = window.downgrade();
+    motion_controller.connect_motion(move |_, x, y| {
+        let (cursor_name, hover_changed, _done) = {
+            let mut st = state_motion.lock().unwrap();
+            let rect = current_selection_rect(&st);
+
+            // GIF slider dragging — update value from X position
+            if let Some(slider) = st.gif_slider_dragging {
+                if st.settings_menu_open {
+                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                        .clamp(10.0, screen_width as f64 - 450.0);
+                    let value_x = menu_x + 130.0;
+                    if slider == 0 {
+                        let slider_x = value_x + 55.0;
+                        let slider_w = 220.0;
+                        let click_x = x.clamp(slider_x, slider_x + slider_w);
+                        st.gif_fps = 5.0 + (click_x - slider_x) / slider_w * 55.0;
+                    } else {
+                        let q_slider_w = 160.0;
+                        let click_x = x.clamp(value_x, value_x + q_slider_w);
+                        st.gif_quality = 0.1 + (click_x - value_x) / q_slider_w * 0.8;
+                    }
+                }
+                st.hovered_settings_item = -1;
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_crop_menu_item = -1;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                drop(st);
+                if let Some(da) = drawing_area_weak_motion.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+
+            // Click slider dragging
+            if st.click_slider_dragging && st.click_options_open {
+                let rect = current_selection_rect(&st);
+                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                    .clamp(10.0, screen_width as f64 - 450.0);
+                let value_x = menu_x + 130.0;
+                let slider_x = value_x;
+                let slider_w = 280.0;
+                let click_x = x.clamp(slider_x, slider_x + slider_w);
+                st.click_size = ((click_x - slider_x) / slider_w).clamp(0.0, 1.0);
+                st.hovered_click_item = -1;
+                st.hovered_settings_item = -1;
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_crop_menu_item = -1;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                drop(st);
+                if let Some(da) = drawing_area_weak_motion.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+
+            // Capture crop menu hover check
+            if st.capture_crop_menu_open {
+                let item = capture_crop_menu_hit_item(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    x,
+                    y,
+                );
+                let next = item.map(|i| i as i32).unwrap_or(-1);
+                let changed = next != st.hovered_capture_crop_menu_item;
+                if changed {
+                    st.hovered_capture_crop_menu_item = next;
+                }
+                st.hovered_crop_menu_item = -1;
+                st.hovered_settings_item = -1;
+                // Clear other hovers
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                ("pointer".to_string(), changed, true)
+            } else if st.crop_menu_open {
+                let item = recording_crop_menu_hit_item(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    x,
+                    y,
+                );
+                let next = item.map(|i| i as i32).unwrap_or(-1);
+                let changed = next != st.hovered_crop_menu_item;
+                if changed {
+                    st.hovered_crop_menu_item = next;
+                }
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_settings_item = -1;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                ("pointer".to_string(), changed, true)
+            } else if st.settings_menu_open {
+                if st.settings_dropdown_open.is_some() {
+                    st.hovered_settings_item = -1;
+                    st.hovered_capture_crop_menu_item = -1;
+                    st.hovered_crop_menu_item = -1;
+                    st.hover_tool_index = None;
+                    st.hover_size_panel = false;
+                    st.hover_crop_panel = false;
+                    st.hover_record_tile = None;
+                    ("pointer".to_string(), false, true)
+                } else {
+                    let item = settings_menu_hit_item(
+                        rect.left,
+                        rect.top,
+                        rect.width(),
+                        rect.height(),
+                        screen_width as f64,
+                        screen_height as f64,
+                        x,
+                        y,
+                        st.settings_tab,
+                    );
+                    let next = item.unwrap_or(-1);
+                    let changed = next != st.hovered_settings_item;
+                    if changed {
+                        st.hovered_settings_item = next;
+                    }
+                    st.hovered_capture_crop_menu_item = -1;
+                    st.hovered_crop_menu_item = -1;
+                    st.hover_tool_index = None;
+                    st.hover_size_panel = false;
+                    st.hover_crop_panel = false;
+                    st.hover_record_tile = None;
+                    ("pointer".to_string(), changed, true)
+                }
+            } else if st.click_options_open {
+                let item = click_options_hit_item(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    x,
+                    y,
+                );
+                let next = item.unwrap_or(-1);
+                let changed = next != st.hovered_click_item;
+                if changed {
+                    st.hovered_click_item = next;
+                }
+                st.hovered_settings_item = -1;
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_crop_menu_item = -1;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                ("pointer".to_string(), changed, true)
+            } else if st.webcam_options_open {
+                let item = webcam_options_hit_item(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    x,
+                    y,
+                );
+                let next = item.unwrap_or(-1);
+                let changed = next != st.hovered_webcam_item;
+                if changed {
+                    st.hovered_webcam_item = next;
+                }
+                st.hovered_settings_item = -1;
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_crop_menu_item = -1;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                st.hover_record_tile = None;
+                ("pointer".to_string(), changed, true)
+            } else {
+                let record_hit = if st.recording_panel_open {
+                    recording_tile_at(
+                        rect.left,
+                        rect.top,
+                        rect.width(),
+                        rect.height(),
+                        screen_width as f64,
+                        screen_height as f64,
+                        x,
+                        y,
+                    )
+                } else {
+                    None
+                };
+                let hit = if st.recording_panel_open {
+                    None
+                } else {
+                    toolbar_hit_at(
+                        rect.left,
+                        rect.top,
+                        rect.width(),
+                        rect.height(),
+                        screen_width as f64,
+                        screen_height as f64,
+                        x,
+                        y,
+                    )
+                };
+
+                let (
+                    next_hover_tool_index,
+                    next_hover_size_panel,
+                    next_hover_crop_panel,
+                    next_hover_record_tile,
+                    cursor_name,
+                ) = match hit {
+                    Some(ToolbarHit::Tool(index)) if !st.recording_panel_open => {
+                        (Some(index), false, false, None, "pointer")
+                    }
+                    Some(ToolbarHit::SizePanel) if !st.recording_panel_open => {
+                        (None, true, false, None, "default")
+                    }
+                    Some(ToolbarHit::CropPanel) if !st.recording_panel_open => {
+                        (None, false, true, None, "pointer")
+                    }
+                    None => {
+                        if let Some(tile) = record_hit {
+                            (None, false, false, Some(tile), "pointer")
+                        } else {
+                            let c = if st.completed || st.is_dragging {
+                                detect_resize_handle(x, y, rect)
+                                    .map(cursor_name_for_handle)
+                                    .unwrap_or_else(|| {
+                                        if is_inside_selection(x, y, rect) {
+                                            "fleur"
+                                        } else {
+                                            "crosshair"
+                                        }
+                                    })
+                            } else {
+                                "crosshair"
+                            };
+                            (None, false, false, None, c)
+                        }
+                    }
+                    _ => (None, false, false, None, "crosshair"),
+                };
+
+                let hover_changed = st.hover_tool_index != next_hover_tool_index
+                    || st.hover_size_panel != next_hover_size_panel
+                    || st.hover_crop_panel != next_hover_crop_panel
+                    || st.hover_record_tile != next_hover_record_tile;
+
+                st.hover_tool_index = next_hover_tool_index;
+                st.hover_size_panel = next_hover_size_panel;
+                st.hover_crop_panel = next_hover_crop_panel;
+                st.hover_record_tile = next_hover_record_tile;
+                st.hovered_capture_crop_menu_item = -1;
+                st.hovered_crop_menu_item = -1;
+                st.hovered_settings_item = -1;
+
+                (cursor_name.to_string(), hover_changed, false)
+            }
+        };
+
+        if let Some(win) = window_weak_motion.upgrade() {
+            if let Some(surf) = win.surface() {
+                let cursor = gdk::Cursor::from_name(&cursor_name, None);
+                surf.set_cursor(cursor.as_ref());
+            }
+        }
+        if hover_changed {
+            if let Some(drawing_area) = drawing_area_weak_motion.upgrade() {
+                drawing_area.queue_draw();
+            }
+        }
+    });
+
+    let state_motion_leave = state.clone();
+    let drawing_area_weak_leave = drawing_area.downgrade();
+    let window_weak_leave = window.downgrade();
+    motion_controller.connect_leave(move |_| {
+        let mut st = state_motion_leave.lock().unwrap();
+        let was_hovering = st.hover_tool_index.is_some()
+            || st.hover_size_panel
+            || st.hover_crop_panel
+            || st.hover_record_tile.is_some()
+            || st.hovered_capture_crop_menu_item != -1
+            || st.hovered_crop_menu_item != -1
+            || st.hovered_settings_item != -1;
+        st.hover_tool_index = None;
+        st.hover_size_panel = false;
+        st.hover_crop_panel = false;
+        st.hover_record_tile = None;
+        st.hovered_capture_crop_menu_item = -1;
+        st.hovered_crop_menu_item = -1;
+        st.hovered_settings_item = -1;
+        drop(st);
+
+        // Reset cursor
+        if let Some(win) = window_weak_leave.upgrade() {
+            if let Some(surf) = win.surface() {
+                let cursor = gdk::Cursor::from_name("crosshair", None);
+                surf.set_cursor(cursor.as_ref());
+            }
+        }
+        if was_hovering {
+            if let Some(drawing_area) = drawing_area_weak_leave.upgrade() {
+                drawing_area.queue_draw();
+            }
+        }
+    });
+
+    drawing_area.add_controller(motion_controller);
+
+    // Toolbar click actions
+    let click_gesture = GestureClick::builder()
+        .button(1)
+        .propagation_phase(gtk4::PropagationPhase::Capture)
+        .build();
+
+    let state_click = state.clone();
+    let drawing_area_weak_click = drawing_area.downgrade();
+    let result_tx_click = result_tx.clone();
+    let window_weak_click = window.downgrade();
+    let background_click = background.clone();
+    click_gesture.connect_pressed(move |_, n_press, x, y| {
+        let mut st = state_click.lock().unwrap();
+        let rect = current_selection_rect(&st);
+        let recording_panel_open = st.recording_panel_open;
+
+        // ── Menu click handling ──
+
+        // Capture crop menu (non-recording mode)
+        if st.capture_crop_menu_open {
+            if let Some(item) = capture_crop_menu_hit_item(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
+            ) {
+                st.capture_aspect_ratio_index = item;
+                st.capture_crop_menu_open = false;
+                st.hovered_capture_crop_menu_item = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+            st.capture_crop_menu_open = false;
+            st.hovered_capture_crop_menu_item = -1;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
+            return;
+        }
+
+        // Recording crop menu
+        if st.crop_menu_open {
+            if let Some(item) = recording_crop_menu_hit_item(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
+            ) {
+                st.record_aspect_ratio_index = item;
+                st.crop_menu_open = false;
+                st.hovered_crop_menu_item = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+            st.crop_menu_open = false;
+            st.hovered_crop_menu_item = -1;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
+            return;
+        }
+
+        // Settings menu
+        if st.settings_menu_open {
+            // If a dropdown is open, check dropdown item clicks first
+            if let Some(drop_idx) = st.settings_dropdown_open {
+                let tab = match st.settings_tab {
+                    SettingsTab::Video => 1,
+                    SettingsTab::Gif => 2,
+                    _ => 0,
+                };
+                let (options, value_ptr): (&[&str], &mut usize) = if tab == 1 && drop_idx == 3 {
+                    (&["Original", "1080p", "720p"], &mut st.video_max_res)
+                } else if tab == 1 && drop_idx == 4 {
+                    (&["24", "30", "50", "60"], &mut st.video_fps)
+                } else if tab == 2 && drop_idx == 6 {
+                    (
+                        &["800 x auto", "640 x auto", "480 x auto", "Original"],
+                        &mut st.gif_size_idx,
+                    )
+                } else {
+                    (&[], &mut 0)
+                };
+                // Compute dropdown popup rect
+                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                    .clamp(10.0, screen_width as f64 - 450.0);
+                let menu_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - 570.0);
+                let popup_y = compute_dropdown_popup_y(
+                    menu_y,
+                    drop_idx,
+                    match tab {
+                        1 => SettingsTab::Video,
+                        2 => SettingsTab::Gif,
+                        _ => SettingsTab::General,
+                    },
+                );
+                let popup_rect = RectF {
+                    x: menu_x + 130.0,
+                    y: popup_y,
+                    width: 140.0,
+                    height: options.len() as f64 * 30.0,
+                };
+                // Check if clicked outside popup
+                if !popup_rect.contains(x, y) {
+                    st.settings_dropdown_open = None;
+                    drop(st);
+                    if let Some(da) = drawing_area_weak_click.upgrade() {
+                        da.queue_draw();
+                    }
+                    return;
+                }
+                // Check item clicks
+                for (oi, _opt) in options.iter().enumerate() {
+                    let item_rect = RectF {
+                        x: popup_rect.x,
+                        y: popup_rect.y + oi as f64 * 30.0,
+                        width: popup_rect.width,
+                        height: 30.0,
+                    };
+                    if item_rect.contains(x, y) {
+                        *value_ptr = oi;
+                        st.settings_dropdown_open = None;
+                        st.hovered_settings_item = -1;
+                        drop(st);
+                        if let Some(da) = drawing_area_weak_click.upgrade() {
+                            da.queue_draw();
+                        }
+                        return;
+                    }
+                }
+                st.settings_dropdown_open = None;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+
+            if let Some(item) = settings_menu_hit_item(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
+                st.settings_tab,
+            ) {
+                // Tab clicks
+                if item < 3 {
+                    st.settings_tab = match item {
+                        0 => SettingsTab::General,
+                        1 => SettingsTab::Video,
+                        _ => SettingsTab::Gif,
+                    };
+                    st.hovered_settings_item = -1;
+                    st.settings_dropdown_open = None;
+                } else if matches!(st.settings_tab, SettingsTab::General) {
+                    let general_idx = item - 3;
+                    match general_idx {
+                        0 => st.rec_controls = !st.rec_controls,
+                        1 => st.display_rec_time = !st.display_rec_time,
+                        2 => st.hidpi = !st.hidpi,
+                        3 => st.do_not_disturb = !st.do_not_disturb,
+                        4 => st.show_cursor = !st.show_cursor,
+                        5 => st.rec_clicks = !st.rec_clicks,
+                        6 => st.rec_keystrokes = !st.rec_keystrokes,
+                        7 => st.remember_selection = !st.remember_selection,
+                        8 => st.dim_screen = !st.dim_screen,
+                        9 => st.show_countdown = !st.show_countdown,
+                        _ => {}
+                    }
+                    st.settings_dropdown_open = None;
+                } else if matches!(st.settings_tab, SettingsTab::Video) {
+                    let video_idx = item - 3;
+                    match video_idx {
+                        0 => st.settings_dropdown_open = Some(3), // res dropdown
+                        1 => st.settings_dropdown_open = Some(4), // fps dropdown
+                        2 => st.record_mono = !st.record_mono,
+                        3 => st.open_editor = !st.open_editor,
+                        _ => {}
+                    }
+                } else if matches!(st.settings_tab, SettingsTab::Gif) {
+                    let gif_idx = item - 3;
+                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                        .clamp(10.0, screen_width as f64 - 450.0);
+                    let value_x = menu_x + 130.0;
+                    match gif_idx {
+                        0 => {
+                            // FPS slider — click-to-position + start drag
+                            let slider_x = value_x + 55.0;
+                            let slider_w = 220.0;
+                            let click_x = x.clamp(slider_x, slider_x + slider_w);
+                            st.gif_fps = 5.0 + (click_x - slider_x) / slider_w * 55.0;
+                            st.gif_slider_dragging = Some(0);
+                        }
+                        1 => {
+                            // Quality slider — click-to-position + start drag
+                            let q_slider_w = 160.0;
+                            let click_x = x.clamp(value_x, value_x + q_slider_w);
+                            st.gif_quality = 0.1 + (click_x - value_x) / q_slider_w * 0.8;
+                            st.gif_slider_dragging = Some(1);
+                        }
+                        2 => st.optimize_gif = !st.optimize_gif,
+                        3 => st.settings_dropdown_open = Some(6), // size dropdown
+                        _ => {}
+                    }
+                }
+                st.hovered_settings_item = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+            // Click outside settings menu closes it
+            st.settings_menu_open = false;
+            st.hovered_settings_item = -1;
+            st.settings_dropdown_open = None;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
+            return;
+        }
+
+        // ── Click options menu click handling ──
+        if st.click_options_open {
+            if let Some(item) = click_options_hit_item(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
+            ) {
+                match item {
+                    0 => {
+                        // Size slider — start drag
+                        let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                            .clamp(10.0, screen_width as f64 - 450.0);
+                        let value_x = menu_x + 130.0;
+                        let slider_x = value_x;
+                        let slider_w = 280.0;
+                        let click_x = x.clamp(slider_x, slider_x + slider_w);
+                        st.click_size = ((click_x - slider_x) / slider_w).clamp(0.0, 1.0);
+                        st.click_slider_dragging = true;
+                    }
+                    1 => {
+                        // Color dropdown — cycle
+                        st.click_color = (st.click_color + 1) % CLICK_COLORS_LEN;
+                    }
+                    2 => {
+                        // Style dropdown — toggle
+                        st.click_style = if st.click_style == 0 { 1 } else { 0 };
+                    }
+                    3 => {
+                        // Animation toggle
+                        st.click_animate = !st.click_animate;
+                    }
+                    4 => (), // Preview area — no action
+                    5 | _ => {
+                        // Done button — close
+                        st.click_options_open = false;
+                        st.hovered_click_item = -1;
+                    }
+                }
+                st.hovered_click_item = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+            // Click outside click options closes it
+            st.click_options_open = false;
+            st.hovered_click_item = -1;
+            st.click_slider_dragging = false;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
+            return;
+        }
+
+        // ── Webcam options menu click handling ──
+        if st.webcam_options_open {
+            if let Some(item) = webcam_options_hit_item(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
+            ) {
+                match item {
+                    0 => st.webcam_device = -1,
+                    1 => st.webcam_size = 0,
+                    2 => st.webcam_size = 1,
+                    3 => st.webcam_size = 2,
+                    4 => st.webcam_size = 3,
+                    5 => st.webcam_size = 4,
+                    6 => st.webcam_shape = 0,
+                    7 => st.webcam_shape = 1,
+                    8 => st.webcam_shape = 2,
+                    9 => st.webcam_shape = 3,
+                    10 => st.webcam_flip = !st.webcam_flip,
+                    _ => {}
+                }
+                st.hovered_webcam_item = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+            st.webcam_options_open = false;
+            st.hovered_webcam_item = -1;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
+            return;
+        }
+
+        // ── Normal click handling (no menus open) ──
+        let record_hit = if recording_panel_open {
+            recording_tile_at(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
+            )
+        } else {
+            None
+        };
+        let hit = if recording_panel_open {
+            None
+        } else {
+            toolbar_hit_at(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
+            )
+        };
+        let clicked = match hit {
+            Some(ToolbarHit::Tool(index)) if !recording_panel_open => Some(TOOLBAR_ICONS[index]),
+            _ => None,
+        };
+
+        match clicked {
+            Some(ToolbarIcon::Capture) => {
+                drop(st);
+                if let Some(window) = window_weak_click.upgrade() {
+                    send_selection_result(
+                        &state_click,
+                        &result_tx_click,
+                        &window,
+                        screen_width,
+                        screen_height,
+                        background_click.as_ref(),
+                    );
+                }
+            }
+            Some(ToolbarIcon::Fullscreen) => {
+                st.start_x = 0.0;
+                st.start_y = 0.0;
+                st.current_x = screen_width as f64;
+                st.current_y = screen_height as f64;
+                st.completed = true;
+                st.is_dragging = false;
+                st.fullscreen_mode = true;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+            }
+            Some(ToolbarIcon::Area) => {
+                let screen_w = screen_width as f64;
+                let screen_h = screen_height as f64;
+                let sel_w = DEFAULT_SELECTION_WIDTH
+                    .min(screen_w)
+                    .max(MIN_SELECTION_WIDTH.min(screen_w));
+                let sel_h = DEFAULT_SELECTION_HEIGHT
+                    .min(screen_h)
+                    .max(MIN_SELECTION_HEIGHT.min(screen_h));
+                let sel_x = ((screen_w - sel_w) / 2.0).max(0.0);
+                let sel_y = ((screen_h - sel_h) / 2.0).max(0.0);
+                st.start_x = sel_x;
+                st.start_y = sel_y;
+                st.current_x = sel_x + sel_w;
+                st.current_y = sel_y + sel_h;
+                st.completed = true;
+                st.is_dragging = false;
+                st.fullscreen_mode = false;
+                st.recording_panel_open = false;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+            }
+            Some(ToolbarIcon::Recording) => {
+                st.recording_panel_open = true;
+                st.hover_tool_index = None;
+                st.hover_size_panel = false;
+                st.hover_crop_panel = false;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+            }
+            _ => {
+                // Crop card clicked — open toolbar crop menu
+                if !recording_panel_open && hit == Some(ToolbarHit::CropPanel) {
+                    st.capture_crop_menu_open = !st.capture_crop_menu_open;
+                    st.hovered_capture_crop_menu_item = -1;
+                    st.hover_tool_index = None;
+                    drop(st);
+                    if let Some(da) = drawing_area_weak_click.upgrade() {
+                        da.queue_draw();
+                    }
+                    return;
+                }
+
+                // Recording panel tile clicks
+                if recording_panel_open {
+                    if let Some(tile) = record_hit {
+                        match tile {
+                            RecordPanelTile::Crop => {
+                                st.crop_menu_open = !st.crop_menu_open;
+                                st.hovered_crop_menu_item = -1;
+                                st.hover_tool_index = None;
+                            }
+                            RecordPanelTile::Controls => {
+                                st.settings_menu_open = !st.settings_menu_open;
+                                st.hovered_settings_item = -1;
+                                st.settings_dropdown_open = None;
+                                st.hover_record_tile = None;
+                                st.hover_tool_index = None;
+                            }
+                            RecordPanelTile::Mic => st.mic_toggle = !st.mic_toggle,
+                            RecordPanelTile::Speaker => st.speaker_toggle = !st.speaker_toggle,
+                            RecordPanelTile::Clicks => {
+                                st.rec_clicks = !st.rec_clicks;
+                                st.click_options_open = false;
+                                st.hovered_click_item = -1;
+                                st.click_slider_dragging = false;
+                                st.hover_record_tile = None;
+                                st.hover_tool_index = None;
+                            }
+                            RecordPanelTile::Webcam => {
+                                st.rec_webcam = !st.rec_webcam;
+                                st.webcam_options_open = false;
+                                st.hovered_webcam_item = -1;
+                                st.hover_record_tile = None;
+                                st.hover_tool_index = None;
+                            }
+                            RecordPanelTile::Keystrokes => st.rec_keystrokes = !st.rec_keystrokes,
+                            _ => {}
+                        }
+                        drop(st);
+                        if let Some(da) = drawing_area_weak_click.upgrade() {
+                            da.queue_draw();
+                        }
+                        return;
+                    }
+                }
+
+                if n_press == 2 {
+                    drop(st);
+                    let st = state_click.lock().unwrap();
+                    let inside_selection =
+                        st.completed && is_inside_selection(x, y, current_selection_rect(&st));
+                    drop(st);
+
+                    if inside_selection {
+                        if let Some(window) = window_weak_click.upgrade() {
+                            send_selection_result(
+                                &state_click,
+                                &result_tx_click,
+                                &window,
+                                screen_width,
+                                screen_height,
+                                background_click.as_ref(),
+                            );
+                        }
+                    }
+                } else {
+                    drop(st);
+                }
+            }
+        }
+    });
+    drawing_area.add_controller(click_gesture);
+
+    // Right-click gesture for recording panel tile menus
+    let right_click_gesture = GestureClick::builder()
+        .button(3)
+        .propagation_phase(gtk4::PropagationPhase::Capture)
+        .build();
+    let state_rc = state.clone();
+    let drawing_area_weak_rc = drawing_area.downgrade();
+    right_click_gesture.connect_pressed(move |_, _n_press, x, y| {
+        let mut st = state_rc.lock().unwrap();
+        let rect = current_selection_rect(&st);
+        let recording_panel_open = st.recording_panel_open;
+        if recording_panel_open {
+            if let Some(tile) = recording_tile_at(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                x,
+                y,
+            ) {
+                match tile {
+                    RecordPanelTile::Clicks => {
+                        st.click_options_open = !st.click_options_open;
+                        st.hovered_click_item = -1;
+                        st.click_slider_dragging = false;
+                        st.hover_record_tile = None;
+                        st.hover_tool_index = None;
+                    }
+                    RecordPanelTile::Webcam => {
+                        st.webcam_options_open = !st.webcam_options_open;
+                        st.hovered_webcam_item = -1;
+                        st.hover_record_tile = None;
+                        st.hover_tool_index = None;
+                    }
+                    _ => {}
+                }
+                drop(st);
+                if let Some(da) = drawing_area_weak_rc.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+        }
+        drop(st);
+    });
+    drawing_area.add_controller(right_click_gesture);
+
+    // Setup drag gesture for area selection
+    let drag_gesture = GestureDrag::builder()
+        .propagation_phase(gtk4::PropagationPhase::Capture)
+        .build();
+
+    let state_drag = state.clone();
+    let drawing_area_weak = drawing_area.downgrade();
+
+    // Note: connect_drag_begin takes 3 params (gesture, x, y)
+    drag_gesture.connect_drag_begin(clone!(
+        #[strong]
+        state_drag,
+        #[strong]
+        drawing_area_weak,
+        move |_gesture, x, y| {
+            let mut st = state_drag.lock().unwrap();
+            let (start_x, start_y) =
+                clamp_point_to_bounds(x, y, screen_width as f64, screen_height as f64);
+
+            let rect = current_selection_rect(&st);
+
+            // Suppress drag when clicking toolbar tools, size/crop panels
+            if toolbar_item_at(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                start_x,
+                start_y,
+            )
+            .is_some()
+            {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+
+            let hit = toolbar_hit_at(
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                screen_width as f64,
+                screen_height as f64,
+                start_x,
+                start_y,
+            );
+            if matches!(
+                hit,
+                Some(ToolbarHit::CropPanel) | Some(ToolbarHit::SizePanel)
+            ) {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+
+            // Suppress drag when clicking recording panel tiles
+            if st.recording_panel_open
+                && recording_tile_at(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    start_x,
+                    start_y,
+                )
+                .is_some()
+            {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+
+            // Suppress drag when clicking any open menu
+            if st.capture_crop_menu_open
+                && capture_crop_menu_hit_item(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    start_x,
+                    start_y,
+                )
+                .is_some()
+            {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+            if st.crop_menu_open
+                && recording_crop_menu_hit_item(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    start_x,
+                    start_y,
+                )
+                .is_some()
+            {
+                st.is_dragging = false;
+                st.drag_mode = None;
+                st.initial_rect = None;
+                drop(st);
+                return;
+            }
+            // Check if drag started inside settings menu or click options (suppress selection drag)
+            if (st.settings_menu_open && st.gif_slider_dragging.is_none())
+                || (st.click_options_open && !st.click_slider_dragging)
+            {
+                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
+                    .clamp(10.0, screen_width as f64 - 450.0);
+                let menu_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - 570.0);
+                let menu_rect = RectF {
+                    x: menu_x,
+                    y: menu_y,
+                    width: 440.0,
+                    height: 560.0,
+                };
+                if menu_rect.contains(start_x, start_y) {
+                    st.is_dragging = false;
+                    st.drag_mode = None;
+                    st.initial_rect = None;
+                    drop(st);
+                    return;
+                }
+            }
+
+            st.drag_origin_x = start_x;
+            st.drag_origin_y = start_y;
+            st.initial_rect = Some(current_selection_rect(&st));
+
+            let drag_mode = if st.completed {
+                let rect = current_selection_rect(&st);
+                if let Some(handle) = detect_resize_handle(start_x, start_y, rect) {
+                    // Cursor is on a border/corner handle — resize.
+                    DragMode::Resize(handle)
+                } else if is_inside_selection(start_x, start_y, rect) {
+                    // Cursor is inside the selection — move the whole rect.
+                    DragMode::Move
+                } else {
+                    // Cursor is outside the selection — start a new one.
+                    DragMode::NewSelection
+                }
+            } else {
+                DragMode::NewSelection
+            };
+
+            st.drag_mode = Some(drag_mode);
+
+            if matches!(drag_mode, DragMode::NewSelection) {
+                st.start_x = start_x;
+                st.start_y = start_y;
+                st.current_x = start_x;
+                st.current_y = start_y;
+                st.completed = false;
+            }
+
+            st.is_dragging = true;
+            drop(st);
+
+            if let Some(drawing_area) = drawing_area_weak.upgrade() {
+                drawing_area.queue_draw();
+            }
+        }
+    ));
+
+    drag_gesture.connect_drag_update(clone!(
+        #[strong]
+        state_drag,
+        #[strong]
+        drawing_area_weak,
+        move |_gesture, x, y| {
+            let mut st = state_drag.lock().unwrap();
+            if st.gif_slider_dragging.is_some() || st.click_slider_dragging {
+                drop(st);
+                return;
+            }
+            update_selection_for_drag(&mut st, x, y, screen_width as f64, screen_height as f64);
+            drop(st);
+
+            if let Some(drawing_area) = drawing_area_weak.upgrade() {
+                drawing_area.queue_draw();
+            }
+        }
+    ));
+
+    drag_gesture.connect_drag_end(clone!(
+        #[strong]
+        state_drag,
+        #[strong]
+        drawing_area_weak,
+        move |_gesture, x, y| {
+            let mut st = state_drag.lock().unwrap();
+            if st.gif_slider_dragging.is_some() || st.click_slider_dragging {
+                st.gif_slider_dragging = None;
+                st.click_slider_dragging = false;
+                drop(st);
+                if let Some(drawing_area) = drawing_area_weak.upgrade() {
+                    drawing_area.queue_draw();
+                }
+                return;
+            }
+            update_selection_for_drag(&mut st, x, y, screen_width as f64, screen_height as f64);
+            st.is_dragging = false;
+            st.completed = true;
+            st.drag_mode = None;
+            st.initial_rect = None;
+            drop(st);
+
+            if let Some(drawing_area) = drawing_area_weak.upgrade() {
+                drawing_area.queue_draw();
+            }
+        }
+    ));
+
+    drawing_area.add_controller(drag_gesture);
+
+    // Setup keyboard controller for ESC key
+    let key_controller = EventControllerKey::builder()
+        .propagation_phase(gtk4::PropagationPhase::Capture)
+        .build();
+
+    let state_key = state.clone();
+    let window_weak_esc = window.downgrade();
+    let result_tx_esc = result_tx.clone();
+    let background_key = background.clone();
+    let drawing_area_weak_key = drawing_area.downgrade();
+
+    key_controller.connect_key_pressed(clone!(
+        #[strong]
+        state_key,
+        move |_, key, _, _| {
+            if key == Key::Escape {
+                let mut st = state_key.lock().unwrap();
+                st.cancelled = true;
+                st.fullscreen_mode = false;
+                drop(st);
+
+                let _ = result_tx_esc.send(Ok(None));
+
+                if let Some(window) = window_weak_esc.upgrade() {
+                    window.close();
+                }
+
+                return glib::Propagation::Stop;
+            }
+
+            if key == Key::Return
+                || key == Key::KP_Enter
+                || key == Key::ISO_Enter
+                || key == Key::space
+            {
+                if let Some(window) = window_weak_esc.upgrade() {
+                    send_selection_result(
+                        &state_key,
+                        &result_tx_esc,
+                        &window,
+                        screen_width,
+                        screen_height,
+                        background_key.as_ref(),
+                    );
+                }
+
+                return glib::Propagation::Stop;
+            }
+
+            let delta = match key {
+                Key::Left => Some((-1.0, 0.0)),
+                Key::Right => Some((1.0, 0.0)),
+                Key::Up => Some((0.0, -1.0)),
+                Key::Down => Some((0.0, 1.0)),
+                _ => None,
+            };
+
+            if let Some((dx, dy)) = delta {
+                let mut st = state_key.lock().unwrap();
+                if st.completed {
+                    let rect = current_selection_rect(&st);
+                    let next = SelectionRectF {
+                        left: (rect.left + dx)
+                            .clamp(0.0, (screen_width as f64 - rect.width()).max(0.0)),
+                        top: (rect.top + dy)
+                            .clamp(0.0, (screen_height as f64 - rect.height()).max(0.0)),
+                        right: 0.0,
+                        bottom: 0.0,
+                    };
+                    let moved = SelectionRectF {
+                        right: next.left + rect.width(),
+                        bottom: next.top + rect.height(),
+                        ..next
+                    };
+                    set_selection_rect(&mut st, moved);
+                    st.fullscreen_mode = false;
+                    drop(st);
+                    if let Some(drawing_area) = drawing_area_weak_key.upgrade() {
+                        drawing_area.queue_draw();
+                    }
+                    return glib::Propagation::Stop;
+                }
+            }
+
+            glib::Propagation::Proceed
+        }
+    ));
+
+    window.add_controller(key_controller);
+
+    // On X11: set compositor-bypass hints as soon as the native window is
+    // realized (XID assigned) but BEFORE it is mapped/shown.  Using
+    // connect_realize instead of connect_map means the compositor sees the
+    // correct _NET_WM_WINDOW_TYPE and _NET_WM_BYPASS_COMPOSITOR on the very
+    // first MapNotify event, so it never starts an open/close animation.
+    let window_bypass = window.downgrade();
+    window.connect_realize(move |_| {
+        if let Some(win) = window_bypass.upgrade() {
+            suppress_x11_compositor_animation(&win);
+        }
+    });
+
+    // Show the window
+    let _ = window.grab_focus();
+    window.present();
+}
