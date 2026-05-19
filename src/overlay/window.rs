@@ -11,7 +11,10 @@ use super::hit_testing::{
     recording_tile_at, settings_menu_hit_item, toolbar_hit_at, toolbar_item_at,
     webcam_options_hit_item,
 };
-use super::icons::{ToolbarIcon, TOOLBAR_ICONS};
+use super::icons::{
+    ToolbarIcon, TOOLBAR_AREA_INDEX, TOOLBAR_FULLSCREEN_INDEX, TOOLBAR_ICONS,
+    TOOLBAR_RECORDING_INDEX,
+};
 use super::layout::{
     compute_dropdown_popup_y, RecordPanelTile, RectF, ToolbarHit, DEFAULT_SELECTION_HEIGHT,
     DEFAULT_SELECTION_WIDTH, MIN_SELECTION_HEIGHT, MIN_SELECTION_WIDTH,
@@ -163,6 +166,79 @@ pub(crate) fn suppress_x11_compositor_animation(window: &ApplicationWindow) {
     }
 
     let _ = conn.flush();
+}
+
+fn webcam_preview_size(
+    sel_w: f64,
+    sel_h: f64,
+    webcam_size: usize,
+    webcam_shape: usize,
+) -> (f64, f64) {
+    const MARGIN: f64 = 10.0;
+    let (mut preview_w, mut preview_h) = match webcam_size {
+        0 => (120.0, 160.0),
+        2 => (280.0, 370.0),
+        3 => (360.0, 480.0),
+        4 => (
+            (sel_w - 2.0 * MARGIN).max(1.0),
+            (sel_h - 2.0 * MARGIN).max(1.0),
+        ),
+        _ => (200.0, 260.0),
+    };
+
+    match webcam_shape {
+        0 | 1 => preview_h = preview_w,
+        2 => preview_h = preview_w * 0.75,
+        _ => {}
+    }
+
+    preview_w = preview_w.min((sel_w - 2.0 * MARGIN).max(1.0));
+    preview_h = preview_h.min((sel_h - 2.0 * MARGIN).max(1.0));
+    (preview_w, preview_h)
+}
+
+fn webcam_preview_rect(st: &SelectorState, selection: SelectionRectF) -> RectF {
+    const MARGIN: f64 = 10.0;
+    let sel_w = selection.width();
+    let sel_h = selection.height();
+    let (preview_w, preview_h) = webcam_preview_size(sel_w, sel_h, st.webcam_size, st.webcam_shape);
+    let min_x = selection.left + MARGIN;
+    let max_x = min_x.max(selection.left + sel_w - preview_w - MARGIN);
+    let min_y = selection.top + MARGIN;
+    let max_y = min_y.max(selection.top + sel_h - preview_h - MARGIN);
+
+    RectF {
+        x: min_x + (max_x - min_x) * st.webcam_rel_x.clamp(0.0, 1.0),
+        y: min_y + (max_y - min_y) * (1.0 - st.webcam_rel_y.clamp(0.0, 1.0)),
+        width: preview_w,
+        height: preview_h,
+    }
+}
+
+fn set_webcam_preview_top_left(st: &mut SelectorState, selection: SelectionRectF, x: f64, y: f64) {
+    const MARGIN: f64 = 10.0;
+    let sel_w = selection.width();
+    let sel_h = selection.height();
+    let (preview_w, preview_h) = webcam_preview_size(sel_w, sel_h, st.webcam_size, st.webcam_shape);
+    let min_x = selection.left + MARGIN;
+    let max_x = min_x.max(selection.left + sel_w - preview_w - MARGIN);
+    let min_y = selection.top + MARGIN;
+    let max_y = min_y.max(selection.top + sel_h - preview_h - MARGIN);
+    let clamped_x = x.clamp(min_x, max_x);
+    let clamped_y = y.clamp(min_y, max_y);
+
+    st.webcam_rel_x = if max_x > min_x {
+        (clamped_x - min_x) / (max_x - min_x)
+    } else {
+        0.0
+    }
+    .clamp(0.0, 1.0);
+    st.webcam_rel_y = if max_y > min_y {
+        1.0 - ((clamped_y - min_y) / (max_y - min_y))
+    } else {
+        0.0
+    }
+    .clamp(0.0, 1.0);
 }
 
 pub(crate) fn setup_window(
@@ -570,15 +646,22 @@ pub(crate) fn setup_window(
                                 (None, false, false, Some(tile), "pointer")
                             } else {
                                 let c = if st.completed || st.is_dragging {
-                                    detect_resize_handle(x, y, rect)
-                                        .map(cursor_name_for_handle)
-                                        .unwrap_or_else(|| {
-                                            if is_inside_selection(x, y, rect) {
-                                                "fleur"
-                                            } else {
-                                                "crosshair"
-                                            }
-                                        })
+                                    if st.recording_panel_open
+                                        && st.rec_webcam
+                                        && webcam_preview_rect(&st, rect).contains(x, y)
+                                    {
+                                        "fleur"
+                                    } else {
+                                        detect_resize_handle(x, y, rect)
+                                            .map(cursor_name_for_handle)
+                                            .unwrap_or_else(|| {
+                                                if is_inside_selection(x, y, rect) {
+                                                    "fleur"
+                                                } else {
+                                                    "crosshair"
+                                                }
+                                            })
+                                    }
                                 } else {
                                     "crosshair"
                                 };
@@ -1037,20 +1120,8 @@ pub(crate) fn setup_window(
         };
 
         match clicked {
-            Some(ToolbarIcon::Capture) => {
-                drop(st);
-                if let Some(window) = window_weak_click.upgrade() {
-                    send_selection_result(
-                        &state_click,
-                        &result_tx_click,
-                        &window,
-                        screen_width,
-                        screen_height,
-                        background_click.as_ref(),
-                    );
-                }
-            }
             Some(ToolbarIcon::Fullscreen) => {
+                st.active_tool_index = TOOLBAR_FULLSCREEN_INDEX;
                 st.start_x = 0.0;
                 st.start_y = 0.0;
                 st.current_x = screen_width as f64;
@@ -1064,6 +1135,7 @@ pub(crate) fn setup_window(
                 }
             }
             Some(ToolbarIcon::Area) => {
+                st.active_tool_index = TOOLBAR_AREA_INDEX;
                 let screen_w = screen_width as f64;
                 let screen_h = screen_height as f64;
                 let sel_w = DEFAULT_SELECTION_WIDTH
@@ -1088,6 +1160,7 @@ pub(crate) fn setup_window(
                 }
             }
             Some(ToolbarIcon::Recording) => {
+                st.active_tool_index = TOOLBAR_RECORDING_INDEX;
                 st.recording_panel_open = true;
                 st.hover_tool_index = None;
                 st.hover_size_panel = false;
@@ -1263,6 +1336,7 @@ pub(crate) fn setup_window(
                 st.initial_rect = None;
                 st.is_dragging = true;
                 st.completed = false;
+                st.active_tool_index = TOOLBAR_AREA_INDEX;
                 drop(st);
 
                 if let Some(drawing_area) = drawing_area_weak.upgrade() {
@@ -1335,59 +1409,31 @@ pub(crate) fn setup_window(
                 return;
             }
 
-            // Suppress drag when clicking any open menu
+            // Any open menu owns this pointer press. The click handler may
+            // close the menu or update a slider, but area move/resize/new
+            // selection must not also start underneath it.
             if st.capture_crop_menu_open
-                && capture_crop_menu_hit_item(
-                    rect.left,
-                    rect.top,
-                    rect.width(),
-                    rect.height(),
-                    screen_width as f64,
-                    screen_height as f64,
-                    start_x,
-                    start_y,
-                )
-                .is_some()
+                || st.crop_menu_open
+                || st.settings_menu_open
+                || st.click_options_open
+                || st.webcam_options_open
             {
                 st.is_dragging = false;
                 st.drag_mode = None;
                 st.initial_rect = None;
+                st.dragging_webcam = false;
                 drop(st);
                 return;
             }
-            if st.crop_menu_open
-                && recording_crop_menu_hit_item(
-                    rect.left,
-                    rect.top,
-                    rect.width(),
-                    rect.height(),
-                    screen_width as f64,
-                    screen_height as f64,
-                    start_x,
-                    start_y,
-                )
-                .is_some()
-            {
-                st.is_dragging = false;
-                st.drag_mode = None;
-                st.initial_rect = None;
-                drop(st);
-                return;
-            }
-            // Check if drag started inside settings menu or click options (suppress selection drag)
-            if (st.settings_menu_open && st.gif_slider_dragging.is_none())
-                || (st.click_options_open && !st.click_slider_dragging)
-            {
-                let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
-                    .clamp(10.0, screen_width as f64 - 450.0);
-                let menu_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - 570.0);
-                let menu_rect = RectF {
-                    x: menu_x,
-                    y: menu_y,
-                    width: 440.0,
-                    height: 560.0,
-                };
-                if menu_rect.contains(start_x, start_y) {
+
+            if st.recording_panel_open && st.rec_webcam {
+                let preview = webcam_preview_rect(&st, rect);
+                if preview.contains(start_x, start_y) {
+                    st.drag_origin_x = start_x;
+                    st.drag_origin_y = start_y;
+                    st.dragging_webcam = true;
+                    st.webcam_drag_offset_x = start_x - preview.x;
+                    st.webcam_drag_offset_y = start_y - preview.y;
                     st.is_dragging = false;
                     st.drag_mode = None;
                     st.initial_rect = None;
@@ -1424,6 +1470,10 @@ pub(crate) fn setup_window(
                 st.current_x = start_x;
                 st.current_y = start_y;
                 st.completed = false;
+                st.fullscreen_mode = false;
+                if !st.recording_panel_open {
+                    st.active_tool_index = TOOLBAR_AREA_INDEX;
+                }
             }
 
             st.is_dragging = true;
@@ -1442,6 +1492,19 @@ pub(crate) fn setup_window(
         drawing_area_weak,
         move |_gesture, x, y| {
             let mut st = state_drag.lock().unwrap();
+            if st.dragging_webcam {
+                let pointer_x = st.drag_origin_x + x;
+                let pointer_y = st.drag_origin_y + y;
+                let rect = current_selection_rect(&st);
+                let top_left_x = pointer_x - st.webcam_drag_offset_x;
+                let top_left_y = pointer_y - st.webcam_drag_offset_y;
+                set_webcam_preview_top_left(&mut st, rect, top_left_x, top_left_y);
+                drop(st);
+                if let Some(drawing_area) = drawing_area_weak.upgrade() {
+                    drawing_area.queue_draw();
+                }
+                return;
+            }
             if st.gif_slider_dragging.is_some() || st.click_slider_dragging {
                 drop(st);
                 return;
@@ -1468,6 +1531,22 @@ pub(crate) fn setup_window(
         background_drag,
         move |_gesture, x, y| {
             let mut st = state_drag.lock().unwrap();
+            if st.dragging_webcam {
+                let pointer_x = st.drag_origin_x + x;
+                let pointer_y = st.drag_origin_y + y;
+                let rect = current_selection_rect(&st);
+                let top_left_x = pointer_x - st.webcam_drag_offset_x;
+                let top_left_y = pointer_y - st.webcam_drag_offset_y;
+                set_webcam_preview_top_left(&mut st, rect, top_left_x, top_left_y);
+                st.dragging_webcam = false;
+                st.webcam_drag_offset_x = 0.0;
+                st.webcam_drag_offset_y = 0.0;
+                drop(st);
+                if let Some(drawing_area) = drawing_area_weak.upgrade() {
+                    drawing_area.queue_draw();
+                }
+                return;
+            }
             if st.gif_slider_dragging.is_some() || st.click_slider_dragging {
                 st.gif_slider_dragging = None;
                 st.click_slider_dragging = false;
@@ -1583,6 +1662,7 @@ pub(crate) fn setup_window(
                     };
                     set_selection_rect(&mut st, moved);
                     st.fullscreen_mode = false;
+                    st.active_tool_index = TOOLBAR_AREA_INDEX;
                     drop(st);
                     if let Some(drawing_area) = drawing_area_weak_key.upgrade() {
                         drawing_area.queue_draw();

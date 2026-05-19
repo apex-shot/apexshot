@@ -3,7 +3,6 @@ use std::f64::consts::PI;
 
 #[derive(Clone, Copy)]
 pub(crate) enum ToolbarIcon {
-    Capture,
     Area,
     Fullscreen,
     Window,
@@ -22,8 +21,7 @@ pub(crate) enum ToolbarIcon {
     Gif,
 }
 
-pub(crate) const TOOLBAR_ICONS: [ToolbarIcon; 8] = [
-    ToolbarIcon::Capture,
+pub(crate) const TOOLBAR_ICONS: [ToolbarIcon; 7] = [
     ToolbarIcon::Area,
     ToolbarIcon::Fullscreen,
     ToolbarIcon::Window,
@@ -33,8 +31,11 @@ pub(crate) const TOOLBAR_ICONS: [ToolbarIcon; 8] = [
     ToolbarIcon::Recording,
 ];
 
-pub(crate) const TOOLBAR_LABELS: [&str; 8] = [
-    "Capture",
+pub(crate) const TOOLBAR_AREA_INDEX: usize = 0;
+pub(crate) const TOOLBAR_FULLSCREEN_INDEX: usize = 1;
+pub(crate) const TOOLBAR_RECORDING_INDEX: usize = 6;
+
+pub(crate) const TOOLBAR_LABELS: [&str; 7] = [
     "Area",
     "Fullscreen",
     "Window",
@@ -59,15 +60,6 @@ pub(crate) fn draw_toolbar_icon(
     context.set_line_join(gtk4::cairo::LineJoin::Round);
 
     match icon {
-        ToolbarIcon::Capture => {
-            context.arc(cx, cy, 6.2, 0.0, PI * 2.0);
-            let _ = context.stroke();
-            context.move_to(cx - 3.2, cy);
-            context.line_to(cx + 3.2, cy);
-            context.move_to(cx, cy - 3.2);
-            context.line_to(cx, cy + 3.2);
-            let _ = context.stroke();
-        }
         ToolbarIcon::Area => {
             let h = 5.5;
             context.move_to(cx - 7.0, cy - 1.5);

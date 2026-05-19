@@ -44,7 +44,7 @@ pub(crate) struct ToolbarLayout {
     pub(crate) tools_panel: RectF,
     pub(crate) size_panel: RectF,
     pub(crate) crop_panel: RectF,
-    pub(crate) item_cells: [RectF; 8],
+    pub(crate) item_cells: [RectF; 7],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +140,7 @@ pub(crate) fn compute_toolbar_layout(
         y: 0.0,
         width: FEATURE_PANEL_ITEM_WIDTH,
         height: FEATURE_PANEL_HEIGHT,
-    }; 8];
+    }; 7];
 
     for (index, cell) in item_cells.iter_mut().enumerate() {
         cell.x = tools_panel.x;

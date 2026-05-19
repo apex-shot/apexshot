@@ -1,4 +1,5 @@
 use super::geometry::SelectionRectF;
+use super::icons::TOOLBAR_AREA_INDEX;
 use super::layout::RecordPanelTile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,7 @@ pub(crate) struct SelectorState {
     pub(crate) is_dragging: bool,
     pub(crate) cancelled: bool,
     pub(crate) completed: bool,
+    pub(crate) active_tool_index: usize,
     pub(crate) hover_tool_index: Option<usize>,
     pub(crate) hover_size_panel: bool,
     pub(crate) hover_crop_panel: bool,
@@ -109,6 +111,11 @@ pub(crate) struct SelectorState {
     pub(crate) webcam_size: usize,
     pub(crate) webcam_shape: usize,
     pub(crate) webcam_flip: bool,
+    pub(crate) webcam_rel_x: f64,
+    pub(crate) webcam_rel_y: f64,
+    pub(crate) dragging_webcam: bool,
+    pub(crate) webcam_drag_offset_x: f64,
+    pub(crate) webcam_drag_offset_y: f64,
     pub(crate) overlay_mode: OverlayMode,
 }
 
@@ -126,6 +133,7 @@ impl Default for SelectorState {
             is_dragging: false,
             cancelled: false,
             completed: false,
+            active_tool_index: TOOLBAR_AREA_INDEX,
             hover_tool_index: None,
             hover_size_panel: false,
             hover_crop_panel: false,
@@ -177,7 +185,24 @@ impl Default for SelectorState {
             webcam_size: 1,
             webcam_shape: 0,
             webcam_flip: false,
+            webcam_rel_x: 0.0,
+            webcam_rel_y: 0.0,
+            dragging_webcam: false,
+            webcam_drag_offset_x: 0.0,
+            webcam_drag_offset_y: 0.0,
             overlay_mode: OverlayMode::StandardArea,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::overlay::icons::TOOLBAR_AREA_INDEX;
+
+    #[test]
+    fn selector_state_defaults_to_area_tool_panel_active() {
+        let state = SelectorState::default();
+        assert_eq!(state.active_tool_index, TOOLBAR_AREA_INDEX);
     }
 }

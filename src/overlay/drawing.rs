@@ -78,6 +78,7 @@ pub(crate) fn draw_feature_toolbar(
     screen_width: f64,
     screen_height: f64,
     background: Option<&BackgroundFrame>,
+    active_tool_index: usize,
     hover_tool_index: Option<usize>,
     hover_size_panel: bool,
     hover_crop_panel: bool,
@@ -98,6 +99,8 @@ pub(crate) fn draw_feature_toolbar(
     let size_panel_y = layout.size_panel.y;
     let size_panel_width = layout.size_panel.width;
     let crop_panel = layout.crop_panel;
+    let active_tool_index = active_tool_index.min(TOOLBAR_ICONS.len().saturating_sub(1));
+    let crop_active = capture_crop_menu_open || capture_aspect_ratio_index > 0;
 
     draw_frosted_panel(
         context,
@@ -137,31 +140,29 @@ pub(crate) fn draw_feature_toolbar(
             rect.height - 8.0,
             10.0,
         );
-        if active {
-            context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 0.30);
+        let alpha = if active { 76.0 / 255.0 } else { 22.0 / 255.0 };
+        let (r, g, b) = if active {
+            (176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0)
         } else {
-            context.set_source_rgba(1.0, 1.0, 1.0, 0.16);
-        }
+            (1.0, 1.0, 1.0)
+        };
+        context.set_source_rgba(r, g, b, alpha);
         let _ = context.fill();
     };
 
-    draw_accent(context, layout.item_cells[0], true);
+    draw_accent(context, layout.item_cells[active_tool_index], true);
     if let Some(index) = hover_tool_index {
         if let Some(cell) = layout.item_cells.get(index) {
-            draw_accent(context, *cell, index == 0);
+            if index != active_tool_index {
+                draw_accent(context, *cell, false);
+            }
         }
     }
-    if hover_size_panel || hover_crop_panel {
-        draw_accent(
-            context,
-            RectF {
-                x: top_cluster_x,
-                y: top_cluster_y,
-                width: top_cluster_w,
-                height: top_cluster_h,
-            },
-            false,
-        );
+    if hover_size_panel {
+        draw_accent(context, layout.size_panel, false);
+    }
+    if hover_crop_panel || crop_active {
+        draw_accent(context, crop_panel, crop_active);
     }
 
     // Icons + labels
@@ -170,13 +171,16 @@ pub(crate) fn draw_feature_toolbar(
         let center_x = cell.x + cell.width / 2.0;
         let label = TOOLBAR_LABELS[index];
         let is_hovered = hover_tool_index == Some(index);
-        let is_active = index == 0;
+        let is_active = index == active_tool_index;
 
         // Icon: brighter + reduced shadow on hover
-        let (shadow_alpha, icon_alpha) = if is_hovered || is_active {
-            (0.30, 1.0)
+        let icon_alpha = if is_hovered || is_active { 1.0 } else { 0.94 };
+        let shadow_alpha = if is_hovered {
+            0.24
+        } else if is_active {
+            0.32
         } else {
-            (0.52, 0.98)
+            0.50
         };
         let icon_y = if is_hovered || is_active {
             cell.y + 23.5
@@ -198,7 +202,7 @@ pub(crate) fn draw_feature_toolbar(
             if is_active {
                 (1.0, 229.0 / 255.0, 206.0 / 255.0, icon_alpha)
             } else {
-                (1.0, 1.0, 1.0, icon_alpha)
+                (244.0 / 255.0, 244.0 / 255.0, 244.0 / 255.0, icon_alpha)
             },
         );
 
@@ -208,15 +212,9 @@ pub(crate) fn draw_feature_toolbar(
         } else {
             gtk4::cairo::FontWeight::Normal
         };
-        let (label_alpha_shadow, label_alpha) = if is_hovered {
-            (0.30, 1.0)
-        } else {
-            (0.52, 0.98)
-        };
-
         context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, font_weight);
         context.set_font_size(9.5);
-        context.set_source_rgba(0.0, 0.0, 0.0, label_alpha_shadow);
+        context.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
         if let Ok(extents) = context.text_extents(label) {
             let text_x = center_x - extents.width() / 2.0 - extents.x_bearing() + 0.6;
             let text_y = cell.y + 50.0 + 0.8;
@@ -225,9 +223,9 @@ pub(crate) fn draw_feature_toolbar(
         }
 
         if is_active {
-            context.set_source_rgba(1.0, 229.0 / 255.0, 206.0 / 255.0, label_alpha);
+            context.set_source_rgba(1.0, 229.0 / 255.0, 206.0 / 255.0, icon_alpha);
         } else {
-            context.set_source_rgba(1.0, 1.0, 1.0, label_alpha);
+            context.set_source_rgba(244.0 / 255.0, 244.0 / 255.0, 244.0 / 255.0, icon_alpha);
         }
         if let Ok(extents) = context.text_extents(label) {
             let text_x = center_x - extents.width() / 2.0 - extents.x_bearing();
@@ -285,20 +283,38 @@ pub(crate) fn draw_feature_toolbar(
     }
 
     let crop_center_x = crop_panel.x + crop_panel.width / 2.0;
-    let crop_y = crop_panel.y + 27.5;
+    let crop_y = crop_panel.y
+        + if hover_crop_panel || crop_active {
+            27.0
+        } else {
+            27.5
+        };
     draw_toolbar_icon(
         context,
         ToolbarIcon::Crop,
         crop_center_x + 0.6,
         crop_y + 0.8,
-        (0.0, 0.0, 0.0, if hover_crop_panel { 0.24 } else { 0.46 }),
+        (
+            0.0,
+            0.0,
+            0.0,
+            if hover_crop_panel {
+                62.0 / 255.0
+            } else {
+                118.0 / 255.0
+            },
+        ),
     );
     draw_toolbar_icon(
         context,
         ToolbarIcon::Crop,
         crop_center_x,
         crop_y,
-        (1.0, 1.0, 1.0, 0.95),
+        if crop_active {
+            (1.0, 229.0 / 255.0, 206.0 / 255.0, 0.95)
+        } else {
+            (1.0, 1.0, 1.0, 242.0 / 255.0)
+        },
     );
 
     if capture_crop_menu_open {
@@ -2553,6 +2569,121 @@ pub(crate) fn draw_webcam_options(
     }
 }
 
+fn webcam_preview_size(
+    sel_w: f64,
+    sel_h: f64,
+    webcam_size: usize,
+    webcam_shape: usize,
+) -> (f64, f64) {
+    const MARGIN: f64 = 10.0;
+    let (mut preview_w, mut preview_h) = match webcam_size {
+        0 => (120.0, 160.0),
+        2 => (280.0, 370.0),
+        3 => (360.0, 480.0),
+        4 => (
+            (sel_w - 2.0 * MARGIN).max(1.0),
+            (sel_h - 2.0 * MARGIN).max(1.0),
+        ),
+        _ => (200.0, 260.0),
+    };
+
+    match webcam_shape {
+        0 | 1 => preview_h = preview_w,
+        2 => preview_h = preview_w * 0.75,
+        _ => {}
+    }
+
+    preview_w = preview_w.min((sel_w - 2.0 * MARGIN).max(1.0));
+    preview_h = preview_h.min((sel_h - 2.0 * MARGIN).max(1.0));
+    (preview_w, preview_h)
+}
+
+fn webcam_preview_rect(
+    sel_x: f64,
+    sel_y: f64,
+    sel_w: f64,
+    sel_h: f64,
+    webcam_size: usize,
+    webcam_shape: usize,
+    webcam_rel_x: f64,
+    webcam_rel_y: f64,
+) -> RectF {
+    const MARGIN: f64 = 10.0;
+    let (preview_w, preview_h) = webcam_preview_size(sel_w, sel_h, webcam_size, webcam_shape);
+    let min_x = sel_x + MARGIN;
+    let max_x = min_x.max(sel_x + sel_w - preview_w - MARGIN);
+    let min_y = sel_y + MARGIN;
+    let max_y = min_y.max(sel_y + sel_h - preview_h - MARGIN);
+    RectF {
+        x: min_x + (max_x - min_x) * webcam_rel_x.clamp(0.0, 1.0),
+        y: min_y + (max_y - min_y) * (1.0 - webcam_rel_y.clamp(0.0, 1.0)),
+        width: preview_w,
+        height: preview_h,
+    }
+}
+
+fn draw_webcam_preview(
+    context: &gtk4::cairo::Context,
+    sel_x: f64,
+    sel_y: f64,
+    sel_w: f64,
+    sel_h: f64,
+    webcam_size: usize,
+    webcam_shape: usize,
+    webcam_rel_x: f64,
+    webcam_rel_y: f64,
+    webcam_device: i32,
+) {
+    let rect = webcam_preview_rect(
+        sel_x,
+        sel_y,
+        sel_w,
+        sel_h,
+        webcam_size,
+        webcam_shape,
+        webcam_rel_x,
+        webcam_rel_y,
+    );
+    let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
+
+    context.new_path();
+    if webcam_shape == 0 {
+        context.arc(
+            rect.x + rect.width / 2.0,
+            rect.y + rect.height / 2.0,
+            rect.width.min(rect.height) / 2.0,
+            0.0,
+            PI * 2.0,
+        );
+    } else {
+        let radius = if webcam_shape == 1 { 8.0 } else { 12.0 };
+        rounded_rect_path(context, rect.x, rect.y, rect.width, rect.height, radius);
+    }
+    context.set_source_rgba(0.0, 0.0, 0.0, 180.0 / 255.0);
+    let _ = context.fill_preserve();
+    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
+    context.set_line_width(1.5);
+    let _ = context.stroke();
+
+    let label = if webcam_device >= 0 {
+        format!("Camera {}", webcam_device)
+    } else {
+        "Webcam".to_string()
+    };
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size(10.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
+    context.move_to(rect.x + 8.0, rect.y + rect.height - 8.0);
+    let _ = context.show_text(&label);
+
+    let _ = context.restore();
+}
+
 pub(crate) fn draw_overlay(
     context: &gtk4::cairo::Context,
     width: i32,
@@ -2689,6 +2820,7 @@ pub(crate) fn draw_overlay(
             screen_width,
             screen_height,
             background,
+            st.active_tool_index,
             st.hover_tool_index,
             st.hover_size_panel,
             st.hover_crop_panel,
@@ -2775,6 +2907,20 @@ pub(crate) fn draw_overlay(
                 st.optimize_gif,
                 st.gif_size_idx,
             );
+            if st.rec_webcam {
+                draw_webcam_preview(
+                    context,
+                    x,
+                    y,
+                    sel_w,
+                    sel_h,
+                    st.webcam_size,
+                    st.webcam_shape,
+                    st.webcam_rel_x,
+                    st.webcam_rel_y,
+                    st.webcam_device,
+                );
+            }
             // Click options menu (on top of recording panel)
             if st.click_options_open {
                 let panel_x = (x + (sel_w - 440.0) / 2.0).clamp(10.0, screen_width - 450.0);
@@ -2821,6 +2967,7 @@ pub(crate) fn draw_overlay(
                 screen_width,
                 screen_height,
                 background,
+                st.active_tool_index,
                 st.hover_tool_index,
                 st.hover_size_panel,
                 st.hover_crop_panel,
