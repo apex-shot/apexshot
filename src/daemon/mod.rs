@@ -2989,6 +2989,12 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         is_fullscreen: true,
         show_timer: true,
         use_shell_mask: false,
+        show_webcam: false,
+        webcam_device: -1,
+        webcam_size: 1,
+        webcam_shape: 0,
+        webcam_rel_x: 0.0,
+        webcam_rel_y: 0.0,
     };
 
     match run_recording_with_controls(config, params).await {
@@ -3088,6 +3094,12 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         is_fullscreen: false,
         show_timer: true,
         use_shell_mask: false,
+        show_webcam: false,
+        webcam_device: -1,
+        webcam_size: 1,
+        webcam_shape: 0,
+        webcam_rel_x: 0.0,
+        webcam_rel_y: 0.0,
     };
     match run_recording_with_controls(config, params).await {
         Ok((path, StopAction::Discard)) => {

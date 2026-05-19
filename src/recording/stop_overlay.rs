@@ -1,4 +1,5 @@
 use gdk4x11::X11Surface;
+use serde::{Deserialize, Serialize};
 use gtk4::cairo;
 use gtk4::gdk::{self, Key};
 use gtk4::{
@@ -38,7 +39,7 @@ pub enum StopAction {
     Discard,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RecordingControlsParams {
     pub capture_x: i32,
     pub capture_y: i32,
@@ -47,6 +48,12 @@ pub struct RecordingControlsParams {
     pub is_fullscreen: bool,
     pub show_timer: bool,
     pub use_shell_mask: bool,
+    pub show_webcam: bool,
+    pub webcam_device: i32,
+    pub webcam_size: usize,
+    pub webcam_shape: usize,
+    pub webcam_rel_x: f64,
+    pub webcam_rel_y: f64,
 }
 
 pub fn run_recording_controls(
@@ -56,6 +63,22 @@ pub fn run_recording_controls(
     let stop_tx: Arc<Mutex<Option<oneshot::Sender<StopAction>>>> =
         Arc::new(Mutex::new(Some(stop_tx)));
 
+    let _params_for_activate = RecordingControlsParams {
+        capture_x: params.capture_x,
+        capture_y: params.capture_y,
+        capture_w: params.capture_w,
+        capture_h: params.capture_h,
+        is_fullscreen: params.is_fullscreen,
+        show_timer: params.show_timer,
+        use_shell_mask: params.use_shell_mask,
+        show_webcam: params.show_webcam,
+        webcam_device: params.webcam_device,
+        webcam_size: params.webcam_size,
+        webcam_shape: params.webcam_shape,
+        webcam_rel_x: params.webcam_rel_x,
+        webcam_rel_y: params.webcam_rel_y,
+    };
+
     let app = Application::builder()
         .application_id("com.apexshot.recording")
         .build();
@@ -63,6 +86,11 @@ pub fn run_recording_controls(
     let stop_tx_activate = stop_tx.clone();
     app.connect_activate(move |application| {
         let dim_windows = setup_dim_windows(application, params);
+        let _webcam_window = if params.show_webcam {
+            setup_webcam_window(application, params)
+        } else {
+            None
+        };
         setup_window(application, params, stop_tx_activate.clone(), dim_windows);
     });
 
@@ -99,6 +127,12 @@ pub fn run_recording_stop_overlay(
             is_fullscreen: true,
             show_timer: false,
             use_shell_mask: false,
+            show_webcam: false,
+            webcam_device: -1,
+            webcam_size: 1,
+            webcam_shape: 0,
+            webcam_rel_x: 0.0,
+            webcam_rel_y: 0.0,
         },
         stop_tx,
     )
@@ -1054,4 +1088,115 @@ fn send_net_wm_state_client_message<C: Connection>(
     .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+fn setup_webcam_window(
+    app: &Application,
+    params: RecordingControlsParams,
+) -> Option<ApplicationWindow> {
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .title("ApexShot Webcam")
+        .default_width(240)
+        .default_height(240)
+        .decorated(false)
+        .resizable(false)
+        .focusable(false)
+        .build();
+
+    let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
+    let size_map = [160, 240, 320, 480];
+    let size = size_map.get(params.webcam_size).copied().unwrap_or(240);
+    window.set_default_size(size, size);
+
+    let x = (params.webcam_rel_x * screen_w as f64) as i32;
+    let y = (params.webcam_rel_y * screen_h as f64) as i32;
+
+    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
+
+    if layer_shell_active {
+        window.init_layer_shell();
+        window.set_layer(Layer::Overlay);
+        window.set_anchor(Edge::Top, true);
+        window.set_anchor(Edge::Left, true);
+        window.set_margin(Edge::Top, y);
+        window.set_margin(Edge::Left, x);
+        window.set_keyboard_mode(KeyboardMode::None);
+        window.set_namespace(Some("apexshot-webcam"));
+    } else {
+        window.connect_realize(clone!(
+            #[weak]
+            window,
+            move |_| {
+                suppress_x11_controls_window_type(&window);
+                let _ = request_x11_always_on_top(&window);
+                let _ = position_x11_window(&window, x, y);
+            }
+        ));
+    }
+
+    if params.webcam_shape == 1 {
+        window.add_css_class("webcam-circle");
+        let provider = CssProvider::new();
+        provider.load_from_data(".webcam-circle { border-radius: 9999px; overflow: hidden; }");
+        gtk4::style_context_add_provider_for_display(
+            &gtk4::gdk::Display::default().expect("No display"),
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+
+    let drawing_area = DrawingArea::new();
+    drawing_area.set_content_width(size);
+    drawing_area.set_content_height(size);
+    
+    drawing_area.set_draw_func(move |_, cr, w, h| {
+        cr.set_source_rgb(0.05, 0.05, 0.05);
+        if params.webcam_shape == 1 {
+            cr.arc(w as f64 / 2.0, h as f64 / 2.0, (w as f64 / 2.0).min(h as f64 / 2.0), 0.0, 2.0 * std::f64::consts::PI);
+        } else {
+            cr.rectangle(0.0, 0.0, w as f64, h as f64);
+        }
+        let _ = cr.fill();
+
+        cr.set_source_rgb(0.3, 0.3, 0.3);
+        cr.set_line_width(2.0);
+        let cx = w as f64 / 2.0;
+        let cy = h as f64 / 2.0;
+        cr.arc(cx, cy - 10.0, 15.0, 0.0, 2.0 * std::f64::consts::PI);
+        let _ = cr.stroke();
+        cr.move_to(cx - 20.0, cy + 20.0);
+        cr.line_to(cx + 20.0, cy + 20.0);
+        let _ = cr.stroke();
+    });
+    window.set_child(Some(&drawing_area));
+
+    let drag = GestureDrag::new();
+    let current_x = Rc::new(Cell::new(x));
+    let current_y = Rc::new(Cell::new(y));
+    let drag_start_x = Rc::new(Cell::new(x));
+    let drag_start_y = Rc::new(Cell::new(y));
+
+    drag.connect_drag_begin(clone!(#[strong] current_x, #[strong] current_y, #[strong] drag_start_x, #[strong] drag_start_y, move |_, _, _| {
+        drag_start_x.set(current_x.get());
+        drag_start_y.set(current_y.get());
+    }));
+
+    drag.connect_drag_update(clone!(#[weak] window, #[strong] current_x, #[strong] current_y, #[strong] drag_start_x, #[strong] drag_start_y, move |_, dx, dy| {
+        let next_x = (drag_start_x.get() + dx as i32).clamp(0, screen_w - size);
+        let next_y = (drag_start_y.get() + dy as i32).clamp(0, screen_h - size);
+        current_x.set(next_x);
+        current_y.set(next_y);
+        if layer_shell_active {
+            window.set_margin(Edge::Left, next_x);
+            window.set_margin(Edge::Top, next_y);
+        } else {
+            let _ = position_x11_window(&window, next_x, next_y);
+        }
+    }));
+    window.add_controller(drag);
+
+    window.present();
+    Some(window)
 }

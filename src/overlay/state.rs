@@ -1,6 +1,7 @@
 use super::geometry::SelectionRectF;
 use super::icons::TOOLBAR_AREA_INDEX;
 pub(crate) use super::recording::state::{OverlayIntent, RecordingState};
+use crate::compositor::WindowInfo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResizeHandle {
@@ -75,6 +76,9 @@ pub(crate) struct SelectorState {
     pub(crate) recording: RecordingState,
     // ── Capture intent (mirrors C++ CaptureIntent) ──
     pub(crate) intent: OverlayIntent,
+    // ── Window snapping state ──
+    pub(crate) windows: Vec<WindowInfo>,
+    pub(crate) hovered_window: Option<usize>,
 }
 
 impl Default for SelectorState {
@@ -110,6 +114,8 @@ impl Default for SelectorState {
             hovered_scroll_popup_close: false,
             recording: RecordingState::default(),
             intent: OverlayIntent::default(),
+            windows: Vec::new(),
+            hovered_window: None,
         }
     }
 }

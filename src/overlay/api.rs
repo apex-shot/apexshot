@@ -58,8 +58,17 @@ pub struct AreaSelector {
 impl AreaSelector {
     /// Create a new area selector
     pub fn new() -> Self {
+        let mut state = SelectorState::default();
+        
+        // Populate windows from compositor if available
+        if let Some(compositor) = crate::compositor::detect_compositor() {
+            if let Ok(windows) = compositor.get_windows() {
+                state.windows = windows;
+            }
+        }
+
         Self {
-            state: Arc::new(Mutex::new(SelectorState::default())),
+            state: Arc::new(Mutex::new(state)),
         }
     }
 

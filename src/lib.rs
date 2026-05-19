@@ -23,6 +23,7 @@ pub mod qr;
 pub mod recording;
 pub mod settings;
 pub mod tray;
+pub mod compositor;
 pub mod utils;
 
 // Re-export commonly used types

@@ -736,6 +736,20 @@ pub(crate) fn setup_window(
                         )
                     };
 
+                    let mut next_hovered_window = None;
+                    if !st.completed && !st.is_dragging && hit.is_none() && record_hit.is_none() {
+                        for (i, win) in st.windows.iter().enumerate() {
+                            if x >= win.x as f64
+                                && x <= (win.x + win.width) as f64
+                                && y >= win.y as f64
+                                && y <= (win.y + win.height) as f64
+                            {
+                                next_hovered_window = Some(i);
+                                break;
+                            }
+                        }
+                    }
+
                     let (
                         next_hover_tool_index,
                         next_hover_size_panel,
@@ -773,6 +787,8 @@ pub(crate) fn setup_window(
                                                 }
                                             })
                                     }
+                                } else if next_hovered_window.is_some() {
+                                    "pointer"
                                 } else {
                                     "crosshair"
                                 };
@@ -785,12 +801,14 @@ pub(crate) fn setup_window(
                     let hover_changed = st.hover_tool_index != next_hover_tool_index
                         || st.hover_size_panel != next_hover_size_panel
                         || st.hover_crop_panel != next_hover_crop_panel
-                        || st.recording.hover_record_tile != next_hover_record_tile;
+                        || st.recording.hover_record_tile != next_hover_record_tile
+                        || st.hovered_window != next_hovered_window;
 
                     st.hover_tool_index = next_hover_tool_index;
                     st.hover_size_panel = next_hover_size_panel;
                     st.hover_crop_panel = next_hover_crop_panel;
                     st.recording.hover_record_tile = next_hover_record_tile;
+                    st.hovered_window = next_hovered_window;
                     st.hovered_capture_crop_menu_item = -1;
                     st.recording.hovered_crop_menu_item = -1;
                     st.recording.hovered_settings_item = -1;
@@ -1852,18 +1870,31 @@ pub(crate) fn setup_window(
             st.drag_mode = Some(drag_mode);
 
             if matches!(drag_mode, DragMode::NewSelection) {
-                st.start_x = start_x;
-                st.start_y = start_y;
-                st.current_x = start_x;
-                st.current_y = start_y;
-                st.completed = false;
+                if let Some(win_idx) = st.hovered_window {
+                    let win = &st.windows[win_idx];
+                    let (wx, wy, ww, wh) = (win.x as f64, win.y as f64, win.width as f64, win.height as f64);
+                    st.start_x = wx;
+                    st.start_y = wy;
+                    st.current_x = wx + ww;
+                    st.current_y = wy + wh;
+                    st.completed = true;
+                    st.is_dragging = false;
+                    st.drag_mode = None;
+                } else {
+                    st.start_x = start_x;
+                    st.start_y = start_y;
+                    st.current_x = start_x;
+                    st.current_y = start_y;
+                    st.completed = false;
+                    st.is_dragging = true;
+                }
                 st.fullscreen_mode = false;
                 if !st.recording.panel_open {
                     st.active_tool_index = TOOLBAR_AREA_INDEX;
                 }
+            } else {
+                st.is_dragging = true;
             }
-
-            st.is_dragging = true;
             drop(st);
 
             if let Some(drawing_area) = drawing_area_weak.upgrade() {

@@ -530,6 +530,140 @@ fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
     ]
 }
 
+pub fn export_hotkeys_for_hyprland() -> anyhow::Result<String> {
+    let exe = resolve_action_exe()?;
+    let exe_str = exe.to_string_lossy();
+    let bindings = default_hotkey_bindings();
+    
+    let mut output = String::new();
+    output.push_str("# ApexShot Hotkeys for Hyprland\n");
+    output.push_str("# Add these lines to your hyprland.conf\n\n");
+
+    for binding in bindings {
+        let parts: Vec<&str> = binding.accelerator.split('+').collect();
+        let mut mods = Vec::new();
+        let mut key = String::new();
+
+        for part in parts {
+            let upper = part.to_uppercase();
+            match upper.as_str() {
+                "CTRL" | "CONTROL" => mods.push("CONTROL"),
+                "ALT" => mods.push("ALT"),
+                "SHIFT" => mods.push("SHIFT"),
+                "SUPER" | "META" | "WIN" => mods.push("SUPER"),
+                k => key = k.to_string(),
+            }
+        }
+
+        let mods_str = if mods.is_empty() { "" } else { &mods.join("_") };
+        let name = binding.name.as_deref().unwrap_or("unknown");
+        let args = binding.args.join(" ");
+        
+        output.push_str(&format!(
+            "bind = {}, {}, exec, {} {} # {}\n",
+            mods_str, key, exe_str, args, name
+        ));
+    }
+
+    Ok(output)
+}
+
+pub fn export_hotkeys_for_sway() -> anyhow::Result<String> {
+    let exe = resolve_action_exe()?;
+    let exe_str = exe.to_string_lossy();
+    let bindings = default_hotkey_bindings();
+    
+    let mut output = String::new();
+    output.push_str("# ApexShot Hotkeys for Sway/i3\n");
+    output.push_str("# Add these lines to your sway config (e.g. ~/.config/sway/config)\n\n");
+
+    for binding in bindings {
+        let name = binding.name.as_deref().unwrap_or("unknown");
+        let args = binding.args.join(" ");
+        
+        output.push_str(&format!(
+            "bindsym {} exec {} {} # {}\n",
+            binding.accelerator, exe_str, args, name
+        ));
+    }
+
+    Ok(output)
+}
+
+pub fn export_hotkeys_for_niri() -> anyhow::Result<String> {
+    let exe = resolve_action_exe()?;
+    let exe_str = exe.to_string_lossy();
+    let bindings = default_hotkey_bindings();
+    
+    let mut output = String::new();
+    output.push_str("// ApexShot Hotkeys for Niri\n");
+    output.push_str("// Add these to your config.niri binds { ... } block\n\n");
+
+    for binding in bindings {
+        let parts: Vec<&str> = binding.accelerator.split('+').collect();
+        let mut mods = Vec::new();
+        let mut key = String::new();
+
+        for part in parts {
+            match part.to_uppercase().as_str() {
+                "CTRL" | "CONTROL" => mods.push("Ctrl"),
+                "ALT" => mods.push("Alt"),
+                "SHIFT" => mods.push("Shift"),
+                "SUPER" | "META" | "WIN" => mods.push("Super"),
+                k => key = k.to_string(),
+            }
+        }
+
+        let mods_str = if mods.is_empty() { "".to_string() } else { format!("{}+", mods.join("+")) };
+        let name = binding.name.as_deref().unwrap_or("unknown");
+        let args = binding.args.join(" ");
+        
+        output.push_str(&format!(
+            "    \"{}{}\" {{ spawn \"{}\" \"{}\"; }} // {}\n",
+            mods_str, key, exe_str, args, name
+        ));
+    }
+
+    Ok(output)
+}
+
+pub fn export_hotkeys_for_river() -> anyhow::Result<String> {
+    let exe = resolve_action_exe()?;
+    let exe_str = exe.to_string_lossy();
+    let bindings = default_hotkey_bindings();
+    
+    let mut output = String::new();
+    output.push_str("# ApexShot Hotkeys for River\n");
+    output.push_str("# Add these to your river init script\n\n");
+
+    for binding in bindings {
+        let parts: Vec<&str> = binding.accelerator.split('+').collect();
+        let mut mods = Vec::new();
+        let mut key = String::new();
+
+        for part in parts {
+            match part.to_uppercase().as_str() {
+                "CTRL" | "CONTROL" => mods.push("Control"),
+                "ALT" => mods.push("Alt"),
+                "SHIFT" => mods.push("Shift"),
+                "SUPER" | "META" | "WIN" => mods.push("Super"),
+                k => key = k.to_string(),
+            }
+        }
+
+        let mods_str = if mods.is_empty() { "None".to_string() } else { mods.join("+") };
+        let name = binding.name.as_deref().unwrap_or("unknown");
+        let args = binding.args.join(" ");
+        
+        output.push_str(&format!(
+            "riverctl map normal {} {} spawn \"{} {}\" # {}\n",
+            mods_str, key, exe_str, args, name
+        ));
+    }
+
+    Ok(output)
+}
+
 fn merge_missing_default_hotkeys(cfg: &mut HotkeyConfig) -> bool {
     let mut changed = false;
 
@@ -645,6 +779,24 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
         "capture_window",
         &app_config.shortcut_capture_window,
         &["capture", "window"],
+    );
+    push_binding(
+        &mut bindings,
+        "stop_recording",
+        &app_config.shortcut_recording_stop_save,
+        &["record", "stop"],
+    );
+    push_binding(
+        &mut bindings,
+        "toggle_recording_pause",
+        &app_config.shortcut_recording_pause_resume,
+        &["record", "toggle-pause"],
+    );
+    push_binding(
+        &mut bindings,
+        "restart_recording",
+        &app_config.shortcut_recording_restart,
+        &["record", "restart"],
     );
     push_binding(
         &mut bindings,
@@ -1194,6 +1346,47 @@ pub fn setup_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyhow
     if is_gnome_desktop() {
         install_gnome_custom_keybindings(&cfg)?;
         println!("Installed GNOME custom keybindings. Hotkeys now work without running daemon.");
+    } else if let Some(comp) = crate::compositor::detect_compositor() {
+        match comp.name() {
+            "Hyprland" => {
+                if let Ok(output) = export_hotkeys_for_hyprland() {
+                    let mut hypr_path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
+                    hypr_path.push("hypr");
+                    hypr_path.push("apexshot.conf");
+                    let _ = std::fs::create_dir_all(hypr_path.parent().unwrap());
+                    if std::fs::write(&hypr_path, output).is_ok() {
+                        println!("\n[Hyprland detected]");
+                        println!("1. Saved bindings to: {}", hypr_path.display());
+                        println!("2. Add this line to your hyprland.conf:");
+                        println!("   source = {}", hypr_path.display());
+                    }
+                }
+            }
+            "Sway/i3" => {
+                if let Ok(output) = export_hotkeys_for_sway() {
+                    println!("\n[Sway/i3 detected]");
+                    println!("Add these lines to your config file:\n");
+                    println!("{}", output);
+                }
+            }
+            "Niri" => {
+                if let Ok(output) = export_hotkeys_for_niri() {
+                    println!("\n[Niri detected]");
+                    println!("Add these lines to your binds {{ ... }} block:\n");
+                    println!("{}", output);
+                }
+            }
+            "River" => {
+                if let Ok(output) = export_hotkeys_for_river() {
+                    println!("\n[River detected]");
+                    println!("Add these lines to your river init script:\n");
+                    println!("{}", output);
+                }
+            }
+            _ => {
+                println!("Config saved, but automatic installation for {} is not yet implemented.", comp.name());
+            }
+        }
     } else {
         println!("Config saved, but no-daemon install is currently GNOME-only.");
     }

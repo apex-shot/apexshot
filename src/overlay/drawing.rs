@@ -2963,6 +2963,50 @@ pub(crate) fn draw_overlay(
         let _ = context.paint();
     }
 
+    // ── Window Hover Highlight ──
+    if let Some(win_idx) = st.hovered_window {
+        if !st.completed && !st.is_dragging {
+            let win = &st.windows[win_idx];
+            let x = win.x as f64;
+            let y = win.y as f64;
+            let w = win.width as f64;
+            let h = win.height as f64;
+
+            // Reveal the window area (remove the dark tint)
+            if let Some(bg) = background {
+                let _ = context.save();
+                context.rectangle(x, y, w, h);
+                context.clip();
+                paint_surface_fullscreen(
+                    context,
+                    &bg.surface,
+                    bg.width,
+                    bg.height,
+                    screen_width,
+                    screen_height,
+                );
+                let _ = context.restore();
+            } else {
+                let _ = context.save();
+                context.set_operator(gtk4::cairo::Operator::Clear);
+                context.rectangle(x, y, w, h);
+                let _ = context.fill();
+                let _ = context.restore();
+            }
+
+            // Draw a subtle border around the hovered window
+            context.set_source_rgba(BRAND_ORANGE_R, BRAND_ORANGE_G, BRAND_ORANGE_B, 0.8);
+            context.set_line_width(2.0);
+            context.rectangle(x + 1.0, y + 1.0, w - 2.0, h - 2.0);
+            let _ = context.stroke();
+
+            // Add a very subtle inner glow
+            context.set_source_rgba(BRAND_ORANGE_R, BRAND_ORANGE_G, BRAND_ORANGE_B, 0.1);
+            context.rectangle(x, y, w, h);
+            let _ = context.fill();
+        }
+    }
+
     if st.fullscreen_mode {
         // ── Fullscreen mode: the whole screen IS the selection ──
         // The darkened background is already painted; add a very subtle extra

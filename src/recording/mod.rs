@@ -4,7 +4,7 @@ use gstreamer_app as gst_app;
 use serde::Serialize;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+// No atomic imports needed here anymore
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
@@ -60,20 +60,6 @@ pub enum RecordError {
 
 pub type RecordResult<T> = Result<T, RecordError>;
 
-fn reap_child_if_exited(child: &mut Option<std::process::Child>) -> bool {
-    let Some(process) = child.as_mut() else {
-        return true;
-    };
-
-    match process.try_wait() {
-        Ok(Some(_status)) => {
-            *child = None;
-            true
-        }
-        Ok(None) => false,
-        Err(_) => false,
-    }
-}
 
 fn daemon_event_for_terminal_action(action: RecordingTerminalAction) -> Option<&'static str> {
     match action {
@@ -1985,6 +1971,12 @@ pub fn prepare_overlay_recording_request(
         is_fullscreen: request.fullscreen,
         show_timer: true,
         use_shell_mask,
+        show_webcam: request.webcam,
+        webcam_device: request.webcam_device,
+        webcam_size: request.webcam_size as usize,
+        webcam_shape: request.webcam_shape as usize,
+        webcam_rel_x: request.webcam_rel_x,
+        webcam_rel_y: request.webcam_rel_y,
     });
 
     PreparedOverlayRecordingRequest {
@@ -2013,26 +2005,24 @@ async fn run_recording_with_controls_with_runtime_overlay(
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     visibility_policy: Option<crate::gnome_shell::RecordingControlsVisibilityPolicy>,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    // Check if GNOME Shell extension is available before starting recording
-    if !crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
-        return Err(anyhow::anyhow!(
-            "GNOME Shell extension is not installed. Please install the ApexShot GNOME Shell extension first.\n\n\
-            You can install it from the onboarding window or by running:\n\
-            gnome-extensions install apexshot-gnome-integration@apexshot.github.io"
-        ));
+    // If GNOME Shell extension is available, use it (premium experience)
+    if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
+        return run_recording_with_shell_controls(
+            config,
+            params,
+            runtime_overlay_snapshot,
+            visibility_policy.unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
+        )
+        .await;
     }
 
-    // Always use GNOME Shell recording controls (no fallback to headless)
-    run_recording_with_shell_controls(
-        config,
-        params,
-        runtime_overlay_snapshot,
-        visibility_policy.unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
-    )
-    .await
+    // Fallback for non-GNOME (Hyprland, Sway, Niri, River, etc.)
+    // We use our native GTK+LayerShell overlay which implements the same mask/webcam logic.
+    eprintln!("[recording] GNOME Shell not detected; using native recording overlay.");
+    run_recording_with_native_controls(config, params).await
 }
 
-pub async fn run_recording_with_cpp_controls(
+pub async fn run_recording_with_native_controls(
     config: RecordingConfig,
     params: RecordingControlsParams,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
@@ -2043,49 +2033,24 @@ pub async fn run_recording_with_cpp_controls(
     );
     let control_server = RecordingControlServer::start(session_id).await?;
 
-    let controls_child = Arc::new(Mutex::new(Some(
-        crate::capture_overlay::spawn_recording_controls_via_cpp(
-            control_server.bus_name(),
-            control_server.session_id(),
-            params,
-        )?,
-    )));
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+    let params_json = serde_json::to_string(&params)?;
 
-    let controls_child_reaper = Arc::clone(&controls_child);
-    let reaper_task = tokio::spawn(async move {
-        loop {
-            let finished = {
-                if let Ok(mut child) = controls_child_reaper.lock() {
-                    reap_child_if_exited(&mut child)
-                } else {
-                    true
-                }
-            };
-            if finished {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        }
-    });
+    let mut child = std::process::Command::new(&exe)
+        .arg("recording-controls-internal")
+        .arg(&params_json)
+        .arg(control_server.session_id())
+        .arg(control_server.bus_name())
+        .spawn()?;
 
     notify_daemon_event("recording_session_started");
     let final_outcome = loop {
         let (recording_command_tx, command_rx) = mpsc::unbounded_channel();
         let (control_command_tx, mut control_command_rx) =
             mpsc::unbounded_channel::<RecordingControlCommand>();
-        let controls_child_for_task = Arc::clone(&controls_child);
+        
         let forward_commands = tokio::spawn(async move {
             while let Some(command) = control_command_rx.recv().await {
-                if command.ends_session() {
-                    if let Ok(mut child) = controls_child_for_task.lock() {
-                        if let Some(process) = child.as_mut() {
-                            let _ = process.kill();
-                            let _ = process.wait();
-                        }
-                        *child = None;
-                    }
-                }
-
                 if recording_command_tx.send(command).is_err() {
                     break;
                 }
@@ -2096,17 +2061,12 @@ pub async fn run_recording_with_cpp_controls(
         let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
         control_server.clear_command_sender();
         forward_commands.abort();
+        
         let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(err) => {
-                reaper_task.abort();
-                if let Ok(mut child) = controls_child.lock() {
-                    if let Some(process) = child.as_mut() {
-                        let _ = process.kill();
-                        let _ = process.wait();
-                    }
-                    *child = None;
-                }
+                let _ = child.kill();
+                let _ = child.wait();
                 notify_recording_session_ended_best_effort();
                 return Err(err.into());
             }
@@ -2135,17 +2095,15 @@ pub async fn run_recording_with_cpp_controls(
         }
     };
 
-    reaper_task.abort();
-    if let Ok(mut child) = controls_child.lock() {
-        if let Some(process) = child.as_mut() {
-            let _ = process.kill();
-            let _ = process.wait();
-        }
-        *child = None;
-    }
-    drop(control_server);
+    let _ = child.kill();
+    let status = child.wait()?;
+    let stop_action = if status.code() == Some(2) {
+        StopAction::Discard
+    } else {
+        StopAction::Save
+    };
 
-    Ok(final_outcome)
+    Ok((final_outcome.0, stop_action))
 }
 
 async fn run_recording_with_shell_controls(
@@ -2509,6 +2467,12 @@ mod tests {
                 is_fullscreen: false,
                 show_timer: true,
                 use_shell_mask: false,
+                show_webcam: false,
+                webcam_device: -1,
+                webcam_size: 1,
+                webcam_shape: 0,
+                webcam_rel_x: 0.0,
+                webcam_rel_y: 0.0,
             })
         );
         assert_eq!(prepared.use_shell_mask, false);
@@ -2629,6 +2593,12 @@ mod tests {
                 is_fullscreen: true,
                 show_timer: true,
                 use_shell_mask: false,
+                show_webcam: false,
+                webcam_device: -1,
+                webcam_size: 1,
+                webcam_shape: 0,
+                webcam_rel_x: 0.0,
+                webcam_rel_y: 0.0,
             })
         );
     }
@@ -3189,6 +3159,12 @@ mod tests {
                 is_fullscreen: false,
                 show_timer: true,
                 use_shell_mask: shell_supported,
+                show_webcam: false,
+                webcam_device: -1,
+                webcam_size: 1,
+                webcam_shape: 0,
+                webcam_rel_x: 0.0,
+                webcam_rel_y: 0.0,
             })
         );
         assert_eq!(prepared.use_shell_mask, shell_supported);
@@ -3257,6 +3233,12 @@ mod tests {
                 is_fullscreen: true,
                 show_timer: true,
                 use_shell_mask: false, // fullscreen never uses mask
+                show_webcam: false,
+                webcam_device: -1,
+                webcam_size: 1,
+                webcam_shape: 0,
+                webcam_rel_x: 0.0,
+                webcam_rel_y: 0.0,
             })
         );
     }

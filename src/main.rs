@@ -259,6 +259,12 @@ async fn async_main(args: Vec<String>) {
                 "ui" => Some("open_recording_ui"),
                 "screen" => Some("record_screen"),
                 "area" => Some("record_area"),
+                "stop" => Some("stop_recording_save"),
+                "pause" => Some("toggle_recording_pause"), // Simplified to toggle for now
+                "resume" => Some("toggle_recording_pause"),
+                "toggle-pause" => Some("toggle_recording_pause"),
+                "restart" => Some("restart_recording"),
+                "discard" => Some("discard_recording"),
                 _ => None,
             };
             if let Some(action) = daemon_action {
@@ -306,6 +312,25 @@ async fn async_main(args: Vec<String>) {
                 .expect("Failed to spawn settings");
             if !status.success() {
                 std::process::exit(status.code().unwrap_or(1));
+            }
+        }
+        "recording-controls-internal" => {
+            if args.len() < 3 {
+                std::process::exit(1);
+            }
+            let params: apexshot::recording::RecordingControlsParams = serde_json::from_str(&args[2]).unwrap();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            
+            // We run the controls in the main thread (or a dedicated thread)
+            // since this process is dedicated to the GTK loop.
+            apexshot::recording::run_recording_controls(params, tx).expect("Failed to run recording controls");
+            
+            // Wait for user action (Save/Discard)
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let action = rt.block_on(rx).unwrap_or(apexshot::recording::StopAction::Save);
+            match action {
+                apexshot::recording::StopAction::Save => std::process::exit(0),
+                apexshot::recording::StopAction::Discard => std::process::exit(2),
             }
         }
         "native-host" => {
@@ -1290,9 +1315,35 @@ fn run_hotkeys_command(args: &[String]) -> anyhow::Result<()> {
         "uninstall" => {
             uninstall_hotkeys_for_current_desktop()?;
         }
+        "export" => {
+            let format = if i < args.len() {
+                args[i].as_str()
+            } else {
+                "hyprland"
+            };
+            match format {
+                "hyprland" => {
+                    let output = apexshot::hotkeys::export_hotkeys_for_hyprland()?;
+                    println!("{}", output);
+                }
+                "sway" | "i3" => {
+                    let output = apexshot::hotkeys::export_hotkeys_for_sway()?;
+                    println!("{}", output);
+                }
+                "niri" => {
+                    let output = apexshot::hotkeys::export_hotkeys_for_niri()?;
+                    println!("{}", output);
+                }
+                "river" => {
+                    let output = apexshot::hotkeys::export_hotkeys_for_river()?;
+                    println!("{}", output);
+                }
+                _ => anyhow::bail!("Unknown export format '{format}' (expected hyprland|sway|niri|river)"),
+            }
+        }
         _ => {
             anyhow::bail!(
-                "Unknown hotkeys subcommand '{subcommand}' (expected setup|install|uninstall)"
+                "Unknown hotkeys subcommand '{subcommand}' (expected setup|install|uninstall|export)"
             );
         }
     }
@@ -1914,6 +1965,12 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             is_fullscreen: true,
             show_timer: true,
             use_shell_mask: false,
+            show_webcam: false,
+            webcam_device: -1,
+            webcam_size: 1,
+            webcam_shape: 0,
+            webcam_rel_x: 0.0,
+            webcam_rel_y: 0.0,
         };
 
         let controls_outcome = run_recording_with_controls(config, params)
