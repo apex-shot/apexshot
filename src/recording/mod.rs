@@ -3,7 +3,7 @@ use gstreamer as gst;
 use gstreamer_app as gst_app;
 use serde::Serialize;
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -935,11 +935,10 @@ async fn start_recording_with_commands(
     Ok((final_path, stop_action))
 }
 
-pub fn copy_to_clipboard(path: &PathBuf) -> RecordResult<()> {
+pub fn copy_to_clipboard(path: &Path) -> RecordResult<()> {
     println!("Copying to clipboard...");
 
-    crate::utils::clipboard::copy_uri_to_clipboard(path)
-        .map_err(|e| RecordError::GStreamerError(e))?;
+    crate::utils::clipboard::copy_uri_to_clipboard(path).map_err(RecordError::GStreamerError)?;
 
     println!("Copied to clipboard!");
     Ok(())
@@ -1340,7 +1339,7 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         let source_types = if wants_area_crop {
             SourceType::Monitor.into()
         } else {
-            (SourceType::Monitor | SourceType::Window).into()
+            SourceType::Monitor | SourceType::Window
         };
 
         proxy

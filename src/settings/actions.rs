@@ -187,12 +187,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.quick_access_auto_close_interval = inputs
         .quick_access_auto_close_interval
         .active_id()
-        .or_else(|| {
-            inputs
-                .quick_access_auto_close_interval
-                .active_text()
-                .map(Into::into)
-        })
+        .or_else(|| inputs.quick_access_auto_close_interval.active_text())
         .unwrap_or_else(|| "30".into())
         .parse()
         .unwrap_or(30);
@@ -207,12 +202,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.screenshot_timer_interval = inputs
         .screenshot_timer_interval
         .active_id()
-        .or_else(|| {
-            inputs
-                .screenshot_timer_interval
-                .active_text()
-                .map(Into::into)
-        })
+        .or_else(|| inputs.screenshot_timer_interval.active_text())
         .unwrap_or_else(|| "5".into())
         .parse()
         .unwrap_or(5);
@@ -341,7 +331,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
 fn combo_value(combo: &ComboBoxText, fallback: &str) -> String {
     combo
         .active_id()
-        .or_else(|| combo.active_text().map(Into::into))
+        .or_else(|| combo.active_text())
         .map(|value| value.to_string())
         .unwrap_or_else(|| fallback.to_string())
 }

@@ -1,3 +1,10 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::items_after_test_module,
+    clippy::arc_with_non_send_sync
+)]
+
 pub mod annotations;
 pub mod app_identity;
 pub mod backend;

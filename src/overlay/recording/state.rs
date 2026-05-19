@@ -4,30 +4,20 @@ use super::layout::RecordPanelTile;
 
 /// Mirrors the C++ CaptureIntent enum — distinguishes what the user
 /// wants to do with the selected area when they confirm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum OverlayIntent {
+    #[default]
     Area,
     Record,
     Ocr,
 }
 
-impl Default for OverlayIntent {
-    fn default() -> Self {
-        Self::Area
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum SettingsTab {
+    #[default]
     General,
     Video,
     Gif,
-}
-
-impl Default for SettingsTab {
-    fn default() -> Self {
-        Self::General
-    }
 }
 
 /// All state that only matters when the recording panel is open.

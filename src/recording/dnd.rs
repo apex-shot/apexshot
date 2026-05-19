@@ -3,7 +3,6 @@
 /// Uses `gsettings` on GNOME and `qdbus` on KDE to suppress
 /// system notification banners. Falls back gracefully if neither
 /// desktop environment is detected.
-
 /// Guard that restores DND state when dropped.
 pub struct DndGuard {
     desktop: DesktopEnv,

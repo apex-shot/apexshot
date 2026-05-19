@@ -2092,7 +2092,7 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
     }
 
     // Fallback: derive action from the args list.
-    match binding.args.get(0).map(|s| s.as_str()) {
+    match binding.args.first().map(|s| s.as_str()) {
         Some("capture") => match binding.args.get(1).map(|s| s.as_str()) {
             Some("area") => Some(DaemonAction::CaptureArea),
             Some("crosshair") => Some(DaemonAction::CaptureCrosshair),
@@ -2839,23 +2839,18 @@ fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
     match cpp_area_init {
         Ok(AreaCapturePathResult::Captured(path)) => {
             save_existing_png_and_open(path, state);
-            return;
         }
         Ok(AreaCapturePathResult::ScrollCaptured(path)) => {
             save_existing_png_and_open(path, state);
-            return;
         }
         Ok(AreaCapturePathResult::OcrRequested(capture)) => {
             run_ocr_and_report(capture);
-            return;
         }
         Ok(AreaCapturePathResult::Cancelled) => {
             eprintln!("[daemon] Area selection cancelled.");
-            return;
         }
         Ok(AreaCapturePathResult::RecordingConfigUpdated) => {
             eprintln!("[daemon] Recording overlay state updated.");
-            return;
         }
         Ok(AreaCapturePathResult::RecordingRequested(request)) => {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
@@ -2871,7 +2866,6 @@ fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
                     );
                 }
             }
-            return;
         }
         Err(err) => {
             if err
@@ -2922,11 +2916,9 @@ fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonState>>) {
     match capture_screen_file_via_cpp() {
         Ok(path) => {
             save_existing_png_and_open(path, state);
-            return;
         }
         Err(err) if is_launch_blocked_error(&err) => {
             eprintln!("[daemon] Fullscreen capture blocked: {err}");
-            return;
         }
         Err(err) => {
             eprintln!("[daemon] C++ fullscreen capture failed: {err}");
@@ -3075,11 +3067,13 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         height: cpp_area.height,
     };
 
-    let mut config = RecordingConfig::default();
-    config.x = Some(area.x);
-    config.y = Some(area.y);
-    config.width = Some(area.width as u32);
-    config.height = Some(area.height as u32);
+    let config = RecordingConfig {
+        x: Some(area.x),
+        y: Some(area.y),
+        width: Some(area.width as u32),
+        height: Some(area.height as u32),
+        ..Default::default()
+    };
 
     eprintln!(
         "[daemon] Starting area recording ({},{} {}x{})…",

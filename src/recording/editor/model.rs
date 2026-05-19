@@ -265,7 +265,7 @@ impl VideoEditState {
 
 pub fn even_dimension(value: u32) -> u32 {
     let clamped = value.max(MIN_DIMENSION);
-    if clamped % 2 == 0 {
+    if clamped.is_multiple_of(2) {
         clamped
     } else {
         clamped - 1

@@ -1,11 +1,12 @@
 //! Pen weight types for highlighter freehand mode
 
 /// Preset highlighter thickness levels for freehand highlighting
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PenWeight {
     /// Thin highlighter stroke (8px)
     Small,
     /// Medium highlighter stroke (16px)
+    #[default]
     Medium,
     /// Thick highlighter stroke (24px)
     Large,
@@ -71,12 +72,6 @@ impl PenWeight {
             3 => Self::ExtraLarge,
             _ => Self::Medium, // Default
         }
-    }
-}
-
-impl Default for PenWeight {
-    fn default() -> Self {
-        Self::Medium
     }
 }
 

@@ -485,7 +485,7 @@ impl WaylandBackend {
                         "[capture] Window capture: cropping from {}x{} to {}x{} at ({}, {})",
                         data.width, data.height, win_width, win_height, win_x, win_y
                     );
-                    return crop_capture(data, win_x, win_y, win_width as i32, win_height as i32);
+                    return crop_capture(data, win_x, win_y, win_width, win_height);
                 }
             }
 
@@ -737,6 +737,6 @@ mod tests {
         assert!(!should_wait_for_portal_dialog_to_close(Some(
             "restore-token"
         )));
-        assert!(PORTAL_DIALOG_DISMISSAL_DELAY_MS >= 500);
+        const { assert!(PORTAL_DIALOG_DISMISSAL_DELAY_MS >= 500) };
     }
 }

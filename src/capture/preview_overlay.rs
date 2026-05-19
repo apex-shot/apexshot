@@ -158,7 +158,8 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
     Ok(())
 }
 
-fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: String) {
+fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String) {
+    let path = path.to_path_buf();
     install_preview_css();
     let config = load_config();
     let side = preview_side(&config.quick_access_position);
@@ -194,7 +195,7 @@ fn setup_preview_window(app: &gtk4::Application, path: &PathBuf, preview_id: Str
     let auto_close_anchor = Arc::new(Mutex::new(Instant::now()));
     let source_bytes = Arc::new(Mutex::new(None::<Arc<Vec<u8>>>));
 
-    let preview_area = build_preview_area(path.clone(), preview_width, preview_height);
+    let preview_area = build_preview_area(path.to_path_buf(), preview_width, preview_height);
     preview_area.set_widget_name("capture-preview-image");
 
     // Card = vertical box with internal padding, image sits inside with its own radius

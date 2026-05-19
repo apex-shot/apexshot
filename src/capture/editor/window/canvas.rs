@@ -157,6 +157,157 @@ pub(super) fn crop_canvas_overflow(
     (reserve, reserve, reserve, reserve)
 }
 
+pub(super) fn sample_rendered_color_at_point(
+    rendered: &RgbaImage,
+    image_point: Point,
+) -> Option<DrawColor> {
+    let width = rendered.width();
+    let height = rendered.height();
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    let sample_x = image_point
+        .x
+        .floor()
+        .clamp(0.0, width.saturating_sub(1) as f64) as u32;
+    let sample_y = image_point
+        .y
+        .floor()
+        .clamp(0.0, height.saturating_sub(1) as f64) as u32;
+
+    let rgba = rendered.get_pixel(sample_x, sample_y).0;
+    Some(DrawColor::new(
+        rgba[0] as f64 / 255.0,
+        rgba[1] as f64 / 255.0,
+        rgba[2] as f64 / 255.0,
+        rgba[3] as f64 / 255.0,
+    ))
+}
+
+pub(super) fn eyedropper_loupe_position(cursor_x: f64, cursor_y: f64) -> (i32, i32) {
+    let half_size = EYEDROPPER_LOUPE_SIZE as f64 / 2.0;
+    (
+        (cursor_x - half_size).round() as i32,
+        (cursor_y - half_size).round() as i32,
+    )
+}
+
+pub(super) fn draw_eyedropper_loupe(
+    context: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+    rendered: &RgbaImage,
+    image_point: Point,
+) {
+    if width <= 0 || height <= 0 {
+        return;
+    }
+
+    let image_width = rendered.width();
+    let image_height = rendered.height();
+    if image_width == 0 || image_height == 0 {
+        return;
+    }
+
+    let center_x = width as f64 / 2.0;
+    let center_y = height as f64 / 2.0;
+    let radius = width.min(height) as f64 / 2.0 - 2.0;
+    if radius <= 0.0 {
+        return;
+    }
+
+    let center_px_x = image_point
+        .x
+        .floor()
+        .clamp(0.0, image_width.saturating_sub(1) as f64) as i32;
+    let center_px_y = image_point
+        .y
+        .floor()
+        .clamp(0.0, image_height.saturating_sub(1) as f64) as i32;
+
+    let grid_size = EYEDROPPER_LOUPE_GRID_SIZE.max(1);
+    let half_grid = grid_size / 2;
+    let grid_extent = grid_size as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+    let grid_start_x = center_x - grid_extent / 2.0;
+    let grid_start_y = center_y - grid_extent / 2.0;
+
+    let _ = context.save();
+    context.arc(center_x, center_y, radius, 0.0, TAU);
+    context.clip();
+
+    // Disable antialiasing for crisp pixel edges
+    context.set_antialias(Antialias::None);
+
+    context.set_source_rgba(0.06, 0.07, 0.09, 0.94);
+    let _ = context.paint();
+
+    let max_source_x = image_width.saturating_sub(1) as i32;
+    let max_source_y = image_height.saturating_sub(1) as i32;
+
+    for row in 0..grid_size {
+        for col in 0..grid_size {
+            let source_x = (center_px_x + col - half_grid).clamp(0, max_source_x) as u32;
+            let source_y = (center_px_y + row - half_grid).clamp(0, max_source_y) as u32;
+            let rgba = rendered.get_pixel(source_x, source_y).0;
+
+            context.set_source_rgba(
+                rgba[0] as f64 / 255.0,
+                rgba[1] as f64 / 255.0,
+                rgba[2] as f64 / 255.0,
+                rgba[3] as f64 / 255.0,
+            );
+
+            let dest_x = grid_start_x + col as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+            let dest_y = grid_start_y + row as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+            context.rectangle(
+                dest_x,
+                dest_y,
+                EYEDROPPER_LOUPE_PIXEL_SIZE,
+                EYEDROPPER_LOUPE_PIXEL_SIZE,
+            );
+            let _ = context.fill();
+        }
+    }
+
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.28);
+    context.set_line_width(1.0);
+    for line in 0..=grid_size {
+        let x = grid_start_x + line as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+        context.move_to(x, grid_start_y);
+        context.line_to(x, grid_start_y + grid_extent);
+
+        let y = grid_start_y + line as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+        context.move_to(grid_start_x, y);
+        context.line_to(grid_start_x + grid_extent, y);
+    }
+    let _ = context.stroke();
+
+    // Draw target pixel highlight (center pixel)
+    let target_x = grid_start_x + half_grid as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+    let target_y = grid_start_y + half_grid as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
+    let target_size = EYEDROPPER_LOUPE_PIXEL_SIZE;
+
+    context.rectangle(target_x, target_y, target_size, target_size);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.96);
+    context.set_line_width(2.0);
+    let _ = context.stroke_preserve();
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.97);
+    context.set_line_width(1.0);
+    let _ = context.stroke();
+
+    let _ = context.restore();
+
+    // Draw outer ring with antialiasing for smoothness
+    context.arc(center_x, center_y, radius - 0.5, 0.0, TAU);
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.98);
+    context.set_line_width(2.6);
+    let _ = context.stroke_preserve();
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.74);
+    context.set_line_width(1.2);
+    let _ = context.stroke();
+}
+
 #[cfg(test)]
 mod tests {
     use super::{crop_canvas_overflow, initial_viewport_offset};
@@ -246,155 +397,4 @@ mod tests {
         let placement = initial_viewport_offset(700.0, 400.0, 900.0, 700.0, 1.0);
         assert!(placement.offset_y > 1.0);
     }
-}
-
-pub(super) fn sample_rendered_color_at_point(
-    rendered: &RgbaImage,
-    image_point: Point,
-) -> Option<DrawColor> {
-    let width = rendered.width();
-    let height = rendered.height();
-    if width == 0 || height == 0 {
-        return None;
-    }
-
-    let sample_x = image_point
-        .x
-        .floor()
-        .clamp(0.0, width.saturating_sub(1) as f64) as u32;
-    let sample_y = image_point
-        .y
-        .floor()
-        .clamp(0.0, height.saturating_sub(1) as f64) as u32;
-
-    let rgba = rendered.get_pixel(sample_x, sample_y).0;
-    Some(DrawColor::new(
-        rgba[0] as f64 / 255.0,
-        rgba[1] as f64 / 255.0,
-        rgba[2] as f64 / 255.0,
-        rgba[3] as f64 / 255.0,
-    ))
-}
-
-pub(super) fn eyedropper_loupe_position(cursor_x: f64, cursor_y: f64) -> (i32, i32) {
-    let half_size = EYEDROPPER_LOUPE_SIZE as f64 / 2.0;
-    (
-        (cursor_x - half_size).round() as i32,
-        (cursor_y - half_size).round() as i32,
-    )
-}
-
-pub(super) fn draw_eyedropper_loupe(
-    context: &gtk4::cairo::Context,
-    width: i32,
-    height: i32,
-    rendered: &RgbaImage,
-    image_point: Point,
-) {
-    if width <= 0 || height <= 0 {
-        return;
-    }
-
-    let image_width = rendered.width();
-    let image_height = rendered.height();
-    if image_width == 0 || image_height == 0 {
-        return;
-    }
-
-    let center_x = width as f64 / 2.0;
-    let center_y = height as f64 / 2.0;
-    let radius = width.min(height) as f64 / 2.0 - 2.0;
-    if radius <= 0.0 {
-        return;
-    }
-
-    let center_px_x = image_point
-        .x
-        .floor()
-        .clamp(0.0, image_width.saturating_sub(1) as f64) as i32;
-    let center_px_y = image_point
-        .y
-        .floor()
-        .clamp(0.0, image_height.saturating_sub(1) as f64) as i32;
-
-    let grid_size = EYEDROPPER_LOUPE_GRID_SIZE.max(1);
-    let half_grid = grid_size / 2;
-    let grid_extent = grid_size as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
-    let grid_start_x = center_x - grid_extent / 2.0;
-    let grid_start_y = center_y - grid_extent / 2.0;
-
-    let _ = context.save();
-    context.arc(center_x, center_y, radius, 0.0, TAU);
-    let _ = context.clip();
-
-    // Disable antialiasing for crisp pixel edges
-    context.set_antialias(Antialias::None);
-
-    context.set_source_rgba(0.06, 0.07, 0.09, 0.94);
-    let _ = context.paint();
-
-    let max_source_x = image_width.saturating_sub(1) as i32;
-    let max_source_y = image_height.saturating_sub(1) as i32;
-
-    for row in 0..grid_size {
-        for col in 0..grid_size {
-            let source_x = (center_px_x + col - half_grid).clamp(0, max_source_x) as u32;
-            let source_y = (center_px_y + row - half_grid).clamp(0, max_source_y) as u32;
-            let rgba = rendered.get_pixel(source_x, source_y).0;
-
-            context.set_source_rgba(
-                rgba[0] as f64 / 255.0,
-                rgba[1] as f64 / 255.0,
-                rgba[2] as f64 / 255.0,
-                rgba[3] as f64 / 255.0,
-            );
-
-            let dest_x = grid_start_x + col as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
-            let dest_y = grid_start_y + row as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
-            context.rectangle(
-                dest_x,
-                dest_y,
-                EYEDROPPER_LOUPE_PIXEL_SIZE,
-                EYEDROPPER_LOUPE_PIXEL_SIZE,
-            );
-            let _ = context.fill();
-        }
-    }
-
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.28);
-    context.set_line_width(1.0);
-    for line in 0..=grid_size {
-        let x = grid_start_x + line as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
-        context.move_to(x, grid_start_y);
-        context.line_to(x, grid_start_y + grid_extent);
-
-        let y = grid_start_y + line as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
-        context.move_to(grid_start_x, y);
-        context.line_to(grid_start_x + grid_extent, y);
-    }
-    let _ = context.stroke();
-
-    // Draw target pixel highlight (center pixel)
-    let target_x = grid_start_x + half_grid as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
-    let target_y = grid_start_y + half_grid as f64 * EYEDROPPER_LOUPE_PIXEL_SIZE;
-    let target_size = EYEDROPPER_LOUPE_PIXEL_SIZE;
-
-    context.rectangle(target_x, target_y, target_size, target_size);
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.96);
-    context.set_line_width(2.0);
-    let _ = context.stroke_preserve();
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.97);
-    context.set_line_width(1.0);
-    let _ = context.stroke();
-
-    let _ = context.restore();
-
-    // Draw outer ring with antialiasing for smoothness
-    context.arc(center_x, center_y, radius - 0.5, 0.0, TAU);
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.98);
-    context.set_line_width(2.6);
-    let _ = context.stroke_preserve();
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.74);
-    context.set_line_width(1.2);
-    let _ = context.stroke();
 }

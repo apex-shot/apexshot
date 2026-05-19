@@ -116,7 +116,7 @@ pub fn save_annotations(
     };
     file.annotations = annotations
         .iter()
-        .filter_map(|a| action_to_serializable(a))
+        .filter_map(action_to_serializable)
         .collect();
     file.modified_at = chrono::Utc::now();
 

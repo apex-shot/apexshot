@@ -57,9 +57,7 @@ fn resolve_main_app_desktop_file() -> Option<PathBuf> {
         return Some(desktop_file);
     }
 
-    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
-        return None;
-    }
+    std::env::var_os("WAYLAND_DISPLAY")?;
 
     crate::hotkeys::ensure_desktop_entry_pub(crate::app_identity::app_id()).ok()
 }

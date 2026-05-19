@@ -1824,7 +1824,7 @@ impl EditorState {
             if self
                 .actions
                 .iter()
-                .any(|a| Self::action_requires_effect_rebuild(a))
+                .any(Self::action_requires_effect_rebuild)
             {
                 self.rebuild_effect_layer();
             }
@@ -2226,7 +2226,7 @@ impl EditorState {
 
         let original = *rect;
         let moved = if let Some(handle) = self.select_resize_handle {
-            let resized = if let Some(aspect_ratio) = aspect_ratio {
+            if let Some(aspect_ratio) = aspect_ratio {
                 resize_crop_rect_with_fixed_aspect(
                     rect,
                     handle,
@@ -2250,8 +2250,7 @@ impl EditorState {
                     ),
                     _ => resize_rect_with_handle(rect, handle, dx, dy),
                 }
-            };
-            resized
+            }
         } else {
             let dx_i = dx.round() as i32;
             let dy_i = dy.round() as i32;
@@ -2443,234 +2442,6 @@ impl EditorState {
         self.active_text_is_dragging = false;
         self.active_text_drag_handle = None;
         self.active_text_drag_start = None;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use image::RgbaImage;
-
-    use crate::capture::editor::color::DEFAULT_OBFUSCATE_AMOUNT;
-    use crate::capture::editor::types::{
-        AnnotationAction, ArrowStyle, DrawColor, ObfuscateMethod, Point, Rect, SelectHandle,
-    };
-
-    use super::{apply_corner_radius, EditorState};
-
-    #[test]
-    fn editor_state_defaults_to_background_tool() {
-        let source = include_str!("state.rs");
-        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
-        assert!(
-            production_source.contains("selected_tool: Tool::Background,"),
-            "Editor state should default to the Background tool so startup inspector width matches the initial tool surface",
-        );
-    }
-
-    #[test]
-    fn selected_arrow_style_updates_selected_arrow_immediately() {
-        let mut state = EditorState::new(RgbaImage::new(32, 32));
-        state.actions.push(AnnotationAction::Arrow {
-            start: Point { x: 2.0, y: 3.0 },
-            end: Point { x: 24.0, y: 26.0 },
-            color: DrawColor::new(1.0, 0.5, 0.0, 1.0),
-            stroke_size: 4.0,
-            style: ArrowStyle::Standard,
-            control_points: Some(vec![
-                Point { x: 2.0, y: 3.0 },
-                Point { x: 13.0, y: 14.0 },
-                Point { x: 24.0, y: 26.0 },
-            ]),
-            shadow: false,
-        });
-        state.selected_action_index = Some(0);
-
-        assert!(state.set_selected_arrow_style(ArrowStyle::Curved));
-        assert_eq!(state.selected_arrow_style(), Some(ArrowStyle::Curved));
-        assert!(!state.set_selected_arrow_style(ArrowStyle::Curved));
-    }
-
-    #[test]
-    fn reverse_selected_arrow_action_swaps_endpoints_and_control_points() {
-        let mut state = EditorState::new(RgbaImage::new(32, 32));
-        state.actions.push(AnnotationAction::Arrow {
-            start: Point { x: 1.0, y: 2.0 },
-            end: Point { x: 20.0, y: 22.0 },
-            color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
-            stroke_size: 4.0,
-            style: ArrowStyle::Curved,
-            control_points: Some(vec![
-                Point { x: 1.0, y: 2.0 },
-                Point { x: 10.0, y: 18.0 },
-                Point { x: 20.0, y: 22.0 },
-            ]),
-            shadow: false,
-        });
-        state.selected_action_index = Some(0);
-
-        assert!(state.reverse_selected_arrow_action());
-
-        match state.selected_action() {
-            Some(AnnotationAction::Arrow {
-                start,
-                end,
-                control_points: Some(points),
-                ..
-            }) => {
-                assert_eq!(*start, Point { x: 20.0, y: 22.0 });
-                assert_eq!(*end, Point { x: 1.0, y: 2.0 });
-                assert_eq!(points[0], Point { x: 20.0, y: 22.0 });
-                assert_eq!(points[1], Point { x: 10.0, y: 18.0 });
-                assert_eq!(points[2], Point { x: 1.0, y: 2.0 });
-            }
-            other => panic!("expected selected arrow after reverse, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn corner_radius_antialiases_top_right_edge() {
-        let mut image = RgbaImage::from_pixel(40, 40, image::Rgba([255, 255, 255, 255]));
-
-        apply_corner_radius(&mut image, 12.0);
-
-        let top_right_band_has_partial_alpha = (28..40).any(|x| {
-            (0..12).any(|y| {
-                let alpha = image.get_pixel(x, y)[3];
-                alpha > 0 && alpha < 255
-            })
-        });
-
-        assert!(
-            top_right_band_has_partial_alpha,
-            "expected antialiased pixels along the top-right rounded edge"
-        );
-        assert_eq!(image.get_pixel(39, 0)[3], 0);
-        assert_eq!(image.get_pixel(20, 20)[3], 255);
-    }
-
-    #[test]
-    fn reset_crop_interaction_clears_crop_selection_and_drag_handles() {
-        let mut state = EditorState::new(RgbaImage::new(32, 32));
-        state.crop_selection = Some(Rect {
-            x: 2,
-            y: 3,
-            width: 12,
-            height: 14,
-        });
-        state.drag_start = Some(Point { x: 2.0, y: 3.0 });
-        state.drag_current = Some(Point { x: 15.0, y: 18.0 });
-        state.drag_start_view = Some(Point { x: 4.0, y: 5.0 });
-        state.select_drag_anchor = Some(Point { x: 8.0, y: 9.0 });
-        state.select_resize_handle = Some(SelectHandle::BottomRight);
-
-        state.reset_crop_interaction();
-
-        assert!(state.crop_selection.is_none());
-        assert!(state.drag_start.is_none());
-        assert!(state.drag_current.is_none());
-        assert!(state.drag_start_view.is_none());
-        assert!(state.select_drag_anchor.is_none());
-        assert!(state.select_resize_handle.is_none());
-    }
-
-    #[test]
-    fn focus_tool_uses_dedicated_slider_state_and_persists_intensity_per_action() {
-        let mut state = EditorState::new(RgbaImage::from_pixel(
-            16,
-            16,
-            image::Rgba([200, 180, 160, 255]),
-        ));
-        state.selected_tool = super::Tool::Focus;
-
-        assert_eq!(
-            state.active_size_control_mode(),
-            Some(super::SizeControlMode::Focus)
-        );
-        assert_eq!(state.active_size_value(), Some(58.0));
-
-        assert!(state.set_active_size_without_rebuild(72.0));
-        assert_eq!(state.current_focus_intensity(), 72.0);
-        assert_eq!(state.active_size_value(), Some(72.0));
-
-        state.drag_start = Some(Point { x: 2.0, y: 2.0 });
-        state.drag_current = Some(Point { x: 10.0, y: 10.0 });
-        let draft = state.draft_action().expect("focus draft");
-        match draft {
-            AnnotationAction::Focus { rect, intensity } => {
-                assert_eq!(rect.x, 2);
-                assert_eq!(rect.y, 2);
-                assert_eq!(rect.width, 8);
-                assert_eq!(rect.height, 8);
-                assert_eq!(intensity, 72.0);
-            }
-            other => panic!("expected focus draft, got {other:?}"),
-        }
-
-        state.actions.push(AnnotationAction::Focus {
-            rect: Rect {
-                x: 3,
-                y: 3,
-                width: 6,
-                height: 6,
-            },
-            intensity: 44.0,
-        });
-        state.selected_tool = super::Tool::Select;
-        state.selected_action_index = Some(0);
-
-        assert_eq!(
-            state.active_size_control_mode(),
-            Some(super::SizeControlMode::Focus)
-        );
-        assert_eq!(state.active_size_value(), Some(44.0));
-        assert!(state.set_active_size_without_rebuild(66.0));
-        assert_eq!(state.selected_focus_action_intensity(), Some(66.0));
-        state.rebuild_effect_layer();
-
-        let final_image = state.to_rendered_image().expect("rendered image");
-        assert_eq!(
-            *final_image.get_pixel(4, 4),
-            image::Rgba([200, 180, 160, 255])
-        );
-        let outside = *final_image.get_pixel(1, 1);
-        assert!(outside[0] < 200 && outside[1] < 180 && outside[2] < 160);
-    }
-
-    #[test]
-    fn obfuscate_blur_uses_single_shared_blur_method_and_slider_state() {
-        let mut state = EditorState::new(RgbaImage::new(32, 32));
-        state.set_obfuscate_method(ObfuscateMethod::Blur);
-
-        assert_eq!(state.current_obfuscate_amount(), DEFAULT_OBFUSCATE_AMOUNT);
-        assert_eq!(state.active_size_control_mode(), None);
-
-        state.selected_tool = super::Tool::Obfuscate;
-        assert_eq!(
-            state.active_size_control_mode(),
-            Some(super::SizeControlMode::Obfuscate)
-        );
-        assert_eq!(state.active_size_value(), Some(DEFAULT_OBFUSCATE_AMOUNT));
-
-        assert!(state.set_active_size_without_rebuild(21.0));
-        assert_eq!(state.current_obfuscate_amount(), 21.0);
-
-        state.drag_start = Some(Point { x: 4.0, y: 5.0 });
-        state.drag_current = Some(Point { x: 15.0, y: 18.0 });
-        match state.draft_action().expect("obfuscate draft") {
-            AnnotationAction::Obfuscate {
-                rect,
-                method,
-                amount,
-            } => {
-                assert_eq!(rect.x, 4);
-                assert_eq!(rect.y, 5);
-                assert_eq!(rect.width, 11);
-                assert_eq!(rect.height, 13);
-                assert_eq!(method, ObfuscateMethod::Blur);
-                assert_eq!(amount, 21.0);
-            }
-            other => panic!("expected obfuscate draft, got {other:?}"),
-        }
     }
 }
 
@@ -2986,7 +2757,7 @@ impl EditorState {
         let color = self.selected_color;
         let stroke_size = self.stroke_size;
 
-        let result = match self.selected_tool {
+        match self.selected_tool {
             Tool::Select => None,
             Tool::Crop => None,
             Tool::Background => None,
@@ -3086,9 +2857,7 @@ impl EditorState {
                 intensity: self.current_focus_intensity(),
             }),
             Tool::Text => None,
-        };
-
-        result
+        }
     }
 
     pub fn finalize_drag_action(&mut self) -> Option<AnnotationAction> {
@@ -3364,7 +3133,7 @@ impl EditorState {
             .stride_for_width(width)
             .map_err(|e| EditorError::ImageSave(e.to_string()))?;
 
-        let data = super::render::rgba_to_cairo_argb_bytes(&*self.working_image);
+        let data = super::render::rgba_to_cairo_argb_bytes(&self.working_image);
         let mut surface = gtk4::cairo::ImageSurface::create_for_data(
             data,
             gtk4::cairo::Format::ARgb32,
@@ -3771,4 +3540,232 @@ fn apply_corner_radius(image: &mut RgbaImage, radius: f64) {
         Err(_) => return,
     };
     *image = cairo_argb_to_rgba_image(width, height, stride as usize, surface_data.as_ref());
+}
+
+#[cfg(test)]
+mod tests {
+    use image::RgbaImage;
+
+    use crate::capture::editor::color::DEFAULT_OBFUSCATE_AMOUNT;
+    use crate::capture::editor::types::{
+        AnnotationAction, ArrowStyle, DrawColor, ObfuscateMethod, Point, Rect, SelectHandle,
+    };
+
+    use super::{apply_corner_radius, EditorState};
+
+    #[test]
+    fn editor_state_defaults_to_background_tool() {
+        let source = include_str!("state.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("selected_tool: Tool::Background,"),
+            "Editor state should default to the Background tool so startup inspector width matches the initial tool surface",
+        );
+    }
+
+    #[test]
+    fn selected_arrow_style_updates_selected_arrow_immediately() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.actions.push(AnnotationAction::Arrow {
+            start: Point { x: 2.0, y: 3.0 },
+            end: Point { x: 24.0, y: 26.0 },
+            color: DrawColor::new(1.0, 0.5, 0.0, 1.0),
+            stroke_size: 4.0,
+            style: ArrowStyle::Standard,
+            control_points: Some(vec![
+                Point { x: 2.0, y: 3.0 },
+                Point { x: 13.0, y: 14.0 },
+                Point { x: 24.0, y: 26.0 },
+            ]),
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+
+        assert!(state.set_selected_arrow_style(ArrowStyle::Curved));
+        assert_eq!(state.selected_arrow_style(), Some(ArrowStyle::Curved));
+        assert!(!state.set_selected_arrow_style(ArrowStyle::Curved));
+    }
+
+    #[test]
+    fn reverse_selected_arrow_action_swaps_endpoints_and_control_points() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.actions.push(AnnotationAction::Arrow {
+            start: Point { x: 1.0, y: 2.0 },
+            end: Point { x: 20.0, y: 22.0 },
+            color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+            stroke_size: 4.0,
+            style: ArrowStyle::Curved,
+            control_points: Some(vec![
+                Point { x: 1.0, y: 2.0 },
+                Point { x: 10.0, y: 18.0 },
+                Point { x: 20.0, y: 22.0 },
+            ]),
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+
+        assert!(state.reverse_selected_arrow_action());
+
+        match state.selected_action() {
+            Some(AnnotationAction::Arrow {
+                start,
+                end,
+                control_points: Some(points),
+                ..
+            }) => {
+                assert_eq!(*start, Point { x: 20.0, y: 22.0 });
+                assert_eq!(*end, Point { x: 1.0, y: 2.0 });
+                assert_eq!(points[0], Point { x: 20.0, y: 22.0 });
+                assert_eq!(points[1], Point { x: 10.0, y: 18.0 });
+                assert_eq!(points[2], Point { x: 1.0, y: 2.0 });
+            }
+            other => panic!("expected selected arrow after reverse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corner_radius_antialiases_top_right_edge() {
+        let mut image = RgbaImage::from_pixel(40, 40, image::Rgba([255, 255, 255, 255]));
+
+        apply_corner_radius(&mut image, 12.0);
+
+        let top_right_band_has_partial_alpha = (28..40).any(|x| {
+            (0..12).any(|y| {
+                let alpha = image.get_pixel(x, y)[3];
+                alpha > 0 && alpha < 255
+            })
+        });
+
+        assert!(
+            top_right_band_has_partial_alpha,
+            "expected antialiased pixels along the top-right rounded edge"
+        );
+        assert_eq!(image.get_pixel(39, 0)[3], 0);
+        assert_eq!(image.get_pixel(20, 20)[3], 255);
+    }
+
+    #[test]
+    fn reset_crop_interaction_clears_crop_selection_and_drag_handles() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.crop_selection = Some(Rect {
+            x: 2,
+            y: 3,
+            width: 12,
+            height: 14,
+        });
+        state.drag_start = Some(Point { x: 2.0, y: 3.0 });
+        state.drag_current = Some(Point { x: 15.0, y: 18.0 });
+        state.drag_start_view = Some(Point { x: 4.0, y: 5.0 });
+        state.select_drag_anchor = Some(Point { x: 8.0, y: 9.0 });
+        state.select_resize_handle = Some(SelectHandle::BottomRight);
+
+        state.reset_crop_interaction();
+
+        assert!(state.crop_selection.is_none());
+        assert!(state.drag_start.is_none());
+        assert!(state.drag_current.is_none());
+        assert!(state.drag_start_view.is_none());
+        assert!(state.select_drag_anchor.is_none());
+        assert!(state.select_resize_handle.is_none());
+    }
+
+    #[test]
+    fn focus_tool_uses_dedicated_slider_state_and_persists_intensity_per_action() {
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            16,
+            16,
+            image::Rgba([200, 180, 160, 255]),
+        ));
+        state.selected_tool = super::Tool::Focus;
+
+        assert_eq!(
+            state.active_size_control_mode(),
+            Some(super::SizeControlMode::Focus)
+        );
+        assert_eq!(state.active_size_value(), Some(58.0));
+
+        assert!(state.set_active_size_without_rebuild(72.0));
+        assert_eq!(state.current_focus_intensity(), 72.0);
+        assert_eq!(state.active_size_value(), Some(72.0));
+
+        state.drag_start = Some(Point { x: 2.0, y: 2.0 });
+        state.drag_current = Some(Point { x: 10.0, y: 10.0 });
+        let draft = state.draft_action().expect("focus draft");
+        match draft {
+            AnnotationAction::Focus { rect, intensity } => {
+                assert_eq!(rect.x, 2);
+                assert_eq!(rect.y, 2);
+                assert_eq!(rect.width, 8);
+                assert_eq!(rect.height, 8);
+                assert_eq!(intensity, 72.0);
+            }
+            other => panic!("expected focus draft, got {other:?}"),
+        }
+
+        state.actions.push(AnnotationAction::Focus {
+            rect: Rect {
+                x: 3,
+                y: 3,
+                width: 6,
+                height: 6,
+            },
+            intensity: 44.0,
+        });
+        state.selected_tool = super::Tool::Select;
+        state.selected_action_index = Some(0);
+
+        assert_eq!(
+            state.active_size_control_mode(),
+            Some(super::SizeControlMode::Focus)
+        );
+        assert_eq!(state.active_size_value(), Some(44.0));
+        assert!(state.set_active_size_without_rebuild(66.0));
+        assert_eq!(state.selected_focus_action_intensity(), Some(66.0));
+        state.rebuild_effect_layer();
+
+        let final_image = state.to_rendered_image().expect("rendered image");
+        assert_eq!(
+            *final_image.get_pixel(4, 4),
+            image::Rgba([200, 180, 160, 255])
+        );
+        let outside = *final_image.get_pixel(1, 1);
+        assert!(outside[0] < 200 && outside[1] < 180 && outside[2] < 160);
+    }
+
+    #[test]
+    fn obfuscate_blur_uses_single_shared_blur_method_and_slider_state() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.set_obfuscate_method(ObfuscateMethod::Blur);
+
+        assert_eq!(state.current_obfuscate_amount(), DEFAULT_OBFUSCATE_AMOUNT);
+        assert_eq!(state.active_size_control_mode(), None);
+
+        state.selected_tool = super::Tool::Obfuscate;
+        assert_eq!(
+            state.active_size_control_mode(),
+            Some(super::SizeControlMode::Obfuscate)
+        );
+        assert_eq!(state.active_size_value(), Some(DEFAULT_OBFUSCATE_AMOUNT));
+
+        assert!(state.set_active_size_without_rebuild(21.0));
+        assert_eq!(state.current_obfuscate_amount(), 21.0);
+
+        state.drag_start = Some(Point { x: 4.0, y: 5.0 });
+        state.drag_current = Some(Point { x: 15.0, y: 18.0 });
+        match state.draft_action().expect("obfuscate draft") {
+            AnnotationAction::Obfuscate {
+                rect,
+                method,
+                amount,
+            } => {
+                assert_eq!(rect.x, 4);
+                assert_eq!(rect.y, 5);
+                assert_eq!(rect.width, 11);
+                assert_eq!(rect.height, 13);
+                assert_eq!(method, ObfuscateMethod::Blur);
+                assert_eq!(amount, 21.0);
+            }
+            other => panic!("expected obfuscate draft, got {other:?}"),
+        }
+    }
 }

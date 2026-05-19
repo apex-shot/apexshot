@@ -453,24 +453,21 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for AppState 
         match event {
             // The compositor tells us the buffer parameters we must use.
             zwlr_screencopy_frame_v1::Event::Buffer {
-                format,
+                format: wayland_client::WEnum::Value(fmt),
                 width,
                 height,
                 stride,
             } => {
-                // `format` arrives as a WEnum; extract the inner value.
-                if let wayland_client::WEnum::Value(fmt) = format {
-                    // Only store if this looks like a useful shm format.
-                    // Prefer XRGB8888 / ARGB8888; accept anything the
-                    // compositor offers — convert_to_rgba handles it.
-                    if state.frame_info.is_none() {
-                        state.frame_info = Some(FrameInfo {
-                            width,
-                            height,
-                            stride,
-                            format: fmt,
-                        });
-                    }
+                // Only store if this looks like a useful shm format.
+                // Prefer XRGB8888 / ARGB8888; accept anything the
+                // compositor offers — convert_to_rgba handles it.
+                if state.frame_info.is_none() {
+                    state.frame_info = Some(FrameInfo {
+                        width,
+                        height,
+                        stride,
+                        format: fmt,
+                    });
                 }
             }
             // v3+ compositors send this after all Buffer events are done.

@@ -287,8 +287,8 @@ fn apply_otsu_threshold(data: &mut [u8]) {
     }
 
     let mut sum_all: u64 = 0;
-    for i in 0..256 {
-        sum_all += (i as u64) * (histogram[i] as u64);
+    for (i, count) in histogram.iter().enumerate() {
+        sum_all += (i as u64) * (*count as u64);
     }
 
     let mut sum_background: u64 = 0;
@@ -296,10 +296,10 @@ fn apply_otsu_threshold(data: &mut [u8]) {
     let mut max_variance: f64 = 0.0;
     let mut threshold: u8 = 0;
 
-    for i in 0..256 {
-        let w_b = weight_background + histogram[i] as u64;
+    for (i, count) in histogram.iter().enumerate() {
+        let w_b = weight_background + *count as u64;
         if w_b == 0 || w_b >= total as u64 {
-            weight_background += histogram[i] as u64;
+            weight_background += *count as u64;
             continue;
         }
 
@@ -518,7 +518,7 @@ pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrO
 /// * `Ok(())` if successful
 /// * `Err(OcrError)` if clipboard operation failed
 pub fn copy_to_clipboard(text: &str) -> OcrResult<()> {
-    crate::utils::clipboard::copy_text_to_clipboard(text).map_err(|e| OcrError::ClipboardError(e))
+    crate::utils::clipboard::copy_text_to_clipboard(text).map_err(OcrError::ClipboardError)
 }
 
 /// Extract text from an image file path

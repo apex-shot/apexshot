@@ -297,17 +297,14 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
         let captured_for_response = captured_shortcut.clone();
         let button_for_response = button.clone();
         dialog.connect_response(move |dialog, response| {
-            match response {
-                ResponseType::Accept => {
-                    if let Some(text) = captured_for_response.borrow().clone() {
-                        if text.is_empty() {
-                            button_for_response.set_label("Record shortcut");
-                        } else {
-                            button_for_response.set_label(&text);
-                        }
+            if response == ResponseType::Accept {
+                if let Some(text) = captured_for_response.borrow().clone() {
+                    if text.is_empty() {
+                        button_for_response.set_label("Record shortcut");
+                    } else {
+                        button_for_response.set_label(&text);
                     }
                 }
-                _ => {}
             }
             request_hotkey_suppressed(false);
             dialog.close();

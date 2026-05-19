@@ -817,7 +817,7 @@ fn draw_trim_overlay(
         // Trim selection border (rounded)
         cr.set_source_rgba(0.69, 0.36, 0.22, 0.85);
         cr.set_line_width(1.5);
-        let _ = cr.new_sub_path();
+        cr.new_sub_path();
         cr.arc(
             start_x + r,
             r,

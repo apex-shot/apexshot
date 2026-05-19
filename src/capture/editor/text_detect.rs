@@ -238,10 +238,7 @@ impl TextDetector {
 
             for gx in start_x..=end_x {
                 for gy in start_y..=end_y {
-                    self.spatial_index
-                        .entry((gx, gy))
-                        .or_insert_with(Vec::new)
-                        .push(idx);
+                    self.spatial_index.entry((gx, gy)).or_default().push(idx);
                 }
             }
         }

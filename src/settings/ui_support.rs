@@ -1676,21 +1676,6 @@ pub fn install_settings_css() {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::SETTINGS_CSS;
-
-    #[test]
-    fn settings_css_avoids_unsupported_gtk_properties() {
-        for property in ["max-width", "overflow", "backdrop-filter"] {
-            assert!(
-                !SETTINGS_CSS.contains(property),
-                "settings CSS still contains unsupported GTK property: {property}"
-            );
-        }
-    }
-}
-
 pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
     let icon_name = match color_class {
         "traffic-light-red" => "window-close-symbolic",
@@ -1713,4 +1698,19 @@ pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
     button.set_size_request(24, 24);
 
     button
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SETTINGS_CSS;
+
+    #[test]
+    fn settings_css_avoids_unsupported_gtk_properties() {
+        for property in ["max-width", "overflow", "backdrop-filter"] {
+            assert!(
+                !SETTINGS_CSS.contains(property),
+                "settings CSS still contains unsupported GTK property: {property}"
+            );
+        }
+    }
 }

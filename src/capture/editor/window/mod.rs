@@ -2101,9 +2101,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             let mut st = state.lock().unwrap();
             let changed = st.set_selected_text_font_family(family_str.clone());
             let has_active_text = st.active_text_input.is_some();
-            if st.active_text_input.is_some() {
-                st.text_font_family = family_str.clone();
-            } else if !changed {
+            if st.active_text_input.is_some() || !changed {
                 st.text_font_family = family_str.clone();
             }
             drop(st);
@@ -2274,7 +2272,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let _canvas_overlay = canvas_overlay.clone();
         let canvas_scroller = canvas_scroller.clone();
         let _window = window.downgrade();
-        let canvas_padding = canvas_padding;
         move || {
             let (
                 image_w,
@@ -2679,8 +2676,6 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
         let image_width = working_image.width() as f64;
         let image_height = working_image.height() as f64;
-        let crop_mode_active = crop_mode_active;
-
         let mut virtual_w = image_width;
         let mut virtual_h = image_height;
         let mut draw_scale_factor = 1.0;
@@ -2745,7 +2740,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             image_height: virtual_h,
         };
 
-        let canvas_t = t.clone();
+        let canvas_t = t;
 
         context.set_operator(gtk4::cairo::Operator::Source);
         draw_canvas_checkerboard_background(
@@ -2948,7 +2943,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 
             let _ = context.save();
             context.translate(t.offset_x, t.offset_y);
-            draw_rounded_rect_path(&context, rect_w, rect_h, corner_r, 0.0);
+            draw_rounded_rect_path(context, rect_w, rect_h, corner_r, 0.0);
             context.clip();
             context.translate(-t.offset_x, -t.offset_y);
         }
@@ -3050,36 +3045,29 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         // In Text tool mode: draw hover outline for the text action under the cursor.
         if selected_tool == Tool::Text && active_text_bounds.is_none() {
             if let Some(hover_idx) = hovered_text_action_index {
-                if let Some(action) = actions.get(hover_idx) {
-                    if let AnnotationAction::Text {
-                        position,
-                        text,
-                        font,
-                        max_width,
-                        ..
-                    } = action
-                    {
-                        let available_width = max_width.unwrap_or_else(|| {
-                            (working_image.width() as f64 - position.x).max(font.size * 1.8)
-                        });
-                        let mut text_bounds = text_action_bounds(
-                            context,
-                            *position,
-                            text,
-                            font,
-                            Some(available_width),
-                        );
-                        text_bounds.rect.x = text_bounds.rect.x.clamp(
-                            0,
-                            (working_image.width() as i32 - text_bounds.rect.width).max(0),
-                        );
-                        text_bounds.rect.y = text_bounds.rect.y.clamp(
-                            0,
-                            (working_image.height() as i32 - text_bounds.rect.height).max(0),
-                        );
-                        text_bounds.sync_handles();
-                        draw_text_edit_border(context, &text_bounds, t.scale);
-                    }
+                if let Some(AnnotationAction::Text {
+                    position,
+                    text,
+                    font,
+                    max_width,
+                    ..
+                }) = actions.get(hover_idx)
+                {
+                    let available_width = max_width.unwrap_or_else(|| {
+                        (working_image.width() as f64 - position.x).max(font.size * 1.8)
+                    });
+                    let mut text_bounds =
+                        text_action_bounds(context, *position, text, font, Some(available_width));
+                    text_bounds.rect.x = text_bounds.rect.x.clamp(
+                        0,
+                        (working_image.width() as i32 - text_bounds.rect.width).max(0),
+                    );
+                    text_bounds.rect.y = text_bounds.rect.y.clamp(
+                        0,
+                        (working_image.height() as i32 - text_bounds.rect.height).max(0),
+                    );
+                    text_bounds.sync_handles();
+                    draw_text_edit_border(context, &text_bounds, t.scale);
                 }
             }
         }
@@ -3193,15 +3181,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     .unwrap_or(false));
 
         if show_handles {
-            if let Some(action) = selected_action.as_ref() {
-                if let AnnotationAction::Arrow {
-                    control_points: Some(handles),
-                    color,
-                    ..
-                } = action
-                {
-                    draw_arrow_control_handles(context, handles.clone(), *color, t.scale);
-                }
+            if let Some(AnnotationAction::Arrow {
+                control_points: Some(handles),
+                color,
+                ..
+            }) = selected_action.as_ref()
+            {
+                draw_arrow_control_handles(context, handles.clone(), *color, t.scale);
             }
         }
 

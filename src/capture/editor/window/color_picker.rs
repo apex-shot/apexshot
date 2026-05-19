@@ -979,9 +979,7 @@ pub fn build_color_picker(
         let dragged_custom_slot_index_prepare = dragged_custom_slot_index.clone();
         let suppress_custom_slot_click_once_prepare = suppress_custom_slot_click_once.clone();
         drag_source.connect_prepare(move |source, _, _| {
-            if custom_slot_colors_drag.borrow()[index].is_none() {
-                return None;
-            }
+            custom_slot_colors_drag.borrow()[index]?;
 
             if let Some(icon) = transparent_drag_icon.as_ref() {
                 source.set_icon(Some(icon), 0, 0);
@@ -1133,7 +1131,7 @@ pub fn set_color_picker_trigger_dot_state(
     clear_color_picker_trigger_dot_state(trigger_dot, color_classes);
 
     if let Some(class_name) = color_classes.get(active_index) {
-        trigger_dot.add_css_class(*class_name);
+        trigger_dot.add_css_class(class_name);
     }
 }
 

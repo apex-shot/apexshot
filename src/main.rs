@@ -7,9 +7,12 @@
 //!   cargo run -- record screen
 //!   cargo run -- record area
 //!   cargo run -- ocr <image>
-
-use gtk4;
-use gtk4_layer_shell;
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::items_after_test_module,
+    clippy::arc_with_non_send_sync
+)]
 
 fn capture_daemon_action(capture_type: &str) -> Option<&'static str> {
     match capture_type {
@@ -167,7 +170,6 @@ async fn async_main(args: Vec<String>) {
             //   3. The main thread runs a tiny dispatch loop that executes
             //      GTK work and sends results back.
             run_daemon_with_gtk_on_main_thread();
-            return;
         }
         "hotkeys" => {
             if let Err(e) = run_hotkeys_command(&args) {
@@ -180,35 +182,30 @@ async fn async_main(args: Vec<String>) {
                 eprintln!("Show last preview requires a running ApexShot daemon.");
                 std::process::exit(1);
             }
-            return;
         }
         "open-file" => {
             if !trigger_daemon_action("open_file").await {
                 eprintln!("Open File requires a running ApexShot daemon.");
                 std::process::exit(1);
             }
-            return;
         }
         "open-from-clipboard" => {
             if !trigger_daemon_action("open_from_clipboard").await {
                 eprintln!("Open From Clipboard requires a running ApexShot daemon.");
                 std::process::exit(1);
             }
-            return;
         }
         "restore-recently-closed" => {
             if !trigger_daemon_action("restore_recently_closed").await {
                 eprintln!("Restore Recently Closed requires a running ApexShot daemon.");
                 std::process::exit(1);
             }
-            return;
         }
         "toggle-overlays" => {
             if !trigger_daemon_action("toggle_overlays").await {
                 eprintln!("Hide/Show Overlays requires a running ApexShot daemon.");
                 std::process::exit(1);
             }
-            return;
         }
         "recording-control" => {
             if args.len() < 3 {
@@ -299,7 +296,6 @@ async fn async_main(args: Vec<String>) {
             if !status.success() {
                 std::process::exit(status.code().unwrap_or(1));
             }
-            return;
         }
         "settings" => {
             // Run settings as a subprocess to avoid tokio runtime conflicts
@@ -311,7 +307,6 @@ async fn async_main(args: Vec<String>) {
             if !status.success() {
                 std::process::exit(status.code().unwrap_or(1));
             }
-            return;
         }
         "native-host" => {
             if args.len() >= 3 {
@@ -322,7 +317,6 @@ async fn async_main(args: Vec<String>) {
                 eprintln!("Native host failed: {e}");
                 std::process::exit(1);
             }
-            return;
         }
         "--version" | "-V" => println!("apexshot {}", env!("CARGO_PKG_VERSION")),
         "--help" | "-h" => print_usage(),
@@ -1925,10 +1919,7 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let controls_outcome = run_recording_with_controls(config, params)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
             })?;
 
         match controls_outcome {

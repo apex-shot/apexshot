@@ -1788,7 +1788,7 @@ mod tests {
             std::panic::catch_unwind(|| execute_builtin_overlay_query(|| true))
         });
 
-        assert_eq!(result.expect("query should not panic"), true);
+        assert!(result.expect("query should not panic"));
     }
 
     #[test]

@@ -865,7 +865,7 @@ pub(crate) fn draw_aspect_ratio_menu(
     );
 
     let mut item_rects = Vec::with_capacity(ASPECT_RATIO_OPTIONS.len());
-    for i in 0..ASPECT_RATIO_OPTIONS.len() {
+    for (i, _label) in ASPECT_RATIO_OPTIONS.iter().enumerate() {
         let item_rect = RectF {
             x: menu_x + 5.0,
             y: menu_y + 5.0 + i as f64 * item_h,
@@ -2989,25 +2989,25 @@ pub(crate) fn draw_overlay(
                     st.recording.webcam_flip,
                 );
             }
+        } else {
+            draw_feature_toolbar(
+                context,
+                x,
+                y,
+                sel_w,
+                sel_h,
+                screen_width,
+                screen_height,
+                background,
+                st.active_tool_index,
+                st.hover_tool_index,
+                st.hover_size_panel,
+                st.hover_crop_panel,
+                st.capture_crop_menu_open,
+                st.capture_aspect_ratio_index,
+                st.hovered_capture_crop_menu_item,
+            );
         }
-        // Always draw toolbar (even when recording panel is open for Timer/Scroll access)
-        draw_feature_toolbar(
-            context,
-            x,
-            y,
-            sel_w,
-            sel_h,
-            screen_width,
-            screen_height,
-            background,
-            st.active_tool_index,
-            st.hover_tool_index,
-            st.hover_size_panel,
-            st.hover_crop_panel,
-            st.capture_crop_menu_open,
-            st.capture_aspect_ratio_index,
-            st.hovered_capture_crop_menu_item,
-        );
     }
     // else: idle state — the darkened background painted in Step 1 is enough.
 }

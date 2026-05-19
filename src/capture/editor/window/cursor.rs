@@ -467,7 +467,7 @@ pub fn update_cursor_for_position(
 fn surface_to_texture(mut surface: gtk4::cairo::ImageSurface) -> Option<gdk::Texture> {
     let width = surface.width();
     let height = surface.height();
-    let stride = surface.stride() as i32;
+    let stride = surface.stride();
     let data = surface.data().ok()?.to_vec();
 
     let pixbuf = Pixbuf::from_bytes(

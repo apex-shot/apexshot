@@ -834,7 +834,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let has_effect_actions = st
                 .actions
                 .iter()
-                .any(|a| EditorState::action_requires_effect_rebuild(a));
+                .any(EditorState::action_requires_effect_rebuild);
             drop(st);
 
             if changed || has_effect_actions {
@@ -1467,8 +1467,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     apply_crop_btn.connect_clicked(move |_| {
         let apply_result = {
             let mut st = state_apply_crop.lock().unwrap();
-            let result = st.apply_crop_selection();
-            result
+            st.apply_crop_selection()
         };
 
         match apply_result {
@@ -3186,7 +3185,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             if let Some(area) = drawing_area_motion.upgrade() {
                 area.queue_draw();
             }
-            return;
         }
     });
 
