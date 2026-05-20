@@ -38,7 +38,8 @@ pub use ocr::{
     OcrOutput, OcrResult,
 };
 pub use overlay::{
-    select_area, select_area_from_capture, select_area_from_image, AreaSelector, SelectionArea,
+    select_area, select_area_from_capture, select_area_from_capture_with_gtk,
+    select_area_from_image, select_crosshair_from_capture_with_gtk, AreaSelector, SelectionArea,
     SelectionError, SelectionResult,
 };
 

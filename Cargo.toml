@@ -7,6 +7,14 @@ license = "GPL-3.0"
 authors = ["codegoddy <codegoddy@gmail.com>"]
 repository = "https://github.com/apex-shot/apexshot"
 
+[[bin]]
+name = "apexshot"
+path = "src/main.rs"
+
+[[bin]]
+name = "test_rust_crosshair"
+path = "src/bin/test_rust_crosshair.rs"
+
 [dependencies]
 # display server
 x11rb = { version = "0.13.2", features = ["all-extensions"] }

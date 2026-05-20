@@ -269,7 +269,7 @@ pub fn select_area_from_capture_with_gtk(capture: &CaptureData) -> SelectionResu
     selector.run_with_background(Some(background))
 }
 
-pub(crate) fn select_crosshair_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
+pub fn select_crosshair_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
     let selector = AreaSelector::new_with_mode(OverlayMode::CrosshairCapture);
     let background = background_frame_from_capture(capture)?;
     selector.run_with_background(Some(background))
