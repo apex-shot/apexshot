@@ -1,23 +1,24 @@
-use apexshot::backend::{CaptureData, PixelFormat};
+use apexshot::backend::{DisplayBackend, WaylandBackend, X11Backend};
 use apexshot::overlay::select_crosshair_from_capture_with_gtk;
-use image::RgbaImage;
 
 fn main() {
-    let width = 1920;
-    let height = 1080;
-
-    let mut img = RgbaImage::new(width, height);
-    for y in 0..height {
-        for x in 0..width {
-            let r = ((x as f32 / width as f32) * 255.0) as u8;
-            let g = ((y as f32 / height as f32) * 255.0) as u8;
-            let b = 128u8;
-            img.put_pixel(x, y, image::Rgba([r, g, b, 255]));
-        }
-    }
-
-    let raw: Vec<u8> = img.into_raw();
-    let capture = CaptureData::new(raw, width, height, PixelFormat::RGBA32);
+    let capture = if WaylandBackend::is_supported() {
+        eprintln!("Using Wayland backend to capture screen...");
+        let backend = WaylandBackend::new().expect("Failed to initialize Wayland backend");
+        backend
+            .capture_screen_for_selection_impl()
+            .or_else(|_| backend.capture_screen())
+            .expect("Failed to capture screen under Wayland")
+    } else if X11Backend::is_supported() {
+        eprintln!("Using X11 backend to capture screen...");
+        let backend = X11Backend::new().expect("Failed to initialize X11 backend");
+        backend
+            .capture_screen()
+            .expect("Failed to capture screen under X11")
+    } else {
+        eprintln!("No supported display backend found!");
+        std::process::exit(1);
+    };
 
     eprintln!("Opening Rust GTK overlay in crosshair mode...");
     eprintln!("Click and drag to select an area, press ESC to cancel.");

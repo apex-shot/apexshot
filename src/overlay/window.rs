@@ -409,6 +409,7 @@ pub(crate) fn setup_window(
         window.set_keyboard_mode(KeyboardMode::Exclusive);
         window.set_monitor(Some(&monitor));
         window.set_namespace(Some("apexshot-area-selector"));
+        window.set_exclusive_zone(-1);
     } else {
         // X11 or Wayland-without-layer-shell (e.g. GNOME Wayland):
         // Use a regular fullscreen window. The compositor will grant it
