@@ -101,6 +101,15 @@ fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, Selec
                     SelectionError::InitError(format!("Wayland window capture failed: {err}"))
                 })
         }
+        Err(SelectionError::OcrRequested(area)) => {
+            eprintln!("[capture] OCR requested from GTK overlay — capturing area for OCR");
+            backend
+                .capture_area(area.x, area.y, area.width, area.height)
+                .map(AreaCaptureResult::OcrRequested)
+                .map_err(|err| {
+                    SelectionError::InitError(format!("Wayland area capture for OCR failed: {err}"))
+                })
+        }
         Err(e) => Err(e),
     }
 }

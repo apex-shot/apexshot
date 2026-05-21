@@ -81,11 +81,15 @@ pub fn copy_uri_to_clipboard(path: &Path) -> Result<(), String> {
 
 /// Copy text to the system clipboard.
 ///
-/// On Wayland uses `wl-copy` (piped via stdin for reliability),
-/// falls back to `arboard` crate on X11 or if `wl-copy` is unavailable.
+/// On Wayland uses `wl-copy --foreground` (keeps the data source alive),
+/// fallen back to plain `wl-copy`, then to `arboard` crate.
+/// The foreground process is detached via a background thread so clipboard
+/// data persists as long as the application is running.
 pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
+    let text = text.to_owned();
+
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        // Use wl-copy for Wayland — pipe via stdin to handle special chars and long text
+        // Try plain wl-copy first (forks to background, exits immediately)
         match std::process::Command::new("wl-copy")
             .stdin(std::process::Stdio::piped())
             .spawn()
@@ -105,8 +109,33 @@ pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
                 }
             }
             Err(e) => {
-                // Fall through to arboard if wl-copy not found
-                eprintln!("Warning: wl-copy failed, trying arboard: {e}");
+                eprintln!("Warning: wl-copy failed, trying --foreground: {e}");
+            }
+        }
+
+        // Fallback: wl-copy --foreground in a background thread (keeps data source alive
+        // even on compositors that don't support fork-to-background).
+        match std::process::Command::new("wl-copy")
+            .arg("--foreground")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                if let Some(mut stdin) = child.stdin.take() {
+                    if let Err(e) = stdin.write_all(text.as_bytes()) {
+                        return Err(format!("Failed to write to wl-copy stdin: {e}"));
+                    }
+                }
+                std::thread::Builder::new()
+                    .name("wl-copy-foreground".into())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    })
+                    .ok();
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Warning: wl-copy --foreground failed, trying arboard: {e}");
             }
         }
     }

@@ -52,6 +52,9 @@ pub enum SelectionError {
 
     #[error("Window capture requested from toolbar")]
     WindowCaptureRequested,
+
+    #[error("OCR requested on selection area")]
+    OcrRequested(SelectionArea),
 }
 
 pub struct AreaSelector {
@@ -132,7 +135,16 @@ impl AreaSelector {
 
         // Get the result
         match result_rx.recv() {
-            Ok(Ok(area)) => Ok(area),
+            Ok(Ok(area)) => {
+                // Check if OCR was requested on this selection
+                let st = state.lock().unwrap();
+                if st.intent == crate::overlay::recording::state::OverlayIntent::Ocr {
+                    if let Some(a) = area {
+                        return Err(SelectionError::OcrRequested(a));
+                    }
+                }
+                Ok(area)
+            }
             Ok(Err(e)) => Err(e),
             Err(_) => Err(SelectionError::InitError("No result received".into())),
         }

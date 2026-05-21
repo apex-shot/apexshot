@@ -66,6 +66,11 @@ backend/target
 # Worktrees
 .worktrees/
 
+# External OCR subprojects (neural engine)
+/ocrs/
+/ocrs-cli/
+/ocrs-extension/
+
 # Personal planning documents
 scripts/youtube-video-script.md
 flameshot/

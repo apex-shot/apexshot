@@ -40,7 +40,7 @@ use apexshot::{
         ensure_desktop_entry_pub, install_hotkeys_for_current_desktop, reset_hotkey_config,
         setup_hotkeys_for_current_desktop, uninstall_hotkeys_for_current_desktop,
     },
-    ocr::{extract_text_from_path, OcrConfig},
+    ocr::{extract_text_from_capture, extract_text_from_path, OcrConfig},
     onboarding::{is_onboarding_complete, show_onboarding_window},
     recording::{
         editor::{open_empty_recording_editor, open_recording_editor},
@@ -1664,20 +1664,8 @@ fn run_capture(args: &[String]) {
         config = config.with_prefix(p);
     }
 
-    // Save the capture
-    let saved_path = match save_capture(&capture, &config) {
-        Ok(path) => {
-            println!("Saved to: {}", path.display());
-            path
-        }
-        Err(e) => {
-            eprintln!("Error saving capture: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    // Run OCR if requested
-    if run_ocr {
+    // Save the capture (skip for OCR-only mode)
+    let saved_path = if run_ocr {
         println!("Running OCR...");
         let mut ocr_config = OcrConfig::default().with_clipboard(ocr_clipboard);
 
@@ -1689,7 +1677,7 @@ fn run_capture(args: &[String]) {
             ocr_config = ocr_config.with_min_confidence(conf);
         }
 
-        match extract_text_from_path(&saved_path, &ocr_config) {
+        match extract_text_from_capture(&capture, &ocr_config) {
             Ok(result) => {
                 match &result.source {
                     apexshot::ocr::ContentSource::QrCode => {
@@ -1717,7 +1705,21 @@ fn run_capture(args: &[String]) {
                 std::process::exit(1);
             }
         }
-    }
+
+        // OCR-only mode — exit after copying text to clipboard
+        return;
+    } else {
+        match save_capture(&capture, &config) {
+            Ok(path) => {
+                println!("Saved to: {}", path.display());
+                path
+            }
+            Err(e) => {
+                eprintln!("Error saving capture: {}", e);
+                std::process::exit(1);
+            }
+        }
+    };
 
     // Spawn the preview as a subprocess to avoid GTK conflicts
     // (the area selector already used GTK in this process).

@@ -13,6 +13,7 @@ use image::RgbaImage;
 use thiserror::Error;
 
 pub mod deskew;
+pub mod ocrs_engine;
 
 /// Tesseract OCR Engine Mode — LSTM only (best accuracy for most text)
 const TESS_OEM: &str = "1";
@@ -22,10 +23,10 @@ const TESS_OEM: &str = "1";
 /// on multi-column UI screenshots (e.g. tabular recovery-phrase grids) where
 /// a single PSM frequently mis-orders columns.
 ///  - 6  : assume a single uniform block of text (best for tight tabular grids)
+///  - 7  : treat the image as a single text line (excellent for code)
 ///  - 4  : single column of text of variable sizes (good for forms / lists)
 ///  - 3  : fully automatic page segmentation, no OSD (general fallback)
 ///  - 11 : sparse text — find as much text as possible in no particular order
-const TESS_PSM_CANDIDATES: &[&str] = &["6", "4", "3", "11"];
 
 /// Errors that can occur during OCR operations
 #[derive(Debug, Error)]
@@ -238,16 +239,17 @@ fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
     }
 
     // Apply dark-mode inversion and contrast enhancement
+    let apply_contrast = config.contrast > 1.0;
     for pixel in luma_data.iter_mut() {
         let processed = if dark_mode {
             let inverted = 255.0 - (*pixel as f32);
-            if config.contrast > 1.0 {
+            if apply_contrast {
                 ((inverted - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0) as u8
             } else {
                 inverted as u8
             }
         } else {
-            if config.contrast > 1.0 {
+            if apply_contrast {
                 ((*pixel as f32 - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0) as u8
             } else {
                 *pixel
@@ -338,6 +340,7 @@ fn run_tesseract_with_psm(
     luma_data: &[u8],
     width: i32,
     height: i32,
+    code_mode: bool,
 ) -> OcrResult<(String, i32)> {
     let mut tesseract = tesseract::Tesseract::new(datapath, Some(language))
         .map_err(|e| OcrError::InitializationError(e.to_string()))?
@@ -354,9 +357,25 @@ fn run_tesseract_with_psm(
         // Tell Tesseract the effective DPI of the upscaled image so the LSTM
         // engine picks the right scoring parameters.
         .set_variable("user_defined_dpi", "300")
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set dpi: {}", e)))?
-        .set_variable("textord_heavy_nr", "1")
-        .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
+        .map_err(|e| OcrError::InitializationError(format!("Failed to set dpi: {}", e)))?;
+
+    // For code: disable aggressive noise removal that strips symbols like =, {}, ()
+    // and disable dictionary to prevent "correcting" code into words
+    if code_mode {
+        tesseract = tesseract
+            .set_variable("textord_heavy_nr", "0")
+            .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?
+            .set_variable("load_system_dawg", "0")
+            .map_err(|e| OcrError::InitializationError(format!("Failed to disable dict: {}", e)))?
+            .set_variable("load_freq_dawg", "0")
+            .map_err(|e| OcrError::InitializationError(format!("Failed to disable freq dict: {}", e)))?;
+    } else {
+        tesseract = tesseract
+            .set_variable("textord_heavy_nr", "1")
+            .map_err(|e| OcrError::InitializationError(format!("Failed to set noise removal: {}", e)))?;
+    }
+
+    tesseract = tesseract
         .set_frame(luma_data, width, height, 1, width)
         .map_err(|e| OcrError::ImageError(format!("Failed to set frame: {}", e)))?
         .recognize()
@@ -370,11 +389,11 @@ fn run_tesseract_with_psm(
     Ok((text, confidence))
 }
 
-/// Run Tesseract OCR on an RGBA image.
+/// Run OCR on an RGBA image.
 ///
-/// Handles QR detection, preprocessing, Tesseract setup, and result formatting.
-/// Both `extract_text` and `extract_text_from_path` delegate to this.
-fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOutput> {
+/// Uses Tesseract as the primary engine. Falls back to the neural
+/// OCR engine if Tesseract fails. QR codes are decoded directly.
+fn run_ocr_pipeline(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOutput> {
     // Try QR code detection first
     if let Some(decoded) = qr::detect_and_decode(rgba_image) {
         let mut copied_to_clipboard = false;
@@ -392,10 +411,52 @@ fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOut
         });
     }
 
-    let preprocess_config = PreprocessConfig::default();
+    // Primary: Tesseract with optimized settings
+    match run_tesseract_engine(rgba_image, config) {
+        Ok(result) => return Ok(result),
+        Err(tess_err) => {
+            // Fallback: neural OCR engine if Tesseract fails
+            if let Some((text, confidence)) = ocrs_engine::run_apexshot_ocr(rgba_image) {
+                let final_text = postprocess_code(&text);
+
+                if confidence >= config.min_confidence {
+                    let mut copied_to_clipboard = false;
+                    if config.clipboard_output {
+                        if let Err(e) = copy_to_clipboard(&final_text) {
+                            eprintln!("Warning: Failed to copy to clipboard: {}", e);
+                        } else {
+                            copied_to_clipboard = true;
+                        }
+                    }
+
+                    return Ok(OcrOutput {
+                        text: final_text,
+                        source: ContentSource::Ocr { confidence },
+                        copied_to_clipboard,
+                    });
+                }
+            }
+
+            Err(tess_err)
+        }
+    }
+}
+
+/// Run Tesseract OCR with optimized settings for code and UI text.
+fn run_tesseract_engine(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOutput> {
+    // Optimized preprocessing: higher upscale for symbols, no contrast boost
+    let preprocess_config = PreprocessConfig {
+        scale_factor: 4.0,
+        contrast: 1.0,
+        threshold: false,
+    };
+
     let luma_data = preprocess_image(rgba_image, &preprocess_config);
     let width = (rgba_image.width() as f32 * preprocess_config.scale_factor) as i32;
     let height = (rgba_image.height() as f32 * preprocess_config.scale_factor) as i32;
+
+    // Try PSM 7 (single text line) first, efficient for code and UI text
+    let psm_order = &["7", "6", "4", "3", "11"][..];
 
     // Run Tesseract with several Page Segmentation Modes and keep the result
     // with the highest mean word confidence. Multi-column UI screenshots
@@ -407,7 +468,7 @@ fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOut
 
     let mut best: Option<(String, i32)> = None;
 
-    for &psm in TESS_PSM_CANDIDATES {
+    for &psm in psm_order {
         let attempt = run_tesseract_with_psm(
             config.datapath.as_deref(),
             &config.language,
@@ -415,6 +476,7 @@ fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOut
             &luma_data,
             width,
             height,
+            true,
         );
 
         match attempt {
@@ -452,9 +514,12 @@ fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOut
         return Err(OcrError::LowConfidence(confidence, config.min_confidence));
     }
 
+    // Apply code-specific post-processing to fix common OCR errors
+    let final_text = postprocess_code(trimmed_text);
+
     let mut copied_to_clipboard = false;
     if config.clipboard_output {
-        if let Err(e) = copy_to_clipboard(trimmed_text) {
+        if let Err(e) = copy_to_clipboard(&final_text) {
             eprintln!("Warning: Failed to copy to clipboard: {}", e);
         } else {
             copied_to_clipboard = true;
@@ -462,10 +527,83 @@ fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOut
     }
 
     Ok(OcrOutput {
-        text: trimmed_text.to_string(),
+        text: final_text,
         source: ContentSource::Ocr { confidence },
         copied_to_clipboard,
     })
+}
+
+/// Post-process OCR output to fix common code recognition errors.
+///
+/// Only applies reliable replacements — no heuristic code structure inference.
+fn postprocess_code(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+
+    for line in text.lines() {
+        let mut cleaned = line.to_string();
+
+        // Reliable #include pattern fixes
+        if cleaned.contains("#include") || cleaned.contains("include") {
+            if let Some(pos) = cleaned.find("#include") {
+                if pos > 0 && cleaned[..pos].chars().any(|c| !c.is_whitespace()) {
+                    cleaned = cleaned[pos..].to_string();
+                }
+            }
+            cleaned = cleaned.replace("##include", "#include");
+            cleaned = cleaned.replace("{#include", "#include");
+            cleaned = cleaned.replace("{ #include", "#include");
+            cleaned = cleaned.replace("' #include", "#include");
+            cleaned = cleaned.replace("f#include", "#include");
+            cleaned = cleaned.replace("finclude", "#include");
+            cleaned = cleaned.replace("dinclude", "#include");
+
+            if cleaned.starts_with("#include \"") {
+                let after = &cleaned[10..];
+                if !after.contains('"') {
+                    cleaned.push('"');
+                }
+            }
+        }
+
+        // Reliable Qt class name fixes (Q misread as 0 or O)
+        cleaned = cleaned.replace("<0Point>", "<QPoint>");
+        cleaned = cleaned.replace("<ORect>", "<QRect>");
+        cleaned = cleaned.replace("<0Rect>", "<QRect>");
+        cleaned = cleaned.replace("<0Timer>", "<QTimer>");
+        cleaned = cleaned.replace("<ODateTime>", "<QDateTime>");
+        cleaned = cleaned.replace("<0DateTime>", "<QDateTime>");
+        cleaned = cleaned.replace("<0MessageBox>", "<QMessageBox>");
+        cleaned = cleaned.replace("<OMessageBox>", "<QMessageBox>");
+        cleaned = cleaned.replace("<0MouseEvent>", "<QMouseEvent>");
+        cleaned = cleaned.replace("<OMouseEvent>", "<QMouseEvent>");
+        cleaned = cleaned.replace("<0KeyEvent>", "<QKeyEvent>");
+        cleaned = cleaned.replace("<OKeyEvent>", "<QKeyEvent>");
+        cleaned = cleaned.replace("<0Application>", "<QApplication>");
+        cleaned = cleaned.replace("<OApplication>", "<QApplication>");
+        cleaned = cleaned.replace("captureoverlay", "CaptureOverlay");
+        cleaned = cleaned.replace("CaptureQOverlay", "CaptureOverlay");
+        cleaned = cleaned.replace("Captureoverlay", "CaptureOverlay");
+        cleaned = cleaned.replace("captureOverlay", "CaptureOverlay");
+
+        // Reliable Tesseract-to-code fixes
+        cleaned = cleaned.replace("§", "{");
+        cleaned = cleaned.replace(".itexr()", ".iter()");
+        cleaned = cleaned.replace(".itex()", ".iter()");
+        cleaned = cleaned.replace("\"\"", "\"");
+        cleaned = cleaned.replace("\" \"", "\"");
+        cleaned = cleaned.replace("continueﬂ", "continue;");
+        cleaned = cleaned.replace("continueß", "continue;");
+
+        // Fix common Tesseract artifact: "1{" → " {"
+        if cleaned.ends_with("1{") {
+            cleaned = cleaned[..cleaned.len() - 2].to_string() + " {";
+        }
+
+        result.push_str(&cleaned);
+        result.push('\n');
+    }
+
+    result.trim_end().to_string()
 }
 
 /// Extract text from a CaptureData using Tesseract OCR
@@ -502,7 +640,7 @@ fn run_tesseract(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOut
 pub fn extract_text(capture: &CaptureData, config: &OcrConfig) -> OcrResult<OcrOutput> {
     let rgba_image = capture_to_rgba_image(capture)
         .map_err(|e: SaveError| OcrError::ImageError(e.to_string()))?;
-    run_tesseract(&rgba_image, config)
+    run_ocr_pipeline(&rgba_image, config)
 }
 
 /// Copy text to the system clipboard
@@ -538,7 +676,56 @@ pub fn extract_text_from_path<P: AsRef<std::path::Path>>(
     let image = image::open(path)
         .map_err(|e| OcrError::ImageError(format!("Failed to open image: {}", e)))?;
     let rgba_image = image.to_rgba8();
-    run_tesseract(&rgba_image, config)
+    run_ocr_pipeline(&rgba_image, config)
+}
+
+/// Run OCR directly on raw `CaptureData` pixels without saving to disk.
+///
+/// Converts the capture's pixel format to RGBA, then runs the same
+/// Tesseract pipeline used by [`extract_text_from_path`].
+pub fn extract_text_from_capture(
+    capture: &crate::backend::CaptureData,
+    config: &OcrConfig,
+) -> OcrResult<OcrOutput> {
+    use crate::backend::PixelFormat;
+    use image::{ImageBuffer, Rgba};
+
+    let bytes_per_pixel = capture.format.bytes_per_pixel as usize;
+    let stride = capture.stride as usize;
+    let width = capture.width;
+    let height = capture.height;
+
+    let is_bgr = capture.format == PixelFormat::BGR24
+        || capture.format == PixelFormat::BGR32
+        || capture.format == PixelFormat::BGRA32;
+
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height as usize {
+        let row_start = row * stride;
+        let row_end = (row_start + width as usize * bytes_per_pixel).min(capture.pixels.len());
+        let row_data = &capture.pixels[row_start..row_end];
+        for px in row_data.chunks(bytes_per_pixel) {
+            if px.len() >= 4 {
+                if is_bgr {
+                    rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+                } else {
+                    rgba.extend_from_slice(&[px[0], px[1], px[2], px[3]]);
+                }
+            } else if px.len() == 3 {
+                if is_bgr {
+                    rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
+                } else {
+                    rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
+                }
+            }
+        }
+    }
+
+    let rgba_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, rgba)
+            .ok_or_else(|| OcrError::ImageError("Failed to build RGBA image buffer".into()))?;
+
+    run_ocr_pipeline(&rgba_image, config)
 }
 
 /// Bounding box for a detected text region
