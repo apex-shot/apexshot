@@ -714,13 +714,19 @@ pub(crate) fn setup_window(
                     ("pointer".to_string(), changed, true)
                 } else if st.scroll_popup_open {
                     // Scroll popup hover handling
-                    let popup_w = 400.0;
-                    let popup_h = 200.0;
-                    let popup_x = (screen_width as f64 - popup_w) / 2.0;
-                    let popup_y = (screen_height as f64 - popup_h) / 2.0;
-                    let close_size = 24.0;
-                    let close_x = popup_x + popup_w - close_size - 12.0;
-                    let close_y = popup_y + 12.0;
+                    let (cx, cy) = if st.completed || st.is_dragging {
+                        let r = current_selection_rect(&st);
+                        (r.left + r.width() / 2.0, r.top + r.height() / 2.0)
+                    } else {
+                        (screen_width as f64 / 2.0, screen_height as f64 / 2.0)
+                    };
+                    let popup_w = 360.0;
+                    let popup_h = 170.0;
+                    let popup_x = cx - popup_w / 2.0;
+                    let popup_y = cy - popup_h / 2.0;
+                    let close_size = 22.0;
+                    let close_x = popup_x + popup_w - close_size - 10.0;
+                    let close_y = popup_y + 10.0;
 
                     let next_hover_close = x >= close_x
                         && x <= close_x + close_size
@@ -1338,13 +1344,19 @@ pub(crate) fn setup_window(
 
         // ── Scroll popup click handling ──
         if st.scroll_popup_open {
-            let popup_w = 400.0;
-            let popup_h = 200.0;
-            let popup_x = (screen_width as f64 - popup_w) / 2.0;
-            let popup_y = (screen_height as f64 - popup_h) / 2.0;
-            let close_size = 24.0;
-            let close_x = popup_x + popup_w - close_size - 12.0;
-            let close_y = popup_y + 12.0;
+            let (cx, cy) = if st.completed || st.is_dragging {
+                let r = current_selection_rect(&st);
+                (r.left + r.width() / 2.0, r.top + r.height() / 2.0)
+            } else {
+                (screen_width as f64 / 2.0, screen_height as f64 / 2.0)
+            };
+            let popup_w = 360.0;
+            let popup_h = 170.0;
+            let popup_x = cx - popup_w / 2.0;
+            let popup_y = cy - popup_h / 2.0;
+            let close_size = 22.0;
+            let close_x = popup_x + popup_w - close_size - 10.0;
+            let close_y = popup_y + 10.0;
 
             // Check if close button clicked
             if x >= close_x
@@ -1600,6 +1612,7 @@ pub(crate) fn setup_window(
                 if let Some(da) = drawing_area_weak_click.upgrade() {
                     da.queue_draw();
                 }
+                return;
             }
             Some(ToolbarIcon::Window) => {
                 st.capture_crop_menu_open = false;

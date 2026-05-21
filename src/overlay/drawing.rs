@@ -3174,19 +3174,6 @@ pub(crate) fn draw_overlay(
                     st.intent,
                 );
             }
-            // Scroll capture Chrome extension popup
-            if st.scroll_popup_open {
-                draw_scroll_popup(
-                    context,
-                    x,
-                    y,
-                    sel_w,
-                    sel_h,
-                    screen_width,
-                    screen_height,
-                    st.hovered_scroll_popup_close,
-                );
-            }
             // Webcam options menu
             if st.recording.webcam_options_open {
                 let panel_x = (x + (sel_w - 320.0) / 2.0).clamp(10.0, screen_width - 330.0);
@@ -3239,6 +3226,24 @@ pub(crate) fn draw_overlay(
         }
     }
     // else: idle state — the darkened background painted in Step 1 is enough.
+
+    // Scroll popup: centered on selection when available, otherwise screen-centered
+    if st.scroll_popup_open {
+        let (cx, cy) = if st.completed || st.is_dragging {
+            let r = current_selection_rect(&st);
+            (r.left + r.width() / 2.0, r.top + r.height() / 2.0)
+        } else {
+            (screen_width / 2.0, screen_height / 2.0)
+        };
+        draw_scroll_popup(
+            context,
+            cx,
+            cy,
+            screen_width,
+            screen_height,
+            st.hovered_scroll_popup_close,
+        );
+    }
 }
 
 fn draw_countdown_bubble(
@@ -3355,109 +3360,79 @@ fn draw_countdown_bubble(
 
 fn draw_scroll_popup(
     context: &gtk4::cairo::Context,
-    _sel_x: f64,
-    _sel_y: f64,
-    _sel_w: f64,
-    _sel_h: f64,
-    screen_width: f64,
-    screen_height: f64,
+    center_x: f64,
+    center_y: f64,
+    _screen_width: f64,
+    _screen_height: f64,
     hovered_close: bool,
 ) {
     let _ = context.save();
 
-    let popup_w = 400.0;
-    let popup_h = 200.0;
-    let popup_x = (screen_width - popup_w) / 2.0;
-    let popup_y = (screen_height - popup_h) / 2.0;
+    let popup_w = 360.0;
+    let popup_h = 170.0;
+    let popup_x = center_x - popup_w / 2.0;
+    let popup_y = center_y - popup_h / 2.0;
 
-    // Draw popup background
-    context.set_source_rgba(0.08, 0.08, 0.09, 0.96);
+    // Popup background matching window picker style
     rounded_rect_path(context, popup_x, popup_y, popup_w, popup_h, 12.0);
+    context.set_source_rgba(30.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 235.0 / 255.0);
     let _ = context.fill();
-
-    // Draw border
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.15);
+    rounded_rect_path(context, popup_x, popup_y, popup_w, popup_h, 12.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
     context.set_line_width(1.0);
-    rounded_rect_path(
-        context,
-        popup_x + 0.5,
-        popup_y + 0.5,
-        popup_w - 1.0,
-        popup_h - 1.0,
-        11.5,
-    );
     let _ = context.stroke();
 
-    // Draw close button
-    let close_size = 24.0;
-    let close_x = popup_x + popup_w - close_size - 12.0;
-    let close_y = popup_y + 12.0;
+    // Close button
+    let close_size = 22.0;
+    let close_x = popup_x + popup_w - close_size - 10.0;
+    let close_y = popup_y + 10.0;
     if hovered_close {
         context.set_source_rgba(0.8, 0.25, 0.15, 1.0);
     } else {
-        context.set_source_rgba(0.4, 0.4, 0.4, 1.0);
+        context.set_source_rgba(60.0 / 255.0, 60.0 / 255.0, 60.0 / 255.0, 1.0);
     }
-    rounded_rect_path(context, close_x, close_y, close_size, close_size, 6.0);
+    rounded_rect_path(context, close_x, close_y, close_size, close_size, 5.0);
     let _ = context.fill();
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-    context.set_line_width(2.0);
+    context.set_line_width(1.5);
     context.set_line_cap(gtk4::cairo::LineCap::Round);
-    context.move_to(close_x + 7.0, close_y + 7.0);
-    context.line_to(close_x + close_size - 7.0, close_y + close_size - 7.0);
-    context.move_to(close_x + close_size - 7.0, close_y + 7.0);
-    context.line_to(close_x + 7.0, close_y + close_size - 7.0);
+    context.move_to(close_x + 6.0, close_y + 6.0);
+    context.line_to(close_x + close_size - 6.0, close_y + close_size - 6.0);
+    context.move_to(close_x + close_size - 6.0, close_y + 6.0);
+    context.line_to(close_x + 6.0, close_y + close_size - 6.0);
     let _ = context.stroke();
 
-    // Draw title
+    // Title
     context.select_font_face(
         "Sans",
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
-    context.set_font_size(16.0);
+    context.set_font_size(13.0);
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-    let title = "Scroll Capture";
-    if let Ok(extents) = context.text_extents(title) {
-        let text_x = popup_x + 20.0;
-        let text_y = popup_y + 30.0 - extents.y_bearing();
-        context.move_to(text_x, text_y);
-        let _ = context.show_text(title);
-    }
+    context.move_to(popup_x + 20.0, popup_y + 30.0);
+    let _ = context.show_text("Scroll Capture");
 
-    // Draw description
+    // Body text
     context.select_font_face(
         "Sans",
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
-    context.set_font_size(13.0);
-    context.set_source_rgba(0.9, 0.9, 0.9, 0.9);
-    let desc = "Scroll capture requires a browser extension.";
-    if let Ok(extents) = context.text_extents(desc) {
-        let text_x = popup_x + 20.0;
-        let text_y = popup_y + 60.0 - extents.y_bearing();
-        context.move_to(text_x, text_y);
-        let _ = context.show_text(desc);
-    }
-
-    // Draw extension info
     context.set_font_size(12.0);
-    context.set_source_rgba(0.7, 0.7, 0.7, 0.8);
-    let info = "Install the ApexShot Chrome extension to enable scroll capture.";
-    if let Ok(extents) = context.text_extents(info) {
-        let text_x = popup_x + 20.0;
-        let text_y = popup_y + 85.0 - extents.y_bearing();
-        context.move_to(text_x, text_y);
-        let _ = context.show_text(info);
-    }
+    context.set_source_rgba(1.0, 1.0, 1.0, 180.0 / 255.0);
+    context.move_to(popup_x + 20.0, popup_y + 55.0);
+    let _ = context.show_text("Scroll capture requires the ApexShot");
+    context.move_to(popup_x + 20.0, popup_y + 73.0);
+    let _ = context.show_text("browser extension.");
 
-    // Draw download button
+    // Download button
     let btn_w = 140.0;
-    let btn_h = 36.0;
+    let btn_h = 32.0;
     let btn_x = popup_x + (popup_w - btn_w) / 2.0;
-    let btn_y = popup_y + 120.0;
-    context.set_source_rgba(0.91, 0.33, 0.13, 0.92);
+    let btn_y = popup_y + 100.0;
     rounded_rect_path(context, btn_x, btn_y, btn_w, btn_h, 8.0);
+    context.set_source_rgba(232.0 / 255.0, 85.0 / 255.0, 34.0 / 255.0, 0.92);
     let _ = context.fill();
 
     context.select_font_face(
@@ -3465,7 +3440,7 @@ fn draw_scroll_popup(
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
-    context.set_font_size(14.0);
+    context.set_font_size(13.0);
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
     let btn_text = "Download Extension";
     if let Ok(extents) = context.text_extents(btn_text) {
