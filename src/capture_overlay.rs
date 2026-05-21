@@ -66,15 +66,27 @@ fn should_use_gtk_layer_shell_selector() -> bool {
         || current_desktop_contains("sway")
 }
 
-fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, SelectionError> {
+fn force_wayland_gdk_for_layer_shell() {
     // On Hyprland/sway, GDK may default to X11 backend (via XWayland) because
-    // DISPLAY=:0 is set. Layer-shell requires the Wayland GDK backend, so we
-    // force it here.
+    // DISPLAY=:0 is set. Layer-shell requires the Wayland GDK backend.
     if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("GDK_BACKEND").is_none() {
-        // SAFETY: This must be set before any GTK calls. We are before any
-        // GTK code in this function, so this is safe.
-        std::env::set_var("GDK_BACKEND", "wayland");
+        // SAFETY: This must be set before any GTK calls. Callers invoke this
+        // before entering the GTK layer-shell selector.
+        unsafe { std::env::set_var("GDK_BACKEND", "wayland") };
     }
+}
+
+fn wait_for_layer_shell_overlay_to_unmap() {
+    // Layer-shell window destruction is acknowledged by the compositor just
+    // after GTK returns. Give Hyprland/sway one frame to remove our overlay
+    // before wlr-screencopy grabs the real screenshot, otherwise the capture
+    // can include ApexShot's own UI.
+    std::thread::sleep(std::time::Duration::from_millis(180));
+}
+
+fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResult, SelectionError>
+{
+    force_wayland_gdk_for_layer_shell();
 
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
@@ -85,27 +97,30 @@ fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, Selec
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
         })?;
     match crate::overlay::select_area_from_capture_with_gtk(&full_capture) {
-        Ok(Some(area)) => backend
-            .capture_area(area.x, area.y, area.width, area.height)
-            .map(AreaCaptureResult::Captured)
-            .map_err(|err| {
-                SelectionError::InitError(format!("Wayland area capture failed: {err}"))
-            }),
+        Ok(Some(area)) => {
+            wait_for_layer_shell_overlay_to_unmap();
+            let capture = backend
+                .capture_area(area.x, area.y, area.width, area.height)
+                .map_err(|err| {
+                    SelectionError::InitError(format!("Wayland area capture failed: {err}"))
+                })?;
+            save_capture_to_temp_png(&capture).map(AreaCapturePathResult::Captured)
+        }
         Ok(None) => Err(SelectionError::Cancelled),
         Err(SelectionError::WindowCaptureRequested) => {
             eprintln!("[capture] Window capture requested from GTK overlay — using Wayland portal");
-            backend
-                .capture_window(0)
-                .map(AreaCaptureResult::Captured)
-                .map_err(|err| {
-                    SelectionError::InitError(format!("Wayland window capture failed: {err}"))
-                })
+            wait_for_layer_shell_overlay_to_unmap();
+            let capture = backend.capture_window(0).map_err(|err| {
+                SelectionError::InitError(format!("Wayland window capture failed: {err}"))
+            })?;
+            save_capture_to_temp_png(&capture).map(AreaCapturePathResult::Captured)
         }
         Err(SelectionError::OcrRequested(area)) => {
             eprintln!("[capture] OCR requested from GTK overlay — capturing area for OCR");
+            wait_for_layer_shell_overlay_to_unmap();
             backend
                 .capture_area(area.x, area.y, area.width, area.height)
-                .map(AreaCaptureResult::OcrRequested)
+                .map(AreaCapturePathResult::OcrRequested)
                 .map_err(|err| {
                     SelectionError::InitError(format!("Wayland area capture for OCR failed: {err}"))
                 })
@@ -114,7 +129,32 @@ fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, Selec
     }
 }
 
+fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, SelectionError> {
+    match capture_area_file_via_gtk_layer_shell_wlroots()? {
+        AreaCapturePathResult::Captured(path) => {
+            let capture = load_capture_data_from_path(&path);
+            let _ = std::fs::remove_file(&path);
+            capture.map(AreaCaptureResult::Captured)
+        }
+        AreaCapturePathResult::OcrRequested(capture) => {
+            Ok(AreaCaptureResult::OcrRequested(capture))
+        }
+        AreaCapturePathResult::Cancelled => Ok(AreaCaptureResult::Cancelled),
+        AreaCapturePathResult::ScrollCaptured(path) => {
+            let capture = load_capture_data_from_path(&path);
+            let _ = std::fs::remove_file(&path);
+            capture.map(AreaCaptureResult::ScrollCaptured)
+        }
+        AreaCapturePathResult::RecordingRequested(request) => {
+            Ok(AreaCaptureResult::RecordingRequested(request))
+        }
+        AreaCapturePathResult::RecordingConfigUpdated => Ok(AreaCaptureResult::Cancelled),
+    }
+}
+
 fn capture_crosshair_file_via_gtk_layer_shell_wlroots() -> Result<PathBuf, SelectionError> {
+    force_wayland_gdk_for_layer_shell();
+
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
     let full_capture = backend
@@ -125,6 +165,7 @@ fn capture_crosshair_file_via_gtk_layer_shell_wlroots() -> Result<PathBuf, Selec
         })?;
     let area = crate::overlay::select_crosshair_from_capture_with_gtk(&full_capture)?
         .ok_or(SelectionError::Cancelled)?;
+    wait_for_layer_shell_overlay_to_unmap();
     let capture = backend
         .capture_area(area.x, area.y, area.width, area.height)
         .map_err(|err| SelectionError::InitError(format!("Wayland area capture failed: {err}")))?;
@@ -1172,6 +1213,13 @@ pub fn open_recording_ui_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
 }
 
 pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
+    if should_use_gtk_layer_shell_selector() {
+        eprintln!(
+            "[capture_overlay] Using ApexShot GTK layer-shell selector on wlroots compositor"
+        );
+        return capture_area_file_via_gtk_layer_shell_wlroots();
+    }
+
     // Check config for remember selection
     let config = crate::config::load_config();
     let extra_args = build_area_init_args(&config);

@@ -126,9 +126,13 @@ impl SaveConfig {
         if let Some(dir) = &self.output_dir {
             Ok(dir.clone())
         } else {
-            dirs::picture_dir().ok_or_else(|| {
-                SaveError::FilenameError("Could not determine Pictures directory".into())
-            })
+            dirs::picture_dir()
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Pictures"))
+                })
+                .ok_or_else(|| {
+                    SaveError::FilenameError("Could not determine Pictures directory".into())
+                })
         }
     }
 }
