@@ -679,9 +679,37 @@ impl DisplayBackend for WaylandBackend {
     }
 
     fn capture_window(&self, _window_id: u64) -> DisplayResult<CaptureData> {
-        // Window capture requires the ScreenCast portal (grim/Screenshot portal
-        // always captures the full display, not a single window).
-        block_on_async(async { Self::capture_via_screencast(CaptureTarget::Window, true).await })
+        // Try the ScreenCast portal first (works on GNOME/KDE with proper portal).
+        // This shows the portal's own source-selection dialog to the user.
+        let portal_result = block_on_async(async {
+            Self::capture_via_screencast(CaptureTarget::Window, true).await
+        });
+
+        if portal_result.is_ok() {
+            return portal_result;
+        }
+
+        // Fallback for wlroots compositors (Hyprland, Sway, etc.) where the
+        // ScreenCast portal may not be available: capture the full screen via
+        // wlr-screencopy, then crop to the active window bounds from the
+        // compositor's window list.
+        if let Some(compositor) = crate::compositor::detect_compositor() {
+            if let Ok(Some(window)) = compositor.get_active_window() {
+                eprintln!(
+                    "[wayland] Portal unavailable, falling back to wlr-screencopy window crop: {} \"{}\" at {}x{}+{}x{}",
+                    window.class, window.title, window.x, window.y, window.width, window.height
+                );
+                let full = self.capture_screen_for_selection_impl()?;
+                // Clamp crop to valid screen bounds
+                let x = window.x.max(0);
+                let y = window.y.max(0);
+                let width = window.width.min(full.width as i32 - x).max(1);
+                let height = window.height.min(full.height as i32 - y).max(1);
+                return self.capture_area_direct_impl(x, y, width, height);
+            }
+        }
+
+        portal_result
     }
 
     fn is_supported() -> bool {

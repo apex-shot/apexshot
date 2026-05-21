@@ -685,6 +685,33 @@ pub(crate) fn setup_window(
                     st.hover_crop_panel = false;
                     st.recording.hover_record_tile = None;
                     ("pointer".to_string(), changed, true)
+                } else if st.window_picker_open {
+                    const POPUP_W_P: f64 = 320.0;
+                    const ITEM_H_P: f64 = 28.0;
+                    const HEADER_H_P: f64 = 30.0;
+                    const PAD_P: f64 = 8.0;
+                    let n = st.windows.len();
+                    let popup_h = PAD_P * 2.0 + HEADER_H_P + n as f64 * ITEM_H_P;
+                    let popup_x = (screen_width as f64 - POPUP_W_P) / 2.0;
+                    let popup_y = (screen_height as f64 - popup_h) / 2.0;
+                    let list_y = popup_y + PAD_P + HEADER_H_P;
+
+                    let mut next_entry = -1;
+                    if x >= popup_x && x <= popup_x + POPUP_W_P && y >= list_y {
+                        let idx = ((y - list_y) / ITEM_H_P) as i32;
+                        if idx >= 0 && (idx as usize) < st.windows.len() {
+                            next_entry = idx;
+                        }
+                    }
+
+                    let changed = st.hovered_window_picker_entry != next_entry;
+                    st.hovered_window_picker_entry = next_entry;
+                    st.hovered_scroll_popup_close = false;
+                    st.hover_tool_index = None;
+                    st.hover_size_panel = false;
+                    st.hover_crop_panel = false;
+                    st.recording.hover_record_tile = None;
+                    ("pointer".to_string(), changed, true)
                 } else if st.scroll_popup_open {
                     // Scroll popup hover handling
                     let popup_w = 400.0;
@@ -1346,6 +1373,60 @@ pub(crate) fn setup_window(
             }
         }
 
+        // ── Window picker popup click handling ──
+        if st.window_picker_open {
+            const POPUP_W: f64 = 320.0;
+            const ITEM_H: f64 = 28.0;
+            const HEADER_H: f64 = 30.0;
+            const PAD: f64 = 8.0;
+            let n = st.windows.len();
+            let popup_h = PAD * 2.0 + HEADER_H + n as f64 * ITEM_H;
+            let popup_x = (screen_width as f64 - POPUP_W) / 2.0;
+            let popup_y = (screen_height as f64 - popup_h) / 2.0;
+            let list_y = popup_y + PAD + HEADER_H;
+
+            // Click outside popup closes it
+            if !(x >= popup_x && x <= popup_x + POPUP_W && y >= popup_y && y <= popup_y + popup_h) {
+                st.window_picker_open = false;
+                st.hovered_window_picker_entry = -1;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+
+            // Check if a window entry was clicked
+            let entry_index = ((y - list_y) / ITEM_H) as i32;
+            if entry_index >= 0 && (entry_index as usize) < st.windows.len() {
+                let win = st.windows[entry_index as usize].clone();
+                let w = win.width as f64;
+                let h = win.height as f64;
+                st.start_x = win.x as f64;
+                st.start_y = win.y as f64;
+                st.current_x = win.x as f64 + w;
+                st.current_y = win.y as f64 + h;
+                st.completed = true;
+                st.window_picker_open = false;
+                st.hovered_window_picker_entry = -1;
+                drop(st);
+                if let Some(window) = window_weak_click.upgrade() {
+                    send_selection_result(
+                        &state_click,
+                        &result_tx_click,
+                        &window,
+                        screen_width,
+                        screen_height,
+                        background_click.as_ref(),
+                    );
+                }
+                return;
+            }
+
+            // Click on header area inside popup — ignore
+            return;
+        }
+
         // ── Webcam options menu click handling ──
         if st.recording.webcam_options_open {
             if let Some(item) = webcam_options_hit_item(
@@ -1526,12 +1607,11 @@ pub(crate) fn setup_window(
                 st.active_tool_index = TOOLBAR_AREA_INDEX;
                 st.intent = OverlayIntent::Area;
                 st.hover_tool_index = None;
+                st.window_picker_open = true;
+                st.hovered_window_picker_entry = -1;
                 drop(st);
-                let _ = result_tx_click.send(Err(SelectionError::InitError(
-                    "Window capture is only available through the native C++ overlay".into(),
-                )));
-                if let Some(win) = window_weak_click.upgrade() {
-                    win.close();
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
                 }
             }
             Some(ToolbarIcon::Ocr) => {

@@ -49,6 +49,9 @@ pub enum SelectionError {
 
     #[error("Selection was cancelled by user")]
     Cancelled,
+
+    #[error("Window capture requested from toolbar")]
+    WindowCaptureRequested,
 }
 
 pub struct AreaSelector {
@@ -118,6 +121,14 @@ impl AreaSelector {
 
         // Run the application
         let _ = app.run_with_args::<String>(&[]);
+
+        // Check for window capture request (set by toolbar Window button)
+        {
+            let st = state.lock().unwrap();
+            if st.window_capture_requested {
+                return Err(SelectionError::WindowCaptureRequested);
+            }
+        }
 
         // Get the result
         match result_rx.recv() {

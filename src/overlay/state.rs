@@ -79,6 +79,11 @@ pub(crate) struct SelectorState {
     // ── Window snapping state ──
     pub(crate) windows: Vec<WindowInfo>,
     pub(crate) hovered_window: Option<usize>,
+    // ── Window capture from toolbar button ──
+    pub(crate) window_capture_requested: bool,
+    // ── Window picker popup ──
+    pub(crate) window_picker_open: bool,
+    pub(crate) hovered_window_picker_entry: i32,
 }
 
 impl Default for SelectorState {
@@ -116,6 +121,9 @@ impl Default for SelectorState {
             intent: OverlayIntent::default(),
             windows: Vec::new(),
             hovered_window: None,
+            window_capture_requested: false,
+            window_picker_open: false,
+            hovered_window_picker_entry: -1,
         }
     }
 }

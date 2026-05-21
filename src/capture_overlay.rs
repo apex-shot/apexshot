@@ -67,6 +67,15 @@ fn should_use_gtk_layer_shell_selector() -> bool {
 }
 
 fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, SelectionError> {
+    // On Hyprland/sway, GDK may default to X11 backend (via XWayland) because
+    // DISPLAY=:0 is set. Layer-shell requires the Wayland GDK backend, so we
+    // force it here.
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("GDK_BACKEND").is_none() {
+        // SAFETY: This must be set before any GTK calls. We are before any
+        // GTK code in this function, so this is safe.
+        std::env::set_var("GDK_BACKEND", "wayland");
+    }
+
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
     let full_capture = backend
@@ -75,13 +84,25 @@ fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, Selec
         .map_err(|err| {
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
         })?;
-    let area = crate::overlay::select_area_from_capture_with_gtk(&full_capture)?
-        .ok_or(SelectionError::Cancelled)?;
-
-    backend
-        .capture_area(area.x, area.y, area.width, area.height)
-        .map(AreaCaptureResult::Captured)
-        .map_err(|err| SelectionError::InitError(format!("Wayland area capture failed: {err}")))
+    match crate::overlay::select_area_from_capture_with_gtk(&full_capture) {
+        Ok(Some(area)) => backend
+            .capture_area(area.x, area.y, area.width, area.height)
+            .map(AreaCaptureResult::Captured)
+            .map_err(|err| {
+                SelectionError::InitError(format!("Wayland area capture failed: {err}"))
+            }),
+        Ok(None) => Err(SelectionError::Cancelled),
+        Err(SelectionError::WindowCaptureRequested) => {
+            eprintln!("[capture] Window capture requested from GTK overlay — using Wayland portal");
+            backend
+                .capture_window(0)
+                .map(AreaCaptureResult::Captured)
+                .map_err(|err| {
+                    SelectionError::InitError(format!("Wayland window capture failed: {err}"))
+                })
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn capture_crosshair_file_via_gtk_layer_shell_wlroots() -> Result<PathBuf, SelectionError> {

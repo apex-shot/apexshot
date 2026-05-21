@@ -1517,7 +1517,7 @@ fn run_capture(args: &[String]) {
     let capture: CaptureData = match capture_type {
         "screen" => match capture_screen_via_cpp() {
             Ok(capture) => {
-                println!("Using C++ capture backend...");
+                println!("Capturing full screen...");
                 capture
             }
             Err(err) if is_launch_blocked_error(&err) => {
@@ -1531,15 +1531,15 @@ fn run_capture(args: &[String]) {
         },
         "area" => match capture_area_via_cpp() {
             Ok(AreaCaptureResult::Captured(capture)) => {
-                println!("Using C++ capture backend...");
+                println!("Captured area...");
                 capture
             }
             Ok(AreaCaptureResult::ScrollCaptured(capture)) => {
-                println!("Using C++ capture backend...");
+                println!("Captured area (scroll)...");
                 capture
             }
             Ok(AreaCaptureResult::OcrRequested(capture)) => {
-                println!("Using C++ capture backend...");
+                println!("Captured area (OCR requested)...");
                 run_ocr = true;
                 capture
             }
@@ -1566,7 +1566,7 @@ fn run_capture(args: &[String]) {
         },
         "crosshair" => match capture_crosshair_via_cpp() {
             Ok(AreaCaptureResult::Captured(capture)) => {
-                println!("Using C++ capture backend...");
+                println!("Captured crosshair area...");
                 capture
             }
             Ok(AreaCaptureResult::Cancelled) => {

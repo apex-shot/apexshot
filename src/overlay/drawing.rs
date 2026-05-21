@@ -3226,6 +3226,17 @@ pub(crate) fn draw_overlay(
                 st.capture_delay_seconds,
             );
         }
+
+        // Popups rendered on top of everything (both recording and area modes)
+        if st.window_picker_open {
+            draw_window_picker(
+                context,
+                screen_width,
+                screen_height,
+                &st.windows,
+                st.hovered_window_picker_entry,
+            );
+        }
     }
     // else: idle state — the darkened background painted in Step 1 is enough.
 }
@@ -3529,4 +3540,140 @@ fn draw_crosshair_mode_bubble(
         false,
         (1.0, 1.0, 1.0, 1.0),
     );
+}
+
+fn draw_window_picker(
+    context: &gtk4::cairo::Context,
+    screen_width: f64,
+    screen_height: f64,
+    windows: &[crate::compositor::WindowInfo],
+    hovered_entry: i32,
+) {
+    if windows.is_empty() {
+        return;
+    }
+
+    let _ = context.save();
+    const MENU_W: f64 = 320.0;
+    const ITEM_H: f64 = 28.0;
+    const HEADER_H: f64 = 30.0;
+    const PAD: f64 = 8.0;
+
+    let n = windows.len();
+    let total_h = PAD * 2.0 + HEADER_H + n as f64 * ITEM_H;
+    let popup_x = (screen_width - MENU_W) / 2.0;
+    let popup_y = (screen_height - total_h) / 2.0;
+
+    // Solid dark background matching recording menu style
+    rounded_rect_path(context, popup_x, popup_y, MENU_W, total_h, 12.0);
+    context.set_source_rgba(30.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 235.0 / 255.0);
+    let _ = context.fill();
+    rounded_rect_path(context, popup_x, popup_y, MENU_W, total_h, 12.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
+    context.set_line_width(1.0);
+    let _ = context.stroke();
+
+    // Section header "Select a Window"
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size(11.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
+    context.move_to(popup_x + 18.0, popup_y + PAD + 14.0);
+    let _ = context.show_text("Select a Window");
+
+    let mut curr_y = popup_y + PAD + HEADER_H;
+
+    for (i, win) in windows.iter().enumerate() {
+        let item_rect = RectF {
+            x: popup_x + 4.0,
+            y: curr_y + 1.0,
+            width: MENU_W - 8.0,
+            height: ITEM_H - 2.0,
+        };
+        let hovered = i as i32 == hovered_entry;
+
+        if hovered {
+            rounded_rect_path(
+                context,
+                item_rect.x,
+                item_rect.y,
+                item_rect.width,
+                item_rect.height,
+                6.0,
+            );
+            context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 220.0 / 255.0);
+            let _ = context.fill();
+        }
+
+        let text_color = if hovered {
+            (1.0, 234.0 / 255.0, 214.0 / 255.0, 1.0)
+        } else {
+            (241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 1.0)
+        };
+
+        // Class label (bold)
+        let class_label = if win.class.is_empty() {
+            "Window"
+        } else {
+            &win.class
+        };
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
+        context.set_font_size(13.0);
+        context.set_source_rgba(text_color.0, text_color.1, text_color.2, text_color.3);
+        if let Ok(_ext) = context.text_extents(class_label) {
+            context.move_to(popup_x + 18.0, curr_y + ITEM_H / 2.0 + 4.5);
+            let _ = context.show_text(class_label);
+        }
+
+        // Window title (truncated to fit)
+        let title = if win.title.is_empty() {
+            "Untitled".to_string()
+        } else {
+            win.title.clone()
+        };
+        let max_title_w = MENU_W - 200.0;
+        let mut display_str = title;
+        if let Ok(ext) = context.text_extents(&display_str) {
+            if ext.width() > max_title_w {
+                let chars: Vec<char> = display_str.chars().collect();
+                let mut char_count = chars.len();
+                while char_count > 3 {
+                    char_count -= 1;
+                    let truncated: String = chars[..char_count].iter().collect();
+                    let t = format!("{}…", truncated);
+                    if let Ok(e) = context.text_extents(&t) {
+                        if e.width() <= max_title_w {
+                            display_str = t;
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        context.select_font_face(
+            "Sans",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Normal,
+        );
+        context.set_font_size(12.0);
+        context.set_source_rgba(text_color.0, text_color.1, text_color.2, 0.7);
+        if context.text_extents(&display_str).is_ok() {
+            context.move_to(popup_x + 190.0, curr_y + ITEM_H / 2.0 + 4.0);
+            let _ = context.show_text(&display_str);
+        }
+
+        curr_y += ITEM_H;
+    }
+
+    let _ = context.restore();
 }
