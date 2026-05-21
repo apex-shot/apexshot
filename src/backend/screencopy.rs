@@ -457,19 +457,18 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for AppState 
                 width,
                 height,
                 stride,
-            } => {
+            } if state.frame_info.is_none() => {
                 // Only store if this looks like a useful shm format.
                 // Prefer XRGB8888 / ARGB8888; accept anything the
                 // compositor offers — convert_to_rgba handles it.
-                if state.frame_info.is_none() {
-                    state.frame_info = Some(FrameInfo {
-                        width,
-                        height,
-                        stride,
-                        format: fmt,
-                    });
-                }
+                state.frame_info = Some(FrameInfo {
+                    width,
+                    height,
+                    stride,
+                    format: fmt,
+                });
             }
+            zwlr_screencopy_frame_v1::Event::Buffer { .. } => {}
             // v3+ compositors send this after all Buffer events are done.
             // We don't need special handling — frame_info is already set.
             zwlr_screencopy_frame_v1::Event::BufferDone => {}

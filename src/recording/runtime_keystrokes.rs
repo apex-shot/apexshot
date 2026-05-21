@@ -132,16 +132,16 @@ async fn run_runtime_keystroke_forwarder(
                             .bind_capabilities(DeviceCapability::Keyboard.into());
                         let _ = context.flush();
                     }
-                    EiEvent::DeviceAdded(device_event) => {
+                    EiEvent::DeviceAdded(device_event)
                         if device_event
                             .device
-                            .has_capability(DeviceCapability::Keyboard)
-                        {
-                            formatter
-                                .try_load_keymap(device_event.device.keymap())
-                                .context("failed to load keyboard keymap")?;
-                        }
+                            .has_capability(DeviceCapability::Keyboard) =>
+                    {
+                        formatter
+                            .try_load_keymap(device_event.device.keymap())
+                            .context("failed to load keyboard keymap")?;
                     }
+                    EiEvent::DeviceAdded(_) => {}
                     EiEvent::KeyboardModifiers(modifier_event) => {
                         formatter.apply_modifiers(&modifier_event);
                     }

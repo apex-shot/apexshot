@@ -11,7 +11,7 @@ use super::hit_testing::{
 };
 use super::icons::{
     ToolbarIcon, TOOLBAR_AREA_INDEX, TOOLBAR_FULLSCREEN_INDEX, TOOLBAR_ICONS,
-    TOOLBAR_RECORDING_INDEX,
+    TOOLBAR_RECORDING_INDEX, TOOLBAR_SCROLL_INDEX, TOOLBAR_WINDOW_INDEX,
 };
 use super::layout::{
     RectF, ToolbarHit, DEFAULT_SELECTION_HEIGHT, DEFAULT_SELECTION_WIDTH, MIN_SELECTION_HEIGHT,
@@ -692,8 +692,16 @@ pub(crate) fn setup_window(
                     const PAD_P: f64 = 8.0;
                     let n = st.windows.len();
                     let popup_h = PAD_P * 2.0 + HEADER_H_P + n as f64 * ITEM_H_P;
-                    let popup_x = (screen_width as f64 - POPUP_W_P) / 2.0;
-                    let popup_y = (screen_height as f64 - popup_h) / 2.0;
+                    let (center_x, center_y) = if st.completed || st.is_dragging {
+                        let r = current_selection_rect(&st);
+                        (r.left + r.width() / 2.0, r.top + r.height() / 2.0)
+                    } else {
+                        (screen_width as f64 / 2.0, screen_height as f64 / 2.0)
+                    };
+                    let popup_x = (center_x - POPUP_W_P / 2.0)
+                        .clamp(10.0, (screen_width as f64 - POPUP_W_P - 10.0).max(10.0));
+                    let popup_y = (center_y - popup_h / 2.0)
+                        .clamp(10.0, (screen_height as f64 - popup_h - 10.0).max(10.0));
                     let list_y = popup_y + PAD_P + HEADER_H_P;
 
                     let mut next_entry = -1;
@@ -1393,8 +1401,16 @@ pub(crate) fn setup_window(
             const PAD: f64 = 8.0;
             let n = st.windows.len();
             let popup_h = PAD * 2.0 + HEADER_H + n as f64 * ITEM_H;
-            let popup_x = (screen_width as f64 - POPUP_W) / 2.0;
-            let popup_y = (screen_height as f64 - popup_h) / 2.0;
+            let (center_x, center_y) = if st.completed || st.is_dragging {
+                let r = current_selection_rect(&st);
+                (r.left + r.width() / 2.0, r.top + r.height() / 2.0)
+            } else {
+                (screen_width as f64 / 2.0, screen_height as f64 / 2.0)
+            };
+            let popup_x = (center_x - POPUP_W / 2.0)
+                .clamp(10.0, (screen_width as f64 - POPUP_W - 10.0).max(10.0));
+            let popup_y = (center_y - popup_h / 2.0)
+                .clamp(10.0, (screen_height as f64 - popup_h - 10.0).max(10.0));
             let list_y = popup_y + PAD + HEADER_H;
 
             // Click outside popup closes it
@@ -1605,19 +1621,18 @@ pub(crate) fn setup_window(
             Some(ToolbarIcon::Scroll) => {
                 st.capture_crop_menu_open = false;
                 st.scroll_popup_open = true;
-                st.active_tool_index = TOOLBAR_AREA_INDEX;
+                st.active_tool_index = TOOLBAR_SCROLL_INDEX;
                 st.intent = OverlayIntent::Area;
                 st.hover_tool_index = None;
                 drop(st);
                 if let Some(da) = drawing_area_weak_click.upgrade() {
                     da.queue_draw();
                 }
-                return;
             }
             Some(ToolbarIcon::Window) => {
                 st.capture_crop_menu_open = false;
                 st.scroll_popup_open = false;
-                st.active_tool_index = TOOLBAR_AREA_INDEX;
+                st.active_tool_index = TOOLBAR_WINDOW_INDEX;
                 st.intent = OverlayIntent::Area;
                 st.hover_tool_index = None;
                 st.window_picker_open = true;
@@ -2144,15 +2159,70 @@ pub(crate) fn setup_window(
                 || key == Key::ISO_Enter
                 || key == Key::space
             {
-                if let Some(window) = window_weak_esc.upgrade() {
-                    send_selection_result(
-                        &state_key,
-                        &result_tx_esc,
-                        &window,
-                        screen_width,
-                        screen_height,
-                        background_key.as_ref(),
-                    );
+                let mut st = state_key.lock().unwrap();
+                if st.timer_delay_active && st.capture_delay_seconds > 0 && !st.countdown_active {
+                    st.countdown_active = true;
+                    st.countdown_cancel_requested = false;
+                    st.countdown_value = st.capture_delay_seconds;
+                    st.hovered_countdown_cancel = false;
+                    drop(st);
+
+                    if let Some(da) = drawing_area_weak_key.upgrade() {
+                        da.queue_draw();
+                    }
+
+                    let state_countdown = state_key.clone();
+                    let result_tx_countdown = result_tx_esc.clone();
+                    let window_weak_countdown = window_weak_esc.clone();
+                    let drawing_area_weak_countdown = drawing_area_weak_key.clone();
+                    let background_countdown = background_key.clone();
+                    glib::timeout_add_seconds_local(1, move || {
+                        let mut st = state_countdown.lock().unwrap();
+                        if st.countdown_cancel_requested || st.cancelled {
+                            st.countdown_active = false;
+                            st.countdown_cancel_requested = false;
+                            drop(st);
+                            if let Some(da) = drawing_area_weak_countdown.upgrade() {
+                                da.queue_draw();
+                            }
+                            return glib::ControlFlow::Break;
+                        }
+
+                        st.countdown_value -= 1;
+                        if st.countdown_value <= 0 {
+                            st.countdown_active = false;
+                            drop(st);
+                            if let Some(window) = window_weak_countdown.upgrade() {
+                                send_selection_result(
+                                    &state_countdown,
+                                    &result_tx_countdown,
+                                    &window,
+                                    screen_width,
+                                    screen_height,
+                                    background_countdown.as_ref(),
+                                );
+                            }
+                            glib::ControlFlow::Break
+                        } else {
+                            drop(st);
+                            if let Some(da) = drawing_area_weak_countdown.upgrade() {
+                                da.queue_draw();
+                            }
+                            glib::ControlFlow::Continue
+                        }
+                    });
+                } else if !st.countdown_active {
+                    drop(st);
+                    if let Some(window) = window_weak_esc.upgrade() {
+                        send_selection_result(
+                            &state_key,
+                            &result_tx_esc,
+                            &window,
+                            screen_width,
+                            screen_height,
+                            background_key.as_ref(),
+                        );
+                    }
                 }
 
                 return glib::Propagation::Stop;

@@ -376,7 +376,7 @@ impl TextDetector {
             }
         }
 
-        result.sort_by(|a, b| (a.bounds.y, a.bounds.x).cmp(&(b.bounds.y, b.bounds.x)));
+        result.sort_by_key(|a| (a.bounds.y, a.bounds.x));
 
         result
     }

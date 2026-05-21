@@ -2709,13 +2709,13 @@ pub fn apply_censor_rect(image: &mut RgbaImage, rect: Rect, block_size: f64) {
                 }
             }
 
-            if count > 0 {
-                let color = image::Rgba([
-                    (r_sum / count) as u8,
-                    (g_sum / count) as u8,
-                    (b_sum / count) as u8,
-                    (a_sum / count) as u8,
-                ]);
+            if let (Some(r), Some(g), Some(b), Some(a)) = (
+                r_sum.checked_div(count),
+                g_sum.checked_div(count),
+                b_sum.checked_div(count),
+                a_sum.checked_div(count),
+            ) {
+                let color = image::Rgba([r as u8, g as u8, b as u8, a as u8]);
 
                 for y in by..(by + block_height) {
                     for x in bx..(bx + block_width) {

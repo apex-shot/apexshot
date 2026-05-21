@@ -33,6 +33,8 @@ pub(crate) const TOOLBAR_ICONS: [ToolbarIcon; 7] = [
 
 pub(crate) const TOOLBAR_AREA_INDEX: usize = 0;
 pub(crate) const TOOLBAR_FULLSCREEN_INDEX: usize = 1;
+pub(crate) const TOOLBAR_WINDOW_INDEX: usize = 2;
+pub(crate) const TOOLBAR_SCROLL_INDEX: usize = 3;
 pub(crate) const TOOLBAR_RECORDING_INDEX: usize = 6;
 
 pub(crate) const TOOLBAR_LABELS: [&str; 7] = [

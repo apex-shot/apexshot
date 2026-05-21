@@ -431,6 +431,44 @@ pub(crate) fn draw_frosted_panel(
     let _ = context.restore();
 }
 
+fn draw_popup_panel(
+    context: &gtk4::cairo::Context,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    radius: f64,
+    screen_width: f64,
+    screen_height: f64,
+    background: Option<&BackgroundFrame>,
+) {
+    // Same polished glass treatment used by the recording/webcam menus: warm glow,
+    // soft shadow, frosted fill and subtle rim highlight.
+    let _ = context.save();
+    let glow_cx = x + width * 0.5;
+    let glow_cy = y + height * 0.45;
+    let glow_r = width.max(height) * 0.9;
+    let glow = gtk4::cairo::RadialGradient::new(glow_cx, glow_cy, 0.0, glow_cx, glow_cy, glow_r);
+    glow.add_color_stop_rgba(0.0, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 34.0 / 255.0);
+    glow.add_color_stop_rgba(0.65, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 0.0);
+    let _ = context.set_source(&glow);
+    context.rectangle(x - 42.0, y - 42.0, width + 84.0, height + 84.0);
+    let _ = context.fill();
+    let _ = context.restore();
+
+    draw_frosted_panel(
+        context,
+        x,
+        y,
+        width,
+        height,
+        radius,
+        screen_width,
+        screen_height,
+        background,
+    );
+}
+
 pub(crate) fn draw_text_centered(
     context: &gtk4::cairo::Context,
     rect: RectF,
@@ -2640,14 +2678,17 @@ pub(crate) fn draw_webcam_options(
     let popup_x = menu_x.clamp(10.0, screen_width - menu_w - 10.0);
     let popup_y = menu_y.clamp(10.0, screen_height - total_h - 10.0);
 
-    // Solid dark background matching Qt QMenu style
-    rounded_rect_path(context, popup_x, popup_y, menu_w, total_h, 12.0);
-    context.set_source_rgba(30.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 235.0 / 255.0);
-    let _ = context.fill();
-    rounded_rect_path(context, popup_x, popup_y, menu_w, total_h, 12.0);
-    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
-    context.set_line_width(1.0);
-    let _ = context.stroke();
+    draw_popup_panel(
+        context,
+        popup_x,
+        popup_y,
+        menu_w,
+        total_h,
+        12.0,
+        screen_width,
+        screen_height,
+        _background,
+    );
 
     let mut curr_y = popup_y + pad;
     for section in sections {
@@ -3159,21 +3200,6 @@ pub(crate) fn draw_overlay(
                     &st.recording.click_previews,
                 );
             }
-            // Countdown bubble for timer capture
-            if st.countdown_active {
-                draw_countdown_bubble(
-                    context,
-                    x,
-                    y,
-                    sel_w,
-                    sel_h,
-                    screen_width,
-                    screen_height,
-                    st.countdown_value,
-                    st.hovered_countdown_cancel,
-                    st.intent,
-                );
-            }
             // Webcam options menu
             if st.recording.webcam_options_open {
                 let panel_x = (x + (sel_w - 320.0) / 2.0).clamp(10.0, screen_width - 330.0);
@@ -3218,14 +3244,35 @@ pub(crate) fn draw_overlay(
         if st.window_picker_open {
             draw_window_picker(
                 context,
+                x + sel_w / 2.0,
+                y + sel_h / 2.0,
                 screen_width,
                 screen_height,
+                background,
                 &st.windows,
                 st.hovered_window_picker_entry,
             );
         }
     }
     // else: idle state — the darkened background painted in Step 1 is enough.
+
+    // Timer capture countdown stays on top and centered on screen while the
+    // selection remains movable/resizable underneath.
+    if st.countdown_active {
+        let r = current_selection_rect(&st);
+        draw_countdown_bubble(
+            context,
+            r.left,
+            r.top,
+            r.width(),
+            r.height(),
+            screen_width,
+            screen_height,
+            st.countdown_value,
+            st.hovered_countdown_cancel,
+            st.intent,
+        );
+    }
 
     // Scroll popup: centered on selection when available, otherwise screen-centered
     if st.scroll_popup_open {
@@ -3241,6 +3288,7 @@ pub(crate) fn draw_overlay(
             cy,
             screen_width,
             screen_height,
+            background,
             st.hovered_scroll_popup_close,
         );
     }
@@ -3260,10 +3308,10 @@ fn draw_countdown_bubble(
 ) {
     let _ = context.save();
 
-    if intent == OverlayIntent::Record {
-        // Pill-shaped bubble for recording (like C++)
-        let pill_w = 100.0;
-        let pill_h = 38.0;
+    if intent != OverlayIntent::Record {
+        // Capture-delay countdown: C++-matching pill badge at top-center.
+        let pill_w = 112.0;
+        let pill_h = 44.0;
         let pill_x = (screen_width - pill_w) / 2.0;
         let pill_y = 28.0;
 
@@ -3300,25 +3348,28 @@ fn draw_countdown_bubble(
         );
         context.set_font_size(if hovered_cancel { 13.0 } else { 22.0 });
         context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-        let text = countdown_value.to_string();
+        let text = if hovered_cancel {
+            "Cancel".to_string()
+        } else {
+            countdown_value.to_string()
+        };
         if let Ok(extents) = context.text_extents(&text) {
             let text_x =
                 pill_x + 40.0 + (pill_w - 44.0 - extents.width()) / 2.0 - extents.x_bearing();
-            let text_y = pill_y + (pill_h + extents.height()) / 2.0 - extents.y_bearing();
+            let text_y = pill_y + (pill_h - extents.height()) / 2.0 - extents.y_bearing();
             context.move_to(text_x, text_y);
             let _ = context.show_text(&text);
         }
     } else {
-        // Circle bubble for capture (like C++)
-        let bubble_size = 120.0;
+        // Recording countdown: centered circle (3-2-1), matching C++.
+        let bubble_size = 184.0;
         let bubble_x = (screen_width - bubble_size) / 2.0;
         let bubble_y = (screen_height - bubble_size) / 2.0;
 
-        // Draw circle background
         if hovered_cancel {
-            context.set_source_rgba(0.52, 0.15, 0.09, 0.95);
+            context.set_source_rgba(132.0 / 255.0, 38.0 / 255.0, 24.0 / 255.0, 242.0 / 255.0);
         } else {
-            context.set_source_rgba(0.0, 0.0, 0.0, 0.94);
+            context.set_source_rgba(0.0, 0.0, 0.0, 240.0 / 255.0);
         }
         context.arc(
             bubble_x + bubble_size / 2.0,
@@ -3362,8 +3413,9 @@ fn draw_scroll_popup(
     context: &gtk4::cairo::Context,
     center_x: f64,
     center_y: f64,
-    _screen_width: f64,
-    _screen_height: f64,
+    screen_width: f64,
+    screen_height: f64,
+    background: Option<&BackgroundFrame>,
     hovered_close: bool,
 ) {
     let _ = context.save();
@@ -3373,14 +3425,17 @@ fn draw_scroll_popup(
     let popup_x = center_x - popup_w / 2.0;
     let popup_y = center_y - popup_h / 2.0;
 
-    // Popup background matching window picker style
-    rounded_rect_path(context, popup_x, popup_y, popup_w, popup_h, 12.0);
-    context.set_source_rgba(30.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 235.0 / 255.0);
-    let _ = context.fill();
-    rounded_rect_path(context, popup_x, popup_y, popup_w, popup_h, 12.0);
-    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
-    context.set_line_width(1.0);
-    let _ = context.stroke();
+    draw_popup_panel(
+        context,
+        popup_x,
+        popup_y,
+        popup_w,
+        popup_h,
+        12.0,
+        screen_width,
+        screen_height,
+        background,
+    );
 
     // Close button
     let close_size = 22.0;
@@ -3426,14 +3481,24 @@ fn draw_scroll_popup(
     context.move_to(popup_x + 20.0, popup_y + 73.0);
     let _ = context.show_text("browser extension.");
 
-    // Download button
-    let btn_w = 140.0;
-    let btn_h = 32.0;
+    // CTA button — match the glass/orange accent style instead of a flat block.
+    let btn_w = 182.0;
+    let btn_h = 34.0;
     let btn_x = popup_x + (popup_w - btn_w) / 2.0;
-    let btn_y = popup_y + 100.0;
-    rounded_rect_path(context, btn_x, btn_y, btn_w, btn_h, 8.0);
-    context.set_source_rgba(232.0 / 255.0, 85.0 / 255.0, 34.0 / 255.0, 0.92);
+    let btn_y = popup_y + 102.0;
+    rounded_rect_path(context, btn_x, btn_y + 1.5, btn_w, btn_h, 10.0);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.22);
     let _ = context.fill();
+
+    let btn_grad = gtk4::cairo::LinearGradient::new(0.0, btn_y, 0.0, btn_y + btn_h);
+    btn_grad.add_color_stop_rgba(0.0, 242.0 / 255.0, 116.0 / 255.0, 70.0 / 255.0, 0.96);
+    btn_grad.add_color_stop_rgba(1.0, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 0.94);
+    rounded_rect_path(context, btn_x, btn_y, btn_w, btn_h, 10.0);
+    let _ = context.set_source(&btn_grad);
+    let _ = context.fill_preserve();
+    context.set_source_rgba(1.0, 224.0 / 255.0, 196.0 / 255.0, 0.34);
+    context.set_line_width(1.0);
+    let _ = context.stroke();
 
     context.select_font_face(
         "Sans",
@@ -3445,7 +3510,7 @@ fn draw_scroll_popup(
     let btn_text = "Download Extension";
     if let Ok(extents) = context.text_extents(btn_text) {
         let text_x = btn_x + (btn_w - extents.width()) / 2.0 - extents.x_bearing();
-        let text_y = btn_y + (btn_h + extents.height()) / 2.0 - extents.y_bearing();
+        let text_y = btn_y + (btn_h - extents.height()) / 2.0 - extents.y_bearing();
         context.move_to(text_x, text_y);
         let _ = context.show_text(btn_text);
     }
@@ -3519,8 +3584,11 @@ fn draw_crosshair_mode_bubble(
 
 fn draw_window_picker(
     context: &gtk4::cairo::Context,
+    center_x: f64,
+    center_y: f64,
     screen_width: f64,
     screen_height: f64,
+    background: Option<&BackgroundFrame>,
     windows: &[crate::compositor::WindowInfo],
     hovered_entry: i32,
 ) {
@@ -3536,17 +3604,21 @@ fn draw_window_picker(
 
     let n = windows.len();
     let total_h = PAD * 2.0 + HEADER_H + n as f64 * ITEM_H;
-    let popup_x = (screen_width - MENU_W) / 2.0;
-    let popup_y = (screen_height - total_h) / 2.0;
+    let popup_x = (center_x - MENU_W / 2.0).clamp(10.0, (screen_width - MENU_W - 10.0).max(10.0));
+    let popup_y =
+        (center_y - total_h / 2.0).clamp(10.0, (screen_height - total_h - 10.0).max(10.0));
 
-    // Solid dark background matching recording menu style
-    rounded_rect_path(context, popup_x, popup_y, MENU_W, total_h, 12.0);
-    context.set_source_rgba(30.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 235.0 / 255.0);
-    let _ = context.fill();
-    rounded_rect_path(context, popup_x, popup_y, MENU_W, total_h, 12.0);
-    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
-    context.set_line_width(1.0);
-    let _ = context.stroke();
+    draw_popup_panel(
+        context,
+        popup_x,
+        popup_y,
+        MENU_W,
+        total_h,
+        12.0,
+        screen_width,
+        screen_height,
+        background,
+    );
 
     // Section header "Select a Window"
     context.select_font_face(

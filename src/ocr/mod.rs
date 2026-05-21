@@ -27,7 +27,7 @@ const TESS_OEM: &str = "1";
 ///  - 4  : single column of text of variable sizes (good for forms / lists)
 ///  - 3  : fully automatic page segmentation, no OSD (general fallback)
 ///  - 11 : sparse text — find as much text as possible in no particular order
-
+///
 /// Errors that can occur during OCR operations
 #[derive(Debug, Error)]
 pub enum OcrError {
@@ -419,7 +419,7 @@ fn run_ocr_pipeline(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<Ocr
 
     // Primary: Tesseract with optimized settings
     match run_tesseract_engine(rgba_image, config) {
-        Ok(result) => return Ok(result),
+        Ok(result) => Ok(result),
         Err(tess_err) => {
             // Fallback: neural OCR engine if Tesseract fails
             if let Some((text, confidence)) = ocrs_engine::run_apexshot_ocr(rgba_image) {

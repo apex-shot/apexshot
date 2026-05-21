@@ -43,7 +43,7 @@ fn ensure_cache_dir() -> std::io::Result<()> {
 
 /// Get the cached path for a model URL
 fn cached_model_path(url: &str) -> PathBuf {
-    let filename = url.split('/').last().unwrap_or("model.rten");
+    let filename = url.split('/').next_back().unwrap_or("model.rten");
     model_cache_dir().join(filename)
 }
 
