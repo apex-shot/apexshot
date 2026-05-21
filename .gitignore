@@ -53,6 +53,9 @@ Thumbs.db
 .env
 .env.local
 
+# Tool caches
+.antigravitycli/
+
 # Cache
 .cache/
 *.log
