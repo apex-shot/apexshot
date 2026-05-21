@@ -12,6 +12,7 @@ mod icons;
 mod layout;
 pub(crate) mod recording;
 mod state;
+mod webcam;
 mod window;
 
 #[cfg(test)]

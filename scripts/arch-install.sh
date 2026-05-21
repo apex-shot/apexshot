@@ -494,6 +494,11 @@ install_from_source() {
     info "Installing build dependencies..."
     run_spinner "Installing dependencies..." \
         bash -c "${SUDO} pacman -S --needed --noconfirm ${deps[*]}"
+
+    if command -v systemctl >/dev/null 2>&1; then
+        run_spinner "Restarting desktop portal services..." \
+            bash -c "systemctl --user restart xdg-desktop-portal '${portal_backend}.service' 2>/dev/null || systemctl --user restart xdg-desktop-portal 2>/dev/null || true"
+    fi
     
     ok "Dependencies installed"
     

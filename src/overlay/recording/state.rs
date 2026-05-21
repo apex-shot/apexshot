@@ -1,6 +1,8 @@
 //! Recording panel state, separated from the screenshot capture state.
 
 use super::layout::RecordPanelTile;
+use crate::overlay::webcam::{WebcamFrame, WebcamPreview};
+use std::sync::{Arc, Mutex};
 
 /// Mirrors the C++ CaptureIntent enum — distinguishes what the user
 /// wants to do with the selected area when they confirm.
@@ -90,6 +92,8 @@ pub(crate) struct RecordingState {
     pub(crate) dragging_webcam: bool,
     pub(crate) webcam_drag_offset_x: f64,
     pub(crate) webcam_drag_offset_y: f64,
+    pub(crate) webcam_preview: Option<WebcamPreview>,
+    pub(crate) webcam_frame: Option<Arc<Mutex<Option<WebcamFrame>>>>,
 }
 
 impl Default for RecordingState {
@@ -146,6 +150,8 @@ impl Default for RecordingState {
             dragging_webcam: false,
             webcam_drag_offset_x: 0.0,
             webcam_drag_offset_y: 0.0,
+            webcam_preview: None,
+            webcam_frame: None,
         }
     }
 }

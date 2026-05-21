@@ -162,6 +162,12 @@ pub fn install_checkbox_behaviors(
     });
 }
 
+fn screenshot_or_general_shortcuts_configured(config: &crate::config::AppConfig) -> bool {
+    !crate::hotkeys::hotkey_config_from_app_config(config)
+        .bindings
+        .is_empty()
+}
+
 pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     let previous_config = load_config().sanitized();
     let mut config = previous_config.clone();
@@ -292,10 +298,13 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         uninstall_autostart_entry()?;
     }
 
-    // Start or stop daemon based on tray icon setting
+    // The daemon owns both the tray and global hotkey listeners. Keep it alive
+    // whenever either the tray is visible or any shortcut is configured; hiding
+    // the tray must not silently disable screenshot shortcuts.
     let tray_visible = config.show_menu_bar_icon;
+    let daemon_needed = tray_visible || screenshot_or_general_shortcuts_configured(&config);
     std::thread::spawn(move || {
-        if tray_visible {
+        if daemon_needed {
             let _ = start_daemon_subprocess();
         } else {
             let _ = stop_daemon_via_dbus();
@@ -307,7 +316,9 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         if quick_access_runtime_changed || shortcuts_runtime_changed {
             if allow_auto_respawn && stop_daemon_via_dbus() {
                 std::thread::sleep(std::time::Duration::from_millis(250));
-                let _ = start_daemon_subprocess();
+                if daemon_needed {
+                    let _ = start_daemon_subprocess();
+                }
                 return;
             }
 
@@ -320,7 +331,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         if set_daemon_tray_visibility(tray_visible) {
             return;
         }
-        if tray_visible && allow_auto_respawn {
+        if daemon_needed && allow_auto_respawn {
             let _ = start_daemon_subprocess();
         }
     });
@@ -343,7 +354,10 @@ pub fn close_window(window: &gtk4::ApplicationWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{shortcut_label_value, should_auto_respawn_daemon_for_save_with_env};
+    use super::{
+        screenshot_or_general_shortcuts_configured, shortcut_label_value,
+        should_auto_respawn_daemon_for_save_with_env,
+    };
 
     #[test]
     fn button_label_value_treats_placeholder_as_empty() {
@@ -363,5 +377,40 @@ mod tests {
     fn auto_respawn_is_enabled_for_desktop_managed_daemon_sessions() {
         assert!(should_auto_respawn_daemon_for_save_with_env(true, false));
         assert!(should_auto_respawn_daemon_for_save_with_env(false, true));
+    }
+
+    #[test]
+    fn configured_screenshot_shortcuts_keep_daemon_needed_when_tray_hidden() {
+        let config = crate::config::AppConfig {
+            show_menu_bar_icon: false,
+            shortcut_capture_area: "Ctrl+Alt+4".into(),
+            ..Default::default()
+        };
+        assert!(screenshot_or_general_shortcuts_configured(&config));
+    }
+
+    #[test]
+    fn daemon_not_needed_when_tray_hidden_and_all_shortcuts_empty() {
+        let config = crate::config::AppConfig {
+            show_menu_bar_icon: false,
+            shortcut_open_file: String::new(),
+            shortcut_open_from_clipboard: String::new(),
+            shortcut_restore_recently_closed: String::new(),
+            shortcut_toggle_overlays: String::new(),
+            shortcut_capture_area: String::new(),
+            shortcut_capture_crosshair: String::new(),
+            shortcut_capture_fullscreen: String::new(),
+            shortcut_capture_window: String::new(),
+            shortcut_show_last_preview: String::new(),
+            shortcut_open_recording_ui: String::new(),
+            shortcut_record_screen: String::new(),
+            shortcut_record_area: String::new(),
+            shortcut_recording_pause_resume: String::new(),
+            shortcut_recording_stop_save: String::new(),
+            shortcut_recording_restart: String::new(),
+            shortcut_recording_discard: String::new(),
+            ..Default::default()
+        };
+        assert!(!screenshot_or_general_shortcuts_configured(&config));
     }
 }

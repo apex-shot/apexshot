@@ -26,6 +26,7 @@ use super::recording::hit_testing::{
 use super::recording::layout::{compute_dropdown_popup_y, RecordPanelTile};
 use super::recording::state::{OverlayIntent, SettingsTab};
 use super::state::{DragMode, OverlayMode, SelectorState};
+use super::webcam::{first_webcam_device, start_webcam_preview};
 use gtk4::gdk::Key;
 use gtk4::{
     gdk,
@@ -37,6 +38,22 @@ use gtk4::{
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::sync::{Arc, Mutex};
 use x11rb::wrapper::ConnectionExt;
+
+fn sync_webcam_preview(st: &mut SelectorState) {
+    if !st.recording.rec_webcam || st.recording.webcam_device < 0 {
+        st.recording.webcam_preview = None;
+        st.recording.webcam_frame = None;
+        return;
+    }
+    if st.recording.webcam_preview.is_none() {
+        if let Some(preview) =
+            start_webcam_preview(st.recording.webcam_device, st.recording.webcam_flip)
+        {
+            st.recording.webcam_frame = Some(preview.frame_handle());
+            st.recording.webcam_preview = Some(preview);
+        }
+    }
+}
 
 pub(crate) fn send_selection_result(
     state: &Arc<Mutex<SelectorState>>,
@@ -278,6 +295,14 @@ fn aspect_ratio_for_index(index: usize) -> f64 {
     RATIOS.get(index).copied().unwrap_or(0.0)
 }
 
+fn active_aspect_ratio(st: &SelectorState) -> f64 {
+    if st.recording.panel_open {
+        aspect_ratio_for_index(st.recording.record_aspect_ratio_index)
+    } else {
+        aspect_ratio_for_index(st.capture_aspect_ratio_index)
+    }
+}
+
 fn apply_aspect_to_selection(
     st: &mut SelectorState,
     ratio: f64,
@@ -477,6 +502,20 @@ pub(crate) fn setup_window(
 
     // Set the drawing area as the child
     window.set_child(Some(&drawing_area));
+
+    let state_webcam_tick = state.clone();
+    drawing_area.add_tick_callback(move |area, _| {
+        if state_webcam_tick
+            .lock()
+            .map(|st| st.recording.rec_webcam && st.recording.webcam_preview.is_some())
+            .unwrap_or(false)
+        {
+            area.queue_draw();
+            glib::ControlFlow::Continue
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
 
     let motion_controller = EventControllerMotion::new();
     let state_motion = state.clone();
@@ -1468,7 +1507,11 @@ pub(crate) fn setup_window(
                 y,
             ) {
                 match item {
-                    0 => st.recording.webcam_device = -1,
+                    0 => {
+                        st.recording.webcam_device = -1;
+                        st.recording.webcam_preview = None;
+                        st.recording.webcam_frame = None;
+                    }
                     1 => st.recording.webcam_size = 0,
                     2 => st.recording.webcam_size = 1,
                     3 => st.recording.webcam_size = 2,
@@ -1478,9 +1521,20 @@ pub(crate) fn setup_window(
                     7 => st.recording.webcam_shape = 1,
                     8 => st.recording.webcam_shape = 2,
                     9 => st.recording.webcam_shape = 3,
-                    10 => st.recording.webcam_flip = !st.recording.webcam_flip,
+                    10 => {
+                        st.recording.webcam_flip = !st.recording.webcam_flip;
+                        st.recording.webcam_preview = None;
+                        st.recording.webcam_frame = None;
+                    }
+                    device_id if device_id >= 100 => {
+                        st.recording.webcam_device = device_id - 100;
+                        st.recording.rec_webcam = true;
+                        st.recording.webcam_preview = None;
+                        st.recording.webcam_frame = None;
+                    }
                     _ => {}
                 }
+                sync_webcam_preview(&mut st);
                 st.recording.hovered_webcam_item = -1;
                 drop(st);
                 if let Some(da) = drawing_area_weak_click.upgrade() {
@@ -1716,6 +1770,12 @@ pub(crate) fn setup_window(
                             }
                             RecordPanelTile::Webcam => {
                                 st.recording.rec_webcam = !st.recording.rec_webcam;
+                                if st.recording.rec_webcam && st.recording.webcam_device < 0 {
+                                    if let Some(device) = first_webcam_device() {
+                                        st.recording.webcam_device = device;
+                                    }
+                                }
+                                sync_webcam_preview(&mut st);
                                 st.recording.crop_menu_open = false;
                                 st.recording.settings_menu_open = false;
                                 st.recording.settings_dropdown_open = None;
@@ -2048,6 +2108,15 @@ pub(crate) fn setup_window(
                 return;
             }
             update_selection_for_drag(&mut st, x, y, screen_width as f64, screen_height as f64);
+            let ratio = active_aspect_ratio(&st);
+            if ratio > 0.0 && !matches!(st.drag_mode, Some(DragMode::Move)) {
+                apply_aspect_to_selection(
+                    &mut st,
+                    ratio,
+                    screen_width as f64,
+                    screen_height as f64,
+                );
+            }
             drop(st);
 
             if let Some(drawing_area) = drawing_area_weak.upgrade() {
@@ -2095,6 +2164,15 @@ pub(crate) fn setup_window(
                 return;
             }
             update_selection_for_drag(&mut st, x, y, screen_width as f64, screen_height as f64);
+            let ratio = active_aspect_ratio(&st);
+            if ratio > 0.0 && !matches!(st.drag_mode, Some(DragMode::Move)) {
+                apply_aspect_to_selection(
+                    &mut st,
+                    ratio,
+                    screen_width as f64,
+                    screen_height as f64,
+                );
+            }
             st.is_dragging = false;
             st.completed = true;
             st.drag_mode = None;

@@ -7,6 +7,7 @@ use super::recording::layout::{
 };
 use super::recording::state::{OverlayIntent, SettingsTab};
 use super::state::{OverlayMode, SelectorState};
+use super::webcam::WebcamFrame;
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
@@ -2645,31 +2646,51 @@ pub(crate) fn draw_webcam_options(
     let header_h = 30.0;
     let pad = 8.0;
 
-    let sections: &[&[(&str, bool, i32)]] = &[
-        &[("Camera", false, -1), ("None", true, 0)],
-        &[
-            ("Size", false, -1),
-            ("Small", true, 1),
-            ("Medium", true, 2),
-            ("Large", true, 3),
-            ("Huge", true, 4),
+    let webcam_devices = super::webcam::enumerate_webcam_devices();
+    let mut camera_section: Vec<(String, bool, i32)> = vec![
+        ("Camera".to_string(), false, -1),
+        ("None".to_string(), true, 0),
+    ];
+    for device in webcam_devices {
+        camera_section.push((
+            format!("Camera {device} (/dev/video{device})"),
+            true,
+            100 + device,
+        ));
+    }
+
+    let sections: Vec<Vec<(String, bool, i32)>> = vec![
+        camera_section,
+        vec![
+            ("Size".to_string(), false, -1),
+            ("Small".to_string(), true, 1),
+            ("Medium".to_string(), true, 2),
+            ("Large".to_string(), true, 3),
+            ("Huge".to_string(), true, 4),
         ],
-        &[
-            ("Click on camera to toggle Full Screen", false, -1),
-            ("Full Screen", true, 5),
+        vec![
+            (
+                "Click on camera to toggle Full Screen".to_string(),
+                false,
+                -1,
+            ),
+            ("Full Screen".to_string(), true, 5),
         ],
-        &[
-            ("Shape", false, -1),
-            ("Circle", true, 6),
-            ("Square", true, 7),
-            ("Rectangle", true, 8),
-            ("Vertical", true, 9),
+        vec![
+            ("Shape".to_string(), false, -1),
+            ("Circle".to_string(), true, 6),
+            ("Square".to_string(), true, 7),
+            ("Rectangle".to_string(), true, 8),
+            ("Vertical".to_string(), true, 9),
         ],
-        &[("Options", false, -1), ("Flip Camera", true, 10)],
+        vec![
+            ("Options".to_string(), false, -1),
+            ("Flip Camera".to_string(), true, 10),
+        ],
     ];
 
     let mut total_h = pad * 2.0;
-    for section in sections {
+    for section in &sections {
         for (ii, _) in section.iter().enumerate() {
             total_h += if ii == 0 { header_h } else { item_h };
         }
@@ -2703,7 +2724,7 @@ pub(crate) fn draw_webcam_options(
                 context.set_font_size(11.0);
                 context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
                 context.move_to(popup_x + 18.0, curr_y + 14.0);
-                context.show_text(label).ok();
+                context.show_text(label.as_str()).ok();
                 curr_y += header_h;
             } else {
                 // Clickable item
@@ -2774,7 +2795,7 @@ pub(crate) fn draw_webcam_options(
                 context.set_font_size(13.0);
                 context.set_source_rgba(text_color.0, text_color.1, text_color.2, text_color.3);
                 context.move_to(popup_x + 32.0, curr_y + item_h / 2.0 + 4.5);
-                context.show_text(label).ok();
+                context.show_text(label.as_str()).ok();
 
                 curr_y += item_h;
             }
@@ -2846,6 +2867,7 @@ fn draw_webcam_preview(
     webcam_rel_x: f64,
     webcam_rel_y: f64,
     webcam_device: i32,
+    webcam_frame: Option<WebcamFrame>,
 ) {
     let rect = webcam_preview_rect(
         sel_x,
@@ -2873,8 +2895,29 @@ fn draw_webcam_preview(
         let radius = if webcam_shape == 1 { 8.0 } else { 12.0 };
         rounded_rect_path(context, rect.x, rect.y, rect.width, rect.height, radius);
     }
-    context.set_source_rgba(0.0, 0.0, 0.0, 180.0 / 255.0);
-    let _ = context.fill_preserve();
+    if let Some(frame) = webcam_frame {
+        context.clip_preserve();
+        if let Ok(surface) = gtk4::cairo::ImageSurface::create_for_data(
+            frame.bgra,
+            gtk4::cairo::Format::ARgb32,
+            frame.width,
+            frame.height,
+            frame.width * 4,
+        ) {
+            let _ = context.save();
+            context.translate(rect.x, rect.y);
+            context.scale(
+                rect.width / frame.width as f64,
+                rect.height / frame.height as f64,
+            );
+            let _ = context.set_source_surface(&surface, 0.0, 0.0);
+            let _ = context.paint();
+            let _ = context.restore();
+        }
+    } else {
+        context.set_source_rgba(0.0, 0.0, 0.0, 180.0 / 255.0);
+        let _ = context.fill_preserve();
+    }
     context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
     context.set_line_width(1.5);
     let _ = context.stroke();
@@ -3178,6 +3221,10 @@ pub(crate) fn draw_overlay(
                     st.recording.webcam_rel_x,
                     st.recording.webcam_rel_y,
                     st.recording.webcam_device,
+                    st.recording
+                        .webcam_frame
+                        .as_ref()
+                        .and_then(|frame| frame.lock().ok().and_then(|slot| slot.clone())),
                 );
             }
             // Click options menu (on top of recording panel)

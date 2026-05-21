@@ -453,11 +453,24 @@ pub(crate) fn webcam_options_hit_item(
     let header_h = 30.0;
     let pad = 8.0;
 
-    let item_counts: &[usize] = &[1, 4, 1, 4, 1];
+    let camera_ids: Vec<i32> = std::iter::once(0)
+        .chain(
+            crate::overlay::webcam::enumerate_webcam_devices()
+                .into_iter()
+                .map(|d| 100 + d),
+        )
+        .collect();
+    let sections: Vec<Vec<i32>> = vec![
+        camera_ids,
+        vec![1, 2, 3, 4],
+        vec![5],
+        vec![6, 7, 8, 9],
+        vec![10],
+    ];
 
     let mut total_h = pad * 2.0;
-    for &c in item_counts {
-        total_h += header_h + c as f64 * item_h;
+    for section in &sections {
+        total_h += header_h + section.len() as f64 * item_h;
     }
 
     let menu_x =
@@ -475,10 +488,9 @@ pub(crate) fn webcam_options_hit_item(
     }
 
     let mut curr_y = menu_y + pad;
-    let mut running_idx = 0i32;
-    for &count in item_counts {
+    for section in &sections {
         curr_y += header_h; // skip header
-        for _ in 0..count {
+        for &item_id in section {
             let item_rect = RectF {
                 x: menu_x + 4.0,
                 y: curr_y + 1.0,
@@ -486,10 +498,9 @@ pub(crate) fn webcam_options_hit_item(
                 height: item_h - 2.0,
             };
             if item_rect.contains(x, y) {
-                return Some(running_idx);
+                return Some(item_id);
             }
             curr_y += item_h;
-            running_idx += 1;
         }
     }
     None
@@ -581,8 +592,9 @@ pub(crate) fn webcam_options_menu_contains(
     let header_h = 30.0;
     let pad = 8.0;
 
-    let item_counts: &[usize] = &[1, 4, 1, 4, 1];
-    let mut total_h = pad * 2.0;
+    let camera_count = 1 + crate::overlay::webcam::enumerate_webcam_devices().len();
+    let item_counts: &[usize] = &[4, 1, 4, 1];
+    let mut total_h = pad * 2.0 + header_h + camera_count as f64 * item_h;
     for &c in item_counts {
         total_h += header_h + c as f64 * item_h;
     }
