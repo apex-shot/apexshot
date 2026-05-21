@@ -73,8 +73,7 @@ fn ensure_model_cached(url: &str) -> anyhow::Result<PathBuf> {
         .with_context(|| format!("Failed to create cache file: {}", cache_path.display()))?;
 
     let mut reader = response.into_reader();
-    std::io::copy(&mut reader, &mut file)
-        .context("Failed to write model to cache")?;
+    std::io::copy(&mut reader, &mut file).context("Failed to write model to cache")?;
 
     eprintln!("[apexshot-ocr] Model cached to {}", cache_path.display());
     Ok(cache_path)
@@ -85,16 +84,16 @@ static OCR_ENGINE: OnceLock<Option<OcrEngine>> = OnceLock::new();
 
 /// Initialize the OCR engine, loading models from cache or downloading them
 fn init_ocr_engine() -> anyhow::Result<Option<OcrEngine>> {
-    let detection_path = ensure_model_cached(DETECTION_MODEL_URL)
-        .context("Failed to cache detection model")?;
-    let recognition_path = ensure_model_cached(RECOGNITION_MODEL_URL)
-        .context("Failed to cache recognition model")?;
+    let detection_path =
+        ensure_model_cached(DETECTION_MODEL_URL).context("Failed to cache detection model")?;
+    let recognition_path =
+        ensure_model_cached(RECOGNITION_MODEL_URL).context("Failed to cache recognition model")?;
 
-    let detection_model = rten::Model::load_file(&detection_path)
-        .context("Failed to load detection model")?;
+    let detection_model =
+        rten::Model::load_file(&detection_path).context("Failed to load detection model")?;
 
-    let recognition_model = rten::Model::load_file(&recognition_path)
-        .context("Failed to load recognition model")?;
+    let recognition_model =
+        rten::Model::load_file(&recognition_path).context("Failed to load recognition model")?;
 
     // Use beam search for better accuracy on code with many symbols
     let engine = OcrEngine::new(OcrEngineParams {
@@ -161,10 +160,7 @@ fn rgba_to_hwc_tensor(image: &RgbaImage) -> rten_tensor::NdTensor<u8, 3> {
         rgb_data.push(pixel[2]); // B
     }
 
-    rten_tensor::NdTensor::from_data(
-        [height as usize, width as usize, 3],
-        rgb_data,
-    )
+    rten_tensor::NdTensor::from_data([height as usize, width as usize, 3], rgb_data)
 }
 
 /// Track the leftmost X coordinate to reconstruct indentation
@@ -208,8 +204,7 @@ pub fn run_apexshot_ocr(rgba_image: &RgbaImage) -> Option<(String, i32)> {
     let processed = preprocess_for_code(rgba_image);
 
     let tensor = rgba_to_hwc_tensor(&processed);
-    let img_source = ImageSource::from_tensor(tensor.view(), DimOrder::Hwc)
-        .ok()?;
+    let img_source = ImageSource::from_tensor(tensor.view(), DimOrder::Hwc).ok()?;
 
     let input = engine.prepare_input(img_source).ok()?;
 
