@@ -1,5 +1,5 @@
 use apexshot::backend::{DisplayBackend, WaylandBackend, X11Backend};
-use apexshot::overlay::select_crosshair_from_capture_with_gtk;
+use apexshot::overlay::{select_crosshair_from_capture_with_gtk, OverlaySelection};
 
 fn main() {
     let capture = if WaylandBackend::is_supported() {
@@ -24,13 +24,13 @@ fn main() {
     eprintln!("Click and drag to select an area, press ESC to cancel.");
 
     match select_crosshair_from_capture_with_gtk(&capture) {
-        Ok(Some(area)) => {
+        Ok(OverlaySelection::Area(Some(area))) => {
             println!(
                 "Selected area: x={}, y={}, width={}, height={}",
                 area.x, area.y, area.width, area.height
             );
         }
-        Ok(None) => {
+        Ok(OverlaySelection::Area(None)) | Ok(OverlaySelection::Recording(_)) => {
             println!("Selection cancelled");
         }
         Err(e) => {

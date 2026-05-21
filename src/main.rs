@@ -370,9 +370,9 @@ async fn async_main(args: Vec<String>) {
             let params: apexshot::recording::RecordingControlsParams =
                 serde_json::from_str(&args[2]).unwrap();
             let seconds: u32 = args[3].parse().unwrap_or(3);
-            apexshot::recording::run_recording_countdown_bar(params, seconds)
+            let completed = apexshot::recording::run_recording_countdown_bar(params, seconds)
                 .expect("Failed to run recording countdown");
-            std::process::exit(0);
+            std::process::exit(if completed { 0 } else { 2 });
         }
         "native-host" => {
             if args.len() >= 3 {
@@ -1176,14 +1176,6 @@ fn run_daemon_with_gtk_on_main_thread() {
                 eprintln!("[gtk] SelectAreaLive received — launching C++ overlay");
                 let live_start = std::time::Instant::now();
                 let result = run_capture_overlay(None)
-                    .map(|opt| {
-                        opt.map(|a| apexshot::SelectionArea {
-                            x: a.x,
-                            y: a.y,
-                            width: a.width,
-                            height: a.height,
-                        })
-                    })
                     .map_err(|e| apexshot::SelectionError::InitError(e.to_string()));
                 eprintln!(
                     "[gtk] SelectAreaLive completed after {:.0}ms",
@@ -1212,9 +1204,13 @@ fn run_daemon_with_gtk_on_main_thread() {
             } => {
                 eprintln!("[gtk] RunCountdown received — launching countdown UI");
                 if let Some(params) = params {
-                    if let Err(err) = run_recording_countdown_bar(params, seconds) {
-                        eprintln!("[gtk] Countdown bar failed: {err}");
-                        apexshot::recording::countdown_overlay::run_countdown_overlay(seconds);
+                    match run_recording_countdown_bar(params, seconds) {
+                        Ok(true) => {}
+                        Ok(false) => eprintln!("[gtk] Countdown cancelled"),
+                        Err(err) => {
+                            eprintln!("[gtk] Countdown bar failed: {err}");
+                            apexshot::recording::countdown_overlay::run_countdown_overlay(seconds);
+                        }
                     }
                 } else {
                     apexshot::recording::countdown_overlay::run_countdown_overlay(seconds);
@@ -1230,7 +1226,10 @@ fn run_daemon_with_gtk_on_main_thread() {
                 let tmp_bg = save_temp_png(&capture);
                 let area = run_capture_overlay(tmp_bg.as_deref())
                     .ok()
-                    .flatten()
+                    .and_then(|selection| match selection {
+                        apexshot::OverlaySelection::Area(area) => area,
+                        apexshot::OverlaySelection::Recording(_) => None,
+                    })
                     .map(|a| apexshot::SelectionArea {
                         x: a.x,
                         y: a.y,
@@ -1967,7 +1966,7 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
             let selection =
                 run_capture_overlay(None).map_err(|e| format!("Selection failed: {}", e))?;
-            if let Some(area) = selection {
+            if let apexshot::OverlaySelection::Area(Some(area)) = selection {
                 config.x = Some(area.x);
                 config.y = Some(area.y);
                 config.width = Some(area.width as u32);

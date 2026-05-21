@@ -1,4 +1,4 @@
-use super::api::{SelectionError, SelectionResult};
+use super::api::{OverlaySelection, SelectionError, SelectionResult};
 use super::background::BackgroundFrame;
 use super::drawing::{draw_overlay, CLICK_COLORS_LEN};
 use super::geometry::{
@@ -27,6 +27,7 @@ use super::recording::layout::{compute_dropdown_popup_y, RecordPanelTile};
 use super::recording::state::{OverlayIntent, SettingsTab};
 use super::state::{DragMode, OverlayMode, SelectorState};
 use super::webcam::{first_webcam_device, start_webcam_preview};
+use crate::capture_overlay::{RecordingRequest, RecordingType};
 use gtk4::gdk::Key;
 use gtk4::{
     gdk,
@@ -38,6 +39,53 @@ use gtk4::{
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::sync::{Arc, Mutex};
 use x11rb::wrapper::ConnectionExt;
+
+fn recording_request_from_state(
+    st: &SelectorState,
+    record_type: RecordingType,
+) -> RecordingRequest {
+    let area = current_selection_rect(st);
+    RecordingRequest {
+        x: area.left.round() as i32,
+        y: area.top.round() as i32,
+        width: area.width().round() as i32,
+        height: area.height().round() as i32,
+        record_type,
+        controls: st.recording.rec_controls,
+        mic: st.recording.mic_toggle,
+        speaker: st.recording.speaker_toggle,
+        clicks: st.recording.rec_clicks,
+        keystrokes: st.recording.rec_keystrokes,
+        webcam: st.recording.rec_webcam,
+        click_size: st.recording.click_size,
+        click_color: st.recording.click_color as u8,
+        click_style: st.recording.click_style as u8,
+        click_animate: st.recording.click_animate,
+        webcam_size: st.recording.webcam_size as u8,
+        webcam_shape: st.recording.webcam_shape as u8,
+        webcam_flip: st.recording.webcam_flip,
+        webcam_device: st.recording.webcam_device,
+        webcam_rel_x: st.recording.webcam_rel_x,
+        webcam_rel_y: st.recording.webcam_rel_y,
+        display_rec_time: st.recording.display_rec_time,
+        hidpi: st.recording.hidpi,
+        notifications: st.recording.do_not_disturb,
+        cursor: st.recording.show_cursor,
+        remember_selection: st.recording.remember_selection,
+        dim_screen: st.recording.dim_screen,
+        countdown: st.recording.show_countdown,
+        video_max_res: st.recording.video_max_res as u8,
+        video_fps: st.recording.video_fps as u8,
+        record_mono: st.recording.record_mono,
+        open_editor: st.recording.open_editor,
+        gif_fps: st.recording.gif_fps.round().clamp(5.0, 60.0) as u8,
+        gif_quality: st.recording.gif_quality,
+        gif_size_idx: st.recording.gif_size_idx as u8,
+        optimize_gif: st.recording.optimize_gif,
+        fullscreen: st.fullscreen_mode,
+        ..RecordingRequest::default()
+    }
+}
 
 fn sync_webcam_preview(st: &mut SelectorState) {
     if !st.recording.rec_webcam || st.recording.webcam_device < 0 {
@@ -72,9 +120,9 @@ pub(crate) fn send_selection_result(
     let _ = intent;
 
     let result = if area.is_valid() {
-        Ok(Some(area))
+        Ok(OverlaySelection::Area(Some(area)))
     } else {
-        Ok(None)
+        Ok(OverlaySelection::Area(None))
     };
     let _ = result_tx.send(result);
     window.close();
@@ -1789,7 +1837,22 @@ pub(crate) fn setup_window(
                             RecordPanelTile::Keystrokes => {
                                 st.recording.rec_keystrokes = !st.recording.rec_keystrokes
                             }
-                            _ => {}
+                            RecordPanelTile::Size => {}
+                            RecordPanelTile::RecordVideo | RecordPanelTile::RecordGif => {
+                                let record_type = if matches!(tile, RecordPanelTile::RecordGif) {
+                                    RecordingType::Gif
+                                } else {
+                                    RecordingType::Video
+                                };
+                                let request = recording_request_from_state(&st, record_type);
+                                drop(st);
+                                let _ =
+                                    result_tx_click.send(Ok(OverlaySelection::Recording(request)));
+                                if let Some(window) = window_weak_click.upgrade() {
+                                    window.close();
+                                }
+                                return;
+                            }
                         }
                         drop(st);
                         if let Some(da) = drawing_area_weak_click.upgrade() {
@@ -2223,7 +2286,7 @@ pub(crate) fn setup_window(
                 st.fullscreen_mode = false;
                 drop(st);
 
-                let _ = result_tx_esc.send(Ok(None));
+                let _ = result_tx_esc.send(Ok(OverlaySelection::Area(None)));
 
                 if let Some(window) = window_weak_esc.upgrade() {
                     window.close();

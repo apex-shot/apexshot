@@ -484,6 +484,7 @@ install_from_source() {
         ffmpeg
         grim
         slurp
+        wf-recorder
         xdg-desktop-portal
     )
 

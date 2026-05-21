@@ -3068,6 +3068,7 @@ async fn handle_open_recording_ui(_tx: std::sync::mpsc::Sender<DaemonAction>) {
 
 async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::capture_overlay::run_capture_overlay;
+    use crate::overlay::OverlaySelection;
     use crate::recording::{
         run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
     };
@@ -3078,8 +3079,8 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     let selection = tokio::task::spawn_blocking(|| run_capture_overlay(None)).await;
 
     let cpp_area = match selection {
-        Ok(Ok(Some(a))) => a,
-        Ok(Ok(None)) => {
+        Ok(Ok(OverlaySelection::Area(Some(a)))) => a,
+        Ok(Ok(OverlaySelection::Area(None))) | Ok(Ok(OverlaySelection::Recording(_))) => {
             eprintln!("[daemon] Area selection cancelled.");
             return;
         }

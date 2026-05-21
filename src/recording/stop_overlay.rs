@@ -1,6 +1,5 @@
+use crate::overlay::webcam::start_webcam_preview;
 use gdk4x11::X11Surface;
-use gst::prelude::*;
-use gstreamer as gst;
 use gtk4::cairo;
 use gtk4::gdk::{self, Key};
 use gtk4::{
@@ -13,7 +12,10 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -159,18 +161,26 @@ pub fn run_recording_controls(
 pub fn run_recording_countdown_bar(
     params: RecordingControlsParams,
     seconds: u32,
-) -> Result<(), StopOverlayError> {
+) -> Result<bool, StopOverlayError> {
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
         .build();
 
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_activate = cancelled.clone();
     app.connect_activate(move |application| {
         let dim_windows = setup_dim_windows(application, params);
-        setup_countdown_window(application, params, seconds, dim_windows);
+        setup_countdown_window(
+            application,
+            params,
+            seconds,
+            dim_windows,
+            cancelled_activate.clone(),
+        );
     });
 
     let _ = app.run_with_args::<String>(&[]);
-    Ok(())
+    Ok(!cancelled.load(Ordering::Relaxed))
 }
 
 pub fn run_recording_stop_overlay(
@@ -473,83 +483,180 @@ fn setup_countdown_window(
     params: RecordingControlsParams,
     seconds: u32,
     dim_windows: Vec<ApplicationWindow>,
+    cancelled: Arc<AtomicBool>,
 ) {
-    install_controls_css();
-
     let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
-    let initial_pos = compute_bar_position(&params, screen_w, screen_h);
+    let countdown_center = if !params.is_fullscreen && params.capture_w > 0 && params.capture_h > 0
+    {
+        (
+            params.capture_x as f64 + params.capture_w as f64 / 2.0,
+            params.capture_y as f64 + params.capture_h as f64 / 2.0,
+        )
+    } else {
+        (screen_w as f64 / 2.0, screen_h as f64 / 2.0)
+    };
+
+    install_countdown_css();
 
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Recording Countdown")
-        .default_width(BAR_W)
-        .default_height(BAR_H)
+        .default_width(screen_w)
+        .default_height(screen_h)
         .decorated(false)
         .resizable(false)
         .focusable(false)
         .build();
+    window.set_css_classes(&["recording-countdown-overlay"]);
 
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
     if layer_shell_active {
-        let (pos_x, pos_y) = initial_pos;
         window.init_layer_shell();
-        window.set_layer(Layer::Top);
+        window.set_layer(Layer::Overlay);
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
-        window.set_margin(Edge::Top, pos_y);
-        window.set_margin(Edge::Left, pos_x);
+        window.set_anchor(Edge::Bottom, true);
+        window.set_anchor(Edge::Right, true);
         window.set_keyboard_mode(KeyboardMode::None);
         window.set_exclusive_zone(-1);
         window.set_namespace(Some("apexshot-recording-countdown"));
     } else {
+        window.fullscreen();
         window.connect_realize(clone!(
             #[weak]
             window,
             move |_| {
                 suppress_x11_controls_window_type(&window);
                 let _ = request_x11_always_on_top(&window);
-                let (x, y) = initial_pos;
-                let _ = position_x11_window(&window, x, y);
-            }
-        ));
-
-        window.connect_map(clone!(
-            #[weak]
-            window,
-            move |_| {
-                let (x, y) = initial_pos;
-                let _ = request_x11_always_on_top(&window);
-                let _ = position_x11_window(&window, x, y);
             }
         ));
     }
 
-    let label = Label::new(Some(&seconds.to_string()));
-    label.add_css_class("rec-timer");
-    label.add_css_class("countdown-label");
+    let remaining = Rc::new(Cell::new(seconds.max(1) as i32));
+    let hovered = Rc::new(Cell::new(false));
+    let drawing_area = DrawingArea::new();
+    drawing_area.set_css_classes(&["recording-countdown-canvas"]);
+    drawing_area.set_content_width(screen_w);
+    drawing_area.set_content_height(screen_h);
+    drawing_area.set_draw_func({
+        let remaining = remaining.clone();
+        let hovered = hovered.clone();
+        move |_, cr, width, height| {
+            cr.set_operator(cairo::Operator::Source);
+            cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+            let _ = cr.paint();
+            cr.set_operator(cairo::Operator::Over);
 
-    let progress_inner = GtkBox::new(Orientation::Horizontal, 0);
-    progress_inner.add_css_class("countdown-progress-inner");
-    progress_inner.set_size_request(BAR_W - 40, -1);
+            let bubble_size = 184.0;
+            let center_x = countdown_center
+                .0
+                .clamp(bubble_size / 2.0, width as f64 - bubble_size / 2.0);
+            let center_y = countdown_center
+                .1
+                .clamp(bubble_size / 2.0, height as f64 - bubble_size / 2.0);
+            let bubble_x = center_x - bubble_size / 2.0;
+            let bubble_y = center_y - bubble_size / 2.0;
+            let is_hovered = hovered.get();
 
-    let progress_outer = GtkBox::new(Orientation::Horizontal, 0);
-    progress_outer.add_css_class("countdown-progress");
-    progress_outer.append(&progress_inner);
+            cr.set_source_rgba(
+                if is_hovered { 132.0 / 255.0 } else { 0.0 },
+                if is_hovered { 38.0 / 255.0 } else { 0.0 },
+                if is_hovered { 24.0 / 255.0 } else { 0.0 },
+                if is_hovered {
+                    242.0 / 255.0
+                } else {
+                    240.0 / 255.0
+                },
+            );
+            cr.arc(
+                bubble_x + bubble_size / 2.0,
+                bubble_y + bubble_size / 2.0,
+                bubble_size / 2.0,
+                0.0,
+                std::f64::consts::TAU,
+            );
+            let _ = cr.fill();
 
-    let bar = GtkBox::new(Orientation::Vertical, 0);
-    bar.add_css_class("countdown-bar-container");
-    bar.set_valign(gtk4::Align::Center);
-    bar.set_halign(gtk4::Align::Center);
-    bar.append(&label);
-    bar.append(&progress_outer);
+            cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+            cr.set_font_size(if is_hovered { 34.0 } else { 72.0 });
+            if is_hovered {
+                cr.set_source_rgb(1.0, 228.0 / 255.0, 214.0 / 255.0);
+            } else {
+                cr.set_source_rgb(1.0, 1.0, 1.0);
+            }
+            let text = if is_hovered {
+                "Cancel".to_string()
+            } else {
+                remaining.get().to_string()
+            };
+            if let Ok(extents) = cr.text_extents(&text) {
+                cr.move_to(
+                    bubble_x + (bubble_size - extents.width()) / 2.0 - extents.x_bearing(),
+                    bubble_y + (bubble_size - extents.height()) / 2.0 - extents.y_bearing(),
+                );
+                let _ = cr.show_text(&text);
+            }
+        }
+    });
 
-    window.set_child(Some(&bar));
+    let motion = gtk4::EventControllerMotion::new();
+    motion.connect_motion({
+        let hovered = hovered.clone();
+        let drawing_area = drawing_area.clone();
+        move |_, x, y| {
+            let bubble_size = 184.0;
+            let cx = countdown_center
+                .0
+                .clamp(bubble_size / 2.0, screen_w as f64 - bubble_size / 2.0);
+            let cy = countdown_center
+                .1
+                .clamp(bubble_size / 2.0, screen_h as f64 - bubble_size / 2.0);
+            let inside = (x - cx).hypot(y - cy) <= bubble_size / 2.0;
+            if hovered.replace(inside) != inside {
+                drawing_area.queue_draw();
+            }
+        }
+    });
+    motion.connect_leave({
+        let hovered = hovered.clone();
+        let drawing_area = drawing_area.clone();
+        move |_| {
+            if hovered.replace(false) {
+                drawing_area.queue_draw();
+            }
+        }
+    });
+    drawing_area.add_controller(motion);
 
-    let remaining = Rc::new(Cell::new(seconds as f32));
-    let total = seconds as f32;
-    let label_weak = label.downgrade();
-    let progress_inner_weak = progress_inner.downgrade();
+    let click = gtk4::GestureClick::builder().button(1).build();
+    click.connect_pressed({
+        let app_weak = app.downgrade();
+        let window_weak = window.downgrade();
+        move |_, _, x, y| {
+            let bubble_size = 184.0;
+            let cx = countdown_center
+                .0
+                .clamp(bubble_size / 2.0, screen_w as f64 - bubble_size / 2.0);
+            let cy = countdown_center
+                .1
+                .clamp(bubble_size / 2.0, screen_h as f64 - bubble_size / 2.0);
+            if (x - cx).hypot(y - cy) <= bubble_size / 2.0 {
+                cancelled.store(true, Ordering::Relaxed);
+                if let Some(window) = window_weak.upgrade() {
+                    window.close();
+                }
+                if let Some(app) = app_weak.upgrade() {
+                    app.quit();
+                }
+            }
+        }
+    });
+    drawing_area.add_controller(click);
+
+    window.set_child(Some(&drawing_area));
+
+    let drawing_area_weak = drawing_area.downgrade();
     let window_weak = window.downgrade();
     let app_weak = app.downgrade();
     let dim_window_weaks: Vec<_> = dim_windows
@@ -557,10 +664,9 @@ fn setup_countdown_window(
         .map(|window| window.downgrade())
         .collect();
 
-    // Smoother tick at 60fps for progress bar
-    glib::timeout_add_local(Duration::from_millis(16), move || {
-        let current = remaining.get();
-        if current <= 0.0 {
+    glib::timeout_add_local(Duration::from_secs(1), move || {
+        let next = remaining.get() - 1;
+        if next <= 0 {
             for dim_window in &dim_window_weaks {
                 if let Some(window) = dim_window.upgrade() {
                     window.close();
@@ -577,20 +683,10 @@ fn setup_countdown_window(
             }
             return glib::ControlFlow::Break;
         }
-
-        let next = current - 0.016;
         remaining.set(next);
-
-        if let Some(label) = label_weak.upgrade() {
-            let display_secs = next.ceil() as u32;
-            label.set_text(&display_secs.to_string());
+        if let Some(area) = drawing_area_weak.upgrade() {
+            area.queue_draw();
         }
-
-        if let Some(progress) = progress_inner_weak.upgrade() {
-            let width = ((next / total) * (BAR_W - 40) as f32) as i32;
-            progress.set_size_request(width.max(0), -1);
-        }
-
         glib::ControlFlow::Continue
     });
 
@@ -697,7 +793,7 @@ fn build_dim_window(
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
     if layer_shell_active {
         window.init_layer_shell();
-        window.set_layer(Layer::Top);
+        window.set_layer(Layer::Overlay);
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
         window.set_anchor(Edge::Bottom, false);
@@ -731,6 +827,25 @@ fn build_dim_window(
 
     window.present();
     Some(window)
+}
+
+fn install_countdown_css() {
+    if let Some(display) = gdk::Display::default() {
+        let provider = CssProvider::new();
+        provider.load_from_data(
+            ".recording-countdown-overlay,
+             .recording-countdown-overlay > contents,
+             .recording-countdown-canvas {
+                background: transparent;
+                background-color: transparent;
+             }",
+        );
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
 }
 
 fn install_controls_css() {
@@ -806,6 +921,12 @@ fn install_controls_css() {
                 overflow: hidden;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.5);
                 border: 2px solid rgba(255, 255, 255, 0.2);
+            }
+            .recording-webcam-window,
+            .recording-webcam-window > contents,
+            .recording-webcam-canvas {
+                background: transparent;
+                background-color: transparent;
             }
             .webcam-picture {
                 background-color: #000;
@@ -1204,6 +1325,67 @@ fn send_net_wm_state_client_message<C: Connection>(
     Ok(())
 }
 
+fn rounded_rect_path_local(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+    let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+    cr.new_sub_path();
+    cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+    cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+    cr.arc(
+        x + r,
+        y + h - r,
+        r,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    cr.arc(
+        x + r,
+        y + r,
+        r,
+        std::f64::consts::PI,
+        std::f64::consts::PI * 1.5,
+    );
+    cr.close_path();
+}
+
+fn recording_webcam_size(
+    params: &RecordingControlsParams,
+    screen_w: i32,
+    screen_h: i32,
+) -> (i32, i32) {
+    const MARGIN: i32 = 10;
+    let bounds_w = if params.is_fullscreen || params.capture_w <= 0 {
+        screen_w
+    } else {
+        params.capture_w
+    };
+    let bounds_h = if params.is_fullscreen || params.capture_h <= 0 {
+        screen_h
+    } else {
+        params.capture_h
+    };
+
+    let (mut width, mut height) = match params.webcam_size {
+        0 => (120, 160),
+        2 => (280, 370),
+        3 => (360, 480),
+        4 => (
+            (bounds_w - 2 * MARGIN).max(1),
+            (bounds_h - 2 * MARGIN).max(1),
+        ),
+        _ => (200, 260),
+    };
+
+    match params.webcam_shape {
+        0 | 1 => height = width,
+        2 => height = ((width as f64) * 0.75).round() as i32,
+        _ => {}
+    }
+
+    width = width.min((bounds_w - 2 * MARGIN).max(1));
+    height = height.min((bounds_h - 2 * MARGIN).max(1));
+    (width, height)
+}
+
 fn setup_webcam_window(
     application: &Application,
     params: RecordingControlsParams,
@@ -1219,15 +1401,41 @@ fn setup_webcam_window(
         .focusable(false)
         .build();
 
-    window.add_css_class("webcam-window");
+    window.add_css_class("recording-webcam-window");
 
     let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
-    let size_map = [160, 240, 320, 480];
-    let size = size_map.get(params.webcam_size).copied().unwrap_or(240);
-    window.set_default_size(size, size);
+    let (mut webcam_w, mut webcam_h) = recording_webcam_size(&params, screen_w, screen_h);
+    webcam_w = webcam_w.max(1);
+    webcam_h = webcam_h.max(1);
+    window.set_default_size(webcam_w, webcam_h);
 
-    let x = (params.webcam_rel_x * screen_w as f64) as i32;
-    let y = (params.webcam_rel_y * screen_h as f64) as i32;
+    let bounds_x = if params.is_fullscreen {
+        0
+    } else {
+        params.capture_x
+    };
+    let bounds_y = if params.is_fullscreen {
+        0
+    } else {
+        params.capture_y
+    };
+    let bounds_w = if params.is_fullscreen || params.capture_w <= 0 {
+        screen_w
+    } else {
+        params.capture_w
+    };
+    let bounds_h = if params.is_fullscreen || params.capture_h <= 0 {
+        screen_h
+    } else {
+        params.capture_h
+    };
+    let max_x = (bounds_x + bounds_w - webcam_w).max(bounds_x);
+    let max_y = (bounds_y + bounds_h - webcam_h).max(bounds_y);
+    let x = (bounds_x as f64 + (max_x - bounds_x) as f64 * params.webcam_rel_x.clamp(0.0, 1.0))
+        .round() as i32;
+    let y = (bounds_y as f64
+        + (max_y - bounds_y) as f64 * (1.0 - params.webcam_rel_y.clamp(0.0, 1.0)))
+    .round() as i32;
 
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
@@ -1237,8 +1445,10 @@ fn setup_webcam_window(
         window.set_layer(Layer::Overlay);
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
-        window.set_margin(Edge::Top, y);
-        window.set_margin(Edge::Left, x);
+        window.set_margin(Edge::Top, bounds_y);
+        window.set_margin(Edge::Left, bounds_x);
+        window.set_default_size(bounds_w, bounds_h);
+        window.set_opacity(1.0);
         window.set_keyboard_mode(KeyboardMode::None);
         window.set_namespace(Some("apexshot-webcam"));
     } else {
@@ -1264,49 +1474,78 @@ fn setup_webcam_window(
         );
     }
 
-    // Use gtk4-paintable-sink for real webcam feed if device is set
-    let video_widget = if params.webcam_device >= 0 {
-        let picture = gtk4::Picture::new();
-        picture.add_css_class("webcam-picture");
-        let sink = gst::ElementFactory::make("gtk4paintablesink").build().ok();
-        if let Some(sink) = sink {
-            let paintable = sink.property::<gdk::Paintable>("paintable");
-            picture.set_paintable(Some(&paintable));
-
-            let device_str = format!("/dev/video{}", params.webcam_device);
-            let flip_str = if params.webcam_flip {
-                " ! videoflip method=horizontal-flip"
-            } else {
-                ""
-            };
-            let pipeline_str = format!(
-                "v4l2src device={} ! videoconvert{} ! videoscale ! video/x-raw,width={},height={} ! {}",
-                device_str,
-                flip_str,
-                size,
-                size,
-                sink.name()
-            );
-
-            if let Ok(pipeline) = gst::parse::launch(&pipeline_str) {
-                let _ = pipeline.set_state(gst::State::Playing);
-            }
-        }
-        Some(picture.upcast::<gtk4::Widget>())
+    let webcam_preview = if params.webcam_device >= 0 {
+        start_webcam_preview(params.webcam_device, params.webcam_flip)
     } else {
         None
     };
 
-    if let Some(widget) = video_widget {
-        window.set_child(Some(&widget));
-    } else {
-        let drawing_area = DrawingArea::new();
-        drawing_area.set_content_width(size);
-        drawing_area.set_content_height(size);
+    let drawing_area = DrawingArea::new();
+    drawing_area.set_css_classes(&["recording-webcam-canvas"]);
+    drawing_area.set_content_width(webcam_w);
+    drawing_area.set_content_height(webcam_h);
+    if layer_shell_active {
+        drawing_area.set_halign(gtk4::Align::Start);
+        drawing_area.set_valign(gtk4::Align::Start);
+        drawing_area.set_margin_start(x - bounds_x);
+        drawing_area.set_margin_top(y - bounds_y);
+    }
 
+    if let Some(preview) = webcam_preview.as_ref() {
+        let frames = preview.frame_handle();
+        drawing_area.set_draw_func(move |_, cr, w, h| {
+            let radius = (w as f64 / 2.0).min(h as f64 / 2.0);
+            cr.save().ok();
+            if params.webcam_shape == 0 {
+                cr.arc(
+                    w as f64 / 2.0,
+                    h as f64 / 2.0,
+                    radius,
+                    0.0,
+                    std::f64::consts::TAU,
+                );
+                cr.clip();
+            } else {
+                let r = if params.webcam_shape == 1 { 8.0 } else { 12.0 };
+                rounded_rect_path_local(cr, 0.0, 0.0, w as f64, h as f64, r);
+                cr.clip();
+            }
+
+            let frame = frames.lock().ok().and_then(|slot| slot.clone());
+            if let Some(frame) = frame {
+                if let Ok(surface) = cairo::ImageSurface::create_for_data(
+                    frame.bgra,
+                    cairo::Format::ARgb32,
+                    frame.width,
+                    frame.height,
+                    frame.width * 4,
+                ) {
+                    cr.scale(
+                        w as f64 / frame.width as f64,
+                        h as f64 / frame.height as f64,
+                    );
+                    let _ = cr.set_source_surface(&surface, 0.0, 0.0);
+                    let _ = cr.paint();
+                }
+            } else {
+                cr.set_source_rgb(0.05, 0.05, 0.05);
+                let _ = cr.paint();
+            }
+            cr.restore().ok();
+        });
+        let area_weak = drawing_area.downgrade();
+        glib::timeout_add_local(Duration::from_millis(33), move || {
+            if let Some(area) = area_weak.upgrade() {
+                area.queue_draw();
+                glib::ControlFlow::Continue
+            } else {
+                glib::ControlFlow::Break
+            }
+        });
+    } else {
         drawing_area.set_draw_func(move |_, cr, w, h| {
             cr.set_source_rgb(0.05, 0.05, 0.05);
-            if params.webcam_shape == 1 {
+            if params.webcam_shape == 0 {
                 cr.arc(
                     w as f64 / 2.0,
                     h as f64 / 2.0,
@@ -1315,7 +1554,8 @@ fn setup_webcam_window(
                     2.0 * std::f64::consts::PI,
                 );
             } else {
-                cr.rectangle(0.0, 0.0, w as f64, h as f64);
+                let r = if params.webcam_shape == 1 { 8.0 } else { 12.0 };
+                rounded_rect_path_local(cr, 0.0, 0.0, w as f64, h as f64, r);
             }
             let _ = cr.fill();
 
@@ -1329,8 +1569,8 @@ fn setup_webcam_window(
             cr.line_to(cx + 20.0, cy + 20.0);
             let _ = cr.stroke();
         });
-        window.set_child(Some(&drawing_area));
     }
+    window.set_child(Some(&drawing_area));
 
     let drag = GestureDrag::new();
     let current_x = Rc::new(Cell::new(x));
@@ -1356,6 +1596,8 @@ fn setup_webcam_window(
     drag.connect_drag_update(clone!(
         #[weak]
         window,
+        #[weak]
+        drawing_area,
         #[strong]
         current_x,
         #[strong]
@@ -1365,20 +1607,35 @@ fn setup_webcam_window(
         #[strong]
         drag_start_y,
         move |_, dx, dy| {
-            let next_x = (drag_start_x.get() + dx as i32).clamp(0, screen_w - size);
-            let next_y = (drag_start_y.get() + dy as i32).clamp(0, screen_h - size);
+            let next_x = (drag_start_x.get() + dx as i32).clamp(bounds_x, max_x);
+            let next_y = (drag_start_y.get() + dy as i32).clamp(bounds_y, max_y);
             current_x.set(next_x);
             current_y.set(next_y);
             if layer_shell_active {
-                window.set_margin(Edge::Left, next_x);
-                window.set_margin(Edge::Top, next_y);
+                drawing_area.set_margin_start(next_x - bounds_x);
+                drawing_area.set_margin_top(next_y - bounds_y);
             } else {
                 let _ = position_x11_window(&window, next_x, next_y);
             }
+        }
+    ));
 
-            // Notify daemon of webcam move
-            let rel_x = next_x as f64 / screen_w as f64;
-            let rel_y = next_y as f64 / screen_h as f64;
+    drag.connect_drag_end(clone!(
+        #[strong]
+        current_x,
+        #[strong]
+        current_y,
+        move |_, _, _| {
+            let rel_x = if max_x > bounds_x {
+                (current_x.get() - bounds_x) as f64 / (max_x - bounds_x) as f64
+            } else {
+                0.0
+            };
+            let rel_y = if max_y > bounds_y {
+                1.0 - ((current_y.get() - bounds_y) as f64 / (max_y - bounds_y) as f64)
+            } else {
+                0.0
+            };
             let exe =
                 std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
             let _ = std::process::Command::new(exe)
@@ -1390,6 +1647,12 @@ fn setup_webcam_window(
         }
     ));
     window.add_controller(drag);
+
+    if let Some(preview) = webcam_preview {
+        window.connect_destroy(move |_| {
+            let _keep_preview_alive = &preview;
+        });
+    }
 
     window.present();
     Some(window)

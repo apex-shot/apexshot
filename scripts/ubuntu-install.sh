@@ -307,12 +307,13 @@ install_deps() {
         qtbase5-dev libqt5widgets5 libqt5x11extras5-dev
         libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
         gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+        gstreamer1.0-pipewire
         libpipewire-0.3-dev
         tesseract-ocr tesseract-ocr-eng
         libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
         wl-clipboard
         xdg-utils libnotify-bin ffmpeg unzip
-        pipewire
+        pipewire wf-recorder
     )
 
     # Some deps may already be present; skip if so to keep the UI clean.

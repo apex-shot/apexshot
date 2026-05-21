@@ -23,7 +23,7 @@ use std::{
 use crate::{
     backend::{CaptureData, DisplayBackend, PixelFormat, WaylandBackend},
     gnome_integration::{emit_tracked_window_closed, emit_tracked_window_opened},
-    overlay::{SelectionArea, SelectionError, SelectionResult},
+    overlay::{OverlaySelection, SelectionArea, SelectionError, SelectionResult},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +97,7 @@ fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResu
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
         })?;
     match crate::overlay::select_area_from_capture_with_gtk(&full_capture) {
-        Ok(Some(area)) => {
+        Ok(crate::overlay::OverlaySelection::Area(Some(area))) => {
             wait_for_layer_shell_overlay_to_unmap();
             let capture = backend
                 .capture_area(area.x, area.y, area.width, area.height)
@@ -106,7 +106,10 @@ fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResu
                 })?;
             save_capture_to_temp_png(&capture).map(AreaCapturePathResult::Captured)
         }
-        Ok(None) => Err(SelectionError::Cancelled),
+        Ok(crate::overlay::OverlaySelection::Area(None)) => Err(SelectionError::Cancelled),
+        Ok(crate::overlay::OverlaySelection::Recording(request)) => {
+            Ok(AreaCapturePathResult::RecordingRequested(request))
+        }
         Err(SelectionError::WindowCaptureRequested) => {
             eprintln!("[capture] Window capture requested from GTK overlay — using Wayland portal");
             wait_for_layer_shell_overlay_to_unmap();
@@ -163,8 +166,11 @@ fn capture_crosshair_file_via_gtk_layer_shell_wlroots() -> Result<PathBuf, Selec
         .map_err(|err| {
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
         })?;
-    let area = crate::overlay::select_crosshair_from_capture_with_gtk(&full_capture)?
-        .ok_or(SelectionError::Cancelled)?;
+    let area = match crate::overlay::select_crosshair_from_capture_with_gtk(&full_capture)? {
+        OverlaySelection::Area(Some(area)) => area,
+        OverlaySelection::Area(None) => return Err(SelectionError::Cancelled),
+        OverlaySelection::Recording(_) => return Err(SelectionError::Cancelled),
+    };
     wait_for_layer_shell_overlay_to_unmap();
     let capture = backend
         .capture_area(area.x, area.y, area.width, area.height)
@@ -886,38 +892,33 @@ pub fn run_capture_overlay_with_window(
             let stdout = String::from_utf8_lossy(&output.stdout);
             parse_selection_json(stdout.trim())
         }
-        Some(1) | None => Ok(None),
-        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => Ok(None),
-        Some(3) => {
-            // Window capture requested — signal by returning a special sentinel area
-            Ok(Some(SelectionArea {
-                x: i32::MIN,
-                y: i32::MIN,
-                width: i32::MIN,
-                height: i32::MIN,
-            }))
+        Some(1) | None => Ok(OverlaySelection::Area(None)),
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
+            Ok(OverlaySelection::Area(None))
         }
+        Some(3) => Ok(OverlaySelection::Area(Some(SelectionArea {
+            x: i32::MIN,
+            y: i32::MIN,
+            width: i32::MIN,
+            height: i32::MIN,
+        }))),
         Some(4) => {
-            // User switched to Area mode from window picker toolbar
-            // Signal with sentinel x = i32::MIN + 1
             eprintln!("[capture_overlay] Window picker: switch to area mode requested");
-            Ok(Some(SelectionArea {
+            Ok(OverlaySelection::Area(Some(SelectionArea {
                 x: i32::MIN + 1,
                 y: i32::MIN,
                 width: i32::MIN,
                 height: i32::MIN,
-            }))
+            })))
         }
         Some(5) => {
-            // User switched to Fullscreen mode from window picker toolbar
-            // Signal with sentinel x = i32::MIN + 2
             eprintln!("[capture_overlay] Window picker: switch to fullscreen mode requested");
-            Ok(Some(SelectionArea {
+            Ok(OverlaySelection::Area(Some(SelectionArea {
                 x: i32::MIN + 2,
                 y: i32::MIN,
                 width: i32::MIN,
                 height: i32::MIN,
-            }))
+            })))
         }
         Some(code) => Err(SelectionError::InitError(format!(
             "apexshot-capture exited with code {code}"
@@ -940,15 +941,16 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
             let stdout = String::from_utf8_lossy(&output.stdout);
             parse_selection_json(stdout.trim())
         }
-        Some(1) | None => Ok(None),
-        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => Ok(None),
+        Some(1) | None => Ok(OverlaySelection::Area(None)),
+        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
+            Ok(OverlaySelection::Area(None))
+        }
         Some(3) => {
-            // Window capture requested via toolbar button (Wayland path)
             eprintln!(
                 "[capture_overlay] Window capture requested — launching GNOME DBus window capture"
             );
-            let _ = capture_window_via_cpp(); // result handled by caller via CaptureData path
-            Ok(None) // signal caller to use capture_window_via_cpp instead
+            let _ = capture_window_via_cpp();
+            Ok(OverlaySelection::Area(None))
         }
         Some(code) => Err(SelectionError::InitError(format!(
             "apexshot-capture exited with code {code}"
@@ -1537,12 +1539,12 @@ fn parse_selection_json(json: &str) -> SelectionResult {
 
     match (x, y, w, h) {
         (Some(x), Some(y), Some(width), Some(height)) if width > 0 && height > 0 => {
-            Ok(Some(SelectionArea {
+            Ok(OverlaySelection::Area(Some(SelectionArea {
                 x,
                 y,
                 width,
                 height,
-            }))
+            })))
         }
         _ => Err(SelectionError::InitError(format!(
             "Failed to parse selection from apexshot-capture output: '{json}'"
@@ -1615,7 +1617,7 @@ mod tests {
         parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
         parse_recording_json, parse_selection_json, save_capture_to_temp_png,
         should_request_screenshot_lock, tracked_overlay_id, CaptureSessionCoordinator,
-        LaunchBlockedReason, OverlayExitCode, RecordingType,
+        LaunchBlockedReason, OverlayExitCode, OverlaySelection, RecordingType,
     };
     use crate::{
         backend::{CaptureData, PixelFormat},
@@ -1660,7 +1662,10 @@ mod tests {
     #[test]
     fn test_parse_normal() {
         let result = parse_selection_json(r#"{"x":10,"y":20,"width":300,"height":200}"#).unwrap();
-        let area = result.unwrap();
+        let area = match result {
+            OverlaySelection::Area(Some(area)) => area,
+            other => panic!("unexpected selection: {other:?}"),
+        };
         assert_eq!(area.x, 10);
         assert_eq!(area.y, 20);
         assert_eq!(area.width, 300);
@@ -1693,7 +1698,10 @@ mod tests {
     #[test]
     fn test_parse_selection_coords() {
         let parsed = parse_selection_json(r#"{"x":1,"y":2,"width":3,"height":4}"#).unwrap();
-        let area = parsed.unwrap();
+        let area = match parsed {
+            OverlaySelection::Area(Some(area)) => area,
+            other => panic!("unexpected selection: {other:?}"),
+        };
         assert_eq!(area.x, 1);
         assert_eq!(area.y, 2);
         assert_eq!(area.width, 3);

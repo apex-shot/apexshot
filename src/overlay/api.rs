@@ -4,6 +4,7 @@ use super::background::{
 use super::state::{OverlayMode, SelectorState};
 use super::window::setup_window;
 use crate::backend::CaptureData;
+use crate::capture_overlay::RecordingRequest;
 use gtk4::{prelude::*, Application};
 use image::RgbaImage;
 use std::sync::{Arc, Mutex};
@@ -36,8 +37,14 @@ impl SelectionArea {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum OverlaySelection {
+    Area(Option<SelectionArea>),
+    Recording(RecordingRequest),
+}
+
 /// Result of area selection
-pub type SelectionResult = Result<Option<SelectionArea>, SelectionError>;
+pub type SelectionResult = Result<OverlaySelection, SelectionError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SelectionError {
@@ -135,7 +142,7 @@ impl AreaSelector {
 
         // Get the result
         match result_rx.recv() {
-            Ok(Ok(area)) => {
+            Ok(Ok(OverlaySelection::Area(area))) => {
                 // Check if OCR was requested on this selection
                 let st = state.lock().unwrap();
                 if st.intent == crate::overlay::recording::state::OverlayIntent::Ocr {
@@ -143,9 +150,9 @@ impl AreaSelector {
                         return Err(SelectionError::OcrRequested(a));
                     }
                 }
-                Ok(area)
+                Ok(OverlaySelection::Area(area))
             }
-            Ok(Err(e)) => Err(e),
+            Ok(other) => other,
             Err(_) => Err(SelectionError::InitError("No result received".into())),
         }
     }

@@ -4,6 +4,7 @@ use gstreamer_app as gst_app;
 use serde::Serialize;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 // No atomic imports needed here anymore
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -662,6 +663,162 @@ const PROFILES: &[EncoderProfile] = &[
     },
 ];
 
+fn is_wlroots_session() -> bool {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .or_else(|_| std::env::var("DESKTOP_SESSION"))
+        .unwrap_or_default()
+        .to_lowercase();
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+        || std::env::var_os("SWAYSOCK").is_some()
+        || desktop.contains("hyprland")
+        || desktop.contains("sway")
+        || desktop.contains("river")
+        || desktop.contains("wayfire")
+        || desktop.contains("labwc")
+        || desktop.contains("niri")
+}
+
+fn command_exists(name: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {} >/dev/null 2>&1", name))
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn should_use_wf_recorder(config: &RecordingConfig) -> bool {
+    is_wlroots_session() && config.output_path.extension().is_none_or(|e| e != "gif")
+}
+
+async fn record_with_wf_recorder(
+    config: RecordingConfig,
+    command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+    if !command_exists("wf-recorder") {
+        return Err(RecordError::UnsupportedBackend(
+            "wlroots recording requires wf-recorder. Install it with: sudo pacman -S wf-recorder"
+                .into(),
+        ));
+    }
+
+    let final_path = config.output_path.clone();
+    let mut args: Vec<String> = Vec::new();
+
+    if let (Some(x), Some(y), Some(width), Some(height)) =
+        (config.x, config.y, config.width, config.height)
+    {
+        args.push("-g".into());
+        args.push(format!("{},{} {}x{}", x.max(0), y.max(0), width, height));
+    }
+
+    args.push("-r".into());
+    args.push(config.fps.max(1).to_string());
+
+    if config.cursor {
+        args.push("--show-cursor".into());
+    }
+
+    if config.mic_enabled || config.speaker_enabled {
+        args.push("-a".into());
+        if let Some(source) = config
+            .mic_source
+            .as_ref()
+            .or(config.speaker_source.as_ref())
+        {
+            if !source.is_empty() {
+                args.push(source.clone());
+            }
+        }
+    }
+
+    args.push("-f".into());
+    args.push(final_path.to_string_lossy().to_string());
+
+    println!("Starting wlroots recording to: {:?}", final_path);
+    println!("wf-recorder {}", args.join(" "));
+
+    let mut child = tokio::process::Command::new("wf-recorder")
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(RecordError::IoError)?;
+
+    notify_daemon_event("recording_session_started");
+    let mut command_rx = command_rx;
+    let mut stop_action = RecordingTerminalAction::Save;
+    let mut paused = false;
+
+    loop {
+        tokio::select! {
+            status = child.wait() => {
+                let status = status.map_err(RecordError::IoError)?;
+                if !status.success() && stop_action == RecordingTerminalAction::Save {
+                    return Err(RecordError::GStreamerError(format!("wf-recorder exited with {status}")));
+                }
+                break;
+            }
+            command = async {
+                match &mut command_rx {
+                    Some(rx) => rx.recv().await,
+                    None => futures_util::future::pending::<Option<RecordingControlCommand>>().await,
+                }
+            } => {
+                let Some(command) = command else {
+                    command_rx = None;
+                    continue;
+                };
+                match command {
+                    RecordingControlCommand::Pause if !paused => {
+                        if let Some(pid) = child.id() {
+                            let _ = std::process::Command::new("kill").args(["-USR1", &pid.to_string()]).status();
+                        }
+                        paused = true;
+                        notify_daemon_event("recording_session_paused");
+                    }
+                    RecordingControlCommand::Resume if paused => {
+                        if let Some(pid) = child.id() {
+                            let _ = std::process::Command::new("kill").args(["-USR1", &pid.to_string()]).status();
+                        }
+                        paused = false;
+                        notify_daemon_event("recording_session_resumed");
+                    }
+                    RecordingControlCommand::Restart => {
+                        stop_action = RecordingTerminalAction::Restart;
+                        break;
+                    }
+                    RecordingControlCommand::StopSave => {
+                        stop_action = RecordingTerminalAction::Save;
+                        break;
+                    }
+                    RecordingControlCommand::StopDiscard => {
+                        stop_action = RecordingTerminalAction::Discard;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if let Some(pid) = child.id() {
+        let _ = std::process::Command::new("kill")
+            .args(["-INT", &pid.to_string()])
+            .status();
+    }
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
+
+    if stop_action == RecordingTerminalAction::Discard {
+        let _ = std::fs::remove_file(&final_path);
+    }
+    if let Some(event) = daemon_event_for_terminal_action(stop_action) {
+        notify_daemon_event(event);
+    }
+    Ok((final_path, stop_action))
+}
+
 /// Start a recording session
 pub async fn start_recording(config: RecordingConfig) -> RecordResult<PathBuf> {
     start_recording_with_commands(config, None)
@@ -700,6 +857,16 @@ async fn start_recording_with_commands(
     config: RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+    if is_wlroots_session() {
+        if should_use_wf_recorder(&config) {
+            return record_with_wf_recorder(config, command_rx).await;
+        }
+        return Err(RecordError::UnsupportedBackend(
+            "wlroots recording no longer falls back to the XDG portal; GIF recording via wf-recorder is not implemented yet"
+                .into(),
+        ));
+    }
+
     // 1. Initialize GStreamer
     gst::init().map_err(|e| RecordError::InitError(e.to_string()))?;
 
@@ -2048,11 +2215,15 @@ pub async fn run_recording_with_native_controls(
     let params_json = serde_json::to_string(&params)?;
 
     if params.countdown_enabled {
-        let _ = std::process::Command::new(&exe)
+        let status = std::process::Command::new(&exe)
             .arg("recording-countdown-internal")
             .arg(&params_json)
             .arg(params.countdown_seconds.to_string())
-            .status();
+            .status()?;
+        if status.code() == Some(2) {
+            notify_recording_session_ended_best_effort();
+            return Ok((config.output_path.clone(), StopAction::Discard));
+        }
     }
 
     let mut child = std::process::Command::new(&exe)
