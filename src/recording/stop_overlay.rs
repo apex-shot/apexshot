@@ -5,12 +5,13 @@ use gtk4::gdk::{self, Key};
 use gtk4::{
     glib::{self, clone},
     prelude::*,
-    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea,
-    EventControllerKey, GestureDrag, Label, Orientation, Separator,
+    Application, ApplicationWindow, CssProvider, DrawingArea, EventControllerKey,
+    EventControllerMotion, GestureClick, GestureDrag,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
+use std::f64::consts::PI;
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -25,11 +26,87 @@ use x11rb::{
     protocol::xproto::{self, ConnectionExt as _},
 };
 
-const BAR_W: i32 = 420;
-const BAR_H: i32 = 60;
-const MARGIN: i32 = 24;
-const DOCK_SAFE: i32 = 64;
-const BAR_GAP: i32 = 2;
+use crate::overlay::drawing::{draw_frosted_panel, rounded_rect_path};
+use crate::overlay::layout::{ACTION_CARD_GAP, FEATURE_PANEL_MARGIN, FEATURE_PANEL_TOP_GAP, RectF};
+use crate::overlay::recording::layout::REC_ACTION_HEIGHT;
+
+const BAR_PAD: f64 = 8.0;
+const BAR_HEIGHT: f64 = REC_ACTION_HEIGHT + BAR_PAD * 2.0;
+const STOP_CELL_W_WITH_TIMER: f64 = 120.0;
+const STOP_CELL_W_ICON_ONLY: f64 = 72.0;
+const ICON_CELL_W: f64 = 56.0;
+const CELL_GAP: f64 = ACTION_CARD_GAP;
+const CELL_H: f64 = REC_ACTION_HEIGHT;
+const PANEL_RADIUS: f64 = 12.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BarTile {
+    Stop,
+    Pause,
+    Restart,
+    Discard,
+    Menu,
+}
+
+fn compute_bar_width(show_timer: bool) -> f64 {
+    let stop_w = if show_timer {
+        STOP_CELL_W_WITH_TIMER
+    } else {
+        STOP_CELL_W_ICON_ONLY
+    };
+    BAR_PAD * 2.0 + stop_w + CELL_GAP * 4.0 + ICON_CELL_W * 4.0
+}
+
+fn bar_tile_rects(bar_x: f64, bar_y: f64, show_timer: bool) -> [(BarTile, RectF); 5] {
+    let stop_w = if show_timer {
+        STOP_CELL_W_WITH_TIMER
+    } else {
+        STOP_CELL_W_ICON_ONLY
+    };
+    let y = bar_y + BAR_PAD;
+    let mut x = bar_x + BAR_PAD;
+    let stop = RectF {
+        x,
+        y,
+        width: stop_w,
+        height: CELL_H,
+    };
+    x += stop_w + CELL_GAP;
+    let pause = RectF {
+        x,
+        y,
+        width: ICON_CELL_W,
+        height: CELL_H,
+    };
+    x += ICON_CELL_W + CELL_GAP;
+    let restart = RectF {
+        x,
+        y,
+        width: ICON_CELL_W,
+        height: CELL_H,
+    };
+    x += ICON_CELL_W + CELL_GAP;
+    let discard = RectF {
+        x,
+        y,
+        width: ICON_CELL_W,
+        height: CELL_H,
+    };
+    x += ICON_CELL_W + CELL_GAP;
+    let menu = RectF {
+        x,
+        y,
+        width: ICON_CELL_W,
+        height: CELL_H,
+    };
+    [
+        (BarTile::Stop, stop),
+        (BarTile::Pause, pause),
+        (BarTile::Restart, restart),
+        (BarTile::Discard, discard),
+        (BarTile::Menu, menu),
+    ]
+}
 
 #[derive(Debug, Error)]
 pub enum StopOverlayError {
@@ -224,26 +301,36 @@ fn compute_bar_position(
     screen_w: i32,
     screen_h: i32,
 ) -> (i32, i32) {
-    if params.is_fullscreen {
-        let x = (screen_w - BAR_W) / 2;
-        let y = MARGIN;
-        return (x, y);
+    let bar_w = compute_bar_width(params.show_timer);
+    let bar_h = BAR_HEIGHT;
+    let margin = FEATURE_PANEL_MARGIN;
+    let top_gap = FEATURE_PANEL_TOP_GAP;
+    let screen_w_f = screen_w as f64;
+    let screen_h_f = screen_h as f64;
+
+    if params.is_fullscreen || params.capture_w <= 0 || params.capture_h <= 0 {
+        let x = ((screen_w_f - bar_w) / 2.0)
+            .clamp(margin, (screen_w_f - bar_w - margin).max(margin));
+        return (x.round() as i32, margin.round() as i32);
     }
 
-    let x = (params.capture_x + (params.capture_w - BAR_W) / 2)
-        .clamp(MARGIN, (screen_w - BAR_W - MARGIN).max(MARGIN));
+    let sel_x = params.capture_x as f64;
+    let sel_y = params.capture_y as f64;
+    let sel_w = params.capture_w as f64;
+    let sel_h = params.capture_h as f64;
 
-    let y_below = params.capture_y + params.capture_h + BAR_GAP;
-    if y_below + BAR_H + DOCK_SAFE <= screen_h {
-        return (x, y_below);
-    }
+    let x = (sel_x + (sel_w - bar_w) / 2.0)
+        .clamp(margin, (screen_w_f - bar_w - margin).max(margin));
 
-    let y_above = params.capture_y - BAR_H - BAR_GAP;
-    if y_above >= MARGIN {
-        return (x, y_above);
-    }
+    let below_y = sel_y + sel_h + top_gap;
+    let above_y = sel_y - top_gap - bar_h;
+    let y = if below_y + bar_h + margin <= screen_h_f {
+        below_y
+    } else {
+        above_y.clamp(margin, (screen_h_f - bar_h - margin).max(margin))
+    };
 
-    ((screen_w - BAR_W) / 2, MARGIN)
+    (x.round() as i32, y.round() as i32)
 }
 
 fn setup_window(
@@ -259,14 +346,20 @@ fn setup_window(
     let current_pos = Rc::new(Cell::new(initial_pos));
     let drag_start_pos = Rc::new(Cell::new(initial_pos));
 
+    let bar_w_f = compute_bar_width(params.show_timer);
+    let bar_h_f = BAR_HEIGHT;
+    let bar_w_i = bar_w_f.ceil() as i32;
+    let bar_h_i = bar_h_f.ceil() as i32;
+
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Recording")
-        .default_width(BAR_W)
-        .default_height(BAR_H)
+        .default_width(bar_w_i)
+        .default_height(bar_h_i)
         .decorated(false)
         .resizable(false)
         .build();
+    window.add_css_class("recording-controls-window");
 
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
@@ -310,58 +403,72 @@ fn setup_window(
         ));
     }
 
-    let stop_btn = icon_button_with_stop();
-    let pause_btn = icon_button_with_pause();
-    pause_btn.set_sensitive(false);
+    let elapsed_secs = Rc::new(Cell::new(0u64));
+    let hovered_tile: Rc<Cell<Option<BarTile>>> = Rc::new(Cell::new(None));
+    let show_timer = params.show_timer;
 
-    let restart_btn = icon_button_with_restart();
-    restart_btn.set_sensitive(false);
+    let drawing_area = DrawingArea::new();
+    drawing_area.add_css_class("recording-controls-canvas");
+    drawing_area.set_content_width(bar_w_i);
+    drawing_area.set_content_height(bar_h_i);
 
-    let discard_btn = icon_button_with_discard();
-    let menu_btn = icon_button_with_menu();
+    {
+        let elapsed = elapsed_secs.clone();
+        let hovered = hovered_tile.clone();
+        drawing_area.set_draw_func(move |_, cr, width, height| {
+            cr.set_operator(cairo::Operator::Source);
+            cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+            let _ = cr.paint();
+            cr.set_operator(cairo::Operator::Over);
 
-    let timer_label = Label::new(Some("0:00"));
-    timer_label.add_css_class("rec-timer");
+            let w = width as f64;
+            let h = height as f64;
+            draw_frosted_panel(cr, 0.0, 0.0, w, h, PANEL_RADIUS, w, h, None);
 
-    let sep1 = create_separator();
-    let sep2 = create_separator();
-    let sep3 = create_separator();
-    let sep4 = create_separator();
+            let tiles = bar_tile_rects(0.0, 0.0, show_timer);
+            let hover = hovered.get();
+            let secs = elapsed.get();
 
-    let stop_container = GtkBox::new(Orientation::Horizontal, 0);
-    stop_container.add_css_class("stop-container");
-    stop_container.append(&stop_btn);
-    if params.show_timer {
-        stop_container.append(&timer_label);
+            for (tile, rect) in tiles.iter() {
+                let is_stop = *tile == BarTile::Stop;
+                let is_hovered = hover == Some(*tile);
+                let is_disabled =
+                    matches!(*tile, BarTile::Pause | BarTile::Restart);
+
+                if is_stop {
+                    draw_primary_pill(cr, *rect, is_hovered);
+                } else if is_hovered && !is_disabled {
+                    draw_accent_cell(cr, *rect);
+                }
+
+                let alpha = if is_disabled {
+                    0.32
+                } else if is_hovered {
+                    1.0
+                } else {
+                    0.94
+                };
+
+                match tile {
+                    BarTile::Stop => draw_stop_glyph(cr, *rect, show_timer, secs),
+                    BarTile::Pause => draw_pause_glyph(cr, *rect, alpha),
+                    BarTile::Restart => draw_restart_glyph(cr, *rect, alpha),
+                    BarTile::Discard => draw_discard_glyph(cr, *rect, alpha),
+                    BarTile::Menu => draw_menu_glyph(cr, *rect, alpha),
+                }
+            }
+        });
     }
 
-    let bar = GtkBox::new(Orientation::Horizontal, 0);
-    bar.add_css_class("recording-controls-bar");
-    bar.set_valign(gtk4::Align::Center);
-
-    bar.append(&stop_container);
-    bar.append(&sep1);
-    bar.append(&pause_btn);
-    bar.append(&sep2);
-    bar.append(&restart_btn);
-    bar.append(&sep3);
-    bar.append(&discard_btn);
-    bar.append(&sep4);
-    bar.append(&menu_btn);
-
-    window.set_child(Some(&bar));
+    window.set_child(Some(&drawing_area));
 
     if params.show_timer {
-        let elapsed_secs = Rc::new(Cell::new(0u64));
-        let elapsed_secs_timer = elapsed_secs.clone();
-        let timer_label_weak = timer_label.downgrade();
+        let elapsed_for_timer = elapsed_secs.clone();
+        let drawing_area_weak = drawing_area.downgrade();
         glib::timeout_add_local(Duration::from_secs(1), move || {
-            let secs = elapsed_secs_timer.get() + 1;
-            elapsed_secs_timer.set(secs);
-            if let Some(lbl) = timer_label_weak.upgrade() {
-                let mins = secs / 60;
-                let s = secs % 60;
-                lbl.set_text(&format!("{}:{:02}", mins, s));
+            elapsed_for_timer.set(elapsed_for_timer.get() + 1);
+            if let Some(area) = drawing_area_weak.upgrade() {
+                area.queue_draw();
                 glib::ControlFlow::Continue
             } else {
                 glib::ControlFlow::Break
@@ -369,78 +476,99 @@ fn setup_window(
         });
     }
 
-    let stop_tx_stop = stop_tx.clone();
-    let window_weak = window.downgrade();
-    let dim_window_weaks: Vec<_> = dim_windows
-        .iter()
-        .map(|window| window.downgrade())
-        .collect();
-    stop_btn.connect_clicked(move |_| {
-        send_stop_action(&stop_tx_stop, StopAction::Save);
-        for dim_window in &dim_window_weaks {
-            if let Some(window) = dim_window.upgrade() {
-                window.close();
+    let motion = EventControllerMotion::new();
+    {
+        let hovered = hovered_tile.clone();
+        let drawing_area_weak = drawing_area.downgrade();
+        motion.connect_motion(move |_, x, y| {
+            let tiles = bar_tile_rects(0.0, 0.0, show_timer);
+            let mut hit: Option<BarTile> = None;
+            for (tile, rect) in tiles.iter() {
+                if rect.contains(x, y) {
+                    hit = Some(*tile);
+                    break;
+                }
             }
-        }
-        if let Some(window) = window_weak.upgrade() {
-            if let Some(app) = window.application() {
-                app.quit();
-            } else {
-                window.close();
+            if hovered.replace(hit) != hit {
+                if let Some(area) = drawing_area_weak.upgrade() {
+                    area.queue_draw();
+                }
             }
-        }
-    });
+        });
+    }
+    {
+        let hovered = hovered_tile.clone();
+        let drawing_area_weak = drawing_area.downgrade();
+        motion.connect_leave(move |_| {
+            if hovered.replace(None).is_some() {
+                if let Some(area) = drawing_area_weak.upgrade() {
+                    area.queue_draw();
+                }
+            }
+        });
+    }
+    drawing_area.add_controller(motion);
 
-    let stop_tx_discard = stop_tx.clone();
-    let window_weak_discard = window.downgrade();
-    let dim_window_weaks_discard: Vec<_> = dim_windows
-        .iter()
-        .map(|window| window.downgrade())
-        .collect();
-    discard_btn.connect_clicked(move |_| {
-        send_stop_action(&stop_tx_discard, StopAction::Discard);
-        for dim_window in &dim_window_weaks_discard {
-            if let Some(window) = dim_window.upgrade() {
-                window.close();
-            }
-        }
-        if let Some(window) = window_weak_discard.upgrade() {
-            if let Some(app) = window.application() {
-                app.quit();
-            } else {
-                window.close();
-            }
-        }
-    });
-
-    let stop_tx_esc = stop_tx.clone();
-    let window_weak_esc = window.downgrade();
-    let dim_window_weaks_esc: Vec<_> = dim_windows
-        .iter()
-        .map(|window| window.downgrade())
-        .collect();
-    let key_ctrl = EventControllerKey::builder()
-        .propagation_phase(gtk4::PropagationPhase::Capture)
-        .build();
-    key_ctrl.connect_key_pressed(move |_, key, _, _| {
-        if key == Key::Escape {
-            send_stop_action(&stop_tx_esc, StopAction::Save);
-            for dim_window in &dim_window_weaks_esc {
+    let close_with_action = {
+        let stop_tx = stop_tx.clone();
+        let window_weak = window.downgrade();
+        let dim_window_weaks: Vec<_> = dim_windows
+            .iter()
+            .map(|window| window.downgrade())
+            .collect();
+        Rc::new(move |action: StopAction| {
+            send_stop_action(&stop_tx, action);
+            for dim_window in &dim_window_weaks {
                 if let Some(window) = dim_window.upgrade() {
                     window.close();
                 }
             }
-            if let Some(window) = window_weak_esc.upgrade() {
+            if let Some(window) = window_weak.upgrade() {
                 if let Some(app) = window.application() {
                     app.quit();
                 } else {
                     window.close();
                 }
             }
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
-    });
+        })
+    };
+
+    let click = GestureClick::builder().button(1).build();
+    {
+        let close_with_action = close_with_action.clone();
+        click.connect_released(move |gesture, n_press, x, y| {
+            if n_press != 1 {
+                return;
+            }
+            let tiles = bar_tile_rects(0.0, 0.0, show_timer);
+            for (tile, rect) in tiles.iter() {
+                if rect.contains(x, y) {
+                    gesture.set_state(gtk4::EventSequenceState::Claimed);
+                    match tile {
+                        BarTile::Stop => close_with_action(StopAction::Save),
+                        BarTile::Discard => close_with_action(StopAction::Discard),
+                        BarTile::Pause | BarTile::Restart | BarTile::Menu => {}
+                    }
+                    return;
+                }
+            }
+        });
+    }
+    drawing_area.add_controller(click);
+
+    let key_ctrl = EventControllerKey::builder()
+        .propagation_phase(gtk4::PropagationPhase::Capture)
+        .build();
+    {
+        let close_with_action = close_with_action.clone();
+        key_ctrl.connect_key_pressed(move |_, key, _, _| {
+            if key == Key::Escape {
+                close_with_action(StopAction::Save);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+    }
     window.add_controller(key_ctrl);
 
     let drag = GestureDrag::new();
@@ -462,8 +590,8 @@ fn setup_window(
         drag_start_pos,
         move |_, dx, dy| {
             let (start_x, start_y) = drag_start_pos.get();
-            let next_x = (start_x + dx.round() as i32).clamp(0, (screen_w - BAR_W).max(0));
-            let next_y = (start_y + dy.round() as i32).clamp(0, (screen_h - BAR_H).max(0));
+            let next_x = (start_x + dx.round() as i32).clamp(0, (screen_w - bar_w_i).max(0));
+            let next_y = (start_y + dy.round() as i32).clamp(0, (screen_h - bar_h_i).max(0));
             current_pos.set((next_x, next_y));
             if layer_shell_active {
                 window.set_margin(Edge::Left, next_x);
@@ -473,7 +601,7 @@ fn setup_window(
             }
         }
     ));
-    bar.add_controller(drag);
+    drawing_area.add_controller(drag);
 
     window.present();
 }
@@ -852,47 +980,11 @@ fn install_controls_css() {
     if let Some(display) = gdk::Display::default() {
         let provider = CssProvider::new();
         provider.load_from_data(
-            ".recording-controls-bar {
-                background-color: #141414;
-                border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                padding: 4px 6px;
-            }
-            .stop-container {
-                background-color: #1e1f22;
-                border-radius: 8px;
-                padding-left: 12px;
-                padding-right: 16px;
-            }
-            .rec-btn {
-                background: none;
-                border: none;
-                padding: 0;
-                min-width: 52px;
-                min-height: 52px;
-                box-shadow: none;
-                border-radius: 8px;
-            }
-            .rec-btn:hover {
-                background-color: rgba(255, 255, 255, 0.08); /* 22 / 255 ≈ 0.08 */
-            }
-            .rec-btn:active {
-                background-color: rgba(255, 255, 255, 0.12);
-            }
-            .rec-btn:disabled {
-                opacity: 0.25;
-            }
-            .rec-timer {
-                color: #f46357;
-                font-size: 15pt;
-                font-weight: 700;
-                margin-left: 10px;
-            }
-            .rec-separator {
-                background-color: rgba(255, 255, 255, 0.08);
-                min-width: 1px;
-                margin-top: 18px;
-                margin-bottom: 18px;
+            ".recording-controls-window,
+             .recording-controls-window > contents,
+             .recording-controls-canvas {
+                background: transparent;
+                background-color: transparent;
             }
             .countdown-bar-container {
                 background-color: #141414;
@@ -956,45 +1048,111 @@ fn install_dim_css() {
     }
 }
 
-fn icon_button_with_stop() -> Button {
-    let drawing_area = DrawingArea::new();
-    drawing_area.set_content_width(40);
-    drawing_area.set_content_height(40);
-    drawing_area.set_draw_func(|_, cr, w, h| {
-        let cx = w as f64 / 2.0;
-        let cy = h as f64 / 2.0;
-
-        cr.set_source_rgb(0.95, 0.38, 0.34); // f46357
-        cr.set_line_width(1.8);
-        cr.arc(cx, cy, 10.0, 0.0, 2.0 * std::f64::consts::PI);
-        let _ = cr.stroke();
-
-        let sq = 4.0;
-        cr.rectangle(cx - sq, cy - sq, sq * 2.0, sq * 2.0);
-        let _ = cr.fill();
-    });
-
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_focusable(false);
-    button.set_child(Some(&drawing_area));
-    button.add_css_class("rec-btn");
-    button
+fn draw_accent_cell(cr: &cairo::Context, rect: RectF) {
+    rounded_rect_path(cr, rect.x, rect.y, rect.width, rect.height, 10.0);
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.09);
+    let _ = cr.fill();
 }
 
-fn icon_button_with_pause() -> Button {
-    let drawing_area = DrawingArea::new();
-    drawing_area.set_content_width(40);
-    drawing_area.set_content_height(40);
-    drawing_area.set_draw_func(|_, cr, w, h| {
-        let cx = w as f64 / 2.0;
-        let cy = h as f64 / 2.0;
+fn draw_primary_pill(cr: &cairo::Context, rect: RectF, hovered: bool) {
+    if hovered {
+        rounded_rect_path(cr, rect.x, rect.y, rect.width, rect.height, 10.0);
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.09);
+        let _ = cr.fill();
+    }
+    let (path_x, path_y, path_w, path_h) = (
+        rect.x + 3.0,
+        rect.y + 3.0,
+        rect.width - 6.0,
+        rect.height - 6.0,
+    );
+    rounded_rect_path(cr, path_x, path_y, path_w, path_h, 9.0);
+    cr.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 88.0 / 255.0);
+    let _ = cr.fill();
 
-        cr.set_source_rgb(1.0, 1.0, 1.0);
-        cr.set_line_width(1.8);
-        cr.arc(cx, cy, 10.0, 0.0, 2.0 * std::f64::consts::PI);
+    let _ = cr.save();
+    rounded_rect_path(cr, path_x, path_y, path_w, path_h, 9.0);
+    cr.clip();
+    rounded_rect_path(
+        cr,
+        rect.x + 3.8,
+        rect.y + 3.8,
+        rect.width - 7.6,
+        rect.height - 7.6,
+        8.4,
+    );
+    cr.set_source_rgba(1.0, 212.0 / 255.0, 178.0 / 255.0, 152.0 / 255.0);
+    cr.set_line_width(1.1);
+    let _ = cr.stroke();
+    let _ = cr.restore();
+}
+
+fn draw_stop_glyph(cr: &cairo::Context, rect: RectF, show_timer: bool, secs: u64) {
+    let cy = rect.y + rect.height / 2.0;
+    let icon_cx = if show_timer {
+        rect.x + 22.0
+    } else {
+        rect.x + rect.width / 2.0
+    };
+
+    let shadow_alpha = 0.32;
+    cr.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
+    cr.set_line_width(1.8);
+    cr.arc(icon_cx + 0.6, cy + 0.8, 10.0, 0.0, 2.0 * PI);
+    let _ = cr.stroke();
+    let sq = 4.0;
+    cr.rectangle(icon_cx + 0.6 - sq, cy + 0.8 - sq, sq * 2.0, sq * 2.0);
+    let _ = cr.fill();
+
+    cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    cr.set_line_width(1.8);
+    cr.arc(icon_cx, cy, 10.0, 0.0, 2.0 * PI);
+    let _ = cr.stroke();
+    cr.rectangle(icon_cx - sq, cy - sq, sq * 2.0, sq * 2.0);
+    let _ = cr.fill();
+
+    if show_timer {
+        let mins = secs / 60;
+        let s = secs % 60;
+        let text = format!("{}:{:02}", mins, s);
+        cr.select_font_face(
+            "Sans",
+            cairo::FontSlant::Normal,
+            cairo::FontWeight::Bold,
+        );
+        cr.set_font_size(16.5);
+        let label_x = rect.x + 42.0;
+        let label_y = cy + 5.6;
+
+        cr.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
+        cr.move_to(label_x + 0.6, label_y + 0.8);
+        let _ = cr.show_text(&text);
+        cr.set_source_rgba(1.0, 232.0 / 255.0, 214.0 / 255.0, 1.0);
+        cr.move_to(label_x, label_y);
+        let _ = cr.show_text(&text);
+    }
+}
+
+fn draw_glyph_with_shadow<F>(cr: &cairo::Context, rect: RectF, alpha: f64, draw: F)
+where
+    F: Fn(&cairo::Context, f64, f64),
+{
+    let cx = rect.x + rect.width / 2.0;
+    let cy = rect.y + rect.height / 2.0;
+
+    cr.set_source_rgba(0.0, 0.0, 0.0, (alpha * 0.40).min(0.44));
+    cr.set_line_width(1.8);
+    draw(cr, cx + 0.6, cy + 0.8);
+
+    cr.set_source_rgba(1.0, 1.0, 1.0, alpha);
+    cr.set_line_width(1.8);
+    draw(cr, cx, cy);
+}
+
+fn draw_pause_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
+    draw_glyph_with_shadow(cr, rect, alpha, |cr, cx, cy| {
+        cr.arc(cx, cy, 10.0, 0.0, 2.0 * PI);
         let _ = cr.stroke();
-
         let bar_w = 2.2;
         let bar_h = 11.0;
         let gap = 3.5;
@@ -1002,37 +1160,18 @@ fn icon_button_with_pause() -> Button {
         cr.rectangle(cx + gap - bar_w / 2.0, cy - bar_h / 2.0, bar_w, bar_h);
         let _ = cr.fill();
     });
-
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_focusable(false);
-    button.set_child(Some(&drawing_area));
-    button.add_css_class("rec-btn");
-    button
 }
 
-fn icon_button_with_restart() -> Button {
-    let drawing_area = DrawingArea::new();
-    drawing_area.set_content_width(40);
-    drawing_area.set_content_height(40);
-    drawing_area.set_draw_func(|_, cr, w, h| {
-        let cx = w as f64 / 2.0;
-        let cy = h as f64 / 2.0;
-
-        cr.set_source_rgb(1.0, 1.0, 1.0);
-        cr.set_line_width(1.8);
-
-        // Incomplete circle arc
-        let start_angle = 60.0 * std::f64::consts::PI / 180.0;
-        let end_angle = 340.0 * std::f64::consts::PI / 180.0;
+fn draw_restart_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
+    draw_glyph_with_shadow(cr, rect, alpha, |cr, cx, cy| {
+        let start_angle = 60.0_f64.to_radians();
+        let end_angle = 340.0_f64.to_radians();
         cr.arc(cx, cy, 8.5, start_angle, end_angle);
         let _ = cr.stroke();
 
-        // Arrow head at the end of the arc (start_angle)
         let head_r = 8.5;
         let tip_angle = start_angle;
-        let base_angle1 = start_angle - 25.0 * std::f64::consts::PI / 180.0;
-
+        let base_angle1 = start_angle - 25.0_f64.to_radians();
         cr.move_to(cx + head_r * tip_angle.cos(), cy - head_r * tip_angle.sin());
         cr.line_to(
             cx + (head_r + 4.0) * base_angle1.cos(),
@@ -1045,73 +1184,33 @@ fn icon_button_with_restart() -> Button {
         cr.close_path();
         let _ = cr.fill();
     });
-
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_focusable(false);
-    button.set_child(Some(&drawing_area));
-    button.add_css_class("rec-btn");
-    button
 }
 
-fn icon_button_with_discard() -> Button {
-    let drawing_area = DrawingArea::new();
-    drawing_area.set_content_width(40);
-    drawing_area.set_content_height(40);
-    drawing_area.set_draw_func(|_, cr, w, h| {
-        let cx = w as f64 / 2.0;
-        let cy = h as f64 / 2.0;
-
-        cr.set_source_rgb(1.0, 1.0, 1.0);
-        cr.set_line_width(1.8);
-
-        // Body
+fn draw_discard_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
+    draw_glyph_with_shadow(cr, rect, alpha, |cr, cx, cy| {
+        cr.set_line_join(cairo::LineJoin::Round);
         let bw = 11.0;
         let bh = 13.0;
         let top = cy - 3.5;
-
-        cr.set_line_join(cairo::LineJoin::Round);
         cr.rectangle(cx - bw / 2.0, top, bw, bh);
         let _ = cr.stroke();
-
-        // Lid
         cr.move_to(cx - 8.0, top - 1.5);
         cr.line_to(cx + 8.0, top - 1.5);
         let _ = cr.stroke();
-
-        // Handle
         cr.rectangle(cx - 2.5, top - 4.0, 5.0, 2.5);
         let _ = cr.stroke();
-
-        // Lines inside
         cr.move_to(cx - 2.0, top + 2.5);
         cr.line_to(cx - 2.0, top + 9.5);
         cr.move_to(cx + 2.0, top + 2.5);
         cr.line_to(cx + 2.0, top + 9.5);
         let _ = cr.stroke();
     });
-
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_focusable(false);
-    button.set_child(Some(&drawing_area));
-    button.add_css_class("rec-btn");
-    button
 }
 
-fn icon_button_with_menu() -> Button {
-    let drawing_area = DrawingArea::new();
-    drawing_area.set_content_width(40);
-    drawing_area.set_content_height(40);
-    drawing_area.set_draw_func(|_, cr, w, h| {
-        let cx = w as f64 / 2.0;
-        let cy = h as f64 / 2.0;
-
-        cr.set_source_rgb(0.63, 0.63, 0.65); // a0a0a5
-        cr.set_line_width(1.8);
+fn draw_menu_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
+    draw_glyph_with_shadow(cr, rect, alpha, |cr, cx, cy| {
         cr.set_line_cap(cairo::LineCap::Round);
-
-        let lw = 10.0;
+        let lw = 12.0;
         cr.move_to(cx - lw / 2.0, cy - 5.0);
         cr.line_to(cx + lw / 2.0, cy - 5.0);
         cr.move_to(cx - lw / 2.0, cy);
@@ -1120,19 +1219,6 @@ fn icon_button_with_menu() -> Button {
         cr.line_to(cx + lw / 2.0, cy + 5.0);
         let _ = cr.stroke();
     });
-
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_focusable(false);
-    button.set_child(Some(&drawing_area));
-    button.add_css_class("rec-btn");
-    button
-}
-
-fn create_separator() -> Separator {
-    let sep = Separator::new(Orientation::Vertical);
-    sep.add_css_class("rec-separator");
-    sep
 }
 
 fn display_size() -> Option<(i32, i32)> {

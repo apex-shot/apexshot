@@ -5,11 +5,11 @@
 
 mod api;
 mod background;
-mod drawing;
+pub(crate) mod drawing;
 mod geometry;
 mod hit_testing;
-mod icons;
-mod layout;
+pub(crate) mod icons;
+pub(crate) mod layout;
 pub(crate) mod recording;
 mod state;
 pub(crate) mod webcam;
