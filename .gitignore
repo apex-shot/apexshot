@@ -59,6 +59,7 @@ Thumbs.db
 # Cache
 .cache/
 *.log
+*.mp4
 *.tmp
 *.temp
 
