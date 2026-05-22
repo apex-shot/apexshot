@@ -25,6 +25,7 @@ use crate::{
     gnome_integration::{emit_tracked_window_closed, emit_tracked_window_opened},
     overlay::{OverlaySelection, SelectionArea, SelectionError, SelectionResult},
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CaptureSessionState {
@@ -692,7 +693,7 @@ pub enum AreaCaptureResult {
 }
 
 /// Recording request from the capture overlay.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingRequest {
     pub x: i32,
     pub y: i32,
@@ -793,7 +794,8 @@ impl Default for RecordingRequest {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RecordingType {
     Video,
     Gif,

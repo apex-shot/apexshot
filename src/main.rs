@@ -336,6 +336,23 @@ async fn async_main(args: Vec<String>) {
                 std::process::exit(status.code().unwrap_or(1));
             }
         }
+        "record-from-overlay" => {
+            // Run recording as a subprocess (like the C++ binary approach)
+            // to isolate GTK/layer-shell state from the just-closed overlay.
+            if args.len() < 3 {
+                eprintln!("Error: missing recording request JSON");
+                std::process::exit(1);
+            }
+            let request: apexshot::capture_overlay::RecordingRequest =
+                serde_json::from_str(&args[2]).unwrap_or_else(|e| {
+                    eprintln!("Error: invalid recording request JSON: {e}");
+                    std::process::exit(1);
+                });
+            if let Err(e) = run_overlay_recording_request(request) {
+                eprintln!("Recording failed: {e}");
+                std::process::exit(1);
+            }
+        }
         "recording-controls-internal" => {
             if args.len() < 3 {
                 std::process::exit(1);
@@ -1543,12 +1560,17 @@ fn run_capture(args: &[String]) {
                 capture
             }
             Ok(AreaCaptureResult::RecordingRequested(request)) => {
-                if let Err(err) = run_overlay_recording_request(request) {
-                    eprintln!("{err}");
-                    std::process::exit(1);
-                }
-
-                std::process::exit(0);
+                // Run recording as a subprocess to fully isolate GTK/layer-shell
+                // state from the just-closed capture overlay.
+                let exe = std::env::current_exe()
+                    .unwrap_or_else(|_| PathBuf::from("apexshot"));
+                let json = serde_json::to_string(&request).unwrap();
+                let status = std::process::Command::new(&exe)
+                    .arg("record-from-overlay")
+                    .arg(&json)
+                    .status()
+                    .expect("Failed to spawn recording subprocess");
+                std::process::exit(status.code().unwrap_or(1));
             }
             Ok(AreaCaptureResult::Cancelled) => {
                 eprintln!("Selection cancelled");
