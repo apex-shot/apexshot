@@ -368,13 +368,11 @@ async fn async_main(args: Vec<String>) {
             apexshot::recording::run_recording_controls(params, _session_id, _bus_name, tx)
                 .expect("Failed to run recording controls");
 
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            let action = rt
-                .block_on(rx)
-                .unwrap_or(apexshot::recording::StopAction::Save);
+            let action = tokio::task::block_in_place(|| {
+                let handle = tokio::runtime::Handle::current();
+                handle.block_on(rx)
+            })
+            .unwrap_or(apexshot::recording::StopAction::Save);
             match action {
                 apexshot::recording::StopAction::Save => std::process::exit(0),
                 apexshot::recording::StopAction::Discard => std::process::exit(2),
