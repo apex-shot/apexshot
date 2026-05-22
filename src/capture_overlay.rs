@@ -108,6 +108,7 @@ fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResu
         }
         Ok(crate::overlay::OverlaySelection::Area(None)) => Err(SelectionError::Cancelled),
         Ok(crate::overlay::OverlaySelection::Recording(request)) => {
+            wait_for_layer_shell_overlay_to_unmap();
             Ok(AreaCapturePathResult::RecordingRequested(request))
         }
         Err(SelectionError::WindowCaptureRequested) => {

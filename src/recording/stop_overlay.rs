@@ -45,7 +45,6 @@ enum BarTile {
     Pause,
     Restart,
     Discard,
-    Menu,
 }
 
 fn compute_bar_width(show_timer: bool) -> f64 {
@@ -54,10 +53,10 @@ fn compute_bar_width(show_timer: bool) -> f64 {
     } else {
         STOP_CELL_W_ICON_ONLY
     };
-    BAR_PAD * 2.0 + stop_w + CELL_GAP * 4.0 + ICON_CELL_W * 4.0
+    BAR_PAD * 2.0 + stop_w + CELL_GAP * 3.0 + ICON_CELL_W * 3.0
 }
 
-fn bar_tile_rects(bar_x: f64, bar_y: f64, show_timer: bool) -> [(BarTile, RectF); 5] {
+fn bar_tile_rects(bar_x: f64, bar_y: f64, show_timer: bool) -> [(BarTile, RectF); 4] {
     let stop_w = if show_timer {
         STOP_CELL_W_WITH_TIMER
     } else {
@@ -92,19 +91,11 @@ fn bar_tile_rects(bar_x: f64, bar_y: f64, show_timer: bool) -> [(BarTile, RectF)
         width: ICON_CELL_W,
         height: CELL_H,
     };
-    x += ICON_CELL_W + CELL_GAP;
-    let menu = RectF {
-        x,
-        y,
-        width: ICON_CELL_W,
-        height: CELL_H,
-    };
     [
         (BarTile::Stop, stop),
         (BarTile::Pause, pause),
         (BarTile::Restart, restart),
         (BarTile::Discard, discard),
-        (BarTile::Menu, menu),
     ]
 }
 
@@ -324,6 +315,7 @@ fn compute_bar_position(
 
     let below_y = sel_y + sel_h + top_gap;
     let above_y = sel_y - top_gap - bar_h;
+
     let y = if below_y + bar_h + margin <= screen_h_f {
         below_y
     } else {
@@ -454,7 +446,6 @@ fn setup_window(
                     BarTile::Pause => draw_pause_glyph(cr, *rect, alpha),
                     BarTile::Restart => draw_restart_glyph(cr, *rect, alpha),
                     BarTile::Discard => draw_discard_glyph(cr, *rect, alpha),
-                    BarTile::Menu => draw_menu_glyph(cr, *rect, alpha),
                 }
             }
         });
@@ -547,7 +538,7 @@ fn setup_window(
                     match tile {
                         BarTile::Stop => close_with_action(StopAction::Save),
                         BarTile::Discard => close_with_action(StopAction::Discard),
-                        BarTile::Pause | BarTile::Restart | BarTile::Menu => {}
+                        BarTile::Pause | BarTile::Restart => {}
                     }
                     return;
                 }
@@ -921,7 +912,7 @@ fn build_dim_window(
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
     if layer_shell_active {
         window.init_layer_shell();
-        window.set_layer(Layer::Overlay);
+        window.set_layer(Layer::Top);
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
         window.set_anchor(Edge::Bottom, false);
@@ -1203,20 +1194,6 @@ fn draw_discard_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
         cr.line_to(cx - 2.0, top + 9.5);
         cr.move_to(cx + 2.0, top + 2.5);
         cr.line_to(cx + 2.0, top + 9.5);
-        let _ = cr.stroke();
-    });
-}
-
-fn draw_menu_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
-    draw_glyph_with_shadow(cr, rect, alpha, |cr, cx, cy| {
-        cr.set_line_cap(cairo::LineCap::Round);
-        let lw = 12.0;
-        cr.move_to(cx - lw / 2.0, cy - 5.0);
-        cr.line_to(cx + lw / 2.0, cy - 5.0);
-        cr.move_to(cx - lw / 2.0, cy);
-        cr.line_to(cx + lw / 2.0, cy);
-        cr.move_to(cx - lw / 2.0, cy + 5.0);
-        cr.line_to(cx + lw / 2.0, cy + 5.0);
         let _ = cr.stroke();
     });
 }
