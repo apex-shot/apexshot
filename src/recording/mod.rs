@@ -715,20 +715,30 @@ async fn record_with_wf_recorder(
     args.push("-r".into());
     args.push(config.fps.max(1).to_string());
 
-    if config.cursor {
-        args.push("--show-cursor".into());
-    }
+    // wf-recorder records the cursor by default on current wlroots setups.
+    // Older packaged versions do not recognize `--show-cursor`, and passing it
+    // can make recording startup noisy or fail. There is no portable positive
+    // "show cursor" flag, so only omit cursor customization here.
 
     if config.mic_enabled || config.speaker_enabled {
         args.push("-a".into());
-        if let Some(source) = config
-            .mic_source
-            .as_ref()
-            .or(config.speaker_source.as_ref())
-        {
-            if !source.is_empty() {
-                args.push(source.clone());
-            }
+        let source = if config.speaker_enabled && !config.mic_enabled {
+            config
+                .speaker_source
+                .clone()
+                .unwrap_or_else(get_pulse_speaker_monitor)
+        } else {
+            // wf-recorder accepts a single Pulse source. For mic-only use the
+            // default mic. If both mic + speaker are requested, prefer the mic
+            // here; the GStreamer backend can mix both, but wf-recorder cannot
+            // portably mix two Pulse sources without an external filter graph.
+            config
+                .mic_source
+                .clone()
+                .unwrap_or_else(get_pulse_default_source)
+        };
+        if !source.is_empty() {
+            args.push(source);
         }
     }
 
@@ -773,14 +783,17 @@ async fn record_with_wf_recorder(
                 match command {
                     RecordingControlCommand::Pause if !paused => {
                         if let Some(pid) = child.id() {
-                            let _ = std::process::Command::new("kill").args(["-USR1", &pid.to_string()]).status();
+                            // Some wf-recorder builds treat SIGUSR1 as fatal (observed as
+                            // exit by signal 10). Use SIGSTOP/SIGCONT for a compositor-agnostic
+                            // process pause instead of crashing the recorder.
+                            let _ = std::process::Command::new("kill").args(["-STOP", &pid.to_string()]).status();
                         }
                         paused = true;
                         notify_daemon_event("recording_session_paused");
                     }
                     RecordingControlCommand::Resume if paused => {
                         if let Some(pid) = child.id() {
-                            let _ = std::process::Command::new("kill").args(["-USR1", &pid.to_string()]).status();
+                            let _ = std::process::Command::new("kill").args(["-CONT", &pid.to_string()]).status();
                         }
                         paused = false;
                         notify_daemon_event("recording_session_resumed");
@@ -2210,10 +2223,12 @@ pub async fn run_recording_with_native_controls(
         std::process::id(),
         chrono::Utc::now().timestamp_millis()
     );
-    let control_server = RecordingControlServer::start(session_id).await?;
+    let control_server = RecordingControlServer::start(session_id.clone()).await?;
 
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-    let params_json = serde_json::to_string(&params)?;
+    let mut ui_params = params.clone();
+    ui_params.session_id = Some(session_id);
+    let params_json = serde_json::to_string(&ui_params)?;
 
     let mut child = std::process::Command::new(&exe)
         .arg("recording-ui-internal")
@@ -2259,7 +2274,13 @@ pub async fn run_recording_with_native_controls(
 
     match ready {
         Ok(Some(true)) => {}
-        Ok(Some(false)) | Ok(None) | Err(_) => {
+        Ok(Some(false)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            notify_recording_session_ended_best_effort();
+            return Ok((config.output_path.clone(), StopAction::Discard));
+        }
+        Ok(None) | Err(_) => {
             if let Ok(Some(status)) = child.try_wait() {
                 if status.code() == Some(2) {
                     notify_recording_session_ended_best_effort();
@@ -2290,6 +2311,9 @@ pub async fn run_recording_with_native_controls(
             let cmd = match line.trim() {
                 "save" => RecordingControlCommand::StopSave,
                 "discard" => RecordingControlCommand::StopDiscard,
+                "pause" => RecordingControlCommand::Pause,
+                "resume" => RecordingControlCommand::Resume,
+                "restart" => RecordingControlCommand::Restart,
                 _ => continue,
             };
             if ui_tx.send(cmd).is_err() {
@@ -2322,7 +2346,10 @@ pub async fn run_recording_with_native_controls(
                 notify_daemon_event(event);
             }
             let _ = std::fs::remove_file(&path);
-            (config.output_path.clone(), StopAction::Discard)
+            stdout_task.abort();
+            let _ = child.kill();
+            let _ = child.wait();
+            return Box::pin(run_recording_with_native_controls(config, params)).await;
         }
         (path, RecordingTerminalAction::Save) => {
             if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Save) {

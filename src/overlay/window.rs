@@ -87,6 +87,20 @@ fn recording_request_from_state(
     }
 }
 
+fn poll_daemon_audio_levels() -> Option<(f64, f64)> {
+    let conn = zbus::blocking::Connection::session().ok()?;
+    let proxy = zbus::blocking::Proxy::new(
+        &conn,
+        crate::daemon::DAEMON_BUS_NAME,
+        crate::daemon::DAEMON_OBJECT_PATH,
+        crate::daemon::DAEMON_INTERFACE,
+    )
+    .ok()?;
+    let mic = proxy.call::<_, _, f64>("GetMicLevel", &()).ok()?;
+    let speaker = proxy.call::<_, _, f64>("GetSpeakerLevel", &()).ok()?;
+    Some((mic.clamp(0.0, 1.0), speaker.clamp(0.0, 1.0)))
+}
+
 fn sync_webcam_preview(st: &mut SelectorState) {
     if !st.recording.rec_webcam || st.recording.webcam_device < 0 {
         st.recording.webcam_preview = None;
@@ -563,6 +577,53 @@ pub(crate) fn setup_window(
         } else {
             glib::ControlFlow::Continue
         }
+    });
+
+    let audio_levels = Arc::new(Mutex::new((0.0_f64, 0.0_f64)));
+    {
+        let audio_levels = audio_levels.clone();
+        std::thread::spawn(move || loop {
+            if let Some(levels) = poll_daemon_audio_levels() {
+                if let Ok(mut guard) = audio_levels.lock() {
+                    *guard = levels;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        });
+    }
+
+    let state_audio_tick = state.clone();
+    let drawing_area_weak_audio = drawing_area.downgrade();
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        let (mic_level, speaker_level) = audio_levels
+            .lock()
+            .map(|guard| *guard)
+            .unwrap_or((0.0, 0.0));
+        if let Ok(mut st) = state_audio_tick.lock() {
+            if !st.recording.panel_open {
+                return glib::ControlFlow::Continue;
+            }
+            let old_mic = st.recording.mic_level;
+            let old_speaker = st.recording.speaker_level;
+            st.recording.mic_level = if st.recording.mic_toggle {
+                mic_level
+            } else {
+                0.0
+            };
+            st.recording.speaker_level = if st.recording.speaker_toggle {
+                speaker_level
+            } else {
+                0.0
+            };
+            if (old_mic - st.recording.mic_level).abs() > 0.01
+                || (old_speaker - st.recording.speaker_level).abs() > 0.01
+            {
+                if let Some(area) = drawing_area_weak_audio.upgrade() {
+                    area.queue_draw();
+                }
+            }
+        }
+        glib::ControlFlow::Continue
     });
 
     let motion_controller = EventControllerMotion::new();

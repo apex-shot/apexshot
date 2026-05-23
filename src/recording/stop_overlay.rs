@@ -255,6 +255,7 @@ pub fn run_recording_countdown_bar(
             cancelled_activate.clone(),
             false,
             None,
+            None,
         );
     });
 
@@ -278,6 +279,11 @@ pub fn run_recording_ui(
 
     app.connect_activate(move |application| {
         let dim_windows = setup_dim_windows(application, params.clone());
+        let _webcam_window = if params.show_webcam {
+            setup_webcam_window(application, params.clone(), params.session_id.clone())
+        } else {
+            None
+        };
         let controls_window = setup_window(
             application,
             params.clone(),
@@ -293,6 +299,7 @@ pub fn run_recording_ui(
             Arc::new(AtomicBool::new(false)),
             true,
             Some(controls_window),
+            Some(stop_tx.clone()),
         );
     });
 
@@ -505,13 +512,12 @@ fn setup_window(
             for (tile, rect) in tiles.iter() {
                 let is_stop = *tile == BarTile::Stop;
                 let is_hovered = hover == Some(*tile);
-                let is_disabled =
-                    session_id_draw.is_none() || matches!(*tile, BarTile::Pause | BarTile::Restart);
+                let is_disabled = session_id_draw.is_none();
 
                 if is_stop {
                     draw_primary_pill(cr, *rect, is_hovered);
-                } else if is_hovered && !is_disabled {
-                    draw_accent_cell(cr, *rect);
+                } else {
+                    draw_control_cell(cr, *tile, *rect, is_hovered, is_disabled, paused.get());
                 }
 
                 let alpha = if is_disabled {
@@ -543,7 +549,21 @@ fn setup_window(
     if params.show_timer {
         let elapsed_for_timer = elapsed_secs.clone();
         let drawing_area_weak = drawing_area.downgrade();
+        let window_weak = window.downgrade();
+        let paused_for_timer = is_paused.clone();
         glib::timeout_add_local(Duration::from_secs(1), move || {
+            let Some(window) = window_weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            // In countdown mode the controls window is created hidden before the
+            // actual recorder starts. Do not count that waiting time as recording
+            // time; begin ticking only once the controls are shown.
+            if !window.is_visible() {
+                return glib::ControlFlow::Continue;
+            }
+            if paused_for_timer.get() {
+                return glib::ControlFlow::Continue;
+            }
             elapsed_for_timer.set(elapsed_for_timer.get() + 1);
             if let Some(area) = drawing_area_weak.upgrade() {
                 area.queue_draw();
@@ -617,6 +637,7 @@ fn setup_window(
         let session_id = session_id.clone();
         let paused = is_paused.clone();
         let drawing_area_weak = drawing_area.downgrade();
+        let window_weak = window.downgrade();
         click.connect_released(move |gesture, n_press, x, y| {
             if n_press != 1 {
                 return;
@@ -629,26 +650,34 @@ fn setup_window(
                         BarTile::Stop => close_with_action(StopAction::Save),
                         BarTile::Discard => close_with_action(StopAction::Discard),
                         BarTile::Pause => {
-                            if let Some(_sid) = &session_id {
+                            if session_id.is_some() {
                                 let currently_paused = paused.get();
-                                let cmd = if currently_paused {
+                                if currently_paused {
                                     paused.set(false);
-                                    crate::recording::control_session::RecordingControlCommand::Resume
+                                    println!("resume");
                                 } else {
                                     paused.set(true);
-                                    crate::recording::control_session::RecordingControlCommand::Pause
-                                };
-                                let _ = crate::recording::control_session::send_active_recording_command(cmd);
+                                    println!("pause");
+                                }
+                                use std::io::Write;
+                                let _ = std::io::stdout().flush();
                                 if let Some(area) = drawing_area_weak.upgrade() {
                                     area.queue_draw();
                                 }
                             }
                         }
                         BarTile::Restart => {
-                            if let Some(_sid) = &session_id {
-                                let _ = crate::recording::control_session::send_active_recording_command(
-                                    crate::recording::control_session::RecordingControlCommand::Restart,
-                                );
+                            if session_id.is_some() {
+                                println!("restart");
+                                use std::io::Write;
+                                let _ = std::io::stdout().flush();
+                                if let Some(window) = window_weak.upgrade() {
+                                    if let Some(app) = window.application() {
+                                        app.quit();
+                                    } else {
+                                        window.close();
+                                    }
+                                }
                             }
                         }
                     }
@@ -717,6 +746,7 @@ fn setup_countdown_window(
     cancelled: Arc<AtomicBool>,
     unified_mode: bool,
     controls_window: Option<ApplicationWindow>,
+    cancel_stop_tx: Option<Arc<Mutex<Option<oneshot::Sender<StopAction>>>>>,
 ) {
     let display = gdk::Display::default().expect("No display");
     let monitor = monitor_for_capture(&display, &params);
@@ -888,6 +918,7 @@ fn setup_countdown_window(
     click.connect_pressed({
         let app_weak = app.downgrade();
         let window_weak = window.downgrade();
+        let cancel_stop_tx = cancel_stop_tx.clone();
         move |_, _, x, y| {
             let bubble_size = 184.0;
             let cx = countdown_center
@@ -898,6 +929,17 @@ fn setup_countdown_window(
                 .clamp(bubble_size / 2.0, win_h as f64 - bubble_size / 2.0);
             if (x - cx).hypot(y - cy) <= bubble_size / 2.0 {
                 cancelled.store(true, Ordering::Relaxed);
+                if let Some(tx) = cancel_stop_tx
+                    .as_ref()
+                    .and_then(|tx| tx.lock().ok().and_then(|mut guard| guard.take()))
+                {
+                    let _ = tx.send(StopAction::Discard);
+                }
+                if unified_mode {
+                    println!("discard");
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+                }
                 if let Some(window) = window_weak.upgrade() {
                     window.close();
                 }
@@ -1071,6 +1113,9 @@ fn build_dim_window(
         window.set_margin(Edge::Top, y);
         window.set_margin(Edge::Left, x);
         window.set_keyboard_mode(KeyboardMode::None);
+        // Critical on Hyprland: keep mask coordinates relative to the physical
+        // output, not the compositor workarea below reserved bars/panels.
+        window.set_exclusive_zone(-1);
         window.set_namespace(Some("apexshot-recording-mask"));
     } else {
         window.fullscreen_on_monitor(monitor);
@@ -1190,10 +1235,48 @@ fn install_dim_css() {
     }
 }
 
-fn draw_accent_cell(cr: &cairo::Context, rect: RectF) {
+fn draw_control_cell(
+    cr: &cairo::Context,
+    tile: BarTile,
+    rect: RectF,
+    hovered: bool,
+    disabled: bool,
+    paused: bool,
+) {
+    let active_pause = matches!(tile, BarTile::Pause) && paused;
+    if !hovered && !active_pause {
+        return;
+    }
+
+    let (r, g, b, fill_alpha, stroke_alpha) = if disabled {
+        (1.0, 1.0, 1.0, 0.04, 0.06)
+    } else {
+        match tile {
+            BarTile::Pause if active_pause => {
+                (74.0 / 255.0, 144.0 / 255.0, 226.0 / 255.0, 0.24, 0.34)
+            }
+            BarTile::Pause => (74.0 / 255.0, 144.0 / 255.0, 226.0 / 255.0, 0.18, 0.26),
+            BarTile::Restart => (1.0, 184.0 / 255.0, 77.0 / 255.0, 0.18, 0.28),
+            BarTile::Discard => (235.0 / 255.0, 87.0 / 255.0, 87.0 / 255.0, 0.18, 0.30),
+            BarTile::Stop => (1.0, 1.0, 1.0, 0.09, 0.14),
+        }
+    };
+
     rounded_rect_path(cr, rect.x, rect.y, rect.width, rect.height, 10.0);
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.09);
+    cr.set_source_rgba(r, g, b, fill_alpha);
     let _ = cr.fill();
+
+    rounded_rect_path(
+        cr,
+        rect.x + 0.75,
+        rect.y + 0.75,
+        rect.width - 1.5,
+        rect.height - 1.5,
+        9.25,
+    );
+    cr.set_source_rgba(r, g, b, stroke_alpha);
+    cr.set_line_width(1.2);
+    let _ = cr.stroke();
 }
 
 fn draw_primary_pill(cr: &cairo::Context, rect: RectF, hovered: bool) {
@@ -1627,6 +1710,11 @@ fn setup_webcam_window(
     window.add_css_class("recording-webcam-window");
 
     let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
+    let display = gdk::Display::default();
+    let monitor = display
+        .as_ref()
+        .and_then(|display| monitor_for_capture(display, &params));
+    let monitor_geom = monitor.as_ref().map(|m| m.geometry());
     let (mut webcam_w, mut webcam_h) = recording_webcam_size(&params, screen_w, screen_h);
     webcam_w = webcam_w.max(1);
     webcam_h = webcam_h.max(1);
@@ -1664,15 +1752,23 @@ fn setup_webcam_window(
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
 
     if layer_shell_active {
+        let output_origin_x = monitor_geom.as_ref().map(|g| g.x()).unwrap_or(0);
+        let output_origin_y = monitor_geom.as_ref().map(|g| g.y()).unwrap_or(0);
         window.init_layer_shell();
         window.set_layer(Layer::Overlay);
+        if let Some(ref monitor) = monitor {
+            window.set_monitor(Some(monitor));
+        }
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
-        window.set_margin(Edge::Top, bounds_y);
-        window.set_margin(Edge::Left, bounds_x);
+        window.set_anchor(Edge::Bottom, false);
+        window.set_anchor(Edge::Right, false);
+        window.set_margin(Edge::Top, bounds_y - output_origin_y);
+        window.set_margin(Edge::Left, bounds_x - output_origin_x);
         window.set_default_size(bounds_w, bounds_h);
         window.set_opacity(1.0);
         window.set_keyboard_mode(KeyboardMode::None);
+        window.set_exclusive_zone(-1);
         window.set_namespace(Some("apexshot-webcam"));
     } else {
         window.connect_realize(clone!(

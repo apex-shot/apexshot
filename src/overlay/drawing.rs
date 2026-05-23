@@ -513,6 +513,10 @@ pub(crate) fn draw_recording_panel(
     settings_dropdown_open: Option<usize>,
     video_max_res: usize,
     video_fps: usize,
+    mic_enabled: bool,
+    speaker_enabled: bool,
+    mic_level: f64,
+    speaker_level: f64,
     record_mono: bool,
     open_editor: bool,
     rec_controls: bool,
@@ -595,11 +599,18 @@ pub(crate) fn draw_recording_panel(
     };
     let rail = deck.left_toggle_rail;
     let rail_tiles = [
-        (RecordPanelTile::Mic, ToolbarIcon::Mic, "Mic", true),
+        (
+            RecordPanelTile::Mic,
+            ToolbarIcon::Mic,
+            "Mic",
+            mic_enabled,
+            true,
+        ),
         (
             RecordPanelTile::Speaker,
             ToolbarIcon::Speaker,
             "Speaker",
+            speaker_enabled,
             false,
         ),
         (
@@ -607,18 +618,21 @@ pub(crate) fn draw_recording_panel(
             ToolbarIcon::Webcam,
             "Cam",
             rec_webcam,
+            false,
         ),
         (
             RecordPanelTile::Clicks,
             ToolbarIcon::Clicks,
             "Clicks",
             rec_clicks,
+            false,
         ),
         (
             RecordPanelTile::Keystrokes,
             ToolbarIcon::Keystrokes,
             "Keys",
             rec_keystrokes,
+            false,
         ),
     ];
 
@@ -688,7 +702,7 @@ pub(crate) fn draw_recording_panel(
         (1.0, 1.0, 1.0, 0.96),
     );
 
-    for (index, (tile, icon, label, active)) in rail_tiles.iter().enumerate() {
+    for (index, (tile, icon, label, active, warm_meter)) in rail_tiles.iter().enumerate() {
         let rect = RectF {
             x: rail.x,
             y: rail.y + FEATURE_PANEL_HEIGHT * index as f64,
@@ -731,6 +745,19 @@ pub(crate) fn draw_recording_panel(
             hovered || *active,
             color,
         );
+        if matches!(*tile, RecordPanelTile::Mic | RecordPanelTile::Speaker) {
+            let level = match tile {
+                RecordPanelTile::Mic => mic_level,
+                RecordPanelTile::Speaker => speaker_level,
+                _ => 0.0,
+            };
+            draw_audio_meter_segments(
+                context,
+                rect,
+                if *active { level } else { 0.0 },
+                *warm_meter,
+            );
+        }
     }
 
     let actions = deck.bottom_action_bar;
@@ -901,6 +928,49 @@ pub(crate) fn draw_recording_panel(
             56.0 / 255.0,
             (1.0, 214.0 / 255.0, 186.0 / 255.0),
         );
+    }
+}
+
+fn draw_audio_meter_segments(context: &gtk4::cairo::Context, rect: RectF, level: f64, warm: bool) {
+    let num_segments = 4;
+    let segment_w = 10.0;
+    let segment_h = 4.5;
+    let spacing = 3.0;
+    let total_w = num_segments as f64 * segment_w + (num_segments - 1) as f64 * spacing;
+    let base_x = rect.x + rect.width / 2.0 - total_w / 2.0;
+    let base_y = rect.y + rect.height - 17.0;
+    let level = level.clamp(0.0, 1.0);
+
+    rounded_rect_path(
+        context,
+        base_x - 4.0,
+        base_y - 1.0,
+        total_w + 8.0,
+        segment_h + 2.0,
+        5.0,
+    );
+    context.set_source_rgba(0.0, 0.0, 0.0, 24.0 / 255.0);
+    let _ = context.fill();
+
+    for b in 0..num_segments {
+        let threshold = (b + 1) as f64 / num_segments as f64;
+        let lit = level >= threshold - 0.18;
+        let x = base_x + b as f64 * (segment_w + spacing);
+        rounded_rect_path(context, x, base_y, segment_w, segment_h, 2.2);
+        if lit {
+            if warm {
+                context.set_source_rgba(1.0, 134.0 / 255.0, 52.0 / 255.0, 0.92);
+            } else {
+                context.set_source_rgba(76.0 / 255.0, 154.0 / 255.0, 1.0, 0.92);
+            }
+            let _ = context.fill();
+        } else {
+            context.set_source_rgba(1.0, 1.0, 1.0, 42.0 / 255.0);
+            let _ = context.fill_preserve();
+            context.set_source_rgba(1.0, 1.0, 1.0, 18.0 / 255.0);
+            context.set_line_width(0.9);
+            let _ = context.stroke();
+        }
     }
 }
 
@@ -3191,6 +3261,10 @@ pub(crate) fn draw_overlay(
                 st.recording.settings_dropdown_open,
                 st.recording.video_max_res,
                 st.recording.video_fps,
+                st.recording.mic_toggle,
+                st.recording.speaker_toggle,
+                st.recording.mic_level,
+                st.recording.speaker_level,
                 st.recording.record_mono,
                 st.recording.open_editor,
                 st.recording.rec_controls,

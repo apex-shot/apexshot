@@ -31,6 +31,8 @@ pub(crate) struct RecordingState {
     // Recording toggles
     pub(crate) mic_toggle: bool,
     pub(crate) speaker_toggle: bool,
+    pub(crate) mic_level: f64,
+    pub(crate) speaker_level: f64,
 
     // Recording settings
     pub(crate) rec_controls: bool,
@@ -103,6 +105,8 @@ impl Default for RecordingState {
             hover_record_tile: None,
             mic_toggle: true,
             speaker_toggle: false,
+            mic_level: 0.0,
+            speaker_level: 0.0,
             rec_controls: true,
             display_rec_time: true,
             hidpi: false,
