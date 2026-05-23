@@ -3021,6 +3021,7 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         key_position: 0,
         countdown_enabled: false,
         countdown_seconds: 3,
+        session_id: None,
     };
 
     match run_recording_with_controls(config, params).await {
@@ -3138,6 +3139,7 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         key_position: 0,
         countdown_enabled: false,
         countdown_seconds: 3,
+        session_id: None,
     };
     match run_recording_with_controls(config, params).await {
         Ok((path, StopAction::Discard)) => {

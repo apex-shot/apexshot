@@ -358,8 +358,7 @@ async fn async_main(args: Vec<String>) {
             if args.len() < 4 {
                 std::process::exit(1);
             }
-            let params: RecordingControlsParams =
-                serde_json::from_str(&args[2]).unwrap();
+            let params: RecordingControlsParams = serde_json::from_str(&args[2]).unwrap();
             let seconds: u32 = args[3].parse().unwrap_or(3);
 
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -1588,8 +1587,7 @@ fn run_capture(args: &[String]) {
             Ok(AreaCaptureResult::RecordingRequested(request)) => {
                 // Run recording as a subprocess to fully isolate GTK/layer-shell
                 // state from the just-closed capture overlay.
-                let exe = std::env::current_exe()
-                    .unwrap_or_else(|_| PathBuf::from("apexshot"));
+                let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
                 let json = serde_json::to_string(&request).unwrap();
                 let status = std::process::Command::new(&exe)
                     .arg("record-from-overlay")
@@ -2076,6 +2074,7 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             key_position: 0,
             countdown_enabled: false,
             countdown_seconds: 3,
+            session_id: None,
         };
 
         let controls_outcome = run_recording_with_controls(config, params)

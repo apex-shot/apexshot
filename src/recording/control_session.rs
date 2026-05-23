@@ -253,10 +253,6 @@ impl RecordingControlServer {
         &self.bus_name
     }
 
-    pub fn session_id(&self) -> &str {
-        &self.session_id
-    }
-
     pub fn set_command_sender(&self, tx: mpsc::UnboundedSender<RecordingControlCommand>) {
         if let Ok(mut guard) = self.command_tx.lock() {
             *guard = Some(tx);

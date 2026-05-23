@@ -27,7 +27,7 @@ use x11rb::{
 };
 
 use crate::overlay::drawing::{draw_frosted_panel, rounded_rect_path};
-use crate::overlay::layout::{ACTION_CARD_GAP, FEATURE_PANEL_MARGIN, FEATURE_PANEL_TOP_GAP, RectF};
+use crate::overlay::layout::{RectF, ACTION_CARD_GAP, FEATURE_PANEL_MARGIN, FEATURE_PANEL_TOP_GAP};
 use crate::overlay::recording::layout::REC_ACTION_HEIGHT;
 
 const BAR_PAD: f64 = 8.0;
@@ -111,7 +111,7 @@ pub enum StopAction {
     Discard,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordingControlsParams {
     pub capture_x: i32,
     pub capture_y: i32,
@@ -137,6 +137,7 @@ pub struct RecordingControlsParams {
     pub key_position: u8,
     pub countdown_enabled: bool,
     pub countdown_seconds: u32,
+    pub session_id: Option<String>,
 }
 
 impl Default for RecordingControlsParams {
@@ -166,6 +167,7 @@ impl Default for RecordingControlsParams {
             key_position: 0,
             countdown_enabled: false,
             countdown_seconds: 3,
+            session_id: None,
         }
     }
 }
@@ -204,6 +206,7 @@ pub fn run_recording_controls(
         key_position: params.key_position,
         countdown_enabled: params.countdown_enabled,
         countdown_seconds: params.countdown_seconds,
+        session_id: session_id.clone(),
     };
 
     let app = Application::builder()
@@ -211,15 +214,21 @@ pub fn run_recording_controls(
         .build();
 
     let stop_tx_activate = stop_tx.clone();
-    let session_id_clone = session_id.clone();
     app.connect_activate(move |application| {
-        let dim_windows = setup_dim_windows(application, params);
+        let dim_windows = setup_dim_windows(application, params.clone());
         let _webcam_window = if params.show_webcam {
-            setup_webcam_window(application, params, session_id_clone.clone())
+            setup_webcam_window(application, params.clone(), session_id.clone())
         } else {
             None
         };
-        setup_window(application, params, stop_tx_activate.clone(), dim_windows);
+        let controls_window = setup_window(
+            application,
+            params.clone(),
+            stop_tx_activate.clone(),
+            dim_windows,
+            session_id.clone(),
+        );
+        controls_window.set_visible(true); // Show immediately for non-countdown mode
     });
 
     let _ = app.run_with_args::<String>(&[]);
@@ -237,14 +246,15 @@ pub fn run_recording_countdown_bar(
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancelled_activate = cancelled.clone();
     app.connect_activate(move |application| {
-        let dim_windows = setup_dim_windows(application, params);
+        let dim_windows = setup_dim_windows(application, params.clone());
         setup_countdown_window(
             application,
-            params,
+            params.clone(),
             seconds,
             dim_windows,
             cancelled_activate.clone(),
             false,
+            None,
         );
     });
 
@@ -268,15 +278,22 @@ pub fn run_recording_ui(
 
     app.connect_activate(move |application| {
         let dim_windows = setup_dim_windows(application, params.clone());
+        let controls_window = setup_window(
+            application,
+            params.clone(),
+            stop_tx.clone(),
+            dim_windows.clone(),
+            params.session_id.clone(),
+        );
         setup_countdown_window(
             application,
             params.clone(),
             seconds,
-            dim_windows.clone(),
+            dim_windows,
             Arc::new(AtomicBool::new(false)),
             true,
+            Some(controls_window),
         );
-        setup_window(application, params, stop_tx.clone(), dim_windows);
     });
 
     let _ = app.run_with_args::<String>(&[]);
@@ -312,6 +329,7 @@ pub fn run_recording_stop_overlay(
             key_position: 0,
             countdown_enabled: false,
             countdown_seconds: 3,
+            session_id: None,
         },
         None,
         None,
@@ -332,8 +350,8 @@ fn compute_bar_position(
     let screen_h_f = screen_h as f64;
 
     if params.is_fullscreen || params.capture_w <= 0 || params.capture_h <= 0 {
-        let x = ((screen_w_f - bar_w) / 2.0)
-            .clamp(margin, (screen_w_f - bar_w - margin).max(margin));
+        let x =
+            ((screen_w_f - bar_w) / 2.0).clamp(margin, (screen_w_f - bar_w - margin).max(margin));
         return (x.round() as i32, margin.round() as i32);
     }
 
@@ -342,8 +360,8 @@ fn compute_bar_position(
     let sel_w = params.capture_w as f64;
     let sel_h = params.capture_h as f64;
 
-    let x = (sel_x + (sel_w - bar_w) / 2.0)
-        .clamp(margin, (screen_w_f - bar_w - margin).max(margin));
+    let x =
+        (sel_x + (sel_w - bar_w) / 2.0).clamp(margin, (screen_w_f - bar_w - margin).max(margin));
 
     let below_y = sel_y + sel_h + top_gap;
     let above_y = sel_y - top_gap - bar_h;
@@ -362,7 +380,8 @@ fn setup_window(
     params: RecordingControlsParams,
     stop_tx: Arc<Mutex<Option<oneshot::Sender<StopAction>>>>,
     dim_windows: Vec<ApplicationWindow>,
-) {
+    session_id: Option<String>,
+) -> ApplicationWindow {
     install_controls_css();
 
     let display = gdk::Display::default().expect("No display");
@@ -409,6 +428,7 @@ fn setup_window(
         .resizable(false)
         .build();
     window.add_css_class("recording-controls-window");
+    window.set_visible(false); // Hide during countdown, show after
 
     if layer_shell_active {
         let (pos_x, pos_y) = initial_pos_mapped;
@@ -455,6 +475,8 @@ fn setup_window(
 
     let elapsed_secs = Rc::new(Cell::new(0u64));
     let hovered_tile: Rc<Cell<Option<BarTile>>> = Rc::new(Cell::new(None));
+    let is_paused: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let session_id_draw = session_id.clone();
     let show_timer = params.show_timer;
 
     let drawing_area = DrawingArea::new();
@@ -465,6 +487,7 @@ fn setup_window(
     {
         let elapsed = elapsed_secs.clone();
         let hovered = hovered_tile.clone();
+        let paused = is_paused.clone();
         drawing_area.set_draw_func(move |_, cr, width, height| {
             cr.set_operator(cairo::Operator::Source);
             cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
@@ -483,7 +506,7 @@ fn setup_window(
                 let is_stop = *tile == BarTile::Stop;
                 let is_hovered = hover == Some(*tile);
                 let is_disabled =
-                    matches!(*tile, BarTile::Pause | BarTile::Restart);
+                    session_id_draw.is_none() || matches!(*tile, BarTile::Pause | BarTile::Restart);
 
                 if is_stop {
                     draw_primary_pill(cr, *rect, is_hovered);
@@ -501,7 +524,13 @@ fn setup_window(
 
                 match tile {
                     BarTile::Stop => draw_stop_glyph(cr, *rect, show_timer, secs),
-                    BarTile::Pause => draw_pause_glyph(cr, *rect, alpha),
+                    BarTile::Pause => {
+                        if paused.get() {
+                            draw_resume_glyph(cr, *rect, alpha)
+                        } else {
+                            draw_pause_glyph(cr, *rect, alpha)
+                        }
+                    }
                     BarTile::Restart => draw_restart_glyph(cr, *rect, alpha),
                     BarTile::Discard => draw_discard_glyph(cr, *rect, alpha),
                 }
@@ -585,6 +614,9 @@ fn setup_window(
     let click = GestureClick::builder().button(1).build();
     {
         let close_with_action = close_with_action.clone();
+        let session_id = session_id.clone();
+        let paused = is_paused.clone();
+        let drawing_area_weak = drawing_area.downgrade();
         click.connect_released(move |gesture, n_press, x, y| {
             if n_press != 1 {
                 return;
@@ -596,7 +628,29 @@ fn setup_window(
                     match tile {
                         BarTile::Stop => close_with_action(StopAction::Save),
                         BarTile::Discard => close_with_action(StopAction::Discard),
-                        BarTile::Pause | BarTile::Restart => {}
+                        BarTile::Pause => {
+                            if let Some(_sid) = &session_id {
+                                let currently_paused = paused.get();
+                                let cmd = if currently_paused {
+                                    paused.set(false);
+                                    crate::recording::control_session::RecordingControlCommand::Resume
+                                } else {
+                                    paused.set(true);
+                                    crate::recording::control_session::RecordingControlCommand::Pause
+                                };
+                                let _ = crate::recording::control_session::send_active_recording_command(cmd);
+                                if let Some(area) = drawing_area_weak.upgrade() {
+                                    area.queue_draw();
+                                }
+                            }
+                        }
+                        BarTile::Restart => {
+                            if let Some(_sid) = &session_id {
+                                let _ = crate::recording::control_session::send_active_recording_command(
+                                    crate::recording::control_session::RecordingControlCommand::Restart,
+                                );
+                            }
+                        }
                     }
                     return;
                 }
@@ -652,7 +706,7 @@ fn setup_window(
     ));
     drawing_area.add_controller(drag);
 
-    window.present();
+    window
 }
 
 fn setup_countdown_window(
@@ -662,6 +716,7 @@ fn setup_countdown_window(
     dim_windows: Vec<ApplicationWindow>,
     cancelled: Arc<AtomicBool>,
     unified_mode: bool,
+    controls_window: Option<ApplicationWindow>,
 ) {
     let display = gdk::Display::default().expect("No display");
     let monitor = monitor_for_capture(&display, &params);
@@ -886,6 +941,10 @@ fn setup_countdown_window(
                 if let Some(window) = window_weak.upgrade() {
                     window.close();
                 }
+                // Show controls window after countdown finishes
+                if let Some(controls) = controls_window.as_ref() {
+                    controls.set_visible(true);
+                }
                 println!("ready");
                 {
                     use std::io::Write;
@@ -931,12 +990,11 @@ fn setup_dim_windows(app: &Application, params: RecordingControlsParams) -> Vec<
         return Vec::new();
     };
     let geometry = monitor.geometry();
-    let local_x = (params.capture_x - geometry.x()).clamp(0, geometry.width());
-    let local_y = (params.capture_y - geometry.y()).clamp(0, geometry.height());
-    let local_right =
-        (params.capture_x + params.capture_w - geometry.x()).clamp(0, geometry.width());
-    let local_bottom =
-        (params.capture_y + params.capture_h - geometry.y()).clamp(0, geometry.height());
+    // Coordinates from overlay are already monitor-local, no need to subtract geometry
+    let local_x = params.capture_x.clamp(0, geometry.width());
+    let local_y = params.capture_y.clamp(0, geometry.height());
+    let local_right = (params.capture_x + params.capture_w).clamp(0, geometry.width());
+    let local_bottom = (params.capture_y + params.capture_h).clamp(0, geometry.height());
 
     let rects = vec![
         (0, 0, geometry.width(), local_y),
@@ -1199,11 +1257,7 @@ fn draw_stop_glyph(cr: &cairo::Context, rect: RectF, show_timer: bool, secs: u64
         let mins = secs / 60;
         let s = secs % 60;
         let text = format!("{}:{:02}", mins, s);
-        cr.select_font_face(
-            "Sans",
-            cairo::FontSlant::Normal,
-            cairo::FontWeight::Bold,
-        );
+        cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
         cr.set_font_size(16.5);
         let label_x = rect.x + 42.0;
         let label_y = cy + 5.6;
@@ -1242,6 +1296,19 @@ fn draw_pause_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
         let gap = 3.5;
         cr.rectangle(cx - gap - bar_w / 2.0, cy - bar_h / 2.0, bar_w, bar_h);
         cr.rectangle(cx + gap - bar_w / 2.0, cy - bar_h / 2.0, bar_w, bar_h);
+        let _ = cr.fill();
+    });
+}
+
+fn draw_resume_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
+    draw_glyph_with_shadow(cr, rect, alpha, |cr, cx, cy| {
+        cr.arc(cx, cy, 10.0, 0.0, 2.0 * PI);
+        let _ = cr.stroke();
+        let triangle_size = 5.0;
+        cr.move_to(cx - triangle_size / 2.0, cy - triangle_size);
+        cr.line_to(cx - triangle_size / 2.0, cy + triangle_size);
+        cr.line_to(cx + triangle_size, cy);
+        cr.close_path();
         let _ = cr.fill();
     });
 }

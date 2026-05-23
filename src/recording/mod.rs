@@ -2154,6 +2154,7 @@ pub fn prepare_overlay_recording_request(
         key_position: request.key_position,
         countdown_enabled: request.countdown,
         countdown_seconds: 3, // Default to 3s for now, or fetch from config
+        session_id: None,     // Will be set when controls are launched
     });
 
     PreparedOverlayRecordingRequest {
@@ -2186,7 +2187,7 @@ async fn run_recording_with_controls_with_runtime_overlay(
     if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
         return run_recording_with_shell_controls(
             config,
-            params,
+            params.clone(),
             runtime_overlay_snapshot,
             visibility_policy
                 .unwrap_or_else(|| shell_controls_visibility_policy_for_params(&params)),
@@ -2244,19 +2245,16 @@ pub async fn run_recording_with_native_controls(
     } else {
         5
     };
-    let ready = tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs as u64),
-        async {
-            while let Some(line) = ui_line_rx.recv().await {
-                match line.trim() {
-                    "ready" => return Some(true),
-                    "discard" => return Some(false),
-                    _ => {}
-                }
+    let ready = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs as u64), async {
+        while let Some(line) = ui_line_rx.recv().await {
+            match line.trim() {
+                "ready" => return Some(true),
+                "discard" => return Some(false),
+                _ => {}
             }
-            None
-        },
-    )
+        }
+        None
+    })
     .await;
 
     match ready {
@@ -2273,74 +2271,71 @@ pub async fn run_recording_with_native_controls(
 
     notify_daemon_event("recording_session_started");
 
-    let final_outcome = loop {
-        let (recording_command_tx, command_rx) = mpsc::unbounded_channel();
-        let (control_command_tx, mut control_command_rx) =
-            mpsc::unbounded_channel::<RecordingControlCommand>();
+    let (recording_command_tx, command_rx) = mpsc::unbounded_channel();
+    let (control_command_tx, mut control_command_rx) =
+        mpsc::unbounded_channel::<RecordingControlCommand>();
 
-        let dbus_tx = recording_command_tx.clone();
-        let dbus_forward = tokio::spawn(async move {
-            while let Some(cmd) = control_command_rx.recv().await {
-                if dbus_tx.send(cmd).is_err() {
-                    break;
-                }
+    let dbus_tx = recording_command_tx.clone();
+    let dbus_forward = tokio::spawn(async move {
+        while let Some(cmd) = control_command_rx.recv().await {
+            if dbus_tx.send(cmd).is_err() {
+                break;
             }
-        });
+        }
+    });
 
-        let ui_tx = recording_command_tx.clone();
-        let ui_forward = tokio::spawn(async move {
-            while let Some(line) = ui_line_rx.recv().await {
-                let cmd = match line.trim() {
-                    "save" => RecordingControlCommand::StopSave,
-                    "discard" => RecordingControlCommand::StopDiscard,
-                    _ => continue,
-                };
-                if ui_tx.send(cmd).is_err() {
-                    break;
-                }
+    let ui_tx = recording_command_tx.clone();
+    let ui_forward = tokio::spawn(async move {
+        while let Some(line) = ui_line_rx.recv().await {
+            let cmd = match line.trim() {
+                "save" => RecordingControlCommand::StopSave,
+                "discard" => RecordingControlCommand::StopDiscard,
+                _ => continue,
+            };
+            if ui_tx.send(cmd).is_err() {
+                break;
             }
-        });
+        }
+    });
 
-        control_server.set_command_sender(control_command_tx);
-        let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
-        control_server.clear_command_sender();
+    control_server.set_command_sender(control_command_tx);
+    let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
+    control_server.clear_command_sender();
 
-        dbus_forward.abort();
-        ui_forward.abort();
+    dbus_forward.abort();
+    ui_forward.abort();
 
-        let outcome = match outcome {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                notify_recording_session_ended_best_effort();
-                return Err(err.into());
-            }
-        };
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            notify_recording_session_ended_best_effort();
+            return Err(err.into());
+        }
+    };
 
-        match outcome {
-            (path, RecordingTerminalAction::Restart) => {
-                if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Restart)
-                {
-                    notify_daemon_event(event);
-                }
-                let _ = std::fs::remove_file(&path);
-                return Ok((config.output_path.clone(), StopAction::Discard));
+    let final_outcome = match outcome {
+        (path, RecordingTerminalAction::Restart) => {
+            if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Restart)
+            {
+                notify_daemon_event(event);
             }
-            (path, RecordingTerminalAction::Save) => {
-                if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Save) {
-                    notify_daemon_event(event);
-                }
-                break (path, StopAction::Save);
+            let _ = std::fs::remove_file(&path);
+            (config.output_path.clone(), StopAction::Discard)
+        }
+        (path, RecordingTerminalAction::Save) => {
+            if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Save) {
+                notify_daemon_event(event);
             }
-            (path, RecordingTerminalAction::Discard) => {
-                if let Some(event) =
-                    daemon_event_for_terminal_action(RecordingTerminalAction::Discard)
-                {
-                    notify_daemon_event(event);
-                }
-                break (path, StopAction::Discard);
+            (path, StopAction::Save)
+        }
+        (path, RecordingTerminalAction::Discard) => {
+            if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Discard)
+            {
+                notify_daemon_event(event);
             }
+            (path, StopAction::Discard)
         }
     };
 
@@ -2739,6 +2734,7 @@ mod tests {
                 key_position: 0,
                 countdown_enabled: false,
                 countdown_seconds: 3,
+                session_id: None,
             })
         );
         assert_eq!(prepared.use_shell_mask, false);
@@ -2876,6 +2872,7 @@ mod tests {
                 key_position: 0,
                 countdown_enabled: true,
                 countdown_seconds: 3,
+                session_id: None,
             })
         );
     }
@@ -3453,6 +3450,7 @@ mod tests {
                 key_position: 0,
                 countdown_enabled: false,
                 countdown_seconds: 3,
+                session_id: None,
             })
         );
         assert_eq!(prepared.use_shell_mask, shell_supported);
@@ -3538,6 +3536,7 @@ mod tests {
                 key_position: 0,
                 countdown_enabled: false,
                 countdown_seconds: 3,
+                session_id: None,
             })
         );
     }
