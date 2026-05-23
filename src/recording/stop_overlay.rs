@@ -244,11 +244,43 @@ pub fn run_recording_countdown_bar(
             seconds,
             dim_windows,
             cancelled_activate.clone(),
+            false,
         );
     });
 
     let _ = app.run_with_args::<String>(&[]);
     Ok(!cancelled.load(Ordering::Relaxed))
+}
+
+/// Unified recording UI: dim windows + countdown + controls bar in one lifecycle.
+/// Dim windows persist through the entire flow, eliminating surface transitions.
+/// Prints "ready" to stdout when countdown finishes and controls are visible.
+pub fn run_recording_ui(
+    params: RecordingControlsParams,
+    seconds: u32,
+    stop_tx: oneshot::Sender<StopAction>,
+) -> Result<(), StopOverlayError> {
+    let stop_tx = Arc::new(Mutex::new(Some(stop_tx)));
+
+    let app = Application::builder()
+        .application_id("com.apexshot.recording")
+        .build();
+
+    app.connect_activate(move |application| {
+        let dim_windows = setup_dim_windows(application, params.clone());
+        setup_countdown_window(
+            application,
+            params.clone(),
+            seconds,
+            dim_windows.clone(),
+            Arc::new(AtomicBool::new(false)),
+            true,
+        );
+        setup_window(application, params, stop_tx.clone(), dim_windows);
+    });
+
+    let _ = app.run_with_args::<String>(&[]);
+    Ok(())
 }
 
 pub fn run_recording_stop_overlay(
@@ -333,10 +365,35 @@ fn setup_window(
 ) {
     install_controls_css();
 
+    let display = gdk::Display::default().expect("No display");
+    let monitor = monitor_for_capture(&display, &params);
+
     let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
     let initial_pos = compute_bar_position(&params, screen_w, screen_h);
-    let current_pos = Rc::new(Cell::new(initial_pos));
-    let drag_start_pos = Rc::new(Cell::new(initial_pos));
+
+    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
+
+    let (clamp_w, clamp_h) = if let Some(ref m) = monitor {
+        let geom = m.geometry();
+        (geom.width(), geom.height())
+    } else {
+        (screen_w, screen_h)
+    };
+
+    let initial_pos_mapped = if layer_shell_active {
+        if let Some(ref m) = monitor {
+            let geom = m.geometry();
+            (initial_pos.0 - geom.x(), initial_pos.1 - geom.y())
+        } else {
+            initial_pos
+        }
+    } else {
+        initial_pos
+    };
+
+    let current_pos = Rc::new(Cell::new(initial_pos_mapped));
+    let drag_start_pos = Rc::new(Cell::new(initial_pos_mapped));
 
     let bar_w_f = compute_bar_width(params.show_timer);
     let bar_h_f = BAR_HEIGHT;
@@ -353,12 +410,13 @@ fn setup_window(
         .build();
     window.add_css_class("recording-controls-window");
 
-    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
     if layer_shell_active {
-        let (pos_x, pos_y) = initial_pos;
+        let (pos_x, pos_y) = initial_pos_mapped;
         window.init_layer_shell();
         window.set_layer(Layer::Top);
+        if let Some(ref m) = monitor {
+            window.set_monitor(Some(m));
+        }
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
         window.set_anchor(Edge::Bottom, false);
@@ -581,8 +639,8 @@ fn setup_window(
         drag_start_pos,
         move |_, dx, dy| {
             let (start_x, start_y) = drag_start_pos.get();
-            let next_x = (start_x + dx.round() as i32).clamp(0, (screen_w - bar_w_i).max(0));
-            let next_y = (start_y + dy.round() as i32).clamp(0, (screen_h - bar_h_i).max(0));
+            let next_x = (start_x + dx.round() as i32).clamp(0, (clamp_w - bar_w_i).max(0));
+            let next_y = (start_y + dy.round() as i32).clamp(0, (clamp_h - bar_h_i).max(0));
             current_pos.set((next_x, next_y));
             if layer_shell_active {
                 window.set_margin(Edge::Left, next_x);
@@ -603,16 +661,32 @@ fn setup_countdown_window(
     seconds: u32,
     dim_windows: Vec<ApplicationWindow>,
     cancelled: Arc<AtomicBool>,
+    unified_mode: bool,
 ) {
-    let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
+    let display = gdk::Display::default().expect("No display");
+    let monitor = monitor_for_capture(&display, &params);
+    let monitor_geom = monitor.as_ref().map(|m| m.geometry());
+
+    let (win_w, win_h) = if let Some(ref geom) = monitor_geom {
+        (geom.width(), geom.height())
+    } else {
+        display_size().unwrap_or((1920, 1080))
+    };
+
     let countdown_center = if !params.is_fullscreen && params.capture_w > 0 && params.capture_h > 0
     {
-        (
-            params.capture_x as f64 + params.capture_w as f64 / 2.0,
-            params.capture_y as f64 + params.capture_h as f64 / 2.0,
-        )
+        let global_center_x = params.capture_x as f64 + params.capture_w as f64 / 2.0;
+        let global_center_y = params.capture_y as f64 + params.capture_h as f64 / 2.0;
+        if let Some(ref geom) = monitor_geom {
+            (
+                global_center_x - geom.x() as f64,
+                global_center_y - geom.y() as f64,
+            )
+        } else {
+            (global_center_x, global_center_y)
+        }
     } else {
-        (screen_w as f64 / 2.0, screen_h as f64 / 2.0)
+        (win_w as f64 / 2.0, win_h as f64 / 2.0)
     };
 
     install_countdown_css();
@@ -620,8 +694,8 @@ fn setup_countdown_window(
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Recording Countdown")
-        .default_width(screen_w)
-        .default_height(screen_h)
+        .default_width(win_w)
+        .default_height(win_h)
         .decorated(false)
         .resizable(false)
         .focusable(false)
@@ -633,6 +707,9 @@ fn setup_countdown_window(
     if layer_shell_active {
         window.init_layer_shell();
         window.set_layer(Layer::Overlay);
+        if let Some(ref m) = monitor {
+            window.set_monitor(Some(m));
+        }
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
         window.set_anchor(Edge::Bottom, true);
@@ -641,7 +718,11 @@ fn setup_countdown_window(
         window.set_exclusive_zone(-1);
         window.set_namespace(Some("apexshot-recording-countdown"));
     } else {
-        window.fullscreen();
+        if let Some(ref m) = monitor {
+            window.fullscreen_on_monitor(m);
+        } else {
+            window.fullscreen();
+        }
         window.connect_realize(clone!(
             #[weak]
             window,
@@ -656,8 +737,8 @@ fn setup_countdown_window(
     let hovered = Rc::new(Cell::new(false));
     let drawing_area = DrawingArea::new();
     drawing_area.set_css_classes(&["recording-countdown-canvas"]);
-    drawing_area.set_content_width(screen_w);
-    drawing_area.set_content_height(screen_h);
+    drawing_area.set_content_width(win_w);
+    drawing_area.set_content_height(win_h);
     drawing_area.set_draw_func({
         let remaining = remaining.clone();
         let hovered = hovered.clone();
@@ -727,10 +808,10 @@ fn setup_countdown_window(
             let bubble_size = 184.0;
             let cx = countdown_center
                 .0
-                .clamp(bubble_size / 2.0, screen_w as f64 - bubble_size / 2.0);
+                .clamp(bubble_size / 2.0, win_w as f64 - bubble_size / 2.0);
             let cy = countdown_center
                 .1
-                .clamp(bubble_size / 2.0, screen_h as f64 - bubble_size / 2.0);
+                .clamp(bubble_size / 2.0, win_h as f64 - bubble_size / 2.0);
             let inside = (x - cx).hypot(y - cy) <= bubble_size / 2.0;
             if hovered.replace(inside) != inside {
                 drawing_area.queue_draw();
@@ -756,10 +837,10 @@ fn setup_countdown_window(
             let bubble_size = 184.0;
             let cx = countdown_center
                 .0
-                .clamp(bubble_size / 2.0, screen_w as f64 - bubble_size / 2.0);
+                .clamp(bubble_size / 2.0, win_w as f64 - bubble_size / 2.0);
             let cy = countdown_center
                 .1
-                .clamp(bubble_size / 2.0, screen_h as f64 - bubble_size / 2.0);
+                .clamp(bubble_size / 2.0, win_h as f64 - bubble_size / 2.0);
             if (x - cx).hypot(y - cy) <= bubble_size / 2.0 {
                 cancelled.store(true, Ordering::Relaxed);
                 if let Some(window) = window_weak.upgrade() {
@@ -786,19 +867,30 @@ fn setup_countdown_window(
     glib::timeout_add_local(Duration::from_secs(1), move || {
         let next = remaining.get() - 1;
         if next <= 0 {
-            for dim_window in &dim_window_weaks {
-                if let Some(window) = dim_window.upgrade() {
-                    window.close();
+            if !unified_mode {
+                for dim_window in &dim_window_weaks {
+                    if let Some(window) = dim_window.upgrade() {
+                        window.close();
+                    }
                 }
-            }
-            if let Some(window) = window_weak.upgrade() {
-                if let Some(app) = window.application() {
+                if let Some(window) = window_weak.upgrade() {
+                    if let Some(app) = window.application() {
+                        app.quit();
+                    } else {
+                        window.close();
+                    }
+                } else if let Some(app) = app_weak.upgrade() {
                     app.quit();
-                } else {
+                }
+            } else {
+                if let Some(window) = window_weak.upgrade() {
                     window.close();
                 }
-            } else if let Some(app) = app_weak.upgrade() {
-                app.quit();
+                println!("ready");
+                {
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+                }
             }
             return glib::ControlFlow::Break;
         }
@@ -913,6 +1005,7 @@ fn build_dim_window(
     if layer_shell_active {
         window.init_layer_shell();
         window.set_layer(Layer::Top);
+        window.set_monitor(Some(monitor));
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
         window.set_anchor(Edge::Bottom, false);

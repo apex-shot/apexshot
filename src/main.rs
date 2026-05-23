@@ -44,8 +44,9 @@ use apexshot::{
     onboarding::{is_onboarding_complete, show_onboarding_window},
     recording::{
         editor::{open_empty_recording_editor, open_recording_editor},
-        run_overlay_recording_request, run_recording_countdown_bar, run_recording_with_controls,
-        start_recording, RecordingConfig, RecordingControlsParams, StopAction,
+        run_overlay_recording_request, run_recording_countdown_bar, run_recording_ui,
+        run_recording_with_controls, start_recording, RecordingConfig, RecordingControlsParams,
+        StopAction,
     },
     settings::show_settings_window,
 };
@@ -351,6 +352,33 @@ async fn async_main(args: Vec<String>) {
             if let Err(e) = run_overlay_recording_request(request) {
                 eprintln!("Recording failed: {e}");
                 std::process::exit(1);
+            }
+        }
+        "recording-ui-internal" => {
+            if args.len() < 4 {
+                std::process::exit(1);
+            }
+            let params: RecordingControlsParams =
+                serde_json::from_str(&args[2]).unwrap();
+            let seconds: u32 = args[3].parse().unwrap_or(3);
+
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let _ = run_recording_ui(params, seconds, tx);
+
+            let action = tokio::task::block_in_place(|| {
+                let handle = tokio::runtime::Handle::current();
+                handle.block_on(rx)
+            })
+            .unwrap_or(StopAction::Save);
+            match action {
+                StopAction::Save => {
+                    println!("save");
+                    std::process::exit(0);
+                }
+                StopAction::Discard => {
+                    println!("discard");
+                    std::process::exit(2);
+                }
             }
         }
         "recording-controls-internal" => {
