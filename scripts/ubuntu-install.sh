@@ -212,9 +212,34 @@ resolve_latest_gnome_extension_url() {
     printf 'https://github.com%s' "$zip_path"
 }
 
-is_gnome_session() {
+current_desktop_id() {
     local desktop="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}"
-    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] || [[ "${desktop,,}" == *gnome* ]]
+    printf '%s' "${desktop,,}"
+}
+
+is_gnome_session() {
+    local desktop
+    desktop=$(current_desktop_id)
+    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] || [[ "$desktop" == *gnome* ]]
+}
+
+portal_backend_packages() {
+    local desktop packages
+    desktop=$(current_desktop_id)
+
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || [[ "$desktop" == *hyprland* ]]; then
+        packages="xdg-desktop-portal xdg-desktop-portal-hyprland grim slurp"
+    elif [[ -n "${SWAYSOCK:-}" ]] || [[ "$desktop" == *sway* || "$desktop" == *river* || "$desktop" == *dwl* || "$desktop" == *wayfire* || "$desktop" == *labwc* || "$desktop" == *niri* ]]; then
+        packages="xdg-desktop-portal xdg-desktop-portal-wlr grim slurp"
+    elif [[ "$desktop" == *kde* || "$desktop" == *plasma* ]]; then
+        packages="xdg-desktop-portal xdg-desktop-portal-kde"
+    elif is_gnome_session; then
+        packages="xdg-desktop-portal xdg-desktop-portal-gnome"
+    else
+        packages="xdg-desktop-portal xdg-desktop-portal-gtk"
+    fi
+
+    printf '%s' "$packages"
 }
 
 should_skip_gnome_extension() {
@@ -315,6 +340,11 @@ install_deps() {
         xdg-utils libnotify-bin ffmpeg unzip
         pipewire wf-recorder
     )
+
+    local portal_pkg
+    for portal_pkg in $(portal_backend_packages); do
+        deps+=("$portal_pkg")
+    done
 
     # Some deps may already be present; skip if so to keep the UI clean.
     local missing=()
@@ -533,11 +563,20 @@ cleanup_shadowing_home_binaries() {
     hash -r 2>/dev/null || true
 }
 
+capture_backend_summary() {
+    if is_gnome_session; then
+        printf '%s' "GNOME Wayland/Desktop: C++ capture overlay + Screenshot portal for screenshots; ScreenCast portal for recording."
+    else
+        printf '%s' "Non-GNOME desktops: Rust/wlroots selector where supported; portal/X11 fallbacks otherwise."
+    fi
+}
+
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is ready!${RESET}\n"
     echo -e "  Version:   ${BOLD}${VERSION}${RESET}"
     echo -e "  Binary:    ${BOLD}/usr/bin/apexshot${RESET}"
+    echo -e "  Capture:   ${BOLD}$(capture_backend_summary)${RESET}"
     echo -e "  Website:   ${DIM}https://apexshot.org/${RESET}"
     echo -e "  Issues:    ${DIM}https://github.com/${REPO}/issues${RESET}"
     echo -e "\n  ${BOLD}Quick start:${RESET}"

@@ -3086,10 +3086,13 @@ pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
 }
 
 pub fn recommended_window_size_with_extra_width(
-    image_width: i32,
-    image_height: i32,
+    _image_width: i32,
+    _image_height: i32,
     extra_width: i32,
 ) -> (i32, i32) {
+    // Keep the editor window size stable. Do not auto-resize the window based on
+    // the opened screenshot dimensions; users can manually resize the editor if
+    // they want a larger or smaller workspace.
     let (screen_width, screen_height) = if let Some(display) = gdk::Display::default() {
         let monitors = display.monitors();
         if monitors.n_items() > 0 {
@@ -3110,32 +3113,14 @@ pub fn recommended_window_size_with_extra_width(
         (1920, 1080)
     };
 
-    let max_width = (screen_width as f64) * 0.90;
-    let max_height = (screen_height as f64) * 0.85;
-
-    let ui_height = 110.0;
-    let ui_width = 72.0 + extra_width.max(0) as f64;
-    let min_editor_width = 980.0_f64.min(max_width);
-    let min_editor_height = 560.0_f64.min(max_height);
-
-    let avail_width = (max_width - ui_width).max(1.0);
-    let avail_height = (max_height - ui_height).max(1.0);
-
-    let mut w = image_width as f64;
-    let mut h = image_height as f64;
-
-    if w > avail_width || h > avail_height {
-        let scale_x = avail_width / w;
-        let scale_y = avail_height / h;
-        let scale = scale_x.min(scale_y);
-
-        w *= scale;
-        h *= scale;
-    }
+    let max_width = ((screen_width as f64) * 0.90).round() as i32;
+    let max_height = ((screen_height as f64) * 0.85).round() as i32;
+    let default_width = 1280 + extra_width.max(0);
+    let default_height = 820;
 
     (
-        (w + ui_width).round().max(min_editor_width.round()) as i32,
-        (h + ui_height).round().max(min_editor_height.round()) as i32,
+        default_width.clamp(980.min(max_width), max_width.max(1)),
+        default_height.clamp(560.min(max_height), max_height.max(1)),
     )
 }
 

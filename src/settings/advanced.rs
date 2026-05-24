@@ -5,7 +5,6 @@ use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Label, O
 pub struct AdvancedSettingsWidgets {
     pub section: GtkBox,
     pub retina_suffix_check: CheckButton,
-    pub clipboard_mode_input: ComboBoxText,
     pub ocr_lang_input: ComboBoxText,
     pub ocr_line_breaks_check: CheckButton,
 }
@@ -79,43 +78,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
 
     section.append(&filename_frame);
 
-    // --- Clipboard Group ---
-    let clipboard_title = Label::new(Some("Clipboard"));
-    clipboard_title.add_css_class("settings-group-title");
-    clipboard_title.set_xalign(0.0);
-    clipboard_title.set_halign(Align::Start);
-    clipboard_title.set_margin_bottom(8);
-    section.append(&clipboard_title);
-
-    let clipboard_frame = build_frame();
-
-    // Clipboard mode
-    let clipboard_mode_input = ComboBoxText::new();
-    clipboard_mode_input.add_css_class("settings-select");
-    clipboard_mode_input.append(Some("File & Image (default)"), "File & Image (default)");
-    clipboard_mode_input.append(Some("Image Only"), "Image Only");
-    clipboard_mode_input.append(Some("File Path Only"), "File Path Only");
-    clipboard_mode_input.set_active_id(Some(&config.adv_clipboard_mode));
-
-    let clipboard_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    clipboard_hbox.set_hexpand(true);
-    let clip_vbox = GtkBox::new(Orientation::Vertical, 4);
-    clip_vbox.set_hexpand(true);
-    let lbl_clip = Label::new(Some("Copy behavior"));
-    lbl_clip.set_xalign(0.0);
-    let clip_hint = Label::new(Some(
-        "Choose whether screenshots copy as an image, a file URI, or both.",
-    ));
-    clip_hint.add_css_class("settings-sub-option-hint");
-    clip_hint.set_xalign(0.0);
-    clip_vbox.append(&lbl_clip);
-    clip_vbox.append(&clip_hint);
-    clipboard_hbox.append(&clip_vbox);
-    clipboard_hbox.append(&clipboard_mode_input);
-    clipboard_frame.append(&build_row!(&clipboard_hbox, false));
-
-    section.append(&clipboard_frame);
-
     // --- Text Recognition Group ---
     let ocr_title = Label::new(Some("Text Recognition (OCR)"));
     ocr_title.add_css_class("settings-group-title");
@@ -166,7 +128,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     AdvancedSettingsWidgets {
         section,
         retina_suffix_check,
-        clipboard_mode_input,
         ocr_lang_input,
         ocr_line_breaks_check,
     }

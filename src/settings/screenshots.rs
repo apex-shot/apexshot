@@ -9,6 +9,7 @@ pub struct ScreenshotsSettingsWidgets {
     pub export_location_entry: Entry,
     pub export_location_browse: Button,
     pub format_input: ComboBoxText,
+    pub clipboard_mode_input: ComboBoxText,
     pub freeze_screen_check: CheckButton,
     pub crosshair_mode_input: ComboBoxText,
     pub show_magnifier_check: CheckButton,
@@ -87,6 +88,31 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     format_hbox.append(&format_label);
     format_hbox.append(&format_input);
     export_frame.append(&build_row!(&format_hbox, true));
+
+    // Clipboard mode
+    let clipboard_mode_input = ComboBoxText::new();
+    clipboard_mode_input.add_css_class("settings-select");
+    clipboard_mode_input.append(Some("File & Image (default)"), "File & Image (default)");
+    clipboard_mode_input.append(Some("Image Only"), "Image Only");
+    clipboard_mode_input.append(Some("File Path Only"), "File Path Only");
+    clipboard_mode_input.set_active_id(Some(&config.adv_clipboard_mode));
+
+    let clipboard_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    clipboard_hbox.set_hexpand(true);
+    let clip_vbox = GtkBox::new(Orientation::Vertical, 4);
+    clip_vbox.set_hexpand(true);
+    let lbl_clip = Label::new(Some("Clipboard copy behavior"));
+    lbl_clip.set_xalign(0.0);
+    let clip_hint = Label::new(Some(
+        "Choose whether screenshots copy as an image, a file URI, or both.",
+    ));
+    clip_hint.add_css_class("settings-sub-option-hint");
+    clip_hint.set_xalign(0.0);
+    clip_vbox.append(&lbl_clip);
+    clip_vbox.append(&clip_hint);
+    clipboard_hbox.append(&clip_vbox);
+    clipboard_hbox.append(&clipboard_mode_input);
+    export_frame.append(&build_row!(&clipboard_hbox, false));
 
     section.append(&export_frame);
 
@@ -203,6 +229,7 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
         export_location_entry,
         export_location_browse,
         format_input,
+        clipboard_mode_input,
         freeze_screen_check,
         crosshair_mode_input,
         show_magnifier_check,

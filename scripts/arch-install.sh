@@ -667,10 +667,19 @@ cleanup() {
     fi
 }
 
+capture_backend_summary() {
+    if is_gnome_session; then
+        printf '%s' "GNOME Wayland/Desktop: C++ capture overlay + Screenshot portal for screenshots; ScreenCast portal for recording."
+    else
+        printf '%s' "Non-GNOME desktops: Rust/wlroots selector where supported; portal/X11 fallbacks otherwise."
+    fi
+}
+
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is ready!${RESET}\n"
     echo -e "  Binary:    ${BOLD}${INSTALL_PATH}${RESET}"
+    echo -e "  Capture:   ${BOLD}$(capture_backend_summary)${RESET}"
     echo -e "  Website:   ${DIM}https://apexshot.org/${RESET}"
     echo -e "  Issues:    ${DIM}https://github.com/${REPO}/issues${RESET}"
     echo -e "\n  ${BOLD}Quick start:${RESET}"

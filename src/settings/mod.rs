@@ -479,7 +479,7 @@ fn build_settings_window(app: &Application) {
         shortcut_recording_restart: shortcuts.recording_restart_btn.clone(),
         shortcut_recording_discard: shortcuts.recording_discard_btn.clone(),
         adv_retina_suffix: advanced.retina_suffix_check.clone(),
-        adv_clipboard_mode: advanced.clipboard_mode_input.clone(),
+        adv_clipboard_mode: screenshots.clipboard_mode_input.clone(),
         adv_ocr_language: advanced.ocr_lang_input.clone(),
         adv_ocr_keep_line_breaks: advanced.ocr_line_breaks_check.clone(),
     });

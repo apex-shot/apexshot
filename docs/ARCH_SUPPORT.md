@@ -104,10 +104,10 @@ if distro.is_arch() {
 
 Arch-specific functionality:
 
-- **Desktop environment detection**: Hyprland, Sway, i3, etc.
-- **Portal backend preference**: `xdg-desktop-portal-hyprland`, `xdg-desktop-portal-wlr`, `xdg-desktop-portal-kde`, or GNOME based on session detection
-- **Dependency checking**: Verify pacman packages
-- **Capture policy**: Hyprland/wlroots sessions try native `wlr-screencopy` first for non-interactive monitor frames, then fall back to the shared XDG ScreenCast portal + PipeWire path
+- **Desktop environment detection**: GNOME, Hyprland, Sway, KDE/Plasma, and wlroots-like sessions.
+- **Portal backend preference**: `xdg-desktop-portal-gnome`, `xdg-desktop-portal-hyprland`, `xdg-desktop-portal-wlr`, `xdg-desktop-portal-kde`, or GTK fallback based on session detection.
+- **Dependency checking**: Verify pacman packages.
+- **Capture policy**: GNOME sessions use the C++ capture overlay plus the Screenshot portal for still screenshots. Hyprland/Sway/wlroots sessions use the Rust GTK layer-shell selector plus native `wlr-screencopy` for area/crosshair screenshots; recording remains ScreenCast portal + PipeWire because it needs a live stream.
 
 ## Implementation Roadmap
 
@@ -147,7 +147,7 @@ Arch-specific functionality:
 | Aspect | Ubuntu | Arch |
 |--------|--------|------|
 | Package Manager | apt/dpkg | pacman |
-| Desktop Portal | xdg-desktop-portal-gnome | xdg-desktop-portal-hyprland / xdg-desktop-portal-wlr |
+| Desktop Portal | Auto-selected: `xdg-desktop-portal-gnome` on GNOME, `xdg-desktop-portal-hyprland` on Hyprland, `xdg-desktop-portal-wlr` on wlroots/Sway, `xdg-desktop-portal-kde` on Plasma | Same auto-selection via pacman packages |
 | Clipboard | wl-clipboard | wl-clipboard (same) |
 | OCR | tesseract-ocr | tesseract |
 | Build Deps | build-essential | base-devel |
@@ -156,16 +156,15 @@ Arch-specific functionality:
 
 ## Shared Wayland Capture Policy
 
-For other Flameshot-compatible Linux distros, ApexShot should keep the same Wayland capture method instead of adding distro-specific screenshot backends:
+ApexShot ships one package and chooses the best capture route at runtime:
 
-1. On Hyprland, Sway, and wlroots-like sessions, try direct `zwlr_screencopy_manager_v1` capture for non-interactive monitor frames.
-2. Fall back to `org.freedesktop.portal.ScreenCast` to request a shared monitor/window stream.
-3. Read the selected PipeWire node through GStreamer.
-4. Reuse restore tokens where the portal backend supports them.
-5. Keep `org.freedesktop.portal.Screenshot` only for explicit interactive selector helpers.
-6. Leave GNOME Shell extension features behind GNOME session gates so non-GNOME desktops use portal-backed capture without requiring the extension.
+1. **GNOME Wayland** uses the C++ Qt capture overlay for area/crosshair UI and `org.freedesktop.portal.Screenshot` for still screenshots. The ScreenCast portal is kept for recording only, because recording needs a live PipeWire stream.
+2. **Hyprland, Sway, and wlroots-like sessions** use the Rust GTK layer-shell selector for area/crosshair UI and native `zwlr_screencopy_manager_v1` capture. This avoids forcing non-GNOME users through the GNOME-oriented C++/portal screenshot flow.
+3. **KDE/Plasma and other Wayland desktops** use the best available portal/X11 fallback path until compositor-specific support is tested.
+4. **GNOME Shell extension features** stay behind GNOME session gates. Arch users running GNOME are handled as GNOME users; Arch users running Hyprland/Sway are handled as wlroots users.
+5. **Clipboard behavior** is shared across screenshot types and controlled by Settings → Screenshots → Export → Clipboard copy behavior (`File & Image`, `Image Only`, or `File Path Only`).
 
-The distro work that remains is packaging, dependency naming, portal backend installation defaults, and manual testing on each distro/desktop combination.
+The distro work that remains is packaging polish, dependency naming, portal backend installation defaults, and manual testing on each distro/desktop combination.
 
 ## Testing Checklist
 

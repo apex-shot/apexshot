@@ -61,7 +61,8 @@ Works best today on:
 | GNOME Shell 47-50 on Ubuntu 24.04 / 25.10 / Pop!_OS 22.04 / Arch (Wayland) | Public beta, tested daily |
 | GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
 | Pop!_OS 22.04 (Ubuntu-based, Wayland) | Supported via deb package |
-| KDE Plasma 6 / Sway / Hyprland / Niri (Wayland) | Implemented through ScreenCast portal, needs distro testing |
+| Hyprland / Sway / wlroots-like compositors (Wayland) | Area and crosshair selection use the Rust GTK layer-shell selector with native `wlr-screencopy`; recording uses ScreenCast/PipeWire where available. Needs broader distro testing. |
+| KDE Plasma 6 / Niri / other Wayland desktops | Portal-backed capture/recording paths implemented, needs distro testing |
 | Fedora / openSUSE / NixOS / Alpine / Gentoo / Void (Wayland) | Distro-family support metadata implemented, packaging/testing pending |
 | X11 on any distro | Experimental |
 
@@ -118,7 +119,7 @@ support is improving over time.
 | **Core** | Rust 2021 Edition |
 | **Native Overlay** | C++17 / Qt5 (region selection, drawing) |
 | **GUI** | GTK4 + gtk4-layer-shell |
-| **Display Servers** | X11 (x11rb + MIT-SHM), Wayland (ashpd ScreenCast portal + PipeWire) |
+| **Display Servers** | X11 (x11rb + MIT-SHM), GNOME Wayland screenshots via Screenshot portal + C++ overlay, wlroots/Hyprland/Sway screenshots via `wlr-screencopy` + Rust GTK layer-shell, recording via ScreenCast portal + PipeWire |
 | **Recording** | GStreamer (VP8, VP9, H.264, H.265, Theora, GIF) |
 | **Audio** | PipeWire (mic/speaker level monitoring) |
 | **OCR** | Tesseract + ocrs/rten |
