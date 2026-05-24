@@ -40,6 +40,14 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::sync::{Arc, Mutex};
 use x11rb::wrapper::ConnectionExt;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// When the daemon is not running, the overlay starts its own PipeWire audio
+/// level monitoring and stores the results here.
+static OVERLAY_MIC_LEVEL: AtomicU64 = AtomicU64::new(0);
+static OVERLAY_SPEAKER_LEVEL: AtomicU64 = AtomicU64::new(0);
+static START_LOCAL_MONITORING: std::sync::Once = std::sync::Once::new();
+
 fn recording_request_from_state(
     st: &SelectorState,
     record_type: RecordingType,
@@ -99,6 +107,203 @@ fn poll_daemon_audio_levels() -> Option<(f64, f64)> {
     let mic = proxy.call::<_, _, f64>("GetMicLevel", &()).ok()?;
     let speaker = proxy.call::<_, _, f64>("GetSpeakerLevel", &()).ok()?;
     Some((mic.clamp(0.0, 1.0), speaker.clamp(0.0, 1.0)))
+}
+
+/// Start local PipeWire audio-level monitoring for the overlay.
+///
+/// Used when the daemon is not running (standalone capture mode on
+/// compositors like Hyprland).  Spawns two PipeWire capture streams
+/// (mic + system audio) and writes peak/RMS levels into the atomics.
+fn start_local_audio_monitoring() {
+    START_LOCAL_MONITORING.call_once(|| {
+        let mic_target = crate::daemon::find_physical_input_device();
+        spawn_overlay_pw_stream(
+            "mic",
+            "apexshot-overlay-mic",
+            mic_target.as_deref(),
+            false,
+            &OVERLAY_MIC_LEVEL,
+        );
+        spawn_overlay_pw_stream(
+            "speaker",
+            "apexshot-overlay-speaker",
+            None,
+            true,
+            &OVERLAY_SPEAKER_LEVEL,
+        );
+    });
+}
+
+/// Spawn a single PipeWire capture stream for the overlay's audio meter.
+fn spawn_overlay_pw_stream(
+    label: &'static str,
+    stream_name: &'static str,
+    target: Option<&str>,
+    capture_sink: bool,
+    level: &'static AtomicU64,
+) {
+    let target_owned = target.map(String::from);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        use pipewire as pw;
+        use pw::{properties::properties, spa};
+        use spa::param::format::{MediaSubtype, MediaType};
+        use spa::param::format_utils;
+
+        pw::init();
+
+        let mainloop = match pw::main_loop::MainLoopRc::new(None) {
+            Ok(ml) => ml,
+            Err(e) => {
+                eprintln!("[overlay] PipeWire ({label}): main loop: {e}");
+                return;
+            }
+        };
+        let context = match pw::context::ContextRc::new(&mainloop, None) {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                eprintln!("[overlay] PipeWire ({label}): context: {e}");
+                return;
+            }
+        };
+        let core = match context.connect_rc(None) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[overlay] PipeWire ({label}): core: {e}");
+                return;
+            }
+        };
+
+        let mut props = properties! {
+            *pw::keys::MEDIA_TYPE => "Audio",
+            *pw::keys::MEDIA_CATEGORY => "Capture",
+            *pw::keys::MEDIA_ROLE => "Production",
+        };
+        if let Some(ref target_name) = target_owned {
+            props.insert("target.object", target_name.as_str());
+        }
+        if capture_sink {
+            props.insert("stream.capture.sink", "true");
+        }
+
+        let stream = match pw::stream::StreamBox::new(&core, stream_name, props) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[overlay] PipeWire ({label}): stream: {e}");
+                return;
+            }
+        };
+
+        let _listener = stream
+            .add_local_listener_with_user_data(spa::param::audio::AudioInfoRaw::default())
+            .param_changed(move |_, user_data, id, param| {
+                let Some(param) = param else { return };
+                if id != spa::param::ParamType::Format.as_raw() {
+                    return;
+                }
+                let (media_type, media_subtype) = match format_utils::parse_format(param) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+                if media_type != MediaType::Audio || media_subtype != MediaSubtype::Raw {
+                    return;
+                }
+                user_data.parse(param).ok();
+            })
+            .process(move |stream, _user_data| {
+                let mut buf = match stream.dequeue_buffer() {
+                    Some(b) => b,
+                    None => return,
+                };
+                let datas = buf.datas_mut();
+                if datas.is_empty() {
+                    return;
+                }
+
+                let mut sum_sq: f64 = 0.0;
+                let mut count: u64 = 0;
+                for data in datas.iter_mut() {
+                    let n_bytes = data.chunk().size() as usize;
+                    if let Some(slice) = data.data() {
+                        let ptr = slice.as_ptr() as *const f32;
+                        if n_bytes >= std::mem::size_of::<f32>() {
+                            let n_samples = n_bytes / std::mem::size_of::<f32>();
+                            for j in 0..n_samples {
+                                let s = unsafe { *ptr.add(j) };
+                                sum_sq += (s * s) as f64;
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+
+                let rms = if count > 0 {
+                    (sum_sq / count as f64).sqrt()
+                } else {
+                    0.0
+                };
+                let raw_level = (rms * 3.0).clamp(0.0, 1.0);
+
+                let gated = if !capture_sink && raw_level < 0.15 {
+                    0.0
+                } else {
+                    raw_level
+                };
+
+                level.store(gated.to_bits(), Ordering::Relaxed);
+            })
+            .register();
+
+        // Build F32LE mono format
+        let mut params: Vec<Vec<u8>> = Vec::new();
+        {
+            let mut audio_info = spa::param::audio::AudioInfoRaw::new();
+            audio_info.set_format(spa::param::audio::AudioFormat::F32LE);
+            audio_info.set_rate(44100);
+            audio_info.set_channels(1);
+
+            let obj = spa::pod::Object {
+                type_: spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
+                id: spa::param::ParamType::EnumFormat.as_raw(),
+                properties: audio_info.into(),
+            };
+
+            let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
+                std::io::Cursor::new(Vec::new()),
+                &spa::pod::Value::Object(obj),
+            )
+            .unwrap()
+            .0
+            .into_inner();
+
+            if spa::pod::Pod::from_bytes(&values).is_some() {
+                params.push(values);
+            }
+        }
+
+        let mut param_refs: Vec<&spa::pod::Pod> = params
+            .iter()
+            .filter_map(|bytes| spa::pod::Pod::from_bytes(bytes))
+            .collect();
+
+        match stream.connect(
+            spa::utils::Direction::Input,
+            None,
+            pw::stream::StreamFlags::AUTOCONNECT
+                | pw::stream::StreamFlags::MAP_BUFFERS
+                | pw::stream::StreamFlags::RT_PROCESS,
+            &mut param_refs,
+        ) {
+            Ok(_) => eprintln!("[overlay] PipeWire ({label}) monitoring started."),
+            Err(e) => {
+                eprintln!("[overlay] PipeWire ({label}): connect: {e}");
+                return;
+            }
+        }
+
+        mainloop.run();
+    });
 }
 
 fn sync_webcam_preview(st: &mut SelectorState) {
@@ -595,13 +800,29 @@ pub(crate) fn setup_window(
     let audio_levels = Arc::new(Mutex::new((0.0_f64, 0.0_f64)));
     {
         let audio_levels = audio_levels.clone();
-        std::thread::spawn(move || loop {
-            if let Some(levels) = poll_daemon_audio_levels() {
-                if let Ok(mut guard) = audio_levels.lock() {
-                    *guard = levels;
+        std::thread::spawn(move || {
+            // Try daemon D-Bus first.  If the daemon is not running (standalone
+            // capture mode on Hyprland), fall back to local PipeWire monitoring.
+            let mut try_daemon = true;
+            loop {
+                if try_daemon {
+                    if let Some(levels) = poll_daemon_audio_levels() {
+                        if let Ok(mut guard) = audio_levels.lock() {
+                            *guard = levels;
+                        }
+                    } else {
+                        try_daemon = false;
+                        start_local_audio_monitoring();
+                    }
+                } else {
+                    let mic = f64::from_bits(OVERLAY_MIC_LEVEL.load(Ordering::Relaxed));
+                    let speaker = f64::from_bits(OVERLAY_SPEAKER_LEVEL.load(Ordering::Relaxed));
+                    if let Ok(mut guard) = audio_levels.lock() {
+                        *guard = (mic.clamp(0.0, 1.0), speaker.clamp(0.0, 1.0));
+                    }
                 }
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
         });
     }
 
@@ -708,6 +929,32 @@ pub(crate) fn setup_window(
                     st.hover_size_panel = false;
                     st.hover_crop_panel = false;
                     st.recording.hover_record_tile = None;
+                    drop(st);
+                    if let Some(da) = drawing_area_weak_motion.upgrade() {
+                        da.queue_draw();
+                    }
+                    return;
+                }
+
+                // Volume slider dragging
+                if st.recording.volume_slider_dragging
+                    && (st.recording.mic_volume_popup_open
+                        || st.recording.speaker_volume_popup_open)
+                {
+                    let popup_w = 240.0;
+                    let popup_x = (rect.left + (rect.width() - popup_w) / 2.0)
+                        .clamp(10.0, screen_width as f64 - popup_w - 10.0);
+                    let slider_x = popup_x + 20.0;
+                    let slider_w = popup_w - 40.0;
+                    let click_x = x.clamp(slider_x, slider_x + slider_w);
+                    let fraction = ((click_x - slider_x) / slider_w).clamp(0.0, 1.0);
+                    if st.recording.mic_volume_popup_open {
+                        st.recording.mic_volume = fraction;
+                        set_mic_volume(fraction);
+                    } else {
+                        st.recording.speaker_volume = fraction;
+                        set_speaker_volume(fraction);
+                    }
                     drop(st);
                     if let Some(da) = drawing_area_weak_motion.upgrade() {
                         da.queue_draw();
@@ -1685,6 +1932,52 @@ pub(crate) fn setup_window(
             return;
         }
 
+        // ── Volume popup click handling ──
+        if st.recording.mic_volume_popup_open || st.recording.speaker_volume_popup_open {
+            let popup_w = 240.0;
+            let popup_h = 110.0;
+            let popup_x = (rect.left + (rect.width() - popup_w) / 2.0)
+                .clamp(10.0, screen_width as f64 - popup_w - 10.0);
+            let popup_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - popup_h - 10.0);
+            if x >= popup_x && x <= popup_x + popup_w && y >= popup_y && y <= popup_y + popup_h {
+                // Inside popup — check slider hit
+                let slider_x = popup_x + 20.0;
+                let slider_w = popup_w - 40.0;
+                let slider_track_h = 6.0;
+                let track_y = popup_y + 50.0;
+                if y >= track_y - 13.0
+                    && y <= track_y + slider_track_h + 13.0
+                    && x >= slider_x
+                    && x <= slider_x + slider_w
+                {
+                    let fraction = ((x - slider_x) / slider_w).clamp(0.0, 1.0);
+                    if st.recording.mic_volume_popup_open {
+                        st.recording.mic_volume = fraction;
+                        set_mic_volume(fraction);
+                    } else {
+                        st.recording.speaker_volume = fraction;
+                        set_speaker_volume(fraction);
+                    }
+                    st.recording.volume_slider_dragging = true;
+                }
+                // Ignore click inside popup (but not on slider — already handled above by setting dragging)
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+            // Click outside volume popup closes it
+            st.recording.mic_volume_popup_open = false;
+            st.recording.speaker_volume_popup_open = false;
+            st.recording.volume_slider_dragging = false;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
+            return;
+        }
+
         // ── Normal click handling (no menus open) ──
         let record_hit = if recording_panel_open {
             recording_tile_at(
@@ -1852,6 +2145,8 @@ pub(crate) fn setup_window(
                                 st.recording.click_options_open = false;
                                 st.recording.click_dropdown_open = None;
                                 st.recording.webcam_options_open = false;
+                                st.recording.mic_volume_popup_open = false;
+                                st.recording.speaker_volume_popup_open = false;
                                 st.hover_tool_index = None;
                             }
                             RecordPanelTile::Controls => {
@@ -1862,14 +2157,18 @@ pub(crate) fn setup_window(
                                 st.recording.click_options_open = false;
                                 st.recording.click_dropdown_open = None;
                                 st.recording.webcam_options_open = false;
+                                st.recording.mic_volume_popup_open = false;
+                                st.recording.speaker_volume_popup_open = false;
                                 st.recording.hover_record_tile = None;
                                 st.hover_tool_index = None;
                             }
                             RecordPanelTile::Mic => {
-                                st.recording.mic_toggle = !st.recording.mic_toggle
+                                st.recording.mic_toggle = !st.recording.mic_toggle;
+                                st.recording.mic_volume_popup_open = false;
                             }
                             RecordPanelTile::Speaker => {
-                                st.recording.speaker_toggle = !st.recording.speaker_toggle
+                                st.recording.speaker_toggle = !st.recording.speaker_toggle;
+                                st.recording.speaker_volume_popup_open = false;
                             }
                             RecordPanelTile::Clicks => {
                                 if st.recording.rec_clicks {
@@ -1884,6 +2183,8 @@ pub(crate) fn setup_window(
                                 st.recording.settings_menu_open = false;
                                 st.recording.settings_dropdown_open = None;
                                 st.recording.webcam_options_open = false;
+                                st.recording.mic_volume_popup_open = false;
+                                st.recording.speaker_volume_popup_open = false;
                                 st.recording.click_dropdown_open = None;
                                 st.recording.hovered_click_item = -1;
                                 st.recording.click_slider_dragging = false;
@@ -1904,6 +2205,8 @@ pub(crate) fn setup_window(
                                 st.recording.click_options_open = false;
                                 st.recording.click_dropdown_open = None;
                                 st.recording.webcam_options_open = false;
+                                st.recording.mic_volume_popup_open = false;
+                                st.recording.speaker_volume_popup_open = false;
                                 st.recording.hovered_webcam_item = -1;
                                 st.recording.hover_record_tile = None;
                                 st.hover_tool_index = None;
@@ -1994,6 +2297,8 @@ pub(crate) fn setup_window(
                         st.recording.settings_menu_open = false;
                         st.recording.crop_menu_open = false;
                         st.recording.webcam_options_open = false;
+                        st.recording.mic_volume_popup_open = false;
+                        st.recording.speaker_volume_popup_open = false;
                         st.recording.hover_record_tile = None;
                         st.hover_tool_index = None;
                     }
@@ -2004,6 +2309,33 @@ pub(crate) fn setup_window(
                         st.recording.crop_menu_open = false;
                         st.recording.click_options_open = false;
                         st.recording.click_dropdown_open = None;
+                        st.recording.mic_volume_popup_open = false;
+                        st.recording.speaker_volume_popup_open = false;
+                        st.recording.hover_record_tile = None;
+                        st.hover_tool_index = None;
+                    }
+                    RecordPanelTile::Mic => {
+                        st.recording.mic_volume_popup_open = !st.recording.mic_volume_popup_open;
+                        st.recording.speaker_volume_popup_open = false;
+                        st.recording.volume_slider_dragging = false;
+                        st.recording.settings_menu_open = false;
+                        st.recording.crop_menu_open = false;
+                        st.recording.click_options_open = false;
+                        st.recording.click_dropdown_open = None;
+                        st.recording.webcam_options_open = false;
+                        st.recording.hover_record_tile = None;
+                        st.hover_tool_index = None;
+                    }
+                    RecordPanelTile::Speaker => {
+                        st.recording.speaker_volume_popup_open =
+                            !st.recording.speaker_volume_popup_open;
+                        st.recording.mic_volume_popup_open = false;
+                        st.recording.volume_slider_dragging = false;
+                        st.recording.settings_menu_open = false;
+                        st.recording.crop_menu_open = false;
+                        st.recording.click_options_open = false;
+                        st.recording.click_dropdown_open = None;
+                        st.recording.webcam_options_open = false;
                         st.recording.hover_record_tile = None;
                         st.hover_tool_index = None;
                     }
@@ -2134,6 +2466,8 @@ pub(crate) fn setup_window(
                 || st.recording.settings_menu_open
                 || st.recording.click_options_open
                 || st.recording.webcam_options_open
+                || st.recording.mic_volume_popup_open
+                || st.recording.speaker_volume_popup_open
             {
                 st.is_dragging = false;
                 st.drag_mode = None;
@@ -2240,7 +2574,10 @@ pub(crate) fn setup_window(
                 }
                 return;
             }
-            if st.recording.gif_slider_dragging.is_some() || st.recording.click_slider_dragging {
+            if st.recording.gif_slider_dragging.is_some()
+                || st.recording.click_slider_dragging
+                || st.recording.volume_slider_dragging
+            {
                 drop(st);
                 return;
             }
@@ -2291,9 +2628,13 @@ pub(crate) fn setup_window(
                 }
                 return;
             }
-            if st.recording.gif_slider_dragging.is_some() || st.recording.click_slider_dragging {
+            if st.recording.gif_slider_dragging.is_some()
+                || st.recording.click_slider_dragging
+                || st.recording.volume_slider_dragging
+            {
                 st.recording.gif_slider_dragging = None;
                 st.recording.click_slider_dragging = false;
+                st.recording.volume_slider_dragging = false;
                 drop(st);
                 if let Some(drawing_area) = drawing_area_weak.upgrade() {
                     drawing_area.queue_draw();
@@ -2500,4 +2841,26 @@ pub(crate) fn setup_window(
     // Show the window
     let _ = window.grab_focus();
     window.present();
+}
+
+fn set_mic_volume(vol: f64) {
+    let pct = (vol.clamp(0.0, 1.0) * 100.0).round() as u32;
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("pactl")
+            .args([
+                "set-source-volume",
+                "@DEFAULT_SOURCE@",
+                &format!("{}%", pct),
+            ])
+            .output();
+    });
+}
+
+fn set_speaker_volume(vol: f64) {
+    let pct = (vol.clamp(0.0, 1.0) * 100.0).round() as u32;
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("pactl")
+            .args(["set-sink-volume", "@DEFAULT_SINK@", &format!("{}%", pct)])
+            .output();
+    });
 }

@@ -1464,7 +1464,8 @@ fn start_audio_level_stream(
                     return;
                 }
 
-                let mut peak: f32 = 0.0;
+                let mut sum_sq: f64 = 0.0;
+                let mut count: u64 = 0;
                 for data in datas.iter_mut() {
                     let n_bytes = data.chunk().size() as usize;
                     if let Some(slice) = data.data() {
@@ -1472,51 +1473,26 @@ fn start_audio_level_stream(
                         if n_bytes >= std::mem::size_of::<f32>() {
                             let n_samples = n_bytes / std::mem::size_of::<f32>();
                             for j in 0..n_samples {
-                                let s = unsafe { *ptr.add(j) }.abs();
-                                if s > peak {
-                                    peak = s;
-                                }
+                                let s = unsafe { *ptr.add(j) };
+                                sum_sq += (s * s) as f64;
+                                count += 1;
                             }
                         }
                     }
                 }
 
-                let raw_level = if capture_sink {
-                    // RMS averaging for system audio — gives natural, varied levels
-                    let mut sum_sq: f64 = 0.0;
-                    let mut count: u64 = 0;
-                    for data in datas.iter_mut() {
-                        let n_bytes = data.chunk().size() as usize;
-                        if let Some(slice) = data.data() {
-                            let ptr = slice.as_ptr() as *const f32;
-                            if n_bytes >= std::mem::size_of::<f32>() {
-                                let n_samples = n_bytes / std::mem::size_of::<f32>();
-                                for j in 0..n_samples {
-                                    let s = unsafe { *ptr.add(j) };
-                                    sum_sq += (s * s) as f64;
-                                    count += 1;
-                                }
-                            }
-                        }
-                    }
-                    if count > 0 {
-                        (sum_sq / count as f64).sqrt().clamp(0.0, 1.0) * 3.0
-                    } else {
-                        0.0
-                    }
+                // RMS gives natural, varied levels for both mic and speaker
+                let rms = if count > 0 {
+                    (sum_sq / count as f64).sqrt()
                 } else {
-                    // Peak detection for mic — responsive to voice
-                    (peak * 2.0).clamp(0.0, 1.0) as f64
+                    0.0
                 };
+                let raw_level = (rms * 3.0).clamp(0.0, 1.0);
 
-                // Noise gate: ignore quiet audio to avoid picking up speaker bleed
-                // Only applies to mic stream (not speaker/sink monitor)
-                let gated = if !capture_sink {
-                    if raw_level < 0.15 {
-                        0.0
-                    } else {
-                        raw_level
-                    }
+                // Noise gate for mic: ignore quiet audio to avoid picking up
+                // ambient noise or speaker bleed
+                let gated = if !capture_sink && raw_level < 0.15 {
+                    0.0
                 } else {
                     raw_level
                 };
@@ -1579,7 +1555,7 @@ fn start_audio_level_stream(
 /// Detect the first physical (non-monitor) audio input device via pactl.
 /// Returns `None` if no suitable device is found, letting PipeWire fall back
 /// to the default input.
-fn find_physical_input_device() -> Option<String> {
+pub(crate) fn find_physical_input_device() -> Option<String> {
     let output = std::process::Command::new("pactl")
         .args(["list", "sources", "short"])
         .output()
