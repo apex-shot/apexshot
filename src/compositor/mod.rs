@@ -29,6 +29,13 @@ pub trait Compositor: Debug + Send + Sync {
     /// Get the currently focused window
     fn get_active_window(&self) -> anyhow::Result<Option<WindowInfo>>;
 
+    /// Get the name of the currently active workspace.
+    /// Returns `None` when the compositor does not support workspace queries
+    /// (e.g. non-tiling WMs) or when the query fails.
+    fn get_active_workspace(&self) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+
     /// Check if this compositor is currently running
     fn is_running(&self) -> bool;
 }

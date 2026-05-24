@@ -1297,6 +1297,15 @@ fn run_daemon_with_gtk_on_main_thread() {
                     });
                 let _ = reply.send(result);
             }
+            GtkWork::CaptureWindow { reply } => {
+                eprintln!("[gtk] CaptureWindow received — launching window selector");
+                let result =
+                    apexshot::capture_overlay::capture_window_file_via_cpp().map_err(|e| match e {
+                        apexshot::SelectionError::Cancelled => "cancelled".to_string(),
+                        other => other.to_string(),
+                    });
+                let _ = reply.send(result);
+            }
             GtkWork::RunRecordingControls { params, stop_tx } => {
                 eprintln!("[gtk] RunRecordingControls received — launching recording controls");
                 if let Err(err) =

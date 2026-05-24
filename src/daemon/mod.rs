@@ -404,6 +404,9 @@ pub enum GtkWork {
     CaptureScreen {
         reply: std::sync::mpsc::SyncSender<Result<std::path::PathBuf, String>>,
     },
+    CaptureWindow {
+        reply: std::sync::mpsc::SyncSender<Result<std::path::PathBuf, String>>,
+    },
     RunRecordingControls {
         params: crate::recording::RecordingControlsParams,
         stop_tx: tokio::sync::oneshot::Sender<crate::recording::StopAction>,
@@ -3011,8 +3014,29 @@ fn handle_capture_window_with_active_session(state: Arc<Mutex<DaemonState>>) {
     let app_config = load_config().sanitized();
     apply_screenshot_timer_if_needed("window", &app_config);
 
-    eprintln!("[daemon] Window capture requested — using the shared window capture flow");
-    match capture_window_file_via_cpp() {
+    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
+
+    let path_result = if let Some(gtk_tx) = gtk_tx {
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
+        match gtk_tx.send(GtkWork::CaptureWindow { reply: reply_tx }) {
+            Ok(()) => match reply_rx.recv() {
+                Ok(result) => result.map_err(|err| match err.as_str() {
+                    "cancelled" => crate::overlay::SelectionError::Cancelled,
+                    other => crate::overlay::SelectionError::InitError(other.to_string()),
+                }),
+                Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
+                    "GTK main-thread window capture reply failed: {err}"
+                ))),
+            },
+            Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
+                "GTK main-thread window capture dispatch failed: {err}"
+            ))),
+        }
+    } else {
+        capture_window_file_via_cpp()
+    };
+
+    match path_result {
         Ok(path) => {
             save_existing_png_and_open(path, state);
         }

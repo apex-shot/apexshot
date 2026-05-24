@@ -85,6 +85,45 @@ fn wait_for_layer_shell_overlay_to_unmap() {
     std::thread::sleep(std::time::Duration::from_millis(180));
 }
 
+/// Crop a sub-region from a `CaptureData` without re-capturing from the display.
+fn crop_background(
+    full: &CaptureData,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+) -> Result<CaptureData, SelectionError> {
+    if w <= 0 || h <= 0 || x < 0 || y < 0 {
+        return Err(SelectionError::InitError(format!(
+            "Invalid crop area: {}x{} at ({}, {})",
+            w, h, x, y
+        )));
+    }
+    let x_u = x as u32;
+    let y_u = y as u32;
+    let w_u = w as u32;
+    let h_u = h as u32;
+    if x_u + w_u > full.width || y_u + h_u > full.height {
+        return Err(SelectionError::InitError(format!(
+            "Crop area ({}x{} at ({},{})) out of bounds for {}x{} capture",
+            w, h, x, y, full.width, full.height
+        )));
+    }
+
+    let bpp = full.format.bytes_per_pixel as usize;
+    let stride = full.stride as usize;
+    let row_len = w_u as usize * bpp;
+
+    let mut pixels = Vec::with_capacity(row_len * h_u as usize);
+    for row in 0..h_u as usize {
+        let src_y = y_u as usize + row;
+        let offset = src_y * stride + x_u as usize * bpp;
+        pixels.extend_from_slice(&full.pixels[offset..offset + row_len]);
+    }
+
+    Ok(CaptureData::new(pixels, w_u, h_u, full.format))
+}
+
 fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResult, SelectionError>
 {
     force_wayland_gdk_for_layer_shell();
@@ -99,17 +138,13 @@ fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResu
         })?;
     match crate::overlay::select_area_from_capture_with_gtk(&full_capture) {
         Ok(crate::overlay::OverlaySelection::Area(Some(area))) => {
-            wait_for_layer_shell_overlay_to_unmap();
-            let capture = backend
-                .capture_area(area.x, area.y, area.width, area.height)
-                .map_err(|err| {
-                    SelectionError::InitError(format!("Wayland area capture failed: {err}"))
-                })?;
+            // Crop from the frozen background instead of capturing from the
+            // live screen — avoids capturing our own overlay UI.
+            let capture = crop_background(&full_capture, area.x, area.y, area.width, area.height)?;
             save_capture_to_temp_png(&capture).map(AreaCapturePathResult::Captured)
         }
         Ok(crate::overlay::OverlaySelection::Area(None)) => Err(SelectionError::Cancelled),
         Ok(crate::overlay::OverlaySelection::Recording(request)) => {
-            wait_for_layer_shell_overlay_to_unmap();
             Ok(AreaCapturePathResult::RecordingRequested(request))
         }
         Err(SelectionError::WindowCaptureRequested) => {
@@ -122,13 +157,10 @@ fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResu
         }
         Err(SelectionError::OcrRequested(area)) => {
             eprintln!("[capture] OCR requested from GTK overlay — capturing area for OCR");
-            wait_for_layer_shell_overlay_to_unmap();
-            backend
-                .capture_area(area.x, area.y, area.width, area.height)
-                .map(AreaCapturePathResult::OcrRequested)
-                .map_err(|err| {
-                    SelectionError::InitError(format!("Wayland area capture for OCR failed: {err}"))
-                })
+            // Crop from frozen background — the overlay is still fully on screen
+            // when this error variant is returned, so a live capture would show it.
+            let capture = crop_background(&full_capture, area.x, area.y, area.width, area.height)?;
+            Ok(AreaCapturePathResult::OcrRequested(capture))
         }
         Err(e) => Err(e),
     }
@@ -173,10 +205,9 @@ fn capture_crosshair_file_via_gtk_layer_shell_wlroots() -> Result<PathBuf, Selec
         OverlaySelection::Area(None) => return Err(SelectionError::Cancelled),
         OverlaySelection::Recording(_) => return Err(SelectionError::Cancelled),
     };
-    wait_for_layer_shell_overlay_to_unmap();
-    let capture = backend
-        .capture_area(area.x, area.y, area.width, area.height)
-        .map_err(|err| SelectionError::InitError(format!("Wayland area capture failed: {err}")))?;
+    // Crop from the frozen background — the overlay was just visible and may
+    // not have been fully unmapped by the compositor yet.
+    let capture = crop_background(&full_capture, area.x, area.y, area.width, area.height)?;
 
     save_capture_to_temp_png(&capture)
 }
@@ -966,6 +997,32 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
         return Err(blocked_selection_error(
             LaunchBlockedReason::BuiltinOverlayActive,
         ));
+    }
+
+    if should_use_gtk_layer_shell_selector() {
+        eprintln!(
+            "[capture_overlay] capture_window_via_cpp: using Rust area overlay window picker"
+        );
+        force_wayland_gdk_for_layer_shell();
+        let backend = WaylandBackend::new().map_err(|e| {
+            SelectionError::InitError(format!("Failed to initialize Wayland backend: {e}"))
+        })?;
+        let full_capture = backend
+            .capture_screen_for_selection_impl()
+            .or_else(|_| backend.capture_screen())
+            .map_err(|err| {
+                SelectionError::InitError(format!("Wayland background capture failed: {err}"))
+            })?;
+        let area = match crate::overlay::select_window_from_capture_with_gtk(&full_capture)? {
+            OverlaySelection::Area(Some(area)) => area,
+            OverlaySelection::Area(None) => return Err(SelectionError::Cancelled),
+            OverlaySelection::Recording(_) => return Err(SelectionError::Cancelled),
+        };
+        // Crop from the frozen background — avoids the overlay-UI-in-screenshot
+        // race condition entirely since `full_capture` was taken before the
+        // window-picker overlay was shown.
+        let capture = crop_background(&full_capture, area.x, area.y, area.width, area.height)?;
+        return save_capture_to_temp_png(&capture);
     }
 
     if WaylandBackend::is_supported() {

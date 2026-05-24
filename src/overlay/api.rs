@@ -1,8 +1,11 @@
 use super::background::{
     background_frame_from_capture, background_frame_from_image, BackgroundFrame,
 };
-use super::state::{OverlayMode, SelectorState};
 use super::window::setup_window;
+use super::{
+    icons::TOOLBAR_WINDOW_INDEX,
+    state::{OverlayMode, SelectorState},
+};
 use crate::backend::CaptureData;
 use crate::capture_overlay::RecordingRequest;
 use gtk4::{prelude::*, Application};
@@ -76,7 +79,12 @@ impl AreaSelector {
         // Populate windows from compositor if available
         if let Some(compositor) = crate::compositor::detect_compositor() {
             if let Ok(windows) = compositor.get_windows() {
-                state.windows = windows;
+                let active_ws = compositor.get_active_workspace().ok().flatten();
+                state.windows = if let Some(ref ws) = active_ws {
+                    windows.into_iter().filter(|w| w.workspace == *ws).collect()
+                } else {
+                    windows
+                };
             }
         }
 
@@ -88,6 +96,17 @@ impl AreaSelector {
     fn new_with_mode(mode: OverlayMode) -> Self {
         let selector = Self::new();
         selector.state.lock().unwrap().overlay_mode = mode;
+        selector
+    }
+
+    fn new_window_picker() -> Self {
+        let selector = Self::new();
+        {
+            let mut st = selector.state.lock().unwrap();
+            st.active_tool_index = TOOLBAR_WINDOW_INDEX;
+            st.window_picker_open = true;
+            st.hovered_window_picker_entry = -1;
+        }
         selector
     }
 
@@ -301,6 +320,12 @@ pub fn select_area_from_capture_with_gtk(capture: &CaptureData) -> SelectionResu
 
 pub fn select_crosshair_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
     let selector = AreaSelector::new_with_mode(OverlayMode::CrosshairCapture);
+    let background = background_frame_from_capture(capture)?;
+    selector.run_with_background(Some(background))
+}
+
+pub fn select_window_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
+    let selector = AreaSelector::new_window_picker();
     let background = background_frame_from_capture(capture)?;
     selector.run_with_background(Some(background))
 }

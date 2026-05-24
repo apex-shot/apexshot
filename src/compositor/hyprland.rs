@@ -105,6 +105,15 @@ impl Compositor for Hyprland {
         }))
     }
 
+    fn get_active_workspace(&self) -> anyhow::Result<Option<String>> {
+        let response = self.send_command("j/activeworkspace")?;
+        if response.trim().is_empty() {
+            return Ok(None);
+        }
+        let ws: HyprlandWorkspace = serde_json::from_str(&response)?;
+        Ok(Some(ws.name))
+    }
+
     fn is_running(&self) -> bool {
         Self::is_supported() && Self::socket_path().map(|p| p.exists()).unwrap_or(false)
     }
