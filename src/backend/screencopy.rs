@@ -14,7 +14,7 @@
 
 use wayland_client::{
     protocol::{wl_buffer, wl_output, wl_registry, wl_shm, wl_shm_pool},
-    Connection, Dispatch, EventQueue, QueueHandle,
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
 use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
@@ -55,26 +55,33 @@ pub fn capture() -> DisplayResult<Option<CaptureData>> {
         None => return Ok(None),
     };
 
-    // If there is no output we cannot capture anything.
-    let output = match state.outputs.first().cloned() {
-        Some(o) => o,
-        None => {
-            return Err(DisplayError::CaptureError(
-                "No Wayland outputs found".into(),
-            ))
-        }
-    };
+    if state.outputs.is_empty() {
+        return Err(DisplayError::CaptureError(
+            "No Wayland outputs found".into(),
+        ));
+    }
 
-    // Allocate shared memory for the frame.  We learn the exact dimensions
-    // from the `buffer` event emitted by the frame object.
-    let shm = match state.shm.take() {
-        Some(s) => s,
-        None => {
-            return Err(DisplayError::CaptureError(
-                "Compositor did not advertise wl_shm".into(),
-            ))
-        }
-    };
+    // TODO: compose all advertised outputs. For now capture the output with the
+    // smallest logical origin so multi-monitor crops at least start from the
+    // same logical desktop origin used by the overlay.
+    let output = state
+        .outputs
+        .iter()
+        .min_by_key(|o| {
+            state
+                .output_infos
+                .iter()
+                .find(|info| info.id == o.id().protocol_id())
+                .map(|info| (info.x, info.y))
+                .unwrap_or((0, 0))
+        })
+        .cloned()
+        .expect("checked non-empty");
+
+    let shm = state
+        .shm
+        .take()
+        .ok_or_else(|| DisplayError::CaptureError("Compositor did not advertise wl_shm".into()))?;
 
     // Request a frame for the full output (overlay_cursor = 0 → no cursor).
     let frame = manager.capture_output(0, &output, &qh, ());
@@ -313,12 +320,22 @@ struct FrameInfo {
     format: wl_shm::Format,
 }
 
+#[derive(Clone, Debug)]
+struct OutputInfo {
+    id: u32,
+    x: i32,
+    y: i32,
+    scale: i32,
+}
+
 #[derive(Default)]
 struct AppState {
     /// Bound screencopy manager (None if compositor lacks the protocol).
     screencopy_manager: Option<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1>,
     /// All advertised wl_output globals.
     outputs: Vec<wl_output::WlOutput>,
+    /// Logical output metadata from wl_output events.
+    output_infos: Vec<OutputInfo>,
     /// Bound wl_shm.
     shm: Option<wl_shm::WlShm>,
     /// Frame buffer parameters received from the compositor.
@@ -376,13 +393,40 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppState {
 
 impl Dispatch<wl_output::WlOutput, ()> for AppState {
     fn event(
-        _: &mut Self,
-        _: &wl_output::WlOutput,
-        _: wl_output::Event,
+        state: &mut Self,
+        output: &wl_output::WlOutput,
+        event: wl_output::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+        let id = output.id().protocol_id();
+        let mut ensure = || {
+            if let Some(idx) = state.output_infos.iter().position(|info| info.id == id) {
+                idx
+            } else {
+                state.output_infos.push(OutputInfo {
+                    id,
+                    x: 0,
+                    y: 0,
+                    scale: 1,
+                });
+                state.output_infos.len() - 1
+            }
+        };
+
+        match event {
+            wl_output::Event::Geometry { x, y, .. } => {
+                let idx = ensure();
+                state.output_infos[idx].x = x;
+                state.output_infos[idx].y = y;
+            }
+            wl_output::Event::Scale { factor } => {
+                let idx = ensure();
+                state.output_infos[idx].scale = factor.max(1);
+            }
+            _ => {}
+        }
     }
 }
 

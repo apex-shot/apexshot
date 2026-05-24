@@ -94,6 +94,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     clipboard_mode_input.add_css_class("settings-select");
     clipboard_mode_input.append(Some("File & Image (default)"), "File & Image (default)");
     clipboard_mode_input.append(Some("Image Only"), "Image Only");
+    clipboard_mode_input.append(Some("File Path Only"), "File Path Only");
     clipboard_mode_input.set_active_id(Some(&config.adv_clipboard_mode));
 
     let clipboard_hbox = GtkBox::new(Orientation::Horizontal, 12);
@@ -103,7 +104,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     let lbl_clip = Label::new(Some("Copy behavior"));
     lbl_clip.set_xalign(0.0);
     let clip_hint = Label::new(Some(
-        "Adjust if you encounter issues with clipboard managers.",
+        "Choose whether screenshots copy as an image, a file URI, or both.",
     ));
     clip_hint.add_css_class("settings-sub-option-hint");
     clip_hint.set_xalign(0.0);

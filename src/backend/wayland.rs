@@ -270,6 +270,10 @@ fn crop_capture(
 // ──────────────────────────────────────────────────────────────────────────────
 
 impl WaylandBackend {
+    fn should_use_screenshot_portal() -> bool {
+        std::env::var_os("APEXSHOT_WAYLAND_SCREENSHOT_PORTAL").is_some()
+    }
+
     fn should_try_native_screencopy() -> bool {
         if std::env::var_os("APEXSHOT_DISABLE_WLR_SCREENCOPY").is_some() {
             return false;
@@ -312,14 +316,14 @@ impl WaylandBackend {
             }
             Ok(None) => {
                 eprintln!(
-                    "[capture] Native wlr-screencopy unavailable ({:.0}ms); falling back to ScreenCast portal.",
+                    "[capture] Native wlr-screencopy unavailable ({:.0}ms).",
                     start.elapsed().as_millis()
                 );
                 None
             }
             Err(err) => {
                 eprintln!(
-                    "[capture] Native wlr-screencopy failed ({:.0}ms): {err}; falling back to ScreenCast portal.",
+                    "[capture] Native wlr-screencopy failed ({:.0}ms): {err}.",
                     start.elapsed().as_millis()
                 );
                 None
@@ -594,6 +598,24 @@ impl WaylandBackend {
     /// Always uses the ScreenCast path for full customization and cross-distro
     /// consistency. wlr-screencopy, grim, and the Screenshot portal are bypassed.
     pub fn capture_screen_impl(&self) -> DisplayResult<CaptureData> {
+        if Self::should_use_screenshot_portal() {
+            let start = std::time::Instant::now();
+            let result = block_on_async(Self::capture_via_screenshot_portal(false));
+            match &result {
+                Ok(d) => eprintln!(
+                    "[capture] Screenshot portal succeeded in {:.0}ms ({}x{}).",
+                    start.elapsed().as_millis(),
+                    d.width,
+                    d.height
+                ),
+                Err(e) => eprintln!(
+                    "[capture] Screenshot portal failed ({:.0}ms): {e}",
+                    start.elapsed().as_millis()
+                ),
+            }
+            return result;
+        }
+
         if let Some(result) = Self::capture_monitor_via_native_screencopy() {
             return result;
         }
@@ -623,22 +645,22 @@ impl WaylandBackend {
             )));
         }
 
-        let full = self
-            .capture_screen_for_selection_impl()
-            .or_else(|_| self.capture_screen_impl())?;
+        let full = self.capture_screen_for_selection_impl()?;
         crop_capture(full, x, y, width, height)
     }
 
-    /// Capture used for area-selector backgrounds on Wayland.
+    /// Capture used for direct area crops on Wayland.
     ///
-    /// Uses ScreenCast portal + PipeWire for cross-distro consistency.
+    /// This intentionally stays on the native wlr-screencopy path. We do not
+    /// fall back to the ScreenCast portal for screenshot/area capture here.
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
-        eprintln!("[capture] capture_screen_for_selection_impl: called (Wayland selector background capture)");
-        if let Some(result) = Self::capture_monitor_via_native_screencopy() {
-            return result;
+        eprintln!("[capture] capture_screen_for_selection_impl: using native wlr-screencopy only");
+        match Self::capture_monitor_via_native_screencopy() {
+            Some(result) => result,
+            None => Err(DisplayError::CaptureError(
+                "Native wlr-screencopy is unavailable for Wayland area capture".into(),
+            )),
         }
-
-        Self::capture_monitor_via_screencast()
     }
 }
 

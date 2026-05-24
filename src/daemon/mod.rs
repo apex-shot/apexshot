@@ -2378,17 +2378,25 @@ fn copy_screenshot_to_clipboard(path: &std::path::Path, config: &crate::config::
     if !config.after_capture_copy_file_to_clipboard {
         return;
     }
-    if config.adv_clipboard_mode == "Image Only" {
-        if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
-            eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+    match config.adv_clipboard_mode.as_str() {
+        "Image Only" => {
+            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
+                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+            }
         }
-    } else {
-        // "File & Image (default)" — copy both image and URI
-        if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
-            eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+        "File Path Only" => {
+            if let Err(e) = copy_capture_uri_to_clipboard(path) {
+                eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
+            }
         }
-        if let Err(e) = copy_capture_uri_to_clipboard(path) {
-            eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
+        _ => {
+            // "File & Image (default)" — copy both image and URI
+            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
+                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+            }
+            if let Err(e) = copy_capture_uri_to_clipboard(path) {
+                eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
+            }
         }
     }
 }
@@ -2450,7 +2458,6 @@ fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mutex<DaemonS
     match save_existing_png(&path, &screenshot_save_config()) {
         Ok(saved_path) => {
             eprintln!("[daemon] Saved: {}", saved_path.display());
-            play_shutter_sound_if_enabled();
             apply_screenshot_after_capture_actions(saved_path, state);
         }
         Err(e) => {

@@ -45,6 +45,11 @@ bool isGnomeWaylandSession()
     return wayland && gnomeDesktop;
 }
 
+bool shouldUseScreenshotPortal()
+{
+    return true;
+}
+
 bool extractShellScreenshotPath(const QDBusMessage& message,
                                const QString& requestedPath,
                                QString& outPath,
@@ -307,10 +312,6 @@ bool captureViaPortal(QString& outPortalPath, QString& outError, bool interactiv
 }
 #endif
 
-#if defined(Q_OS_LINUX)
-bool captureViaScreenCastPortal(QString& outPath, QSize& outSize, QString& outError);
-#endif
-
 bool captureViaQtGrab(QString& outTempPath, QSize& outSize, QString& outError)
 {
     QScreen* primary = QGuiApplication::primaryScreen();
@@ -405,6 +406,80 @@ QPoint overlayLocalOriginForDesktopCapture(const QRect& overlayGeometry,
     }
 
     return origin;
+}
+
+QRect mapLogicalSelectionToCapturedImage(const QRect& logicalSelection,
+                                         const QImage& fullImage,
+                                         const QRect& desktopBounds)
+{
+    const QRect selected = logicalSelection.normalized().intersected(desktopBounds);
+    const auto screens = QGuiApplication::screens();
+
+    // Mixed-DPI Wayland screenshots are laid out in physical pixels per output,
+    // not by applying one global scale to the whole logical desktop. Pick the
+    // monitor containing the selection center and map using that monitor's DPR,
+    // with preceding monitors contributing their own physical widths/heights.
+    QScreen* target = nullptr;
+    const QPoint center = selected.center();
+    for (QScreen* screen : screens) {
+        if (screen->geometry().contains(center)) {
+            target = screen;
+            break;
+        }
+    }
+
+    if (target && target->geometry().contains(selected)) {
+        const bool horizontalLayout = desktopBounds.width() >= desktopBounds.height();
+        int originX = 0;
+        int originY = 0;
+
+        if (horizontalLayout) {
+            QList<QScreen*> sorted = screens;
+            std::sort(sorted.begin(), sorted.end(), [](QScreen* a, QScreen* b) {
+                if (a->geometry().x() == b->geometry().x()) {
+                    return a->geometry().y() < b->geometry().y();
+                }
+                return a->geometry().x() < b->geometry().x();
+            });
+            for (QScreen* screen : sorted) {
+                if (screen == target) {
+                    break;
+                }
+                originX += qRound(screen->geometry().width() * screen->devicePixelRatio());
+            }
+        } else {
+            QList<QScreen*> sorted = screens;
+            std::sort(sorted.begin(), sorted.end(), [](QScreen* a, QScreen* b) {
+                if (a->geometry().y() == b->geometry().y()) {
+                    return a->geometry().x() < b->geometry().x();
+                }
+                return a->geometry().y() < b->geometry().y();
+            });
+            for (QScreen* screen : sorted) {
+                if (screen == target) {
+                    break;
+                }
+                originY += qRound(screen->geometry().height() * screen->devicePixelRatio());
+            }
+        }
+
+        const QRect screenGeo = target->geometry();
+        const double dpr = target->devicePixelRatio();
+        return QRect(originX + qRound((selected.x() - screenGeo.x()) * dpr),
+                     originY + qRound((selected.y() - screenGeo.y()) * dpr),
+                     qMax(1, qRound(selected.width() * dpr)),
+                     qMax(1, qRound(selected.height() * dpr)));
+    }
+
+    // Fallback for spanning selections or unusual compositor layouts.
+    const double scaleX = static_cast<double>(fullImage.width()) /
+                          static_cast<double>(desktopBounds.width());
+    const double scaleY = static_cast<double>(fullImage.height()) /
+                          static_cast<double>(desktopBounds.height());
+    return QRect(qRound((selected.x() - desktopBounds.x()) * scaleX),
+                 qRound((selected.y() - desktopBounds.y()) * scaleY),
+                 qMax(1, qRound(selected.width() * scaleX)),
+                 qMax(1, qRound(selected.height() * scaleY)));
 }
 
 bool saveCroppedToTemp(const QImage& fullImage,
@@ -812,6 +887,10 @@ namespace ScreenCapture {
 bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outError)
 {
 #if defined(Q_OS_LINUX)
+    if (shouldUseScreenshotPortal()) {
+        return captureFullscreenToTempPngViaPortal(outPath, outSize, outError);
+    }
+
     QString shellError;
     if (isGnomeWaylandSession()) {
         if (captureViaGnomeShellFullscreen(outPath, outSize, shellError)) {
@@ -842,13 +921,6 @@ bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outEr
         return true;
     }
 
-    QString screencastError;
-    if (isGnomeWaylandSession()) {
-        if (captureViaScreenCastPortal(outPath, outSize, screencastError)) {
-            return true;
-        }
-    }
-
     QString fallbackError;
     if (captureViaQtGrab(outPath, outSize, fallbackError)) {
         return true;
@@ -856,12 +928,12 @@ bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outEr
 
     if (shellError.isEmpty()) {
         outError =
-          QStringLiteral("Portal capture failed (%1); Screencast fallback failed (%2); Qt fallback failed (%3)")
-            .arg(portalError, screencastError, fallbackError);
+          QStringLiteral("Portal capture failed (%1); Qt fallback failed (%2)")
+            .arg(portalError, fallbackError);
     } else {
         outError =
-          QStringLiteral("GNOME Shell capture failed (%1); Portal capture failed (%2); Screencast fallback failed (%3); Qt fallback failed (%4)")
-            .arg(shellError, portalError, screencastError, fallbackError);
+          QStringLiteral("GNOME Shell capture failed (%1); Portal capture failed (%2); Qt fallback failed (%3)")
+            .arg(shellError, portalError, fallbackError);
     }
     return false;
 #else
@@ -909,6 +981,10 @@ bool captureAreaToTempPng(const QRect& logicalSelection,
                           QSize& outSize,
                           QString& outError)
 {
+    if (shouldUseScreenshotPortal()) {
+        return captureAreaToTempPngViaPortal(logicalSelection, outPath, outSize, outError);
+    }
+
     QString shellError;
     if (isGnomeWaylandSession()) {
         if (captureViaGnomeShellArea(logicalSelection, outPath, outSize, shellError)) {
@@ -950,18 +1026,12 @@ bool captureAreaToTempPng(const QRect& logicalSelection,
         return false;
     }
 
-    const double scaleX = static_cast<double>(fullImage.width()) /
-                          static_cast<double>(desktopBounds.width());
-    const double scaleY = static_cast<double>(fullImage.height()) /
-                          static_cast<double>(desktopBounds.height());
-
-    int cropX = qRound((selected.x() - desktopBounds.x()) * scaleX);
-    int cropY = qRound((selected.y() - desktopBounds.y()) * scaleY);
-    int cropW = qMax(1, qRound(selected.width() * scaleX));
-    int cropH = qMax(1, qRound(selected.height() * scaleY));
-
     return saveCroppedToTemp(
-      fullImage, QRect(cropX, cropY, cropW, cropH), outPath, outSize, outError);
+      fullImage,
+      mapLogicalSelectionToCapturedImage(selected, fullImage, desktopBounds),
+      outPath,
+      outSize,
+      outError);
 }
 
 bool captureAreaToTempPngViaPortal(const QRect& logicalSelection,
@@ -997,18 +1067,12 @@ bool captureAreaToTempPngViaPortal(const QRect& logicalSelection,
         return false;
     }
 
-    const double scaleX = static_cast<double>(fullImage.width()) /
-                          static_cast<double>(desktopBounds.width());
-    const double scaleY = static_cast<double>(fullImage.height()) /
-                          static_cast<double>(desktopBounds.height());
-
-    int cropX = qRound((selected.x() - desktopBounds.x()) * scaleX);
-    int cropY = qRound((selected.y() - desktopBounds.y()) * scaleY);
-    int cropW = qMax(1, qRound(selected.width() * scaleX));
-    int cropH = qMax(1, qRound(selected.height() * scaleY));
-
     return saveCroppedToTemp(
-      fullImage, QRect(cropX, cropY, cropW, cropH), outPath, outSize, outError);
+      fullImage,
+      mapLogicalSelectionToCapturedImage(selected, fullImage, desktopBounds),
+      outPath,
+      outSize,
+      outError);
 #else
     return captureAreaToTempPng(logicalSelection, outPath, outSize, outError);
 #endif
