@@ -530,10 +530,9 @@ fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
     ]
 }
 
-pub fn export_hotkeys_for_hyprland() -> anyhow::Result<String> {
+fn export_hotkeys_for_hyprland_config(bindings: &[HotkeyBinding]) -> anyhow::Result<String> {
     let exe = resolve_action_exe()?;
     let exe_str = exe.to_string_lossy();
-    let bindings = default_hotkey_bindings();
 
     let mut output = String::new();
     output.push_str("# ApexShot Hotkeys for Hyprland\n");
@@ -547,7 +546,7 @@ pub fn export_hotkeys_for_hyprland() -> anyhow::Result<String> {
         for part in parts {
             let upper = part.to_uppercase();
             match upper.as_str() {
-                "CTRL" | "CONTROL" => mods.push("CONTROL"),
+                "CTRL" | "CONTROL" => mods.push("CTRL"),
                 "ALT" => mods.push("ALT"),
                 "SHIFT" => mods.push("SHIFT"),
                 "SUPER" | "META" | "WIN" => mods.push("SUPER"),
@@ -555,7 +554,8 @@ pub fn export_hotkeys_for_hyprland() -> anyhow::Result<String> {
             }
         }
 
-        let mods_str = if mods.is_empty() { "" } else { &mods.join("_") };
+        let mods_joined = mods.join(" ");
+        let mods_str = if mods.is_empty() { "" } else { &mods_joined };
         let name = binding.name.as_deref().unwrap_or("unknown");
         let args = binding.args.join(" ");
 
@@ -566,6 +566,17 @@ pub fn export_hotkeys_for_hyprland() -> anyhow::Result<String> {
     }
 
     Ok(output)
+}
+
+pub fn export_hotkeys_for_hyprland() -> anyhow::Result<String> {
+    export_hotkeys_for_hyprland_config(&default_hotkey_bindings())
+}
+
+pub fn export_configured_hotkeys_for_hyprland(
+    config_path: Option<PathBuf>,
+) -> anyhow::Result<String> {
+    let (_path, cfg) = load_or_create_config(config_path)?;
+    export_hotkeys_for_hyprland_config(&cfg.bindings)
 }
 
 pub fn export_hotkeys_for_sway() -> anyhow::Result<String> {
@@ -778,6 +789,12 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
     );
     push_binding(
         &mut bindings,
+        "capture_previous_area",
+        &app_config.shortcut_capture_previous_area,
+        &["capture", "previous-area"],
+    );
+    push_binding(
+        &mut bindings,
         "capture_screen",
         &app_config.shortcut_capture_fullscreen,
         &["capture", "screen"],
@@ -861,7 +878,97 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
 pub fn sync_hotkeys_from_app_config(app_config: &crate::config::AppConfig) -> anyhow::Result<()> {
     let path = default_config_path();
     let cfg = hotkey_config_from_app_config(app_config);
-    save_hotkey_config(&path, &cfg)
+    save_hotkey_config(&path, &cfg)?;
+
+    // Hyprland does not provide a desktop-agnostic global-shortcuts service the
+    // way GNOME does, so settings-tab changes need to refresh the sourced
+    // Hyprland snippet too. This is best-effort: users still need
+    // `source = ~/.config/hypr/apexshot.conf` in hyprland.conf and may need to
+    // reload Hyprland config depending on their compositor setup.
+    if crate::compositor::detect_compositor()
+        .map(|comp| comp.name() == "Hyprland")
+        .unwrap_or(false)
+    {
+        write_hyprland_hotkey_snippet(&cfg)?;
+    }
+
+    Ok(())
+}
+
+fn hyprland_hotkey_snippet_path() -> PathBuf {
+    let mut hypr_path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
+    hypr_path.push("hypr");
+    hypr_path.push("apexshot.conf");
+    hypr_path
+}
+
+fn write_hyprland_hotkey_snippet(cfg: &HotkeyConfig) -> anyhow::Result<PathBuf> {
+    let hypr_path = hyprland_hotkey_snippet_path();
+    let output = export_hotkeys_for_hyprland_config(&cfg.bindings)?;
+    if let Some(parent) = hypr_path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("Failed to create Hyprland config dir {}", parent.display())
+        })?;
+    }
+    std::fs::write(&hypr_path, output).with_context(|| {
+        format!(
+            "Failed to write Hyprland hotkeys to {}",
+            hypr_path.display()
+        )
+    })?;
+    ensure_hyprland_sources_hotkey_snippet(&hypr_path)?;
+    reload_hyprland_config();
+    Ok(hypr_path)
+}
+
+fn hyprland_main_config_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
+    path.push("hypr");
+    path.push("hyprland.conf");
+    path
+}
+
+fn ensure_hyprland_sources_hotkey_snippet(snippet_path: &Path) -> anyhow::Result<()> {
+    let config_path = hyprland_main_config_path();
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("Failed to create Hyprland config dir {}", parent.display())
+        })?;
+    }
+
+    let source_line = format!("source = {}", snippet_path.display());
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == source_line) {
+        return Ok(());
+    }
+
+    let mut updated = existing;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str("\n# ApexShot shortcuts\n");
+    updated.push_str(&source_line);
+    updated.push('\n');
+
+    std::fs::write(&config_path, updated).with_context(|| {
+        format!(
+            "Failed to add ApexShot source line to {}",
+            config_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn reload_hyprland_config() {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return;
+    }
+
+    match std::process::Command::new("hyprctl").arg("reload").status() {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("[hotkeys] hyprctl reload exited with {status}"),
+        Err(e) => eprintln!("[hotkeys] failed to run hyprctl reload: {e}"),
+    }
 }
 
 pub fn reset_hotkey_config(config_path: Option<PathBuf>) -> anyhow::Result<PathBuf> {
@@ -1357,18 +1464,11 @@ pub fn setup_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyhow
     } else if let Some(comp) = crate::compositor::detect_compositor() {
         match comp.name() {
             "Hyprland" => {
-                if let Ok(output) = export_hotkeys_for_hyprland() {
-                    let mut hypr_path =
-                        dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
-                    hypr_path.push("hypr");
-                    hypr_path.push("apexshot.conf");
-                    let _ = std::fs::create_dir_all(hypr_path.parent().unwrap());
-                    if std::fs::write(&hypr_path, output).is_ok() {
-                        println!("\n[Hyprland detected]");
-                        println!("1. Saved bindings to: {}", hypr_path.display());
-                        println!("2. Add this line to your hyprland.conf:");
-                        println!("   source = {}", hypr_path.display());
-                    }
+                if let Ok(hypr_path) = write_hyprland_hotkey_snippet(&cfg) {
+                    println!("\n[Hyprland detected]");
+                    println!("1. Saved bindings to: {}", hypr_path.display());
+                    println!("2. Add this line to your hyprland.conf:");
+                    println!("   source = {}", hypr_path.display());
                 }
             }
             "Sway/i3" => {

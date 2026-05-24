@@ -398,6 +398,12 @@ pub enum GtkWork {
     CaptureAreaInit {
         reply: std::sync::mpsc::SyncSender<Result<AreaCapturePathResult, String>>,
     },
+    CaptureCrosshair {
+        reply: std::sync::mpsc::SyncSender<Result<std::path::PathBuf, String>>,
+    },
+    CaptureScreen {
+        reply: std::sync::mpsc::SyncSender<Result<std::path::PathBuf, String>>,
+    },
     RunRecordingControls {
         params: crate::recording::RecordingControlsParams,
         stop_tx: tokio::sync::oneshot::Sender<crate::recording::StopAction>,
@@ -2906,7 +2912,29 @@ fn handle_capture_crosshair_with_active_session(state: Arc<Mutex<DaemonState>>) 
     let app_config = load_config().sanitized();
     apply_screenshot_timer_if_needed("crosshair", &app_config);
 
-    match capture_crosshair_file_via_cpp() {
+    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
+
+    let crosshair = if let Some(gtk_tx) = gtk_tx {
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
+        match gtk_tx.send(GtkWork::CaptureCrosshair { reply: reply_tx }) {
+            Ok(()) => match reply_rx.recv() {
+                Ok(result) => result.map_err(|err| match err.as_str() {
+                    "cancelled" => crate::overlay::SelectionError::Cancelled,
+                    other => crate::overlay::SelectionError::InitError(other.to_string()),
+                }),
+                Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
+                    "GTK main-thread crosshair reply failed: {err}"
+                ))),
+            },
+            Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
+                "GTK main-thread crosshair dispatch failed: {err}"
+            ))),
+        }
+    } else {
+        capture_crosshair_file_via_cpp()
+    };
+
+    match crosshair {
         Ok(path) => {
             save_existing_png_and_open(path, state);
         }
@@ -2935,7 +2963,29 @@ fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonState>>) {
     let app_config = load_config().sanitized();
     apply_screenshot_timer_if_needed("screen", &app_config);
 
-    match capture_screen_file_via_cpp() {
+    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
+
+    let screen = if let Some(gtk_tx) = gtk_tx {
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
+        match gtk_tx.send(GtkWork::CaptureScreen { reply: reply_tx }) {
+            Ok(()) => match reply_rx.recv() {
+                Ok(result) => result.map_err(|err| match err.as_str() {
+                    "cancelled" => crate::overlay::SelectionError::Cancelled,
+                    other => crate::overlay::SelectionError::InitError(other.to_string()),
+                }),
+                Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
+                    "GTK main-thread screen reply failed: {err}"
+                ))),
+            },
+            Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
+                "GTK main-thread screen dispatch failed: {err}"
+            ))),
+        }
+    } else {
+        capture_screen_file_via_cpp()
+    };
+
+    match screen {
         Ok(path) => {
             save_existing_png_and_open(path, state);
         }

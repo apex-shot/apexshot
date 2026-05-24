@@ -493,7 +493,20 @@ pub(crate) fn setup_window(
         window.set_anchor(Edge::Bottom, true);
         window.set_anchor(Edge::Left, true);
         window.set_anchor(Edge::Right, true);
-        window.set_keyboard_mode(KeyboardMode::Exclusive);
+        let keyboard_mode = if state
+            .lock()
+            .map(|st| st.overlay_mode == OverlayMode::CrosshairCapture)
+            .unwrap_or(false)
+        {
+            // Hyprland stops compositor global binds while a layer-shell surface
+            // has exclusive keyboard focus. Crosshair mode is easy to leave open
+            // accidentally, so avoid making all ApexShot shortcuts appear dead
+            // until the app/overlay is restarted.
+            KeyboardMode::OnDemand
+        } else {
+            KeyboardMode::Exclusive
+        };
+        window.set_keyboard_mode(keyboard_mode);
         window.set_monitor(Some(&monitor));
         window.set_namespace(Some("apexshot-area-selector"));
         window.set_exclusive_zone(-1);

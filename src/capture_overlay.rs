@@ -1013,7 +1013,24 @@ pub fn capture_window_via_cpp() -> Result<CaptureData, SelectionError> {
     capture
 }
 
+fn capture_screen_file_via_wlroots() -> Result<PathBuf, SelectionError> {
+    let backend = WaylandBackend::new()
+        .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
+    let capture = backend
+        .capture_screen_for_selection_impl()
+        .or_else(|_| backend.capture_screen())
+        .map_err(|err| {
+            SelectionError::InitError(format!("Wayland fullscreen capture failed: {err}"))
+        })?;
+    save_capture_to_temp_png(&capture)
+}
+
 pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
+    if should_use_gtk_layer_shell_selector() {
+        eprintln!("[capture_overlay] Using native wlroots fullscreen capture");
+        return capture_screen_file_via_wlroots();
+    }
+
     let output = run_capture_binary(&["--capture-screen"], None)?;
 
     match output.status.code() {

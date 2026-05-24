@@ -35,6 +35,11 @@ const PERM_YES: &str = "yes";
 ///   - `apexshot install` (so permissions are set up at install time)
 ///   - Daemon startup (so a fresh session still has permissions after reboot)
 pub fn ensure_portal_permissions() {
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        eprintln!("[portal-perm] skipped: no user session bus (run from the desktop session, not sudo/root)");
+        return;
+    }
+
     let app_id = crate::app_identity::app_id();
     for (table, id) in [
         (SCREENSHOT_TABLE, SCREENSHOT_ID),

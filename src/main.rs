@@ -18,6 +18,7 @@ fn capture_daemon_action(capture_type: &str) -> Option<&'static str> {
     match capture_type {
         "area" => Some("capture_area"),
         "crosshair" => Some("capture_crosshair"),
+        "previous-area" | "previous_area" => Some("capture_area"),
         "screen" => Some("capture_screen"),
         "window" => Some("capture_window"),
         _ => None,
@@ -635,6 +636,9 @@ fn install_binary(force: bool, dev_install: bool) {
         }
     }
 
+    // Remove first to avoid ETXTBUSY when overwriting a running binary
+    let _ = std::fs::remove_file(dest);
+
     match std::fs::copy(&src, dest) {
         Ok(_) => {
             if let Err(e) = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755)) {
@@ -684,6 +688,8 @@ fn install_binary(force: bool, dev_install: bool) {
             std::process::exit(1);
         }
     }
+
+    let _ = std::fs::remove_file(capture_dest);
 
     match std::fs::copy(&capture_src, capture_dest) {
         Ok(_) => {
@@ -820,20 +826,49 @@ fn install_autostart(dev_install: bool) {
     }
 }
 
+fn user_home_from_passwd(username: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
+    let output = std::process::Command::new("getent")
+        .arg("passwd")
+        .arg(username)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next()?;
+    let home = line.split(':').nth(5)?;
+    if home.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(home))
+    }
+}
+
 fn install_desktop_launcher(dev_install: bool) {
     if !dev_install {
         return;
     }
 
-    let local_apps_dir = std::env::var_os("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME")
-                .map(std::path::PathBuf::from)
-                .expect("HOME is not set");
-            home.join(".local/share")
-        })
-        .join("applications");
+    let local_apps_dir = if let Some(sudo_user) = std::env::var_os("SUDO_USER") {
+        // `apexshot install --dev` is normally run via sudo to copy files into
+        // /usr/local.  Do not install the launcher into /root; put it in the
+        // invoking user's desktop database so Hyprland/app launchers can see it.
+        user_home_from_passwd(&sudo_user)
+            .unwrap_or_else(|| std::path::PathBuf::from("/home").join(&sudo_user))
+            .join(".local/share/applications")
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                let home = std::env::var_os("HOME")
+                    .map(std::path::PathBuf::from)
+                    .expect("HOME is not set");
+                home.join(".local/share")
+            })
+            .join("applications")
+    };
 
     if let Err(e) = std::fs::create_dir_all(&local_apps_dir) {
         eprintln!("Error: could not create applications directory: {e}");
@@ -858,7 +893,19 @@ fn install_desktop_launcher(dev_install: bool) {
     );
 
     match std::fs::write(&desktop_path, desktop_content) {
-        Ok(()) => println!("✓ Dev app launcher installed: {}", desktop_path.display()),
+        Ok(()) => {
+            if let Some(sudo_user) = std::env::var_os("SUDO_USER") {
+                let _ = std::process::Command::new("chown")
+                    .arg(format!(
+                        "{}:{}",
+                        sudo_user.to_string_lossy(),
+                        sudo_user.to_string_lossy()
+                    ))
+                    .arg(&desktop_path)
+                    .status();
+            }
+            println!("✓ Dev app launcher installed: {}", desktop_path.display())
+        }
         Err(e) => {
             eprintln!("Error: failed to write dev launcher: {e}");
             std::process::exit(1);
@@ -1226,9 +1273,28 @@ fn run_daemon_with_gtk_on_main_thread() {
                 let _ = reply.send(result);
             }
             GtkWork::CaptureAreaInit { reply } => {
-                eprintln!("[gtk] CaptureAreaInit received — launching C++ area-init");
+                eprintln!("[gtk] CaptureAreaInit received — launching area selector");
                 let result = apexshot::capture_overlay::capture_area_file_via_cpp()
                     .map_err(|e| e.to_string());
+                let _ = reply.send(result);
+            }
+            GtkWork::CaptureCrosshair { reply } => {
+                eprintln!("[gtk] CaptureCrosshair received — launching Rust crosshair selector");
+                let result = apexshot::capture_overlay::capture_crosshair_file_via_cpp().map_err(
+                    |e| match e {
+                        apexshot::SelectionError::Cancelled => "cancelled".to_string(),
+                        other => other.to_string(),
+                    },
+                );
+                let _ = reply.send(result);
+            }
+            GtkWork::CaptureScreen { reply } => {
+                eprintln!("[gtk] CaptureScreen received — launching fullscreen capture");
+                let result =
+                    apexshot::capture_overlay::capture_screen_file_via_cpp().map_err(|e| match e {
+                        apexshot::SelectionError::Cancelled => "cancelled".to_string(),
+                        other => other.to_string(),
+                    });
                 let _ = reply.send(result);
             }
             GtkWork::RunRecordingControls { params, stop_tx } => {
@@ -1407,7 +1473,8 @@ fn run_hotkeys_command(args: &[String]) -> anyhow::Result<()> {
             };
             match format {
                 "hyprland" => {
-                    let output = apexshot::hotkeys::export_hotkeys_for_hyprland()?;
+                    let output =
+                        apexshot::hotkeys::export_configured_hotkeys_for_hyprland(config_path)?;
                     println!("{}", output);
                 }
                 "sway" | "i3" => {
