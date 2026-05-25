@@ -221,8 +221,8 @@ pub fn run_recording_controls(
         } else {
             None
         };
-        let _click_overlay_window = if params.show_clicks {
-            Some(setup_click_overlay_window(application, params.clone()))
+        let _click_overlay = if params.show_clicks {
+            setup_click_overlay(application, params.clone())
         } else {
             None
         };
@@ -1982,123 +1982,175 @@ fn setup_webcam_window(
     Some(window)
 }
 
-// ── Click overlay window (real-time on-screen click indicators) ───────────
+// ── Click indicator overlay (capture-area-only, transparent window) ──────
 
-/// Click colours matching `click_overlay::CLICK_COLORS`.
-static CLICK_OVERLAY_COLORS: &[(f64, f64, f64)] = &[
-    (0.71, 0.71, 0.71), // Gray
-    (0.48, 0.39, 1.0),  // Indigo
-    (1.0, 0.24, 0.24),  // Red
-    (0.24, 0.47, 1.0),  // Blue
-    (0.24, 0.78, 0.31), // Green
-    (1.0, 0.82, 0.20),  // Yellow
-    (1.0, 0.59, 0.12),  // Orange
-    (0.71, 0.24, 0.86), // Purple
-    (1.0, 1.0, 1.0),    // White
-];
-
-#[derive(Clone)]
-struct ClickDot {
-    x: f64,
-    y: f64,
-    at: std::time::Instant,
-}
-
-fn setup_click_overlay_window(
+fn setup_click_overlay(
     app: &Application,
     params: RecordingControlsParams,
-) -> ApplicationWindow {
+) -> Option<ApplicationWindow> {
     use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+
+    if params.is_fullscreen || params.capture_w <= 0 || params.capture_h <= 0 {
+        return None;
+    }
 
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
+    if is_wayland && !gtk4_layer_shell::is_supported() {
+        return None;
+    }
+
+    let display = gdk::Display::default()?;
+    let monitor = monitor_for_capture(&display, &params)?;
+
+    // CSS for transparent background
+    let provider = CssProvider::new();
+    provider.load_from_data(
+        ".click-overlay-window,
+         .click-overlay-window > contents { background: transparent; background-color: transparent; }
+         .click-overlay-canvas { background: transparent; background-color: transparent; }",
+    );
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
 
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Clicks")
-        .default_width(screen_w)
-        .default_height(screen_h)
+        .default_width(params.capture_w)
+        .default_height(params.capture_h)
         .decorated(false)
         .resizable(false)
+        .focusable(false)
         .build();
+    window.set_css_classes(&["click-overlay-window"]);
+    window.set_can_focus(false);
+    window.set_focusable(false);
 
-    if is_wayland && gtk4_layer_shell::is_supported() {
+    if is_wayland {
         window.init_layer_shell();
         window.set_layer(Layer::Top);
+        window.set_monitor(Some(&monitor));
         window.set_anchor(Edge::Top, true);
-        window.set_anchor(Edge::Bottom, true);
         window.set_anchor(Edge::Left, true);
-        window.set_anchor(Edge::Right, true);
+        window.set_anchor(Edge::Bottom, false);
+        window.set_anchor(Edge::Right, false);
+        window.set_margin(Edge::Top, params.capture_y);
+        window.set_margin(Edge::Left, params.capture_x);
         window.set_keyboard_mode(KeyboardMode::None);
         window.set_exclusive_zone(-1);
-        window.set_namespace(Some("apexshot-clicks"));
+        window.set_namespace(Some("apexshot-recording-clicks"));
     } else {
-        window.connect_realize(|w| {
+        window.fullscreen_on_monitor(&monitor);
+        let cx = params.capture_x;
+        let cy = params.capture_y;
+        window.connect_realize(move |w| {
             suppress_x11_controls_window_type(w);
-            let _ = position_x11_window(w, 0, 0);
+            let _ = request_x11_always_on_top(w);
+            let _ = position_x11_window(w, cx, cy);
+        });
+        window.connect_map(move |w| {
+            let _ = request_x11_always_on_top(w);
+            let _ = position_x11_window(w, cx, cy);
         });
     }
 
-    // Shared click event store
-    let clicks: Arc<Mutex<Vec<ClickDot>>> = Arc::new(Mutex::new(Vec::new()));
+    let clicks_tuples: Arc<Mutex<Vec<(f64, f64, Instant)>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // Start click polling in background thread
+    // Click polling thread
     {
-        let clicks_clone = clicks.clone();
+        let clicks_c = clicks_tuples.clone();
         let cap_x = params.capture_x;
         let cap_y = params.capture_y;
         let cap_w = params.capture_w as u32;
         let cap_h = params.capture_h as u32;
         std::thread::Builder::new()
-            .name("click-poll-overlay".into())
+            .name("click-poll".into())
             .spawn(move || {
-                poll_clicks_overlay(clicks_clone, cap_x, cap_y, cap_w, cap_h);
+                poll_global_clicks(clicks_c, cap_x, cap_y, cap_w, cap_h);
             })
             .ok();
     }
 
     let drawing_area = DrawingArea::new();
-    drawing_area.set_content_width(screen_w);
-    drawing_area.set_content_height(screen_h);
+    drawing_area.set_css_classes(&["click-overlay-canvas"]);
+    drawing_area.set_content_width(params.capture_w);
+    drawing_area.set_content_height(params.capture_h);
 
-    let click_size = params.click_size;
-    let click_color = params.click_color as usize;
-    let click_style = params.click_style;
-    let click_animate = params.click_animate;
+    let size = params.click_size;
+    let color = params.click_color as usize;
+    let style = params.click_style;
+    let animate = params.click_animate;
 
-    let clicks_draw = clicks.clone();
+    let clicks_draw = clicks_tuples.clone();
     drawing_area.set_draw_func(move |_, cr, _w, _h| {
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+        cr.set_operator(cairo::Operator::Clear);
         let _ = cr.paint();
+        cr.set_operator(cairo::Operator::Over);
 
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let max_age = std::time::Duration::from_millis(800);
-        let active: Vec<ClickDot> = {
+        let active: Vec<(f64, f64, Instant)> = {
             let mut guard = clicks_draw.lock().unwrap();
-            guard.retain(|d| now - d.at < max_age);
+            guard.retain(|d| now - d.2 < max_age);
             guard.clone()
         };
 
-        for dot in &active {
-            let elapsed = now - dot.at;
-            draw_one_click_dot(
-                cr,
-                dot.x,
-                dot.y,
-                elapsed,
-                click_size,
-                click_color,
-                click_style,
-                click_animate,
-            );
+        for (dot_x, dot_y, dot_at) in &active {
+            let elapsed = now - *dot_at;
+            let t = elapsed.as_secs_f64() / max_age.as_secs_f64();
+            let base_radius = 10.0 + size * 50.0;
+            let (radius, alpha) = if animate {
+                if t < 0.25 {
+                    (base_radius * (0.5 + 0.5 * t / 0.25), 1.0)
+                } else {
+                    (base_radius, (1.0 - (t - 0.25) / 0.75).clamp(0.0, 1.0))
+                }
+            } else if t < 0.625 {
+                (base_radius, 1.0)
+            } else {
+                continue;
+            };
+
+            let palette: &[(f64, f64, f64)] = &[
+                (0.71, 0.71, 0.71),
+                (0.48, 0.39, 1.0),
+                (1.0, 0.24, 0.24),
+                (0.24, 0.47, 1.0),
+                (0.24, 0.78, 0.31),
+                (1.0, 0.82, 0.20),
+                (1.0, 0.59, 0.12),
+                (0.71, 0.24, 0.86),
+                (1.0, 1.0, 1.0),
+            ];
+            let (r, g, b) = palette[color % palette.len()];
+
+            if style == 1 {
+                cr.set_source_rgba(r, g, b, alpha * 0.65);
+                cr.new_path();
+                cr.arc(*dot_x, *dot_y, radius, 0.0, 2.0 * std::f64::consts::PI);
+                let _ = cr.fill();
+                cr.set_source_rgba(r, g, b, alpha);
+                cr.set_line_width(2.0);
+                cr.new_path();
+                cr.arc(*dot_x, *dot_y, radius, 0.0, 2.0 * std::f64::consts::PI);
+                let _ = cr.stroke();
+            } else {
+                cr.set_source_rgba(r, g, b, alpha);
+                cr.set_line_width(3.0);
+                cr.new_path();
+                cr.arc(*dot_x, *dot_y, radius, 0.0, 2.0 * std::f64::consts::PI);
+                let _ = cr.stroke();
+            }
         }
     });
 
     window.set_child(Some(&drawing_area));
 
-    // Redraw at ~30 fps while clicks are active
     let drawing_area_weak = drawing_area.downgrade();
-    let clicks_timer = clicks.clone();
+    let clicks_timer = clicks_tuples.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(33), move || {
         let has_clicks = !clicks_timer.lock().unwrap().is_empty();
         if has_clicks {
@@ -2110,65 +2162,12 @@ fn setup_click_overlay_window(
     });
 
     window.present();
-    window
+    Some(window)
 }
 
-fn draw_one_click_dot(
-    cr: &cairo::Context,
-    cx: f64,
-    cy: f64,
-    elapsed: std::time::Duration,
-    size: f64,
-    color_idx: usize,
-    style: u8,
-    animate: bool,
-) {
-    let max_age = std::time::Duration::from_millis(800);
-    if elapsed > max_age {
-        return;
-    }
-
-    let base_radius = 10.0 + size * 50.0;
-    let t = elapsed.as_secs_f64() / max_age.as_secs_f64();
-
-    let (radius, alpha) = if animate {
-        if t < 0.25 {
-            let grow = t / 0.25;
-            (base_radius * (0.5 + 0.5 * grow), 1.0)
-        } else {
-            let fade = 1.0 - (t - 0.25) / 0.75;
-            (base_radius, fade.clamp(0.0, 1.0))
-        }
-    } else if t < 0.625 {
-        (base_radius, 1.0)
-    } else {
-        return;
-    };
-
-    let (r, g, b) = CLICK_OVERLAY_COLORS[color_idx % CLICK_OVERLAY_COLORS.len()];
-
-    if style == 1 {
-        cr.set_source_rgba(r, g, b, alpha * 0.65);
-        cr.new_path();
-        cr.arc(cx, cy, radius, 0.0, 2.0 * std::f64::consts::PI);
-        let _ = cr.fill();
-        cr.set_source_rgba(r, g, b, alpha);
-        cr.set_line_width(2.0);
-        cr.new_path();
-        cr.arc(cx, cy, radius, 0.0, 2.0 * std::f64::consts::PI);
-        let _ = cr.stroke();
-    } else {
-        cr.set_source_rgba(r, g, b, alpha);
-        cr.set_line_width(3.0);
-        cr.new_path();
-        cr.arc(cx, cy, radius, 0.0, 2.0 * std::f64::consts::PI);
-        let _ = cr.stroke();
-    }
-}
-
-/// Polls mouse clicks using the same auto-detection as `click_overlay`.
-fn poll_clicks_overlay(
-    clicks: Arc<Mutex<Vec<ClickDot>>>,
+/// Polls global mouse clicks: Hyprland socket2 → Sway IPC → X11.
+fn poll_global_clicks(
+    clicks: Arc<Mutex<Vec<(f64, f64, std::time::Instant)>>>,
     capture_x: i32,
     capture_y: i32,
     capture_w: u32,
@@ -2185,7 +2184,9 @@ fn poll_clicks_overlay(
         path.push("hypr");
         path.push(&sig);
         path.push(".socket2.sock");
+        eprintln!("[click-overlay] Hyprland socket2: {:?}", path);
         if let Ok(stream) = std::os::unix::net::UnixStream::connect(&path) {
+            eprintln!("[click-overlay] Hyprland socket2 connected");
             let reader = BufReader::new(stream);
             let mut cx: f64 = 0.0;
             let mut cy: f64 = 0.0;
@@ -2204,11 +2205,12 @@ fn poll_clicks_overlay(
                         && px < capture_x + capture_w as i32
                         && py < capture_y + capture_h as i32
                     {
-                        clicks.lock().unwrap().push(ClickDot {
-                            x: cx,
-                            y: cy,
-                            at: std::time::Instant::now(),
-                        });
+                        eprintln!("[click-overlay] CLICK at ({}, {})", cx, cy);
+                        clicks.lock().unwrap().push((
+                            cx - capture_x as f64,
+                            cy - capture_y as f64,
+                            std::time::Instant::now(),
+                        ));
                     }
                 }
             }
@@ -2225,12 +2227,10 @@ fn poll_clicks_overlay(
             let payload = r#"["input"]"#;
             let magic = b"i3-ipc";
             let len = payload.len() as u32;
-            let msg_type: u32 = 2;
             let mut header = Vec::new();
             header.extend_from_slice(magic);
             header.extend_from_slice(&len.to_ne_bytes());
-            header.extend_from_slice(&msg_type.to_ne_bytes());
-
+            header.extend_from_slice(&2u32.to_ne_bytes());
             if stream.write_all(&header).is_ok() && stream.write_all(payload.as_bytes()).is_ok() {
                 let mut hdr = [0u8; 14];
                 let mut buf = Vec::new();
@@ -2268,11 +2268,12 @@ fn poll_clicks_overlay(
                         && px < capture_x + capture_w as i32
                         && py < capture_y + capture_h as i32
                     {
-                        clicks.lock().unwrap().push(ClickDot {
-                            x: px as f64,
-                            y: py as f64,
-                            at: std::time::Instant::now(),
-                        });
+                        eprintln!("[click-overlay] SWAY CLICK at ({}, {})", px, py);
+                        clicks.lock().unwrap().push((
+                            (px - capture_x) as f64,
+                            (py - capture_y) as f64,
+                            std::time::Instant::now(),
+                        ));
                     }
                 }
                 return;
@@ -2280,7 +2281,7 @@ fn poll_clicks_overlay(
         }
     }
 
-    // X11 fallback
+    // X11
     if let Ok((conn, screen_num)) = x11rb::connect(None) {
         let root = conn.setup().roots[screen_num].root;
         let mut prev: u16 = 0;
@@ -2297,11 +2298,12 @@ fn poll_clicks_overlay(
                             && px < capture_x + capture_w as i32
                             && py < capture_y + capture_h as i32
                         {
-                            clicks.lock().unwrap().push(ClickDot {
-                                x: reply.root_x as f64,
-                                y: reply.root_y as f64,
-                                at: std::time::Instant::now(),
-                            });
+                            eprintln!("[click-overlay] X11 CLICK at ({}, {})", px, py);
+                            clicks.lock().unwrap().push((
+                                (px - capture_x) as f64,
+                                (py - capture_y) as f64,
+                                std::time::Instant::now(),
+                            ));
                         }
                     }
                     prev = mask;
@@ -2316,5 +2318,5 @@ fn poll_clicks_overlay(
         return;
     }
 
-    eprintln!("[click-overlay] No supported backend for real-time click display");
+    eprintln!("[click-overlay] No supported click backend");
 }
