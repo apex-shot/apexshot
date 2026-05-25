@@ -3021,10 +3021,29 @@ pub(crate) fn draw_volume_popup(
     title: &str,
     dragging: bool,
 ) {
-    let menu_w = 240.0;
-    let menu_h = 110.0;
+    let menu_w = 280.0;
+    let menu_h = 130.0;
     let menu_x = panel_x.clamp(10.0, screen_width - menu_w - 10.0);
     let menu_y = panel_y.clamp(10.0, screen_height - menu_h - 10.0);
+
+    let accent_r = 176.0 / 255.0;
+    let accent_g = 92.0 / 255.0;
+    let accent_b = 56.0 / 255.0;
+
+    // Warm radial glow — same treatment as settings / click-options menus
+    {
+        let _ = context.save();
+        let glow_cx = menu_x + menu_w / 2.0;
+        let glow_cy = menu_y + menu_h / 2.0;
+        let glow =
+            gtk4::cairo::RadialGradient::new(glow_cx, glow_cy, 0.0, glow_cx, glow_cy, menu_w);
+        glow.add_color_stop_rgba(0.0, accent_r, accent_g, accent_b, 40.0 / 255.0);
+        glow.add_color_stop_rgba(0.6, 0.0, 0.0, 0.0, 0.0);
+        let _ = context.set_source(&glow);
+        context.rectangle(menu_x - 40.0, menu_y - 40.0, menu_w + 80.0, menu_h + 80.0);
+        let _ = context.fill();
+        let _ = context.restore();
+    }
 
     draw_frosted_panel(
         context,
@@ -3038,23 +3057,69 @@ pub(crate) fn draw_volume_popup(
         background,
     );
 
-    // Header
+    // Two-line header matching settings / click-options menus
     context.select_font_face(
         "Sans",
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
-    context.set_font_size(10.0);
+    context.set_font_size(10.7);
     context.set_source_rgba(1.0, 224.0 / 255.0, 196.0 / 255.0, 176.0 / 255.0);
-    let _ = context.move_to(menu_x + 16.0, menu_y + 22.0);
-    let _ = context.show_text(title);
+    if let Ok(_ext) = context.text_extents("RECORDING DEVICE") {
+        context.move_to(menu_x + 18.0, menu_y + 28.0);
+        context.show_text("RECORDING DEVICE").ok();
+    }
+    context.set_font_size(18.7);
+    context.set_source_rgba(245.0 / 255.0, 245.0 / 255.0, 246.0 / 255.0, 1.0);
+    if let Ok(_ext) = context.text_extents(title) {
+        context.move_to(menu_x + 18.0, menu_y + 48.0);
+        context.show_text(title).ok();
+    }
 
-    // Slider
-    let slider_x = menu_x + 20.0;
-    let slider_y = menu_y + 50.0;
-    let slider_w = menu_w - 40.0;
+    // Slider row — compact single-row layout fitting 280px panel
+    let row_y = menu_y + 78.0;
+    let row_h = 46.0;
+
+    // Label: left-aligned
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size(13.3);
+    context.set_source_rgba(1.0, 1.0, 1.0, 210.0 / 255.0);
+    let label_text = "Volume:";
+    let label_x = menu_x + 18.0;
+    if let Ok(extents) = context.text_extents(label_text) {
+        context.move_to(
+            label_x,
+            row_y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
+        );
+        context.show_text(label_text).ok();
+    }
+
+    // Percentage badge: right-aligned at the panel edge
+    let pct = (volume * 100.0).round() as i32;
+    let pct_text = format!("{}%", pct);
+    context.select_font_face(
+        "Sans",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size(11.0);
+    context.set_source_rgba(1.0, 232.0 / 255.0, 214.0 / 255.0, 220.0 / 255.0);
+    if let Ok(extents) = context.text_extents(&pct_text) {
+        let px = menu_x + menu_w - 12.0 - extents.width() - extents.x_bearing();
+        let py = row_y + row_h / 2.0 - extents.height() / 2.0 - extents.y_bearing();
+        context.move_to(px, py);
+        context.show_text(&pct_text).ok();
+    }
+
+    // Slider between label and percentage badge
+    let slider_x = menu_x + 83.0;
+    let slider_w = 140.0;
     let slider_track_h = 6.0;
-    let track_y = slider_y;
+    let track_y = row_y + (row_h - slider_track_h) / 2.0;
 
     // Track background
     context.set_source_rgba(1.0, 1.0, 1.0, if dragging { 36.0 } else { 28.0 } / 255.0);
@@ -3103,24 +3168,6 @@ pub(crate) fn draw_volume_popup(
     rounded_rect_path(context, handle_x, handle_y, handle_w, handle_h, 6.0);
     let _ = context.fill();
     let _ = context.restore();
-
-    // Percentage badge (to the right of the slider track, vertically centred on it)
-    let pct = (volume * 100.0).round() as i32;
-    context.select_font_face(
-        "Sans",
-        gtk4::cairo::FontSlant::Normal,
-        gtk4::cairo::FontWeight::Bold,
-    );
-    context.set_font_size(11.0);
-    context.set_source_rgba(1.0, 232.0 / 255.0, 214.0 / 255.0, 220.0 / 255.0);
-    let pct_text = format!("{}%", pct);
-    if let Ok(extents) = context.text_extents(&pct_text) {
-        let _ = context.move_to(
-            slider_x + slider_w + 8.0,
-            track_y + slider_track_h / 2.0 + extents.height() / 2.0 - extents.y_bearing(),
-        );
-        let _ = context.show_text(&pct_text);
-    }
 }
 
 pub(crate) fn draw_overlay(
@@ -3436,8 +3483,8 @@ pub(crate) fn draw_overlay(
             }
             // Volume popup menus (positioned top-centre of selection like other menus)
             {
-                let popup_x = (x + (sel_w - 240.0) / 2.0).clamp(10.0, screen_width - 250.0);
-                let popup_y = (y + 24.0).clamp(10.0, screen_height - 120.0);
+                let popup_x = (x + (sel_w - 280.0) / 2.0).clamp(10.0, screen_width - 290.0);
+                let popup_y = (y + 24.0).clamp(10.0, screen_height - 140.0);
                 if st.recording.mic_volume_popup_open {
                     draw_volume_popup(
                         context,

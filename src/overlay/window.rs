@@ -941,11 +941,11 @@ pub(crate) fn setup_window(
                     && (st.recording.mic_volume_popup_open
                         || st.recording.speaker_volume_popup_open)
                 {
-                    let popup_w = 240.0;
+                    let popup_w = 280.0;
                     let popup_x = (rect.left + (rect.width() - popup_w) / 2.0)
                         .clamp(10.0, screen_width as f64 - popup_w - 10.0);
-                    let slider_x = popup_x + 20.0;
-                    let slider_w = popup_w - 40.0;
+                    let slider_x = popup_x + 83.0;
+                    let slider_w = 140.0;
                     let click_x = x.clamp(slider_x, slider_x + slider_w);
                     let fraction = ((click_x - slider_x) / slider_w).clamp(0.0, 1.0);
                     if st.recording.mic_volume_popup_open {
@@ -1934,17 +1934,19 @@ pub(crate) fn setup_window(
 
         // ── Volume popup click handling ──
         if st.recording.mic_volume_popup_open || st.recording.speaker_volume_popup_open {
-            let popup_w = 240.0;
-            let popup_h = 110.0;
+            let popup_w = 280.0;
+            let popup_h = 130.0;
             let popup_x = (rect.left + (rect.width() - popup_w) / 2.0)
                 .clamp(10.0, screen_width as f64 - popup_w - 10.0);
             let popup_y = (rect.top + 24.0).clamp(10.0, screen_height as f64 - popup_h - 10.0);
             if x >= popup_x && x <= popup_x + popup_w && y >= popup_y && y <= popup_y + popup_h {
                 // Inside popup — check slider hit
-                let slider_x = popup_x + 20.0;
-                let slider_w = popup_w - 40.0;
+                let slider_x = popup_x + 83.0;
+                let slider_w = 140.0;
                 let slider_track_h = 6.0;
-                let track_y = popup_y + 50.0;
+                let row_y = popup_y + 78.0;
+                let row_h = 46.0;
+                let track_y = row_y + (row_h - slider_track_h) / 2.0;
                 if y >= track_y - 13.0
                     && y <= track_y + slider_track_h + 13.0
                     && x >= slider_x
