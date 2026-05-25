@@ -212,16 +212,13 @@ pub(crate) fn draw_click_overlay(
 /// Start a background thread that polls the X11 pointer position and button
 /// state during recording.  When a button press is detected inside the capture
 /// area, a `ClickEvent` is appended to the tracker.
-///
-/// Returns a handle that, when dropped, signals the polling thread to stop.
-pub(crate) fn start_click_polling(
+fn start_click_polling_x11(
     tracker: ClickTracker,
     capture_x: i32,
     capture_y: i32,
     capture_w: u32,
     capture_h: u32,
 ) -> Option<ClickPollingHandle> {
-    // We use x11rb for X11 mouse polling.
     let (conn, _screen_num) = match x11rb::connect(None) {
         Ok(c) => c,
         Err(e) => {
@@ -234,31 +231,27 @@ pub(crate) fn start_click_polling(
     let running_clone = running.clone();
 
     std::thread::Builder::new()
-        .name("click-poll".into())
+        .name("click-poll-x11".into())
         .spawn(move || {
             let root = conn.setup().roots[_screen_num].root;
             let mut prev_buttons: u16 = 0;
-            let interval = std::time::Duration::from_millis(10); // ~100 Hz
+            let interval = std::time::Duration::from_millis(10);
 
             while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                // Poll pointer position & button state
                 if let Ok(cookie) = conn.query_pointer(root) {
                     if let Ok(reply) = cookie.reply() {
                         let px = reply.root_x as i32;
                         let py = reply.root_y as i32;
                         let buttons = reply.mask;
 
-                        // Detect button press (transition from released → pressed)
                         let newly_pressed = u16::from(buttons) & !prev_buttons;
-                        if newly_pressed != 0 {
-                            // Only record clicks inside the capture area
-                            if px >= capture_x
-                                && py >= capture_y
-                                && px < capture_x + capture_w as i32
-                                && py < capture_y + capture_h as i32
-                            {
-                                tracker.record_click(px, py, capture_x, capture_y);
-                            }
+                        if newly_pressed != 0
+                            && px >= capture_x
+                            && py >= capture_y
+                            && px < capture_x + capture_w as i32
+                            && py < capture_y + capture_h as i32
+                        {
+                            tracker.record_click(px, py, capture_x, capture_y);
                         }
                         prev_buttons = u16::from(buttons);
                     } else {
@@ -267,12 +260,215 @@ pub(crate) fn start_click_polling(
                 } else {
                     break;
                 }
-
                 std::thread::sleep(interval);
             }
         })
         .ok()
         .map(|_handle| ClickPollingHandle { running })
+}
+
+// ── Wayland compositor click polling ───────────────────────────────────────
+
+/// Connect to the Hyprland event socket (`.socket2.sock`) and listen for
+/// `mousebuttondown` events.  Mouse position is tracked via `mousemove` events.
+fn start_click_polling_hyprland(
+    tracker: ClickTracker,
+    capture_x: i32,
+    capture_y: i32,
+    capture_w: u32,
+    capture_h: u32,
+) -> Option<ClickPollingHandle> {
+    use std::io::{BufRead, BufReader};
+
+    let sig = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
+    let mut path = std::path::PathBuf::from(runtime);
+    path.push("hypr");
+    path.push(&sig);
+    path.push(".socket2.sock");
+
+    let stream = match std::os::unix::net::UnixStream::connect(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[click-overlay] Cannot connect to Hyprland socket2: {e}");
+            return None;
+        }
+    };
+
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let running_clone = running.clone();
+
+    std::thread::Builder::new()
+        .name("click-poll-hypr".into())
+        .spawn(move || {
+            let reader = BufReader::new(stream);
+            let mut cursor_x: f64 = 0.0;
+            let mut cursor_y: f64 = 0.0;
+
+            for line in reader.lines() {
+                if !running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                let line = match line {
+                    Ok(l) => l,
+                    Err(_) => break,
+                };
+
+                if let Some(rest) = line.strip_prefix("mousemove>>") {
+                    // Format: "x,y"
+                    if let Some((x_str, y_str)) = rest.split_once(',') {
+                        cursor_x = x_str.trim().parse().unwrap_or(cursor_x);
+                        cursor_y = y_str.trim().parse().unwrap_or(cursor_y);
+                    }
+                } else if line.starts_with("mousebuttondown>>") {
+                    let px = cursor_x as i32;
+                    let py = cursor_y as i32;
+                    if px >= capture_x
+                        && py >= capture_y
+                        && px < capture_x + capture_w as i32
+                        && py < capture_y + capture_h as i32
+                    {
+                        tracker.record_click(px, py, capture_x, capture_y);
+                    }
+                }
+            }
+        })
+        .ok()
+        .map(|_handle| ClickPollingHandle { running })
+}
+
+/// Connect to Sway IPC and subscribe to input events, parsing mouse button
+/// presses to record clicks.
+fn start_click_polling_sway(
+    tracker: ClickTracker,
+    capture_x: i32,
+    capture_y: i32,
+    capture_w: u32,
+    capture_h: u32,
+) -> Option<ClickPollingHandle> {
+    use std::io::{Read, Write};
+
+    let socket_path = std::env::var_os("SWAYSOCK")
+        .or_else(|| std::env::var_os("I3SOCK"))
+        .map(std::path::PathBuf::from)?;
+
+    let mut stream = match std::os::unix::net::UnixStream::connect(&socket_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[click-overlay] Cannot connect to Sway socket: {e}");
+            return None;
+        }
+    };
+
+    // Sway IPC subscribe to input events (type 2, payload '["input"]')
+    let payload = r#"["input"]"#;
+    let magic = b"i3-ipc";
+    let len = payload.len() as u32;
+    let msg_type: u32 = 2; // SUBSCRIBE
+
+    let mut header = Vec::new();
+    header.extend_from_slice(magic);
+    header.extend_from_slice(&len.to_ne_bytes());
+    header.extend_from_slice(&msg_type.to_ne_bytes());
+
+    if stream.write_all(&header).is_err() || stream.write_all(payload.as_bytes()).is_err() {
+        eprintln!("[click-overlay] Failed to subscribe to Sway IPC input events");
+        return None;
+    }
+
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let running_clone = running.clone();
+
+    std::thread::Builder::new()
+        .name("click-poll-sway".into())
+        .spawn(move || {
+            let mut header_buf = [0u8; 14];
+            let mut payload_buf = Vec::new();
+
+            loop {
+                if !running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+
+                if stream.read_exact(&mut header_buf).is_err() {
+                    break;
+                }
+                let payload_len = u32::from_ne_bytes([
+                    header_buf[6],
+                    header_buf[7],
+                    header_buf[8],
+                    header_buf[9],
+                ]) as usize;
+
+                payload_buf.resize(payload_len, 0);
+                if stream.read_exact(&mut payload_buf).is_err() {
+                    break;
+                }
+
+                let Ok(text) = std::str::from_utf8(&payload_buf) else {
+                    continue;
+                };
+
+                // Sway IPC sends JSON with "change":"run" events for each input.
+                // Look for mouse button press events.
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(text) {
+                    if event.get("change").and_then(|v| v.as_str()) == Some("run") {
+                        if let Some(input) = event.get("input") {
+                            if input.get("type").and_then(|v| v.as_i64()) == Some(4) {
+                                // Pointer event
+                                if input.get("state").and_then(|v| v.as_str()) == Some("pressed") {
+                                    let px =
+                                        input.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                                    let py =
+                                        input.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                                    if px >= capture_x
+                                        && py >= capture_y
+                                        && px < capture_x + capture_w as i32
+                                        && py < capture_y + capture_h as i32
+                                    {
+                                        tracker.record_click(px, py, capture_x, capture_y);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .ok()
+        .map(|_handle| ClickPollingHandle { running })
+}
+
+/// Start click polling: tries X11 first, then Wayland compositor-specific
+/// event sockets (Hyprland, Sway).
+pub(crate) fn start_click_polling(
+    tracker: ClickTracker,
+    capture_x: i32,
+    capture_y: i32,
+    capture_w: u32,
+    capture_h: u32,
+) -> Option<ClickPollingHandle> {
+    // Try X11 first
+    if std::env::var("DISPLAY").is_ok() {
+        return start_click_polling_x11(
+            tracker.clone(),
+            capture_x,
+            capture_y,
+            capture_w,
+            capture_h,
+        );
+    }
+
+    // Wayland compositor-specific
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        return start_click_polling_hyprland(tracker, capture_x, capture_y, capture_w, capture_h);
+    }
+    if std::env::var_os("SWAYSOCK").is_some() || std::env::var_os("I3SOCK").is_some() {
+        return start_click_polling_sway(tracker, capture_x, capture_y, capture_w, capture_h);
+    }
+
+    eprintln!("[click-overlay] No supported compositor found for click polling");
+    None
 }
 
 pub(crate) struct ClickPollingHandle {

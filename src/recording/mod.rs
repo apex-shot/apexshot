@@ -1022,10 +1022,8 @@ async fn start_recording_with_commands(
             None
         };
 
-    // 5c. Start click polling for X11 recordings
-    let _click_polling: Option<click_overlay::ClickPollingHandle> = if config.rec_clicks
-        && std::env::var("WAYLAND_DISPLAY").is_err()
-    {
+    // 5c. Start click polling (auto-detects X11 / Hyprland / Sway)
+    let _click_polling: Option<click_overlay::ClickPollingHandle> = if config.rec_clicks {
         if let (Some(x), Some(y), Some(tracker)) = (config.x, config.y, _click_tracker.clone()) {
             click_overlay::start_click_polling(
                 tracker,
