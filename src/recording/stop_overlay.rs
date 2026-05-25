@@ -221,6 +221,11 @@ pub fn run_recording_controls(
         } else {
             None
         };
+        let _click_overlay_window = if params.show_clicks {
+            Some(setup_click_overlay_window(application, params.clone()))
+        } else {
+            None
+        };
         let controls_window = setup_window(
             application,
             params.clone(),
@@ -1975,4 +1980,341 @@ fn setup_webcam_window(
 
     window.present();
     Some(window)
+}
+
+// ── Click overlay window (real-time on-screen click indicators) ───────────
+
+/// Click colours matching `click_overlay::CLICK_COLORS`.
+static CLICK_OVERLAY_COLORS: &[(f64, f64, f64)] = &[
+    (0.71, 0.71, 0.71), // Gray
+    (0.48, 0.39, 1.0),  // Indigo
+    (1.0, 0.24, 0.24),  // Red
+    (0.24, 0.47, 1.0),  // Blue
+    (0.24, 0.78, 0.31), // Green
+    (1.0, 0.82, 0.20),  // Yellow
+    (1.0, 0.59, 0.12),  // Orange
+    (0.71, 0.24, 0.86), // Purple
+    (1.0, 1.0, 1.0),    // White
+];
+
+#[derive(Clone)]
+struct ClickDot {
+    x: f64,
+    y: f64,
+    at: std::time::Instant,
+}
+
+fn setup_click_overlay_window(
+    app: &Application,
+    params: RecordingControlsParams,
+) -> ApplicationWindow {
+    use std::sync::{Arc, Mutex};
+
+    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
+
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .title("ApexShot Clicks")
+        .default_width(screen_w)
+        .default_height(screen_h)
+        .decorated(false)
+        .resizable(false)
+        .build();
+
+    if is_wayland && gtk4_layer_shell::is_supported() {
+        window.init_layer_shell();
+        window.set_layer(Layer::Top);
+        window.set_anchor(Edge::Top, true);
+        window.set_anchor(Edge::Bottom, true);
+        window.set_anchor(Edge::Left, true);
+        window.set_anchor(Edge::Right, true);
+        window.set_keyboard_mode(KeyboardMode::None);
+        window.set_exclusive_zone(-1);
+        window.set_namespace(Some("apexshot-clicks"));
+    } else {
+        window.connect_realize(|w| {
+            suppress_x11_controls_window_type(w);
+            let _ = position_x11_window(w, 0, 0);
+        });
+    }
+
+    // Shared click event store
+    let clicks: Arc<Mutex<Vec<ClickDot>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // Start click polling in background thread
+    {
+        let clicks_clone = clicks.clone();
+        let cap_x = params.capture_x;
+        let cap_y = params.capture_y;
+        let cap_w = params.capture_w as u32;
+        let cap_h = params.capture_h as u32;
+        std::thread::Builder::new()
+            .name("click-poll-overlay".into())
+            .spawn(move || {
+                poll_clicks_overlay(clicks_clone, cap_x, cap_y, cap_w, cap_h);
+            })
+            .ok();
+    }
+
+    let drawing_area = DrawingArea::new();
+    drawing_area.set_content_width(screen_w);
+    drawing_area.set_content_height(screen_h);
+
+    let click_size = params.click_size;
+    let click_color = params.click_color as usize;
+    let click_style = params.click_style;
+    let click_animate = params.click_animate;
+
+    let clicks_draw = clicks.clone();
+    drawing_area.set_draw_func(move |_, cr, _w, _h| {
+        cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+        let _ = cr.paint();
+
+        let now = std::time::Instant::now();
+        let max_age = std::time::Duration::from_millis(800);
+        let active: Vec<ClickDot> = {
+            let mut guard = clicks_draw.lock().unwrap();
+            guard.retain(|d| now - d.at < max_age);
+            guard.clone()
+        };
+
+        for dot in &active {
+            let elapsed = now - dot.at;
+            draw_one_click_dot(
+                cr,
+                dot.x,
+                dot.y,
+                elapsed,
+                click_size,
+                click_color,
+                click_style,
+                click_animate,
+            );
+        }
+    });
+
+    window.set_child(Some(&drawing_area));
+
+    // Redraw at ~30 fps while clicks are active
+    let drawing_area_weak = drawing_area.downgrade();
+    let clicks_timer = clicks.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(33), move || {
+        let has_clicks = !clicks_timer.lock().unwrap().is_empty();
+        if has_clicks {
+            if let Some(da) = drawing_area_weak.upgrade() {
+                da.queue_draw();
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+
+    window.present();
+    window
+}
+
+fn draw_one_click_dot(
+    cr: &cairo::Context,
+    cx: f64,
+    cy: f64,
+    elapsed: std::time::Duration,
+    size: f64,
+    color_idx: usize,
+    style: u8,
+    animate: bool,
+) {
+    let max_age = std::time::Duration::from_millis(800);
+    if elapsed > max_age {
+        return;
+    }
+
+    let base_radius = 10.0 + size * 50.0;
+    let t = elapsed.as_secs_f64() / max_age.as_secs_f64();
+
+    let (radius, alpha) = if animate {
+        if t < 0.25 {
+            let grow = t / 0.25;
+            (base_radius * (0.5 + 0.5 * grow), 1.0)
+        } else {
+            let fade = 1.0 - (t - 0.25) / 0.75;
+            (base_radius, fade.clamp(0.0, 1.0))
+        }
+    } else if t < 0.625 {
+        (base_radius, 1.0)
+    } else {
+        return;
+    };
+
+    let (r, g, b) = CLICK_OVERLAY_COLORS[color_idx % CLICK_OVERLAY_COLORS.len()];
+
+    if style == 1 {
+        cr.set_source_rgba(r, g, b, alpha * 0.65);
+        cr.new_path();
+        cr.arc(cx, cy, radius, 0.0, 2.0 * std::f64::consts::PI);
+        let _ = cr.fill();
+        cr.set_source_rgba(r, g, b, alpha);
+        cr.set_line_width(2.0);
+        cr.new_path();
+        cr.arc(cx, cy, radius, 0.0, 2.0 * std::f64::consts::PI);
+        let _ = cr.stroke();
+    } else {
+        cr.set_source_rgba(r, g, b, alpha);
+        cr.set_line_width(3.0);
+        cr.new_path();
+        cr.arc(cx, cy, radius, 0.0, 2.0 * std::f64::consts::PI);
+        let _ = cr.stroke();
+    }
+}
+
+/// Polls mouse clicks using the same auto-detection as `click_overlay`.
+fn poll_clicks_overlay(
+    clicks: Arc<Mutex<Vec<ClickDot>>>,
+    capture_x: i32,
+    capture_y: i32,
+    capture_w: u32,
+    capture_h: u32,
+) {
+    use std::io::{BufRead, BufReader, Read, Write};
+
+    // Hyprland socket2
+    if let (Some(sig), Some(runtime)) = (
+        std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE"),
+        std::env::var_os("XDG_RUNTIME_DIR"),
+    ) {
+        let mut path = std::path::PathBuf::from(runtime);
+        path.push("hypr");
+        path.push(&sig);
+        path.push(".socket2.sock");
+        if let Ok(stream) = std::os::unix::net::UnixStream::connect(&path) {
+            let reader = BufReader::new(stream);
+            let mut cx: f64 = 0.0;
+            let mut cy: f64 = 0.0;
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                if let Some(rest) = line.strip_prefix("mousemove>>") {
+                    if let Some((x, y)) = rest.split_once(',') {
+                        cx = x.trim().parse().unwrap_or(cx);
+                        cy = y.trim().parse().unwrap_or(cy);
+                    }
+                } else if line.starts_with("mousebuttondown>>") {
+                    let px = cx as i32;
+                    let py = cy as i32;
+                    if px >= capture_x
+                        && py >= capture_y
+                        && px < capture_x + capture_w as i32
+                        && py < capture_y + capture_h as i32
+                    {
+                        clicks.lock().unwrap().push(ClickDot {
+                            x: cx,
+                            y: cy,
+                            at: std::time::Instant::now(),
+                        });
+                    }
+                }
+            }
+            return;
+        }
+    }
+
+    // Sway IPC
+    if let Some(socket) = std::env::var_os("SWAYSOCK")
+        .or_else(|| std::env::var_os("I3SOCK"))
+        .map(std::path::PathBuf::from)
+    {
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&socket) {
+            let payload = r#"["input"]"#;
+            let magic = b"i3-ipc";
+            let len = payload.len() as u32;
+            let msg_type: u32 = 2;
+            let mut header = Vec::new();
+            header.extend_from_slice(magic);
+            header.extend_from_slice(&len.to_ne_bytes());
+            header.extend_from_slice(&msg_type.to_ne_bytes());
+
+            if stream.write_all(&header).is_ok() && stream.write_all(payload.as_bytes()).is_ok() {
+                let mut hdr = [0u8; 14];
+                let mut buf = Vec::new();
+                loop {
+                    if stream.read_exact(&mut hdr).is_err() {
+                        break;
+                    }
+                    let plen = u32::from_ne_bytes([hdr[6], hdr[7], hdr[8], hdr[9]]) as usize;
+                    buf.resize(plen, 0);
+                    if stream.read_exact(&mut buf).is_err() {
+                        break;
+                    }
+                    let Ok(text) = std::str::from_utf8(&buf) else {
+                        continue;
+                    };
+                    let Ok(event) = serde_json::from_str::<serde_json::Value>(text) else {
+                        continue;
+                    };
+                    if event.get("change").and_then(|v| v.as_str()) != Some("run") {
+                        continue;
+                    }
+                    let Some(input) = event.get("input") else {
+                        continue;
+                    };
+                    if input.get("type").and_then(|v| v.as_i64()) != Some(4) {
+                        continue;
+                    }
+                    if input.get("state").and_then(|v| v.as_str()) != Some("pressed") {
+                        continue;
+                    }
+                    let px = input.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                    let py = input.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                    if px >= capture_x
+                        && py >= capture_y
+                        && px < capture_x + capture_w as i32
+                        && py < capture_y + capture_h as i32
+                    {
+                        clicks.lock().unwrap().push(ClickDot {
+                            x: px as f64,
+                            y: py as f64,
+                            at: std::time::Instant::now(),
+                        });
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    // X11 fallback
+    if let Ok((conn, screen_num)) = x11rb::connect(None) {
+        let root = conn.setup().roots[screen_num].root;
+        let mut prev: u16 = 0;
+        loop {
+            if let Ok(cookie) = conn.query_pointer(root) {
+                if let Ok(reply) = cookie.reply() {
+                    let mask = u16::from(reply.mask);
+                    let newly = mask & !prev;
+                    if newly != 0 {
+                        let px = reply.root_x as i32;
+                        let py = reply.root_y as i32;
+                        if px >= capture_x
+                            && py >= capture_y
+                            && px < capture_x + capture_w as i32
+                            && py < capture_y + capture_h as i32
+                        {
+                            clicks.lock().unwrap().push(ClickDot {
+                                x: reply.root_x as f64,
+                                y: reply.root_y as f64,
+                                at: std::time::Instant::now(),
+                            });
+                        }
+                    }
+                    prev = mask;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        return;
+    }
+
+    eprintln!("[click-overlay] No supported backend for real-time click display");
 }
