@@ -1,3 +1,4 @@
+use gst::glib::translate::ToGlibPtr;
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
@@ -14,6 +15,7 @@ use crate::{
     config::{save_config, AppConfig},
 };
 
+mod click_overlay;
 mod control_session;
 pub mod editor;
 mod runtime_keystrokes;
@@ -124,6 +126,12 @@ pub struct RecordingConfig {
     pub gif_quality: f64,
     pub gif_optimize: bool,
     pub gif_max_width: Option<u32>,
+    // Click overlay settings (non-GNOME recordings)
+    pub rec_clicks: bool,
+    pub click_size: f64,
+    pub click_color: u8,
+    pub click_style: u8,
+    pub click_animate: bool,
 }
 
 #[derive(Debug)]
@@ -607,6 +615,11 @@ impl Default for RecordingConfig {
             gif_quality: 0.75,
             gif_optimize: true,
             gif_max_width: Some(800),
+            rec_clicks: false,
+            click_size: 0.5,
+            click_color: 3,
+            click_style: 0,
+            click_animate: true,
         }
     }
 }
@@ -965,6 +978,68 @@ async fn start_recording_with_commands(
         .ok_or_else(|| RecordError::GStreamerError("Pipeline has no bus".into()))?;
 
     println!("Recording...");
+
+    // 5b. Set up click overlay (cairooverlay) for non-GNOME recordings
+    let _click_tracker: Option<click_overlay::ClickTracker> =
+        if config.rec_clicks && pipeline.by_name("clickover").is_some() {
+            let frame_w = config.width.unwrap_or(0) as f64;
+            let frame_h = config.height.unwrap_or(0) as f64;
+            let tracker = click_overlay::ClickTracker::new(
+                config.width.unwrap_or(0),
+                config.height.unwrap_or(0),
+                click_overlay::ClickOverlayConfig {
+                    enabled: true,
+                    size: config.click_size,
+                    color: config.click_color,
+                    style: config.click_style,
+                    animate: config.click_animate,
+                },
+            );
+            if let Some(overlay_elem) = pipeline.by_name("clickover") {
+                let tracker_clone = tracker.clone();
+                overlay_elem.connect("draw", false, move |values| {
+                    // cairo_t* is passed as a raw pointer in the GLib value system.
+                    // We extract it via FFI and wrap it with from_raw_none (no ownership).
+                    let cr_ptr = unsafe {
+                        gst::glib::gobject_ffi::g_value_get_pointer(values[1].to_glib_none().0)
+                            as *mut gtk4::cairo::ffi::cairo_t
+                    };
+                    if cr_ptr.is_null() {
+                        return None;
+                    }
+                    // Use the recorded frame dimensions from the config.
+                    let cr = unsafe { gtk4::cairo::Context::from_raw_none(cr_ptr) };
+                    if frame_w > 0.0 && frame_h > 0.0 {
+                        click_overlay::draw_click_overlay(&cr, frame_w, frame_h, &tracker_clone);
+                    }
+                    // Do NOT drop the Context — GStreamer owns the cairo_t.
+                    std::mem::forget(cr);
+                    None
+                });
+            }
+            Some(tracker)
+        } else {
+            None
+        };
+
+    // 5c. Start click polling for X11 recordings
+    let _click_polling: Option<click_overlay::ClickPollingHandle> = if config.rec_clicks
+        && std::env::var("WAYLAND_DISPLAY").is_err()
+    {
+        if let (Some(x), Some(y), Some(tracker)) = (config.x, config.y, _click_tracker.clone()) {
+            click_overlay::start_click_polling(
+                tracker,
+                x,
+                y,
+                config.width.unwrap_or(0),
+                config.height.unwrap_or(0),
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     let mut command_rx = command_rx;
 
@@ -1394,15 +1469,22 @@ async fn build_pipeline(
     let video_queue = video_queue_props(profile);
     let video_post_caps = video_post_encoder_caps(profile);
 
+    let click_overlay_str = if config.rec_clicks {
+        "cairooverlay name=clickover ! "
+    } else {
+        ""
+    };
+
     if let Some(aenc) = audio_encoder {
         let muxer_named = format!("{} name=mux", profile.muxer);
 
         let video_leg = format!(
-            "{}{} ! videoconvert{}{} ! videorate ! {} ! {} ! {}{} ! mux.",
+            "{}{} ! videoconvert{}{} ! {}videorate ! {} ! {} ! {}{} ! mux.",
             video_source,
             crop_filter,
             hidpi_filter,
             resolution_filter,
+            click_overlay_str,
             video_raw_caps,
             video_queue,
             video_encoder,
@@ -1448,8 +1530,8 @@ async fn build_pipeline(
     } else {
         Ok(BuiltPipeline {
             pipeline_str: format!(
-            "{}{} ! videoconvert{}{} ! videorate ! {} ! {} ! {}{} ! {} ! filesink location=\"{}\"",
-            video_source, crop_filter, hidpi_filter, resolution_filter, video_raw_caps,
+            "{}{} ! videoconvert{}{} ! {}videorate ! {} ! {} ! {}{} ! {} ! filesink location=\"{}\"",
+            video_source, crop_filter, hidpi_filter, resolution_filter, click_overlay_str, video_raw_caps,
             video_queue, video_encoder, video_post_caps, profile.muxer, output_str
             ),
             wayland_source,
@@ -2114,6 +2196,11 @@ pub fn prepare_overlay_recording_request(
         gif_quality,
         gif_optimize,
         gif_max_width,
+        rec_clicks: request.clicks,
+        click_size: request.click_size,
+        click_color: request.click_color,
+        click_style: request.click_style,
+        click_animate: request.click_animate,
     };
 
     let runtime_overlay_snapshot = use_shell_controls.then_some(RuntimeOverlaySnapshot {
@@ -2645,6 +2732,11 @@ mod tests {
             gif_quality: 0.75,
             gif_optimize: true,
             gif_max_width: Some(800),
+            rec_clicks: false,
+            click_size: 0.5,
+            click_color: 3,
+            click_style: 0,
+            click_animate: true,
         }
     }
 
