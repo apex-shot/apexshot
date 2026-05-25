@@ -326,19 +326,20 @@ install_deps() {
 
     info "This may take a few minutes..."
 
+    # This installer installs a prebuilt .deb, so only runtime packages belong
+    # here. Do not install -dev/build packages: some Ubuntu derivatives (for
+    # example Linux Mint Cinnamon) do not publish libgtk4-layer-shell-dev even
+    # though users are not building ApexShot from source.
     local deps=(
-        build-essential cmake pkg-config
-        libx11-dev libxext6 libxtst-dev
-        qtbase5-dev libqt5widgets5 libqt5x11extras5-dev
-        libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
-        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
-        gstreamer1.0-pipewire
-        libpipewire-0.3-dev
+        libx11-6 libxext6 libxtst6
+        libqt5widgets5 libqt5dbus5 libqt5network5 libqt5x11extras5
+        gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+        gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-pipewire
         tesseract-ocr tesseract-ocr-eng
-        libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
-        wl-clipboard
-        xdg-utils libnotify-bin ffmpeg unzip
-        pipewire wf-recorder
+        libgtk-4-1 libadwaita-1-0 libgtk4-layer-shell0
+        wl-clipboard xclip
+        xdg-utils libnotify-bin ffmpeg unzip curl wget
+        pipewire
     )
 
     local portal_pkg
@@ -346,13 +347,32 @@ install_deps() {
         deps+=("$portal_pkg")
     done
 
-    # Some deps may already be present; skip if so to keep the UI clean.
+    prime_sudo
+
+    # Update apt before checking availability so derivatives with stale package
+    # lists do not produce false "Unable to locate package" failures.
+    run_spinner "Updating package lists..." bash -c "${SUDO} apt-get update -qq"
+
     local missing=()
+    local unavailable=()
+    local pkg
     for pkg in "${deps[@]}"; do
-        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        if dpkg -s "$pkg" >/dev/null 2>&1; then
+            continue
+        fi
+        if apt-cache show "$pkg" >/dev/null 2>&1; then
             missing+=("$pkg")
+        else
+            unavailable+=("$pkg")
         fi
     done
+
+    if [[ ${#unavailable[@]} -gt 0 ]]; then
+        err "Your apt repositories do not provide required ApexShot runtime package(s): ${unavailable[*]}"
+        err "This commonly happens on older Ubuntu/Mint bases with libgtk4-layer-shell0."
+        err "Please open an issue with your distro/version, or use a newer Ubuntu/Debian base that provides these packages."
+        exit 1
+    fi
 
     if [[ ${#missing[@]} -eq 0 ]]; then
         ok "All dependencies already satisfied"
@@ -361,12 +381,6 @@ install_deps() {
 
     info "Missing packages: ${missing[*]}"
 
-    prime_sudo
-
-    # Update apt quietly
-    run_spinner "Updating package lists..." bash -c "${SUDO} apt-get update -qq"
-
-    # Install missing packages quietly
     run_spinner "Installing missing packages..." bash -c "${SUDO} apt-get install -y -qq ${missing[*]}"
 
     ok "Dependencies installed"
