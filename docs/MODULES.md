@@ -107,6 +107,9 @@ whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
   invoked by the daemon or CLI.
 - **Recording start** happens directly from the daemon (`src/daemon/mod.rs`)
   which calls `prepare_overlay_recording_request` and `start_recording`.
+- **Recording backend** is chosen automatically: `wf-recorder` on wlroots
+  compositors (Hyprland/Sway) for native `wlr-screencopy` capture; GStreamer +
+  XDG ScreenCast portal + PipeWire on other Wayland compositors.
 - **During recording:** a GTK4 `stop_overlay.rs` floating bar shows pause/stop
   controls and elapsed time. No shell extension or Qt process is involved.
 - **After recording:** the GTK4 video editor, preview overlay, and after-capture
@@ -423,8 +426,8 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 **Submodules:**
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`, `DisplayError`
 - `x11.rs` — `X11Backend` via `x11rb` + MIT-SHM
-- `wayland.rs` — `WaylandBackend` via `ashpd` ScreenCast portal + PipeWire
-- `screencopy.rs` — `wlr-screencopy` Wayland protocol implementation
+- `wayland.rs` — `WaylandBackend` with tiered capture (XDG Screenshot portal, `wlr-screencopy`, or ScreenCast + PipeWire)
+- `screencopy.rs` — `wlr-screencopy` native Wayland protocol implementation for Hyprland/Sway
 - `portal_permissions.rs` — Persistent XDG portal permission setup (`ensure_portal_permissions()`)
 
 **Key Types:**
@@ -435,11 +438,18 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 - `CursorData` — `pixels`, `width`, `height`, `x`, `y`, `xhot`, `yhot`
 - `DisplayError` — `UnsupportedBackend`, `InitializationError`, `CaptureError`, `InvalidArea`, `PortalError`, `IoError`
 
-**Platform Note:** `WaylandBackend` uses the XDG ScreenCast portal + PipeWire
-"share screen" path for Wayland capture. Ubuntu GNOME Wayland and Arch GNOME
-Wayland are confirmed; KDE Plasma, Hyprland, Sway, Fedora, openSUSE, and NixOS
-remain priority manual validation targets. `X11Backend` exists but is not
-thoroughly tested.
+**Platform Note:** `WaylandBackend` uses a tiered capture strategy:
+- **GNOME Wayland** — XDG Screenshot portal (fast one-shot image capture)
+  when `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL` is set.
+- **Hyprland / Sway** — `wlr-screencopy` native Wayland protocol.
+- **Other compositors** — XDG ScreenCast portal + PipeWire as fallback (implemented, not yet tested on KDE/Niri)
+
+Recording uses the XDG ScreenCast portal + PipeWire on most compositors. On wlroots
+compositors (Hyprland/Sway), `wf-recorder` is preferred when installed for
+native `wlr-screencopy` capture with lower overhead. Ubuntu GNOME
+Wayland, Arch GNOME Wayland, Hyprland, and Sway are confirmed; KDE Plasma,
+Fedora, openSUSE, Niri, and NixOS remain priority manual validation targets.
+`X11Backend` exists but is not thoroughly tested.
 
 ---
 

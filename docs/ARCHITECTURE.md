@@ -221,8 +221,11 @@ Shared utilities:
 Abstraction over display servers:
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`
 - `x11.rs` — X11 backend via `x11rb` + MIT-SHM
-- `wayland.rs` — Wayland backend via `ashpd` ScreenCast portal + PipeWire
-- `screencopy.rs` — `wlr-screencopy` protocol implementation
+- `wayland.rs` — Wayland backend with a tiered capture strategy:
+  - **GNOME:** XDG Screenshot portal via `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL` env var (fast one-shot image)
+  - **Hyprland/Sway:** `wlr-screencopy` native Wayland protocol
+  - **Fallback:** XDG ScreenCast portal + PipeWire for cross-compositor compatibility
+- `screencopy.rs` — `wlr-screencopy` protocol implementation for Hyprland/Sway
 - `portal_permissions.rs` — persistent XDG portal permission setup
 
 **Supported pixel formats:** RGB24, RGB32, RGBA32, BGR24, BGR32, BGRA32.
@@ -323,7 +326,10 @@ extension path** used on GNOME Wayland.
    fullscreen recording, it skips this step and captures the full monitor bounds.
 3. A `RecordingConfig` is built from user settings (format, fps, audio sources,
    webcam, countdown, cursor, etc.).
-4. `recording::start_recording(config)` constructs a GStreamer pipeline:
+4. `recording::start_recording(config)` starts the recording. On wlroots
+   compositors (Hyprland/Sway), `wf-recorder` is used when available for
+   native `wlr-screencopy` capture with lower overhead. On all other Wayland
+   compositors, a GStreamer pipeline is built:
    - **Video source:** PipeWire ScreenCast portal stream (Wayland) or X11 SHM
      capture (X11).
    - **Audio sources:** PulseAudio or PipeWire mic/speaker sources, mixed via
@@ -332,7 +338,7 @@ extension path** used on GNOME Wayland.
      gifenc/lzw for GIF. Codec auto-detection picks the best available encoder.
    - **Muxer:** webmmux, mp4mux, or avimux depending on format.
    - **Webcam PiP:** If enabled and a webcam device is found, a separate
-     v4l2src pipeline captures the camera feed and composits it over the
+     v4l2src pipeline captures the camera feed and composites it over the
      recording via a `cairooverlay` element.
 5. If countdown is enabled, `countdown_overlay.rs` shows a fullscreen 3-2-1
    countdown (with Escape to cancel). A `dim_overlay.rs` dim mask covers the
@@ -460,7 +466,8 @@ Configuration stored in `~/.config/apexshot/config.yml`:
 
 **Implemented but not thoroughly tested:**
 - X11 (backend code in `src/backend/x11.rs`)
-- Non-GNOME Wayland compositors through the XDG ScreenCast portal + PipeWire path
+- KDE Plasma, Niri, and other non-wlroots Wayland compositors through the
+  XDG ScreenCast portal + PipeWire path (implemented, not yet tested)
 - Fedora/RHEL, openSUSE, NixOS, Alpine, Gentoo, and Void distro-family metadata
 
 **Priority manual validation targets:**

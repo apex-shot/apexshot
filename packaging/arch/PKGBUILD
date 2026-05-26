@@ -64,6 +64,7 @@ optdepends=(
     'xdg-desktop-portal-kde: for KDE Plasma'
     'gnome-shell-extension-appindicator: system tray icon on GNOME'
     'xclip: clipboard support on X11'
+    'wf-recorder: native recording for wlroots compositors (Hyprland/Sway)'
     'grim: faster screenshot fallback on wlroots compositors'
     'slurp: region selection helper for wlroots compositors'
 )

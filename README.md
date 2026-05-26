@@ -61,8 +61,8 @@ Works best today on:
 | GNOME Shell 47-50 on Ubuntu 24.04 / 25.10 / Pop!_OS 22.04 / Arch (Wayland) | Public beta, tested daily |
 | GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
 | Pop!_OS 22.04 (Ubuntu-based, Wayland) | Supported via deb package |
-| Hyprland / Sway / wlroots-like compositors (Wayland) | Full Rust-native stack: GTK4 layer-shell overlay for area/crosshair selection, `wlr-screencopy` for screenshots, ScreenCast/PipeWire for recording. No Qt overlay or GNOME extension needed. Needs broader distro testing. |
-| KDE Plasma 6 / Niri / other Wayland desktops | Portal-backed capture/recording paths implemented, needs distro testing |
+| Hyprland / Sway / wlroots-like compositors (Wayland) | Full Rust-native stack: GTK4 layer-shell overlay for area/crosshair selection, `wlr-screencopy` for screenshots, `wf-recorder` for recording (falls back to ScreenCast + PipeWire if `wf-recorder` not installed). No Qt overlay or GNOME extension needed. |
+| KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet tested |
 | Fedora / openSUSE / NixOS / Alpine / Gentoo / Void (Wayland) | Distro-family support metadata implemented, packaging/testing pending |
 | X11 on any distro | Experimental |
 
@@ -117,7 +117,7 @@ support is improving over time.
 | **Core** | Rust 2021 Edition |
 | **Native Overlay** | C++17 / Qt5 (region selection, drawing) |
 | **GUI** | GTK4 + gtk4-layer-shell |
-| **Display Servers** | X11 (x11rb + MIT-SHM), GNOME Wayland screenshots via Screenshot portal + C++ overlay, wlroots/Hyprland/Sway screenshots via `wlr-screencopy` + Rust GTK layer-shell, recording via ScreenCast portal + PipeWire |
+| **Display Servers** | X11 (x11rb + MIT-SHM), GNOME Wayland screenshots via XDG Screenshot portal + C++ overlay, wlroots/Hyprland/Sway screenshots via `wlr-screencopy` + Rust GTK layer-shell, recording via `wf-recorder` on wlroots or ScreenCast portal + PipeWire elsewhere |
 | **Recording** | GStreamer (VP8, VP9, H.264, H.265, Theora, GIF) |
 | **Audio** | PipeWire (mic/speaker level monitoring) |
 | **OCR** | Tesseract + ocrs/rten |
@@ -413,9 +413,11 @@ overlay, and GStreamer handle everything.
    opens the Rust GTK4 overlay for area selection and recording configuration.
 3. The overlay provides the same controls as the GNOME path: mic/speaker toggles,
    webcam PiP, format picker (MP4/GIF), countdown, and video quality settings.
-4. Once confirmed, a GStreamer pipeline captures the screen via PipeWire
-   ScreenCast (Wayland) or X11 SHM (X11), encodes to the chosen format, and
-   writes the output file.
+4. Once confirmed, recording begins. On wlroots compositors (Hyprland/Sway),
+   `wf-recorder` is preferred when installed for native `wlr-screencopy`
+   capture. On other Wayland compositors, a GStreamer pipeline captures via
+   the XDG ScreenCast portal + PipeWire; on X11, via X11 SHM. The output
+   is encoded to the chosen format and written to disk.
 5. During recording, a floating GTK4 stop overlay shows pause/stop controls
    and elapsed time. Pause/resume/stop can also be triggered from the tray menu
    or global hotkeys.
