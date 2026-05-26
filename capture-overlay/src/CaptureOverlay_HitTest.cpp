@@ -140,19 +140,13 @@ void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
     m_micTimer->stop();
     m_recordingToolsHidden = false;
     m_settingsOpen = false;
-    m_clickOptionsOpen = false;
-    m_keystrokeOptionsOpen = false;
     m_cropMenuOpen = false;
     m_hoveredRecordTile = RecordPanelTile::None;
     m_hoveredCropMenuItem = -1;
     m_captureIntent = CaptureIntent::Area;
     m_recordType = RecordType::None;
-    m_showKeystrokePreview = false;
-    m_keyPreviews.clear();
-    m_clickPreviews.clear();
     m_countdownCancelRequested = false;
     m_hoveredCountdownCancel = false;
-    stopClickAnimTimer();
     stopWebcamCapture();
     m_micLevel = 0.0;
     m_speakerLevel = 0.0;
@@ -224,11 +218,10 @@ CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoi
     static const RecordPanelTile tileOrder[] = {
         RecordPanelTile::Controls, RecordPanelTile::Size, RecordPanelTile::Crop,
         RecordPanelTile::Mic, RecordPanelTile::Speaker, RecordPanelTile::Webcam,
-        RecordPanelTile::Click, RecordPanelTile::Keystrokes,
         RecordPanelTile::RecordVideo, RecordPanelTile::RecordGif
     };
 
-    for (int i = 0; i < (int)m_recTileRects.size() && i < 10; ++i) {
+    for (int i = 0; i < (int)m_recTileRects.size() && i < 8; ++i) {
         if (m_recTileRects[i].contains(pos)) {
             return tileOrder[i];
         }
@@ -250,14 +243,7 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
     if (m_recordingPanelOpen) {
         RecordPanelTile tile = hitTestRecordingPanel(pos);
         if (tile != RecordPanelTile::None) {
-            // Disabled features keep the default arrow cursor so the tile
-            // visibly communicates that it is non-interactive.
-            if (tile == RecordPanelTile::Keystrokes
-                && !apexshot::kKeystrokesFeatureAvailable) {
-                setCursor(Qt::ArrowCursor);
-            } else {
-                setCursor(Qt::PointingHandCursor);
-            }
+            setCursor(Qt::PointingHandCursor);
             return;
         }
         // Still allow resize handles when panel is open

@@ -31,15 +31,6 @@ class QTimer;
 
 #include "ScrollControlPanel.h"
 
-// ── Feature flags ────────────────────────────────────────────────────────
-// The "Show keystrokes" recording overlay is still under development. The
-// UI is kept in place so the layout/state machine doesn't churn, but the
-// tile and the matching settings row are rendered as disabled and clicks
-// are ignored. Flip this to `true` once the recorder side is implemented.
-namespace apexshot {
-inline constexpr bool kKeystrokesFeatureAvailable = false;
-}
-
 class CaptureOverlay : public QWidget
 {
     Q_OBJECT
@@ -94,23 +85,19 @@ public:
     bool recordFullscreen() const { return m_fullscreenMode; }
     bool recordMicEnabled() const { return m_recMic; }
     bool recordSpeakerEnabled() const { return m_recSpeaker; }
-    bool recordClicksEnabled() const { return m_recClicks; }
-    bool recordKeystrokesEnabled() const {
-        // Force the keystroke flag off whenever the feature is gated, so the
-        // recorder never tries to render the (still-broken) keystroke overlay
-        // even if the persisted user setting was `true`.
-        return apexshot::kKeystrokesFeatureAvailable && m_recKeystrokes;
-    }
+    bool recordClicksEnabled() const { return false; }
+    bool recordKeystrokesEnabled() const { return false; }
+    // Deprecated click/keystroke style accessors — kept for caller compatibility
+    double recordClickSize() const { return 0.3; }
+    int recordClickColor() const { return 0; }
+    int recordClickStyle() const { return 0; }
+    bool recordClickAnimate() const { return false; }
+    double recordKeySize() const { return 0.32; }
+    int recordKeyPosition() const { return 0; }
+    int recordKeyAppearance() const { return 0; }
+    bool recordKeyBlurBg() const { return false; }
+    int recordKeyFilter() const { return 0; }
     bool recordWebcamEnabled() const { return m_recWebcam; }
-    double recordClickSize() const { return m_clickSize; }
-    int recordClickColor() const { return m_clickColor; }
-    int recordClickStyle() const { return m_clickStyle; }
-    bool recordClickAnimate() const { return m_clickAnimate; }
-    double recordKeySize() const { return m_keySize; }
-    int recordKeyPosition() const { return m_keyPosition; }
-    int recordKeyAppearance() const { return m_keyAppearance; }
-    bool recordKeyBlurBg() const { return m_keyBlurBg; }
-    int recordKeyFilter() const { return m_keyFilter; }
     int recordWebcamSize() const { return static_cast<int>(m_webcamSize); }
     int recordWebcamShape() const { return static_cast<int>(m_webcamShape); }
     bool recordWebcamFlip() const { return m_webcamFlip; }
@@ -144,8 +131,18 @@ public:
     void setInitialHidpi(bool v) { m_hidpi = v; }
     void setInitialDoNotDisturb(bool v) { m_doNotDisturb = v; }
     void setInitialShowCursor(bool v) { m_showCursor = v; }
-    void setInitialRecClicks(bool v) { m_recClicks = v; }
-    void setInitialRecKeystrokes(bool v) { m_recKeystrokes = v; }
+    // Deprecated click/keystroke setters — kept for caller compatibility (no-ops)
+    void setInitialRecClicks(bool) {}
+    void setInitialRecKeystrokes(bool) {}
+    void setInitialClickSize(double) {}
+    void setInitialClickColor(int) {}
+    void setInitialClickStyle(int) {}
+    void setInitialClickAnimate(bool) {}
+    void setInitialKeySize(double) {}
+    void setInitialKeyPosition(int) {}
+    void setInitialKeyAppearance(int) {}
+    void setInitialKeyBlurBg(bool) {}
+    void setInitialKeyFilter(int) {}
     void setInitialRecWebcam(bool v)
     {
         m_recWebcam = v;
@@ -164,15 +161,6 @@ public:
             startWebcamCapture();
         }
     }
-    void setInitialClickSize(double v) { m_clickSize = v; }
-    void setInitialClickColor(int v) { m_clickColor = v; }
-    void setInitialClickStyle(int v) { m_clickStyle = v; }
-    void setInitialClickAnimate(bool v) { m_clickAnimate = v; }
-    void setInitialKeySize(double v) { m_keySize = v; }
-    void setInitialKeyPosition(int v) { m_keyPosition = v; }
-    void setInitialKeyAppearance(int v) { m_keyAppearance = v; }
-    void setInitialKeyBlurBg(bool v) { m_keyBlurBg = v; }
-    void setInitialKeyFilter(int v) { m_keyFilter = v; }
     void setInitialWebcamSize(int v) { m_webcamSize = static_cast<WebcamSize>(v); }
     void setInitialWebcamShape(int v) { m_webcamShape = static_cast<WebcamShape>(v); }
     void setInitialWebcamFlip(bool v) { m_webcamFlip = v; }
@@ -236,7 +224,7 @@ private:
     enum class RecordPanelTile {
         None,
         Controls, Size, Crop,
-        Mic, Speaker, Webcam, Click, Keystrokes,
+        Mic, Speaker, Webcam,
         RecordVideo, RecordGif
     };
 
@@ -261,13 +249,8 @@ private:
                             double selW, double selH);
     void drawSettingsMenu(QPainter& p,
                           double panelX, double startY);
-    void drawClickOptions(QPainter& p, const QRectF& parentRect);
-    void drawKeystrokeOptions(QPainter& p, const QRectF& parentRect);
     void drawDropdownPopup(QPainter& p, const QRectF& anchorRect,
                            const QStringList& options, int selectedIndex);
-    void startClickAnimTimer();
-    void stopClickAnimTimer();
-    void drawKeystrokePreview(QPainter& p, double sx, double sy, double selW, double selH);
     QRectF scrollPrimaryButtonRect() const;
     QSizeF webcamPreviewSize(double selW, double selH) const;
     QRectF webcamPreviewRect(double selX, double selY, double selW, double selH) const;
@@ -422,49 +405,16 @@ private:
     bool m_hidpi;              // "HiDPI Scaling — record at display scale resolution"
     bool m_doNotDisturb;       // ""Do Not Disturb" while recording"
     bool m_showCursor;         // "Show cursor"
-    bool m_recClicks;          // "Highlight clicks"
-    bool m_recKeystrokes;      // "Show keystrokes"
     int  m_recordAspectRatioIndex; // 0 = Freeform
     bool m_rememberSelection;  // "Remember last selection"
     bool m_dimScreen;          // "Dim screen while recording"
     bool m_showCountdown;      // "Show countdown"
 
-    // Click highlight options
-    bool   m_clickOptionsOpen;
-    double m_clickSize;        // 0.0 to 1.0
-    int    m_clickColor;       // index
-    int    m_clickStyle;       // index
-    bool   m_clickAnimate;
-    struct ClickPreview {
-        QPointF pos;
-        qint64  birthMs;       // QDateTime::currentMSecsSinceEpoch() at creation
-    };
-    QList<ClickPreview> m_clickPreviews;
-    bool   m_sliderDragging;   // true while dragging click size slider
-    QRectF m_sliderTrackRect;  // cached click slider track rect for drag calc
-    bool   m_keySliderDragging; // true while dragging keystroke size slider
-    QRectF m_keySliderTrackRect; // cached keystroke slider track rect
     bool   m_gifFpsDragging;       // true while dragging GIF FPS slider
     bool   m_gifQualityDragging;   // true while dragging GIF quality slider
     QRectF m_gifFpsTrackRect;      // cached GIF FPS slider track rect for drag calc
     QRectF m_gifQualityTrackRect;  // cached GIF quality slider track rect for drag calc
-    QTimer* m_clickAnimTimer;  // timer for preview animation ticks
-    double m_clickAnimPhase;   // 0.0 to 1.0 cycling phase for animation
 
-    // Keystroke options
-    bool   m_keystrokeOptionsOpen;
-    bool   m_showKeystrokePreview; // toggle for previewing position/style
-    double m_keySize;        // 0.0 to 1.0
-    int    m_keyPosition;    // index
-    int    m_keyAppearance;  // index
-    bool   m_keyBlurBg;
-    int    m_keyFilter;      // 0=All, 1=Command
-    struct KeyPreview {
-        QString text;
-        qint64  birthMs;
-    };
-    QList<KeyPreview> m_keyPreviews; // recent key presses for live preview
-    
     // Video settings
     int  m_videoFormat;      // index
     int  m_videoMaxRes;      // index
@@ -503,13 +453,9 @@ private:
     QRectF m_recordingTopClusterRect;
     QRectF m_recordingBottomBarRect;
     QRectF m_settingsPanelRect; // for hit testing settings menu
-    QRectF m_clickOptionsPanelRect;
-    QRectF m_keystrokeOptionsPanelRect;
     QRectF m_cropMenuPanelRect;
     QList<QRectF> m_recTileRects; // Matches RecordPanelTile order (skip None)
     QList<QRectF> m_settingsClickableRects; // checkbox & tab rects for hit testing
-    QList<QRectF> m_clickOptionsClickableRects;
-    QList<QRectF> m_keystrokeOptionsClickableRects;
     QList<QRectF> m_cropMenuItemRects;
 
     // Toolbar hover state

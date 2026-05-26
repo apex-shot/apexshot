@@ -47,53 +47,7 @@ static void showWebScrollCaptureInfo(QWidget* parent)
     messageBox.setStandardButtons(QMessageBox::Ok);
     messageBox.exec();
 }
-// ── Helper: convert key event to preview display text ──────────────────────────
 
-static QString keyEventToPreviewText(QKeyEvent* event)
-{
-    int key = event->key();
-    Qt::KeyboardModifiers mods = event->modifiers();
-
-    // Modifier keys alone — skip
-    if (key == Qt::Key_Shift || key == Qt::Key_Control || key == Qt::Key_Alt ||
-        key == Qt::Key_Meta || key == Qt::Key_CapsLock || key == Qt::Key_unknown) {
-        return {};
-    }
-
-    // Special keys
-    switch (key) {
-    case Qt::Key_Return:
-    case Qt::Key_Enter:  return "\u21A9";  // ↩
-    case Qt::Key_Backspace: return "\u232B"; // ⌫
-    case Qt::Key_Delete:    return "\u2326"; // ⌦
-    case Qt::Key_Tab:       return "\u21E5"; // ⇥
-    case Qt::Key_Space:     return " ";
-    case Qt::Key_Escape:    return "Esc";
-    case Qt::Key_Up:        return "\u2191"; // ↑
-    case Qt::Key_Down:      return "\u2193"; // ↓
-    case Qt::Key_Left:      return "\u2190"; // ←
-    case Qt::Key_Right:     return "\u2192"; // →
-    default: break;
-    }
-
-    // Build string with modifier prefixes
-    QString result;
-    if (mods & Qt::ControlModifier) result += "\u2318 ";  // ⌘
-    if (mods & Qt::AltModifier)     result += "\u2325 ";  // ⌥
-    if (mods & Qt::ShiftModifier)   result += "\u21E7 ";  // ⇧
-
-    // Key text
-    QString text = event->text();
-    if (!text.isEmpty() && text.at(0).isPrint()) {
-        result += text.toUpper();
-    } else {
-        // Named key
-        QString name = QKeySequence(key).toString();
-        if (!name.isEmpty()) result += name;
-    }
-
-    return result.trimmed();
-}
 
 void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 {
@@ -139,14 +93,8 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 
     auto closeRecordingMenus = [&]() {
         m_settingsOpen = false;
-        m_clickOptionsOpen = false;
-        m_keystrokeOptionsOpen = false;
         m_cropMenuOpen = false;
         m_hoveredCropMenuItem = -1;
-        stopClickAnimTimer();
-        m_clickPreviews.clear();
-        m_showKeystrokePreview = false;
-        m_keyPreviews.clear();
         m_dropdownOpen = -1;
         m_dropdownAnchor = QRectF();
         m_dropdownOptions.clear();
@@ -333,106 +281,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         update();
     }
 
-    // Keystroke Options sub-panel clicks
-    if (m_keystrokeOptionsOpen && m_keystrokeOptionsPanelRect.contains(pos)) {
-        for (int i = 0; i < m_keystrokeOptionsClickableRects.size(); ++i) {
-            if (m_keystrokeOptionsClickableRects[i].contains(pos)) {
-                switch (i) {
-                case 0: { // Slider — start drag
-                    double relX = pos.x() - m_keystrokeOptionsClickableRects[i].x();
-                    m_keySize = std::max(0.0, std::min(1.0, relX / m_keystrokeOptionsClickableRects[i].width()));
-                    m_keySliderDragging = true;
-                    break;
-                }
-                case 1: // Position dropdown
-                    m_dropdownOpen = i;
-                    m_dropdownAnchor = m_keystrokeOptionsClickableRects[i];
-                    m_dropdownOptions = QStringList() << "Bottom-Center" << "Bottom-Left" << "Bottom-Right" 
-                                                    << "Top-Center" << "Top-Left" << "Top-Right";
-                    m_dropdownValuePtr = &m_keyPosition;
-                    break;
-                case 2: // Appearance dropdown
-                    m_dropdownOpen = i;
-                    m_dropdownAnchor = m_keystrokeOptionsClickableRects[i];
-                    m_dropdownOptions = QStringList() << "Dark" << "Light";
-                    m_dropdownValuePtr = &m_keyAppearance;
-                    break;
-                case 3: m_keyBlurBg = !m_keyBlurBg; break;
-                case 4: m_keyFilter = 0; break;
-                case 5: m_keyFilter = 1; break;
-                case 6: m_showKeystrokePreview = !m_showKeystrokePreview; break;
-                case 7: 
-                    m_keystrokeOptionsOpen = false; 
-                    m_showKeystrokePreview = false;
-                    m_keyPreviews.clear();
-                    break; // OK
-                }
-                update();
-                return;
-            }
-        }
-        return;
-    }
-
-    // Click Options sub-panel clicks
-    if (m_clickOptionsOpen && m_clickOptionsPanelRect.contains(pos)) {
-        for (int i = 0; i < m_clickOptionsClickableRects.size(); ++i) {
-            if (m_clickOptionsClickableRects[i].contains(pos)) {
-                switch (i) {
-                case 0: { // Slider — start drag
-                    double relX = pos.x() - m_clickOptionsClickableRects[i].x();
-                    m_clickSize = std::max(0.0, std::min(1.0, relX / m_clickOptionsClickableRects[i].width()));
-                    m_sliderDragging = true;
-                    break;
-                }
-                case 1: // Color dropdown
-                    m_dropdownOpen = i;
-                    m_dropdownAnchor = m_clickOptionsClickableRects[i];
-                    m_dropdownOptions = QStringList()
-                        << "Gray" << "Indigo" << "Red" << "Blue" << "Green"
-                        << "Yellow" << "Orange" << "Purple" << "White";
-                    m_dropdownColors = QList<QColor>()
-                        << QColor(180, 180, 180) << QColor(122, 100, 255) << QColor(255, 60, 60)
-                        << QColor(60, 120, 255) << QColor(60, 200, 80) << QColor(255, 210, 50)
-                        << QColor(255, 150, 30) << QColor(180, 60, 220) << QColor(255, 255, 255);
-                    m_dropdownValuePtr = &m_clickColor;
-                    break;
-                case 2: // Style dropdown
-                    m_dropdownOpen = i;
-                    m_dropdownAnchor = m_clickOptionsClickableRects[i];
-                    m_dropdownOptions = QStringList() << "Outline" << "Filled";
-                    m_dropdownValuePtr = &m_clickStyle;
-                    break;
-                case 3: { // Animate toggle
-                    m_clickAnimate = !m_clickAnimate;
-                    if (m_clickAnimate && !m_clickPreviews.isEmpty()) {
-                        startClickAnimTimer();
-                    } else {
-                        stopClickAnimTimer();
-                    }
-                    break;
-                }
-                case 4: { // Preview — add click point
-                    qint64 now = QDateTime::currentMSecsSinceEpoch();
-                    m_clickPreviews.append({pos, now});
-                    if (m_clickPreviews.size() > 10) m_clickPreviews.removeFirst();
-                    startClickAnimTimer();
-                    break;
-                }
-                case 5: { // OK — close panel
-                    m_clickOptionsOpen = false;
-                    stopClickAnimTimer();
-                    m_clickPreviews.clear();
-                    break;
-                }
-                }
-                update();
-                return;
-            }
-        }
-        return;
-    }
-
     // Settings menu clicks
     if (m_settingsOpen) {
         if (m_settingsPanelRect.contains(pos)) {
@@ -454,25 +302,9 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                         case 5: m_hidpi = !m_hidpi; break;
                         case 6: m_doNotDisturb = !m_doNotDisturb; break;
                         case 7: m_showCursor = !m_showCursor; break;
-                        case 8:
-                            m_recClicks = !m_recClicks;
-                            if (!m_recClicks) {
-                                m_clickOptionsOpen = false;
-                                stopClickAnimTimer();
-                                m_clickPreviews.clear();
-                            }
-                            break;
-                        case 9:
-                            m_recKeystrokes = !m_recKeystrokes;
-                            if (!m_recKeystrokes) {
-                                m_keystrokeOptionsOpen = false;
-                                m_showKeystrokePreview = false;
-                                m_keyPreviews.clear();
-                            }
-                            break;
-                        case 10: m_rememberSelection = !m_rememberSelection; break;
-                        case 11: m_dimScreen = !m_dimScreen; break;
-                        case 12: m_showCountdown = !m_showCountdown; break;
+                        case 8: m_rememberSelection = !m_rememberSelection; break;
+                        case 9: m_dimScreen = !m_dimScreen; break;
+                        case 10: m_showCountdown = !m_showCountdown; break;
                         }
                         update();
                         return;
@@ -528,10 +360,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             RecordPanelTile tile = hitTestRecordingPanel(pos);
             if (tile != RecordPanelTile::Controls) {
                 m_settingsOpen = false;
-                m_clickOptionsOpen = false;
-                stopClickAnimTimer();
-                m_clickPreviews.clear();
-                update();
+                        update();
                 // continue to handle the click normally
             }
         }
@@ -576,58 +405,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             m_recSpeaker = !m_recSpeaker;
             update();
             return;
-        case RecordPanelTile::Click:
-            if (m_recClicks) {
-                closeRecordingMenus();
-                m_recClicks = false;
-                stopClickAnimTimer();
-                m_clickPreviews.clear();
-            } else {
-                closeRecordingMenus();
-                m_recClicks = true;
-                m_clickOptionsOpen = true;
-            }
-            update();
-            return;
-        case RecordPanelTile::Keystrokes:
-            if (!apexshot::kKeystrokesFeatureAvailable) {
-                // Feature is gated off — swallow the click so the rest of
-                // the overlay keeps behaving normally but no state changes.
-                return;
-            }
-            if (m_recKeystrokes) {
-                closeRecordingMenus();
-                m_recKeystrokes = false;
-                m_showKeystrokePreview = false;
-                m_keyPreviews.clear();
-            } else {
-                closeRecordingMenus();
-                m_recKeystrokes = true;
-                m_keystrokeOptionsOpen = true;
-            }
-            update();
-            return;
-        case RecordPanelTile::Webcam:
-            m_recWebcam = !m_recWebcam;
-            if (!m_recWebcam) {
-                stopWebcamCapture();
-            } else if (m_recordingPanelOpen && m_webcamDevice >= 0) {
-                startWebcamCapture();
-            }
-            update();
-            return;
-        case RecordPanelTile::RecordVideo:
-            m_recordType = RecordType::Video;
-            m_captureIntent = CaptureIntent::Record;
-            confirmRecordingSelection();
-            return;
-        case RecordPanelTile::RecordGif:
-            m_recordType = RecordType::Gif;
-            m_captureIntent = CaptureIntent::Record;
-            confirmRecordingSelection();
-            return;
-        default:
-            break;
         }
         if (tile == RecordPanelTile::None && m_recWebcam && m_hasSelection) {
             const QRect sel = m_selection.normalized();
@@ -918,19 +695,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         // Cursor is set at the end of this function.
     }
 
-    // ── Slider Drag ─────────────────────────────────────────────────────────
-    if (m_sliderDragging) {
-        double relX = pos.x() - m_sliderTrackRect.x();
-        m_clickSize = std::max(0.0, std::min(1.0, relX / m_sliderTrackRect.width()));
-        update();
-        return;
-    }
-    if (m_keySliderDragging) {
-        double relX = pos.x() - m_keySliderTrackRect.x();
-        m_keySize = std::max(0.0, std::min(1.0, relX / m_keySliderTrackRect.width()));
-        update();
-        return;
-    }
+    // ── GIF Slider Drag ─────────────────────────────────────────────────────
     if (m_gifFpsDragging) {
         double relX = pos.x() - m_gifFpsTrackRect.x();
         m_gifFps = 5 + (int)(55.0 * std::max(0.0, std::min(1.0, relX / m_gifFpsTrackRect.width())));
@@ -1029,32 +794,6 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         if (m_cropMenuOpen && m_hoveredCropMenuItem != -1) {
             m_hoveredCropMenuItem = -1;
             update();
-        }
-
-        // Click Options sub-panel hover
-        if (m_clickOptionsOpen && m_clickOptionsPanelRect.contains(pos)) {
-            int newHover = -1;
-            for (int i = static_cast<int>(m_clickOptionsClickableRects.size()) - 1; i >= 0; --i) {
-                if (m_clickOptionsClickableRects[i].contains(pos)) {
-                    newHover = i;
-                    break;
-                }
-            }
-            setCursor(Qt::PointingHandCursor);
-            return;
-        }
-
-        // Keystroke Options sub-panel hover
-        if (m_keystrokeOptionsOpen && m_keystrokeOptionsPanelRect.contains(pos)) {
-            int newHover = -1;
-            for (int i = static_cast<int>(m_keystrokeOptionsClickableRects.size()) - 1; i >= 0; --i) {
-                if (m_keystrokeOptionsClickableRects[i].contains(pos)) {
-                    newHover = i;
-                    break;
-                }
-            }
-            setCursor(Qt::PointingHandCursor);
-            return;
         }
 
         // Settings menu hover
@@ -1346,15 +1085,6 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
 
-    // Stop slider drag
-    if (m_sliderDragging) {
-        m_sliderDragging = false;
-        update();
-    }
-    if (m_keySliderDragging) {
-        m_keySliderDragging = false;
-        update();
-    }
     if (m_gifFpsDragging) {
         m_gifFpsDragging = false;
     }
@@ -1549,28 +1279,7 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
         // Let arrow keys through for resize/move
     }
 
-    // Capture key presses for keystroke preview — block all actions except ESC
-    if (m_showKeystrokePreview) {
-        if (event->key() == Qt::Key_Escape) {
-            // Allow ESC to still work
-            m_showKeystrokePreview = false;
-            m_keyPreviews.clear();
-            update();
-            return;
-        }
-        QString keyText = keyEventToPreviewText(event);
-        if (!keyText.isEmpty()) {
-            qint64 now = QDateTime::currentMSecsSinceEpoch();
-            m_keyPreviews.append({keyText, now});
-            if (m_keyPreviews.size() > 8) m_keyPreviews.removeFirst();
-            startClickAnimTimer();
-            update();
-        }
-        return; // consume the key — don't trigger any other actions
-    }
-
-    if (m_captureIntent == CaptureIntent::Scroll) {
-        switch (event->key()) {
+    switch (event->key()) {
         case Qt::Key_Escape:
             cancelSelection();
             return;
@@ -1593,7 +1302,6 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
         if (m_scrollStage == ScrollStage::Capturing) {
             return;
         }
-    }
 
     bool shift = event->modifiers() & Qt::ShiftModifier;
     switch (event->key()) {

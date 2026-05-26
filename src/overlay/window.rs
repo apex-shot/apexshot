@@ -1,6 +1,6 @@
 use super::api::{OverlaySelection, SelectionError, SelectionResult};
 use super::background::BackgroundFrame;
-use super::drawing::{draw_overlay, CLICK_COLORS_LEN};
+use super::drawing::draw_overlay;
 use super::geometry::{
     clamp_point_to_bounds, current_selection_rect, cursor_name_for_handle, detect_resize_handle,
     is_inside_selection, selection_area_from_state, set_selection_rect, update_selection_for_drag,
@@ -18,7 +18,6 @@ use super::layout::{
     MIN_SELECTION_WIDTH,
 };
 use super::recording::hit_testing::{
-    click_dropdown_hit_item, click_options_hit_item, click_options_menu_contains,
     recording_crop_menu_contains, recording_crop_menu_hit_item, recording_tile_at,
     settings_menu_contains, settings_menu_hit_item, webcam_options_hit_item,
     webcam_options_menu_contains,
@@ -905,31 +904,6 @@ pub(crate) fn setup_window(
                     return;
                 }
 
-                // Click slider dragging
-                if st.recording.click_slider_dragging && st.recording.click_options_open {
-                    let rect = current_selection_rect(&st);
-                    let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
-                        .clamp(10.0, screen_width as f64 - 450.0);
-                    let value_x = menu_x + 130.0;
-                    let slider_x = value_x;
-                    let slider_w = 280.0;
-                    let click_x = x.clamp(slider_x, slider_x + slider_w);
-                    st.recording.click_size = ((click_x - slider_x) / slider_w).clamp(0.0, 1.0);
-                    st.recording.hovered_click_item = -1;
-                    st.recording.hovered_settings_item = -1;
-                    st.hovered_capture_crop_menu_item = -1;
-                    st.recording.hovered_crop_menu_item = -1;
-                    st.hover_tool_index = None;
-                    st.hover_size_panel = false;
-                    st.hover_crop_panel = false;
-                    st.recording.hover_record_tile = None;
-                    drop(st);
-                    if let Some(da) = drawing_area_weak_motion.upgrade() {
-                        da.queue_draw();
-                    }
-                    return;
-                }
-
                 // Volume slider dragging
                 if st.recording.volume_slider_dragging
                     && (st.recording.mic_volume_popup_open
@@ -1039,30 +1013,6 @@ pub(crate) fn setup_window(
                         st.recording.hover_record_tile = None;
                         ("pointer".to_string(), changed, true)
                     }
-                } else if st.recording.click_options_open {
-                    let item = click_options_hit_item(
-                        rect.left,
-                        rect.top,
-                        rect.width(),
-                        rect.height(),
-                        screen_width as f64,
-                        screen_height as f64,
-                        x,
-                        y,
-                    );
-                    let next = item.unwrap_or(-1);
-                    let changed = next != st.recording.hovered_click_item;
-                    if changed {
-                        st.recording.hovered_click_item = next;
-                    }
-                    st.recording.hovered_settings_item = -1;
-                    st.hovered_capture_crop_menu_item = -1;
-                    st.recording.hovered_crop_menu_item = -1;
-                    st.hover_tool_index = None;
-                    st.hover_size_panel = false;
-                    st.hover_crop_panel = false;
-                    st.recording.hover_record_tile = None;
-                    ("pointer".to_string(), changed, true)
                 } else if st.recording.webcam_options_open {
                     let item = webcam_options_hit_item(
                         rect.left,
@@ -1536,17 +1486,10 @@ pub(crate) fn setup_window(
                         2 => st.recording.hidpi = !st.recording.hidpi,
                         3 => st.recording.do_not_disturb = !st.recording.do_not_disturb,
                         4 => st.recording.show_cursor = !st.recording.show_cursor,
-                        5 => st.recording.rec_clicks = !st.recording.rec_clicks,
-                        6 => st.recording.rec_keystrokes = !st.recording.rec_keystrokes,
                         7 => st.recording.remember_selection = !st.recording.remember_selection,
                         8 => st.recording.dim_screen = !st.recording.dim_screen,
                         9 => st.recording.show_countdown = !st.recording.show_countdown,
                         _ => {}
-                    }
-                    if !st.recording.rec_clicks {
-                        st.recording.click_options_open = false;
-                        st.recording.click_dropdown_open = None;
-                        st.recording.click_previews.clear();
                     }
                     st.recording.settings_dropdown_open = None;
                 } else if matches!(st.recording.settings_tab, SettingsTab::Video) {
@@ -1608,143 +1551,6 @@ pub(crate) fn setup_window(
             st.recording.settings_menu_open = false;
             st.recording.hovered_settings_item = -1;
             st.recording.settings_dropdown_open = None;
-            drop(st);
-            if let Some(da) = drawing_area_weak_click.upgrade() {
-                da.queue_draw();
-            }
-            return;
-        }
-
-        // ── Click options menu click handling ──
-        if st.recording.click_options_open {
-            if let Some(dropdown) = st.recording.click_dropdown_open {
-                if let Some(item) = click_dropdown_hit_item(
-                    rect.left,
-                    rect.top,
-                    rect.width(),
-                    rect.height(),
-                    screen_width as f64,
-                    screen_height as f64,
-                    x,
-                    y,
-                    dropdown,
-                ) {
-                    match dropdown {
-                        1 => st.recording.click_color = item.min(CLICK_COLORS_LEN - 1),
-                        2 => st.recording.click_style = item.min(1),
-                        _ => {}
-                    }
-                    st.recording.click_dropdown_open = None;
-                    st.recording.hovered_click_item = -1;
-                    drop(st);
-                    if let Some(da) = drawing_area_weak_click.upgrade() {
-                        da.queue_draw();
-                    }
-                    return;
-                }
-                st.recording.click_dropdown_open = None;
-                drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() {
-                    da.queue_draw();
-                }
-                return;
-            }
-
-            if let Some(item) = click_options_hit_item(
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-                screen_width as f64,
-                screen_height as f64,
-                x,
-                y,
-            ) {
-                match item {
-                    0 => {
-                        // Size slider — start drag
-                        let menu_x = (rect.left + (rect.width() - 440.0) / 2.0)
-                            .clamp(10.0, screen_width as f64 - 450.0);
-                        let value_x = menu_x + 130.0;
-                        let slider_x = value_x;
-                        let slider_w = 280.0;
-                        let click_x = x.clamp(slider_x, slider_x + slider_w);
-                        st.recording.click_size = ((click_x - slider_x) / slider_w).clamp(0.0, 1.0);
-                        st.recording.click_slider_dragging = true;
-                    }
-                    1 => {
-                        st.recording.click_dropdown_open = Some(1);
-                    }
-                    2 => {
-                        st.recording.click_dropdown_open = Some(2);
-                    }
-                    3 => {
-                        // Animation toggle
-                        st.recording.click_animate = !st.recording.click_animate;
-                    }
-                    4 => {
-                        let was_empty = st.recording.click_previews.is_empty();
-                        st.recording
-                            .click_previews
-                            .push((x, y, std::time::Instant::now()));
-                        if st.recording.click_previews.len() > 10 {
-                            st.recording.click_previews.remove(0);
-                        }
-                        if was_empty {
-                            let state_timer = state_click.clone();
-                            let drawing_area_timer = drawing_area_weak_click.clone();
-                            glib::timeout_add_local(
-                                std::time::Duration::from_millis(16),
-                                move || {
-                                    let mut st = state_timer.lock().unwrap();
-                                    let click_lifetime = std::time::Duration::from_millis(1500);
-                                    st.recording.click_previews.retain(|&(_, _, birth_time)| {
-                                        birth_time.elapsed() < click_lifetime
-                                    });
-                                    if let Some(da) = drawing_area_timer.upgrade() {
-                                        da.queue_draw();
-                                    }
-                                    if st.recording.click_previews.is_empty() {
-                                        glib::ControlFlow::Break
-                                    } else {
-                                        glib::ControlFlow::Continue
-                                    }
-                                },
-                            );
-                        }
-                    }
-                    _ => {
-                        // Done button — close
-                        st.recording.click_options_open = false;
-                        st.recording.hovered_click_item = -1;
-                        st.recording.click_dropdown_open = None;
-                        st.recording.click_previews.clear();
-                    }
-                }
-                st.recording.hovered_click_item = -1;
-                drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() {
-                    da.queue_draw();
-                }
-                return;
-            }
-            if click_options_menu_contains(
-                rect.left,
-                rect.top,
-                rect.width(),
-                screen_width as f64,
-                screen_height as f64,
-                x,
-                y,
-            ) {
-                // Click was inside click options (empty area) — ignore it
-                return;
-            }
-            // Click outside click options closes it
-            st.recording.click_options_open = false;
-            st.recording.hovered_click_item = -1;
-            st.recording.click_slider_dragging = false;
-            st.recording.click_dropdown_open = None;
             drop(st);
             if let Some(da) = drawing_area_weak_click.upgrade() {
                 da.queue_draw();
@@ -2138,8 +1944,6 @@ pub(crate) fn setup_window(
                                 st.recording.hovered_crop_menu_item = -1;
                                 st.recording.settings_menu_open = false;
                                 st.recording.settings_dropdown_open = None;
-                                st.recording.click_options_open = false;
-                                st.recording.click_dropdown_open = None;
                                 st.recording.webcam_options_open = false;
                                 st.recording.mic_volume_popup_open = false;
                                 st.recording.speaker_volume_popup_open = false;
@@ -2150,8 +1954,6 @@ pub(crate) fn setup_window(
                                 st.recording.hovered_settings_item = -1;
                                 st.recording.settings_dropdown_open = None;
                                 st.recording.crop_menu_open = false;
-                                st.recording.click_options_open = false;
-                                st.recording.click_dropdown_open = None;
                                 st.recording.webcam_options_open = false;
                                 st.recording.mic_volume_popup_open = false;
                                 st.recording.speaker_volume_popup_open = false;
@@ -2177,8 +1979,6 @@ pub(crate) fn setup_window(
                                 st.recording.crop_menu_open = false;
                                 st.recording.settings_menu_open = false;
                                 st.recording.settings_dropdown_open = None;
-                                st.recording.click_options_open = false;
-                                st.recording.click_dropdown_open = None;
                                 st.recording.webcam_options_open = false;
                                 st.recording.mic_volume_popup_open = false;
                                 st.recording.speaker_volume_popup_open = false;
@@ -2266,8 +2066,6 @@ pub(crate) fn setup_window(
                         st.recording.hovered_webcam_item = -1;
                         st.recording.settings_menu_open = false;
                         st.recording.crop_menu_open = false;
-                        st.recording.click_options_open = false;
-                        st.recording.click_dropdown_open = None;
                         st.recording.mic_volume_popup_open = false;
                         st.recording.speaker_volume_popup_open = false;
                         st.recording.hover_record_tile = None;
@@ -2279,8 +2077,6 @@ pub(crate) fn setup_window(
                         st.recording.volume_slider_dragging = false;
                         st.recording.settings_menu_open = false;
                         st.recording.crop_menu_open = false;
-                        st.recording.click_options_open = false;
-                        st.recording.click_dropdown_open = None;
                         st.recording.webcam_options_open = false;
                         st.recording.hover_record_tile = None;
                         st.hover_tool_index = None;
@@ -2292,8 +2088,6 @@ pub(crate) fn setup_window(
                         st.recording.volume_slider_dragging = false;
                         st.recording.settings_menu_open = false;
                         st.recording.crop_menu_open = false;
-                        st.recording.click_options_open = false;
-                        st.recording.click_dropdown_open = None;
                         st.recording.webcam_options_open = false;
                         st.recording.hover_record_tile = None;
                         st.hover_tool_index = None;
@@ -2423,7 +2217,6 @@ pub(crate) fn setup_window(
             if st.capture_crop_menu_open
                 || st.recording.crop_menu_open
                 || st.recording.settings_menu_open
-                || st.recording.click_options_open
                 || st.recording.webcam_options_open
                 || st.recording.mic_volume_popup_open
                 || st.recording.speaker_volume_popup_open
@@ -2533,10 +2326,7 @@ pub(crate) fn setup_window(
                 }
                 return;
             }
-            if st.recording.gif_slider_dragging.is_some()
-                || st.recording.click_slider_dragging
-                || st.recording.volume_slider_dragging
-            {
+            if st.recording.gif_slider_dragging.is_some() || st.recording.volume_slider_dragging {
                 drop(st);
                 return;
             }
@@ -2587,12 +2377,8 @@ pub(crate) fn setup_window(
                 }
                 return;
             }
-            if st.recording.gif_slider_dragging.is_some()
-                || st.recording.click_slider_dragging
-                || st.recording.volume_slider_dragging
-            {
+            if st.recording.gif_slider_dragging.is_some() || st.recording.volume_slider_dragging {
                 st.recording.gif_slider_dragging = None;
-                st.recording.click_slider_dragging = false;
                 st.recording.volume_slider_dragging = false;
                 drop(st);
                 if let Some(drawing_area) = drawing_area_weak.upgrade() {

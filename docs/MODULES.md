@@ -104,7 +104,6 @@ This document provides detailed information about every module and submodule in 
 - `stop_overlay.rs` — GTK4 floating control bar (pause, stop, timer) during recording
 - `countdown_overlay.rs` — Fullscreen 3-2-1 countdown with Escape cancellation
 - `dim_overlay.rs` — Fullscreen dim mask shown during countdown
-- `runtime_keystrokes.rs` — EI portal keystroke capture and forwarding for runtime overlays
 - `dnd.rs` — Do Not Disturb inhibition during recording
 
 **Key Types (`mod.rs`):**
@@ -143,10 +142,10 @@ This document provides detailed information about every module and submodule in 
 - `run_dim_overlay(close_flag)` — Shows fullscreen dim; closes when `AtomicBool` is set
 
 **Key Types (`runtime_keystrokes.rs`):**
-- `RuntimeKeystrokeForwarder` — Handle to stop the keystroke forwarding thread
+*(Removed — click/keystroke runtime overlays have been removed.)*
 
 **Key Functions (`runtime_keystrokes.rs`):**
-- `spawn_runtime_keystroke_forwarder(session_id, filter_mode)` — Spawns EI portal keystroke listener
+*(Removed.)*
 
 #### Recording Editor (`recording/editor/`)
 
@@ -518,10 +517,8 @@ thoroughly tested.
 - `extension.js` — Main extension logic, D-Bus service registration, cleanup
 - `controls-ui.js` — Recording controls UI shell elements (pause/stop buttons)
 - `controls-ui-layout.js` — Positioning logic for controls UI
-- `runtime-overlays.js` — Click and keystroke overlay rendering on shell stage
+- `runtime-overlays.js` — Webcam/mic/speaker runtime overlay rendering on shell stage
 - `runtime-overlays-visibility.js` — Show/hide logic for runtime overlays
-- `click-display.js` — Click animation actor
-- `keystroke-display.js` — Keystroke text rendering
 - `mask-ui.js` — Recording mask shell actor (dimmed region around capture area)
 - `session-state.js` — Session tracking, window list management
 - `window-list.js` — Window enumeration for window capture
@@ -583,7 +580,6 @@ Configuration for a recording session.
 - `mic_enabled, speaker_enabled: bool`
 - `show_webcam: bool`
 - `webcam_size, webcam_position: String`
-- `show_clicks, show_keystrokes: bool`
 - `gif_quality, gif_optimize, gif_max_width: u32`
 - `countdown_seconds: u32`
 

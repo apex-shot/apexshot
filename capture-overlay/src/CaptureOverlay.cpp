@@ -379,30 +379,12 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_hidpi(true)
     , m_doNotDisturb(true)
     , m_showCursor(true)
-    , m_recClicks(false)
-    , m_recKeystrokes(false)
     , m_recordAspectRatioIndex(0)
     , m_rememberSelection(false)
     , m_dimScreen(true)
     , m_showCountdown(true)
-    , m_clickOptionsOpen(false)
-    , m_clickSize(0.3)
-    , m_clickColor(0)
-    , m_clickStyle(0)
-    , m_clickAnimate(true)
-    , m_sliderDragging(false)
-    , m_keySliderDragging(false)
     , m_gifFpsDragging(false)
     , m_gifQualityDragging(false)
-    , m_clickAnimTimer(nullptr)
-    , m_clickAnimPhase(0.0)
-    , m_keystrokeOptionsOpen(false)
-    , m_showKeystrokePreview(false)
-    , m_keySize(0.32) // Matches screenshot better as default
-    , m_keyPosition(0) // Bottom-Center
-    , m_keyAppearance(0) // Dark
-    , m_keyBlurBg(true)
-    , m_keyFilter(0) // Show all keys
     , m_videoFormat(0) // MP4
     , m_videoMaxRes(0) // Original
     , m_videoFps(2) // 50 (index 2: 24, 30, 50, 60)
