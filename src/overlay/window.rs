@@ -71,7 +71,7 @@ fn recording_request_from_state(
         display_rec_time: st.recording.display_rec_time,
         hidpi: st.recording.hidpi,
         notifications: st.recording.do_not_disturb,
-        cursor: st.recording.show_cursor,
+        cursor: true,
         remember_selection: st.recording.remember_selection,
         dim_screen: st.recording.dim_screen,
         countdown: st.recording.show_countdown,
@@ -1485,10 +1485,9 @@ pub(crate) fn setup_window(
                         1 => st.recording.display_rec_time = !st.recording.display_rec_time,
                         2 => st.recording.hidpi = !st.recording.hidpi,
                         3 => st.recording.do_not_disturb = !st.recording.do_not_disturb,
-                        4 => st.recording.show_cursor = !st.recording.show_cursor,
-                        7 => st.recording.remember_selection = !st.recording.remember_selection,
-                        8 => st.recording.dim_screen = !st.recording.dim_screen,
-                        9 => st.recording.show_countdown = !st.recording.show_countdown,
+                        4 => st.recording.remember_selection = !st.recording.remember_selection,
+                        5 => st.recording.dim_screen = !st.recording.dim_screen,
+                        6 => st.recording.show_countdown = !st.recording.show_countdown,
                         _ => {}
                     }
                     st.recording.settings_dropdown_open = None;

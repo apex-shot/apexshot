@@ -205,22 +205,6 @@ pub(crate) fn settings_menu_hit_item(
                 cy += 32.0;
             }
             cy += 10.0;
-            for _ in 0..2 {
-                if check_area_at(cy) {
-                    return Some(idx);
-                }
-                idx += 1;
-                cy += 32.0;
-            }
-            cy += 10.0;
-            {
-                if check_area_at(cy) {
-                    return Some(idx);
-                }
-                idx += 1;
-                cy += 32.0;
-            }
-            cy += 10.0;
             for _ in 0..3 {
                 if check_area_at(cy) {
                     return Some(idx);

@@ -525,7 +525,6 @@ pub(crate) fn draw_recording_panel(
     display_rec_time: bool,
     hidpi: bool,
     do_not_disturb: bool,
-    show_cursor: bool,
     rec_webcam: bool,
     remember_selection: bool,
     dim_screen: bool,
@@ -898,7 +897,6 @@ pub(crate) fn draw_recording_panel(
             display_rec_time,
             hidpi,
             do_not_disturb,
-            show_cursor,
             rec_webcam,
             remember_selection,
             dim_screen,
@@ -1195,7 +1193,6 @@ pub(crate) fn draw_settings_menu(
     display_rec_time: bool,
     hidpi: bool,
     do_not_disturb: bool,
-    show_cursor: bool,
     rec_webcam: bool,
     remember_selection: bool,
     dim_screen: bool,
@@ -1347,7 +1344,6 @@ pub(crate) fn draw_settings_menu(
             display_rec_time,
             hidpi,
             do_not_disturb,
-            show_cursor,
             rec_webcam,
             remember_selection,
             dim_screen,
@@ -1415,7 +1411,6 @@ pub(crate) fn draw_settings_general_tab(
     display_rec_time: bool,
     hidpi: bool,
     do_not_disturb: bool,
-    show_cursor: bool,
     _rec_webcam: bool,
     remember_selection: bool,
     dim_screen: bool,
@@ -1476,7 +1471,6 @@ pub(crate) fn draw_settings_general_tab(
     s!("Menu bar", "Display time in top bar", display_rec_time);
     s!("HiDPI", "Record at display scale res", hidpi);
     s!("Notifications", "DND while recording", do_not_disturb);
-    s!("Cursor", "Show cursor", show_cursor, 10.0);
     s!(
         "Recording area",
         "Remember last selection",
@@ -2726,7 +2720,6 @@ pub(crate) fn draw_overlay(
                 st.recording.display_rec_time,
                 st.recording.hidpi,
                 st.recording.do_not_disturb,
-                st.recording.show_cursor,
                 st.recording.rec_webcam,
                 st.recording.remember_selection,
                 st.recording.dim_screen,
