@@ -301,10 +301,9 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                         case 4: m_displayRecTime = !m_displayRecTime; break;
                         case 5: m_hidpi = !m_hidpi; break;
                         case 6: m_doNotDisturb = !m_doNotDisturb; break;
-                        case 7: m_showCursor = !m_showCursor; break;
-                        case 8: m_rememberSelection = !m_rememberSelection; break;
-                        case 9: m_dimScreen = !m_dimScreen; break;
-                        case 10: m_showCountdown = !m_showCountdown; break;
+                        case 7: m_rememberSelection = !m_rememberSelection; break;
+                        case 8: m_dimScreen = !m_dimScreen; break;
+                        case 9: m_showCountdown = !m_showCountdown; break;
                         }
                         update();
                         return;
@@ -405,6 +404,36 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             m_recSpeaker = !m_recSpeaker;
             update();
             return;
+        case RecordPanelTile::Webcam:
+            m_recWebcam = !m_recWebcam;
+            if (m_recWebcam && m_webcamDevice < 0 && !m_webcamDeviceIndexes.isEmpty()) {
+                m_webcamDevice = m_webcamDeviceIndexes.first();
+                startWebcamCapture();
+            } else if (m_recWebcam && m_webcamDevice >= 0) {
+                startWebcamCapture();
+            } else {
+                stopWebcamCapture();
+            }
+            update();
+            return;
+        case RecordPanelTile::RecordVideo:
+            if (m_recordType == RecordType::Video) {
+                m_captureIntent = CaptureIntent::Record;
+                confirmRecordingSelection();
+            } else {
+                m_recordType = RecordType::Video;
+                update();
+            }
+            return;
+        case RecordPanelTile::RecordGif:
+            if (m_recordType == RecordType::Gif) {
+                m_captureIntent = CaptureIntent::Record;
+                confirmRecordingSelection();
+            } else {
+                m_recordType = RecordType::Gif;
+                update();
+            }
+            return;
         }
         if (tile == RecordPanelTile::None && m_recWebcam && m_hasSelection) {
             const QRect sel = m_selection.normalized();
@@ -417,12 +446,28 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 return;
             }
         }
-        // If click is on resize handle, allow it
+        // If click is on resize/move handle, allow it to pass through to the
+        // common selection manipulation code below. Otherwise, clicks on empty
+        // desktop space should start a fresh recording area, just like the
+        // screenshot side. Only clicks on the recording deck background itself
+        // are swallowed.
         HandlePos h = hitTest(pos);
         if (h != HandlePos::None) {
-            // Pass through to resize handling below
+            // Pass through to resize/move handling below.
+        } else if (m_recPanelRect.contains(pos)) {
+            return;
         } else {
-            return; // Click was on panel background, don't start drag
+            closeRecordingMenus();
+            m_dragging = true;
+            m_moving = false;
+            m_resizing = HandlePos::None;
+            m_hasSelection = false;
+            m_fullscreenMode = false;
+            m_selection = QRect(pos, pos);
+            m_dragStart = pos;
+            setCursor(Qt::CrossCursor);
+            update();
+            return;
         }
     }
 
@@ -1085,6 +1130,9 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
 
+    const bool wasManipulatingSelection =
+        m_dragging || m_moving || m_resizing != HandlePos::None;
+
     if (m_gifFpsDragging) {
         m_gifFpsDragging = false;
     }
@@ -1111,6 +1159,12 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
     }
     m_moving = false;
     m_resizing = HandlePos::None;
+    if (wasManipulatingSelection) {
+        // The orange drag overlay can otherwise remain visible until the next
+        // expose/hover update on some compositors. Force an immediate full
+        // repaint after clearing the manipulation flags.
+        repaint();
+    }
     updateCursor(event->pos());
 }
 

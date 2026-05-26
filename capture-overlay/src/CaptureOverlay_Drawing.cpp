@@ -1194,8 +1194,8 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
     const QRectF gifRect(videoRect.right() + ACTION_CARD_GAP, bottomY, ACTION_RAIL_W, ACTION_CARD_H);
     m_recTileRects.append(videoRect);
     m_recTileRects.append(gifRect);
-    drawPrimaryAction(videoRect, RecordPanelTile::RecordVideo, 16, QStringLiteral("Video"), true);
-    drawPrimaryAction(gifRect, RecordPanelTile::RecordGif, 17, QStringLiteral("GIF"), false);
+    drawPrimaryAction(videoRect, RecordPanelTile::RecordVideo, 16, QStringLiteral("Video"), m_recordType == RecordType::Video);
+    drawPrimaryAction(gifRect, RecordPanelTile::RecordGif, 17, QStringLiteral("GIF"), m_recordType == RecordType::Gif);
 
     const double contextualX = std::max(10.0, std::min(selX + (selW - 440.0) / 2.0, screenW - 450.0));
     const double contextualY = std::max(10.0, std::min(selY + 24.0, screenH - 570.0));
@@ -1390,9 +1390,6 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
         drawSetting("Menu bar:", "Display recording time in the top bar", m_displayRecTime, &m_displayRecTime);
         drawSetting("HiDPI:", "Record at display scale resolution", m_hidpi, &m_hidpi);
         drawSetting("Notifications:", "\"Do Not Disturb\" while recording", m_doNotDisturb, &m_doNotDisturb);
-        
-        currY += 10.0; // Gap
-        drawSetting("Cursor:", "Show cursor", m_showCursor, &m_showCursor);
         
         currY += 10.0; // Gap
         drawSetting("Recording area:", "Remember last selection", m_rememberSelection, &m_rememberSelection);

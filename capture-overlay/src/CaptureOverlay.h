@@ -107,7 +107,7 @@ public:
     bool recordDisplayRecTime() const { return m_displayRecTime; }
     bool recordHidpiEnabled() const { return m_hidpi; }
     bool recordDoNotDisturb() const { return m_doNotDisturb; }
-    bool recordShowCursor() const { return m_showCursor; }
+    bool recordShowCursor() const { return true; }
     bool recordRememberSelection() const { return m_rememberSelection; }
     bool recordDimScreen() const { return m_dimScreen; }
     bool recordShowCountdown() const { return m_showCountdown; }
@@ -130,7 +130,7 @@ public:
     void setInitialDisplayRecTime(bool v) { m_displayRecTime = v; }
     void setInitialHidpi(bool v) { m_hidpi = v; }
     void setInitialDoNotDisturb(bool v) { m_doNotDisturb = v; }
-    void setInitialShowCursor(bool v) { m_showCursor = v; }
+    void setInitialShowCursor(bool) { m_showCursor = true; }
     // Deprecated click/keystroke setters — kept for caller compatibility (no-ops)
     void setInitialRecClicks(bool) {}
     void setInitialRecKeystrokes(bool) {}

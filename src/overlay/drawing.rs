@@ -8,6 +8,7 @@ use super::recording::layout::{
 use super::recording::state::{OverlayIntent, SettingsTab};
 use super::state::{OverlayMode, SelectorState};
 use super::webcam::WebcamFrame;
+use crate::capture_overlay::RecordingType;
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
@@ -504,6 +505,7 @@ pub(crate) fn draw_recording_panel(
     screen_height: f64,
     background: Option<&BackgroundFrame>,
     hover_tile: Option<RecordPanelTile>,
+    selected_record_type: Option<RecordingType>,
     crop_menu_open: bool,
     record_aspect_ratio_index: usize,
     hovered_crop_menu_item: i32,
@@ -757,20 +759,20 @@ pub(crate) fn draw_recording_panel(
         width: REC_ACTION_WIDTH,
         height: actions.height,
     };
-    for (rect, tile, icon, label, primary) in [
+    for (rect, tile, icon, label, selected) in [
         (
             video,
             RecordPanelTile::RecordVideo,
             ToolbarIcon::Video,
             "Video",
-            true,
+            selected_record_type == Some(RecordingType::Video),
         ),
         (
             gif,
             RecordPanelTile::RecordGif,
             ToolbarIcon::Gif,
             "GIF",
-            false,
+            selected_record_type == Some(RecordingType::Gif),
         ),
     ] {
         let hovered = hover_tile == Some(tile);
@@ -792,7 +794,7 @@ pub(crate) fn draw_recording_panel(
             rect.height - 6.0,
         );
         rounded_rect_path(context, path_x, path_y, path_w, path_h, 9.0);
-        if primary || hovered {
+        if selected || hovered {
             context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 88.0 / 255.0);
         } else {
             context.set_source_rgba(1.0, 1.0, 1.0, 18.0 / 255.0);
@@ -809,7 +811,7 @@ pub(crate) fn draw_recording_panel(
             rect.height - 7.6,
             8.4,
         );
-        if primary || hovered {
+        if selected || hovered {
             context.set_source_rgba(1.0, 212.0 / 255.0, 178.0 / 255.0, 152.0 / 255.0);
         } else {
             context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
@@ -817,10 +819,10 @@ pub(crate) fn draw_recording_panel(
         context.set_line_width(1.1);
         let _ = context.stroke();
         let _ = context.restore();
-        let icon_alpha = if hovered || primary { 1.0 } else { 0.94 };
+        let icon_alpha = if hovered || selected { 1.0 } else { 0.94 };
         let shadow_alpha = if hovered {
             0.24
-        } else if primary {
+        } else if selected {
             0.32
         } else {
             0.50
@@ -849,7 +851,7 @@ pub(crate) fn draw_recording_panel(
         context.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
         context.move_to(rect.x + 50.6, rect.y + 30.8);
         let _ = context.show_text(label);
-        if primary {
+        if selected {
             context.set_source_rgba(1.0, 232.0 / 255.0, 214.0 / 255.0, icon_alpha);
         } else {
             context.set_source_rgba(245.0 / 255.0, 245.0 / 255.0, 246.0 / 255.0, icon_alpha);
@@ -2704,6 +2706,7 @@ pub(crate) fn draw_overlay(
                 screen_height,
                 background,
                 st.recording.hover_record_tile,
+                st.recording.selected_record_type,
                 st.recording.crop_menu_open,
                 st.recording.record_aspect_ratio_index,
                 st.recording.hovered_crop_menu_item,

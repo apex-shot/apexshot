@@ -1,6 +1,7 @@
 //! Recording panel state, separated from the screenshot capture state.
 
 use super::layout::RecordPanelTile;
+use crate::capture_overlay::RecordingType;
 use crate::overlay::webcam::{WebcamFrame, WebcamPreview};
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +28,7 @@ pub(crate) enum SettingsTab {
 pub(crate) struct RecordingState {
     pub(crate) panel_open: bool,
     pub(crate) hover_record_tile: Option<RecordPanelTile>,
+    pub(crate) selected_record_type: Option<RecordingType>,
 
     // Recording toggles
     pub(crate) mic_toggle: bool,
@@ -97,6 +99,7 @@ impl Default for RecordingState {
         Self {
             panel_open: false,
             hover_record_tile: None,
+            selected_record_type: None,
             mic_toggle: true,
             speaker_toggle: false,
             mic_level: 0.0,

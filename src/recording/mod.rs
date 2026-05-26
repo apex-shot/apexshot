@@ -604,8 +604,8 @@ impl Default for RecordingConfig {
 
 struct EncoderProfile {
     name: &'static str,
-    encoder: &'static str,
-    props: &'static str,
+    encoder: &'static str,        // GStreamer element name (used by X11 path)
+    ffmpeg_encoder: &'static str, // ffmpeg -c:v name (used by Wayland path)
     muxer: &'static str,
     extension: &'static str,
 }
@@ -616,7 +616,7 @@ const PROFILES: &[EncoderProfile] = &[
     EncoderProfile {
         name: "VP9",
         encoder: "vp9enc",
-        props: "",
+        ffmpeg_encoder: "libvpx-vp9",
         muxer: "webmmux",
         extension: "webm",
     },
@@ -624,7 +624,7 @@ const PROFILES: &[EncoderProfile] = &[
     EncoderProfile {
         name: "VP8",
         encoder: "vp8enc",
-        props: "",
+        ffmpeg_encoder: "libvpx",
         muxer: "webmmux",
         extension: "webm",
     },
@@ -632,7 +632,7 @@ const PROFILES: &[EncoderProfile] = &[
     EncoderProfile {
         name: "H.264 (x264)",
         encoder: "x264enc",
-        props: "",
+        ffmpeg_encoder: "libx264",
         muxer: "mp4mux",
         extension: "mp4",
     },
@@ -640,7 +640,7 @@ const PROFILES: &[EncoderProfile] = &[
     EncoderProfile {
         name: "H.264 (OpenH264)",
         encoder: "openh264enc",
-        props: "",
+        ffmpeg_encoder: "libopenh264",
         muxer: "mp4mux",
         extension: "mp4",
     },
@@ -648,7 +648,7 @@ const PROFILES: &[EncoderProfile] = &[
     EncoderProfile {
         name: "Theora",
         encoder: "theoraenc",
-        props: "",
+        ffmpeg_encoder: "libtheora",
         muxer: "oggmux",
         extension: "ogv",
     },
@@ -1028,9 +1028,23 @@ fn record_wayland_with_ffmpeg_sync(
         RecordError::GStreamerError("No format negotiated before recording".into())
     })?;
 
-    let width = format.width;
-    let height = format.height;
-    let fps = config.fps;
+    // Raw frame dimensions sent into ffmpeg after our manual area crop. Video
+    // settings such as max resolution are applied as ffmpeg filters, not here.
+    let mut input_width = format.width;
+    let mut input_height = format.height;
+    if let Some(crop) = wayland_source.crop {
+        input_width = input_width
+            .checked_sub(crop.left + crop.right)
+            .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop width".into()))?;
+        input_height = input_height
+            .checked_sub(crop.top + crop.bottom)
+            .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop height".into()))?;
+        eprintln!(
+            "[recording] Applying Wayland area crop: left={} top={} right={} bottom={} => {}x{}",
+            crop.left, crop.top, crop.right, crop.bottom, input_width, input_height
+        );
+    }
+    let fps = config.fps.max(1);
 
     // Build ffmpeg command
     let use_vaapi = should_use_vaapi();
@@ -1042,7 +1056,9 @@ fn record_wayland_with_ffmpeg_sync(
         .arg("-nostats");
 
     if use_vaapi {
-        let vaapi_args = ffmpeg_vaapi_args(width, height);
+        let (vaapi_width, vaapi_height) =
+            fit_within_max_resolution(input_width, input_height, config.max_resolution);
+        let vaapi_args = ffmpeg_vaapi_args(vaapi_width, vaapi_height);
         for arg in &vaapi_args {
             ffmpeg_cmd.arg(arg);
         }
@@ -1054,14 +1070,35 @@ fn record_wayland_with_ffmpeg_sync(
         .arg("-pix_fmt")
         .arg("rgba")
         .arg("-s")
-        .arg(format!("{}x{}", width, height))
+        .arg(format!("{}x{}", input_width, input_height))
         .arg("-r")
         .arg(fps.to_string())
         .arg("-i")
         .arg("pipe:0");
 
     if !use_vaapi {
+        // Convert desktop RGBA (full-range RGB) to standard limited-range
+        // YUV420P for broad MP4/player compatibility. Tagging H.264 as full
+        // range can make some Linux players display lifted blacks / a washed
+        // layer, so use normal video range while preserving correct RGB input.
+        let filter = wayland_video_filter(config.max_resolution);
+        ffmpeg_cmd
+            .arg("-vf")
+            .arg(filter)
+            .arg("-color_range")
+            .arg("tv")
+            .arg("-colorspace")
+            .arg("bt709")
+            .arg("-color_primaries")
+            .arg("bt709")
+            .arg("-color_trc")
+            .arg("iec61966-2-1");
         ffmpeg_cmd.arg("-c:v").arg(encoder_name);
+        // Sane defaults for screen recording.
+        if encoder_name == "libx264" {
+            ffmpeg_cmd.arg("-preset").arg("veryfast");
+            ffmpeg_cmd.arg("-crf").arg("23");
+        }
         if !encoder_props.is_empty() {
             for prop in encoder_props.split_whitespace() {
                 if let Some((key, val)) = prop.split_once('=') {
@@ -1072,8 +1109,12 @@ fn record_wayland_with_ffmpeg_sync(
     }
 
     // Add audio inputs when mic/speaker are enabled.
-    // ffmpeg captures from PulseAudio directly with -f pulse.
+    // ffmpeg captures from PulseAudio directly with -f pulse. On modern GNOME
+    // this is normally provided by pipewire-pulse, so start it if the user
+    // session has not already activated it.
     if config.mic_enabled || config.speaker_enabled {
+        ensure_pipewire_pulse_running();
+
         if config.mic_enabled {
             let mic_dev = config
                 .mic_source
@@ -1126,6 +1167,9 @@ fn record_wayland_with_ffmpeg_sync(
     // Recording loop
     let mut command_rx = command_rx;
     let mut stop_action = RecordingTerminalAction::Save;
+    let mut frames_written = 0u64;
+    let frame_interval = std::time::Duration::from_secs_f64(1.0 / fps as f64);
+    let mut next_frame_at: Option<std::time::Instant> = None;
 
     loop {
         // Check for control commands
@@ -1181,22 +1225,39 @@ fn record_wayland_with_ffmpeg_sync(
             }
         };
 
-        // Check if PipeWire capture had an error
-        if capture.has_error() {
-            if let Some(err) = capture.error_message() {
-                eprintln!("PipeWire stream error: {err}");
+        let now = std::time::Instant::now();
+        if let Some(deadline) = next_frame_at {
+            if now < deadline {
+                continue;
             }
-            break;
         }
+        next_frame_at = Some(now + frame_interval);
+
+        let pixels = if let Some(crop) = wayland_source.crop {
+            crop_rgba_frame(&frame, crop)?
+        } else {
+            frame.pixels
+        };
 
         // Write frame to ffmpeg stdin
-        if let Err(e) = stdin.write_all(&frame.pixels) {
+        if let Err(e) = stdin.write_all(&pixels) {
             if e.kind() == std::io::ErrorKind::BrokenPipe {
                 eprintln!("ffmpeg pipe broken (likely exited)");
             } else {
                 eprintln!("Failed to write to ffmpeg: {e}");
             }
             break;
+        }
+
+        frames_written += 1;
+        if frames_written == 1 {
+            eprintln!(
+                "[recording] First frame written to ffmpeg ({} bytes)",
+                pixels.len()
+            );
+        }
+        if frames_written.is_multiple_of(30) {
+            eprintln!("[recording] {} frames written", frames_written);
         }
     }
 
@@ -1227,6 +1288,69 @@ fn record_wayland_with_ffmpeg_sync(
     }
 
     Ok((final_path, stop_action))
+}
+
+fn fit_within_max_resolution(
+    width: u32,
+    height: u32,
+    max_resolution: Option<(u32, u32)>,
+) -> (u32, u32) {
+    let Some((max_w, max_h)) = max_resolution else {
+        return (width, height);
+    };
+    if width <= max_w && height <= max_h {
+        return (width, height);
+    }
+
+    let scale = (max_w as f64 / width as f64).min(max_h as f64 / height as f64);
+    let mut out_w = (width as f64 * scale).round().max(2.0) as u32;
+    let mut out_h = (height as f64 * scale).round().max(2.0) as u32;
+    out_w -= out_w % 2;
+    out_h -= out_h % 2;
+    (out_w.max(2), out_h.max(2))
+}
+
+fn wayland_video_filter(max_resolution: Option<(u32, u32)>) -> String {
+    let scale = if let Some((max_w, max_h)) = max_resolution {
+        format!(
+            "scale=w='min(iw,{max_w})':h='min(ih,{max_h})':force_original_aspect_ratio=decrease:force_divisible_by=2:in_range=pc:out_range=tv"
+        )
+    } else {
+        // Keep original size, but make dimensions encoder-safe for yuv420p.
+        "scale=w='trunc(iw/2)*2':h='trunc(ih/2)*2':in_range=pc:out_range=tv".to_string()
+    };
+    format!("{scale},format=yuv420p")
+}
+
+fn crop_rgba_frame(
+    frame: &crate::pipewire_engine::PipeWireFrame,
+    crop: CropMargins,
+) -> RecordResult<Vec<u8>> {
+    let out_width = frame
+        .width
+        .checked_sub(crop.left + crop.right)
+        .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop width".into()))?;
+    let out_height = frame
+        .height
+        .checked_sub(crop.top + crop.bottom)
+        .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop height".into()))?;
+
+    let src_stride = frame.stride as usize;
+    let row_bytes = out_width as usize * 4;
+    let start_x = crop.left as usize * 4;
+    let start_y = crop.top as usize;
+    let mut cropped = Vec::with_capacity(row_bytes * out_height as usize);
+
+    for y in 0..out_height as usize {
+        let src_start = (start_y + y) * src_stride + start_x;
+        let src_end = src_start + row_bytes;
+        let row = frame.pixels.get(src_start..src_end).ok_or_else(|| {
+            RecordError::GStreamerError("Wayland crop exceeded frame bounds".into())
+        })?;
+        cropped.extend_from_slice(row);
+    }
+
+    Ok(cropped)
 }
 
 /// X11 fallback recording using GStreamer ximagesrc.
@@ -1339,6 +1463,26 @@ fn build_x11_gstreamer_pipeline(
     ))
 }
 
+fn ensure_pipewire_pulse_running() {
+    if !command_exists("systemctl") {
+        return;
+    }
+
+    let active = std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", "pipewire-pulse.service"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if active {
+        return;
+    }
+
+    eprintln!("[recording] pipewire-pulse is not active; attempting to start it for audio capture");
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "start", "pipewire-pulse.service"])
+        .status();
+}
+
 fn get_pulse_default_source() -> String {
     std::process::Command::new("pactl")
         .arg("get-default-source")
@@ -1431,6 +1575,7 @@ fn select_audio_encoder(muxer: &str) -> Option<&'static str> {
         .copied()
 }
 
+#[cfg(test)]
 fn video_encoder_props(profile: &EncoderProfile, config: &RecordingConfig) -> String {
     let key_int_max = config.fps.saturating_mul(2).max(1);
 
@@ -1461,7 +1606,7 @@ fn video_encoder_props(profile: &EncoderProfile, config: &RecordingConfig) -> St
         return "bitrate=8000000 complexity=medium".to_string();
     }
 
-    profile.props.to_string()
+    String::new()
 }
 
 #[allow(dead_code)]
@@ -1532,11 +1677,13 @@ async fn build_pipeline(
         None
     };
 
-    let encoder_props = video_encoder_props(profile, config).to_string();
+    // Encoder props are GStreamer-specific; ffmpeg has its own defaults.
+    // Only used by the X11 GStreamer fallback path.
+    let encoder_props = String::new();
 
     Ok(BuiltPipeline {
         wayland_source,
-        encoder_name: profile.encoder.to_string(),
+        encoder_name: profile.ffmpeg_encoder.to_string(),
         encoder_props,
         final_path: output_path.to_path_buf(),
         config: config.clone(),
@@ -1561,7 +1708,11 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         RecordingScreenCastTarget::Screen
     };
     let cursor_mode = if config.cursor {
-        CursorMode::Metadata
+        // Ask the portal/compositor to embed the cursor in the video stream.
+        // Metadata mode is optional and GNOME often does not provide usable
+        // cursor bitmap metadata for ScreenCast streams, which made the
+        // "show cursor" setting appear ignored in PipeWire recordings.
+        CursorMode::Embedded
     } else {
         CursorMode::Hidden
     };
@@ -2290,7 +2441,7 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_display_time = request.display_rec_time;
     app_config.rec_hidpi = request.hidpi;
     app_config.rec_notifications = request.notifications;
-    app_config.rec_cursor = request.cursor;
+    app_config.rec_cursor = true;
     app_config.rec_remember_selection = request.remember_selection;
     app_config.rec_dim_screen = request.dim_screen;
     app_config.rec_countdown = request.countdown;
@@ -2385,7 +2536,7 @@ pub fn prepare_overlay_recording_request(
         height: capture_height,
         x: capture_x,
         y: capture_y,
-        cursor: request.cursor,
+        cursor: true,
         hidpi: request.hidpi,
         max_resolution,
         fps,
@@ -2841,7 +2992,6 @@ mod tests {
     use crate::config::AppConfig;
     use chrono::TimeZone;
     use pretty_assertions::assert_eq;
-    use std::path::Path;
 
     #[test]
     fn reap_child_if_exited_clears_completed_child() {
@@ -2951,7 +3101,7 @@ mod tests {
         assert_eq!(prepared.updated_app_config.rec_display_time, true);
         assert_eq!(prepared.updated_app_config.rec_hidpi, true);
         assert_eq!(prepared.updated_app_config.rec_notifications, false);
-        assert_eq!(prepared.updated_app_config.rec_cursor, false);
+        assert_eq!(prepared.updated_app_config.rec_cursor, true);
         assert_eq!(prepared.updated_app_config.rec_remember_selection, true);
         assert_eq!(prepared.updated_app_config.last_selection_x, Some(10));
         assert_eq!(prepared.updated_app_config.last_selection_y, Some(20));
@@ -2968,7 +3118,7 @@ mod tests {
         assert_eq!(prepared.recording_config.height, Some(480));
         assert_eq!(prepared.recording_config.x, Some(10));
         assert_eq!(prepared.recording_config.y, Some(20));
-        assert_eq!(prepared.recording_config.cursor, false);
+        assert_eq!(prepared.recording_config.cursor, true);
         assert_eq!(prepared.recording_config.hidpi, true);
         assert_eq!(prepared.recording_config.max_resolution, Some((1280, 720)));
         assert_eq!(prepared.recording_config.fps, 60);
@@ -3175,7 +3325,6 @@ mod tests {
         assert!(openh264_props.contains("complexity=medium"));
     }
 
-    #[test]
     // Tests removed: GStreamer pipeline assertions and encoder availability checks
     // are no longer applicable with native PipeWire recording.
     #[test]

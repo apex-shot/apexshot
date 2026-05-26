@@ -1993,14 +1993,26 @@ pub(crate) fn setup_window(
                                 } else {
                                     RecordingType::Video
                                 };
-                                let request = recording_request_from_state(&st, record_type);
-                                drop(st);
-                                let _ =
-                                    result_tx_click.send(Ok(OverlaySelection::Recording(request)));
-                                if let Some(window) = window_weak_click.upgrade() {
-                                    window.close();
+                                if st.recording.selected_record_type == Some(record_type) {
+                                    let request = recording_request_from_state(&st, record_type);
+                                    drop(st);
+                                    let _ = result_tx_click
+                                        .send(Ok(OverlaySelection::Recording(request)));
+                                    if let Some(window) = window_weak_click.upgrade() {
+                                        window.close();
+                                    }
+                                    return;
                                 }
-                                return;
+
+                                st.recording.selected_record_type = Some(record_type);
+                                st.recording.crop_menu_open = false;
+                                st.recording.settings_menu_open = false;
+                                st.recording.settings_dropdown_open = None;
+                                st.recording.webcam_options_open = false;
+                                st.recording.mic_volume_popup_open = false;
+                                st.recording.speaker_volume_popup_open = false;
+                                st.recording.hover_record_tile = None;
+                                st.hover_tool_index = None;
                             }
                         }
                         drop(st);

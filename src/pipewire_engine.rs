@@ -149,9 +149,12 @@ fn format_bpp(format: spa::param::video::VideoFormat) -> u32 {
 }
 
 fn format_swaps_rb(format: spa::param::video::VideoFormat) -> bool {
+    // PipeWire's BGRx/BGRA memory order is B,G,R,A/x. The public frame data
+    // we feed to ffmpeg is always RGBA, so BGR formats need R/B swapped.
+    // RGBx/RGBA are already in the desired channel order.
     matches!(
         format,
-        spa::param::video::VideoFormat::RGBx | spa::param::video::VideoFormat::RGBA
+        spa::param::video::VideoFormat::BGRx | spa::param::video::VideoFormat::BGRA
     )
 }
 
@@ -180,6 +183,10 @@ pub struct PipeWireCapture {
     _context: pw::context::ContextRc,
     _core: pw::core::CoreRc,
     _stream: pw::stream::StreamRc,
+    // Keep the listener alive for the lifetime of the capture. Dropping it
+    // unregisters PipeWire callbacks, which means format negotiation can
+    // succeed but no process callbacks arrive afterwards (empty 261-byte mp4s).
+    _listener: pw::stream::StreamListener<Arc<Mutex<StreamInner>>>,
 }
 
 impl PipeWireCapture {
@@ -392,6 +399,7 @@ impl PipeWireCapture {
             _context: context,
             _core: core,
             _stream: stream,
+            _listener,
         })
     }
 
@@ -645,7 +653,12 @@ fn convert_to_rgba_frame(
     let width = format.size().width as usize;
     let height = format.size().height as usize;
     let bpp = format_bpp(format.format()) as usize;
-    let swaps_rb = format_swaps_rb(format.format());
+    let video_format = format.format();
+    let swaps_rb = format_swaps_rb(video_format);
+    let has_alpha = matches!(
+        video_format,
+        spa::param::video::VideoFormat::BGRA | spa::param::video::VideoFormat::RGBA
+    );
     let stride = width * bpp;
     let row_len = width * 4;
 
@@ -659,12 +672,12 @@ fn convert_to_rgba_frame(
                 pixels.push(px[2]);
                 pixels.push(px[1]);
                 pixels.push(px[0]);
-                pixels.push(px.get(3).copied().unwrap_or(255));
+                pixels.push(if has_alpha { px[3] } else { 255 });
             } else {
                 pixels.push(px[0]);
                 pixels.push(px[1]);
                 pixels.push(px[2]);
-                pixels.push(px.get(3).copied().unwrap_or(255));
+                pixels.push(if has_alpha { px[3] } else { 255 });
             }
         }
     }
@@ -792,10 +805,10 @@ mod tests {
 
     #[test]
     fn test_format_swaps_rb() {
-        assert!(!format_swaps_rb(spa::param::video::VideoFormat::BGRx));
-        assert!(!format_swaps_rb(spa::param::video::VideoFormat::BGRA));
-        assert!(format_swaps_rb(spa::param::video::VideoFormat::RGBx));
-        assert!(format_swaps_rb(spa::param::video::VideoFormat::RGBA));
+        assert!(format_swaps_rb(spa::param::video::VideoFormat::BGRx));
+        assert!(format_swaps_rb(spa::param::video::VideoFormat::BGRA));
+        assert!(!format_swaps_rb(spa::param::video::VideoFormat::RGBx));
+        assert!(!format_swaps_rb(spa::param::video::VideoFormat::RGBA));
     }
 
     #[test]
@@ -845,8 +858,8 @@ mod tests {
 
     #[test]
     fn test_convert_bgra_to_rgba_indirect() {
-        assert!(!format_swaps_rb(spa::param::video::VideoFormat::BGRA));
-        assert!(format_swaps_rb(spa::param::video::VideoFormat::RGBA));
+        assert!(format_swaps_rb(spa::param::video::VideoFormat::BGRA));
+        assert!(!format_swaps_rb(spa::param::video::VideoFormat::RGBA));
         assert_eq!(format_bpp(spa::param::video::VideoFormat::BGRA), 4);
     }
 }
