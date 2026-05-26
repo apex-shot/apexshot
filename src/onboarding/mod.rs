@@ -33,7 +33,6 @@ pub fn mark_onboarding_complete() -> std::io::Result<()> {
 #[derive(Clone, Copy, PartialEq)]
 pub enum OnboardingStep {
     Welcome,
-    GnomeExtension,
     ChromeExtension,
     Cloud,
     Complete,
@@ -42,8 +41,7 @@ pub enum OnboardingStep {
 impl OnboardingStep {
     fn next(self) -> Option<Self> {
         match self {
-            Self::Welcome => Some(Self::GnomeExtension),
-            Self::GnomeExtension => Some(Self::ChromeExtension),
+            Self::Welcome => Some(Self::ChromeExtension),
             Self::ChromeExtension => Some(Self::Cloud),
             Self::Cloud => Some(Self::Complete),
             Self::Complete => None,
@@ -53,8 +51,7 @@ impl OnboardingStep {
     fn prev(self) -> Option<Self> {
         match self {
             Self::Welcome => None,
-            Self::GnomeExtension => Some(Self::Welcome),
-            Self::ChromeExtension => Some(Self::GnomeExtension),
+            Self::ChromeExtension => Some(Self::Welcome),
             Self::Cloud => Some(Self::ChromeExtension),
             Self::Complete => Some(Self::Cloud),
         }
@@ -217,9 +214,6 @@ fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
         OnboardingStep::Welcome => {
             welcome::build(&widgets.content_box);
         }
-        OnboardingStep::GnomeExtension => {
-            extensions::build_gnome(&widgets.content_box);
-        }
         OnboardingStep::ChromeExtension => {
             extensions::build_chrome(&widgets.content_box);
         }
@@ -239,7 +233,6 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
     // Build progress dots
     let steps = [
         OnboardingStep::Welcome,
-        OnboardingStep::GnomeExtension,
         OnboardingStep::ChromeExtension,
         OnboardingStep::Cloud,
         OnboardingStep::Complete,
