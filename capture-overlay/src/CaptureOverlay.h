@@ -31,15 +31,6 @@ class QTimer;
 
 #include "ScrollControlPanel.h"
 
-// ── Feature flags ────────────────────────────────────────────────────────
-// The "Show keystrokes" recording overlay is still under development. The
-// UI is kept in place so the layout/state machine doesn't churn, but the
-// tile and the matching settings row are rendered as disabled and clicks
-// are ignored. Flip this to `true` once the recorder side is implemented.
-namespace apexshot {
-inline constexpr bool kKeystrokesFeatureAvailable = false;
-}
-
 class CaptureOverlay : public QWidget
 {
     Q_OBJECT
@@ -94,13 +85,8 @@ public:
     bool recordFullscreen() const { return m_fullscreenMode; }
     bool recordMicEnabled() const { return m_recMic; }
     bool recordSpeakerEnabled() const { return m_recSpeaker; }
-    bool recordClicksEnabled() const { return m_recClicks; }
-    bool recordKeystrokesEnabled() const {
-        // Force the keystroke flag off whenever the feature is gated, so the
-        // recorder never tries to render the (still-broken) keystroke overlay
-        // even if the persisted user setting was `true`.
-        return apexshot::kKeystrokesFeatureAvailable && m_recKeystrokes;
-    }
+    bool recordClicksEnabled() const { return false; }
+    bool recordKeystrokesEnabled() const { return false; }
     bool recordWebcamEnabled() const { return m_recWebcam; }
     double recordClickSize() const { return m_clickSize; }
     int recordClickColor() const { return m_clickColor; }
@@ -144,8 +130,8 @@ public:
     void setInitialHidpi(bool v) { m_hidpi = v; }
     void setInitialDoNotDisturb(bool v) { m_doNotDisturb = v; }
     void setInitialShowCursor(bool v) { m_showCursor = v; }
-    void setInitialRecClicks(bool v) { m_recClicks = v; }
-    void setInitialRecKeystrokes(bool v) { m_recKeystrokes = v; }
+    void setInitialRecClicks(bool) {}
+    void setInitialRecKeystrokes(bool) {}
     void setInitialRecWebcam(bool v)
     {
         m_recWebcam = v;
@@ -236,7 +222,7 @@ private:
     enum class RecordPanelTile {
         None,
         Controls, Size, Crop,
-        Mic, Speaker, Webcam, Click, Keystrokes,
+        Mic, Speaker, Webcam,
         RecordVideo, RecordGif
     };
 
@@ -261,13 +247,10 @@ private:
                             double selW, double selH);
     void drawSettingsMenu(QPainter& p,
                           double panelX, double startY);
-    void drawClickOptions(QPainter& p, const QRectF& parentRect);
-    void drawKeystrokeOptions(QPainter& p, const QRectF& parentRect);
     void drawDropdownPopup(QPainter& p, const QRectF& anchorRect,
                            const QStringList& options, int selectedIndex);
     void startClickAnimTimer();
     void stopClickAnimTimer();
-    void drawKeystrokePreview(QPainter& p, double sx, double sy, double selW, double selH);
     QRectF scrollPrimaryButtonRect() const;
     QSizeF webcamPreviewSize(double selW, double selH) const;
     QRectF webcamPreviewRect(double selX, double selY, double selW, double selH) const;
