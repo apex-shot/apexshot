@@ -1421,7 +1421,7 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         RecordingScreenCastTarget::Screen
     };
     let cursor_mode = if config.cursor {
-        CursorMode::Embedded
+        CursorMode::Metadata
     } else {
         CursorMode::Hidden
     };
@@ -1604,7 +1604,6 @@ async fn record_gif_rust_with_commands(
     config: RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
-    
     use std::process::Command;
 
     println!("Starting GIF recording (via FFmpeg Pipe)...");

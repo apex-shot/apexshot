@@ -14,10 +14,13 @@
 //!
 //! 3. Format negotiation: we advertise a priority list of video formats
 //!    (BGRx, BGRA, RGBx, RGBA) and accept whatever the compositor picks.
+//!    Color space (BT.601/BT.709/RGB, full/limited range) is also negotiated.
 
 use pipewire as pw;
 use pw::properties::properties;
 use pw::spa;
+// libspa-sys for raw SPA buffer metadata access (cursor).
+use libspa_sys as spa_sys;
 
 use std::os::fd::OwnedFd;
 use std::sync::{Arc, Mutex};
@@ -36,6 +39,64 @@ pub struct PipeWireFrame {
     pub height: u32,
     /// Row stride in bytes (= width * 4 for RGBA).
     pub stride: u32,
+    /// Cursor overlay metadata (from SPA_META_Cursor, when available).
+    pub cursor: Option<CursorOverlay>,
+    /// Color space from negotiated format.
+    pub color_space: ColorSpace,
+}
+
+/// Cursor bitmap and position extracted from PipeWire buffer metadata.
+#[derive(Debug, Clone)]
+pub struct CursorOverlay {
+    /// RGBA pixel data for the cursor image.
+    pub bitmap: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    /// Screen position of the cursor (top-left of the bitmap).
+    pub x: i32,
+    pub y: i32,
+    /// Hotspot offset within the bitmap (the click point).
+    pub hotspot_x: i32,
+    pub hotspot_y: i32,
+}
+
+/// Color space information from the negotiated video format.
+#[derive(Debug, Clone, Copy)]
+pub struct ColorSpace {
+    /// SPA video color range: 1 = full (0-255), 2 = limited (16-235).
+    pub range: u32,
+    /// SPA video color matrix: 1 = RGB, 2 = BT.601, 3 = BT.709.
+    pub matrix: u32,
+}
+
+impl Default for ColorSpace {
+    fn default() -> Self {
+        Self {
+            range: 1,
+            matrix: 1,
+        }
+    }
+}
+
+impl ColorSpace {
+    /// Human-readable label for the color matrix.
+    pub fn matrix_label(&self) -> &'static str {
+        match self.matrix {
+            1 => "RGB",
+            2 => "BT.601",
+            3 => "BT.709",
+            _ => "unknown",
+        }
+    }
+
+    /// Human-readable label for the color range.
+    pub fn range_label(&self) -> &'static str {
+        match self.range {
+            1 => "full (0-255)",
+            2 => "limited (16-235)",
+            _ => "unknown",
+        }
+    }
 }
 
 /// Format negotiated with the compositor.
@@ -46,6 +107,7 @@ pub struct NegotiatedFormat {
     pub stride: u32,
     pub framerate_num: u32,
     pub framerate_denom: u32,
+    pub color_space: ColorSpace,
 }
 
 /// Errors from the PipeWire engine.
@@ -73,26 +135,8 @@ pub enum PipeWireError {
 pub type PipeWireResult<T> = Result<T, PipeWireError>;
 
 // ---------------------------------------------------------------------------
-// PipeWireStream — a minimal handle (unused for now, PipeWireCapture is primary)
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-pub struct PipeWireStream {
-    inner: Arc<Mutex<StreamInner>>,
-    _stream: pw::stream::StreamRc,
-}
-
-// ---------------------------------------------------------------------------
 // Supported video formats
 // ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-const SUPPORTED_FORMATS: &[spa::param::video::VideoFormat] = &[
-    spa::param::video::VideoFormat::BGRx,
-    spa::param::video::VideoFormat::BGRA,
-    spa::param::video::VideoFormat::RGBx,
-    spa::param::video::VideoFormat::RGBA,
-];
 
 fn format_bpp(format: spa::param::video::VideoFormat) -> u32 {
     match format {
@@ -116,17 +160,13 @@ fn format_swaps_rb(format: spa::param::video::VideoFormat) -> bool {
 // ---------------------------------------------------------------------------
 
 struct StreamInner {
-    /// Negotiated format (set by param_changed callback).
     format: Option<NegotiatedFormat>,
-    /// Full raw format info for conversion.
     raw_format: Option<spa::param::video::VideoInfoRaw>,
-    /// Queue of raw frame buffers (pushed by process callback).
     frames: std::collections::VecDeque<Vec<u8>>,
-    /// Incremented each time a frame is dequeued publicly.
+    /// Cursor overlays corresponding to frames (paired by queue position).
+    cursor_queue: std::collections::VecDeque<CursorOverlay>,
     frames_consumed: u64,
-    /// Set to true when the stream enters error state.
     error: Option<String>,
-    /// For single-frame mode: stop collecting after this many frames.
     max_frames: Option<u64>,
 }
 
@@ -134,14 +174,6 @@ struct StreamInner {
 // PipeWireCapture
 // ---------------------------------------------------------------------------
 
-/// Full PipeWire screen capture session.
-///
-/// ```ignore
-/// let capture = PipeWireCapture::connect(pipewire_fd, node_id, Some(1), None, None)?;
-/// let frame = capture.wait_for_frame(Duration::from_secs(2))?;
-/// // frame.pixels is RGBA32
-/// drop(capture); // disconnects stream, tears down PipeWire
-/// ```
 pub struct PipeWireCapture {
     inner: Arc<Mutex<StreamInner>>,
     _thread_loop: pw::thread_loop::ThreadLoopRc,
@@ -151,12 +183,6 @@ pub struct PipeWireCapture {
 }
 
 impl PipeWireCapture {
-    /// Create a new PipeWire capture session.
-    ///
-    /// * `pipewire_fd` — file descriptor from the portal's `OpenPipeWireRemote`.
-    /// * `node_id` — PipeWire node ID from the portal's `Start` response.
-    /// * `max_frames` — if `Some(n)`, stop collecting after n frames; `None` = continuous.
-    /// * `width_hint`, `height_hint` — preferred resolution for format negotiation.
     pub fn connect(
         pipewire_fd: OwnedFd,
         node_id: u32,
@@ -166,8 +192,7 @@ impl PipeWireCapture {
     ) -> PipeWireResult<Self> {
         pw::init();
 
-        // SAFETY: pw_thread_loop_new is always safe to call; the Rust binding
-        // marks it unsafe due to the underlying C FFI.
+        // SAFETY: pw_thread_loop_new is always safe to call; binding uses unsafe for C FFI.
         let thread_loop = unsafe {
             pw::thread_loop::ThreadLoopRc::new(Some("apexshot-pw"), None)
                 .map_err(|e| PipeWireError::Init(format!("Failed to create thread loop: {e}")))?
@@ -184,6 +209,7 @@ impl PipeWireCapture {
             format: None,
             raw_format: None,
             frames: std::collections::VecDeque::new(),
+            cursor_queue: std::collections::VecDeque::new(),
             frames_consumed: 0,
             error: None,
             max_frames,
@@ -200,13 +226,11 @@ impl PipeWireCapture {
         )
         .map_err(|e| PipeWireError::Connect(format!("Failed to create stream: {e}")))?;
 
-        // Build format negotiation parameters (SPA pod).
         let format_pod = build_enum_format_pod(width_hint, height_hint);
         let pod = spa::pod::Pod::from_bytes(&format_pod)
             .ok_or_else(|| PipeWireError::Connect("Failed to parse format pod bytes".into()))?;
         let mut params = [pod];
 
-        // Register callbacks before connecting.
         let inner_clone = Arc::clone(&inner);
         let _listener = stream
             .add_local_listener_with_user_data(inner_clone)
@@ -223,13 +247,11 @@ impl PipeWireCapture {
                 if id != pw::spa::param::ParamType::Format.as_raw() {
                     return;
                 }
-
                 let (media_type, media_subtype) =
                     match spa::param::format_utils::parse_format(param) {
                         Ok(v) => v,
                         Err(_) => return,
                     };
-
                 if media_type != spa::param::format::MediaType::Video
                     || media_subtype != spa::param::format::MediaSubtype::Raw
                 {
@@ -246,22 +268,29 @@ impl PipeWireCapture {
                 let w = info.size().width;
                 let h = info.size().height;
                 let bpp = format_bpp(info.format());
+                let cs = ColorSpace {
+                    range: info.color_range(),
+                    matrix: info.color_matrix(),
+                };
                 guard.format = Some(NegotiatedFormat {
                     width: w,
                     height: h,
                     stride: w * bpp,
                     framerate_num: info.framerate().num,
                     framerate_denom: info.framerate().denom,
+                    color_space: cs,
                 });
                 guard.raw_format = Some(info);
 
                 eprintln!(
-                    "[pipewire] Negotiated format: {:?} {}x{} @ {}/{} fps",
+                    "[pipewire] Negotiated format: {:?} {}x{} @ {}/{} fps, color: {} {}",
                     guard.raw_format.as_ref().unwrap().format(),
                     w,
                     h,
                     guard.raw_format.as_ref().unwrap().framerate().num,
                     guard.raw_format.as_ref().unwrap().framerate().denom,
+                    cs.matrix_label(),
+                    cs.range_label(),
                 );
             })
             .process(|_stream, inner| {
@@ -269,8 +298,6 @@ impl PipeWireCapture {
                     Ok(g) => g,
                     Err(_) => return,
                 };
-
-                // Respect max_frames limit
                 if let Some(max) = guard.max_frames {
                     if guard.frames.len() as u64 >= max {
                         return;
@@ -289,24 +316,28 @@ impl PipeWireCapture {
                 if datas.is_empty() {
                     return;
                 }
-
                 let chunk_size = datas[0].chunk().size() as usize;
                 if chunk_size == 0 {
                     return;
                 }
-
                 if let Some(ref mem) = datas[0].data() {
                     if chunk_size <= mem.len() {
-                        let raw_data = mem[..chunk_size].to_vec();
-                        guard.frames.push_back(raw_data);
+                        guard.frames.push_back(mem[..chunk_size].to_vec());
                     }
+                }
+
+                // Extract SPA_META_Cursor from the raw spa_buffer.
+                // The compositor sends this when CursorMode::Metadata is used.
+                // SAFETY: Buffer is alive during this callback.
+                let cursor = unsafe { extract_cursor_metadata(&buffer) };
+                if let Some(cur) = cursor {
+                    guard.cursor_queue.push_back(cur);
                 }
                 // buffer returned to stream via Drop
             })
             .register()
             .map_err(|e| PipeWireError::Connect(format!("Failed to register listener: {e}")))?;
 
-        // Connect the stream to the compositor's node.
         stream
             .connect(
                 spa::utils::Direction::Input,
@@ -316,10 +347,8 @@ impl PipeWireCapture {
             )
             .map_err(|e| PipeWireError::Connect(format!("Failed to connect stream: {e}")))?;
 
-        // Start the thread loop to begin processing PipeWire events.
         thread_loop.start();
 
-        // Wait for format negotiation (compositor sends param_changed async).
         let start = Instant::now();
         loop {
             {
@@ -334,7 +363,6 @@ impl PipeWireCapture {
             std::thread::sleep(Duration::from_millis(5));
         }
 
-        // Check for errors during negotiation.
         {
             let guard = inner.lock().unwrap();
             if let Some(ref err) = guard.error {
@@ -354,36 +382,29 @@ impl PipeWireCapture {
         })
     }
 
-    /// Get the negotiated format (only available after connection).
     pub fn format(&self) -> Option<NegotiatedFormat> {
         self.inner.lock().unwrap().format.clone()
     }
 
-    /// Block until a frame arrives, or timeout.
     pub fn wait_for_frame(&self, timeout: Duration) -> PipeWireResult<PipeWireFrame> {
         let deadline = Instant::now() + timeout;
-
         loop {
             if let Some(frame) = self.try_recv_frame()? {
                 return Ok(frame);
             }
-
             if Instant::now() > deadline {
                 return Err(PipeWireError::Timeout(timeout));
             }
-
             {
                 let guard = self.inner.lock().unwrap();
                 if let Some(ref err) = guard.error {
                     return Err(PipeWireError::Stream(err.clone()));
                 }
             }
-
             std::thread::sleep(Duration::from_millis(2));
         }
     }
 
-    /// Non-blocking: return the next frame, or `None` if none available.
     pub fn try_recv_frame(&self) -> PipeWireResult<Option<PipeWireFrame>> {
         let mut guard = self.inner.lock().unwrap();
 
@@ -396,30 +417,154 @@ impl PipeWireCapture {
             None => return Ok(None),
         };
 
+        let color_space = guard
+            .format
+            .as_ref()
+            .map(|f| f.color_space)
+            .unwrap_or_default();
+
         let raw = match guard.frames.pop_front() {
             Some(data) => data,
             None => return Ok(None),
         };
+        let cursor = guard.cursor_queue.pop_front();
 
         guard.frames_consumed += 1;
         drop(guard);
 
-        Ok(Some(convert_to_rgba_frame(&raw, &raw_format)))
+        Ok(Some(convert_to_rgba_frame(
+            &raw,
+            &raw_format,
+            color_space,
+            cursor,
+        )))
     }
 
-    /// Total frames dequeued so far.
     pub fn frames_consumed(&self) -> u64 {
         self.inner.lock().unwrap().frames_consumed
     }
 
-    /// Check if the stream has encountered an error.
     pub fn has_error(&self) -> bool {
         self.inner.lock().unwrap().error.is_some()
     }
 
-    /// Get the error message, if any.
     pub fn error_message(&self) -> Option<String> {
         self.inner.lock().unwrap().error.clone()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cursor metadata extraction (raw SPA buffer access)
+// ---------------------------------------------------------------------------
+
+// From pipewire spa/buffer/meta.h: SPA_META_Cursor = 1
+const SPA_META_CURSOR: u32 = 1;
+
+/// Extract SPA_META_Cursor from a PipeWire buffer.
+///
+/// Uses raw FFI to access the internal spa_buffer and call
+/// `spa_buffer_find_meta_data`. The safe `pipewire` crate does not expose
+/// this, so we reach through the `Buffer` struct's internal pointer.
+///
+/// # Safety
+/// `buffer` must be a valid, alive PipeWire buffer.
+unsafe fn extract_cursor_metadata(buffer: &pw::buffer::Buffer) -> Option<CursorOverlay> {
+    // Buffer layout: { buf: NonNull<pw_sys::pw_buffer>, stream: &Stream }
+    // NonNull<T> is repr(transparent) over *const T, so offset 0 is the raw pointer.
+    let pw_buf: *const pw::sys::pw_buffer =
+        *(buffer as *const pw::buffer::Buffer as *const *const pw::sys::pw_buffer);
+
+    if pw_buf.is_null() {
+        return None;
+    }
+    let spa_buf: *mut spa_sys::spa_buffer = (*pw_buf).buffer;
+    if spa_buf.is_null() {
+        return None;
+    }
+
+    let cursor_meta = spa_sys::spa_buffer_find_meta_data(
+        spa_buf,
+        SPA_META_CURSOR,
+        std::mem::size_of::<spa_sys::spa_meta_cursor>(),
+    );
+
+    if cursor_meta.is_null() {
+        return None;
+    }
+
+    let cursor: &spa_sys::spa_meta_cursor = &*cursor_meta.cast::<spa_sys::spa_meta_cursor>();
+    let bitmap_offset = cursor.bitmap_offset;
+    if bitmap_offset == 0 {
+        return None;
+    }
+
+    let bitmap_ptr =
+        (cursor_meta as *const u8).add(bitmap_offset as usize) as *const spa_sys::spa_meta_bitmap;
+    let bitmap: &spa_sys::spa_meta_bitmap = &*bitmap_ptr;
+
+    let bw = bitmap.size.width;
+    let bh = bitmap.size.height;
+    if bw == 0 || bh == 0 {
+        return None;
+    }
+
+    let bitmap_data_ptr = bitmap_ptr.add(1) as *const u8;
+    let bitmap_bytes = (bw * bh * 4) as usize;
+    let bitmap_pixels = std::slice::from_raw_parts(bitmap_data_ptr, bitmap_bytes).to_vec();
+
+    // Convert BGRA cursor bitmap to RGBA.
+    let mut rgba = bitmap_pixels;
+    for px in rgba.chunks_exact_mut(4) {
+        px.swap(0, 2); // B↔R
+    }
+
+    Some(CursorOverlay {
+        bitmap: rgba,
+        width: bw,
+        height: bh,
+        x: cursor.position.x,
+        y: cursor.position.y,
+        hotspot_x: cursor.hotspot.x,
+        hotspot_y: cursor.hotspot.y,
+    })
+}
+
+/// Alpha-blend a cursor bitmap into frame pixels at the correct position.
+fn composite_cursor_into_frame(
+    pixels: &mut [u8],
+    frame_width: u32,
+    frame_height: u32,
+    stride: u32,
+    cursor: &CursorOverlay,
+) {
+    let cx = cursor.x - cursor.hotspot_x;
+    let cy = cursor.y - cursor.hotspot_y;
+
+    let start_x = cx.max(0) as u32;
+    let start_y = cy.max(0) as u32;
+    let end_x = (cx + cursor.width as i32).min(frame_width as i32).max(0) as u32;
+    let end_y = (cy + cursor.height as i32).min(frame_height as i32).max(0) as u32;
+
+    for py in start_y..end_y {
+        let cur_row = (py - start_y) as usize;
+        let frame_row = py as usize;
+
+        for px in start_x..end_x {
+            let cur_col = (px - start_x) as usize;
+            let cur_idx = (cur_row * cursor.width as usize + cur_col) * 4;
+            let frame_idx = frame_row * stride as usize + px as usize * 4;
+
+            let ca = cursor.bitmap[cur_idx + 3] as f32 / 255.0;
+            let ca_inv = 1.0 - ca;
+
+            pixels[frame_idx] =
+                (cursor.bitmap[cur_idx] as f32 * ca + pixels[frame_idx] as f32 * ca_inv) as u8;
+            pixels[frame_idx + 1] = (cursor.bitmap[cur_idx + 1] as f32 * ca
+                + pixels[frame_idx + 1] as f32 * ca_inv) as u8;
+            pixels[frame_idx + 2] = (cursor.bitmap[cur_idx + 2] as f32 * ca
+                + pixels[frame_idx + 2] as f32 * ca_inv) as u8;
+            pixels[frame_idx + 3] = 255;
+        }
     }
 }
 
@@ -427,34 +572,48 @@ impl PipeWireCapture {
 // Frame format conversion
 // ---------------------------------------------------------------------------
 
-/// Convert a raw PipeWire frame buffer to RGBA32 pixels.
-fn convert_to_rgba_frame(raw: &[u8], format: &spa::param::video::VideoInfoRaw) -> PipeWireFrame {
+fn convert_to_rgba_frame(
+    raw: &[u8],
+    format: &spa::param::video::VideoInfoRaw,
+    color_space: ColorSpace,
+    cursor: Option<CursorOverlay>,
+) -> PipeWireFrame {
     let width = format.size().width as usize;
     let height = format.size().height as usize;
     let bpp = format_bpp(format.format()) as usize;
     let swaps_rb = format_swaps_rb(format.format());
     let stride = width * bpp;
-    let row_len = width * 4; // output is always RGBA32
+    let row_len = width * 4;
 
     let mut pixels = Vec::with_capacity(row_len * height);
 
     for row in 0..height {
         let src_start = row * stride;
         let src_row = &raw[src_start..src_start + width * bpp];
-
         for px in src_row.chunks_exact(bpp) {
             if swaps_rb {
-                pixels.push(px[2]); // R ← B position
-                pixels.push(px[1]); // G
-                pixels.push(px[0]); // B ← R position
+                pixels.push(px[2]);
+                pixels.push(px[1]);
+                pixels.push(px[0]);
                 pixels.push(px.get(3).copied().unwrap_or(255));
             } else {
-                pixels.push(px[0]); // R
-                pixels.push(px[1]); // G
-                pixels.push(px[2]); // B
+                pixels.push(px[0]);
+                pixels.push(px[1]);
+                pixels.push(px[2]);
                 pixels.push(px.get(3).copied().unwrap_or(255));
             }
         }
+    }
+
+    // Composite cursor into frame if metadata was available.
+    if let Some(ref cur) = cursor {
+        composite_cursor_into_frame(
+            &mut pixels,
+            width as u32,
+            height as u32,
+            row_len as u32,
+            cur,
+        );
     }
 
     PipeWireFrame {
@@ -462,6 +621,8 @@ fn convert_to_rgba_frame(raw: &[u8], format: &spa::param::video::VideoInfoRaw) -
         width: format.size().width,
         height: format.size().height,
         stride: row_len as u32,
+        cursor,
+        color_space,
     }
 }
 
@@ -469,7 +630,6 @@ fn convert_to_rgba_frame(raw: &[u8], format: &spa::param::video::VideoInfoRaw) -
 // SPA pod construction
 // ---------------------------------------------------------------------------
 
-/// Build an `EnumFormat` SPA pod advertising our supported video formats.
 fn build_enum_format_pod(width_hint: Option<u32>, height_hint: Option<u32>) -> Vec<u8> {
     use pw::spa::pod::Value;
     use pw::spa::utils::{Fraction, Rectangle, SpaTypes};
@@ -542,10 +702,6 @@ fn build_enum_format_pod(width_hint: Option<u32>, height_hint: Option<u32>) -> V
 // Convenience: single-frame capture
 // ---------------------------------------------------------------------------
 
-/// Capture a single video frame from a PipeWire stream.
-///
-/// Opens a connection, grabs one frame, disconnects. Replacement for
-/// `capture_single_frame_from_pipewire()`.
 pub fn capture_single_frame(
     pipewire_fd: OwnedFd,
     node_id: u32,
@@ -572,10 +728,8 @@ mod tests {
 
     #[test]
     fn test_format_swaps_rb() {
-        // BGR× formats have R and B in expected byte order
         assert!(!format_swaps_rb(spa::param::video::VideoFormat::BGRx));
         assert!(!format_swaps_rb(spa::param::video::VideoFormat::BGRA));
-        // RGB× formats are swapped
         assert!(format_swaps_rb(spa::param::video::VideoFormat::RGBx));
         assert!(format_swaps_rb(spa::param::video::VideoFormat::RGBA));
     }
@@ -597,9 +751,36 @@ mod tests {
     }
 
     #[test]
+    fn test_color_space_defaults() {
+        let cs = ColorSpace::default();
+        assert_eq!(cs.range, 1);
+        assert_eq!(cs.matrix, 1);
+        assert_eq!(cs.matrix_label(), "RGB");
+        assert_eq!(cs.range_label(), "full (0-255)");
+    }
+
+    #[test]
+    fn test_color_space_labels() {
+        assert_eq!(
+            ColorSpace {
+                range: 2,
+                matrix: 3
+            }
+            .matrix_label(),
+            "BT.709"
+        );
+        assert_eq!(
+            ColorSpace {
+                range: 2,
+                matrix: 3
+            }
+            .range_label(),
+            "limited (16-235)"
+        );
+    }
+
+    #[test]
     fn test_convert_bgra_to_rgba_indirect() {
-        // VideoInfoRaw can't be easily constructed in tests, but we verify
-        // the format utility functions that drive the conversion logic.
         assert!(!format_swaps_rb(spa::param::video::VideoFormat::BGRA));
         assert!(format_swaps_rb(spa::param::video::VideoFormat::RGBA));
         assert_eq!(format_bpp(spa::param::video::VideoFormat::BGRA), 4);

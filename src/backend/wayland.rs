@@ -320,7 +320,7 @@ impl WaylandBackend {
         let select_request = screencast
             .select_sources(
                 &session,
-                CursorMode::Embedded,
+                CursorMode::Metadata,
                 target.source_type().into(),
                 false,
                 restore_token,
