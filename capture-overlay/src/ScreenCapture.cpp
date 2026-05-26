@@ -47,7 +47,10 @@ bool isGnomeWaylandSession()
 
 bool shouldUseScreenshotPortal()
 {
-    return true;
+    // On GNOME Wayland sessions the GNOME Shell D-Bus screenshot API
+    // (via the daemon) is preferred — it silently captures without the
+    // compositor flash/sound that the XDG Screenshot portal triggers.
+    return !isGnomeWaylandSession();
 }
 
 bool extractShellScreenshotPath(const QDBusMessage& message,

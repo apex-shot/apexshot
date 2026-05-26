@@ -2868,6 +2868,7 @@ pub(crate) fn draw_overlay(
             screen_height,
             background,
             st.hovered_scroll_popup_close,
+            st.hovered_scroll_download,
         );
     }
 }
@@ -2995,7 +2996,8 @@ fn draw_scroll_popup(
     screen_height: f64,
     background: Option<&BackgroundFrame>,
     hovered_close: bool,
-) {
+    hovered_download: bool,
+) -> RectF {
     let _ = context.save();
 
     let popup_w = 360.0;
@@ -3064,13 +3066,28 @@ fn draw_scroll_popup(
     let btn_h = 34.0;
     let btn_x = popup_x + (popup_w - btn_w) / 2.0;
     let btn_y = popup_y + 102.0;
+
+    let btn_rect = RectF {
+        x: btn_x,
+        y: btn_y,
+        width: btn_w,
+        height: btn_h,
+    };
+
+    // Button shadow
     rounded_rect_path(context, btn_x, btn_y + 1.5, btn_w, btn_h, 10.0);
     context.set_source_rgba(0.0, 0.0, 0.0, 0.22);
     let _ = context.fill();
 
+    // Button gradient — brightened on hover
     let btn_grad = gtk4::cairo::LinearGradient::new(0.0, btn_y, 0.0, btn_y + btn_h);
-    btn_grad.add_color_stop_rgba(0.0, 242.0 / 255.0, 116.0 / 255.0, 70.0 / 255.0, 0.96);
-    btn_grad.add_color_stop_rgba(1.0, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 0.94);
+    if hovered_download {
+        btn_grad.add_color_stop_rgba(0.0, 1.0, 142.0 / 255.0, 88.0 / 255.0, 0.98);
+        btn_grad.add_color_stop_rgba(1.0, 220.0 / 255.0, 112.0 / 255.0, 68.0 / 255.0, 0.96);
+    } else {
+        btn_grad.add_color_stop_rgba(0.0, 242.0 / 255.0, 116.0 / 255.0, 70.0 / 255.0, 0.96);
+        btn_grad.add_color_stop_rgba(1.0, 176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 0.94);
+    }
     rounded_rect_path(context, btn_x, btn_y, btn_w, btn_h, 10.0);
     let _ = context.set_source(&btn_grad);
     let _ = context.fill_preserve();
@@ -3094,6 +3111,8 @@ fn draw_scroll_popup(
     }
 
     let _ = context.restore();
+
+    btn_rect
 }
 
 fn draw_crosshair_mode_bubble(

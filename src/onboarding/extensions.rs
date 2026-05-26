@@ -4,7 +4,7 @@ use std::process::Command;
 // TODO: Update these URLs when extensions are published
 const GNOME_EXTENSION_URL: &str =
     "https://github.com/apex-shot/apexshot/releases/tag/gnome-extension-v2";
-const CHROME_EXTENSION_URL: &str =
+pub const CHROME_EXTENSION_URL: &str =
     "https://chromewebstore.google.com/detail/apexshot/kaejmfabajnakpodjffipckmcpfpdenj";
 const EXTENSION_UUID: &str = "apexshot-gnome-integration@apexshot.github.io";
 const OLD_EXTENSION_UUID: &str = "apexshot-preview-helper@apexshot.github.io";

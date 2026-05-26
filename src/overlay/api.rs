@@ -76,6 +76,24 @@ impl AreaSelector {
     pub fn new() -> Self {
         let mut state = SelectorState::default();
 
+        // Populate recording defaults from app config so the Rust overlay
+        // recording checkboxes stay in sync with Settings > After Capture.
+        let app_config = crate::config::load_config();
+        state.recording.rec_controls = app_config.rec_controls;
+        state.recording.display_rec_time = app_config.rec_display_time;
+        state.recording.do_not_disturb = app_config.rec_notifications;
+        state.recording.remember_selection = app_config.rec_remember_selection;
+        state.recording.dim_screen = app_config.rec_dim_screen;
+        state.recording.show_countdown = app_config.rec_countdown;
+        state.recording.video_max_res = app_config.rec_video_max_res as usize;
+        state.recording.video_fps = app_config.rec_video_fps as usize;
+        state.recording.record_mono = app_config.rec_video_mono;
+        state.recording.open_editor = app_config.rec_video_open_editor;
+        state.recording.gif_fps = app_config.rec_gif_fps as f64;
+        state.recording.gif_quality = app_config.rec_gif_quality;
+        state.recording.optimize_gif = app_config.rec_gif_optimize;
+        state.recording.gif_size_idx = app_config.rec_gif_size_idx as usize;
+
         // Populate windows from compositor if available
         if let Some(compositor) = crate::compositor::detect_compositor() {
             if let Ok(windows) = compositor.get_windows() {

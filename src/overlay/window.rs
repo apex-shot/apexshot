@@ -1067,6 +1067,7 @@ pub(crate) fn setup_window(
                     let changed = st.hovered_window_picker_entry != next_entry;
                     st.hovered_window_picker_entry = next_entry;
                     st.hovered_scroll_popup_close = false;
+                    st.hovered_scroll_download = false;
                     st.hover_tool_index = None;
                     st.hover_size_panel = false;
                     st.hover_crop_panel = false;
@@ -1092,10 +1093,23 @@ pub(crate) fn setup_window(
                         && x <= close_x + close_size
                         && y >= close_y
                         && y <= close_y + close_size;
-                    let changed = st.hovered_scroll_popup_close != next_hover_close;
-                    if changed {
+                    let changed_close = st.hovered_scroll_popup_close != next_hover_close;
+                    if changed_close {
                         st.hovered_scroll_popup_close = next_hover_close;
                     }
+
+                    // Download button hover
+                    let btn_w = 182.0;
+                    let btn_h = 34.0;
+                    let btn_x = popup_x + (popup_w - btn_w) / 2.0;
+                    let btn_y = popup_y + 102.0;
+                    let next_hover_download =
+                        x >= btn_x && x <= btn_x + btn_w && y >= btn_y && y <= btn_y + btn_h;
+                    let changed_download = st.hovered_scroll_download != next_hover_download;
+                    if changed_download {
+                        st.hovered_scroll_download = next_hover_download;
+                    }
+
                     st.hover_tool_index = None;
                     st.hover_size_panel = false;
                     st.hover_crop_panel = false;
@@ -1581,6 +1595,27 @@ pub(crate) fn setup_window(
             {
                 st.scroll_popup_open = false;
                 st.hovered_scroll_popup_close = false;
+                st.hovered_scroll_download = false;
+                drop(st);
+                if let Some(da) = drawing_area_weak_click.upgrade() {
+                    da.queue_draw();
+                }
+                return;
+            }
+
+            // Check if download button clicked
+            let btn_w = 182.0;
+            let btn_h = 34.0;
+            let btn_x = popup_x + (popup_w - btn_w) / 2.0;
+            let btn_y = popup_y + 102.0;
+            if x >= btn_x && x <= btn_x + btn_w && y >= btn_y && y <= btn_y + btn_h {
+                let url = crate::onboarding::extensions::CHROME_EXTENSION_URL.to_string();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                });
+                st.scroll_popup_open = false;
+                st.hovered_scroll_popup_close = false;
+                st.hovered_scroll_download = false;
                 drop(st);
                 if let Some(da) = drawing_area_weak_click.upgrade() {
                     da.queue_draw();
@@ -1592,6 +1627,7 @@ pub(crate) fn setup_window(
             if !(x >= popup_x && x <= popup_x + popup_w && y >= popup_y && y <= popup_y + popup_h) {
                 st.scroll_popup_open = false;
                 st.hovered_scroll_popup_close = false;
+                st.hovered_scroll_download = false;
                 drop(st);
                 if let Some(da) = drawing_area_weak_click.upgrade() {
                     da.queue_draw();
@@ -1902,6 +1938,8 @@ pub(crate) fn setup_window(
             Some(ToolbarIcon::Window) => {
                 st.capture_crop_menu_open = false;
                 st.scroll_popup_open = false;
+                st.hovered_scroll_popup_close = false;
+                st.hovered_scroll_download = false;
                 st.active_tool_index = TOOLBAR_WINDOW_INDEX;
                 st.intent = OverlayIntent::Area;
                 st.hover_tool_index = None;

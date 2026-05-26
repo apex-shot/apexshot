@@ -72,6 +72,7 @@ pub(crate) struct SelectorState {
     // ── Scroll popup state ──
     pub(crate) scroll_popup_open: bool,
     pub(crate) hovered_scroll_popup_close: bool,
+    pub(crate) hovered_scroll_download: bool,
     // ── Recording panel state (separated) ──
     pub(crate) recording: RecordingState,
     // ── Capture intent (mirrors C++ CaptureIntent) ──
@@ -117,6 +118,7 @@ impl Default for SelectorState {
             hovered_countdown_cancel: false,
             scroll_popup_open: false,
             hovered_scroll_popup_close: false,
+            hovered_scroll_download: false,
             recording: RecordingState::default(),
             intent: OverlayIntent::default(),
             windows: Vec::new(),

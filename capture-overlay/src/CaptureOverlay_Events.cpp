@@ -3,11 +3,13 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QApplication>
+#include <QDesktopServices>
 #include <QMessageBox>
 #include <QDateTime>
 #include <QPoint>
 #include <QRect>
 #include <QTimer>
+#include <QUrl>
 #include <cmath>
 
 namespace {
@@ -212,14 +214,10 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    // Right-click on webcam tile shows context menu
+    // Right-click on recording panel tiles
     if (event->button() == Qt::RightButton && m_recordingPanelOpen) {
-        std::fprintf(stderr, "[mousePressEvent] Right-click detected, m_recordingPanelOpen=true\n");
         RecordPanelTile tile = hitTestRecordingPanel(pos);
-        std::fprintf(stderr, "[mousePressEvent] hitTest returned tile=%d (Webcam=%d)\n", 
-                     (int)tile, (int)RecordPanelTile::Webcam);
         if (tile == RecordPanelTile::Webcam) {
-            std::fprintf(stderr, "[mousePressEvent] Showing webcam context menu\n");
             const QRect sel = m_selection.normalized();
             const double contextualX = std::max(10.0, std::min(sel.x() + (sel.width() - 440.0) / 2.0, width() - 450.0));
             const double contextualY = std::max(10.0, std::min(sel.y() + 24.0, height() - 510.0));
@@ -227,15 +225,86 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             showWebcamContextMenu(mapToGlobal(QPoint((int)contextualX, (int)contextualY)));
             return;
         }
+        if (tile == RecordPanelTile::Mic) {
+            closeRecordingMenus();
+            m_micVolumePopupOpen = !m_micVolumePopupOpen;
+            m_speakerVolumePopupOpen = false;
+            m_volumeSliderDragging = false;
+            m_recordConfigRequested = false;
+            update();
+            return;
+        }
+        if (tile == RecordPanelTile::Speaker) {
+            closeRecordingMenus();
+            m_speakerVolumePopupOpen = !m_speakerVolumePopupOpen;
+            m_micVolumePopupOpen = false;
+            m_volumeSliderDragging = false;
+            m_recordConfigRequested = false;
+            update();
+            return;
+        }
     }
 
     if (event->button() != Qt::LeftButton) return;
+
+    // ── Volume popup interactions ──────────────────────────────────────────
+    if ((m_micVolumePopupOpen || m_speakerVolumePopupOpen) && !m_volumeSliderRect.isNull()) {
+        if (m_volumeSliderRect.contains(pos)) {
+            m_volumeSliderDragging = true;
+            double relX = pos.x() - m_volumeSliderRect.x();
+            double fraction = qBound(0.0, relX / m_volumeSliderRect.width(), 1.0);
+            if (fraction < 0.02) fraction = 0.0;
+            if (fraction > 0.98) fraction = 1.0;
+            if (m_micVolumePopupOpen) {
+                m_micVolume = fraction;
+                runPactlVolume("mic", qRound(fraction * 100.0));
+            } else {
+                m_speakerVolume = fraction;
+                runPactlVolume("speaker", qRound(fraction * 100.0));
+            }
+            update();
+            return;
+        }
+        // Click outside volume popup — close it
+        if (!m_volumePopupRect.contains(pos)) {
+            m_micVolumePopupOpen = false;
+            m_speakerVolumePopupOpen = false;
+            m_volumeSliderDragging = false;
+            update();
+            return;
+        }
+        // Click inside popup but not on slider — just swallow the click
+        return;
+    }
+
+    // ── Scroll popup interactions ─────────────────────────────────────────
+    if (m_scrollPopupOpen) {
+        if (m_scrollCloseRect.contains(pos)) {
+            m_scrollPopupOpen = false;
+            m_hoveredScrollClose = false;
+            update();
+            return;
+        }
+        if (m_scrollDownloadBtnRect.contains(pos)) {
+            QDesktopServices::openUrl(QUrl("https://chromewebstore.google.com/detail/apexshot/kaejmfabajnakpodjffipckmcpfpdenj"));
+            return;
+        }
+        // Click outside scroll popup — close it
+        if (!m_scrollPopupRect.contains(pos)) {
+            m_scrollPopupOpen = false;
+            m_hoveredScrollClose = false;
+            update();
+            return;
+        }
+        return;
+    }
 
     // ── Global Dropdown Logic ───────────────────────────────────────────────
     if (m_dropdownOpen != -1) {
         for (int i = 0; i < m_dropdownItemRects.size(); ++i) {
             if (m_dropdownItemRects[i].contains(pos)) {
                 if (m_dropdownValuePtr) *m_dropdownValuePtr = i;
+                m_recordConfigRequested = true; // persist settings on exit
                 m_dropdownOpen = -1;
                 m_dropdownColors.clear();
                 m_hoveredDropdownItem = -1;
@@ -269,6 +338,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         for (int i = 0; i < m_cropMenuItemRects.size(); ++i) {
             if (m_cropMenuItemRects[i].contains(pos)) {
                 m_recordAspectRatioIndex = i;
+                m_recordConfigRequested = true;
                 m_cropMenuOpen = false;
                 m_hoveredCropMenuItem = -1;
                 applyCurrentRecordingAspect();
@@ -284,6 +354,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
     // Settings menu clicks
     if (m_settingsOpen) {
         if (m_settingsPanelRect.contains(pos)) {
+            m_recordConfigRequested = true; // persist settings on exit
             // Check in reverse order so the latest clickable rects win when rows overlap.
             for (int i = static_cast<int>(m_settingsClickableRects.size()) - 1; i >= 0; --i) {
                 if (m_settingsClickableRects[i].contains(pos)) {
@@ -398,14 +469,17 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         }
         case RecordPanelTile::Mic:
             m_recMic = !m_recMic;
+            m_recordConfigRequested = true;
             update();
             return;
         case RecordPanelTile::Speaker:
             m_recSpeaker = !m_recSpeaker;
+            m_recordConfigRequested = true;
             update();
             return;
         case RecordPanelTile::Webcam:
             m_recWebcam = !m_recWebcam;
+            m_recordConfigRequested = true;
             if (m_recWebcam && m_webcamDevice < 0 && !m_webcamDeviceIndexes.isEmpty()) {
                 m_webcamDevice = m_webcamDeviceIndexes.first();
                 startWebcamCapture();
@@ -422,6 +496,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 confirmRecordingSelection();
             } else {
                 m_recordType = RecordType::Video;
+                m_recordConfigRequested = true;
                 update();
             }
             return;
@@ -431,6 +506,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 confirmRecordingSelection();
             } else {
                 m_recordType = RecordType::Gif;
+                m_recordConfigRequested = true;
                 update();
             }
             return;
@@ -551,8 +627,9 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 closeCaptureCropMenu();
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Area;
+                m_scrollPopupOpen = true;
+                m_hoveredScrollClose = false;
                 update();
-                showWebScrollCaptureInfo(this);
                 return true;
             } else if (toolIndex == 4) {
                 closeCaptureCropMenu();
@@ -581,6 +658,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Record;
                 m_recordingPanelOpen = true;
+                m_recordConfigRequested = true;
                 m_micTimer->start();
                 m_recordingToolsHidden = false;
                 if (m_recWebcam && m_webcamDevice >= 0)
@@ -753,6 +831,25 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
+
+    // ── Volume Slider Drag ─────────────────────────────────────────────────
+    if (m_volumeSliderDragging && !m_volumeSliderRect.isNull()) {
+        double relX = pos.x() - m_volumeSliderRect.x();
+        double fraction = qBound(0.0, relX / m_volumeSliderRect.width(), 1.0);
+        // Snap to 0 and 1 near edges
+        if (fraction < 0.02) fraction = 0.0;
+        if (fraction > 0.98) fraction = 1.0;
+        if (m_micVolumePopupOpen) {
+            m_micVolume = fraction;
+            runPactlVolume("mic", qRound(fraction * 100.0));
+        } else if (m_speakerVolumePopupOpen) {
+            m_speakerVolume = fraction;
+            runPactlVolume("speaker", qRound(fraction * 100.0));
+        }
+        update();
+        return;
+    }
+
     if (m_draggingWebcam && m_hasSelection) {
         const QRect sel = m_selection.normalized();
         setWebcamPreviewTopLeft(QPointF(pos) - m_webcamDragOffset,
@@ -877,6 +974,17 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
             }
         }
         updateCursor(pos);
+        return;
+    }
+
+    // Scroll capture popup hover
+    if (m_scrollPopupOpen && !m_scrollPopupRect.isNull() && m_scrollPopupRect.contains(pos)) {
+        const bool hoveringClose = m_scrollCloseRect.contains(pos);
+        if (hoveringClose != m_hoveredScrollClose) {
+            m_hoveredScrollClose = hoveringClose;
+            update();
+        }
+        setCursor(hoveringClose ? Qt::PointingHandCursor : Qt::ArrowCursor);
         return;
     }
 
@@ -1135,9 +1243,15 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
 
     if (m_gifFpsDragging) {
         m_gifFpsDragging = false;
+        m_recordConfigRequested = true;
     }
     if (m_gifQualityDragging) {
         m_gifQualityDragging = false;
+        m_recordConfigRequested = true;
+    }
+    if (m_volumeSliderDragging) {
+        m_volumeSliderDragging = false;
+        update();
     }
     if (m_draggingWebcam) {
         m_draggingWebcam = false;

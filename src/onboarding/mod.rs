@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 mod cloud;
 mod complete;
-mod extensions;
+pub mod extensions;
 mod welcome;
 
 use crate::settings::ui_support::{install_settings_css, traffic_light_button};

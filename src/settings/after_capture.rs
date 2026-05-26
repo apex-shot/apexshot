@@ -5,6 +5,7 @@ use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, Grid, Label, Orientati
 pub struct AfterCaptureWidgets {
     pub wrapper: GtkBox,
     pub screenshot_after_capture_checks: Vec<CheckButton>,
+    pub rec_open_video_editor: CheckButton,
 }
 
 pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
@@ -82,9 +83,10 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         ),
         ("Save", config.after_capture_save),
         ("Open Annotate tool", config.after_capture_open_annotate),
-        ("Open Video Editor", false),
+        ("Open Video Editor", config.rec_video_open_editor),
     ];
     let mut screenshot_after_capture_checks = Vec::new();
+    let mut rec_open_video_editor = CheckButton::new();
 
     for (index, (action, active)) in screenshot_after_capture_rows.into_iter().enumerate() {
         let row = Grid::new();
@@ -110,6 +112,10 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         recording_cell.set_halign(Align::Center);
         if action != "Open Annotate tool" {
             let recording_check = CheckButton::new();
+            if action == "Open Video Editor" {
+                recording_check.set_active(active);
+                rec_open_video_editor = recording_check.clone();
+            }
             recording_cell.append(&recording_check);
         }
 
@@ -143,6 +149,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     AfterCaptureWidgets {
         wrapper: after_capture_wrapper,
         screenshot_after_capture_checks,
+        rec_open_video_editor,
     }
 }
 

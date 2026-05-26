@@ -308,6 +308,7 @@ static Qt::WindowFlags captureOverlayWindowFlags()
 void CaptureOverlay::openRecordingPanelForShortcut()
 {
     m_recordingPanelOpen = true;
+    m_recordConfigRequested = true;
     m_micTimer->start();
     m_recordingToolsHidden = false;
     m_settingsOpen = false;

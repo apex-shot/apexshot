@@ -154,7 +154,6 @@ void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
 
 void CaptureOverlay::cancelSelection()
 {
-    m_recordConfigRequested = false;
     resetRecordingPanelToAreaMode();
     m_captureCropMenuOpen = false;
     m_hoveredCaptureCropMenuItem = -1;
@@ -167,7 +166,11 @@ void CaptureOverlay::cancelSelection()
         m_countdownTimer->stop();
     }
     releaseKeyboard();
-    QApplication::exit(1);
+    if (m_recordConfigRequested) {
+        QApplication::exit(6); // kExitRecordConfigUpdated
+    } else {
+        QApplication::exit(1);
+    }
 }
 
 QRect CaptureOverlay::handleRect(const QPoint& center) const

@@ -9,6 +9,7 @@
 #include <QPixmap>
 #include <QColor>
 #include <QLinearGradient>
+#include <QProcess>
 #include <QRadialGradient>
 #include <QPen>
 #include <QDateTime>
@@ -955,6 +956,42 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
         p.restore();
     } else {
         m_countdownBubbleRect = QRectF();
+    }
+
+    // ── Volume popup (Mic / Speaker) ─────────────────────────────────────
+    if (m_recordingPanelOpen) {
+        const auto sel = m_selection.normalized();
+        const double sx = sel.x(), sy = sel.y(), selW = sel.width(), selH = sel.height();
+        // Position top-centre of selection like the settings menu (matches Rust overlay)
+        const double popupX = qBound(10.0, (sx + (selW - 280.0) / 2.0), width() - 290.0);
+        const double popupY = qBound(10.0, sy + 24.0, height() - 140.0);
+
+        if (m_micVolumePopupOpen) {
+            drawVolumePopup(p, popupX, popupY, "Microphone", m_micVolume, true);
+        } else {
+            m_volumePopupRect = QRectF();
+        }
+        if (m_speakerVolumePopupOpen) {
+            drawVolumePopup(p, popupX, popupY, "Speaker", m_speakerVolume, true);
+        } else if (!m_micVolumePopupOpen) {
+            m_volumePopupRect = QRectF();
+        }
+    }
+
+    // ── Scroll capture popup ──────────────────────────────────────────────
+    if (m_scrollPopupOpen) {
+        // Center on selection area when available, otherwise on screen
+        // (matches Rust overlay behavior)
+        double cx, cy;
+        if (m_hasSelection) {
+            const auto sel = m_selection.normalized();
+            cx = sel.x() + sel.width() / 2.0;
+            cy = sel.y() + sel.height() / 2.0;
+        } else {
+            cx = width() / 2.0;
+            cy = height() / 2.0;
+        }
+        drawScrollPopup(p, cx, cy);
     }
 }
 
@@ -2008,5 +2045,214 @@ void CaptureOverlay::drawToolbar(QPainter& p,
             drawScrollButton(scrollPrimaryButtonRect(), QStringLiteral("Start capture"), true);
         }
     }
+}
+
+// ── Volume Popup (Mic / Speaker) ──────────────────────────────────────────
+// Mirrors draw_volume_popup from src/overlay/drawing.rs
+
+void CaptureOverlay::runPactlVolume(const QString& type, int pct)
+{
+    QStringList args;
+    if (type == "mic") {
+        args << "set-source-volume" << "@DEFAULT_SOURCE@" << QString("%1%").arg(pct);
+    } else {
+        args << "set-sink-volume" << "@DEFAULT_SINK@" << QString("%1%").arg(pct);
+    }
+    QProcess::startDetached("pactl", args);
+}
+
+void CaptureOverlay::drawVolumePopup(QPainter& p,
+                                      double panelX, double panelY,
+                                      const QString& title,
+                                      double volume,
+                                      bool isOpen)
+{
+    if (!isOpen) return;
+
+    const double menuW = 280.0;
+    const double menuH = 130.0;
+    const double scrW = width();
+    const double scrH = height();
+    // panelX/panelY are pre-computed top-centre-of-selection positions,
+    // already clamped to screen bounds by the caller. Apply the same
+    // bounds clamping as a safety net.
+    const double menuX = qBound(10.0, panelX, scrW - menuW - 10.0);
+    const double menuY = qBound(10.0, panelY, scrH - menuH - 10.0);
+
+    const QColor accentColor(176, 92, 56);
+
+    // Warm radial glow
+    {
+        QRadialGradient glow(menuX + menuW / 2.0, menuY + menuH / 2.0, menuW);
+        glow.setColorAt(0, QColor(accentColor.red(), accentColor.green(), accentColor.blue(), 40));
+        glow.setColorAt(0.6, QColor(0, 0, 0, 0));
+        p.fillRect(QRectF(menuX - 40, menuY - 40, menuW + 80, menuH + 80), glow);
+    }
+
+    drawFrostedPanel(p, menuX, menuY, menuW, menuH, 12.0, m_blurredBg.isNull() ? nullptr : &m_blurredBg, scrW, scrH);
+
+    // Header: "RECORDING DEVICE" label
+    QFont headerFont("Sans", 10, QFont::Bold);
+    p.setFont(headerFont);
+    p.setPen(QColor(255, 224, 196, 176));
+    p.drawText(QRectF(menuX + 18, menuY + 20, menuW - 36, 18), Qt::AlignLeft | Qt::AlignVCenter, "RECORDING DEVICE");
+
+    // Title (Mic / Speaker)
+    QFont titleFont("Sans", 18, QFont::Bold);
+    p.setFont(titleFont);
+    p.setPen(QColor(245, 245, 246, 255));
+    p.drawText(QRectF(menuX + 18, menuY + 42, menuW - 36, 22), Qt::AlignLeft | Qt::AlignVCenter, title);
+
+    // Slider row
+    const double rowY = menuY + 78.0;
+    const double rowH = 46.0;
+    const double sliderX = menuX + 83.0;
+    const double sliderW = 140.0;
+    const double sliderTrackH = 6.0;
+    const double trackY = rowY + (rowH - sliderTrackH) / 2.0;
+
+    // "Volume:" label
+    QFont labelFont("Sans", 13, QFont::Bold);
+    p.setFont(labelFont);
+    p.setPen(QColor(255, 255, 255, 210));
+    p.drawText(QRectF(menuX + 18, rowY, 65, rowH), Qt::AlignLeft | Qt::AlignVCenter, "Volume:");
+
+    // Percentage badge
+    const int pct = qBound(0, qRound(volume * 100.0), 100);
+    QFont pctFont("Sans", 11, QFont::Bold);
+    p.setFont(pctFont);
+    p.setPen(QColor(255, 232, 214, 220));
+    p.drawText(QRectF(menuX + menuW - 55, rowY, 43, rowH), Qt::AlignRight | Qt::AlignVCenter, QString("%1%").arg(pct));
+
+    // Track background
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(255, 255, 255, m_volumeSliderDragging ? 36 : 28));
+    p.drawRoundedRect(QRectF(sliderX, trackY, sliderW, sliderTrackH), 3, 3);
+
+    // Filled portion
+    const double filledW = qBound(0.0, volume, 1.0) * sliderW;
+    if (filledW > 1.0) {
+        QLinearGradient fillGrad(sliderX, 0, sliderX + sliderW, 0);
+        fillGrad.setColorAt(0.0, QColor(204, 122, 80, 235));
+        fillGrad.setColorAt(1.0, QColor(255, 178, 122, 235));
+        p.setBrush(fillGrad);
+        p.drawRoundedRect(QRectF(sliderX, trackY, filledW, sliderTrackH), 3, 3);
+    }
+
+    // Slider handle
+    const double handleW = m_volumeSliderDragging ? 18.0 : 14.0;
+    const double handleH = 26.0;
+    const double handleX = sliderX + filledW - handleW / 2.0;
+    const double handleY = trackY + sliderTrackH / 2.0 - handleH / 2.0;
+
+    // Handle shadow
+    p.setBrush(QColor(0, 0, 0, 90));
+    p.drawRoundedRect(QRectF(handleX + 0.6, handleY + 1.4, handleW, handleH), 6, 6);
+
+    // Handle body gradient (white to light gray)
+    QLinearGradient handleGrad(0, handleY, 0, handleY + handleH);
+    handleGrad.setColorAt(0.0, QColor(255, 255, 255, 255));
+    handleGrad.setColorAt(1.0, QColor(225, 225, 230, 255));
+    p.setBrush(handleGrad);
+    p.drawRoundedRect(QRectF(handleX, handleY, handleW, handleH), 6, 6);
+
+    // Cache layout rects for hit testing
+    m_volumePopupRect = QRectF(menuX, menuY, menuW, menuH);
+    m_volumeSliderRect = QRectF(sliderX, trackY - 12, sliderW, sliderTrackH + 24);
+    m_volumeHandleRect = QRectF(handleX - 4, handleY - 4, handleW + 8, handleH + 8);
+}
+
+// ── Scroll Capture Popup ──────────────────────────────────────────────────
+// Mirrors draw_scroll_popup from src/overlay/drawing.rs
+
+void CaptureOverlay::drawScrollPopup(QPainter& p, double centerX, double centerY)
+{
+    if (!m_scrollPopupOpen) return;
+
+    const double popupW = 360.0;
+    const double popupH = 170.0;
+    const double scrW = width();
+    const double scrH = height();
+    const double popupX = qBound(10.0, centerX - popupW / 2.0, scrW - popupW - 10.0);
+    const double popupY = qBound(10.0, centerY - popupH / 2.0, scrH - popupH - 10.0);
+
+    const QColor accentColor(176, 92, 56);
+
+    // Warm radial glow
+    {
+        QRadialGradient glow(popupX + popupW / 2.0, popupY + popupH / 2.0, popupW / 2.0);
+        glow.setColorAt(0, QColor(accentColor.red(), accentColor.green(), accentColor.blue(), 40));
+        glow.setColorAt(0.6, QColor(0, 0, 0, 0));
+        p.fillRect(QRectF(popupX - 40, popupY - 40, popupW + 80, popupH + 80), glow);
+    }
+
+    drawFrostedPanel(p, popupX, popupY, popupW, popupH, 12.0, m_blurredBg.isNull() ? nullptr : &m_blurredBg, scrW, scrH);
+
+    // Close button
+    const double closeSize = 22.0;
+    const double closeX = popupX + popupW - closeSize - 10.0;
+    const double closeY = popupY + 10.0;
+    if (m_hoveredScrollClose) {
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(204, 64, 38, 255));
+    } else {
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(60, 60, 60, 255));
+    }
+    p.drawRoundedRect(QRectF(closeX, closeY, closeSize, closeSize), 5, 5);
+
+    // X mark
+    p.setPen(QPen(QColor(255, 255, 255, 255), 1.5, Qt::SolidLine, Qt::RoundCap));
+    p.drawLine(QPointF(closeX + 6, closeY + 6),
+               QPointF(closeX + closeSize - 6, closeY + closeSize - 6));
+    p.drawLine(QPointF(closeX + closeSize - 6, closeY + 6),
+               QPointF(closeX + 6, closeY + closeSize - 6));
+
+    // Title
+    QFont titleFont("Sans", 13, QFont::Bold);
+    p.setFont(titleFont);
+    p.setPen(QColor(255, 255, 255, 255));
+    p.drawText(QRectF(popupX + 20, popupY + 24, popupW - 60, 20), Qt::AlignLeft | Qt::AlignVCenter, "Scroll Capture");
+
+    // Body text
+    QFont bodyFont("Sans", 12);
+    p.setFont(bodyFont);
+    p.setPen(QColor(255, 255, 255, 180));
+    p.drawText(QRectF(popupX + 20, popupY + 55, popupW - 40, 18), Qt::AlignLeft | Qt::AlignVCenter, "Scroll capture requires the ApexShot");
+    p.drawText(QRectF(popupX + 20, popupY + 73, popupW - 40, 18), Qt::AlignLeft | Qt::AlignVCenter, "browser extension.");
+
+    // CTA button — orange gradient, matching Rust overlay
+    const double btnW = 182.0;
+    const double btnH = 34.0;
+    const double btnX = popupX + (popupW - btnW) / 2.0;
+    const double btnY = popupY + 102.0;
+
+    // Button shadow
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 56));
+    p.drawRoundedRect(QRectF(btnX, btnY + 1.5, btnW, btnH), 10, 10);
+
+    // Button gradient
+    QLinearGradient btnGrad(0, btnY, 0, btnY + btnH);
+    btnGrad.setColorAt(0.0, QColor(242, 116, 70, 245));
+    btnGrad.setColorAt(1.0, QColor(176, 92, 56, 240));
+    p.setBrush(btnGrad);
+    p.drawRoundedRect(QRectF(btnX, btnY, btnW, btnH), 10, 10);
+
+    // Button border
+    p.setPen(QPen(QColor(255, 224, 196, 87), 1.0));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(btnX, btnY, btnW, btnH), 10, 10);
+
+    // Button text
+    QFont btnFont("Sans", 13, QFont::Bold);
+    p.setFont(btnFont);
+    p.setPen(QColor(255, 255, 255, 255));
+    p.drawText(QRectF(btnX, btnY, btnW, btnH), Qt::AlignCenter, "Download Extension");
+
+    // Cache layout rects for hit testing
+    m_scrollPopupRect = QRectF(popupX, popupY, popupW, popupH);
+    m_scrollCloseRect = QRectF(closeX, closeY, closeSize, closeSize);
+    m_scrollDownloadBtnRect = QRectF(btnX, btnY, btnW, btnH);
 }
 

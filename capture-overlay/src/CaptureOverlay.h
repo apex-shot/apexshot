@@ -251,6 +251,13 @@ private:
                           double panelX, double startY);
     void drawDropdownPopup(QPainter& p, const QRectF& anchorRect,
                            const QStringList& options, int selectedIndex);
+    void drawVolumePopup(QPainter& p,
+                         double panelX, double panelY,
+                         const QString& title,
+                         double volume,
+                         bool isOpen);
+    void drawScrollPopup(QPainter& p, double centerX, double centerY);
+    static void runPactlVolume(const QString& type, int pct);
     QRectF scrollPrimaryButtonRect() const;
     QSizeF webcamPreviewSize(double selW, double selH) const;
     QRectF webcamPreviewRect(double selX, double selY, double selW, double selH) const;
@@ -446,6 +453,27 @@ private:
     double m_micLevel; // Normalized level for animation
     double m_speakerLevel; // Normalized level for speaker animation
     QTimer* m_micTimer;
+
+    // Volume popups (mic & speaker)
+    double m_micVolume = 1.0;
+    double m_speakerVolume = 1.0;
+    bool m_micVolumePopupOpen = false;
+    bool m_speakerVolumePopupOpen = false;
+    bool m_volumeSliderDragging = false;
+
+    // Scroll capture popup
+    bool m_scrollPopupOpen = false;
+    bool m_hoveredScrollClose = false;
+
+    // Volume popup layout cache (for hit testing)
+    QRectF m_volumePopupRect;
+    QRectF m_volumeSliderRect;
+    QRectF m_volumeHandleRect;
+
+    // Scroll popup layout cache (for hit testing)
+    QRectF m_scrollPopupRect;
+    QRectF m_scrollCloseRect;
+    QRectF m_scrollDownloadBtnRect;
     
     // Recording panel layout caches (for hit testing)
     QRectF m_recPanelRect;

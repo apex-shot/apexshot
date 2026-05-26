@@ -438,6 +438,7 @@ fn build_settings_window(app: &Application) {
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),
         screenshot_open_annotate: after_capture.screenshot_after_capture_checks[3].clone(),
+        rec_open_video_editor: after_capture.rec_open_video_editor.clone(),
         quick_access_position: quick_access.position_input.clone(),
         quick_access_multi_display: quick_access.multi_display_check.clone(),
         quick_access_overlay_size: quick_access.overlay_size_input.clone(),
