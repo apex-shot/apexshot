@@ -209,62 +209,37 @@ pub(crate) fn start_webcam_preview(_device: i32, _flip: bool) -> Option<WebcamPr
     })
 }
 
-/// Open the Camera portal via raw D-Bus (avoids ashpd pipewire version conflict).
+/// Open the Camera portal via ashpd (proper request/response handling).
 async fn open_camera_portal() -> Result<Option<(std::os::fd::OwnedFd, u32)>, String> {
-    use zbus::zvariant::OwnedFd;
+    use ashpd::desktop::camera::Camera;
 
-    let conn = zbus::Connection::session()
+    let camera = Camera::new()
         .await
-        .map_err(|e| format!("D-Bus session: {e}"))?;
+        .map_err(|e| format!("Camera proxy: {e}"))?;
 
-    let proxy = zbus::Proxy::new(
-        &conn,
-        "org.freedesktop.portal.Desktop",
-        "/org/freedesktop/portal/desktop",
-        "org.freedesktop.portal.Camera",
-    )
-    .await
-    .map_err(|e| format!("Camera proxy: {e}"))?;
-
-    // Check if camera is present.
-    let is_present: bool = proxy
-        .get_property("IsCameraPresent")
+    if !camera
+        .is_present()
         .await
-        .map_err(|e| format!("IsCameraPresent: {e}"))?;
-
-    if !is_present {
+        .map_err(|e| format!("IsCameraPresent: {e}"))?
+    {
         return Ok(None);
     }
 
-    // Request access (no session needed — Camera portal is simpler than ScreenCast).
-    let options: std::collections::HashMap<&str, zbus::zvariant::Value<'_>> =
-        std::collections::HashMap::from([(
-            "handle_token",
-            zbus::zvariant::Value::Str("apexshot_camera".into()),
-        )]);
-
-    proxy
-        .call_method("AccessCamera", &(&options,))
+    // Request access — triggers permission dialog, waits for user response.
+    camera
+        .request_access()
         .await
-        .map_err(|e| format!("AccessCamera: {e}"))?;
+        .map_err(|e| format!("AccessCamera: {e}"))?
+        .response()
+        .map_err(|e| format!("AccessCamera response: {e}"))?;
 
-    // Open PipeWire remote for the camera.
-    let fd: OwnedFd = proxy
-        .call_method("OpenPipeWireRemote", &(&options,))
+    let fd = camera
+        .open_pipe_wire_remote()
         .await
-        .map_err(|e| format!("OpenPipeWireRemote: {e}"))?
-        .body()
-        .deserialize()
-        .map_err(|e| format!("OpenPipeWireRemote reply: {e}"))?;
+        .map_err(|e| format!("OpenPipeWireRemote: {e}"))?;
 
-    let owned_fd: std::os::fd::OwnedFd = fd.into();
-
-    // Use our PipeWire engine to find camera nodes on this remote.
-    // The media session exposes camera nodes automatically — we connect
-    // with PW_ID_ANY to let PipeWire auto-connect to the camera.
-    // The Camera portal doesn't give us stream IDs; the PipeWire
-    // media-session auto-connects to the right node.
-    Ok(Some((owned_fd, pipewire::constants::ID_ANY)))
+    eprintln!("[webcam] Camera portal opened, fd={}", fd.as_raw_fd());
+    Ok(Some((fd, pipewire::constants::ID_ANY)))
 }
 
 // ---------------------------------------------------------------------------
