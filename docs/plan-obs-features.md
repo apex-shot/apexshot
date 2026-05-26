@@ -347,9 +347,157 @@ Feature 4 (Camera portal)   ← independent, do last (largest change)
 
 ## Total Estimate
 
-| Lines of code | ~750 new/changed |
-|---------------|-----------------|
-| Files changed | 3-4 |
-| New files | 1 (`camera_portal.rs`) |
-| Total effort | ~12 hours |
-| Can drop GStreamer after | Feature 4 (camera) is the last GStreamer user |
+| **UPDATE:** Features 1 and 2 completed.
+
+---
+
+## Feature 6: VAAPI Hardware Encoding (est. 30 lines, 30 min)
+
+### What it does
+Detect VAAPI-capable GPUs (Intel, AMD) and configure the ffmpeg CLI to use
+`h264_vaapi` or `av1_vaapi` encoders instead of software VP9/x264. OBS uses
+the same approach through `libavcodec`'s VAAPI backend.
+
+### OBS reference
+`obs-studio/plugins/obs-ffmpeg/obs-ffmpeg-vaapi.c` — rate control modes (CBR,
+CQP, VBR, QVBR), global_quality, profile selection.
+
+### What changes
+
+**`src/recording/mod.rs`:**
+
+1. Add to `RecordingConfig`:
+```rust
+pub hw_encoder: Option<HwEncoder>,  // None = software, Some(Vaapi)
+```
+
+2. In `record_wayland_with_ffmpeg_sync()`, when `hw_encoder == Some(Vaapi)`:
+   - Add `-vaapi_device /dev/dri/renderD128` to ffmpeg args
+   - Add `-vf 'format=nv12,hwupload'` for GPU upload
+   - Switch `-c:v` from `libx264`/`libvpx` to `h264_vaapi`/`av1_vaapi`
+
+3. Detect VAAPI device at startup:
+```rust
+fn detect_vaapi_device() -> Option<String> {
+    // Check /dev/dri/renderD128 exists and is readable
+    // Or use `vainfo` / libdrm to enumerate devices
+}
+```
+
+### Verification
+- Record with `APEXSHOT_HW_ENCODER=vaapi`. Check `ffprobe` shows VAAPI-encoded stream.
+- Compare CPU usage vs software encoding — should be 5-10x lower.
+
+---
+
+## Feature 7: Encoder Quality Presets from OBS (est. 50 lines, 45 min)
+
+### What it does
+Replace apexshot's hardcoded encoder properties with OBS's battle-tested
+defaults. OBS has tuned these across millions of streams.
+
+### OBS reference
+`obs-studio/plugins/obs-ffmpeg/obs-ffmpeg-video-encoders.c:59-107`
+
+### What changes
+
+**`src/recording/mod.rs`:**
+
+1. Update `video_encoder_props()` to match OBS defaults:
+
+| Encoder | OBS default | Current apexshot |
+|---------|------------|-----------------|
+| x264 | `veryfast` preset, CRF 23, main profile | `medium` preset, CQP 14, film tune |
+| VP9 | CQ 30, deadline good, cpu-used 0 | CQ 10, deadline 10000, cpu-used 4 |
+| VP8 | CQ 10, deadline good | CQ 10, deadline 8, cpu-used 4 |
+
+2. Add a `quality` slider to the recording UI that maps to CQ/CRF values.
+
+### Verification
+- Record test clip with new presets. Compare file size and quality with old.
+- Check `ffprobe` shows correct encoder parameters.
+
+---
+
+## Feature 8: Direct PulseAudio Capture (est. 150 lines, 2 hours)
+
+### What it does
+Use `libpulse` directly instead of ffmpeg's `-f pulse` input for audio capture.
+Gives proper device enumeration, format selection, and latency control — same
+approach OBS uses.
+
+### OBS reference
+`obs-studio/plugins/linux-pulseaudio/pulse-input.c` — `pa_simple_new()` with
+format negotiation (`pa_sample_format_t` → obs audio format), channel mapping,
+speaker layout detection.
+
+### What changes
+
+**New file: `src/audio_capture.rs`:**
+
+1. Wrap `libpulse-sys` (or `libpulse-binding` crate) for PulseAudio access:
+```rust
+pub struct PulseAudioSource {
+    device: String,
+    sample_rate: u32,
+    channels: u8,
+    format: PulseAudioFormat,
+}
+
+impl PulseAudioSource {
+    pub fn default_mic() -> Option<Self>;
+    pub fn default_speaker_monitor() -> Option<Self>;
+    pub fn enumerate_devices() -> Vec<DeviceInfo>;
+    pub fn capture_samples(&self) -> impl Iterator<Item = Vec<u8>>;
+}
+```
+
+**`src/recording/mod.rs`:**
+
+2. Replace ffmpeg `-f pulse` audio input with captured samples written to
+   ffmpeg's second stdin pipe, or keep ffmpeg pulse input with better
+   device selection flags.
+
+**`Cargo.toml`:**
+
+3. Add `libpulse-binding` or `libpulse-sys` crate.
+
+### Verification
+- Record with mic + speaker. Verify both audio streams present.
+- Test device enumeration with multiple microphones.
+
+---
+
+## Updated Implementation Order
+
+```
+✅ Feature 2 (Color space)       — done
+✅ Feature 1 (Cursor overlay)    — done
+⬜ Feature 6 (VAAPI HW encoding) — next, highest impact-to-effort
+⬜ Feature 7 (Encoder presets)   — quick win after VAAPI
+⬜ Feature 3 (DMA-BUF)           — larger change
+⬜ Feature 5 (GPU sync)          — depends on DMA-BUF
+⬜ Feature 8 (PulseAudio)        — independent
+⬜ Feature 4 (Camera portal)     — largest change
+```
+
+## Updated Files Modified
+
+| Feature | `pipewire_engine.rs` | `recording/mod.rs` | `webcam.rs` | New files |
+|---------|---------------------|-------------------|-------------|-----------|
+| ✅ 1. Cursor | +80 | +5 | — | — |
+| ✅ 2. Color | +30 | +5 | — | — |
+| 3. DMA-BUF | +200 | +15 | — | — |
+| 4. Camera | — | — | ~100 replaced | `camera_portal.rs` |
+| 5. GPU sync | +120 | — | — | — |
+| 6. VAAPI | — | +30 | — | — |
+| 7. Presets | — | +50 | — | — |
+| 8. PulseAudio | — | +50 | — | `audio_capture.rs` |
+
+## Total Estimate (updated)
+
+| Lines of code | ~1,100 new/changed |
+|---------------|--------------------|
+| Files changed | 4-5 |
+| New files | 2-3 |
+| Total effort | ~18 hours |

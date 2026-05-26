@@ -682,6 +682,49 @@ fn should_use_wf_recorder(config: &RecordingConfig) -> bool {
     is_wlroots_session() && config.output_path.extension().is_none_or(|e| e != "gif")
 }
 
+// ---------------------------------------------------------------------------
+// Hardware encoder detection (VAAPI)
+// ---------------------------------------------------------------------------
+
+fn detect_vaapi_device() -> Option<String> {
+    // Try the standard render node paths.
+    for path in &["/dev/dri/renderD128", "/dev/dri/renderD129"] {
+        if std::path::Path::new(path).exists() {
+            return Some(path.to_string());
+        }
+    }
+    None
+}
+
+fn should_use_vaapi() -> bool {
+    if std::env::var_os("APEXSHOT_HW_ENCODER")
+        .map(|v| v == "vaapi")
+        .unwrap_or(false)
+    {
+        return detect_vaapi_device().is_some();
+    }
+    if let Ok(val) = std::env::var("APEXSHOT_HW_ENCODER") {
+        return val == "vaapi" && detect_vaapi_device().is_some();
+    }
+    false
+}
+
+fn ffmpeg_vaapi_args(width: u32, height: u32) -> Vec<String> {
+    let device = detect_vaapi_device().unwrap_or_else(|| "/dev/dri/renderD128".into());
+    vec![
+        "-vaapi_device".into(),
+        device,
+        "-vf".into(),
+        format!("format=nv12,hwupload,scale_vaapi=w={width}:h={height}"),
+        "-c:v".into(),
+        "h264_vaapi".into(),
+        "-qp".into(),
+        "24".into(),
+        "-profile".into(),
+        "main".into(),
+    ]
+}
+
 async fn record_with_wf_recorder(
     config: RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
@@ -990,12 +1033,22 @@ fn record_wayland_with_ffmpeg_sync(
     let fps = config.fps;
 
     // Build ffmpeg command
+    let use_vaapi = should_use_vaapi();
     let mut ffmpeg_cmd = Command::new("ffmpeg");
     ffmpeg_cmd
         .arg("-y")
         .arg("-loglevel")
         .arg("warning")
-        .arg("-nostats")
+        .arg("-nostats");
+
+    if use_vaapi {
+        let vaapi_args = ffmpeg_vaapi_args(width, height);
+        for arg in &vaapi_args {
+            ffmpeg_cmd.arg(arg);
+        }
+    }
+
+    ffmpeg_cmd
         .arg("-f")
         .arg("rawvideo")
         .arg("-pix_fmt")
@@ -1005,15 +1058,15 @@ fn record_wayland_with_ffmpeg_sync(
         .arg("-r")
         .arg(fps.to_string())
         .arg("-i")
-        .arg("pipe:0")
-        .arg("-c:v")
-        .arg(encoder_name);
+        .arg("pipe:0");
 
-    // Add encoder-specific properties
-    if !encoder_props.is_empty() {
-        for prop in encoder_props.split_whitespace() {
-            if let Some((key, val)) = prop.split_once('=') {
-                ffmpeg_cmd.arg(format!("-{key}")).arg(val);
+    if !use_vaapi {
+        ffmpeg_cmd.arg("-c:v").arg(encoder_name);
+        if !encoder_props.is_empty() {
+            for prop in encoder_props.split_whitespace() {
+                if let Some((key, val)) = prop.split_once('=') {
+                    ffmpeg_cmd.arg(format!("-{key}")).arg(val);
+                }
             }
         }
     }
@@ -1286,34 +1339,26 @@ fn select_audio_encoder(muxer: &str) -> Option<&'static str> {
 fn video_encoder_props(profile: &EncoderProfile, config: &RecordingConfig) -> String {
     let key_int_max = config.fps.saturating_mul(2).max(1);
 
+    // Presets informed by OBS's obs-ffmpeg-video-encoders.c, adapted for
+    // file recording (prioritize quality over streaming latency).
+
     if profile.encoder == "x264enc" {
-        // Screen recordings favor detail retention over ultra-low-latency delivery.
-        // Bias toward structural detail so scrolling text and thumbnails stay sharper
-        // in both area and fullscreen recordings.
-        // `psy-tune=film` keeps psychovisual rate-distortion ON, which preserves
-        // perceived sharpness on text and UI edges. `ssim`/`psnr` tunes optimize
-        // for benchmark scores by disabling psy-rd, which softens screen content.
-        return format!(
-            "speed-preset=medium pass=qual quantizer=14 bitrate=8000 key-int-max={} rc-lookahead=20 ref=4 subme=6 psy-tune=film",
-            key_int_max
-        );
+        // OBS default: veryfast, CRF 23, main profile.
+        // For screen recording we bump quality slightly but keep the fast preset.
+        return format!("preset=veryfast crf=22 profile=main key-int-max={key_int_max}",);
     }
 
     if profile.encoder == "vp9enc" {
-        // The libvpx defaults target just 256 kbps, which is far too low for desktop
-        // capture and leads to obvious grain on moving text and thumbnails. Keep a
-        // higher quality target, but avoid realtime settings that turn desktop motion
-        // into visible blockiness.
+        // OBS default: CQ 30, deadline good, cpu-used 0.
+        // For local recording we use slightly higher quality.
         return format!(
-            "deadline=10000 end-usage=cq cq-level=10 target-bitrate=0 bits-per-pixel=0.12 cpu-used=4 row-mt=true threads=8 keyframe-max-dist={} lag-in-frames=0",
-            key_int_max
+            "deadline=good end-usage=cq cq-level=20 target-bitrate=0 cpu-used=2 row-mt=true threads=8 keyframe-max-dist={key_int_max} lag-in-frames=0",
         );
     }
 
     if profile.encoder == "vp8enc" {
         return format!(
-            "deadline=8 end-usage=cq cq-level=10 target-bitrate=0 bits-per-pixel=0.12 cpu-used=4 threads=8 keyframe-max-dist={} lag-in-frames=0",
-            key_int_max
+            "deadline=good end-usage=cq cq-level=10 target-bitrate=0 cpu-used=2 threads=8 keyframe-max-dist={key_int_max} lag-in-frames=0",
         );
     }
 
@@ -3001,17 +3046,11 @@ mod tests {
 
         let props = video_encoder_props(profile_by_encoder("x264enc"), &config);
 
-        assert!(props.contains("speed-preset=medium"));
-        assert!(props.contains("quantizer=14"));
-        assert!(props.contains("bitrate=8000"));
+        // OBS-based preset: veryfast + crf 22 + main profile
+        assert!(props.contains("preset=veryfast"));
+        assert!(props.contains("crf=22"));
+        assert!(props.contains("profile=main"));
         assert!(props.contains("key-int-max=120"));
-        assert!(props.contains("rc-lookahead=20"));
-        assert!(props.contains("ref=4"));
-        assert!(props.contains("subme=6"));
-        assert!(props.contains("psy-tune=film"));
-        assert!(!props.contains("tune=zerolatency"));
-        assert!(!props.contains("speed-preset=fast "));
-        assert!(!props.contains("speed-preset=ultrafast"));
     }
 
     #[test]
@@ -3023,20 +3062,18 @@ mod tests {
 
         let vp9_props = video_encoder_props(profile_by_encoder("vp9enc"), &config);
         assert!(vp9_props.contains("end-usage=cq"));
-        assert!(vp9_props.contains("cq-level=10"));
+        assert!(vp9_props.contains("cq-level=20"));
         assert!(vp9_props.contains("target-bitrate=0"));
-        assert!(vp9_props.contains("bits-per-pixel=0.12"));
-        assert!(vp9_props.contains("cpu-used=4"));
+        assert!(vp9_props.contains("cpu-used=2"));
         assert!(vp9_props.contains("keyframe-max-dist=120"));
-        assert!(vp9_props.contains("deadline=10000"));
+        assert!(vp9_props.contains("deadline=good"));
 
         let vp8_props = video_encoder_props(profile_by_encoder("vp8enc"), &config);
         assert!(vp8_props.contains("end-usage=cq"));
         assert!(vp8_props.contains("target-bitrate=0"));
-        assert!(vp8_props.contains("bits-per-pixel=0.12"));
-        assert!(vp8_props.contains("cpu-used=4"));
+        assert!(vp8_props.contains("cpu-used=2"));
         assert!(vp8_props.contains("keyframe-max-dist=120"));
-        assert!(vp8_props.contains("deadline=8"));
+        assert!(vp8_props.contains("deadline=good"));
 
         let openh264_props = video_encoder_props(profile_by_encoder("openh264enc"), &config);
         assert!(openh264_props.contains("bitrate=8000000"));
