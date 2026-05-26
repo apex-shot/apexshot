@@ -27,7 +27,7 @@ jobs:
           rustup default stable
 
       - name: Cache cargo dependencies
-        uses: Swatinem/rust-cache@v2.7.3
+        uses: Swatinem/rust-cache@54e2af0a8339c0435fa1de94002eab349a2f15ef
         with:
           key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
 
@@ -100,7 +100,7 @@ jobs:
           rustup default stable
 
       - name: Cache cargo dependencies
-        uses: Swatinem/rust-cache@v2.7.3
+        uses: Swatinem/rust-cache@54e2af0a8339c0435fa1de94002eab349a2f15ef
         with:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
@@ -188,7 +188,7 @@ jobs:
           rustup default stable
 
       - name: Cache cargo dependencies
-        uses: Swatinem/rust-cache@v2.7.3
+        uses: Swatinem/rust-cache@54e2af0a8339c0435fa1de94002eab349a2f15ef
         with:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
