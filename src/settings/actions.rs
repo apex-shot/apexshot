@@ -85,7 +85,6 @@ pub struct SaveInputs {
     pub shortcut_show_last_preview: Button,
     pub shortcut_open_recording_ui: Button,
     pub shortcut_record_screen: Button,
-    pub shortcut_record_area: Button,
     pub shortcut_recording_pause_resume: Button,
     pub shortcut_recording_stop_save: Button,
     pub shortcut_recording_restart: Button,
@@ -241,7 +240,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.shortcut_show_last_preview = button_label_value(&inputs.shortcut_show_last_preview);
     config.shortcut_open_recording_ui = button_label_value(&inputs.shortcut_open_recording_ui);
     config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);
-    config.shortcut_record_area = button_label_value(&inputs.shortcut_record_area);
     config.shortcut_recording_pause_resume =
         button_label_value(&inputs.shortcut_recording_pause_resume);
     config.shortcut_recording_stop_save = button_label_value(&inputs.shortcut_recording_stop_save);
@@ -283,7 +281,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         || previous_config.shortcut_show_last_preview != config.shortcut_show_last_preview
         || previous_config.shortcut_open_recording_ui != config.shortcut_open_recording_ui
         || previous_config.shortcut_record_screen != config.shortcut_record_screen
-        || previous_config.shortcut_record_area != config.shortcut_record_area
         || previous_config.shortcut_recording_pause_resume
             != config.shortcut_recording_pause_resume
         || previous_config.shortcut_recording_stop_save != config.shortcut_recording_stop_save
@@ -406,7 +403,6 @@ mod tests {
             shortcut_show_last_preview: String::new(),
             shortcut_open_recording_ui: String::new(),
             shortcut_record_screen: String::new(),
-            shortcut_record_area: String::new(),
             shortcut_recording_pause_resume: String::new(),
             shortcut_recording_stop_save: String::new(),
             shortcut_recording_restart: String::new(),

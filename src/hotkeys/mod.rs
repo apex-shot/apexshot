@@ -503,11 +503,6 @@ fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
             args: vec!["record".into(), "screen".into(), "--overlay-stop".into()],
         },
         HotkeyBinding {
-            name: Some("record_area".into()),
-            accelerator: "CTRL+ALT+SHIFT+R".into(),
-            args: vec!["record".into(), "area".into(), "--overlay-stop".into()],
-        },
-        HotkeyBinding {
             name: Some("recording_pause_resume".into()),
             accelerator: "CTRL+ALT+SHIFT+P".into(),
             args: vec!["recording-control".into(), "pause-resume".into()],
@@ -840,12 +835,6 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
         "record_screen",
         &app_config.shortcut_record_screen,
         &["record", "screen", "--overlay-stop"],
-    );
-    push_binding(
-        &mut bindings,
-        "record_area",
-        &app_config.shortcut_record_area,
-        &["record", "area", "--overlay-stop"],
     );
     push_binding(
         &mut bindings,
@@ -2311,14 +2300,6 @@ mod tests {
 
         // `record_area`, `open_recording_ui`, and `show_last_preview` ship with
         // working defaults so the user can rebind them in the Shortcuts settings.
-        let record_area = hotkeys
-            .bindings
-            .iter()
-            .find(|binding| binding.name.as_deref() == Some("record_area"))
-            .expect("record_area binding should exist by default");
-        assert_eq!(record_area.accelerator, "CTRL+ALT+SHIFT+R");
-        assert_eq!(record_area.args, vec!["record", "area", "--overlay-stop"]);
-
         assert!(hotkeys
             .bindings
             .iter()

@@ -152,6 +152,16 @@ pub struct CaptureData {
 
     /// Optional cursor overlay data
     pub cursor: Option<CursorData>,
+
+    /// The logical desktop origin (x, y) of the captured output.
+    /// Used to correctly offset area-crop coordinates when the capture
+    /// comes from a single monitor in a multi-monitor layout.
+    pub output_origin_x: i32,
+    pub output_origin_y: i32,
+
+    /// The compositor-reported scale factor for this output (≥1).
+    /// Physical pixels = logical pixels × scale.
+    pub output_scale: i32,
 }
 
 impl CaptureData {
@@ -184,6 +194,9 @@ impl CaptureData {
             stride,
             format,
             cursor,
+            output_origin_x: 0,
+            output_origin_y: 0,
+            output_scale: 1,
         }
     }
 

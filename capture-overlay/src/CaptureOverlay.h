@@ -104,7 +104,7 @@ public:
     int recordWebcamDevice() const { return m_webcamDevice; }
     double recordWebcamRelX() const { return m_webcamRelX; }
     double recordWebcamRelY() const { return m_webcamRelY; }
-    bool recordDisplayRecTime() const { return m_displayRecTime; }
+    bool recordDisplayRecTime() const { return true; } // always enabled
     bool recordHidpiEnabled() const { return m_hidpi; }
     bool recordDoNotDisturb() const { return m_doNotDisturb; }
     bool recordShowCursor() const { return true; }

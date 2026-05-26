@@ -78,6 +78,29 @@ pub fn capture() -> DisplayResult<Option<CaptureData>> {
         .cloned()
         .expect("checked non-empty");
 
+    // Snapshot the selected output's origin and scale before we move
+    // `state` fields further down. These are used to correctly crop
+    // the physical-pixel image when the caller supplies logical-area
+    // coordinates (see CaptureData::output_origin_* / output_scale).
+    let output_origin_x = state
+        .output_infos
+        .iter()
+        .find(|info| info.id == output.id().protocol_id())
+        .map(|info| info.x)
+        .unwrap_or(0);
+    let output_origin_y = state
+        .output_infos
+        .iter()
+        .find(|info| info.id == output.id().protocol_id())
+        .map(|info| info.y)
+        .unwrap_or(0);
+    let output_scale = state
+        .output_infos
+        .iter()
+        .find(|info| info.id == output.id().protocol_id())
+        .map(|info| info.scale)
+        .unwrap_or(1);
+
     let shm = state
         .shm
         .take()
@@ -203,12 +226,17 @@ pub fn capture() -> DisplayResult<Option<CaptureData>> {
     pool.destroy();
     frame.destroy();
 
-    Ok(Some(CaptureData::new(
+    Ok(Some(CaptureData {
         pixels,
-        info.width,
-        info.height,
-        PixelFormat::RGBA32,
-    )))
+        width: info.width,
+        height: info.height,
+        stride: info.width * 4,
+        format: PixelFormat::RGBA32,
+        cursor: None,
+        output_origin_x,
+        output_origin_y,
+        output_scale,
+    }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1170,6 +1170,7 @@ fn record_wayland_with_ffmpeg_sync(
     let mut frames_written = 0u64;
     let frame_interval = std::time::Duration::from_secs_f64(1.0 / fps as f64);
     let mut next_frame_at: Option<std::time::Instant> = None;
+    let mut paused = false;
 
     loop {
         // Check for control commands
@@ -1200,16 +1201,24 @@ fn record_wayland_with_ffmpeg_sync(
                     println!("\nDiscarding recording...");
                     break;
                 }
-                RecordingControlCommand::Pause => {
-                    // Pause: pause capturing frames
+                RecordingControlCommand::Pause if !paused => {
                     println!("Recording paused");
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    paused = true;
                 }
-                RecordingControlCommand::Resume => {
+                RecordingControlCommand::Resume if paused => {
                     println!("Recording resumed");
+                    paused = false;
+                    next_frame_at = None; // don't skip the first frame
                 }
                 _ => {}
             }
+        }
+
+        // While paused, spin briefly and check for commands instead
+        // of capturing frames.
+        if paused {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            continue;
         }
 
         // Try to get a frame from PipeWire
@@ -2438,7 +2447,7 @@ pub fn prepare_overlay_recording_request(
     let shell_controls_visibility_policy =
         use_shell_controls.then(|| shell_controls_visibility_policy_for_request(request));
     app_config.rec_controls = request.controls;
-    app_config.rec_display_time = request.display_rec_time;
+    app_config.rec_display_time = true; // always show recording time in top bar
     app_config.rec_hidpi = request.hidpi;
     app_config.rec_notifications = request.notifications;
     app_config.rec_cursor = true;

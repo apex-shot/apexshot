@@ -124,47 +124,48 @@ fn crop_capture(
     width: i32,
     height: i32,
 ) -> DisplayResult<CaptureData> {
-    if width <= 0 || height <= 0 || x < 0 || y < 0 {
+    if width <= 0 || height <= 0 {
         return Err(DisplayError::InvalidArea(format!(
             "Invalid dimensions: {}x{}",
             width, height
         )));
     }
 
-    let x_end = x
-        .checked_add(width)
-        .ok_or_else(|| DisplayError::InvalidArea("Area width overflow".into()))?;
-    let y_end = y
-        .checked_add(height)
-        .ok_or_else(|| DisplayError::InvalidArea("Area height overflow".into()))?;
+    // Map desktop-logical coordinates to output-relative physical pixels.
+    // The overlay reports selection coordinates in the logical desktop space.
+    // The capture comes from a single output at (output_origin_x, output_origin_y)
+    // with physical pixels = logical_pixels × output_scale.
+    let scale = capture.output_scale.max(1);
+    let rel_x = (x - capture.output_origin_x).max(0) * scale;
+    let rel_y = (y - capture.output_origin_y).max(0) * scale;
+    let rel_w = width.max(1) * scale;
+    let rel_h = height.max(1) * scale;
 
-    if x_end as u32 > capture.width || y_end as u32 > capture.height {
+    // Clamp to the captured image bounds.
+    let crop_x = rel_x.min(capture.width as i32).max(0) as u32;
+    let crop_y = rel_y.min(capture.height as i32).max(0) as u32;
+    let crop_w = ((rel_x + rel_w).min(capture.width as i32) - rel_x).max(0) as u32;
+    let crop_h = ((rel_y + rel_h).min(capture.height as i32) - rel_y).max(0) as u32;
+    if crop_w == 0 || crop_h == 0 {
         return Err(DisplayError::InvalidArea(format!(
-            "Requested area ({x}, {y}, {width}, {height}) is out of bounds for {}x{} capture",
-            capture.width, capture.height
+            "Requested area ({x}, {y}, {width}, {height}) maps outside captured output ({},{} scale {})",
+            capture.output_origin_x, capture.output_origin_y, scale
         )));
     }
 
-    let width_u32 = width as u32;
-    let height_u32 = height as u32;
     let bytes_per_pixel = capture.format.bytes_per_pixel as usize;
     let source_stride = capture.stride as usize;
-    let row_len = width_u32 as usize * bytes_per_pixel;
+    let row_len = crop_w as usize * bytes_per_pixel;
 
-    let mut cropped = Vec::with_capacity(row_len * height_u32 as usize);
-    for row in 0..height_u32 as usize {
-        let src_y = y as usize + row;
-        let src_offset = src_y * source_stride + x as usize * bytes_per_pixel;
+    let mut cropped = Vec::with_capacity(row_len * crop_h as usize);
+    for row in 0..crop_h as usize {
+        let src_y = crop_y as usize + row;
+        let src_offset = src_y * source_stride + crop_x as usize * bytes_per_pixel;
         let src_end = src_offset + row_len;
         cropped.extend_from_slice(&capture.pixels[src_offset..src_end]);
     }
 
-    Ok(CaptureData::new(
-        cropped,
-        width_u32,
-        height_u32,
-        capture.format,
-    ))
+    Ok(CaptureData::new(cropped, crop_w, crop_h, capture.format))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -679,7 +680,8 @@ mod tests {
     #[test]
     fn test_crop_capture_rejects_invalid_area() {
         let data = CaptureData::new(vec![255; 4 * 4 * 4], 4, 4, PixelFormat::RGBA32);
-        let result = crop_capture(data, 3, 3, 3, 3);
+        // Area completely outside the captured output — should fail.
+        let result = crop_capture(data, 10, 10, 2, 2);
         assert!(result.is_err());
     }
 

@@ -68,7 +68,7 @@ fn recording_request_from_state(
         webcam_device: st.recording.webcam_device,
         webcam_rel_x: st.recording.webcam_rel_x,
         webcam_rel_y: st.recording.webcam_rel_y,
-        display_rec_time: st.recording.display_rec_time,
+        display_rec_time: true, // always show recording time in top bar
         hidpi: st.recording.hidpi,
         notifications: st.recording.do_not_disturb,
         cursor: true,
@@ -1293,6 +1293,21 @@ pub(crate) fn setup_window(
         let rect = current_selection_rect(&st);
         let recording_panel_open = st.recording.panel_open;
 
+        // ── Countdown bubble cancel ───────────────────────────────────────
+        if st.countdown_active
+            && x >= st.countdown_bubble_x
+            && x <= st.countdown_bubble_x + st.countdown_bubble_w
+            && y >= st.countdown_bubble_y
+            && y <= st.countdown_bubble_y + st.countdown_bubble_h
+        {
+            st.countdown_cancel_requested = true;
+            drop(st);
+            if let Some(da) = drawing_area_weak_click.upgrade() {
+                da.queue_draw();
+            }
+            return;
+        }
+
         // ── Menu click handling ──
 
         // Capture crop menu (non-recording mode)
@@ -1496,12 +1511,11 @@ pub(crate) fn setup_window(
                     let general_idx = item - 3;
                     match general_idx {
                         0 => st.recording.rec_controls = !st.recording.rec_controls,
-                        1 => st.recording.display_rec_time = !st.recording.display_rec_time,
-                        2 => st.recording.hidpi = !st.recording.hidpi,
-                        3 => st.recording.do_not_disturb = !st.recording.do_not_disturb,
-                        4 => st.recording.remember_selection = !st.recording.remember_selection,
-                        5 => st.recording.dim_screen = !st.recording.dim_screen,
-                        6 => st.recording.show_countdown = !st.recording.show_countdown,
+                        1 => st.recording.hidpi = !st.recording.hidpi,
+                        2 => st.recording.do_not_disturb = !st.recording.do_not_disturb,
+                        3 => st.recording.remember_selection = !st.recording.remember_selection,
+                        4 => st.recording.dim_screen = !st.recording.dim_screen,
+                        5 => st.recording.show_countdown = !st.recording.show_countdown,
                         _ => {}
                     }
                     st.recording.settings_dropdown_open = None;

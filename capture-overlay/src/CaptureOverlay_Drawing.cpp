@@ -1424,7 +1424,6 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
         };
 
         drawSetting("Controls:", "Use keyboard shortcuts to control recordings (elapsed time appears in the top bar)", m_recControls, &m_recControls);
-        drawSetting("Menu bar:", "Display recording time in the top bar", m_displayRecTime, &m_displayRecTime);
         drawSetting("HiDPI:", "Record at display scale resolution", m_hidpi, &m_hidpi);
         drawSetting("Notifications:", "\"Do Not Disturb\" while recording", m_doNotDisturb, &m_doNotDisturb);
         

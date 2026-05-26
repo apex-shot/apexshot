@@ -474,7 +474,6 @@ fn build_settings_window(app: &Application) {
         shortcut_show_last_preview: shortcuts.show_last_preview_btn.clone(),
         shortcut_open_recording_ui: shortcuts.open_recording_ui_btn.clone(),
         shortcut_record_screen: shortcuts.record_screen_btn.clone(),
-        shortcut_record_area: shortcuts.record_area_btn.clone(),
         shortcut_recording_pause_resume: shortcuts.recording_pause_resume_btn.clone(),
         shortcut_recording_stop_save: shortcuts.recording_stop_save_btn.clone(),
         shortcut_recording_restart: shortcuts.recording_restart_btn.clone(),

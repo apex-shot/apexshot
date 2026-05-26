@@ -369,12 +369,11 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     if (m_settingsTab == 0) { // General tab logic
                         switch (i) {
                         case 3: m_recControls = !m_recControls; break;
-                        case 4: m_displayRecTime = !m_displayRecTime; break;
-                        case 5: m_hidpi = !m_hidpi; break;
-                        case 6: m_doNotDisturb = !m_doNotDisturb; break;
-                        case 7: m_rememberSelection = !m_rememberSelection; break;
-                        case 8: m_dimScreen = !m_dimScreen; break;
-                        case 9: m_showCountdown = !m_showCountdown; break;
+                        case 4: m_hidpi = !m_hidpi; break;
+                        case 5: m_doNotDisturb = !m_doNotDisturb; break;
+                        case 6: m_rememberSelection = !m_rememberSelection; break;
+                        case 7: m_dimScreen = !m_dimScreen; break;
+                        case 8: m_showCountdown = !m_showCountdown; break;
                         }
                         update();
                         return;
@@ -709,7 +708,8 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             }
         } else {
             bool clickedToolbar = layout.leftToolsPanel.contains(pos) ||
-                                  layout.sizeCard.contains(pos);
+                                  layout.sizeCard.contains(pos) ||
+                                  layout.cropCard.contains(pos);
             if (clickedToolbar) {
                 for (int i = 0; i < NUM_TOOLS; ++i) {
                     if (layout.toolCells[i].contains(pos)) {

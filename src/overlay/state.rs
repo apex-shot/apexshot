@@ -69,6 +69,10 @@ pub(crate) struct SelectorState {
     pub(crate) countdown_cancel_requested: bool,
     #[allow(dead_code)]
     pub(crate) hovered_countdown_cancel: bool,
+    pub(crate) countdown_bubble_x: f64,
+    pub(crate) countdown_bubble_y: f64,
+    pub(crate) countdown_bubble_w: f64,
+    pub(crate) countdown_bubble_h: f64,
     // ── Scroll popup state ──
     pub(crate) scroll_popup_open: bool,
     pub(crate) hovered_scroll_popup_close: bool,
@@ -116,6 +120,10 @@ impl Default for SelectorState {
             countdown_value: 0,
             countdown_cancel_requested: false,
             hovered_countdown_cancel: false,
+            countdown_bubble_x: 0.0,
+            countdown_bubble_y: 0.0,
+            countdown_bubble_w: 0.0,
+            countdown_bubble_h: 0.0,
             scroll_popup_open: false,
             hovered_scroll_popup_close: false,
             hovered_scroll_download: false,

@@ -522,7 +522,6 @@ pub(crate) fn draw_recording_panel(
     record_mono: bool,
     open_editor: bool,
     rec_controls: bool,
-    display_rec_time: bool,
     hidpi: bool,
     do_not_disturb: bool,
     rec_webcam: bool,
@@ -894,7 +893,6 @@ pub(crate) fn draw_recording_panel(
             record_mono,
             open_editor,
             rec_controls,
-            display_rec_time,
             hidpi,
             do_not_disturb,
             rec_webcam,
@@ -1190,7 +1188,6 @@ pub(crate) fn draw_settings_menu(
     record_mono: bool,
     open_editor: bool,
     rec_controls: bool,
-    display_rec_time: bool,
     hidpi: bool,
     do_not_disturb: bool,
     rec_webcam: bool,
@@ -1341,7 +1338,6 @@ pub(crate) fn draw_settings_menu(
             menu_w,
             hovered_item,
             rec_controls,
-            display_rec_time,
             hidpi,
             do_not_disturb,
             rec_webcam,
@@ -1408,7 +1404,6 @@ pub(crate) fn draw_settings_general_tab(
     menu_w: f64,
     hovered_item: i32,
     rec_controls: bool,
-    display_rec_time: bool,
     hidpi: bool,
     do_not_disturb: bool,
     _rec_webcam: bool,
@@ -1468,7 +1463,6 @@ pub(crate) fn draw_settings_general_tab(
     }
 
     s!("Controls", "Use keyboard shortcuts", rec_controls);
-    s!("Menu bar", "Display time in top bar", display_rec_time);
     s!("HiDPI", "Record at display scale res", hidpi);
     s!("Notifications", "DND while recording", do_not_disturb);
     s!(
@@ -2465,7 +2459,7 @@ pub(crate) fn draw_overlay(
     state: &Arc<Mutex<SelectorState>>,
     background: Option<&BackgroundFrame>,
 ) {
-    let st = state.lock().unwrap();
+    let mut st = state.lock().unwrap();
 
     let screen_width = width.max(1) as f64;
     let screen_height = height.max(1) as f64;
@@ -2717,7 +2711,6 @@ pub(crate) fn draw_overlay(
                 st.recording.record_mono,
                 st.recording.open_editor,
                 st.recording.rec_controls,
-                st.recording.display_rec_time,
                 st.recording.hidpi,
                 st.recording.do_not_disturb,
                 st.recording.rec_webcam,
@@ -2838,6 +2831,22 @@ pub(crate) fn draw_overlay(
     // selection remains movable/resizable underneath.
     if st.countdown_active {
         let r = current_selection_rect(&st);
+        let (bx, by, bw, bh) = if st.intent != OverlayIntent::Record {
+            let pill_w = 112.0;
+            let pill_h = 44.0;
+            let pill_x = (screen_width - pill_w) / 2.0;
+            let pill_y = 28.0;
+            (pill_x, pill_y, pill_w, pill_h)
+        } else {
+            let bubble_size = 184.0;
+            let bubble_x = (screen_width - bubble_size) / 2.0;
+            let bubble_y = (screen_height - bubble_size) / 2.0;
+            (bubble_x, bubble_y, bubble_size, bubble_size)
+        };
+        st.countdown_bubble_x = bx;
+        st.countdown_bubble_y = by;
+        st.countdown_bubble_w = bw;
+        st.countdown_bubble_h = bh;
         draw_countdown_bubble(
             context,
             r.left,

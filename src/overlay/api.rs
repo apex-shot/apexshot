@@ -80,7 +80,6 @@ impl AreaSelector {
         // recording checkboxes stay in sync with Settings > After Capture.
         let app_config = crate::config::load_config();
         state.recording.rec_controls = app_config.rec_controls;
-        state.recording.display_rec_time = app_config.rec_display_time;
         state.recording.do_not_disturb = app_config.rec_notifications;
         state.recording.remember_selection = app_config.rec_remember_selection;
         state.recording.dim_screen = app_config.rec_dim_screen;

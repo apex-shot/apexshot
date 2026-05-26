@@ -38,7 +38,6 @@ pub(crate) struct RecordingState {
 
     // Recording settings
     pub(crate) rec_controls: bool,
-    pub(crate) display_rec_time: bool,
     pub(crate) hidpi: bool,
     pub(crate) do_not_disturb: bool,
     pub(crate) rec_webcam: bool,
@@ -104,7 +103,6 @@ impl Default for RecordingState {
             mic_level: 0.0,
             speaker_level: 0.0,
             rec_controls: true,
-            display_rec_time: true,
             hidpi: false,
             do_not_disturb: true,
             rec_webcam: false,
