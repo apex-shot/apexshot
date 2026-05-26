@@ -1,17 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import {
-    createClickOverlayModel,
-    getActiveClickIndicator,
-    recordPointerSample,
-} from "./click-display.js";
-import {
-    createKeystrokeOverlayModel,
-    getKeystrokeOverlayText,
-    recordKeystrokeEvent,
-    recordKeystrokeText,
-} from "./keystroke-display.js";
-
 function cloneRect(rect) {
     if (!rect)
         return null;
@@ -35,27 +23,12 @@ const DEFAULT_RUNTIME_OVERLAY_SNAPSHOT = Object.freeze({
     webcam_shape: 3,
     webcam_flip: false,
     webcam_device: -1,
-    clicks_enabled: false,
-    click_size: 0.3,
-    click_color: 0,
-    click_style: 0,
-    click_animate: true,
-    keystrokes_enabled: false,
-    keystrokes_supported: true,
-    keystrokes_support_message: "",
-    key_size: 0.32,
-    key_position: 0,
-    key_appearance: 0,
-    key_blur_bg: true,
-    key_filter: 0,
 });
 
 const RUNTIME_OVERLAY_VISIBILITY_KEYS = Object.freeze([
     "mic",
     "speaker",
     "webcam",
-    "clicks",
-    "keystrokes",
 ]);
 
 function clamp(value, min, max) {
@@ -99,8 +72,6 @@ export function createRuntimeOverlayVisibility(snapshot = null) {
         mic: snapshot?.mic_visible ?? false,
         speaker: snapshot?.speaker_visible ?? false,
         webcam: snapshot?.webcam_enabled ?? false,
-        clicks: snapshot?.clicks_enabled ?? false,
-        keystrokes: snapshot?.keystrokes_enabled ?? false,
     };
 }
 
@@ -108,14 +79,10 @@ function createRuntimeOverlayState() {
     return {
         chrome: null,
         webcamActor: null,
-        clicksActor: null,
-        keystrokesActor: null,
         audioIndicatorsActor: null,
         micIndicatorActor: null,
         speakerIndicatorActor: null,
         visibility: createRuntimeOverlayVisibility(),
-        clickOverlay: createClickOverlayModel(),
-        keystrokeOverlay: createKeystrokeOverlayModel(),
         selfOwnedActors: new WeakSet(),
         selfOwnedActorOwners: new WeakMap(),
     };
@@ -124,8 +91,6 @@ function createRuntimeOverlayState() {
 function ensureRuntimeOverlayState(sessionState) {
     sessionState.runtimeOverlayState ??= createRuntimeOverlayState();
     sessionState.runtimeOverlayState.visibility ??= createRuntimeOverlayVisibility();
-    sessionState.runtimeOverlayState.clickOverlay ??= createClickOverlayModel();
-    sessionState.runtimeOverlayState.keystrokeOverlay ??= createKeystrokeOverlayModel();
     sessionState.runtimeOverlayState.selfOwnedActors ??= new WeakSet();
     sessionState.runtimeOverlayState.selfOwnedActorOwners ??= new WeakMap();
     return sessionState.runtimeOverlayState;
@@ -219,21 +184,6 @@ export function parseRuntimeOverlaySnapshot(payload) {
         webcam_device: Number.isFinite(parsed.webcam_device)
             ? Math.trunc(parsed.webcam_device)
             : DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.webcam_device,
-        clicks_enabled: normalizeBoolean(parsed.clicks_enabled, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.clicks_enabled),
-        click_size: normalizeNumber(parsed.click_size, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_size, 0, 1),
-        click_color: normalizeInteger(parsed.click_color, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_color, 0, 8),
-        click_style: normalizeNonNegativeInteger(parsed.click_style, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_style),
-        click_animate: normalizeBoolean(parsed.click_animate, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.click_animate),
-        keystrokes_enabled: normalizeBoolean(parsed.keystrokes_enabled, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.keystrokes_enabled),
-        keystrokes_supported: normalizeBoolean(parsed.keystrokes_supported, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.keystrokes_supported),
-        keystrokes_support_message: typeof parsed.keystrokes_support_message === "string"
-            ? parsed.keystrokes_support_message
-            : DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.keystrokes_support_message,
-        key_size: normalizeNumber(parsed.key_size, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_size, 0, 1),
-        key_position: normalizeInteger(parsed.key_position, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_position, 0, 5),
-        key_appearance: normalizeInteger(parsed.key_appearance, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_appearance, 0, 1),
-        key_blur_bg: normalizeBoolean(parsed.key_blur_bg, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_blur_bg),
-        key_filter: normalizeNonNegativeInteger(parsed.key_filter, DEFAULT_RUNTIME_OVERLAY_SNAPSHOT.key_filter),
     };
 
     return Object.freeze(snapshot);
@@ -312,68 +262,3 @@ export function clearControlsState(sessionState) {
     sessionState.shortcutEditActive = false;
 }
 
-export function recordRuntimeOverlayKeystroke(sessionState, event) {
-    if (!sessionState?.runtimeOverlaySnapshot || sessionState.shortcutEditActive)
-        return false;
-
-    const overlayState = ensureRuntimeOverlayState(sessionState);
-    if (!overlayState.visibility.keystrokes)
-        return false;
-
-    return recordKeystrokeEvent(overlayState.keystrokeOverlay, {
-        ...event,
-        filterMode: sessionState.runtimeOverlaySnapshot.key_filter,
-    });
-}
-
-export function getRuntimeOverlayKeystrokeText(sessionState, nowMs) {
-    if (!sessionState)
-        return "";
-
-    return getKeystrokeOverlayText(
-        ensureRuntimeOverlayState(sessionState).keystrokeOverlay,
-        nowMs
-    );
-}
-
-export function pushRuntimeOverlayKeystrokeText(sessionState, text, nowMs) {
-    if (!sessionState?.runtimeOverlaySnapshot || sessionState.shortcutEditActive)
-        return false;
-
-    const overlayState = ensureRuntimeOverlayState(sessionState);
-    if (!overlayState.visibility.keystrokes)
-        return false;
-
-    return recordKeystrokeText(overlayState.keystrokeOverlay, text, nowMs);
-}
-
-export function recordRuntimeOverlayPointerSample(sessionState, sample) {
-    if (!sessionState?.runtimeOverlaySnapshot || sessionState.shortcutEditActive)
-        return [];
-
-    const overlayState = ensureRuntimeOverlayState(sessionState);
-    if (!overlayState.visibility.clicks)
-        return recordPointerSample(overlayState.clickOverlay, sample);
-
-    return recordPointerSample(overlayState.clickOverlay, sample);
-}
-
-export function getRuntimeOverlayClickIndicator(sessionState, nowMs) {
-    if (!sessionState)
-        return null;
-
-    return getActiveClickIndicator(
-        ensureRuntimeOverlayState(sessionState).clickOverlay,
-        nowMs
-    );
-}
-
-export function getRuntimeOverlaySupportMessage(sessionState, key) {
-    if (!sessionState?.runtimeOverlaySnapshot)
-        return "";
-
-    if (key === "keystrokes" && sessionState.runtimeOverlaySnapshot.keystrokes_supported === false)
-        return sessionState.runtimeOverlaySnapshot.keystrokes_support_message || "";
-
-    return "";
-}

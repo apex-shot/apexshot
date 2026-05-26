@@ -9,9 +9,6 @@ import St from "gi://St";
 import Shell from "gi://Shell";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {createSessionState} from "./session-state.js";
-import {pushRuntimeOverlayKeystrokeText} from "./session-state.js";
-import {recordRuntimeOverlayPointerSample} from "./session-state.js";
-import {recordRuntimeOverlayKeystroke} from "./session-state.js";
 import {setRuntimeOverlayVisibility} from "./session-state.js";
 import {shouldExcludeOverlayEvent, updateRuntimeOverlaySnapshot} from "./runtime-overlays.js";
 import {MaskUi} from "./mask-ui.js";
@@ -72,10 +69,6 @@ const MASK_DBUS_IFACE_XML = `
     <method name="ToggleOverlay">
       <arg type="s" name="key" direction="in"/>
       <arg type="b" name="visible" direction="in"/>
-    </method>
-    <method name="PushKeystroke">
-      <arg type="s" name="session_id" direction="in"/>
-      <arg type="s" name="text" direction="in"/>
     </method>
     <method name="SetRecordingPaused">
       <arg type="s" name="session_id" direction="in"/>
@@ -455,23 +448,6 @@ class RecordingMaskService {
             this._maskUi.refresh();
             this._controlsUi.reposition();
         });
-        this._stageKeyPressEventId = global.stage.connect("key-press-event", (_actor, event) =>
-            this._onStageKeyPress(event)
-        );
-        log("[apexshot] runtime keystroke listener enabled");
-        try {
-            this._stagePointerPressEventId = global.stage.connect("button-press-event", (_actor, event) =>
-                this._onStagePointerButtonEvent(event, true)
-            );
-            this._stagePointerReleaseEventId = global.stage.connect("button-release-event", (_actor, event) =>
-                this._onStagePointerButtonEvent(event, false)
-            );
-            log("[apexshot] runtime pointer listener enabled");
-        } catch (e) {
-            logError(e, "[apexshot] failed to enable runtime pointer listener");
-            this._stagePointerPressEventId = null;
-            this._stagePointerReleaseEventId = null;
-        }
     }
 
     disable() {
@@ -482,19 +458,6 @@ class RecordingMaskService {
         if (this._monitorsChangedId !== null) {
             Main.layoutManager.disconnect(this._monitorsChangedId);
             this._monitorsChangedId = null;
-        }
-        this._stopPointerPolling();
-        if (this._stagePointerPressEventId !== null) {
-            global.stage.disconnect(this._stagePointerPressEventId);
-            this._stagePointerPressEventId = null;
-        }
-        if (this._stagePointerReleaseEventId !== null) {
-            global.stage.disconnect(this._stagePointerReleaseEventId);
-            this._stagePointerReleaseEventId = null;
-        }
-        if (this._stageKeyPressEventId !== null) {
-            global.stage.disconnect(this._stageKeyPressEventId);
-            this._stageKeyPressEventId = null;
         }
 
         if (this._ownName !== null) {
@@ -584,15 +547,6 @@ class RecordingMaskService {
         }
     }
 
-    PushKeystrokeAsync(params, invocation) {
-        try {
-            const [sessionId, text] = params;
-            this._pushKeystroke(sessionId, text);
-            invocation.return_value(null);
-        } catch (e) {
-            invocation.return_dbus_error("org.apexshot.ShellOverlay.Error", e.message);
-        }
-    }
 
     SetRecordingPausedAsync(params, invocation) {
         try {
@@ -703,93 +657,8 @@ class RecordingMaskService {
         updateRuntimeOverlaySnapshot(this._sessionState);
     }
 
-    _pushKeystroke(sessionId, text) {
-        const controlsState = this._sessionState.controlsState;
-        if (!controlsState || controlsState.sessionId !== sessionId)
-            return;
 
-        const changed = pushRuntimeOverlayKeystrokeText(
-            this._sessionState,
-            text,
-            Math.floor(GLib.get_monotonic_time() / 1000)
-        );
-        if (changed) {
-            log(`[apexshot] pushed keystroke ${text}`);
-            updateRuntimeOverlaySnapshot(this._sessionState);
-        }
-    }
 
-    _pollPointerState() {
-        if (!this._sessionState.controlsState)
-            return;
-
-        const [x, y, modifiers] = global.get_pointer();
-        let target = null;
-        if (global.stage && typeof global.stage.get_actor_at_pos === "function") {
-            target = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
-        }
-        const exclude = shouldExcludeOverlayEvent(this._sessionState, target);
-
-        const clicks = recordRuntimeOverlayPointerSample(this._sessionState, {
-            x,
-            y,
-            left: Boolean(modifiers & Clutter.ModifierType.BUTTON1_MASK),
-            middle: Boolean(modifiers & Clutter.ModifierType.BUTTON2_MASK),
-            right: Boolean(modifiers & Clutter.ModifierType.BUTTON3_MASK),
-            capture: !exclude,
-            timestampMs: Math.floor(GLib.get_monotonic_time() / 1000),
-        });
-        if (!clicks.length)
-            return;
-
-        updateRuntimeOverlaySnapshot(this._sessionState);
-    }
-
-    _onStagePointerButtonEvent(event, isPress) {
-        if (!this._sessionState.controlsState || !event)
-            return Clutter.EVENT_PROPAGATE;
-
-        const rawButton = typeof event.get_button === "function" ? event.get_button() : 0;
-        const buttonNumber = Array.isArray(rawButton) ? rawButton[1] : rawButton;
-        const buttonName = {
-            [Clutter.BUTTON_PRIMARY ?? 1]: "left",
-            [Clutter.BUTTON_MIDDLE ?? 2]: "middle",
-            [Clutter.BUTTON_SECONDARY ?? 3]: "right",
-        }[buttonNumber];
-        if (!buttonName)
-            return Clutter.EVENT_PROPAGATE;
-
-        const [x, y] = typeof event.get_coords === "function"
-            ? event.get_coords()
-            : global.get_pointer();
-        let target = typeof event.get_source === "function"
-            ? event.get_source()
-            : null;
-        if ((!target || target === global.stage)
-            && global.stage
-            && typeof global.stage.get_actor_at_pos === "function") {
-            target = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
-        }
-        const exclude = shouldExcludeOverlayEvent(this._sessionState, target);
-
-        this._pointerButtons[buttonName] = isPress;
-
-        const sample = {
-            x,
-            y,
-            left: this._pointerButtons.left,
-            middle: this._pointerButtons.middle,
-            right: this._pointerButtons.right,
-            capture: !exclude,
-            timestampMs: Math.floor(GLib.get_monotonic_time() / 1000),
-        };
-
-        const clicks = recordRuntimeOverlayPointerSample(this._sessionState, sample);
-        if (clicks.length)
-            updateRuntimeOverlaySnapshot(this._sessionState);
-
-        return Clutter.EVENT_PROPAGATE;
-    }
 
     _sendRecordingCommand(method, onAccepted = null) {
         const controlsState = this._sessionState.controlsState;
@@ -821,41 +690,7 @@ class RecordingMaskService {
         );
     }
 
-    _onStageKeyPress(event) {
-        if (!event)
-            return Clutter.EVENT_PROPAGATE;
 
-        const target = typeof event.get_source === "function"
-            ? event.get_source()
-            : null;
-        if (shouldExcludeOverlayEvent(this._sessionState, target))
-            return Clutter.EVENT_PROPAGATE;
-
-        const state = typeof event.get_state === "function" ? event.get_state() : 0;
-        const keySymbol = typeof event.get_key_symbol === "function"
-            ? event.get_key_symbol()
-            : 0;
-        const unicodeValue = typeof event.get_key_unicode === "function"
-            ? event.get_key_unicode()
-            : 0;
-        const keyName = Clutter.keysym_to_name(keySymbol) ?? "";
-        const changed = recordRuntimeOverlayKeystroke(this._sessionState, {
-            keySymbol: keyName,
-            unicodeChar: unicodeValue > 0 ? String.fromCodePoint(unicodeValue) : "",
-            ctrl: Boolean(state & Clutter.ModifierType.CONTROL_MASK),
-            alt: Boolean(state & Clutter.ModifierType.MOD1_MASK),
-            shift: Boolean(state & Clutter.ModifierType.SHIFT_MASK),
-            meta: Boolean(state & (Clutter.ModifierType.SUPER_MASK | Clutter.ModifierType.META_MASK)),
-            timestampMs: Math.floor(GLib.get_monotonic_time() / 1000),
-        });
-        log(`[apexshot] stage key press key=${keyName || unicodeValue || "unknown"} changed=${changed}`);
-        if (changed)
-            updateRuntimeOverlaySnapshot(this._sessionState);
-        return Clutter.EVENT_PROPAGATE;
-    }
-}
-
-export default class ApexShotShellSupport {
     constructor() {
     }
 

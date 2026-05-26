@@ -1,4 +1,3 @@
-use gst::glib::translate::ToGlibPtr;
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
@@ -15,10 +14,8 @@ use crate::{
     config::{save_config, AppConfig},
 };
 
-mod click_overlay;
 mod control_session;
 pub mod editor;
-mod runtime_keystrokes;
 mod stop_overlay;
 use control_session::RecordingControlServer;
 pub use control_session::{
@@ -126,12 +123,6 @@ pub struct RecordingConfig {
     pub gif_quality: f64,
     pub gif_optimize: bool,
     pub gif_max_width: Option<u32>,
-    // Click overlay settings (non-GNOME recordings)
-    pub rec_clicks: bool,
-    pub click_size: f64,
-    pub click_color: u8,
-    pub click_style: u8,
-    pub click_animate: bool,
 }
 
 #[derive(Debug)]
@@ -160,19 +151,6 @@ pub struct RuntimeOverlaySnapshot {
     pub webcam_shape: u8,
     pub webcam_flip: bool,
     pub webcam_device: i32,
-    pub clicks_enabled: bool,
-    pub click_size: f64,
-    pub click_color: u8,
-    pub click_style: u8,
-    pub click_animate: bool,
-    pub keystrokes_enabled: bool,
-    pub keystrokes_supported: bool,
-    pub keystrokes_support_message: String,
-    pub key_size: f64,
-    pub key_position: u8,
-    pub key_appearance: u8,
-    pub key_blur_bg: bool,
-    pub key_filter: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -615,11 +593,6 @@ impl Default for RecordingConfig {
             gif_quality: 0.75,
             gif_optimize: true,
             gif_max_width: Some(800),
-            rec_clicks: false,
-            click_size: 0.5,
-            click_color: 3,
-            click_style: 0,
-            click_animate: true,
         }
     }
 }
@@ -978,66 +951,6 @@ async fn start_recording_with_commands(
         .ok_or_else(|| RecordError::GStreamerError("Pipeline has no bus".into()))?;
 
     println!("Recording...");
-
-    // 5b. Set up click overlay (cairooverlay) for non-GNOME recordings
-    let _click_tracker: Option<click_overlay::ClickTracker> =
-        if config.rec_clicks && pipeline.by_name("clickover").is_some() {
-            let frame_w = config.width.unwrap_or(0) as f64;
-            let frame_h = config.height.unwrap_or(0) as f64;
-            let tracker = click_overlay::ClickTracker::new(
-                config.width.unwrap_or(0),
-                config.height.unwrap_or(0),
-                click_overlay::ClickOverlayConfig {
-                    enabled: true,
-                    size: config.click_size,
-                    color: config.click_color,
-                    style: config.click_style,
-                    animate: config.click_animate,
-                },
-            );
-            if let Some(overlay_elem) = pipeline.by_name("clickover") {
-                let tracker_clone = tracker.clone();
-                overlay_elem.connect("draw", false, move |values| {
-                    // cairo_t* is passed as a raw pointer in the GLib value system.
-                    // We extract it via FFI and wrap it with from_raw_none (no ownership).
-                    let cr_ptr = unsafe {
-                        gst::glib::gobject_ffi::g_value_get_pointer(values[1].to_glib_none().0)
-                            as *mut gtk4::cairo::ffi::cairo_t
-                    };
-                    if cr_ptr.is_null() {
-                        return None;
-                    }
-                    // Use the recorded frame dimensions from the config.
-                    let cr = unsafe { gtk4::cairo::Context::from_raw_none(cr_ptr) };
-                    if frame_w > 0.0 && frame_h > 0.0 {
-                        click_overlay::draw_click_overlay(&cr, frame_w, frame_h, &tracker_clone);
-                    }
-                    // Do NOT drop the Context — GStreamer owns the cairo_t.
-                    std::mem::forget(cr);
-                    None
-                });
-            }
-            Some(tracker)
-        } else {
-            None
-        };
-
-    // 5c. Start click polling (auto-detects X11 / Hyprland / Sway)
-    let _click_polling: Option<click_overlay::ClickPollingHandle> = if config.rec_clicks {
-        if let (Some(x), Some(y), Some(tracker)) = (config.x, config.y, _click_tracker.clone()) {
-            click_overlay::start_click_polling(
-                tracker,
-                x,
-                y,
-                config.width.unwrap_or(0),
-                config.height.unwrap_or(0),
-            )
-        } else {
-            None
-        }
-    } else {
-        None
-    };
 
     let mut command_rx = command_rx;
 
@@ -1467,22 +1380,15 @@ async fn build_pipeline(
     let video_queue = video_queue_props(profile);
     let video_post_caps = video_post_encoder_caps(profile);
 
-    let click_overlay_str = if config.rec_clicks {
-        "cairooverlay name=clickover ! "
-    } else {
-        ""
-    };
-
     if let Some(aenc) = audio_encoder {
         let muxer_named = format!("{} name=mux", profile.muxer);
 
         let video_leg = format!(
-            "{}{} ! videoconvert{}{} ! {}videorate ! {} ! {} ! {}{} ! mux.",
+            "{}{} ! videoconvert{}{} ! {}videorate ! {} ! {} ! {} ! mux.",
             video_source,
             crop_filter,
             hidpi_filter,
             resolution_filter,
-            click_overlay_str,
             video_raw_caps,
             video_queue,
             video_encoder,
@@ -1528,8 +1434,8 @@ async fn build_pipeline(
     } else {
         Ok(BuiltPipeline {
             pipeline_str: format!(
-            "{}{} ! videoconvert{}{} ! {}videorate ! {} ! {} ! {}{} ! {} ! filesink location=\"{}\"",
-            video_source, crop_filter, hidpi_filter, resolution_filter, click_overlay_str, video_raw_caps,
+            "{}{} ! videoconvert{}{} ! {}videorate ! {} ! {} ! {} ! {} ! filesink location=\"{}\"",
+            video_source, crop_filter, hidpi_filter, resolution_filter, video_raw_caps,
             video_queue, video_encoder, video_post_caps, profile.muxer, output_str
             ),
             wayland_source,
@@ -2077,20 +1983,9 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_hidpi = request.hidpi;
     app_config.rec_notifications = request.notifications;
     app_config.rec_cursor = request.cursor;
-    app_config.rec_clicks = request.clicks;
-    app_config.rec_keystrokes = request.keystrokes;
     app_config.rec_remember_selection = request.remember_selection;
     app_config.rec_dim_screen = request.dim_screen;
     app_config.rec_countdown = request.countdown;
-    app_config.rec_click_size = request.click_size;
-    app_config.rec_click_color = request.click_color;
-    app_config.rec_click_style = request.click_style;
-    app_config.rec_click_animate = request.click_animate;
-    app_config.rec_key_size = request.key_size;
-    app_config.rec_key_position = request.key_position;
-    app_config.rec_key_appearance = request.key_appearance;
-    app_config.rec_key_blur_bg = request.key_blur_bg;
-    app_config.rec_key_filter = request.key_filter;
     app_config.rec_webcam_enabled = request.webcam;
     app_config.rec_webcam_size = request.webcam_size;
     app_config.rec_webcam_shape = request.webcam_shape;
@@ -2194,11 +2089,6 @@ pub fn prepare_overlay_recording_request(
         gif_quality,
         gif_optimize,
         gif_max_width,
-        rec_clicks: request.clicks,
-        click_size: request.click_size,
-        click_color: request.click_color,
-        click_style: request.click_style,
-        click_animate: request.click_animate,
     };
 
     let runtime_overlay_snapshot = use_shell_controls.then_some(RuntimeOverlaySnapshot {
@@ -2212,19 +2102,6 @@ pub fn prepare_overlay_recording_request(
         webcam_shape: request.webcam_shape,
         webcam_flip: request.webcam_flip,
         webcam_device: request.webcam_device,
-        clicks_enabled: request.clicks,
-        click_size: request.click_size,
-        click_color: request.click_color,
-        click_style: request.click_style,
-        click_animate: request.click_animate,
-        keystrokes_enabled: request.keystrokes,
-        keystrokes_supported: false,
-        keystrokes_support_message: "Not supported on GNOME Wayland yet".to_string(),
-        key_size: request.key_size,
-        key_position: request.key_position,
-        key_appearance: request.key_appearance,
-        key_blur_bg: request.key_blur_bg,
-        key_filter: request.key_filter,
     });
 
     let controls_params = Some(RecordingControlsParams {
@@ -2242,14 +2119,6 @@ pub fn prepare_overlay_recording_request(
         webcam_rel_x: request.webcam_rel_x,
         webcam_rel_y: request.webcam_rel_y,
         webcam_flip: request.webcam_flip,
-        show_clicks: request.clicks,
-        click_size: request.click_size,
-        click_color: request.click_color,
-        click_style: request.click_style,
-        click_animate: request.click_animate,
-        show_keys: request.keystrokes,
-        key_size: request.key_size,
-        key_position: request.key_position,
         countdown_enabled: request.countdown,
         countdown_seconds: 3, // Default to 3s for now, or fetch from config
         session_id: None,     // Will be set when controls are launched
@@ -2491,14 +2360,6 @@ async fn run_recording_with_shell_controls(
             visibility_policy,
             runtime_overlay_snapshot: runtime_overlay_snapshot.clone(),
         })?;
-    let keystroke_forwarder = runtime_overlay_snapshot
-        .filter(|snapshot| snapshot.keystrokes_enabled && snapshot.keystrokes_supported)
-        .map(|snapshot| {
-            runtime_keystrokes::spawn_runtime_keystroke_forwarder(
-                session_id.clone(),
-                snapshot.key_filter.min(1),
-            )
-        });
 
     notify_daemon_event("recording_session_started");
     let final_outcome = loop {
@@ -2512,9 +2373,6 @@ async fn run_recording_with_shell_controls(
                 drop(controls_handle);
                 drop(control_server);
                 drop(webcam_preview);
-                if let Some(forwarder) = keystroke_forwarder {
-                    forwarder.stop();
-                }
                 notify_recording_session_ended_best_effort();
                 return Err(err.into());
             }
@@ -2546,9 +2404,6 @@ async fn run_recording_with_shell_controls(
     drop(controls_handle);
     drop(control_server);
     drop(webcam_preview);
-    if let Some(forwarder) = keystroke_forwarder {
-        forwarder.stop();
-    }
 
     Ok(final_outcome)
 }
@@ -2730,11 +2585,6 @@ mod tests {
             gif_quality: 0.75,
             gif_optimize: true,
             gif_max_width: Some(800),
-            rec_clicks: false,
-            click_size: 0.5,
-            click_color: 3,
-            click_style: 0,
-            click_animate: true,
         }
     }
 
@@ -2756,8 +2606,6 @@ mod tests {
             controls: true,
             mic: true,
             speaker: false,
-            clicks: true,
-            keystrokes: false,
             display_rec_time: true,
             hidpi: true,
             notifications: false,
@@ -2796,8 +2644,6 @@ mod tests {
         assert_eq!(prepared.updated_app_config.rec_hidpi, true);
         assert_eq!(prepared.updated_app_config.rec_notifications, false);
         assert_eq!(prepared.updated_app_config.rec_cursor, false);
-        assert_eq!(prepared.updated_app_config.rec_clicks, true);
-        assert_eq!(prepared.updated_app_config.rec_keystrokes, false);
         assert_eq!(prepared.updated_app_config.rec_remember_selection, true);
         assert_eq!(prepared.updated_app_config.last_selection_x, Some(10));
         assert_eq!(prepared.updated_app_config.last_selection_y, Some(20));
@@ -2841,14 +2687,6 @@ mod tests {
                 webcam_rel_x: 0.0,
                 webcam_rel_y: 0.0,
                 webcam_flip: false,
-                show_clicks: true,
-                click_size: 0.3,
-                click_color: 0,
-                click_style: 0,
-                click_animate: true,
-                show_keys: false,
-                key_size: 0.32,
-                key_position: 0,
                 countdown_enabled: false,
                 countdown_seconds: 3,
                 session_id: None,
@@ -2979,14 +2817,6 @@ mod tests {
                 webcam_rel_x: 0.0,
                 webcam_rel_y: 0.0,
                 webcam_flip: false,
-                show_clicks: false,
-                click_size: 0.3,
-                click_color: 0,
-                click_style: 0,
-                click_animate: true,
-                show_keys: false,
-                key_size: 0.32,
-                key_position: 0,
                 countdown_enabled: true,
                 countdown_seconds: 3,
                 session_id: None,
@@ -3097,9 +2927,7 @@ mod tests {
         .await
         .expect("pipeline should build");
 
-        assert!(built
-            .pipeline_str
-            .contains("videorate ! video/x-raw,framerate=60/1"));
+        assert!(built.pipeline_str.contains("video/x-raw,framerate=60/1"));
         assert!(built.pipeline_str.contains("x264enc"));
         assert!(built.pipeline_str.contains("quantizer=14"));
         assert!(built.pipeline_str.contains("bitrate=8000"));
@@ -3245,7 +3073,9 @@ mod tests {
         assert!(!built
             .pipeline_str
             .contains(" ! videoscale method=lanczos ! video/x-raw,width=2560,height=1440"));
-        assert!(built.pipeline_str.contains(" ! videoconvert ! videorate"));
+        assert!(built
+            .pipeline_str
+            .contains(" ! videoconvert ! video/x-raw,framerate="));
 
         if gst::ElementFactory::find("pulsesrc").is_some()
             && select_audio_encoder(PROFILES[0].muxer).is_some()
@@ -3271,8 +3101,6 @@ mod tests {
             controls: false,
             mic: false,
             speaker: true,
-            clicks: false,
-            keystrokes: true,
             display_rec_time: false,
             hidpi: false,
             notifications: true,
@@ -3336,8 +3164,6 @@ mod tests {
             controls: true,
             mic: true,
             speaker: true,
-            clicks: true,
-            keystrokes: true,
             webcam: true,
             webcam_rel_x: 0.61,
             webcam_rel_y: 0.17,
@@ -3345,15 +3171,6 @@ mod tests {
             webcam_shape: 1,
             webcam_flip: true,
             webcam_device: 7,
-            click_size: 0.45,
-            click_color: 3,
-            click_style: 2,
-            click_animate: false,
-            key_size: 0.5,
-            key_position: 2,
-            key_appearance: 1,
-            key_blur_bg: false,
-            key_filter: 4,
             display_rec_time: true,
             hidpi: false,
             notifications: true,
@@ -3388,15 +3205,6 @@ mod tests {
         assert_eq!(prepared.updated_app_config.rec_webcam_shape, 1);
         assert_eq!(prepared.updated_app_config.rec_webcam_flip, true);
         assert_eq!(prepared.updated_app_config.rec_webcam_device, 7);
-        assert_eq!(prepared.updated_app_config.rec_click_size, 0.45);
-        assert_eq!(prepared.updated_app_config.rec_click_color, 3);
-        assert_eq!(prepared.updated_app_config.rec_click_style, 2);
-        assert_eq!(prepared.updated_app_config.rec_click_animate, false);
-        assert_eq!(prepared.updated_app_config.rec_key_size, 0.5);
-        assert_eq!(prepared.updated_app_config.rec_key_position, 2);
-        assert_eq!(prepared.updated_app_config.rec_key_appearance, 1);
-        assert_eq!(prepared.updated_app_config.rec_key_blur_bg, false);
-        assert_eq!(prepared.updated_app_config.rec_key_filter, 4);
         let shell_supported = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
         assert_eq!(prepared.runtime_overlay_snapshot.is_some(), shell_supported);
         if shell_supported {
@@ -3410,18 +3218,6 @@ mod tests {
             assert_eq!(snap.webcam_shape, 1);
             assert_eq!(snap.webcam_flip, true);
             assert_eq!(snap.webcam_device, 7);
-            assert_eq!(snap.clicks_enabled, true);
-            assert_eq!(snap.click_size, 0.45);
-            assert_eq!(snap.click_color, 3);
-            assert_eq!(snap.click_style, 2);
-            assert_eq!(snap.click_animate, false);
-            assert_eq!(snap.keystrokes_enabled, true);
-            assert_eq!(snap.keystrokes_supported, false);
-            assert_eq!(snap.key_size, 0.5);
-            assert_eq!(snap.key_position, 2);
-            assert_eq!(snap.key_appearance, 1);
-            assert_eq!(snap.key_blur_bg, false);
-            assert_eq!(snap.key_filter, 4);
         }
     }
 
@@ -3436,8 +3232,6 @@ mod tests {
             controls: false,
             mic: true,
             speaker: true,
-            clicks: true,
-            keystrokes: true,
             webcam: true,
             webcam_rel_x: 0.61,
             webcam_rel_y: 0.17,
@@ -3445,15 +3239,6 @@ mod tests {
             webcam_shape: 1,
             webcam_flip: true,
             webcam_device: 7,
-            click_size: 0.45,
-            click_color: 3,
-            click_style: 2,
-            click_animate: false,
-            key_size: 0.5,
-            key_position: 2,
-            key_appearance: 1,
-            key_blur_bg: false,
-            key_filter: 4,
             display_rec_time: true,
             hidpi: false,
             notifications: true,
@@ -3512,8 +3297,6 @@ mod tests {
             controls: true,
             mic: false,
             speaker: false,
-            clicks: false,
-            keystrokes: false,
             display_rec_time: false,
             hidpi: false,
             notifications: true,
@@ -3557,14 +3340,6 @@ mod tests {
                 webcam_rel_x: 0.0,
                 webcam_rel_y: 0.0,
                 webcam_flip: false,
-                show_clicks: false,
-                click_size: 0.3,
-                click_color: 0,
-                click_style: 0,
-                click_animate: true,
-                show_keys: false,
-                key_size: 0.32,
-                key_position: 0,
                 countdown_enabled: false,
                 countdown_seconds: 3,
                 session_id: None,
@@ -3591,8 +3366,6 @@ mod tests {
             controls: true,
             mic: false,
             speaker: false,
-            clicks: false,
-            keystrokes: false,
             display_rec_time: true,
             hidpi: false,
             notifications: true,
@@ -3643,14 +3416,6 @@ mod tests {
                 webcam_rel_x: 0.0,
                 webcam_rel_y: 0.0,
                 webcam_flip: false,
-                show_clicks: false,
-                click_size: 0.3,
-                click_color: 0,
-                click_style: 0,
-                click_animate: true,
-                show_keys: false,
-                key_size: 0.32,
-                key_position: 0,
                 countdown_enabled: false,
                 countdown_seconds: 3,
                 session_id: None,
@@ -3669,8 +3434,6 @@ mod tests {
             controls: true,
             mic: false,
             speaker: false,
-            clicks: false,
-            keystrokes: false,
             display_rec_time: false,
             hidpi: false,
             notifications: true,
@@ -3704,8 +3467,6 @@ mod tests {
             controls: true,
             mic: false,
             speaker: false,
-            clicks: false,
-            keystrokes: false,
             display_rec_time: false,
             hidpi: false,
             notifications: true,
@@ -3739,8 +3500,6 @@ mod tests {
             controls: true,
             mic: false,
             speaker: false,
-            clicks: false,
-            keystrokes: false,
             display_rec_time: false,
             hidpi: false,
             notifications: true,

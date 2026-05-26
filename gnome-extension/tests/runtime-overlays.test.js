@@ -31,22 +31,20 @@ runTest("renderable visibility ignores mic and speaker overlays", () => {
         mic: true,
         speaker: true,
         webcam: false,
-        clicks: true,
-        keystrokes: false,
     });
 
     assertEqual(visibility.mic, false, "mic should not render as an on-screen overlay");
     assertEqual(visibility.speaker, false, "speaker should not render as an on-screen overlay");
-    assertEqual(visibility.clicks, true, "clicks should still render");
+    assertEqual(visibility.webcam, false, "webcam should reflect visibility");
 });
 
-runTest("renderable overlays require webcam clicks or keystrokes", () => {
+runTest("renderable overlays require webcam", () => {
     assert(
-        !hasRenderableRuntimeOverlays({mic: true, speaker: true, webcam: false, clicks: false, keystrokes: false}),
+        !hasRenderableRuntimeOverlays({mic: true, speaker: true, webcam: false}),
         "audio-only visibility should not create GNOME on-screen overlays"
     );
     assert(
-        hasRenderableRuntimeOverlays({mic: false, speaker: false, webcam: true, clicks: false, keystrokes: false}),
+        hasRenderableRuntimeOverlays({mic: false, speaker: false, webcam: true}),
         "webcam visibility should still create GNOME on-screen overlays"
     );
 });

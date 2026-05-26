@@ -620,20 +620,6 @@ pub(crate) fn draw_recording_panel(
             rec_webcam,
             false,
         ),
-        (
-            RecordPanelTile::Clicks,
-            ToolbarIcon::Clicks,
-            "Clicks",
-            rec_clicks,
-            false,
-        ),
-        (
-            RecordPanelTile::Keystrokes,
-            ToolbarIcon::Keystrokes,
-            "Keys",
-            rec_keystrokes,
-            false,
-        ),
     ];
 
     if hover_tile == Some(RecordPanelTile::Controls) {
@@ -1436,8 +1422,8 @@ pub(crate) fn draw_settings_general_tab(
     hidpi: bool,
     do_not_disturb: bool,
     show_cursor: bool,
-    rec_clicks: bool,
-    rec_keystrokes: bool,
+    _rec_clicks: bool,
+    _rec_keystrokes: bool,
     _rec_webcam: bool,
     remember_selection: bool,
     dim_screen: bool,
@@ -1499,8 +1485,6 @@ pub(crate) fn draw_settings_general_tab(
     s!("HiDPI", "Record at display scale res", hidpi);
     s!("Notifications", "DND while recording", do_not_disturb);
     s!("Cursor", "Show cursor", show_cursor, 10.0);
-    s!("", "Highlight clicks", rec_clicks);
-    s!("Keyboard", "Show keystrokes", rec_keystrokes, 10.0);
     s!(
         "Recording area",
         "Remember last selection",

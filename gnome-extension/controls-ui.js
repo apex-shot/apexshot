@@ -7,7 +7,6 @@ import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {shellVersionAtLeast50} from "./gnome-version.js";
 import {
     clearControlsState,
-    getRuntimeOverlaySupportMessage,
     getRuntimeOverlayVisibility,
     registerSelfOwnedActor,
     setRuntimeOverlayVisibility,
@@ -34,8 +33,6 @@ const RUNTIME_OVERLAY_MENU_GAP = 10;
 const RUNTIME_OVERLAY_MENU_MARGIN = 24;
 const RUNTIME_OVERLAY_TOGGLE_SPECS = Object.freeze([
     {key: "webcam", icon: "camera-web-symbolic", label: "Webcam"},
-    {key: "clicks", icon: "input-mouse-symbolic", label: "Clicks"},
-    {key: "keystrokes", icon: "input-keyboard-symbolic", label: "Keystrokes"},
     {key: "mic", icon: "audio-input-microphone-symbolic", label: "Mic"},
     {key: "speaker", icon: "audio-volume-high-symbolic", label: "Speaker"},
 ]);

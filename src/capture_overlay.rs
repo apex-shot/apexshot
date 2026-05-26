@@ -734,19 +734,7 @@ pub struct RecordingRequest {
     pub controls: bool,
     pub mic: bool,
     pub speaker: bool,
-    pub clicks: bool,
-    pub keystrokes: bool,
-    // Runtime overlay settings
     pub webcam: bool,
-    pub click_size: f64,
-    pub click_color: u8,
-    pub click_style: u8,
-    pub click_animate: bool,
-    pub key_size: f64,
-    pub key_position: u8,
-    pub key_appearance: u8,
-    pub key_blur_bg: bool,
-    pub key_filter: u8,
     pub webcam_size: u8,
     pub webcam_shape: u8,
     pub webcam_flip: bool,
@@ -786,18 +774,7 @@ impl Default for RecordingRequest {
             controls: false,
             mic: false,
             speaker: false,
-            clicks: false,
-            keystrokes: false,
             webcam: false,
-            click_size: 0.3,
-            click_color: 0,
-            click_style: 0,
-            click_animate: true,
-            key_size: 0.32,
-            key_position: 0,
-            key_appearance: 0,
-            key_blur_bg: true,
-            key_filter: 0,
             webcam_size: 1,
             webcam_shape: 3,
             webcam_flip: false,
@@ -1191,36 +1168,6 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     } else {
         "--no-show-cursor".into()
     });
-    extra_args.push(if config.rec_clicks {
-        "--rec-clicks".into()
-    } else {
-        "--no-rec-clicks".into()
-    });
-    extra_args.push(if config.rec_keystrokes {
-        "--rec-keystrokes".into()
-    } else {
-        "--no-rec-keystrokes".into()
-    });
-    extra_args.push(format!("--rec-click-size={:.4}", config.rec_click_size));
-    extra_args.push(format!("--rec-click-color={}", config.rec_click_color));
-    extra_args.push(format!("--rec-click-style={}", config.rec_click_style));
-    if config.rec_click_animate {
-        extra_args.push("--rec-click-animate".into());
-    } else {
-        extra_args.push("--no-rec-click-animate".into());
-    }
-    extra_args.push(format!("--rec-key-size={:.4}", config.rec_key_size));
-    extra_args.push(format!("--rec-key-position={}", config.rec_key_position));
-    extra_args.push(format!(
-        "--rec-key-appearance={}",
-        config.rec_key_appearance
-    ));
-    if config.rec_key_blur_bg {
-        extra_args.push("--rec-key-blur-bg".into());
-    } else {
-        extra_args.push("--no-rec-key-blur-bg".into());
-    }
-    extra_args.push(format!("--rec-key-filter={}", config.rec_key_filter));
     if config.rec_webcam_enabled {
         extra_args.push("--rec-webcam".into());
     } else {
@@ -1505,18 +1452,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let controls = extract_bool(json, "controls").unwrap_or(false);
     let mic = extract_bool(json, "mic").unwrap_or(false);
     let speaker = extract_bool(json, "speaker").unwrap_or(false);
-    let clicks = extract_bool(json, "clicks").unwrap_or(false);
-    let keystrokes = extract_bool(json, "keystrokes").unwrap_or(false);
     let webcam = extract_bool(json, "webcam").unwrap_or(false);
-    let click_size = extract_float(json, "click_size").unwrap_or(0.3);
-    let click_color = extract_int(json, "click_color").unwrap_or(0) as u8;
-    let click_style = extract_int(json, "click_style").unwrap_or(0) as u8;
-    let click_animate = extract_bool(json, "click_animate").unwrap_or(true);
-    let key_size = extract_float(json, "key_size").unwrap_or(0.32);
-    let key_position = extract_int(json, "key_position").unwrap_or(0) as u8;
-    let key_appearance = extract_int(json, "key_appearance").unwrap_or(0) as u8;
-    let key_blur_bg = extract_bool(json, "key_blur_bg").unwrap_or(true);
-    let key_filter = extract_int(json, "key_filter").unwrap_or(0) as u8;
     let webcam_size = extract_int(json, "webcam_size").unwrap_or(1) as u8;
     let webcam_shape = extract_int(json, "webcam_shape").unwrap_or(3) as u8;
     let webcam_flip = extract_bool(json, "webcam_flip").unwrap_or(false);
@@ -1556,18 +1492,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         controls,
         mic,
         speaker,
-        clicks,
-        keystrokes,
         webcam,
-        click_size,
-        click_color,
-        click_style,
-        click_animate,
-        key_size,
-        key_position,
-        key_appearance,
-        key_blur_bg,
-        key_filter,
         webcam_size,
         webcam_shape,
         webcam_flip,
@@ -1792,7 +1717,6 @@ mod tests {
                 "x":12,"y":34,"width":567,"height":890,
                 "mode":"record","record_type":"video",
                 "controls":true,"mic":true,"speaker":false,
-                "clicks":true,"keystrokes":false,
                 "display_rec_time":true,"hidpi":false,
                 "notifications":true,"cursor":false,
                 "remember_selection":true,"dim_screen":false,
@@ -1801,10 +1725,7 @@ mod tests {
                 "record_mono":true,"open_editor":false,
                 "gif_fps":33,"gif_quality":0.8125,
                 "gif_size_idx":2,"optimize_gif":false,"fullscreen":true,
-                "webcam":true,"click_size":0.42,"click_color":4,"click_style":1,
-                "click_animate":true,"key_size":0.33,"key_position":3,
-                "key_appearance":1,"key_blur_bg":true,"key_filter":1,
-                "webcam_size":2,"webcam_shape":1,"webcam_flip":true,
+                "webcam":true,"webcam_size":2,"webcam_shape":1,"webcam_flip":true,
                 "webcam_device":2,"webcam_rel_x":0.125,"webcam_rel_y":0.875
             }"#,
         )
@@ -1818,8 +1739,6 @@ mod tests {
         assert!(request.controls);
         assert!(request.mic);
         assert!(!request.speaker);
-        assert!(request.clicks);
-        assert!(!request.keystrokes);
         assert!(request.display_rec_time);
         assert!(!request.hidpi);
         assert!(request.notifications);
@@ -1838,15 +1757,6 @@ mod tests {
         assert!(!request.optimize_gif);
         assert!(request.fullscreen);
         assert!(request.webcam);
-        assert_eq!(request.click_size, 0.42);
-        assert_eq!(request.click_color, 4);
-        assert_eq!(request.click_style, 1);
-        assert!(request.click_animate);
-        assert_eq!(request.key_size, 0.33);
-        assert_eq!(request.key_position, 3);
-        assert_eq!(request.key_appearance, 1);
-        assert!(request.key_blur_bg);
-        assert_eq!(request.key_filter, 1);
         assert_eq!(request.webcam_size, 2);
         assert_eq!(request.webcam_shape, 1);
         assert!(request.webcam_flip);
@@ -1859,15 +1769,6 @@ mod tests {
     fn build_area_init_args_includes_runtime_overlay_defaults() {
         let config = AppConfig {
             rec_video_format: 1,
-            rec_click_size: 0.42,
-            rec_click_color: 4,
-            rec_click_style: 1,
-            rec_click_animate: true,
-            rec_key_size: 0.33,
-            rec_key_position: 3,
-            rec_key_appearance: 1,
-            rec_key_blur_bg: true,
-            rec_key_filter: 1,
             rec_webcam_enabled: true,
             rec_webcam_size: 2,
             rec_webcam_shape: 1,
@@ -1881,15 +1782,6 @@ mod tests {
         let args = build_area_init_args(&config);
 
         assert!(args.contains(&"--video-format=0".to_string()));
-        assert!(args.contains(&"--rec-click-size=0.4200".to_string()));
-        assert!(args.contains(&"--rec-click-color=4".to_string()));
-        assert!(args.contains(&"--rec-click-style=1".to_string()));
-        assert!(args.contains(&"--rec-click-animate".to_string()));
-        assert!(args.contains(&"--rec-key-size=0.3300".to_string()));
-        assert!(args.contains(&"--rec-key-position=3".to_string()));
-        assert!(args.contains(&"--rec-key-appearance=1".to_string()));
-        assert!(args.contains(&"--rec-key-blur-bg".to_string()));
-        assert!(args.contains(&"--rec-key-filter=1".to_string()));
         assert!(args.contains(&"--rec-webcam".to_string()));
         assert!(args.contains(&"--rec-webcam-size=2".to_string()));
         assert!(args.contains(&"--rec-webcam-shape=1".to_string()));
@@ -2010,7 +1902,7 @@ mod tests {
     fn explicit_record_config_exit_is_distinct_from_cancel() {
         let result = parse_area_capture_output(
             Some(OverlayExitCode::RecordConfigUpdated as i32),
-            r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video","controls":true,"mic":false,"speaker":false,"clicks":true,"keystrokes":false,"webcam":false,"click_size":0.1464,"click_color":3,"click_style":0,"click_animate":true,"key_size":0.8929,"key_position":0,"key_appearance":0,"key_blur_bg":true,"key_filter":0,"webcam_size":1,"webcam_shape":1,"webcam_flip":false,"webcam_device":0,"webcam_rel_x":0.0000,"webcam_rel_y":0.0000,"display_rec_time":false,"hidpi":false,"notifications":true,"cursor":true,"remember_selection":false,"dim_screen":true,"countdown":true,"video_max_res":0,"video_fps":1,"record_mono":false,"open_editor":false,"gif_fps":60,"gif_quality":0.7500,"gif_size_idx":0,"optimize_gif":true,"fullscreen":false}"#,
+            r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video","controls":true,"mic":false,"speaker":false,"webcam":false,"webcam_size":1,"webcam_shape":1,"webcam_flip":false,"webcam_device":0,"webcam_rel_x":0.0000,"webcam_rel_y":0.0000,"display_rec_time":false,"hidpi":false,"notifications":true,"cursor":true,"remember_selection":false,"dim_screen":true,"countdown":true,"video_max_res":0,"video_fps":1,"record_mono":false,"open_editor":false,"gif_fps":60,"gif_quality":0.7500,"gif_size_idx":0,"optimize_gif":true,"fullscreen":false}"#,
         )
         .expect("record config should parse");
 

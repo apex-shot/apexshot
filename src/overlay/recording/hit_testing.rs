@@ -102,24 +102,6 @@ pub(crate) fn recording_tile_at(
                 height: FEATURE_PANEL_HEIGHT,
             },
         ),
-        (
-            RecordPanelTile::Clicks,
-            RectF {
-                x: rail.x,
-                y: rail.y + FEATURE_PANEL_HEIGHT * 3.0,
-                width: rail.width,
-                height: FEATURE_PANEL_HEIGHT,
-            },
-        ),
-        (
-            RecordPanelTile::Keystrokes,
-            RectF {
-                x: rail.x,
-                y: rail.y + FEATURE_PANEL_HEIGHT * 4.0,
-                width: rail.width,
-                height: FEATURE_PANEL_HEIGHT,
-            },
-        ),
     ];
     for (tile, rect) in [
         (RecordPanelTile::Controls, controls),

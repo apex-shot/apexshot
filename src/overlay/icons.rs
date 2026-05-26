@@ -15,8 +15,7 @@ pub(crate) enum ToolbarIcon {
     Mic,
     Speaker,
     Webcam,
-    Clicks,
-    Keystrokes,
+
     Video,
     Gif,
 }
@@ -211,46 +210,7 @@ pub(crate) fn draw_toolbar_icon(
             context.line_to(cx + 3.8, cy - 4.6);
             let _ = context.stroke();
         }
-        ToolbarIcon::Clicks => {
-            context.move_to(cx - 0.5, cy - 6.5);
-            context.line_to(cx - 0.5, cy + 5.0);
-            context.line_to(cx + 2.5, cy + 1.5);
-            context.line_to(cx + 7.0, cy + 2.0);
-            context.close_path();
-            let _ = context.stroke();
-            context.move_to(cx + 2.5, cy + 1.5);
-            context.line_to(cx + 5.5, cy + 6.0);
-            let _ = context.stroke();
-            context.set_line_width(1.2);
-            let tx = cx - 0.5;
-            let ty = cy - 6.5;
-            for i in 0..6 {
-                let ang = i as f64 * PI / 3.0;
-                context.move_to(tx + ang.cos() * 3.5, ty + ang.sin() * 3.5);
-                context.line_to(tx + ang.cos() * 6.0, ty + ang.sin() * 6.0);
-            }
-            let _ = context.stroke();
-        }
-        ToolbarIcon::Keystrokes => {
-            rounded_rect_path(context, cx - 8.5, cy - 8.5, 17.0, 17.0, 3.5);
-            let _ = context.stroke();
-            context.set_line_width(1.8);
-            let r = 2.4;
-            context.arc(cx - r, cy - r, r, 0.0, PI * 2.0);
-            context.arc(cx + r, cy - r, r, 0.0, PI * 2.0);
-            context.arc(cx - r, cy + r, r, 0.0, PI * 2.0);
-            context.arc(cx + r, cy + r, r, 0.0, PI * 2.0);
-            let _ = context.stroke();
-            context.move_to(cx - r, cy - r + 0.5);
-            context.line_to(cx - r, cy + r - 0.5);
-            context.move_to(cx + r, cy - r + 0.5);
-            context.line_to(cx + r, cy + r - 0.5);
-            context.move_to(cx - r + 0.5, cy - r);
-            context.line_to(cx + r - 0.5, cy - r);
-            context.move_to(cx - r + 0.5, cy + r);
-            context.line_to(cx + r - 0.5, cy + r);
-            let _ = context.stroke();
-        }
+
         ToolbarIcon::Video => {
             rounded_rect_path(context, cx - 8.0, cy - 5.0, 10.5, 10.0, 2.5);
             let _ = context.stroke();

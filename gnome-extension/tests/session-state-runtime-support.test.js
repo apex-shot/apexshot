@@ -2,7 +2,6 @@
 
 import {
     createSessionState,
-    getRuntimeOverlaySupportMessage,
     setControlsState,
 } from "../session-state.js";
 
@@ -21,28 +20,6 @@ function runTest(name, fn) {
         throw error;
     }
 }
-
-runTest("reads the keystroke support message from the runtime snapshot", () => {
-    const session = createSessionState();
-    setControlsState(session, {
-        dbusDest: "org.apexshot.RecordingControl",
-        sessionId: "recording-unsupported",
-        rect: {x: 0, y: 0, width: 100, height: 100},
-        isFullscreen: false,
-        showTimer: true,
-        runtimeOverlaySnapshot: JSON.stringify({
-            keystrokes_enabled: true,
-            keystrokes_supported: false,
-            keystrokes_support_message: "Not supported on GNOME Wayland yet",
-        }),
-    }, 0);
-
-    assertEqual(
-        getRuntimeOverlaySupportMessage(session, "keystrokes"),
-        "Not supported on GNOME Wayland yet",
-        "support message should come from the snapshot"
-    );
-});
 
 runTest("parses webcam preview manifest path from the runtime snapshot", () => {
     const session = createSessionState();

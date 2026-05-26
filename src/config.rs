@@ -38,8 +38,6 @@ pub struct AppConfig {
     pub rec_hidpi: bool,
     pub rec_notifications: bool,
     pub rec_cursor: bool,
-    pub rec_clicks: bool,
-    pub rec_keystrokes: bool,
     pub rec_remember_selection: bool,
     pub rec_dim_screen: bool,
     pub rec_countdown: bool,
@@ -59,16 +57,6 @@ pub struct AppConfig {
     pub rec_gif_quality: f64,
     pub rec_gif_size_idx: u8,
     pub rec_gif_optimize: bool,
-    // Recording Overlay settings
-    pub rec_click_size: f64,
-    pub rec_click_color: u8,
-    pub rec_click_style: u8,
-    pub rec_click_animate: bool,
-    pub rec_key_size: f64,
-    pub rec_key_position: u8,
-    pub rec_key_appearance: u8,
-    pub rec_key_blur_bg: bool,
-    pub rec_key_filter: u8,
     pub rec_webcam_enabled: bool,
     pub rec_webcam_size: u8,
     pub rec_webcam_shape: u8,
@@ -175,8 +163,6 @@ impl Default for AppConfig {
             rec_hidpi: true,
             rec_notifications: true,
             rec_cursor: true,
-            rec_clicks: false,
-            rec_keystrokes: false,
             rec_remember_selection: false,
             rec_dim_screen: true,
             rec_countdown: true,
@@ -194,15 +180,6 @@ impl Default for AppConfig {
             rec_gif_quality: 0.75,
             rec_gif_size_idx: 0,
             rec_gif_optimize: true,
-            rec_click_size: 0.3,
-            rec_click_color: 0,
-            rec_click_style: 0,
-            rec_click_animate: true,
-            rec_key_size: 0.32,
-            rec_key_position: 0,
-            rec_key_appearance: 0,
-            rec_key_blur_bg: true,
-            rec_key_filter: 0,
             rec_webcam_enabled: false,
             rec_webcam_size: 1,
             rec_webcam_shape: 3,
@@ -312,13 +289,6 @@ impl AppConfig {
         self.rec_gif_fps = self.rec_gif_fps.clamp(5, 60);
         self.rec_gif_quality = self.rec_gif_quality.clamp(0.0, 1.0);
         self.rec_gif_size_idx = self.rec_gif_size_idx.min(3);
-        self.rec_click_size = self.rec_click_size.clamp(0.0, 1.0);
-        self.rec_click_color = self.rec_click_color.min(8);
-        self.rec_click_style = self.rec_click_style.min(1);
-        self.rec_key_size = self.rec_key_size.clamp(0.0, 1.0);
-        self.rec_key_position = self.rec_key_position.min(5);
-        self.rec_key_appearance = self.rec_key_appearance.min(1);
-        self.rec_key_filter = self.rec_key_filter.min(1);
         self.rec_webcam_size = self.rec_webcam_size.min(4);
         self.rec_webcam_shape = self.rec_webcam_shape.min(3);
         self.rec_webcam_rel_x = self.rec_webcam_rel_x.clamp(0.0, 1.0);
@@ -622,8 +592,6 @@ mod tests {
         assert!(cfg.rec_hidpi);
         assert!(cfg.rec_notifications);
         assert!(cfg.rec_cursor);
-        assert!(!cfg.rec_clicks);
-        assert!(!cfg.rec_keystrokes);
         assert!(!cfg.rec_remember_selection);
         assert!(cfg.rec_dim_screen);
         assert!(cfg.rec_countdown);
@@ -636,15 +604,6 @@ mod tests {
         let cfg = AppConfig::default();
         assert!(!cfg.rec_mic);
         assert!(!cfg.rec_speaker);
-        assert_eq!(cfg.rec_click_size, 0.3);
-        assert_eq!(cfg.rec_click_color, 0);
-        assert_eq!(cfg.rec_click_style, 0);
-        assert!(cfg.rec_click_animate);
-        assert_eq!(cfg.rec_key_size, 0.32);
-        assert_eq!(cfg.rec_key_position, 0);
-        assert_eq!(cfg.rec_key_appearance, 0);
-        assert!(cfg.rec_key_blur_bg);
-        assert_eq!(cfg.rec_key_filter, 0);
         assert!(!cfg.rec_webcam_enabled);
         assert_eq!(cfg.rec_webcam_size, 1);
         assert_eq!(cfg.rec_webcam_shape, 3);
@@ -659,15 +618,6 @@ mod tests {
         let original = AppConfig {
             rec_mic: true,
             rec_speaker: true,
-            rec_click_size: 0.42,
-            rec_click_color: 2,
-            rec_click_style: 1,
-            rec_click_animate: true,
-            rec_key_size: 0.33,
-            rec_key_position: 2,
-            rec_key_appearance: 1,
-            rec_key_blur_bg: true,
-            rec_key_filter: 1,
             rec_webcam_enabled: true,
             rec_webcam_size: 2,
             rec_webcam_shape: 1,
@@ -683,15 +633,6 @@ mod tests {
 
         assert_eq!(loaded.rec_mic, original.rec_mic);
         assert_eq!(loaded.rec_speaker, original.rec_speaker);
-        assert_eq!(loaded.rec_click_size, original.rec_click_size);
-        assert_eq!(loaded.rec_click_color, original.rec_click_color);
-        assert_eq!(loaded.rec_click_style, original.rec_click_style);
-        assert_eq!(loaded.rec_click_animate, original.rec_click_animate);
-        assert_eq!(loaded.rec_key_size, original.rec_key_size);
-        assert_eq!(loaded.rec_key_position, original.rec_key_position);
-        assert_eq!(loaded.rec_key_appearance, original.rec_key_appearance);
-        assert_eq!(loaded.rec_key_blur_bg, original.rec_key_blur_bg);
-        assert_eq!(loaded.rec_key_filter, original.rec_key_filter);
         assert_eq!(loaded.rec_webcam_enabled, original.rec_webcam_enabled);
         assert_eq!(loaded.rec_webcam_size, original.rec_webcam_size);
         assert_eq!(loaded.rec_webcam_shape, original.rec_webcam_shape);
@@ -704,13 +645,6 @@ mod tests {
     #[test]
     fn recording_overlay_settings_are_sanitized() {
         let cfg = AppConfig {
-            rec_click_size: -1.0,
-            rec_click_color: 99,
-            rec_click_style: 9,
-            rec_key_size: 2.0,
-            rec_key_position: 99,
-            rec_key_appearance: 9,
-            rec_key_filter: 9,
             rec_webcam_size: 99,
             rec_webcam_shape: 99,
             rec_webcam_rel_x: -0.5,
@@ -719,13 +653,6 @@ mod tests {
         }
         .sanitized();
 
-        assert_eq!(cfg.rec_click_size, 0.0);
-        assert_eq!(cfg.rec_click_color, 8);
-        assert_eq!(cfg.rec_click_style, 1);
-        assert_eq!(cfg.rec_key_size, 1.0);
-        assert_eq!(cfg.rec_key_position, 5);
-        assert_eq!(cfg.rec_key_appearance, 1);
-        assert_eq!(cfg.rec_key_filter, 1);
         assert_eq!(cfg.rec_webcam_size, 4);
         assert_eq!(cfg.rec_webcam_shape, 3);
         assert_eq!(cfg.rec_webcam_rel_x, 0.0);
@@ -738,15 +665,6 @@ mod tests {
         let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
         assert!(!cfg.rec_mic);
         assert!(!cfg.rec_speaker);
-        assert_eq!(cfg.rec_click_size, 0.3);
-        assert_eq!(cfg.rec_click_color, 0);
-        assert_eq!(cfg.rec_click_style, 0);
-        assert!(cfg.rec_click_animate);
-        assert_eq!(cfg.rec_key_size, 0.32);
-        assert_eq!(cfg.rec_key_position, 0);
-        assert_eq!(cfg.rec_key_appearance, 0);
-        assert!(cfg.rec_key_blur_bg);
-        assert_eq!(cfg.rec_key_filter, 0);
         assert!(!cfg.rec_webcam_enabled);
         assert_eq!(cfg.rec_webcam_size, 1);
         assert_eq!(cfg.rec_webcam_shape, 3);

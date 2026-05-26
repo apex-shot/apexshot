@@ -5,12 +5,10 @@ export function createRenderableRuntimeOverlayVisibility(visibility) {
         mic: false,
         speaker: false,
         webcam: Boolean(visibility?.webcam),
-        clicks: Boolean(visibility?.clicks),
-        keystrokes: Boolean(visibility?.keystrokes),
     };
 }
 
 export function hasRenderableRuntimeOverlays(visibility) {
     const renderable = createRenderableRuntimeOverlayVisibility(visibility);
-    return renderable.webcam || renderable.clicks || renderable.keystrokes;
+    return renderable.webcam;
 }

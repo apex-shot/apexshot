@@ -219,15 +219,6 @@ pub fn release_screenshot_lock_best_effort() {
     let _ = end_screenshot_lock();
 }
 
-pub fn push_recording_keystroke(session_id: &str, text: &str) -> anyhow::Result<()> {
-    if !current_session_supports_gnome_shell_overlay() {
-        return Ok(());
-    }
-
-    run_shell_overlay_method("PushKeystroke", show_push_keystroke_args(session_id, text))
-        .context("failed to launch dbus-send for PushKeystroke")
-}
-
 pub fn set_recording_paused(session_id: &str, paused: bool) -> anyhow::Result<()> {
     if !current_session_supports_gnome_shell_overlay() {
         return Ok(());
@@ -338,10 +329,6 @@ fn show_toggle_overlay_args(key: &str, visible: bool) -> Vec<String> {
     vec![format!("string:{key}"), format!("boolean:{visible}")]
 }
 
-fn show_push_keystroke_args(session_id: &str, text: &str) -> Vec<String> {
-    vec![format!("string:{session_id}"), format!("string:{text}")]
-}
-
 fn show_recording_paused_args(session_id: &str, paused: bool) -> Vec<String> {
     vec![format!("string:{session_id}"), format!("boolean:{paused}")]
 }
@@ -420,19 +407,6 @@ mod tests {
             webcam_shape: 1,
             webcam_flip: true,
             webcam_device: 7,
-            clicks_enabled: true,
-            click_size: 0.45,
-            click_color: 3,
-            click_style: 2,
-            click_animate: false,
-            keystrokes_enabled: true,
-            keystrokes_supported: false,
-            keystrokes_support_message: "Not supported on GNOME Wayland yet".into(),
-            key_size: 0.5,
-            key_position: 2,
-            key_appearance: 1,
-            key_blur_bg: false,
-            key_filter: 4,
         };
         let spec = RecordingControlsSpec {
             dbus_dest: "org.apexshot.RecordingControl".into(),
@@ -501,19 +475,6 @@ mod tests {
             webcam_shape: 1,
             webcam_flip: true,
             webcam_device: 7,
-            clicks_enabled: true,
-            click_size: 0.45,
-            click_color: 3,
-            click_style: 2,
-            click_animate: false,
-            keystrokes_enabled: true,
-            keystrokes_supported: false,
-            keystrokes_support_message: "Not supported on GNOME Wayland yet".into(),
-            key_size: 0.5,
-            key_position: 2,
-            key_appearance: 1,
-            key_blur_bg: false,
-            key_filter: 4,
         };
 
         let toggle_args = show_toggle_overlay_args("webcam", false);
@@ -522,27 +483,8 @@ mod tests {
             vec!["string:webcam".to_string(), "boolean:false".to_string()]
         );
 
-        let toggle_on = show_toggle_overlay_args("clicks", true);
-        assert_eq!(
-            toggle_on,
-            vec!["string:clicks".to_string(), "boolean:true".to_string()]
-        );
-
         let snapshot_json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
-        assert!(snapshot_json.contains("\"click_style\":2"));
         assert!(snapshot_json.contains("\"webcam_rel_x\":0.61"));
-    }
-
-    #[test]
-    fn push_keystroke_payload_includes_session_and_text() {
-        let args = show_push_keystroke_args("recording-123", "Ctrl + K");
-        assert_eq!(
-            args,
-            vec![
-                "string:recording-123".to_string(),
-                "string:Ctrl + K".to_string(),
-            ]
-        );
     }
 
     #[test]

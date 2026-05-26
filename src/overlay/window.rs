@@ -62,13 +62,7 @@ fn recording_request_from_state(
         controls: st.recording.rec_controls,
         mic: st.recording.mic_toggle,
         speaker: st.recording.speaker_toggle,
-        clicks: st.recording.rec_clicks,
-        keystrokes: st.recording.rec_keystrokes,
         webcam: st.recording.rec_webcam,
-        click_size: st.recording.click_size,
-        click_color: st.recording.click_color as u8,
-        click_style: st.recording.click_style as u8,
-        click_animate: st.recording.click_animate,
         webcam_size: st.recording.webcam_size as u8,
         webcam_shape: st.recording.webcam_shape as u8,
         webcam_flip: st.recording.webcam_flip,
@@ -2172,27 +2166,6 @@ pub(crate) fn setup_window(
                                 st.recording.speaker_toggle = !st.recording.speaker_toggle;
                                 st.recording.speaker_volume_popup_open = false;
                             }
-                            RecordPanelTile::Clicks => {
-                                if st.recording.rec_clicks {
-                                    st.recording.rec_clicks = false;
-                                    st.recording.click_options_open = false;
-                                    st.recording.click_previews.clear();
-                                } else {
-                                    st.recording.rec_clicks = true;
-                                    st.recording.click_options_open = true;
-                                }
-                                st.recording.crop_menu_open = false;
-                                st.recording.settings_menu_open = false;
-                                st.recording.settings_dropdown_open = None;
-                                st.recording.webcam_options_open = false;
-                                st.recording.mic_volume_popup_open = false;
-                                st.recording.speaker_volume_popup_open = false;
-                                st.recording.click_dropdown_open = None;
-                                st.recording.hovered_click_item = -1;
-                                st.recording.click_slider_dragging = false;
-                                st.recording.hover_record_tile = None;
-                                st.hover_tool_index = None;
-                            }
                             RecordPanelTile::Webcam => {
                                 st.recording.rec_webcam = !st.recording.rec_webcam;
                                 if st.recording.rec_webcam && st.recording.webcam_device < 0 {
@@ -2212,9 +2185,6 @@ pub(crate) fn setup_window(
                                 st.recording.hovered_webcam_item = -1;
                                 st.recording.hover_record_tile = None;
                                 st.hover_tool_index = None;
-                            }
-                            RecordPanelTile::Keystrokes => {
-                                st.recording.rec_keystrokes = !st.recording.rec_keystrokes
                             }
                             RecordPanelTile::Size => {}
                             RecordPanelTile::RecordVideo | RecordPanelTile::RecordGif => {
@@ -2291,19 +2261,6 @@ pub(crate) fn setup_window(
                 y,
             ) {
                 match tile {
-                    RecordPanelTile::Clicks => {
-                        st.recording.click_options_open = !st.recording.click_options_open;
-                        st.recording.click_dropdown_open = None;
-                        st.recording.hovered_click_item = -1;
-                        st.recording.click_slider_dragging = false;
-                        st.recording.settings_menu_open = false;
-                        st.recording.crop_menu_open = false;
-                        st.recording.webcam_options_open = false;
-                        st.recording.mic_volume_popup_open = false;
-                        st.recording.speaker_volume_popup_open = false;
-                        st.recording.hover_record_tile = None;
-                        st.hover_tool_index = None;
-                    }
                     RecordPanelTile::Webcam => {
                         st.recording.webcam_options_open = !st.recording.webcam_options_open;
                         st.recording.hovered_webcam_item = -1;
