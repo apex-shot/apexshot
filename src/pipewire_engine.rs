@@ -226,9 +226,11 @@ impl PipeWireCapture {
         )
         .map_err(|e| PipeWireError::Connect(format!("Failed to create stream: {e}")))?;
 
-        let format_pod = build_enum_format_pod(width_hint, height_hint);
-        let pod = spa::pod::Pod::from_bytes(&format_pod)
-            .ok_or_else(|| PipeWireError::Connect("Failed to parse format pod bytes".into()))?;
+        // Build format pod.
+        let pod_data = build_enum_format_pod(width_hint, height_hint);
+        let pod = spa::pod::Pod::from_bytes(&pod_data)
+            .ok_or_else(|| PipeWireError::Connect("Failed to parse format pod".into()))?;
+        // pod is &Pod; create an array of &Pod for the connect call.
         let mut params = [pod];
 
         let inner_clone = Arc::clone(&inner);
@@ -320,11 +322,22 @@ impl PipeWireCapture {
                 if chunk_size == 0 {
                     return;
                 }
-                if let Some(ref mem) = datas[0].data() {
+
+                // Try DMA-BUF first (zero-copy from GPU), fall back to SHM.
+                let pixel_data = if datas[0].type_() == spa::buffer::DataType::DmaBuf {
+                    read_dmabuf_frame(datas, chunk_size)
+                } else if let Some(ref mem) = datas[0].data() {
                     if chunk_size <= mem.len() {
-                        guard.frames.push_back(mem[..chunk_size].to_vec());
+                        Some(mem[..chunk_size].to_vec())
+                    } else {
+                        None
                     }
-                }
+                } else {
+                    None
+                };
+
+                let Some(pixel_data) = pixel_data else { return };
+                guard.frames.push_back(pixel_data);
 
                 // Extract SPA_META_Cursor from the raw spa_buffer.
                 // The compositor sends this when CursorMode::Metadata is used.
@@ -451,6 +464,47 @@ impl PipeWireCapture {
     pub fn error_message(&self) -> Option<String> {
         self.inner.lock().unwrap().error.clone()
     }
+}
+
+// ---------------------------------------------------------------------------
+// DMA-BUF frame reading (zero-copy from GPU memory)
+// ---------------------------------------------------------------------------
+
+/// Read pixel data from a DMA-BUF buffer by mmap'ing the file descriptor.
+/// DMA-BUF buffers arrive as file descriptors pointing to GPU memory.
+/// mmap'ing them reads directly from GPU without a CPU copy through SHM.
+fn read_dmabuf_frame(datas: &[spa::buffer::Data], chunk_size: usize) -> Option<Vec<u8>> {
+    if datas.is_empty() {
+        return None;
+    }
+
+    let fd = datas[0].fd();
+    if fd < 0 {
+        return None;
+    }
+
+    // mmap the DMA-BUF fd to read GPU memory.
+    let ptr = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            chunk_size,
+            libc::PROT_READ,
+            libc::MAP_SHARED,
+            fd,
+            0,
+        )
+    };
+
+    if ptr == libc::MAP_FAILED {
+        eprintln!("[pipewire] DMA-BUF mmap failed, falling back to SHM");
+        return None;
+    }
+
+    // Copy out before unmapping.
+    let data = unsafe { std::slice::from_raw_parts(ptr as *const u8, chunk_size).to_vec() };
+    unsafe { libc::munmap(ptr, chunk_size) };
+
+    Some(data)
 }
 
 // ---------------------------------------------------------------------------
