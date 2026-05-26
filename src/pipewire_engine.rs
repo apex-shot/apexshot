@@ -511,8 +511,18 @@ fn read_dmabuf_frame(datas: &[spa::buffer::Data], chunk_size: usize) -> Option<V
 // Cursor metadata extraction (raw SPA buffer access)
 // ---------------------------------------------------------------------------
 
-// From pipewire spa/buffer/meta.h: SPA_META_Cursor = 1
-const SPA_META_CURSOR: u32 = 1;
+// From pipewire spa/buffer/meta.h: SPA_META_Cursor = 5
+const SPA_META_CURSOR: u32 = 5;
+
+// TODO: SPA_META_SyncTimeline = 9, SPA_DATA_SyncObj = 5.
+// These require PipeWire ≥ 1.2.0 and updated libspa-sys bindings.
+// When the Rust pipewire crate updates:
+//   1. Build SPA_PARAM_Buffers pod with dataType=1<<SPA_DATA_DmaBuf,
+//      metaType=1<<SPA_META_SyncTimeline
+//   2. Build SPA_PARAM_Meta pod for SPA_META_SyncTimeline
+//   3. Pass both via pw_stream_update_params() after negotiate
+//   4. In DMA-BUF path: check for extra SpaData::SyncObj datas,
+//      poll() on acquire fd, signal release fd after processing
 
 /// Extract SPA_META_Cursor from a PipeWire buffer.
 ///
