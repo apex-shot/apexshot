@@ -20,13 +20,8 @@ use ashpd::desktop::{
     screenshot::Screenshot,
     PersistMode,
 };
-use gst::prelude::*;
-use gstreamer as gst;
-use gstreamer_app as gst_app;
-use gstreamer_video as gst_video;
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 pub struct WaylandBackend;
@@ -98,121 +93,28 @@ fn should_wait_for_portal_dialog_to_close(restore_token: Option<&str>) -> bool {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GStreamer helpers (only used in the ScreenCast fallback)
+// Native PipeWire single-frame capture (replaces GStreamer pipewiresrc)
 // ──────────────────────────────────────────────────────────────────────────────
-
-fn ensure_gstreamer_initialized() -> DisplayResult<()> {
-    static GST_INIT: OnceLock<Result<(), String>> = OnceLock::new();
-    match GST_INIT.get_or_init(|| gst::init().map_err(|e| e.to_string())) {
-        Ok(()) => Ok(()),
-        Err(err) => Err(DisplayError::InitializationError(format!(
-            "Failed to initialize GStreamer: {err}"
-        ))),
-    }
-}
-
-fn pipewire_source_pipeline(node_id: u32, fd: i32) -> String {
-    let copy_buffers = gst::ElementFactory::make("pipewiresrc")
-        .build()
-        .map(|element| element.has_property("always-copy"))
-        .unwrap_or(false);
-    let copy_buffers_prop = if copy_buffers {
-        " always-copy=true"
-    } else {
-        ""
-    };
-
-    format!("pipewiresrc fd={fd} path={node_id} do-timestamp=true{copy_buffers_prop}")
-}
 
 fn capture_single_frame_from_pipewire(
     node_id: u32,
     pipewire_fd: &OwnedFd,
 ) -> DisplayResult<CaptureData> {
-    ensure_gstreamer_initialized()?;
+    let frame = crate::pipewire_engine::capture_single_frame(
+        pipewire_fd
+            .try_clone()
+            .map_err(|e| DisplayError::CaptureError(format!("Failed to clone fd: {e}")))?,
+        node_id,
+        Duration::from_secs(3),
+    )
+    .map_err(|e| DisplayError::CaptureError(format!("PipeWire capture failed: {e}")))?;
 
-    let pipeline_str = format!(
-        "{} num-buffers=1 ! videoconvert ! video/x-raw,format=RGBA ! appsink name=sink emit-signals=false sync=false max-buffers=1 drop=true",
-        pipewire_source_pipeline(node_id, pipewire_fd.as_raw_fd())
-    );
-
-    let pipeline = gst::parse::launch(&pipeline_str)
-        .map_err(|e| DisplayError::CaptureError(format!("Failed to build pipeline: {e}")))?
-        .downcast::<gst::Pipeline>()
-        .map_err(|_| DisplayError::CaptureError("Failed to cast pipeline".into()))?;
-
-    let appsink = pipeline
-        .by_name("sink")
-        .ok_or_else(|| DisplayError::CaptureError("AppSink not found in pipeline".into()))?
-        .downcast::<gst_app::AppSink>()
-        .map_err(|_| DisplayError::CaptureError("Failed to cast AppSink".into()))?;
-
-    pipeline
-        .set_state(gst::State::Playing)
-        .map_err(|e| DisplayError::CaptureError(format!("Failed to start pipeline: {e}")))?;
-
-    let sample = appsink
-        .try_pull_sample(gst::ClockTime::from_seconds(2))
-        .ok_or_else(|| DisplayError::CaptureError("Timed out waiting for PipeWire frame".into()))?;
-
-    let caps = sample
-        .caps()
-        .ok_or_else(|| DisplayError::CaptureError("Missing sample caps".into()))?;
-
-    let info = gst_video::VideoInfo::from_caps(caps)
-        .map_err(|e| DisplayError::CaptureError(format!("Invalid video info from caps: {e}")))?;
-
-    let width = info.width();
-    let height = info.height();
-    if width == 0 || height == 0 {
-        let _ = pipeline.set_state(gst::State::Null);
-        return Err(DisplayError::CaptureError(
-            "PipeWire frame has invalid dimensions".into(),
-        ));
-    }
-
-    let stride_raw = info.stride()[0];
-    if stride_raw <= 0 {
-        let _ = pipeline.set_state(gst::State::Null);
-        return Err(DisplayError::CaptureError(
-            "PipeWire frame has invalid stride".into(),
-        ));
-    }
-    let stride = stride_raw as usize;
-
-    let buffer = sample
-        .buffer()
-        .ok_or_else(|| DisplayError::CaptureError("Missing sample buffer".into()))?;
-    let map = buffer
-        .map_readable()
-        .map_err(|_| DisplayError::CaptureError("Failed to map sample buffer".into()))?;
-
-    let row_len = width as usize * 4;
-    if row_len > stride {
-        let _ = pipeline.set_state(gst::State::Null);
-        return Err(DisplayError::CaptureError(
-            "Frame stride is smaller than expected row length".into(),
-        ));
-    }
-
-    let expected_min_len = stride * height as usize;
-    if map.as_slice().len() < expected_min_len {
-        let _ = pipeline.set_state(gst::State::Null);
-        return Err(DisplayError::CaptureError(
-            "Frame buffer is smaller than expected".into(),
-        ));
-    }
-
-    let mut pixels = Vec::with_capacity(row_len * height as usize);
-    for row in 0..height as usize {
-        let src_start = row * stride;
-        let src_end = src_start + row_len;
-        pixels.extend_from_slice(&map.as_slice()[src_start..src_end]);
-    }
-
-    let _ = pipeline.set_state(gst::State::Null);
-
-    Ok(CaptureData::new(pixels, width, height, PixelFormat::RGBA32))
+    Ok(CaptureData::new(
+        frame.pixels,
+        frame.width,
+        frame.height,
+        PixelFormat::RGBA32,
+    ))
 }
 
 fn crop_capture(

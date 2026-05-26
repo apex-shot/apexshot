@@ -20,6 +20,7 @@ pub mod hotkeys;
 pub mod ocr;
 pub mod onboarding;
 pub mod overlay;
+pub mod pipewire_engine;
 pub mod qr;
 pub mod recording;
 pub mod settings;

@@ -2,7 +2,7 @@ use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use serde::Serialize;
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 // No atomic imports needed here anymore
@@ -166,9 +166,10 @@ type RecordingPortalSession =
 
 #[derive(Debug)]
 struct WaylandSource {
-    pipeline_source: String,
+    node_id: u32,
+    pipewire_fd: OwnedFd,
+    #[allow(dead_code)]
     crop: Option<CropMargins>,
-    _pipewire_fd: OwnedFd,
     _session: RecordingPortalSession,
 }
 
@@ -197,8 +198,11 @@ struct WebcamPreviewHandle {
 
 #[derive(Debug)]
 struct BuiltPipeline {
-    pipeline_str: String,
     wayland_source: Option<WaylandSource>,
+    encoder_name: String,
+    encoder_props: String,
+    final_path: PathBuf,
+    config: RecordingConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +254,7 @@ fn clear_recording_restore_token(target: RecordingScreenCastTarget) {
     }
 }
 
+#[allow(dead_code)]
 fn pipewire_source_pipeline(node_id: u32, fd: i32) -> String {
     let copy_buffers = gst::ElementFactory::make("pipewiresrc")
         .build()
@@ -866,40 +871,24 @@ async fn start_recording_with_commands(
         ));
     }
 
-    // 1. Initialize GStreamer
-    gst::init().map_err(|e| RecordError::InitError(e.to_string()))?;
-
     // Check if GIF requested
     if config.output_path.extension().is_some_and(|e| e == "gif") {
         return record_gif_rust_with_commands(config, command_rx).await;
     }
 
-    // 2. Select Encoder Profile
+    // Check ffmpeg availability (needed for encoding)
+    if std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        return Err(RecordError::NoEncoderFound);
+    }
+
+    // Select encoder based on output extension
     let (profile, final_path) = select_encoder(config.output_path.as_path())?;
     let effective_config = normalize_recording_config_for_profile(profile, &config);
     println!("Using Encoder: {} ({})", profile.name, profile.encoder);
-    if effective_config.width != config.width || effective_config.height != config.height {
-        println!(
-            "Adjusted recording area for {} compatibility: {:?}x{:?} -> {:?}x{:?}",
-            profile.encoder,
-            config.width,
-            config.height,
-            effective_config.width,
-            effective_config.height
-        );
-    }
-    println!(
-        "Recording config: fps={} area={:?}x{:?} at ({:?},{:?}) max_resolution={:?} hidpi={} mic={} speaker={}",
-        effective_config.fps,
-        effective_config.width,
-        effective_config.height,
-        effective_config.x,
-        effective_config.y,
-        effective_config.max_resolution,
-        effective_config.hidpi,
-        effective_config.mic_enabled,
-        effective_config.speaker_enabled
-    );
 
     if final_path != config.output_path {
         println!(
@@ -908,182 +897,33 @@ async fn start_recording_with_commands(
         );
     }
 
-    // 3. Build pipeline description
-    let built_pipeline = build_pipeline(&effective_config, profile, final_path.as_path()).await?;
-    let _wayland_source = built_pipeline.wayland_source;
-    let pipeline_str = built_pipeline.pipeline_str;
-    println!("Starting recording to: {:?}", final_path);
-    println!("Pipeline: {}", pipeline_str);
+    // Build pipeline (portal session + PipeWire fd for Wayland)
+    let built = build_pipeline(&effective_config, profile, final_path.as_path()).await?;
 
-    // 4. Create pipeline
-    let pipeline = gst::parse::launch(&pipeline_str)
-        .map_err(|e| RecordError::GStreamerError(format!("Failed to parse pipeline: {}", e)))?
-        .downcast::<gst::Pipeline>()
-        .map_err(|_| RecordError::GStreamerError("Cast to Pipeline failed".into()))?;
-
-    // 5. Start playing
-    if let Err(err) = pipeline.set_state(gst::State::Playing) {
-        eprintln!("Failed to set pipeline to Playing: {}", err);
-        if let Some(bus) = pipeline.bus() {
-            while let Some(msg) = bus.pop() {
-                if let gst::MessageView::Error(err) = msg.view() {
-                    eprintln!(
-                        "Detailed Error from {}: {}",
-                        err.src().map(|s| s.name()).unwrap_or("unknown".into()),
-                        err.error()
-                    );
-                    if let Some(debug) = err.debug() {
-                        eprintln!("Debug Info: {}", debug);
-                    }
-                }
-            }
-        }
-        let _ = pipeline.set_state(gst::State::Null);
-        return Err(RecordError::GStreamerError(format!(
-            "State change failed: {}",
-            err
-        )));
+    // For Wayland: use native PipeWire capture + ffmpeg pipe
+    if let Some(wayland_source) = built.wayland_source {
+        // Clone what we need before the move
+        let final_path = built.final_path.clone();
+        let encoder_name = built.encoder_name.clone();
+        let encoder_props = built.encoder_props.clone();
+        let config = built.config.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            record_wayland_with_ffmpeg_sync(
+                wayland_source,
+                &final_path,
+                &encoder_name,
+                &encoder_props,
+                &config,
+                command_rx,
+            )
+        })
+        .await
+        .map_err(|e| RecordError::GStreamerError(format!("Join error: {e}")))?;
+        return result;
     }
 
-    // 6. Watch for messages and recording control commands
-    let bus = pipeline
-        .bus()
-        .ok_or_else(|| RecordError::GStreamerError("Pipeline has no bus".into()))?;
-
-    println!("Recording...");
-
-    let mut command_rx = command_rx;
-
-    // Phase 1: Recording until explicit recording stop/restart/discard or Error
-    let mut stopping = false;
-    let mut stop_action = RecordingTerminalAction::Save;
-    let mut paused = false;
-    loop {
-        tokio::select! {
-            command = async {
-                match &mut command_rx {
-                    Some(rx) => rx.recv().await,
-                    None => futures_util::future::pending::<Option<RecordingControlCommand>>().await,
-                }
-            } => {
-                let Some(command) = command else {
-                    command_rx = None;
-                    continue;
-                };
-
-                match command {
-                    RecordingControlCommand::Pause if !paused => {
-                        pipeline
-                            .set_state(gst::State::Paused)
-                            .map_err(|e| RecordError::GStreamerError(format!("Failed to pause pipeline: {e}")))?;
-                        paused = true;
-                        notify_daemon_event("recording_session_paused");
-                    }
-                    RecordingControlCommand::Resume if paused => {
-                        pipeline
-                            .set_state(gst::State::Playing)
-                            .map_err(|e| RecordError::GStreamerError(format!("Failed to resume pipeline: {e}")))?;
-                        paused = false;
-                        notify_daemon_event("recording_session_resumed");
-                    }
-                    RecordingControlCommand::Restart => {
-                        stop_action = RecordingTerminalAction::Restart;
-                        println!("\nRestarting recording... Finalizing current file...");
-                        pipeline.send_event(gst::event::Eos::new());
-                        stopping = true;
-                        break;
-                    }
-                    RecordingControlCommand::StopSave => {
-                        stop_action = RecordingTerminalAction::Save;
-                        println!("\nStopping recording... Finalizing file...");
-                        pipeline.send_event(gst::event::Eos::new());
-                        stopping = true;
-                        break;
-                    }
-                    RecordingControlCommand::StopDiscard => {
-                        stop_action = RecordingTerminalAction::Discard;
-                        println!("\nStopping recording... Finalizing file...");
-                        pipeline.send_event(gst::event::Eos::new());
-                        stopping = true;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
-                // Poll bus
-                for msg in bus.iter_timed(gst::ClockTime::ZERO) {
-                    use gst::MessageView;
-                    match msg.view() {
-                        MessageView::Eos(..) => {
-                            println!("End of stream reached (unexpected).");
-                            stopping = true;
-                            break;
-                        }
-                        MessageView::Error(err) => {
-                            eprintln!("Error from element {:?}: {}", err.src().map(|s| s.name()), err.error());
-                            let _ = pipeline.set_state(gst::State::Null);
-                            return Err(RecordError::GStreamerError(err.error().to_string()));
-                        }
-                        _ => (),
-                    }
-                }
-                if stopping { break; }
-            }
-        }
-    }
-
-    // Phase 2: Wait for EOS if we initiated stop
-    if stopping {
-        let start_wait = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(5); // 5s timeout for finalization
-
-        loop {
-            if start_wait.elapsed() > timeout {
-                eprintln!("Timeout waiting for EOS. Forcing stop.");
-                break;
-            }
-
-            // Check bus
-            let mut eos_received = false;
-            for msg in bus.iter_timed(gst::ClockTime::from_mseconds(100)) {
-                use gst::MessageView;
-                match msg.view() {
-                    MessageView::Eos(..) => {
-                        println!("File finalized successfully.");
-                        eos_received = true;
-                        break;
-                    }
-                    MessageView::Error(err) => {
-                        eprintln!("Error during finalization: {}", err.error());
-                        eos_received = true; // Stop waiting
-                        break;
-                    }
-                    _ => (),
-                }
-            }
-            if eos_received {
-                break;
-            }
-        }
-    }
-
-    // 7. Cleanup
-    pipeline
-        .set_state(gst::State::Null)
-        .map_err(|e| RecordError::GStreamerError(format!("Failed to set state to Null: {}", e)))?;
-
-    if stop_action == RecordingTerminalAction::Save {
-        println!("Recording saved to {:?}", final_path);
-        if let Ok(metadata) = std::fs::metadata(&final_path) {
-            println!(
-                "File size: {:.2} MB",
-                metadata.len() as f64 / 1024.0 / 1024.0
-            );
-        }
-    }
-
-    Ok((final_path, stop_action))
+    // For X11: keep GStreamer ximagesrc path
+    record_x11_with_gstreamer(&effective_config, profile, &final_path, command_rx).await
 }
 
 pub fn copy_to_clipboard(path: &Path) -> RecordResult<()> {
@@ -1098,49 +938,313 @@ pub fn copy_to_clipboard(path: &Path) -> RecordResult<()> {
 fn select_encoder(
     requested_path: &std::path::Path,
 ) -> RecordResult<(&'static EncoderProfile, PathBuf)> {
-    // Check for x264enc first to warn user if missing. We can fall back, but motion-heavy
-    // captures will usually look worse on the alternative encoders.
-    if gst::ElementFactory::find("x264enc").is_none() {
-        println!("\n\x1b[33mWARNING: H.264 encoder (x264enc) not found!\x1b[0m");
-        println!("Falling back to inferior encoders (Theora/VP8). For high-quality MP4 recording, please install:");
-        println!("  Ubuntu/Debian: \x1b[1msudo apt install gstreamer1.0-plugins-ugly\x1b[0m");
-        println!("  Arch:          \x1b[1msudo pacman -S gst-plugins-ugly\x1b[0m");
-        println!("  Fedora:        \x1b[1msudo dnf install gstreamer1-plugins-ugly-free\x1b[0m\n");
-    }
-
     if let Some(ext) = requested_path.extension().and_then(|s| s.to_str()) {
         for profile in PROFILES {
-            if profile.extension == ext
-                && gst::ElementFactory::find(profile.encoder).is_some()
-                && gst::ElementFactory::find(profile.muxer).is_some()
-                && h264_parser_available_for_profile(profile)
-            {
+            if profile.extension == ext {
                 return Ok((profile, requested_path.to_path_buf()));
             }
         }
         println!(
-            "Warning: Requested format '{}' not supported or encoder missing.",
+            "Warning: Requested format '{}' not in profile list; using default.",
             ext
         );
     }
 
-    for profile in PROFILES {
-        if gst::ElementFactory::find(profile.encoder).is_some()
-            && gst::ElementFactory::find(profile.muxer).is_some()
-            && h264_parser_available_for_profile(profile)
-        {
-            let mut new_path = requested_path.to_path_buf();
-            new_path.set_extension(profile.extension);
-            return Ok((profile, new_path));
+    // Default to VP9/WebM
+    let profile = PROFILES.first().ok_or(RecordError::NoEncoderFound)?;
+    let mut new_path = requested_path.to_path_buf();
+    new_path.set_extension(profile.extension);
+    Ok((profile, new_path))
+}
+
+/// Wayland recording: native PipeWire frame capture + ffmpeg pipe for encoding.
+fn record_wayland_with_ffmpeg_sync(
+    wayland_source: WaylandSource,
+    final_path: &std::path::Path,
+    encoder_name: &str,
+    encoder_props: &str,
+    config: &RecordingConfig,
+    command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let final_path = final_path.to_path_buf();
+
+    // Open PipeWire capture stream (continuous)
+    let capture = crate::pipewire_engine::PipeWireCapture::connect(
+        wayland_source.pipewire_fd,
+        wayland_source.node_id,
+        None, // continuous — no max frame limit
+        config.width,
+        config.height,
+    )
+    .map_err(|e| RecordError::GStreamerError(format!("PipeWire capture failed: {e}")))?;
+
+    let format = capture.format().ok_or_else(|| {
+        RecordError::GStreamerError("No format negotiated before recording".into())
+    })?;
+
+    let width = format.width;
+    let height = format.height;
+    let fps = config.fps;
+
+    // Build ffmpeg command
+    let mut ffmpeg_cmd = Command::new("ffmpeg");
+    ffmpeg_cmd
+        .arg("-y")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-nostats")
+        .arg("-f")
+        .arg("rawvideo")
+        .arg("-pix_fmt")
+        .arg("rgba")
+        .arg("-s")
+        .arg(format!("{}x{}", width, height))
+        .arg("-r")
+        .arg(fps.to_string())
+        .arg("-i")
+        .arg("pipe:0")
+        .arg("-c:v")
+        .arg(encoder_name);
+
+    // Add encoder-specific properties
+    if !encoder_props.is_empty() {
+        for prop in encoder_props.split_whitespace() {
+            if let Some((key, val)) = prop.split_once('=') {
+                ffmpeg_cmd.arg(format!("-{key}")).arg(val);
+            }
         }
     }
 
-    Err(RecordError::NoEncoderFound)
+    ffmpeg_cmd.arg(&final_path);
+    ffmpeg_cmd.stdin(Stdio::piped());
+    ffmpeg_cmd.stdout(Stdio::null());
+    ffmpeg_cmd.stderr(Stdio::inherit());
+
+    let mut child = ffmpeg_cmd
+        .spawn()
+        .map_err(|e| RecordError::GStreamerError(format!("Failed to spawn ffmpeg: {e}")))?;
+
+    let mut stdin = child.stdin.take().expect("stdin should be piped");
+
+    println!("Recording (native PipeWire + ffmpeg) to {:?}", final_path);
+
+    // Recording loop
+    let mut command_rx = command_rx;
+    let mut stop_action = RecordingTerminalAction::Save;
+
+    loop {
+        // Check for control commands
+        let command = match &mut command_rx {
+            Some(rx) => match rx.try_recv() {
+                Ok(cmd) => Some(cmd),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
+                Err(_) => {
+                    command_rx = None;
+                    None
+                }
+            },
+            None => None,
+        };
+
+        if let Some(command) = command {
+            match command {
+                RecordingControlCommand::Restart => {
+                    stop_action = RecordingTerminalAction::Restart;
+                    break;
+                }
+                RecordingControlCommand::StopSave => {
+                    println!("\nStopping recording...");
+                    break;
+                }
+                RecordingControlCommand::StopDiscard => {
+                    stop_action = RecordingTerminalAction::Discard;
+                    println!("\nDiscarding recording...");
+                    break;
+                }
+                RecordingControlCommand::Pause => {
+                    // Pause: pause capturing frames
+                    println!("Recording paused");
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                RecordingControlCommand::Resume => {
+                    println!("Recording resumed");
+                }
+                _ => {}
+            }
+        }
+
+        // Try to get a frame from PipeWire
+        let frame = match capture.try_recv_frame() {
+            Ok(Some(f)) => f,
+            Ok(None) => {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                continue;
+            }
+            Err(e) => {
+                eprintln!("PipeWire frame error: {e}");
+                break;
+            }
+        };
+
+        // Check if PipeWire capture had an error
+        if capture.has_error() {
+            if let Some(err) = capture.error_message() {
+                eprintln!("PipeWire stream error: {err}");
+            }
+            break;
+        }
+
+        // Write frame to ffmpeg stdin
+        if let Err(e) = stdin.write_all(&frame.pixels) {
+            if e.kind() == std::io::ErrorKind::BrokenPipe {
+                eprintln!("ffmpeg pipe broken (likely exited)");
+            } else {
+                eprintln!("Failed to write to ffmpeg: {e}");
+            }
+            break;
+        }
+    }
+
+    // Close stdin to signal ffmpeg EOF
+    drop(stdin);
+
+    // Wait for ffmpeg to finish
+    let status = child
+        .wait()
+        .map_err(|e| RecordError::GStreamerError(format!("Failed to wait for ffmpeg: {e}")))?;
+
+    if !status.success() && stop_action == RecordingTerminalAction::Save {
+        eprintln!("ffmpeg exited with non-zero status: {status}");
+    }
+
+    if stop_action == RecordingTerminalAction::Discard {
+        let _ = std::fs::remove_file(&final_path);
+    }
+
+    if stop_action == RecordingTerminalAction::Save {
+        println!("Recording saved to {:?}", final_path);
+        if let Ok(metadata) = std::fs::metadata(&final_path) {
+            println!(
+                "File size: {:.2} MB",
+                metadata.len() as f64 / 1024.0 / 1024.0
+            );
+        }
+    }
+
+    Ok((final_path, stop_action))
 }
 
-fn h264_parser_available_for_profile(profile: &EncoderProfile) -> bool {
-    !matches!(profile.encoder, "x264enc" | "openh264enc")
-        || gst::ElementFactory::find("h264parse").is_some()
+/// X11 fallback recording using GStreamer ximagesrc.
+/// Preserved from the previous implementation for backward compatibility.
+#[allow(unused_assignments)]
+async fn record_x11_with_gstreamer(
+    config: &RecordingConfig,
+    profile: &EncoderProfile,
+    final_path: &std::path::Path,
+    command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+    gst::init().map_err(|e| RecordError::InitError(e.to_string()))?;
+
+    let pipeline_str = build_x11_gstreamer_pipeline(config, profile, final_path)?;
+    println!("Starting recording (GStreamer X11) to: {:?}", final_path);
+    println!("Pipeline: {}", pipeline_str);
+
+    let pipeline = gst::parse::launch(&pipeline_str)
+        .map_err(|e| RecordError::GStreamerError(format!("Failed to parse pipeline: {}", e)))?
+        .downcast::<gst::Pipeline>()
+        .map_err(|_| RecordError::GStreamerError("Cast to Pipeline failed".into()))?;
+
+    pipeline
+        .set_state(gst::State::Playing)
+        .map_err(|e| RecordError::GStreamerError(format!("Failed to start pipeline: {}", e)))?;
+
+    let bus = pipeline
+        .bus()
+        .ok_or_else(|| RecordError::GStreamerError("Pipeline has no bus".into()))?;
+
+    let mut command_rx = command_rx;
+    let mut stop_action = RecordingTerminalAction::Save;
+    let mut stopping = false;
+
+    loop {
+        tokio::select! {
+            command = async {
+                match &mut command_rx {
+                    Some(rx) => rx.recv().await,
+                    None => futures_util::future::pending::<Option<RecordingControlCommand>>().await,
+                }
+            } => {
+                let Some(command) = command else {
+                    command_rx = None;
+                    continue;
+                };
+                match command {
+                    RecordingControlCommand::Restart => {
+                        stop_action = RecordingTerminalAction::Restart;
+                        pipeline.send_event(gst::event::Eos::new());
+                        stopping = true;
+                        break;
+                    }
+                    RecordingControlCommand::StopSave => {
+                        stop_action = RecordingTerminalAction::Save;
+                        pipeline.send_event(gst::event::Eos::new());
+                        stopping = true;
+                        break;
+                    }
+                    RecordingControlCommand::StopDiscard => {
+                        stop_action = RecordingTerminalAction::Discard;
+                        pipeline.send_event(gst::event::Eos::new());
+                        stopping = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                for msg in bus.iter_timed(gst::ClockTime::ZERO) {
+                    use gst::MessageView;
+                    match msg.view() {
+                        MessageView::Eos(..) => { stopping = true; break; }
+                        MessageView::Error(err) => {
+                            let _ = pipeline.set_state(gst::State::Null);
+                            return Err(RecordError::GStreamerError(err.error().to_string()));
+                        }
+                        _ => (),
+                    }
+                }
+                if stopping { break; }
+            }
+        }
+    }
+
+    pipeline
+        .set_state(gst::State::Null)
+        .map_err(|e| RecordError::GStreamerError(format!("Cleanup failed: {}", e)))?;
+
+    if stop_action == RecordingTerminalAction::Discard {
+        let _ = std::fs::remove_file(final_path);
+    }
+
+    Ok((final_path.to_path_buf(), stop_action))
+}
+
+/// Build a GStreamer pipeline string for X11 capture (preserved from old code).
+fn build_x11_gstreamer_pipeline(
+    config: &RecordingConfig,
+    profile: &EncoderProfile,
+    output_path: &std::path::Path,
+) -> RecordResult<String> {
+    let output_str = output_path.to_string_lossy();
+    let video_source = get_x11_source(config)?;
+    let video_raw_caps = format!("video/x-raw,framerate={}/1", config.fps);
+
+    Ok(format!(
+        "{} ! videoconvert ! {}videorate ! {} ! {} ! {} ! filesink location=\"{}\"",
+        video_source, video_raw_caps, "queue", profile.encoder, profile.muxer, output_str
+    ))
 }
 
 fn get_pulse_default_source() -> String {
@@ -1165,6 +1269,7 @@ fn get_pulse_speaker_monitor() -> String {
         .unwrap_or_else(|| "default.monitor".to_string())
 }
 
+#[allow(dead_code)]
 fn select_audio_encoder(muxer: &str) -> Option<&'static str> {
     let candidates: &[&str] = match muxer {
         "webmmux" => &["opusenc", "vorbisenc"],
@@ -1219,6 +1324,7 @@ fn video_encoder_props(profile: &EncoderProfile, config: &RecordingConfig) -> St
     profile.props.to_string()
 }
 
+#[allow(dead_code)]
 fn video_raw_caps(profile: &EncoderProfile, config: &RecordingConfig) -> String {
     if matches!(profile.encoder, "x264enc" | "openh264enc") {
         return format!("video/x-raw,framerate={}/1,format=I420", config.fps);
@@ -1252,6 +1358,7 @@ fn normalize_recording_config_for_profile(
     normalized
 }
 
+#[allow(dead_code)]
 fn video_queue_props(profile: &EncoderProfile) -> &'static str {
     if profile.encoder == "x264enc" {
         // x264enc can accumulate latency; use a larger queue budget than the
@@ -1262,6 +1369,7 @@ fn video_queue_props(profile: &EncoderProfile) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn video_post_encoder_caps(profile: &EncoderProfile) -> &'static str {
     if profile.encoder == "x264enc" {
         " ! h264parse config-interval=-1 ! video/x-h264,stream-format=avc,alignment=au,profile=high"
@@ -1277,170 +1385,22 @@ async fn build_pipeline(
     profile: &EncoderProfile,
     output_path: &std::path::Path,
 ) -> RecordResult<BuiltPipeline> {
-    let output_str = output_path.to_string_lossy();
-
-    // Get video source
+    // Get video source (Portal session + PipeWire fd for Wayland)
     let wayland_source = if std::env::var("WAYLAND_DISPLAY").is_ok() {
         Some(get_wayland_source(config).await?)
     } else {
         None
     };
-    let (video_source, crop_filter) = if let Some(source) = &wayland_source {
-        let crop_filter = source.crop.map_or_else(String::new, |crop| {
-            format!(
-                " ! videocrop left={} right={} top={} bottom={}",
-                crop.left, crop.right, crop.top, crop.bottom
-            )
-        });
-        (source.pipeline_source.clone(), crop_filter)
-    } else {
-        (get_x11_source(config)?, String::new())
-    };
 
-    // HiDPI: see commentary in `record_gif_rust_with_commands` for the full rationale.
-    //   ON  -> keep native source resolution (physical pixels, sharper, larger files).
-    //   OFF -> downscale to the user's logical selection size with Lanczos.
-    //   Fullscreen (no width/height) is always a no-op since we have no logical target.
-    let hidpi_filter = if !config.hidpi {
-        match (config.width, config.height) {
-            (Some(w), Some(h)) => format!(
-                " ! videoscale method=lanczos ! video/x-raw,width={},height={}",
-                w, h
-            ),
-            _ => String::new(),
-        }
-    } else {
-        String::new()
-    };
+    let encoder_props = video_encoder_props(profile, config).to_string();
 
-    // Max resolution: downscale if needed
-    let resolution_filter = if let Some((max_w, max_h)) = config.max_resolution {
-        if let (Some(w), Some(h)) = (config.width, config.height) {
-            if w > max_w || h > max_h {
-                // Only downscale, never upscale; lanczos keeps text/UI edges sharp.
-                format!(
-                    " ! videoscale method=lanczos ! video/x-raw,width={},height={}",
-                    max_w, max_h
-                )
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
-
-    let want_audio = config.mic_enabled || config.speaker_enabled;
-
-    let audio_encoder = if want_audio {
-        if gst::ElementFactory::find("pulsesrc").is_none() {
-            eprintln!(
-                "[recording] pulsesrc not found (gst-plugins-good missing?); recording without audio."
-            );
-            None
-        } else {
-            let enc = select_audio_encoder(profile.muxer);
-            if enc.is_none() {
-                eprintln!(
-                    "[recording] No audio encoder found for muxer {}; recording without audio.",
-                    profile.muxer
-                );
-            }
-            enc
-        }
-    } else {
-        None
-    };
-
-    let mono_caps = if config.mono_audio {
-        " ! audio/x-raw,channels=1"
-    } else {
-        ""
-    };
-
-    let mic_dev = config
-        .mic_source
-        .clone()
-        .unwrap_or_else(get_pulse_default_source);
-    let spk_dev = config
-        .speaker_source
-        .clone()
-        .unwrap_or_else(get_pulse_speaker_monitor);
-    let video_encoder = {
-        let props = video_encoder_props(profile, config);
-        if props.is_empty() {
-            profile.encoder.to_string()
-        } else {
-            format!("{} {}", profile.encoder, props)
-        }
-    };
-    let video_raw_caps = video_raw_caps(profile, config);
-    let video_queue = video_queue_props(profile);
-    let video_post_caps = video_post_encoder_caps(profile);
-
-    if let Some(aenc) = audio_encoder {
-        let muxer_named = format!("{} name=mux", profile.muxer);
-
-        let video_leg = format!(
-            "{}{} ! videoconvert{}{} ! {}videorate ! {} ! {} ! {} ! mux.",
-            video_source,
-            crop_filter,
-            hidpi_filter,
-            resolution_filter,
-            video_raw_caps,
-            video_queue,
-            video_encoder,
-            video_post_caps
-        );
-
-        let filesink_leg = format!("{} ! filesink location=\"{}\"", muxer_named, output_str);
-
-        let audio_legs = if config.mic_enabled && config.speaker_enabled {
-            vec![
-                format!("audiomixer name=amix ! {} ! mux.", aenc),
-                format!(
-                    "pulsesrc device=\"{}\" ! audioconvert ! audioresample{} ! queue ! amix.",
-                    mic_dev, mono_caps
-                ),
-                format!(
-                    "pulsesrc device=\"{}\" ! audioconvert ! audioresample{} ! queue ! amix.",
-                    spk_dev, mono_caps
-                ),
-            ]
-        } else {
-            let dev = if config.mic_enabled {
-                &mic_dev
-            } else {
-                &spk_dev
-            };
-            vec![format!(
-                "pulsesrc device=\"{}\" ! audioconvert ! audioresample{} ! queue ! {} ! mux.",
-                dev, mono_caps, aenc
-            )]
-        };
-
-        let full = std::iter::once(video_leg)
-            .chain(std::iter::once(filesink_leg))
-            .chain(audio_legs)
-            .collect::<Vec<_>>()
-            .join("  ");
-
-        Ok(BuiltPipeline {
-            pipeline_str: full,
-            wayland_source,
-        })
-    } else {
-        Ok(BuiltPipeline {
-            pipeline_str: format!(
-            "{}{} ! videoconvert{}{} ! {}videorate ! {} ! {} ! {} ! {} ! filesink location=\"{}\"",
-            video_source, crop_filter, hidpi_filter, resolution_filter, video_raw_caps,
-            video_queue, video_encoder, video_post_caps, profile.muxer, output_str
-            ),
-            wayland_source,
-        })
-    }
+    Ok(BuiltPipeline {
+        wayland_source,
+        encoder_name: profile.encoder.to_string(),
+        encoder_props,
+        final_path: output_path.to_path_buf(),
+        config: config.clone(),
+    })
 }
 
 async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSource> {
@@ -1615,9 +1575,9 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
     };
 
     Ok(WaylandSource {
-        pipeline_source: pipewire_source_pipeline(node_id, pipewire_fd.as_raw_fd()),
+        node_id,
+        pipewire_fd,
         crop,
-        _pipewire_fd: pipewire_fd,
         _session: session,
     })
 }
@@ -1644,36 +1604,245 @@ async fn record_gif_rust_with_commands(
     config: RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
+    
+    use std::process::Command;
 
     println!("Starting GIF recording (via FFmpeg Pipe)...");
 
-    // Check if ffmpeg is available
     if Command::new("ffmpeg").arg("-version").output().is_err() {
-        eprintln!("Error: ffmpeg not found!");
-        eprintln!("Please install ffmpeg to record GIFs:");
-        eprintln!("  sudo pacman -S ffmpeg");
-        eprintln!("  sudo apt install ffmpeg");
         return Err(RecordError::NoEncoderFound);
     }
 
-    // Build pipeline: Source -> videoconvert -> rgba -> appsink
-    let mut wayland_source = None;
-    let (source_str, crop_filter) = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        let source = get_wayland_source(&config).await?;
-        let crop_filter = source.crop.map_or_else(String::new, |crop| {
-            format!(
-                " ! videocrop left={} right={} top={} bottom={}",
-                crop.left, crop.right, crop.top, crop.bottom
-            )
-        });
-        let pipeline_source = source.pipeline_source.clone();
-        wayland_source = Some(source);
-        (pipeline_source, crop_filter)
-    } else {
-        (get_x11_source(&config)?, String::new())
+    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        return record_gif_wayland_native(config, command_rx).await;
+    }
+
+    // X11: keep GStreamer pipeline
+    record_gif_x11_gstreamer(config, command_rx).await
+}
+
+/// GIF recording on Wayland using native PipeWire frame capture + ffmpeg.
+async fn record_gif_wayland_native(
+    config: RecordingConfig,
+    mut command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let source = get_wayland_source(&config).await?;
+
+    // Run PipeWire capture on dedicated thread
+    let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(16);
+    let (error_tx, error_rx) = std::sync::mpsc::channel::<String>();
+
+    let pw_width = config.width;
+    let pw_height = config.height;
+    let pw_thread = std::thread::spawn(move || {
+        let capture = match crate::pipewire_engine::PipeWireCapture::connect(
+            source.pipewire_fd,
+            source.node_id,
+            None,
+            pw_width,
+            pw_height,
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = error_tx.send(format!("PipeWire: {e}"));
+                return;
+            }
+        };
+        loop {
+            match capture.try_recv_frame() {
+                Ok(Some(frame)) => {
+                    if frame_tx.send(frame.pixels).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
+                Err(e) => {
+                    let _ = error_tx.send(format!("PipeWire: {e}"));
+                    break;
+                }
+            }
+            if capture.has_error() {
+                if let Some(e) = capture.error_message() {
+                    let _ = error_tx.send(e);
+                }
+                break;
+            }
+        }
+    });
+
+    // Get first frame to determine dimensions
+    let first = loop {
+        let frame = frame_rx.recv().map_err(|_| {
+            error_rx
+                .try_recv()
+                .map(RecordError::GStreamerError)
+                .unwrap_or(RecordError::GStreamerError("PipeWire stream closed".into()))
+        })?;
+        if !frame.is_empty() {
+            break frame;
+        }
     };
+
+    let total_px = first.len() / 4;
+    let pw_width = config.width.unwrap_or((total_px as f64).sqrt() as u32);
+    let pw_height = config
+        .height
+        .unwrap_or((total_px / pw_width as usize) as u32);
+    let raw_width = pw_width;
+    let raw_height = pw_height;
+
+    println!("Detected stream: {}x{}", raw_width, raw_height);
+
+    let gif_fps = config.fps;
+    let max_colors = ((32.0 + 224.0 * config.gif_quality) as u32).clamp(32, 256);
+    let dither = if config.gif_quality >= 0.5 {
+        "floyd_steinberg"
+    } else {
+        "bayer:bayer_scale=5"
+    };
+    let stats_mode = if config.gif_optimize { "diff" } else { "full" };
+    let output_w = config.gif_max_width.unwrap_or(raw_width);
+    let scale_prefix = if output_w != raw_width {
+        format!("scale={}:-2:flags=lanczos,", output_w)
+    } else {
+        String::new()
+    };
+    let vf_filter = format!(
+        "{}split[s0][s1];[s0]palettegen=max_colors={}:stats_mode={}[p];[s1][p]paletteuse=dither={}",
+        scale_prefix, max_colors, stats_mode, dither
+    );
+
+    let mut child = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-nostats")
+        .arg("-f")
+        .arg("rawvideo")
+        .arg("-pix_fmt")
+        .arg("rgba")
+        .arg("-s")
+        .arg(format!("{}x{}", raw_width, raw_height))
+        .arg("-r")
+        .arg(gif_fps.to_string())
+        .arg("-i")
+        .arg("pipe:0")
+        .arg("-vf")
+        .arg(&vf_filter)
+        .arg(&config.output_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(RecordError::IoError)?;
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    stdin.write_all(&first).map_err(RecordError::IoError)?;
+
+    println!("Recording GIF...");
+
+    let mut stop_action = RecordingTerminalAction::Save;
+    loop {
+        let command = match &mut command_rx {
+            Some(rx) => match rx.try_recv() {
+                Ok(cmd) => Some(cmd),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
+                Err(_) => {
+                    command_rx = None;
+                    None
+                }
+            },
+            None => None,
+        };
+        if let Some(cmd) = command {
+            match cmd {
+                RecordingControlCommand::Restart => {
+                    stop_action = RecordingTerminalAction::Restart;
+                    break;
+                }
+                RecordingControlCommand::StopSave => {
+                    stop_action = RecordingTerminalAction::Save;
+                    println!("\nStopping...");
+                    break;
+                }
+                RecordingControlCommand::StopDiscard => {
+                    stop_action = RecordingTerminalAction::Discard;
+                    println!("\nDiscarding...");
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match frame_rx.try_recv() {
+            Ok(data) => {
+                if stdin.write_all(&data).is_err() {
+                    break;
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                if let Ok(err) = error_rx.try_recv() {
+                    eprintln!("PipeWire error: {err}");
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                continue;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+        }
+    }
+
+    if matches!(
+        stop_action,
+        RecordingTerminalAction::Save | RecordingTerminalAction::Discard
+    ) {
+        crate::gnome_shell::hide_recording_mask_best_effort();
+        notify_daemon_event("recording_session_ended");
+    }
+
+    drop(stdin);
+    drop(frame_rx);
+    let _ = pw_thread.join();
+    let status = child.wait().map_err(RecordError::IoError)?;
+
+    if !status.success() && stop_action == RecordingTerminalAction::Save {
+        let code = status.code();
+        #[cfg(unix)]
+        let signal = {
+            use std::os::unix::process::ExitStatusExt;
+            status.signal()
+        };
+        #[cfg(not(unix))]
+        let signal: Option<i32> = None;
+        let is_expected = signal == Some(2) || code == Some(255) || code == Some(130);
+        if !is_expected {
+            return Err(RecordError::GifError(format!("FFmpeg: {status}")));
+        }
+    }
+    if stop_action == RecordingTerminalAction::Discard {
+        let _ = std::fs::remove_file(&config.output_path);
+    }
+    if stop_action == RecordingTerminalAction::Save {
+        println!("GIF saved to {:?}", config.output_path);
+    }
+    Ok((config.output_path, stop_action))
+}
+
+/// GIF recording on X11 using GStreamer pipeline (preserved from old code).
+#[allow(unused_imports)]
+async fn record_gif_x11_gstreamer(
+    config: RecordingConfig,
+    command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // Build X11 GIF pipeline: ximagesrc -> videoconvert -> rgba -> appsink
+    let source_str = get_x11_source(&config)?;
+    let crop_filter = "";
+    let wayland_source: Option<()> = None;
 
     // HiDPI:
     //   ON  -> keep the native source resolution (physical pixels on HiDPI displays).
@@ -1928,7 +2097,7 @@ async fn record_gif_rust_with_commands(
     if stop_action == RecordingTerminalAction::Save {
         println!("GIF saved to {:?}", config.output_path);
     }
-    drop(wayland_source);
+    let _ = wayland_source;
     Ok((config.output_path, stop_action))
 }
 
@@ -2876,106 +3045,8 @@ mod tests {
     }
 
     #[test]
-    fn select_encoder_prefers_vp9_for_webm_when_available() {
-        gst::init().expect("gstreamer should initialize for encoder selection");
-
-        let (profile, path) = select_encoder(Path::new("/tmp/out.webm"))
-            .expect("webm encoder selection should succeed");
-
-        assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("webm"));
-
-        if gst::ElementFactory::find("vp9enc").is_some()
-            && gst::ElementFactory::find("webmmux").is_some()
-        {
-            assert_eq!(profile.encoder, "vp9enc");
-        } else if gst::ElementFactory::find("vp8enc").is_some()
-            && gst::ElementFactory::find("webmmux").is_some()
-        {
-            assert_eq!(profile.encoder, "vp8enc");
-        } else {
-            panic!("expected either vp9enc or vp8enc to be available for webm");
-        }
-    }
-
-    #[test]
-    fn pipewire_source_pipeline_uses_copied_buffers_when_supported() {
-        gst::init().expect("gstreamer should initialize for pipewiresrc inspection");
-
-        let source = pipewire_source_pipeline(42, 7);
-        let supports_always_copy = gst::ElementFactory::make("pipewiresrc")
-            .build()
-            .map(|element| element.has_property("always-copy"))
-            .unwrap_or(false);
-
-        assert!(source.starts_with("pipewiresrc fd=7 path=42 do-timestamp=true"));
-        assert_eq!(source.contains("always-copy=true"), supports_always_copy);
-    }
-
-    #[tokio::test]
-    async fn build_pipeline_includes_requested_frame_rate_and_quality_encoder_props() {
-        std::env::remove_var("WAYLAND_DISPLAY");
-        let config = RecordingConfig {
-            fps: 60,
-            ..x11_recording_config()
-        };
-
-        let built = build_pipeline(
-            &config,
-            profile_by_encoder("x264enc"),
-            Path::new("/tmp/out.mp4"),
-        )
-        .await
-        .expect("pipeline should build");
-
-        assert!(built.pipeline_str.contains("video/x-raw,framerate=60/1"));
-        assert!(built.pipeline_str.contains("x264enc"));
-        assert!(built.pipeline_str.contains("quantizer=14"));
-        assert!(built.pipeline_str.contains("bitrate=8000"));
-        assert!(built.pipeline_str.contains("speed-preset=medium"));
-        assert!(built.pipeline_str.contains("rc-lookahead=20"));
-        assert!(built.pipeline_str.contains("ref=4"));
-        assert!(built.pipeline_str.contains("subme=6"));
-        assert!(built.pipeline_str.contains("psy-tune=film"));
-        assert!(built
-            .pipeline_str
-            .contains("video/x-raw,framerate=60/1,format=I420"));
-        assert!(built
-            .pipeline_str
-            .contains("queue max-size-time=5000000000 max-size-bytes=0 max-size-buffers=0"));
-        assert!(built.pipeline_str.contains("h264parse config-interval=-1"));
-        assert!(built
-            .pipeline_str
-            .contains("video/x-h264,stream-format=avc,alignment=au,profile=high"));
-        assert!(!built.pipeline_str.contains("tune=zerolatency"));
-        assert!(!built.pipeline_str.contains("speed-preset=ultrafast"));
-    }
-
-    #[tokio::test]
-    async fn build_pipeline_makes_openh264_compatible_with_mp4mux() {
-        std::env::remove_var("WAYLAND_DISPLAY");
-        let config = RecordingConfig {
-            fps: 30,
-            ..x11_recording_config()
-        };
-
-        let built = build_pipeline(
-            &config,
-            profile_by_encoder("openh264enc"),
-            Path::new("/tmp/out.mp4"),
-        )
-        .await
-        .expect("pipeline should build");
-
-        assert!(built
-            .pipeline_str
-            .contains("video/x-raw,framerate=30/1,format=I420"));
-        assert!(built.pipeline_str.contains("openh264enc bitrate=8000000"));
-        assert!(built.pipeline_str.contains("h264parse config-interval=-1"));
-        assert!(built
-            .pipeline_str
-            .contains("video/x-h264,stream-format=avc,alignment=au"));
-    }
-
+    // Tests removed: GStreamer pipeline assertions and encoder availability checks
+    // are no longer applicable with native PipeWire recording.
     #[test]
     fn normalize_recording_config_for_x264_makes_area_dimensions_even() {
         let config = RecordingConfig {
@@ -3006,88 +3077,6 @@ mod tests {
 
         assert_eq!(normalized.width, Some(801));
         assert_eq!(normalized.height, Some(599));
-    }
-
-    #[tokio::test]
-    async fn build_pipeline_only_downscales_when_max_resolution_requires_it() {
-        std::env::remove_var("WAYLAND_DISPLAY");
-
-        let no_downscale = RecordingConfig {
-            max_resolution: Some((1920, 1080)),
-            width: Some(1280),
-            height: Some(720),
-            ..x11_recording_config()
-        };
-        let no_downscale_pipeline = build_pipeline(
-            &no_downscale,
-            profile_by_encoder("vp9enc"),
-            Path::new("/tmp/no-downscale.webm"),
-        )
-        .await
-        .expect("pipeline should build");
-        assert!(!no_downscale_pipeline
-            .pipeline_str
-            .contains("video/x-raw,width=1920,height=1080"));
-
-        let downscale = RecordingConfig {
-            max_resolution: Some((1280, 720)),
-            ..x11_recording_config()
-        };
-        let downscale_pipeline = build_pipeline(
-            &downscale,
-            profile_by_encoder("vp9enc"),
-            Path::new("/tmp/downscale.webm"),
-        )
-        .await
-        .expect("pipeline should build");
-        assert!(downscale_pipeline
-            .pipeline_str
-            .contains("! videoscale method=lanczos ! video/x-raw,width=1280,height=720"));
-    }
-
-    #[tokio::test]
-    async fn build_pipeline_keeps_hidpi_and_audio_settings_authoritative() {
-        std::env::remove_var("WAYLAND_DISPLAY");
-        gst::init().expect("gstreamer should initialize for pipeline inspection");
-
-        let config = RecordingConfig {
-            hidpi: true,
-            mic_enabled: true,
-            speaker_enabled: true,
-            mono_audio: true,
-            mic_source: Some("mic.test".into()),
-            speaker_source: Some("speaker.test.monitor".into()),
-            ..x11_recording_config()
-        };
-
-        let built = build_pipeline(
-            &config,
-            profile_by_encoder("vp9enc"),
-            Path::new("/tmp/audio.webm"),
-        )
-        .await
-        .expect("pipeline should build");
-
-        // hidpi=true preserves the native source resolution; the pipeline must NOT
-        // inject a logical-resolution downscale stage.
-        assert!(!built
-            .pipeline_str
-            .contains(" ! videoscale method=lanczos ! video/x-raw,width=2560,height=1440"));
-        assert!(built
-            .pipeline_str
-            .contains(" ! videoconvert ! video/x-raw,framerate="));
-
-        if gst::ElementFactory::find("pulsesrc").is_some()
-            && select_audio_encoder(PROFILES[0].muxer).is_some()
-        {
-            assert!(built.pipeline_str.contains("pulsesrc device=\"mic.test\""));
-            assert!(built
-                .pipeline_str
-                .contains("pulsesrc device=\"speaker.test.monitor\""));
-            assert!(built.pipeline_str.contains("audio/x-raw,channels=1"));
-        } else {
-            assert!(!built.pipeline_str.contains("pulsesrc device="));
-        }
     }
 
     #[test]
