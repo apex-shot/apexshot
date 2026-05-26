@@ -1071,6 +1071,45 @@ fn record_wayland_with_ffmpeg_sync(
         }
     }
 
+    // Add audio inputs when mic/speaker are enabled.
+    // ffmpeg captures from PulseAudio directly with -f pulse.
+    if config.mic_enabled || config.speaker_enabled {
+        if config.mic_enabled {
+            let mic_dev = config
+                .mic_source
+                .clone()
+                .unwrap_or_else(get_pulse_default_source);
+            eprintln!("[recording] Audio: mic device={mic_dev}");
+            ffmpeg_cmd.arg("-f").arg("pulse");
+            ffmpeg_cmd.arg("-i").arg(&mic_dev);
+        }
+
+        if config.speaker_enabled {
+            let spk_dev = config
+                .speaker_source
+                .clone()
+                .unwrap_or_else(get_pulse_speaker_monitor);
+            eprintln!("[recording] Audio: speaker monitor={spk_dev}");
+            ffmpeg_cmd.arg("-f").arg("pulse");
+            ffmpeg_cmd.arg("-i").arg(&spk_dev);
+        }
+
+        // Mix multiple audio streams if both enabled.
+        if config.mic_enabled && config.speaker_enabled {
+            ffmpeg_cmd.arg("-filter_complex");
+            ffmpeg_cmd.arg("[1:a][2:a]amix=inputs=2:duration=first[aout]");
+            ffmpeg_cmd.arg("-map").arg("0:v");
+            ffmpeg_cmd.arg("-map").arg("[aout]");
+        } else {
+            ffmpeg_cmd.arg("-map").arg("0:v");
+            ffmpeg_cmd.arg("-map").arg("1:a");
+        }
+
+        if config.mono_audio {
+            ffmpeg_cmd.arg("-ac").arg("1");
+        }
+    }
+
     ffmpeg_cmd.arg(&final_path);
     ffmpeg_cmd.stdin(Stdio::piped());
     ffmpeg_cmd.stdout(Stdio::null());
@@ -1320,6 +1359,62 @@ fn get_pulse_speaker_monitor() -> String {
         .map(|s| format!("{}.monitor", s.trim()))
         .filter(|s| s != ".monitor")
         .unwrap_or_else(|| "default.monitor".to_string())
+}
+
+/// List all PulseAudio/PipeWire input sources (microphones).
+pub fn list_audio_inputs() -> Vec<(String, String)> {
+    // name, description
+    let output = std::process::Command::new("pactl")
+        .args(["list", "sources", "short"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_default();
+
+    output
+        .lines()
+        .filter(|line| !line.contains(".monitor")) // exclude monitor sources
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let name = parts[1].to_string();
+                let desc = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
+                // Filter out "auto_null" and other virtual sources
+                if !name.contains("auto_null") && !desc.is_empty() {
+                    Some((name, desc))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// List all PulseAudio/PipeWire monitor sources (speaker output capture).
+pub fn list_audio_outputs() -> Vec<(String, String)> {
+    let output = std::process::Command::new("pactl")
+        .args(["list", "sources", "short"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_default();
+
+    output
+        .lines()
+        .filter(|line| line.contains(".monitor"))
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let name = parts[1].to_string();
+                let desc = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
+                Some((name, desc))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 #[allow(dead_code)]
