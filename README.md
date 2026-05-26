@@ -61,7 +61,7 @@ Works best today on:
 | GNOME Shell 47-50 on Ubuntu 24.04 / 25.10 / Pop!_OS 22.04 / Arch (Wayland) | Public beta, tested daily |
 | GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
 | Pop!_OS 22.04 (Ubuntu-based, Wayland) | Supported via deb package |
-| Hyprland / Sway / wlroots-like compositors (Wayland) | Area and crosshair selection use the Rust GTK layer-shell selector with native `wlr-screencopy`; recording uses ScreenCast/PipeWire where available. Needs broader distro testing. |
+| Hyprland / Sway / wlroots-like compositors (Wayland) | Full Rust-native stack: GTK4 layer-shell overlay for area/crosshair selection, `wlr-screencopy` for screenshots, ScreenCast/PipeWire for recording. No Qt overlay or GNOME extension needed. Needs broader distro testing. |
 | KDE Plasma 6 / Niri / other Wayland desktops | Portal-backed capture/recording paths implemented, needs distro testing |
 | Fedora / openSUSE / NixOS / Alpine / Gentoo / Void (Wayland) | Distro-family support metadata implemented, packaging/testing pending |
 | X11 on any distro | Experimental |
@@ -399,6 +399,45 @@ apexshot video-editor <video>    # Open video editor with a specific video
 
 # Settings
 apexshot settings                # Open settings window
+```
+
+### Recording on non-GNOME systems (Hyprland, Sway, KDE, X11)
+
+ApexShot uses a fully self-contained Rust stack for recording on systems
+without GNOME Shell. No Qt overlay, no shell extension — the daemon, the GTK4
+overlay, and GStreamer handle everything.
+
+**How it works:**
+1. The daemon runs in the background with a system tray icon and global hotkeys.
+2. Triggering a recording action (`apexshot record area`, tray click, or hotkey)
+   opens the Rust GTK4 overlay for area selection and recording configuration.
+3. The overlay provides the same controls as the GNOME path: mic/speaker toggles,
+   webcam PiP, format picker (MP4/GIF), countdown, and video quality settings.
+4. Once confirmed, a GStreamer pipeline captures the screen via PipeWire
+   ScreenCast (Wayland) or X11 SHM (X11), encodes to the chosen format, and
+   writes the output file.
+5. During recording, a floating GTK4 stop overlay shows pause/stop controls
+   and elapsed time. Pause/resume/stop can also be triggered from the tray menu
+   or global hotkeys.
+
+**What you get without GNOME:**
+- Full screen and area recording (MP4, WebM, GIF)
+- Mic and speaker audio capture with level monitoring
+- Webcam picture-in-picture overlay
+- Countdown timer before recording starts
+- Pause/resume/restart/stop during recording
+- Post-recording video editor (trim, resize, re-encode)
+- System tray with quick-access actions
+- Global hotkeys configurable in Settings
+
+```bash
+# Start the daemon (launches tray icon + hotkey listener)
+apexshot daemon
+
+# Record directly from CLI without the daemon
+apexshot record screen              # Full screen recording
+apexshot record area --gif          # Area recording as GIF
+apexshot record area --format mp4   # Area recording as MP4
 ```
 
 ### Keyboard Shortcuts

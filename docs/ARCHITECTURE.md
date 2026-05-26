@@ -310,15 +310,59 @@ Browser extension for full-page webpage capture:
    - Save to disk
 
 ### Recording Flow
-1. User triggers recording via hotkey, tray, or CLI (`apexshot record area`)
-2. C++ Qt5 overlay or portal handles area selection; `RecordingConfig` built
-3. `recording::start_recording()` constructs GStreamer pipeline
-4. GNOME extension called via D-Bus to show recording mask (`org.apexshot.ShellOverlay.ShowMask`)
-5. Countdown overlay (`countdown_overlay.rs`) shown if configured
-6. Recording starts; `control_session.rs` registers active session
-7. Stop overlay (`stop_overlay.rs`) shown with pause/stop/timer controls
-8. User stops recording; pipeline finalized and file written
-10. After-capture actions applied
+ApexShot supports two distinct recording paths: the **native Rust path** used on
+non-GNOME compositors (Hyprland, Sway, KDE, X11) and the **Qt overlay + GNOME
+extension path** used on GNOME Wayland.
+
+#### Native Rust recording path (non-GNOME): daemon → portal → GStreamer
+
+1. User triggers recording via hotkey, tray, or CLI (`apexshot record area`,
+   `apexshot record screen`).
+2. The daemon processes the action: for area recording, it launches the Rust GTK4
+   layer-shell overlay (`src/overlay.rs`) for interactive area selection. For
+   fullscreen recording, it skips this step and captures the full monitor bounds.
+3. A `RecordingConfig` is built from user settings (format, fps, audio sources,
+   webcam, countdown, cursor, etc.).
+4. `recording::start_recording(config)` constructs a GStreamer pipeline:
+   - **Video source:** PipeWire ScreenCast portal stream (Wayland) or X11 SHM
+     capture (X11).
+   - **Audio sources:** PulseAudio or PipeWire mic/speaker sources, mixed via
+     `audiomixer` when both are enabled.
+   - **Encoder:** VP9 for WebM, H.264 (openh264 or x264enc) for MP4, or
+     gifenc/lzw for GIF. Codec auto-detection picks the best available encoder.
+   - **Muxer:** webmmux, mp4mux, or avimux depending on format.
+   - **Webcam PiP:** If enabled and a webcam device is found, a separate
+     v4l2src pipeline captures the camera feed and composits it over the
+     recording via a `cairooverlay` element.
+5. If countdown is enabled, `countdown_overlay.rs` shows a fullscreen 3-2-1
+   countdown (with Escape to cancel). A `dim_overlay.rs` dim mask covers the
+   screen during the countdown.
+6. Recording starts; `control_session.rs` registers the active session on D-Bus
+   at `/org/apexshot/RecordingControl`, enabling pause/resume/restart/stop
+   commands from tray, hotkeys, or other processes.
+7. The `stop_overlay.rs` GTK4 floating control bar appears with pause, stop, and
+   elapsed-timer controls.
+8. User stops recording via the overlay, hotkey, or tray; the GStreamer pipeline
+   is finalized, and the file is written to the output path.
+9. After-capture actions are applied (copy to clipboard, show preview, open
+   editor, upload, etc.) based on user settings.
+
+#### Qt overlay + GNOME extension path (GNOME Wayland)
+
+1. User triggers recording via hotkey, tray, or CLI.
+2. The C++ Qt5 overlay (`capture-overlay/`) handles area selection and recording
+   configuration UI (format picker, mic/speaker toggles, webcam PiP options).
+3. The overlay outputs a JSON recording request; `RecordingConfig` is built from it.
+4. `recording::start_recording()` constructs the same GStreamer pipeline as above.
+5. The GNOME Shell extension is contacted via D-Bus to:
+   - Show a recording mask (`org.apexshot.ShellOverlay.ShowMask`) that dims the
+     screen outside the selected area.
+   - Render recording controls (pause/stop/timer) directly on the GNOME Shell
+     stage instead of a floating GTK4 overlay.
+   - Display webcam PiP and audio level indicators as shell actors.
+6. Countdown and recording proceed as in the native path, but mask/controls are
+   shell-rendered instead of GTK4 overlays.
+7. User stops; pipeline finalized; after-capture actions applied.
 
 ### Web Scroll Capture Flow
 1. User clicks browser extension button on a webpage

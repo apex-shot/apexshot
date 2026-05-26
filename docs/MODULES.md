@@ -95,7 +95,22 @@ This document provides detailed information about every module and submodule in 
 
 ### Recording Module (`src/recording/`)
 
-**Purpose:** Screen recording with GStreamer pipeline construction, codec auto-detection, audio mixing, and runtime overlays.
+**Purpose:** Screen recording with GStreamer pipeline construction, codec
+auto-detection, audio mixing, and runtime overlays. This module works identically
+on all platforms — the Rust pipeline is the authoritative recorder regardless of
+whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
+(non-GNOME).
+
+**Architecture overview for non-GNOME users:**
+
+- **Area selection** uses the Rust GTK4 layer-shell overlay (`src/overlay.rs`)
+  invoked by the daemon or CLI.
+- **Recording start** happens directly from the daemon (`src/daemon/mod.rs`)
+  which calls `prepare_overlay_recording_request` and `start_recording`.
+- **During recording:** a GTK4 `stop_overlay.rs` floating bar shows pause/stop
+  controls and elapsed time. No shell extension or Qt process is involved.
+- **After recording:** the GTK4 video editor, preview overlay, and after-capture
+  actions all work identically to the GNOME path.
 
 **Submodules:**
 - `mod.rs` — GStreamer pipeline setup, codec detection, recording loop, GIF encoding
@@ -185,7 +200,20 @@ This document provides detailed information about every module and submodule in 
 
 ### Area Selector Overlay (`src/overlay.rs`)
 
-**Purpose:** GTK4 fullscreen overlay for interactive area selection on X11.
+**Purpose:** GTK4 fullscreen overlay for interactive area selection, used on
+non-GNOME Wayland compositors (Hyprland, Sway, KDE) and X11. On GNOME Wayland,
+the C++ Qt5 overlay (`capture-overlay/`) handles area selection instead.
+
+**Capabilities:**
+- Click-and-drag area selection with resize handles
+- Recording panel with mic, speaker, webcam toggles, format picker, and
+  countdown options
+- Settings menu for video/GIF/control preferences
+- Window picker mode for selecting application windows
+- Fullscreen capture mode
+- Crosshair pixel-zoom mode for precise point capture
+- Webcam PiP preview with drag-to-reposition
+- Built with GTK4 + `gtk4-layer-shell` for always-on-top behaviour
 
 **Key Types:**
 - `AreaSelector` — Main selector struct managing the GTK4 window
@@ -457,7 +485,24 @@ thoroughly tested.
 
 ### Daemon Module (`src/daemon/`)
 
-**Purpose:** Single long-running background process providing tray, hotkeys, D-Bus IPC, and in-process capture/recording.
+**Purpose:** Single long-running background process providing tray, hotkeys,
+D-Bus IPC, and in-process capture/recording. The daemon is the central
+orchestrator for non-GNOME users — it handles every capture and recording action
+without requiring the Qt overlay or GNOME Shell extension.
+
+**How the daemon handles recording (non-GNOME):**
+
+1. Receives a `RecordScreen` or `RecordArea` action via hotkey, tray click, D-Bus
+   `Trigger()`, or CLI relay.
+2. For area recording: spawns the GTK4 overlay (`src/overlay.rs`) via
+   `select_area_for_recording()`. The user draws a selection rectangle and
+   configures recording options directly inside the GTK overlay panel.
+3. Builds a `RecordingConfig` from the overlay result and user settings.
+4. Calls `recording::start_recording(config)` which builds the GStreamer
+   pipeline and blocks until recording completes.
+5. During recording: the daemon tracks elapsed time for tray display and relays
+   pause/resume/stop commands from hotkeys to the active `control_session`.
+6. On completion: fires after-capture actions (preview, clipboard, editor, etc.).
 
 **Key Types:**
 - `DaemonAction` — Enum of all actions the daemon can execute:
