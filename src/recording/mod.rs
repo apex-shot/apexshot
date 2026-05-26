@@ -2964,13 +2964,24 @@ pub fn run_overlay_recording_request_with_gtk(
         Ok((path, StopAction::Save)) => {
             eprintln!("Recording saved to {:?}", path);
             if prepared.open_editor {
-                if let Err(err) = crate::recording::editor::open_recording_editor(path.clone()) {
-                    eprintln!("[recording] Failed to open recording editor: {err}");
-                }
+                spawn_recording_editor_subprocess(path.clone());
             }
             Ok(path)
         }
         Err(err) => Err(anyhow::anyhow!("Recording failed: {err}")),
+    }
+}
+
+/// Spawn the recording editor as a **subprocess** so it gets its own GTK
+/// event loop and doesn't conflict with the recording worker thread.
+fn spawn_recording_editor_subprocess(path: std::path::PathBuf) {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+    if let Err(e) = std::process::Command::new(&exe)
+        .arg("video-editor")
+        .arg(&path)
+        .spawn()
+    {
+        eprintln!("[recording] Failed to spawn recording editor: {e}");
     }
 }
 
