@@ -71,8 +71,8 @@ right starting point for a change.
 | Settings UI                           | `src/settings/`                                     | GTK4 preferences window, shortcut editor, recording options. |
 | Onboarding wizard                     | `src/onboarding/`                                   | First-run setup, GNOME extension installer (`wget` + `curl`). |
 | Cross-cutting utilities               | `src/utils/`                                        | Clipboard, desktop env detection, scoped portal identity. |
-| Native interactive overlay (Qt5)      | `capture-overlay/src/`                              | Selection, recording controls, click-options panel; built independently with CMake. Feature flags in `CaptureOverlay.h`. |
-| GNOME Shell extension                 | `gnome-extension/`                                  | Runtime click overlay, mask UI, recording controls dock, screenshot lock. ES modules + GJS tests. |
+| Native interactive overlay (Qt5)      | `capture-overlay/src/`                              | Selection, recording controls; built independently with CMake. |
+| GNOME Shell extension                 | `gnome-extension/`                                  | Mask UI, recording controls dock, screenshot lock. ES modules + GJS tests. |
 | Native messaging host (browser)       | `native-host/`                                      | Bridge between Chrome/Chromium and the daemon. |
 | Chrome/Chromium extension             | `web-scroll-extension/`                             | Full-page scroll capture orchestration. |
 | Packaging (.deb)                      | `Cargo.toml [package.metadata.deb]`, `packaging/`   | Asset list, postinst/prerm, desktop file, icon, native-host manifest. |
@@ -81,11 +81,6 @@ right starting point for a change.
 
 A handful of cross-cutting conventions worth knowing up front:
 
-- **Feature flags** for in-flight UI go in
-  `capture-overlay/src/CaptureOverlay.h` (look for
-  `apexshot::kKeystrokesFeatureAvailable` as the canonical example).
-  The flag gates rendering, click handling, *and* the public accessor
-  the recorder reads, so flipping it can never leave one half stranded.
 - **Restore-token caches** for the XDG ScreenCast portal live at
   `~/.cache/apexshot/`. The Rust path uses
   `wayland-screencast-monitor.token` / `-window.token`; the C++ overlay
@@ -160,7 +155,6 @@ node --check gnome-extension/*.js
 make -C gnome-extension install     # if a Makefile is present, otherwise:
 gnome-extensions pack gnome-extension --force \
   --extra-source=controls-ui.js --extra-source=controls-ui-layout.js \
-  --extra-source=keystroke-display.js --extra-source=click-display.js \
   --extra-source=mask-ui.js --extra-source=runtime-overlays.js \
   --extra-source=runtime-overlays-visibility.js \
   --extra-source=screenshot-lock.js --extra-source=session-state.js \
@@ -180,7 +174,6 @@ cd gnome-extension
 zip apexshot-gnome-integration.zip \
   extension.js metadata.json \
   controls-ui.js controls-ui-layout.js \
-  keystroke-display.js click-display.js \
   mask-ui.js runtime-overlays.js runtime-overlays-visibility.js \
   screenshot-lock.js session-state.js window-list.js
 ```
@@ -228,11 +221,6 @@ clang-format -i capture-overlay/src/*.{cpp,h}
 
 - Modern C++17, no exceptions in the hot path — return `bool` / out
   parameters like the existing portal helpers in `ScreenCapture.cpp`.
-- Feature flags that gate WIP UI live as `inline constexpr bool` in
-  [`capture-overlay/src/CaptureOverlay.h`](capture-overlay/src/CaptureOverlay.h)
-  (see `apexshot::kKeystrokesFeatureAvailable`). When you add a new flag,
-  document **what** it gates, **why** it's off, and **where** the
-  matching draw / event branches live.
 
 ### JavaScript (GNOME extension)
 
@@ -379,12 +367,6 @@ ordered roughly by how much value a single PR can deliver.
 
 ### High value
 
-- **Keystroke overlay recorder side.** The UI is gated off behind
-  `apexshot::kKeystrokesFeatureAvailable` in
-  `capture-overlay/src/CaptureOverlay.h`. The remaining work is on the
-  Rust recording pipeline (consume `recordKeystrokesEnabled()` and feed
-  events into the GNOME extension). Flipping the flag should *just
-  work* once the recorder side is done.
 - **Compositor coverage.** Help us promote KDE / Sway / Hyprland from
   *best-effort* to *tested* in the matrix above. Specifically: verify
   the wlr-screencopy fast path in `src/backend/screencopy.rs`, the

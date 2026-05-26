@@ -279,7 +279,6 @@ apexshot/
 │   │   ├── stop_overlay.rs        # Floating recording control bar
 │   │   ├── countdown_overlay.rs   # Fullscreen 3-2-1 countdown
 │   │   ├── dim_overlay.rs         # Fullscreen dim mask
-│   │   ├── runtime_keystrokes.rs  # EI portal keystroke capture
 │   │   └── dnd.rs                 # Do Not Disturb inhibition
 │   ├── settings/                  # GTK4 settings window
 │   │   ├── mod.rs                 # Main window builder
@@ -319,8 +318,6 @@ apexshot/
 │   ├── controls-ui-layout.js
 │   ├── runtime-overlays.js
 │   ├── runtime-overlays-visibility.js
-│   ├── click-display.js
-│   ├── keystroke-display.js
 │   ├── mask-ui.js
 │   ├── session-state.js
 │   ├── window-list.js
@@ -559,7 +556,7 @@ busctl monitor --session org.apexshot.ShellOverlay
 ### Extension File Guide
 - `extension.js` — Entry point; registers D-Bus services, connects signals
 - `controls-ui.js` — Recording control buttons rendered on the shell stage
-- `runtime-overlays.js` — Click/keystroke display rendered on the shell stage
+- `runtime-overlays.js` — Webcam/mic/speaker display rendered on the shell stage
 - `mask-ui.js` — Recording mask (dimmed region) rendered on the shell stage
 - `session-state.js` — Tracks active sessions, window lists
 
@@ -682,7 +679,7 @@ sudo apt install libpipewire-0.3-dev pipewire
 ### Recording Performance
 - Use appropriate FPS (24–30 for most use cases)
 - Consider resolution limits for lower-end systems (`max_resolution` config)
-- Disable runtime overlays (clicks/keystrokes/webcam) if not needed
+- Disable runtime overlays (webcam) if not needed
 - Use hardware-accelerated codecs (H.264/VA-API if available)
 
 ### Capture Performance

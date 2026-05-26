@@ -99,8 +99,6 @@ support is improving over time.
 - **Audio Monitoring** — Real-time mic and speaker level monitoring via PipeWire
 - **Webcam PiP** — Picture-in-picture webcam overlay during recording
 - **Recording Controls** — Pause, resume, and stop recording with on-screen controls
-- **Runtime Click Overlay** — On-screen click animations during recording, rendered by the GNOME extension and visually matched to the configuration preview (filled or outlined marker, soft halo, optional expanding pulse ring)
-- **Keystroke Overlay** — *Temporarily disabled.* The keystroke tile in the recording UI is shown as a non-interactive "SOON" badge; the underlying recorder hook is still being implemented and will be re-enabled in a future release
 - **Video Editor** — Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings. Open from the tray menu, CLI (`apexshot video-editor`), or a global hotkey. Supports drag-and-drop and file chooser for loading videos.
   ![Video editor UI](media/video-editor.png)
 
@@ -345,9 +343,9 @@ journalctl /usr/bin/gnome-shell -f | grep apexshot
 
 - **Always-on-top preview windows** — Screenshot previews and annotation editor windows stay above other applications during drag operations
 - **Shell-managed recording masks** — A dimmed fullscreen mask highlights the selected recording area
-- **Runtime click overlays** — Click animations rendered directly on the GNOME Shell stage. Each click draws a soft coloured halo, a filled or outlined marker (your choice in *Click Highlights*), and an optional expanding pulse ring when *Animate clicks* is enabled — identical visual treatment to the configuration preview, so what you see while configuring is what you record
-- **Keystroke overlay (currently disabled)** — The visual scaffolding is in place but the recorder side is not yet wired up; see *Known Limitations* below
 - **Window tracking** — D-Bus signals keep preview windows stacked correctly when switching apps
+
+**Note:** The runtime click-overlay and keystroke-overlay features have been removed.
 
 #### Troubleshooting
 
@@ -359,7 +357,6 @@ journalctl /usr/bin/gnome-shell -f | grep apexshot
 | D-Bus signals not working | Monitor session bus: `dbus-monitor --session | grep apexshot` |
 
 **Known Limitations:**
-- **Keystroke overlay is intentionally disabled in the current release.** The "Show keystrokes" tile in the recording UI is greyed out with a `SOON` badge; the configuration row in the recording settings is also disabled. Click handling for the tile is short-circuited so toggling it has no effect, and `recordKeystrokesEnabled()` is force-clamped to `false` so a stale persisted setting can't reach the recorder. The feature will return once the recorder-side keystroke pipeline is implemented; tracked behind the `apexshot::kKeystrokesFeatureAvailable` flag in `capture-overlay/src/CaptureOverlay.h`.
 - Capture overlay is tied to the window where it was initiated. Moving to another application window will hide the overlay until you return to the original window.
 
 **Note:** The onboarding wizard will automatically guide you through installing the GNOME extension on first launch.

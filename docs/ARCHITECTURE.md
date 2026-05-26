@@ -140,10 +140,9 @@ Screen recording with GStreamer:
 - `countdown_overlay.rs` — fullscreen 3-2-1 countdown with Escape cancellation
 - `dim_overlay.rs` — fullscreen dim mask during countdown
 - `editor/` — GTK4 video editor for trimming, dimension conversion, quality, and audio mode (MP4 only)
-- `runtime_keystrokes.rs` — EI (Emulation Input) portal keystroke capture for runtime overlays
 - `dnd.rs` — Do Not Disturb mode during recording
 
-**Features:** MP4/WebM/OGV/GIF output, mic + speaker audio, webcam overlay, click display, keystroke display, recording mask, pause/resume/restart, countdown timer, post-recording video editor.
+**Features:** MP4/WebM/OGV/GIF output, mic + speaker audio, webcam overlay, recording mask, pause/resume/restart, countdown timer, post-recording video editor.
 
 ### 6. X11/Wayland Area Selector (`src/overlay.rs`)
 GTK4 overlay for interactive area selection:
@@ -271,10 +270,8 @@ JavaScript/GJS extension for GNOME Shell 45–49:
 - `extension.js` — main extension logic, D-Bus service setup
 - `controls-ui.js` — recording controls UI shell elements
 - `controls-ui-layout.js` — layout positioning
-- `runtime-overlays.js` — click/keystroke runtime overlay rendering
+- `runtime-overlays.js` — webcam/mic/speaker runtime overlay rendering
 - `runtime-overlays-visibility.js` — overlay show/hide logic
-- `click-display.js` — click animation
-- `keystroke-display.js` — keystroke display
 - `mask-ui.js` — recording mask shell actor
 - `session-state.js` — session tracking, window list
 - `window-list.js` — window enumeration
@@ -320,8 +317,7 @@ Browser extension for full-page webpage capture:
 5. Countdown overlay (`countdown_overlay.rs`) shown if configured
 6. Recording starts; `control_session.rs` registers active session
 7. Stop overlay (`stop_overlay.rs`) shown with pause/stop/timer controls
-8. Runtime overlays (clicks/keystrokes) forwarded via `runtime_keystrokes.rs`
-9. User stops recording; pipeline finalized and file written
+8. User stops recording; pipeline finalized and file written
 10. After-capture actions applied
 
 ### Web Scroll Capture Flow
