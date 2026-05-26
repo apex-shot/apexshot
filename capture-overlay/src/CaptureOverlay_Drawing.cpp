@@ -154,7 +154,7 @@ RecordingDeckLayout computeRecordingDeckLayout(double selX, double selY,
                                                double screenW, double screenH)
 {
     RecordingDeckLayout layout;
-    const double railH = TOOL_CARD_H * 5.0;
+    const double railH = TOOL_CARD_H * 3.0;
     const double centerY = selY + (selH / 2.0);
     const double leftCandidateX = selX - TOOL_RAIL_GAP - TOOL_RAIL_W;
     const double leftPanelX = std::max(FEATURE_PANEL_MARGIN, leftCandidateX);
@@ -1160,8 +1160,6 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
     const QRectF micRect(railX, railY + TOOL_CARD_H * 0.0, TOOL_RAIL_W, TOOL_CARD_H);
     const QRectF speakerRect(railX, railY + TOOL_CARD_H * 1.0, TOOL_RAIL_W, TOOL_CARD_H);
     const QRectF webcamRect(railX, railY + TOOL_CARD_H * 2.0, TOOL_RAIL_W, TOOL_CARD_H);
-    const QRectF clickRect(railX, railY + TOOL_CARD_H * 3.0, TOOL_RAIL_W, TOOL_CARD_H);
-    const QRectF keysRect(railX, railY + TOOL_CARD_H * 4.0, TOOL_RAIL_W, TOOL_CARD_H);
 
     m_recTileRects.append(controlsRect);
     drawModuleTile(controlsRect, RecordPanelTile::Controls, 8, m_settingsOpen, QString(), false, false, 0.0);
