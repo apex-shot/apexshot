@@ -40,11 +40,25 @@ Verification completed at this checkpoint:
 - `cargo check`
 - `node --check gnome-extension/*.js`
 
-Still incomplete:
+Completed in this implementation pass (round 2):
 
-- Finish deeper Qt `capture-overlay` cleanup of now-unused members, initializers, setters/getters, helper structs, timer cleanup, and JSON compatibility fields.
-- Decide whether to fully remove or temporarily keep Qt JSON fields such as `clicks`, `keystrokes`, `click_size`, and `key_size`; current native Rust parser does not appear to require them.
-- Run the final search checklist and broader tests after the Qt cleanup is complete.
+- Finished Qt `capture-overlay` cleanup:
+  - removed unused member variables, initializers, structs (`ClickPreview`, `KeyPreview`),
+  - removed `startClickAnimTimer`/`stopClickAnimTimer` timer machinery,
+  - removed `keyEventToPreviewText` helper,
+  - removed click/keystroke slider drag handling with stale member references,
+  - removed click/keystroke settings toggle cases from `mousePressEvent`,
+  - removed outdated `drawClickOptions`, `drawKeystrokeOptions`, `drawKeystrokePreview` declarations,
+  - preserved `recordClicksEnabled()`/`recordKeystrokesEnabled()` returning `false`,
+  - added stub accessors/setters so `main.cpp` callers compile unchanged,
+  - left JSON output fields (`clicks`, `keystrokes`, `click_size` etc.) in place for backward compatibility.
+- `cargo fmt --all`, `cargo check`, `node --check gnome-extension/*.js` all pass.
+- Final search checklist: zero active feature references.
+
+Remaining work:
+
+- Run `cargo test` and broader tests to confirm no regressions.
+- Optionally remove the now-unused click/keystroke JSON output fields from `main.cpp` if the native Rust parser no longer expects them.
 
 ---
 

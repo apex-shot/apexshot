@@ -47,53 +47,7 @@ static void showWebScrollCaptureInfo(QWidget* parent)
     messageBox.setStandardButtons(QMessageBox::Ok);
     messageBox.exec();
 }
-// ── Helper: convert key event to preview display text ──────────────────────────
 
-static QString keyEventToPreviewText(QKeyEvent* event)
-{
-    int key = event->key();
-    Qt::KeyboardModifiers mods = event->modifiers();
-
-    // Modifier keys alone — skip
-    if (key == Qt::Key_Shift || key == Qt::Key_Control || key == Qt::Key_Alt ||
-        key == Qt::Key_Meta || key == Qt::Key_CapsLock || key == Qt::Key_unknown) {
-        return {};
-    }
-
-    // Special keys
-    switch (key) {
-    case Qt::Key_Return:
-    case Qt::Key_Enter:  return "\u21A9";  // ↩
-    case Qt::Key_Backspace: return "\u232B"; // ⌫
-    case Qt::Key_Delete:    return "\u2326"; // ⌦
-    case Qt::Key_Tab:       return "\u21E5"; // ⇥
-    case Qt::Key_Space:     return " ";
-    case Qt::Key_Escape:    return "Esc";
-    case Qt::Key_Up:        return "\u2191"; // ↑
-    case Qt::Key_Down:      return "\u2193"; // ↓
-    case Qt::Key_Left:      return "\u2190"; // ←
-    case Qt::Key_Right:     return "\u2192"; // →
-    default: break;
-    }
-
-    // Build string with modifier prefixes
-    QString result;
-    if (mods & Qt::ControlModifier) result += "\u2318 ";  // ⌘
-    if (mods & Qt::AltModifier)     result += "\u2325 ";  // ⌥
-    if (mods & Qt::ShiftModifier)   result += "\u21E7 ";  // ⇧
-
-    // Key text
-    QString text = event->text();
-    if (!text.isEmpty() && text.at(0).isPrint()) {
-        result += text.toUpper();
-    } else {
-        // Named key
-        QString name = QKeySequence(key).toString();
-        if (!name.isEmpty()) result += name;
-    }
-
-    return result.trimmed();
-}
 
 void CaptureOverlay::mousePressEvent(QMouseEvent* event)
 {
@@ -141,8 +95,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         m_settingsOpen = false;
         m_cropMenuOpen = false;
         m_hoveredCropMenuItem = -1;
-        stopClickAnimTimer();
-        m_keyPreviews.clear();
         m_dropdownOpen = -1;
         m_dropdownAnchor = QRectF();
         m_dropdownOptions.clear();
@@ -408,7 +360,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             RecordPanelTile tile = hitTestRecordingPanel(pos);
             if (tile != RecordPanelTile::Controls) {
                 m_settingsOpen = false;
-                        stopClickAnimTimer();
                         update();
                 // continue to handle the click normally
             }
@@ -744,19 +695,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         // Cursor is set at the end of this function.
     }
 
-    // ── Slider Drag ─────────────────────────────────────────────────────────
-    if (m_sliderDragging) {
-        double relX = pos.x() - m_sliderTrackRect.x();
-        m_clickSize = std::max(0.0, std::min(1.0, relX / m_sliderTrackRect.width()));
-        update();
-        return;
-    }
-    if (m_keySliderDragging) {
-        double relX = pos.x() - m_keySliderTrackRect.x();
-        m_keySize = std::max(0.0, std::min(1.0, relX / m_keySliderTrackRect.width()));
-        update();
-        return;
-    }
+    // ── GIF Slider Drag ─────────────────────────────────────────────────────
     if (m_gifFpsDragging) {
         double relX = pos.x() - m_gifFpsTrackRect.x();
         m_gifFps = 5 + (int)(55.0 * std::max(0.0, std::min(1.0, relX / m_gifFpsTrackRect.width())));
@@ -1146,15 +1085,6 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
 
-    // Stop slider drag
-    if (m_sliderDragging) {
-        m_sliderDragging = false;
-        update();
-    }
-    if (m_keySliderDragging) {
-        m_keySliderDragging = false;
-        update();
-    }
     if (m_gifFpsDragging) {
         m_gifFpsDragging = false;
     }

@@ -147,7 +147,6 @@ void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
     m_recordType = RecordType::None;
     m_countdownCancelRequested = false;
     m_hoveredCountdownCancel = false;
-    stopClickAnimTimer();
     stopWebcamCapture();
     m_micLevel = 0.0;
     m_speakerLevel = 0.0;
