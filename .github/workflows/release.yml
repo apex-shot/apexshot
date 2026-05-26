@@ -27,9 +27,16 @@ jobs:
           rustup default stable
 
       - name: Cache cargo dependencies
-        uses: Swatinem/rust-cache@54e2af0a8339c0435fa1de94002eab349a2f15ef
+        uses: actions/cache@v4
         with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
           key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-
 
       - name: Install system dependencies (clippy needs the same headers as build)
         run: |
@@ -100,9 +107,16 @@ jobs:
           rustup default stable
 
       - name: Cache cargo dependencies
-        uses: Swatinem/rust-cache@54e2af0a8339c0435fa1de94002eab349a2f15ef
+        uses: actions/cache@v4
         with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Install system dependencies
         run: |
@@ -188,9 +202,16 @@ jobs:
           rustup default stable
 
       - name: Cache cargo dependencies
-        uses: Swatinem/rust-cache@54e2af0a8339c0435fa1de94002eab349a2f15ef
+        uses: actions/cache@v4
         with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Install system dependencies
         run: |
