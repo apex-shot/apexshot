@@ -554,16 +554,18 @@ impl WaylandBackend {
 
     /// Capture used for direct area crops on Wayland.
     ///
-    /// This intentionally stays on the native wlr-screencopy path. We do not
-    /// fall back to the ScreenCast portal for screenshot/area capture here.
+    /// Tries wlr-screencopy first (~50 ms on wlroots compositors), then falls
+    /// back to the ScreenCast portal + PipeWire for non-wlroots desktops
+    /// (COSMIC, KDE, GNOME via Rust path, etc.).
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
-        eprintln!("[capture] capture_screen_for_selection_impl: using native wlr-screencopy only");
-        match Self::capture_monitor_via_native_screencopy() {
-            Some(result) => result,
-            None => Err(DisplayError::CaptureError(
-                "Native wlr-screencopy is unavailable for Wayland area capture".into(),
-            )),
+        if let Some(result) = Self::capture_monitor_via_native_screencopy() {
+            return result;
         }
+
+        eprintln!(
+            "[capture] Native wlr-screencopy unavailable; falling back to ScreenCast portal."
+        );
+        Self::capture_monitor_via_screencast()
     }
 }
 
