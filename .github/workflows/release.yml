@@ -185,7 +185,9 @@ jobs:
 
       - name: Install Rust
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          . "$HOME/.cargo/env"
+          rustup default stable
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Add swap space to prevent OOM during build
@@ -200,11 +202,6 @@ jobs:
           fi
           swapon --show
           free -h
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
 
       - name: Cache cargo dependencies
         uses: actions/cache@v4
