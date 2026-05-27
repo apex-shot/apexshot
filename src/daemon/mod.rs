@@ -24,7 +24,6 @@ use ashpd::desktop::{
 };
 
 use crate::{
-    backend::DisplayBackend,
     capture::{copy_capture_uri_to_clipboard, save_capture, save_existing_png, SaveConfig},
     capture_overlay::{
         begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
@@ -1246,22 +1245,15 @@ impl DaemonIpc {
             Ok(path) => Ok(path),
             Err(shell_err) => {
                 eprintln!(
-                    "[daemon] GNOME Shell area screenshot failed ({shell_err}); trying backend fallback."
+                    "[daemon] GNOME Shell area screenshot failed ({shell_err}); trying Screenshot portal fallback."
                 );
 
-                let fallback = tokio::task::spawn_blocking(move || {
-                    capture_area_to_temp_png_path(x, y, width, height)
-                })
-                .await
-                .map_err(|e| {
-                    zbus::fdo::Error::Failed(format!("Area fallback task join error: {e}"))
-                })?;
-
-                fallback.map_err(|fallback_err| {
-                    zbus::fdo::Error::Failed(format!(
-                        "GNOME Shell area screenshot failed: {shell_err}; backend fallback failed: {fallback_err}"
-                    ))
-                })
+                match capture_area_via_screenshot_portal_path(x, y, width, height).await {
+                    Ok(path) => Ok(path),
+                    Err(portal_err) => Err(zbus::fdo::Error::Failed(format!(
+                        "GNOME Shell area screenshot failed: {shell_err}; Screenshot portal fallback failed: {portal_err}"
+                    ))),
+                }
             }
         }
     }
@@ -1274,22 +1266,15 @@ impl DaemonIpc {
             Ok(path) => Ok(path),
             Err(shell_err) => {
                 eprintln!(
-                    "[daemon] GNOME Shell fullscreen screenshot failed ({shell_err}); trying backend fallback."
+                    "[daemon] GNOME Shell fullscreen screenshot failed ({shell_err}); trying Screenshot portal fallback."
                 );
 
-                let fallback = tokio::task::spawn_blocking(capture_fullscreen_to_temp_png_path)
-                    .await
-                    .map_err(|e| {
-                        zbus::fdo::Error::Failed(format!(
-                            "Fullscreen fallback task join error: {e}"
-                        ))
-                    })?;
-
-                fallback.map_err(|fallback_err| {
-                    zbus::fdo::Error::Failed(format!(
-                        "GNOME Shell fullscreen screenshot failed: {shell_err}; backend fallback failed: {fallback_err}"
-                    ))
-                })
+                match capture_fullscreen_via_screenshot_portal_path().await {
+                    Ok(path) => Ok(path),
+                    Err(portal_err) => Err(zbus::fdo::Error::Failed(format!(
+                        "GNOME Shell fullscreen screenshot failed: {shell_err}; Screenshot portal fallback failed: {portal_err}"
+                    ))),
+                }
             }
         }
     }
@@ -2126,45 +2111,21 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
 // Capture helpers — run on blocking thread via spawn_blocking
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn make_wayland_backend() -> Option<crate::backend::WaylandBackend> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        <crate::backend::WaylandBackend as DisplayBackend>::new().ok()
-    } else {
-        None
-    }
-}
-
-fn make_x11_backend() -> Option<crate::backend::X11Backend> {
-    if std::env::var_os("DISPLAY").is_some() {
-        <crate::backend::X11Backend as DisplayBackend>::new().ok()
-    } else {
-        None
-    }
-}
-
-fn capture_full_screen() -> Option<crate::backend::CaptureData> {
-    if let Some(b) = make_wayland_backend() {
-        b.capture_screen_impl().ok()
-    } else if let Some(b) = make_x11_backend() {
-        <crate::backend::X11Backend as DisplayBackend>::capture_screen(&b).ok()
-    } else {
-        None
-    }
-}
-
 fn capture_to_temp_png_path(capture: crate::backend::CaptureData) -> Result<String, String> {
     let path =
         save_temp_png_daemon(&capture).ok_or_else(|| "Failed to save temporary PNG".to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
 
-fn capture_fullscreen_to_temp_png_path() -> Result<String, String> {
-    let capture = capture_full_screen()
-        .ok_or_else(|| "No display backend available for fullscreen capture".to_string())?;
+async fn capture_fullscreen_via_screenshot_portal_path() -> Result<String, String> {
+    use crate::backend::wayland::capture_fullscreen_via_screenshot_portal;
+    let capture = capture_fullscreen_via_screenshot_portal()
+        .await
+        .map_err(|e| format!("Screenshot portal fullscreen capture failed: {e}"))?;
     capture_to_temp_png_path(capture)
 }
 
-fn capture_area_to_temp_png_path(
+async fn capture_area_via_screenshot_portal_path(
     x: i32,
     y: i32,
     width: i32,
@@ -2173,51 +2134,17 @@ fn capture_area_to_temp_png_path(
     if width <= 0 || height <= 0 {
         return Err(format!("Invalid capture area: {width}x{height}"));
     }
-
-    if let Some(backend) = make_wayland_backend() {
-        match backend.capture_area_direct_impl(x, y, width, height) {
-            Ok(capture) => return capture_to_temp_png_path(capture),
-            Err(area_err) => {
-                let full = backend.capture_screen_impl().map_err(|e| {
-                    format!(
-                        "Wayland area capture failed ({area_err}); fullscreen fallback failed: {e}"
-                    )
-                })?;
-                let crop_x = x.max(0) as u32;
-                let crop_y = y.max(0) as u32;
-                let crop_w = width.max(1) as u32;
-                let crop_h = height.max(1) as u32;
-                let cropped = crop_capture_data(&full, crop_x, crop_y, crop_w, crop_h)
-                    .ok_or_else(|| "Wayland crop fallback was out of bounds".to_string())?;
-                return capture_to_temp_png_path(cropped);
-            }
-        }
-    }
-
-    if let Some(backend) = make_x11_backend() {
-        match <crate::backend::X11Backend as DisplayBackend>::capture_area(
-            &backend, x, y, width, height,
-        ) {
-            Ok(capture) => return capture_to_temp_png_path(capture),
-            Err(area_err) => {
-                let full = <crate::backend::X11Backend as DisplayBackend>::capture_screen(&backend)
-                    .map_err(|e| {
-                        format!(
-                            "X11 area capture failed ({area_err}); fullscreen fallback failed: {e}"
-                        )
-                    })?;
-                let crop_x = x.max(0) as u32;
-                let crop_y = y.max(0) as u32;
-                let crop_w = width.max(1) as u32;
-                let crop_h = height.max(1) as u32;
-                let cropped = crop_capture_data(&full, crop_x, crop_y, crop_w, crop_h)
-                    .ok_or_else(|| "X11 crop fallback was out of bounds".to_string())?;
-                return capture_to_temp_png_path(cropped);
-            }
-        }
-    }
-
-    Err("No display backend available for area capture".into())
+    use crate::backend::wayland::capture_fullscreen_via_screenshot_portal;
+    let full = capture_fullscreen_via_screenshot_portal()
+        .await
+        .map_err(|e| format!("Screenshot portal capture failed: {e}"))?;
+    let crop_x = x.max(0) as u32;
+    let crop_y = y.max(0) as u32;
+    let crop_w = width.max(1) as u32;
+    let crop_h = height.max(1) as u32;
+    let cropped = crop_capture_data(&full, crop_x, crop_y, crop_w, crop_h)
+        .ok_or_else(|| "Screenshot portal crop was out of bounds".to_string())?;
+    capture_to_temp_png_path(cropped)
 }
 
 fn crop_capture_data(

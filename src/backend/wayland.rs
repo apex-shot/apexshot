@@ -589,6 +589,49 @@ where
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Public Screenshot portal helper for daemon fallback
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Capture fullscreen via the XDG Screenshot portal (no ScreenCast dialog).
+pub async fn capture_fullscreen_via_screenshot_portal() -> DisplayResult<CaptureData> {
+    let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
+
+    let request = Screenshot::request()
+        .interactive(false)
+        .modal(false)
+        .send()
+        .await
+        .map_err(|e| DisplayError::PortalError(format!("Screenshot portal request failed: {e}")))?;
+
+    let response = request.response().map_err(|e| {
+        DisplayError::PortalError(format!("Screenshot portal response failed: {e}"))
+    })?;
+
+    let path = response.uri().to_file_path().map_err(|_| {
+        DisplayError::PortalError(format!(
+            "Screenshot portal returned non-file URI: {}",
+            response.uri()
+        ))
+    })?;
+
+    let img = image::open(&path).map_err(|e| {
+        DisplayError::CaptureError(format!(
+            "Failed to load Screenshot portal image {}: {e}",
+            path.display()
+        ))
+    })?;
+
+    let _ = std::fs::remove_file(&path);
+
+    let img = img.into_rgba8();
+    let width = img.width();
+    let height = img.height();
+    let pixels = img.into_raw();
+
+    Ok(CaptureData::new(pixels, width, height, PixelFormat::RGBA32))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // DisplayBackend implementation
 // ──────────────────────────────────────────────────────────────────────────────
 
