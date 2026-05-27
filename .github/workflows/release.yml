@@ -183,6 +183,11 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends curl ca-certificates git zip
 
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
       - name: Add swap space to prevent OOM during build
         run: |
           if swapon --show | grep -q '/swapfile'; then
@@ -269,7 +274,6 @@ jobs:
           zip apexshot-gnome-integration.zip \
             extension.js metadata.json \
             controls-ui.js controls-ui-layout.js \
-            keystroke-display.js click-display.js \
             mask-ui.js runtime-overlays.js runtime-overlays-visibility.js \
             screenshot-lock.js session-state.js window-list.js \
             gnome-version.js
