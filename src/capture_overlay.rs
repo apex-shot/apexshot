@@ -61,10 +61,28 @@ fn current_desktop_contains(needle: &str) -> bool {
 }
 
 fn should_use_gtk_layer_shell_selector() -> bool {
-    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+    // Always use the Rust GTK LayerShell selector on wlroots compositors.
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
         || std::env::var_os("SWAYSOCK").is_some()
         || current_desktop_contains("Hyprland")
         || current_desktop_contains("sway")
+    {
+        return true;
+    }
+
+    // On other Wayland desktops where the C++ capture binary (which relies on
+    // GNOME Shell D-Bus APIs and XDG portals in GNOME/KDE-specific ways) may
+    // not work, use the Rust selector. This covers COSMIC, River, Wayfire,
+    // Labwc, Niri, and any other non-GNOME, non-KDE Wayland session.
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        let is_gnome = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
+        let is_kde = current_desktop_contains("KDE") || current_desktop_contains("Plasma");
+        if !is_gnome && !is_kde {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn force_wayland_gdk_for_layer_shell() {
