@@ -168,6 +168,8 @@ type RecordingPortalSession =
 struct WaylandSource {
     node_id: u32,
     pipewire_fd: OwnedFd,
+    stream_width: u32,
+    stream_height: u32,
     #[allow(dead_code)]
     crop: Option<CropMargins>,
     _session: RecordingPortalSession,
@@ -866,6 +868,225 @@ async fn record_with_wf_recorder(
     Ok((final_path, stop_action))
 }
 
+/// GIF recording on wlroots: record via wf-recorder to a temp MP4 file, then
+/// convert to GIF with ffmpeg (palettegen + paletteuse).
+async fn record_gif_with_wf_recorder(
+    config: RecordingConfig,
+    command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+    use std::process::{Command, Stdio};
+
+    if !command_exists("wf-recorder") {
+        return Err(RecordError::UnsupportedBackend(
+            "wlroots GIF recording requires wf-recorder. Install it with: sudo pacman -S wf-recorder"
+                .into(),
+        ));
+    }
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return Err(RecordError::NoEncoderFound);
+    }
+
+    let final_path = config.output_path.clone();
+
+    // Build a temp .mp4 path in the same directory as the target GIF (or /tmp).
+    let temp_dir = final_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("/tmp"));
+    let temp_path = {
+        let stem = final_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("apexshot-gif-temp");
+        let mut p = temp_dir.join(format!("{}.temp.mp4", stem));
+        // Avoid collisions if a previous temp file still exists.
+        let mut counter = 1_u32;
+        while p.exists() {
+            p = temp_dir.join(format!("{}.temp-{}.mp4", stem, counter));
+            counter += 1;
+        }
+        p
+    };
+
+    // ---- Phase 1: record video with wf-recorder ----
+    let mut args: Vec<String> = Vec::new();
+
+    if let (Some(x), Some(y), Some(width), Some(height)) =
+        (config.x, config.y, config.width, config.height)
+    {
+        args.push("-g".into());
+        args.push(format!("{},{} {}x{}", x, y, width, height));
+    }
+
+    args.push("-r".into());
+    args.push(config.fps.max(1).to_string());
+
+    if config.mic_enabled || config.speaker_enabled {
+        args.push("-a".into());
+        let source = if config.speaker_enabled && !config.mic_enabled {
+            config
+                .speaker_source
+                .clone()
+                .unwrap_or_else(get_pulse_speaker_monitor)
+        } else {
+            config
+                .mic_source
+                .clone()
+                .unwrap_or_else(get_pulse_default_source)
+        };
+        if !source.is_empty() {
+            args.push(source);
+        }
+    }
+
+    args.push("-f".into());
+    args.push(temp_path.to_string_lossy().to_string());
+
+    println!("Recording GIF via wf-recorder (temp: {:?})", temp_path);
+    println!("wf-recorder {}", args.join(" "));
+
+    let mut child = tokio::process::Command::new("wf-recorder")
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(RecordError::IoError)?;
+
+    notify_daemon_event("recording_session_started");
+    let mut command_rx = command_rx;
+    let mut stop_action = RecordingTerminalAction::Save;
+    let mut paused = false;
+
+    loop {
+        tokio::select! {
+            status = child.wait() => {
+                let status = status.map_err(RecordError::IoError)?;
+                if !status.success() && stop_action == RecordingTerminalAction::Save {
+                    let _ = std::fs::remove_file(&temp_path);
+                    return Err(RecordError::GStreamerError(format!("wf-recorder exited with {status}")));
+                }
+                break;
+            }
+            command = async {
+                match &mut command_rx {
+                    Some(rx) => rx.recv().await,
+                    None => futures_util::future::pending::<Option<RecordingControlCommand>>().await,
+                }
+            } => {
+                let Some(command) = command else {
+                    command_rx = None;
+                    continue;
+                };
+                match command {
+                    RecordingControlCommand::Pause if !paused => {
+                        if let Some(pid) = child.id() {
+                            let _ = std::process::Command::new("kill").args(["-STOP", &pid.to_string()]).status();
+                        }
+                        paused = true;
+                        notify_daemon_event("recording_session_paused");
+                    }
+                    RecordingControlCommand::Resume if paused => {
+                        if let Some(pid) = child.id() {
+                            let _ = std::process::Command::new("kill").args(["-CONT", &pid.to_string()]).status();
+                        }
+                        paused = false;
+                        notify_daemon_event("recording_session_resumed");
+                    }
+                    RecordingControlCommand::Restart => {
+                        stop_action = RecordingTerminalAction::Restart;
+                        break;
+                    }
+                    RecordingControlCommand::StopSave => {
+                        stop_action = RecordingTerminalAction::Save;
+                        break;
+                    }
+                    RecordingControlCommand::StopDiscard => {
+                        stop_action = RecordingTerminalAction::Discard;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if let Some(pid) = child.id() {
+        let _ = std::process::Command::new("kill")
+            .args(["-INT", &pid.to_string()])
+            .status();
+    }
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
+
+    // ---- Handle stop actions ----
+    if stop_action == RecordingTerminalAction::Discard {
+        let _ = std::fs::remove_file(&temp_path);
+        if let Some(event) = daemon_event_for_terminal_action(stop_action) {
+            notify_daemon_event(event);
+        }
+        return Ok((final_path, stop_action));
+    }
+
+    if stop_action == RecordingTerminalAction::Restart {
+        let _ = std::fs::remove_file(&temp_path);
+        if let Some(event) = daemon_event_for_terminal_action(stop_action) {
+            notify_daemon_event(event);
+        }
+        return Ok((final_path, stop_action));
+    }
+
+    // ---- Phase 2: convert MP4 to GIF with ffmpeg ----
+    let max_colors = ((32.0 + 224.0 * config.gif_quality) as u32).clamp(32, 256);
+    let dither = if config.gif_quality >= 0.5 {
+        "floyd_steinberg"
+    } else {
+        "bayer:bayer_scale=5"
+    };
+    let stats_mode = if config.gif_optimize { "diff" } else { "full" };
+    let scale_prefix = match config.gif_max_width {
+        Some(w) => format!("scale={}:-2:flags=lanczos,", w),
+        None => String::new(),
+    };
+    let vf_filter = format!(
+        "{}fps={},split[s0][s1];[s0]palettegen=max_colors={}:stats_mode={}[p];[s1][p]paletteuse=dither={}",
+        scale_prefix, config.fps, max_colors, stats_mode, dither
+    );
+
+    println!("Converting to GIF with ffmpeg...");
+    let status = tokio::process::Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-nostats")
+        .arg("-i")
+        .arg(&temp_path)
+        .arg("-vf")
+        .arg(&vf_filter)
+        .arg(&final_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .await
+        .map_err(RecordError::IoError)?;
+
+    let _ = std::fs::remove_file(&temp_path);
+
+    if !status.success() {
+        let _ = std::fs::remove_file(&final_path);
+        return Err(RecordError::GifError(format!(
+            "FFmpeg GIF conversion failed with status: {status}"
+        )));
+    }
+
+    if let Some(event) = daemon_event_for_terminal_action(stop_action) {
+        notify_daemon_event(event);
+    }
+
+    println!("GIF saved to {:?}", final_path);
+    Ok((final_path, stop_action))
+}
+
 /// Start a recording session
 pub async fn start_recording(config: RecordingConfig) -> RecordResult<PathBuf> {
     start_recording_with_commands(config, None)
@@ -908,9 +1129,12 @@ async fn start_recording_with_commands(
         if should_use_wf_recorder(&config) {
             return record_with_wf_recorder(config, command_rx).await;
         }
+        // GIF on wlroots: record via wf-recorder to a temp file, then convert to GIF
+        if config.output_path.extension().is_some_and(|e| e == "gif") {
+            return record_gif_with_wf_recorder(config, command_rx).await;
+        }
         return Err(RecordError::UnsupportedBackend(
-            "wlroots recording no longer falls back to the XDG portal; GIF recording via wf-recorder is not implemented yet"
-                .into(),
+            "wlroots recording with this output format is not supported".into(),
         ));
     }
 
@@ -1852,17 +2076,18 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         stream.source_type()
     );
 
+    let (stream_width, stream_height) = stream
+        .size()
+        .map(|(w, h)| (w as u32, h as u32))
+        .unwrap_or((0, 0));
+
     let crop = if wants_area_crop {
         let position = stream.position().ok_or_else(|| {
             RecordError::PortalError(
                 "The selected Wayland stream did not expose monitor position metadata".into(),
             )
         })?;
-        let size = stream.size().ok_or_else(|| {
-            RecordError::PortalError(
-                "The selected Wayland stream did not expose monitor size metadata".into(),
-            )
-        })?;
+        let size = (stream_width as i32, stream_height as i32);
         let selection = (
             config.x.expect("checked above"),
             config.y.expect("checked above"),
@@ -1877,6 +2102,8 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
     Ok(WaylandSource {
         node_id,
         pipewire_fd,
+        stream_width,
+        stream_height,
         crop,
         _session: session,
     })
@@ -1930,70 +2157,33 @@ async fn record_gif_wayland_native(
 
     let source = get_wayland_source(&config).await?;
 
-    // Run PipeWire capture on dedicated thread
-    let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(16);
-    let (error_tx, error_rx) = std::sync::mpsc::channel::<String>();
-
-    let pw_width = config.width;
-    let pw_height = config.height;
-    let pw_thread = std::thread::spawn(move || {
-        let capture = match crate::pipewire_engine::PipeWireCapture::connect(
-            source.pipewire_fd,
-            source.node_id,
-            None,
-            pw_width,
-            pw_height,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = error_tx.send(format!("PipeWire: {e}"));
-                return;
-            }
-        };
-        loop {
-            match capture.try_recv_frame() {
-                Ok(Some(frame)) => {
-                    if frame_tx.send(frame.pixels).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
-                Err(e) => {
-                    let _ = error_tx.send(format!("PipeWire: {e}"));
-                    break;
-                }
-            }
-            if capture.has_error() {
-                if let Some(e) = capture.error_message() {
-                    let _ = error_tx.send(e);
-                }
-                break;
-            }
-        }
-    });
-
-    // Get first frame to determine dimensions
-    let first = loop {
-        let frame = frame_rx.recv().map_err(|_| {
-            error_rx
-                .try_recv()
-                .map(RecordError::GStreamerError)
-                .unwrap_or(RecordError::GStreamerError("PipeWire stream closed".into()))
-        })?;
-        if !frame.is_empty() {
-            break frame;
-        }
+    // Use stream dimensions from the portal metadata to determine the
+    // frame size going into ffmpeg (after applying area crop when present).
+    let (raw_width, raw_height) = if let Some(ref c) = source.crop {
+        let w = source
+            .stream_width
+            .checked_sub(c.left + c.right)
+            .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop width".into()))?;
+        let h = source
+            .stream_height
+            .checked_sub(c.top + c.bottom)
+            .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop height".into()))?;
+        eprintln!(
+            "[recording] GIF wayland area crop: left={} top={} right={} bottom={} => {}x{}",
+            c.left, c.top, c.right, c.bottom, w, h
+        );
+        (w, h)
+    } else {
+        (source.stream_width, source.stream_height)
     };
 
-    let total_px = first.len() / 4;
-    let pw_width = config.width.unwrap_or((total_px as f64).sqrt() as u32);
-    let pw_height = config
-        .height
-        .unwrap_or((total_px / pw_width as usize) as u32);
-    let raw_width = pw_width;
-    let raw_height = pw_height;
+    if raw_width == 0 || raw_height == 0 {
+        return Err(RecordError::GStreamerError(
+            "Could not determine stream dimensions for GIF recording".into(),
+        ));
+    }
 
-    println!("Detected stream: {}x{}", raw_width, raw_height);
+    println!("Detected stream: {}x{} (after crop)", raw_width, raw_height);
 
     let gif_fps = config.fps;
     let max_colors = ((32.0 + 224.0 * config.gif_quality) as u32).clamp(32, 256);
@@ -2039,7 +2229,66 @@ async fn record_gif_wayland_native(
         .map_err(RecordError::IoError)?;
 
     let mut stdin = child.stdin.take().expect("stdin");
-    stdin.write_all(&first).map_err(RecordError::IoError)?;
+
+    // Spawn a worker thread that reads frames from PipeWire (applying the
+    // area crop when necessary) and sends them through a channel.
+    // PipeWireCapture is constructed *inside* the thread because it contains
+    // Rc types that are not Send.
+    let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(16);
+    let (error_tx, error_rx) = std::sync::mpsc::channel::<String>();
+
+    let node_id = source.node_id;
+    let pipewire_fd = source.pipewire_fd;
+    let pw_width = config.width;
+    let pw_height = config.height;
+    let crop = source.crop;
+
+    let pw_thread = std::thread::spawn(move || {
+        let capture = match crate::pipewire_engine::PipeWireCapture::connect(
+            pipewire_fd,
+            node_id,
+            None,
+            pw_width,
+            pw_height,
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = error_tx.send(format!("PipeWire: {e}"));
+                return;
+            }
+        };
+        loop {
+            match capture.try_recv_frame() {
+                Ok(Some(frame)) => {
+                    let pixels = if let Some(ref c) = crop {
+                        match crop_rgba_frame(&frame, *c) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                eprintln!("GIF crop error: {e}");
+                                continue;
+                            }
+                        }
+                    } else {
+                        frame.pixels
+                    };
+                    if frame_tx.send(pixels).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
+                Err(e) => {
+                    let _ = error_tx.send(format!("PipeWire: {e}"));
+                    break;
+                }
+            }
+            if capture.has_error() {
+                if let Some(e) = capture.error_message() {
+                    let _ = error_tx.send(e);
+                }
+                break;
+            }
+        }
+    });
 
     println!("Recording GIF...");
 

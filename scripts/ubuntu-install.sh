@@ -228,9 +228,9 @@ portal_backend_packages() {
     desktop=$(current_desktop_id)
 
     if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || [[ "$desktop" == *hyprland* ]]; then
-        packages="xdg-desktop-portal xdg-desktop-portal-hyprland grim slurp"
+        packages="xdg-desktop-portal xdg-desktop-portal-hyprland"
     elif [[ -n "${SWAYSOCK:-}" ]] || [[ "$desktop" == *sway* || "$desktop" == *river* || "$desktop" == *dwl* || "$desktop" == *wayfire* || "$desktop" == *labwc* || "$desktop" == *niri* ]]; then
-        packages="xdg-desktop-portal xdg-desktop-portal-wlr grim slurp"
+        packages="xdg-desktop-portal xdg-desktop-portal-wlr"
     elif [[ "$desktop" == *kde* || "$desktop" == *plasma* ]]; then
         packages="xdg-desktop-portal xdg-desktop-portal-kde"
     elif is_gnome_session; then
@@ -339,7 +339,7 @@ install_deps() {
         libgtk-4-1 libadwaita-1-0 libgtk4-layer-shell0
         wl-clipboard xclip
         xdg-utils libnotify-bin ffmpeg unzip curl wget
-        pipewire
+        pipewire pipewire-pulse
     )
 
     local portal_pkg
@@ -579,9 +579,9 @@ cleanup_shadowing_home_binaries() {
 
 capture_backend_summary() {
     if is_gnome_session; then
-        printf '%s' "GNOME Wayland/Desktop: C++ capture overlay + Screenshot portal for screenshots; ScreenCast portal for recording."
+        printf '%s' "GNOME Shell D-Bus API for screenshots; ScreenCast portal + PipeWire for recording."
     else
-        printf '%s' "Non-GNOME desktops: Rust/wlroots selector where supported; portal/X11 fallbacks otherwise."
+        printf '%s' "wlr-screencopy / Screenshot portal for screenshots; ScreenCast portal + PipeWire/wf-recorder for recording."
     fi
 }
 

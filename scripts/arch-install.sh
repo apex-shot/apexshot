@@ -467,6 +467,7 @@ install_from_source() {
         gst-plugin-pipewire
         gst-plugin-libcamera
         libpipewire
+        pipewire-pulse
         pipewire-libcamera
         libcamera
         libcamera-ipa
@@ -482,11 +483,18 @@ install_from_source() {
         libnotify
         xdg-utils
         ffmpeg
-        grim
-        slurp
-        wf-recorder
         xdg-desktop-portal
     )
+
+    local desktop
+    desktop=$(current_desktop_id)
+
+    # wlroots compositors need wf-recorder for video/GIF recording.
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || [[ "$desktop" == *hyprland* ]] || \
+       [[ -n "${SWAYSOCK:-}" ]] || [[ "$desktop" == *sway* || "$desktop" == *river* || "$desktop" == *dwl* || "$desktop" == *wayfire* || "$desktop" == *labwc* || "$desktop" == *niri* ]]; then
+        deps+=(wf-recorder)
+        info "wlroots compositor detected — adding wf-recorder for video/GIF recording"
+    fi
 
     local portal_backend
     portal_backend=$(arch_portal_backend_package)
@@ -669,9 +677,9 @@ cleanup() {
 
 capture_backend_summary() {
     if is_gnome_session; then
-        printf '%s' "GNOME Wayland/Desktop: C++ capture overlay + Screenshot portal for screenshots; ScreenCast portal for recording."
+        printf '%s' "GNOME Shell D-Bus API for screenshots; ScreenCast portal + PipeWire for recording."
     else
-        printf '%s' "Non-GNOME desktops: Rust/wlroots selector where supported; portal/X11 fallbacks otherwise."
+        printf '%s' "wlr-screencopy / Screenshot portal for screenshots; ScreenCast portal + PipeWire/wf-recorder for recording."
     fi
 }
 

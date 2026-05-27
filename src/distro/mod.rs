@@ -124,6 +124,20 @@ impl DistroInfo {
         DistroSupport::for_family(self.family())
     }
 
+    /// Summary of how screenshots are captured on this distribution.
+    pub fn screenshot_capture_summary(&self) -> &'static str {
+        if self.is_debian() || self.is_arch() {
+            // GNOME Wayland: GNOME Shell D-Bus screenshot API (via daemon),
+            // falls back to XDG Screenshot portal, then Qt screen grab.
+            // wlroots: zwlr_screencopy_manager_v1 direct protocol,
+            // falls back to ScreenCast portal + PipeWire.
+            // X11: direct X11 backend.
+            "GNOME Shell D-Bus / Screenshot portal / wlr-screencopy (no external CLI tools)"
+        } else {
+            "XDG Screenshot portal + PipeWire fallback"
+        }
+    }
+
     fn matches_any(&self, ids: &[&str]) -> bool {
         ids.iter()
             .any(|candidate| self.id == *candidate || self.id_like.iter().any(|id| id == candidate))
@@ -178,9 +192,11 @@ impl DistroSupport {
                 required_runtime_packages: &[
                     "xdg-desktop-portal",
                     "pipewire",
+                    "pipewire-pulse",
                     "gstreamer1.0-pipewire",
                     "wl-clipboard",
                     "tesseract-ocr",
+                    "ffmpeg",
                 ],
                 recommended_portal_backends: &[
                     "xdg-desktop-portal-gnome",
@@ -197,9 +213,11 @@ impl DistroSupport {
                 required_runtime_packages: &[
                     "xdg-desktop-portal",
                     "pipewire",
+                    "pipewire-pulse",
                     "gst-plugin-pipewire",
                     "wl-clipboard",
                     "tesseract",
+                    "ffmpeg",
                 ],
                 recommended_portal_backends: &[
                     "xdg-desktop-portal-gnome",
@@ -217,9 +235,11 @@ impl DistroSupport {
                 required_runtime_packages: &[
                     "xdg-desktop-portal",
                     "pipewire",
+                    "pipewire-pulseaudio",
                     "gstreamer1-plugin-pipewire",
                     "wl-clipboard",
                     "tesseract",
+                    "ffmpeg-free",
                 ],
                 recommended_portal_backends: &[
                     "xdg-desktop-portal-gnome",
@@ -236,9 +256,11 @@ impl DistroSupport {
                 required_runtime_packages: &[
                     "xdg-desktop-portal",
                     "pipewire",
+                    "pipewire-pulseaudio",
                     "gstreamer-plugin-pipewire",
                     "wl-clipboard",
                     "tesseract-ocr",
+                    "ffmpeg",
                 ],
                 recommended_portal_backends: &[
                     "xdg-desktop-portal-gnome",
