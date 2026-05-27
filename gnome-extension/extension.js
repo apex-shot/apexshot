@@ -691,6 +691,9 @@ class RecordingMaskService {
     }
 
 
+}
+
+export default class ApexShotShellSupport {
     constructor() {
     }
 

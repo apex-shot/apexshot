@@ -4,7 +4,7 @@
   "uuid": "apexshot-gnome-integration@apexshot.github.io",
   "shell-version": ["45", "46", "47", "48", "49", "50"],
   "url": "https://github.com/apex-shot/apexshot",
-  "version": 2,
+  "version": 3,
   "gettext-domain": "apexshot-gnome-integration",
   "settings-schema": "org.gnome.shell.extensions.apexshot-gnome-integration"
 }
