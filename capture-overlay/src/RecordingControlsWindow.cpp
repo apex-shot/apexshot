@@ -212,18 +212,13 @@ static QPoint computeBarPosition(const QRect& captureRect, bool isFullscreen)
       minX,
       maxX);
 
-    const int belowY = captureRect.y() + captureRect.height() + kGap;
     const int maxY = screenRect.y() + screenRect.height() - kBarHeight - kMargin;
-    if (belowY + kBarHeight + kDockSafe <= screenRect.y() + screenRect.height()) {
-        return QPoint(x, belowY);
-    }
+    const int y = std::clamp(
+      captureRect.y() + (captureRect.height() - kBarHeight) / 2,
+      topY,
+      maxY);
 
-    const int aboveY = captureRect.y() - kBarHeight - kGap;
-    if (aboveY >= topY) {
-        return QPoint(x, aboveY);
-    }
-
-    return QPoint(x, std::clamp(aboveY, topY, maxY));
+    return QPoint(x, y);
 }
 
 } // namespace
