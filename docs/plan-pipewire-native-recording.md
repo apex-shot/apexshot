@@ -1,5 +1,7 @@
 # Plan: Replace GStreamer with Native libpipewire (OBS-style)
 
+**Status: ✅ Phases 1–4 complete. Phase 5 (webcam) complete via Camera portal. Phase 6 (cleanup) partially done — GStreamer retained for X11 fallback and v4l2 webcam fallback.**
+
 ## Goal
 
 Replace all GStreamer-based PipeWire frame consumption in the GNOME/Wayland path with
@@ -263,7 +265,7 @@ For video encoding, we have two options:
 - Supports all formats (webm/vp9, mp4/h264, gif)
 - Users already have ffmpeg installed
 
-### Phase 4: Replace GIF Recording
+### Phase 4: Replace GIF Recording ✅ COMPLETE
 
 Current GIF path: GStreamer pipeline → AppSink → ffmpeg stdin
 New GIF path: PipeWire stream → raw RGBA frames → ffmpeg stdin
@@ -271,21 +273,33 @@ New GIF path: PipeWire stream → raw RGBA frames → ffmpeg stdin
 This is actually *simpler* because we get raw frames directly instead of
 going through a GStreamer pipeline. The ffmpeg invocation stays the same.
 
-### Phase 5: Replace Webcam Preview (`src/overlay/webcam.rs`)
+**Implemented in:** `src/recording/mod.rs` `record_gif_wayland_native()`.
+X11 GIF recording still uses GStreamer fallback (`record_gif_x11_gstreamer()`).
+
+### Phase 5: Replace Webcam Preview (`src/overlay/webcam.rs`) ✅ COMPLETE
 
 Current: GStreamer `v4l2src ! videoconvert ! appsink`
-New: Could use `v4l2` Rust crate or keep as GStreamer (webcam is separate from
-screen capture PipeWire concern). **Decision: keep GStreamer for webcam only**
-initially, or move to `v4l2` crate. The webcam path is completely independent
-from the PipeWire screen recording path.
+New: XDG Camera portal (`org.freedesktop.portal.Camera`) → native PipeWire
+stream via `PipeWireCapture`. Falls back to v4l2 GStreamer when the Camera
+portal is unavailable (older desktops, wlroots).
 
-### Phase 6: Cleanup
+**Implemented in:** `src/overlay/webcam.rs` `start_webcam_preview()` using
+Camera portal + native PipeWire. v4l2/GStreamer fallback in
+`start_webcam_preview_v4l2()`.
 
-- Remove `gstreamer`, `gstreamer-app`, `gstreamer-video` from Cargo.toml
-  (unless webcam still uses them)
-- Remove `gstreamer1.0-pipewire` from distro packaging lists in `src/distro/mod.rs`
-- Remove pipewire source pipeline string builders
-- Update `Cargo.toml` package dependencies (debian/control, fedora spec, etc.)
+### Phase 6: Cleanup 🔄 PARTIALLY COMPLETE
+
+- ~~Remove `gstreamer`, `gstreamer-app`, `gstreamer-video` from Cargo.toml~~ — **retained**: 
+  still used by X11 recording fallback (`record_x11_with_gstreamer()`),
+  X11 GIF fallback (`record_gif_x11_gstreamer()`), and webcam v4l2 fallback.
+- ~~Remove `gstreamer1.0-pipewire` from distro packaging lists~~ — **retained**:
+  needed for X11 GStreamer fallback path.
+- `pipewire_source_pipeline()` function in recording/mod.rs is now `#[allow(dead_code)]` —
+  kept as reference but unused on Wayland.
+- `ensure_gstreamer_initialized()` and GStreamer pipeline code removed from
+  `src/backend/wayland.rs` ✅
+- `capture_single_frame_from_pipewire()` in wayland.rs replaced with
+  `crate::pipewire_engine::capture_single_frame()` ✅
 
 ## Files Modified
 

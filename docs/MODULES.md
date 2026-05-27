@@ -95,11 +95,11 @@ This document provides detailed information about every module and submodule in 
 
 ### Recording Module (`src/recording/`)
 
-**Purpose:** Screen recording with GStreamer pipeline construction, codec
-auto-detection, audio mixing, and runtime overlays. This module works identically
-on all platforms — the Rust pipeline is the authoritative recorder regardless of
-whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
-(non-GNOME).
+**Purpose:** Screen recording with native PipeWire frame capture, ffmpeg
+encoding/muxing, codec auto-detection, audio mixing, and runtime overlays. This
+module works identically on all platforms — the Rust pipeline is the authoritative
+recorder regardless of whether the user interacts through the Qt overlay (GNOME)
+or the daemon/CLI (non-GNOME).
 
 **Architecture overview for non-GNOME users:**
 
@@ -108,15 +108,17 @@ whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
 - **Recording start** happens directly from the daemon (`src/daemon/mod.rs`)
   which calls `prepare_overlay_recording_request` and `start_recording`.
 - **Recording backend** is chosen automatically: `wf-recorder` on wlroots
-  compositors (Hyprland/Sway) for native `wlr-screencopy` capture; GStreamer +
-  XDG ScreenCast portal + PipeWire on other Wayland compositors.
+  compositors (Hyprland/Sway) for native `wlr-screencopy` capture;
+  native PipeWire (`src/pipewire_engine.rs`) + ffmpeg on other Wayland
+  compositors; GStreamer `ximagesrc` fallback on X11.
 - **During recording:** a GTK4 `stop_overlay.rs` floating bar shows pause/stop
   controls and elapsed time. No shell extension or Qt process is involved.
 - **After recording:** the GTK4 video editor, preview overlay, and after-capture
   actions all work identically to the GNOME path.
 
 **Submodules:**
-- `mod.rs` — GStreamer pipeline setup, codec detection, recording loop, GIF encoding
+- `mod.rs` — Native PipeWire capture + ffmpeg pipe recording loop, X11 GStreamer
+  fallback, codec selection, GIF encoding, portal session management
 - `editor/` — GTK4 video editor for trimming, conversion, and export
 - `control_session.rs` — Active recording session tracking and D-Bus control commands
 - `stop_overlay.rs` — GTK4 floating control bar (pause, stop, timer) during recording
@@ -130,7 +132,10 @@ whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
 - `RecordingConfig` — `output_path`, `width`/`height`, `x`/`y`, `cursor`, `fps`, audio sources, overlay options
 
 **Key Functions (`mod.rs`):**
-- `start_recording(config)` — Main recording entry point; builds and runs GStreamer pipeline
+- `start_recording(config)` — Main recording entry point; selects backend (wf-recorder / native PipeWire + ffmpeg / GStreamer X11) and runs recording loop
+- `record_wayland_with_ffmpeg_sync()` — Wayland recording: native PipeWire capture → RGBA frames → ffmpeg stdin pipe
+- `record_gif_wayland_native()` — Wayland GIF recording: native PipeWire + ffmpeg palettegen/paletteuse
+- `record_x11_with_gstreamer()` — X11 fallback using GStreamer ximagesrc pipeline
 - `run_recording_with_controls(params, stop_tx)` — Recording with floating stop overlay
 - `run_recording_countdown_bar()` — Shows countdown then recording controls
 - `run_overlay_recording_request(request)` — Handles C++ overlay recording request
@@ -198,6 +203,44 @@ whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
 - Re-encoding is skipped when only trimming
 - Empty workspace with drop zone and file chooser dialog
 - Accessible from tray menu, CLI (`apexshot video-editor`), and global hotkey
+
+---
+
+### PipeWire Engine (`src/pipewire_engine.rs`)
+
+**Purpose:** Native `libpipewire` client providing OBS-style screen capture.
+Replaces GStreamer `pipewiresrc` with direct PipeWire API for both single-frame
+screenshots and continuous video recording.
+
+**Key Types:**
+- `PipeWireCapture` — Full lifecycle wrapper: `ThreadLoopRc` → `ContextRc` → `CoreRc` → `StreamRc`
+- `PipeWireFrame` — RGBA pixel data, dimensions, stride, cursor overlay, color space
+- `CursorOverlay` — Cursor bitmap and position from `SPA_META_Cursor` metadata
+- `NegotiatedFormat` — Format negotiated with compositor (size, framerate, color space)
+- `ColorSpace` — SPA video color range (full/limited) and matrix (RGB/BT.601/BT.709)
+- `PipeWireError` — Error enum covering init, connect, stream, timeout, format negotiation
+
+**Key Functions:**
+- `PipeWireCapture::connect(fd, node_id, max_frames, width_hint, height_hint)` — Open PipeWire stream via portal fd
+- `PipeWireCapture::wait_for_frame(timeout)` — Blocking dequeue with timeout
+- `PipeWireCapture::try_recv_frame()` — Non-blocking frame dequeue
+- `capture_single_frame(fd, node_id, timeout)` — Convenience: connect, grab one frame, disconnect
+
+**Architecture:**
+```
+Portal (ashpd) → pipewire_fd, node_id
+    ↓
+PipeWireCapture::connect()
+    ├── pw_thread_loop (dedicated thread for PipeWire I/O)
+    ├── pw_context + pw_core (connect via fd)
+    ├── pw_stream → format negotiation (BGRx/BGRA/RGBx/RGBA, DMA-BUF preferred, SHM fallback)
+    ├── process callback → extract buffer (DMA-BUF mmap or SHM memcpy)
+    └── Cursor metadata extraction (SPA_META_Cursor via raw spa_buffer)
+```
+
+**Format negotiation:** Advertises priority list of video formats (BGRx, BGRA, RGBx, RGBA)
+with size range 1×1 to 8192×4320 and framerate 0/1 to 360/1. Accepts whatever the
+compositor picks. Color space (BT.601/BT.709/RGB, full/limited range) is reported.
 
 ---
 
@@ -444,12 +487,13 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 - **Hyprland / Sway** — `wlr-screencopy` native Wayland protocol.
 - **Other compositors** — XDG ScreenCast portal + PipeWire as fallback (implemented, not yet tested on KDE/Niri)
 
-Recording uses the XDG ScreenCast portal + PipeWire on most compositors. On wlroots
-compositors (Hyprland/Sway), `wf-recorder` is preferred when installed for
-native `wlr-screencopy` capture with lower overhead. Ubuntu GNOME
-Wayland, Arch GNOME Wayland, Hyprland, and Sway are confirmed; KDE Plasma,
-Fedora, openSUSE, Niri, and NixOS remain priority manual validation targets.
-`X11Backend` exists but is not thoroughly tested.
+Recording uses the XDG ScreenCast portal + native PipeWire (`src/pipewire_engine.rs`)
++ ffmpeg on most compositors. On wlroots compositors (Hyprland/Sway),
+`wf-recorder` is preferred when installed for native `wlr-screencopy` capture
+with lower overhead. Ubuntu GNOME Wayland, Arch GNOME Wayland, Hyprland, and
+Sway are confirmed; KDE Plasma, Fedora, openSUSE, Niri, and NixOS remain
+priority manual validation targets. `X11Backend` exists but is not thoroughly
+tested.
 
 ---
 

@@ -661,14 +661,43 @@ fn is_wlroots_session() -> bool {
         .or_else(|_| std::env::var("DESKTOP_SESSION"))
         .unwrap_or_default()
         .to_lowercase();
-    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+    let wayland_display = std::env::var_os("WAYLAND_DISPLAY").is_some();
+
+    // Compositor-specific env vars (set by the compositor itself).
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
         || std::env::var_os("SWAYSOCK").is_some()
-        || desktop.contains("hyprland")
+    {
+        return true;
+    }
+
+    // String match on desktop session id (works for labwc when used standalone,
+    // but NOT when labwc is embedded inside XFCE/Wayland where the session
+    // reports as "XFCE").
+    if desktop.contains("hyprland")
         || desktop.contains("sway")
         || desktop.contains("river")
         || desktop.contains("wayfire")
         || desktop.contains("labwc")
         || desktop.contains("niri")
+    {
+        return true;
+    }
+
+    // labwc running under XFCE/Wayland: no unique env var, so detect by
+    // checking for a running labwc process on the same Wayland display.
+    if wayland_display && command_exists("labwc") {
+        // pgrep -x matches the exact process name.
+        if let Ok(output) = std::process::Command::new("pgrep")
+            .args(["-x", "labwc"])
+            .output()
+        {
+            if output.status.success() {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn command_exists(name: &str) -> bool {

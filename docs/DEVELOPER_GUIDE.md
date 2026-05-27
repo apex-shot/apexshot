@@ -273,8 +273,8 @@ apexshot/
 │   │   └── complete.rs            # Completion screen
 │   ├── overlay.rs                 # X11 area selector (GTK4 + gtk4-layer-shell)
 │   ├── qr/                        # QR code detection (rqrr)
-│   ├── recording/                 # Screen recording with GStreamer
-│   │   ├── mod.rs                 # GStreamer pipeline, codec detection
+│   ├── recording/                 # Screen recording with native PipeWire + ffmpeg
+│   │   ├── mod.rs                 # Native PipeWire + ffmpeg, X11 GStreamer fallback, codec detection
 │   │   ├── control_session.rs     # Active session D-Bus commands
 │   │   ├── stop_overlay.rs        # Floating recording control bar
 │   │   ├── countdown_overlay.rs   # Fullscreen 3-2-1 countdown
@@ -402,7 +402,7 @@ impl AppConfig {
 
 **Step 2:** Add UI in `src/settings/recording.rs`.
 
-**Step 3:** Update recording logic in `src/recording/mod.rs` (GStreamer pipeline).
+**Step 3:** Update recording logic in `src/recording/mod.rs` (native PipeWire + ffmpeg).
 
 **Step 4:** If the feature needs runtime UI, add it to `src/recording/stop_overlay.rs` or `src/recording/countdown_overlay.rs`.
 

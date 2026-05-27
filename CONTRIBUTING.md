@@ -26,7 +26,8 @@ Thank you for your interest in contributing to ApexShot! This document provides 
 - **GTK4** + **gtk4-layer-shell** development headers (the latter built
   from source — see the GitHub Actions workflow for the exact recipe).
 - **GStreamer 1.0** with `plugins-base`, `plugins-good`, `plugins-bad`,
-  `libav`, `pipewire`, `pulseaudio` runtime plugins.
+  `libav`, `pipewire`, `pulseaudio` runtime plugins (used for X11 recording
+  fallback and v4l2 webcam fallback).
 - **Qt5** (`qtbase5-dev`, `libqt5x11extras5-dev`).
 - **PipeWire**, **Tesseract**, **xkbcommon**, **libxtst**, **libwayland**,
   **libdbus-1**, **pkg-config**.
@@ -66,7 +67,7 @@ right starting point for a change.
 | Capture backends (X11 / Wayland)      | `src/backend/`                                      | Tier list: wlr-screencopy → grim → portal Screenshot → portal ScreenCast (incl. `restore_token` cache). |
 | Image editor + annotations            | `src/capture/editor/`                               | GTK4 + Cairo. Pen/highlighter rendering, color palette, selection, crop. |
 | Preview overlay                       | `src/capture/preview_overlay.rs`                    | Quick-access card after capture (drag, edit, copy, save). |
-| Recording pipeline                    | `src/recording/`                                    | GStreamer, GIF / video encoding, audio source discovery (`pactl`). |
+| Recording pipeline                    | `src/recording/`                                    | Native PipeWire (`pipewire_engine.rs`) + ffmpeg on Wayland; GStreamer ximagesrc on X11. GIF / video encoding, audio source discovery (`pactl`). |
 | OCR + QR                              | `src/ocr/`, `src/qr/`                               | Tesseract LSTM with multi-PSM voting, deskew, QR-first detection. |
 | Settings UI                           | `src/settings/`                                     | GTK4 preferences window, shortcut editor, recording options. |
 | Onboarding wizard                     | `src/onboarding/`                                   | First-run setup, GNOME extension installer (`wget` + `curl`). |

@@ -49,7 +49,7 @@ security perspective and warrant extra scrutiny:
   on-disk `restore_token` cache (`~/.cache/apexshot/`).
 - `src/utils/clipboard.rs` and `src/utils/desktop_env.rs` — clipboard data
   and environment forwarding.
-- `src/recording/` — PipeWire / GStreamer pipelines that touch raw audio
+- `src/recording/` — PipeWire / ffmpeg pipelines that touch raw audio
   and video buffers.
 - `gnome-extension/` — runs inside the GNOME Shell process; any escape
   from its sandboxing is high impact.

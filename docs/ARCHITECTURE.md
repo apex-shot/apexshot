@@ -132,9 +132,23 @@ Screen capture functionality:
 
 **Supported annotation tools:** Pen, Line, Arrow (Standard/Fancy/Curved/Double), Rectangle, Circle, Highlighter, Text, Obfuscate (Pixelate/Blur/Blackout), Number callouts, Crop, Focus.
 
-### 5. Recording Module (`src/recording/`)
-Screen recording with GStreamer:
-- `mod.rs` — GStreamer pipeline setup (VP8/VP9/H.264/H.265/Theora/GIF), codec auto-detection, audio mixing, webcam PiP
+### 5. PipeWire Engine (`src/pipewire_engine.rs`)
+OBS-style native `libpipewire` client that replaces GStreamer's `pipewiresrc`:
+- `PipeWireCapture` — wraps `pw_thread_loop` → `pw_context` → `pw_core` → `pw_stream`
+- Format negotiation via SPA pods (BGRx/BGRA/RGBx/RGBA, DMA-BUF first, SHM fallback)
+- Frame extraction: DMA-BUF mmap or SHM memcpy → RGBA conversion, cursor compositing
+- Cursor metadata via `SPA_META_Cursor` (raw spa_buffer FFI)
+- Frame queue: `Arc<Mutex<VecDeque>>`, consumed by recording loop or screenshot path
+- Color space reporting (BT.601/BT.709/RGB, full/limited range)
+
+**Key exports:**
+- `PipeWireCapture::connect(fd, node_id, max_frames, width_hint, height_hint)`
+- `PipeWireCapture::wait_for_frame(timeout)` / `try_recv_frame()`
+- `capture_single_frame(fd, node_id, timeout)` — convenience for screenshots
+
+### 6. Recording Module (`src/recording/`)
+Screen recording with native PipeWire + ffmpeg:
+- `mod.rs` — Native PipeWire capture + ffmpeg pipe recording loop, X11 GStreamer fallback, codec selection, GIF encoding, portal session management
 - `control_session.rs` — `RecordingControlCommand` (Pause/Resume/Restart/StopSave/StopDiscard), active session tracking via static `OnceLock`
 - `stop_overlay.rs` — GTK4 floating control bar during recording (pause, stop, timer, position)
 - `countdown_overlay.rs` — fullscreen 3-2-1 countdown with Escape cancellation
@@ -144,14 +158,14 @@ Screen recording with GStreamer:
 
 **Features:** MP4/WebM/OGV/GIF output, mic + speaker audio, webcam overlay, recording mask, pause/resume/restart, countdown timer, post-recording video editor.
 
-### 6. X11/Wayland Area Selector (`src/overlay.rs`)
+### 7. X11/Wayland Area Selector (`src/overlay.rs`)
 GTK4 overlay for interactive area selection:
 - Full-screen transparent window with mouse drag selection
 - Built with GTK4 + `gtk4-layer-shell`
 - Used on X11; on Wayland, portal/`ashpd` handles area selection
 - Supports `select_area_from_capture` and `select_area_from_image` for re-cropping
 
-### 7. Settings Module (`src/settings/`)
+### 8. Settings Module (`src/settings/`)
 GTK4-based settings window with custom chromeless styling and edge-drag resize:
 - `mod.rs` — main settings window builder, single-instance check, tab navigation
 - `general.rs` — general app settings (sounds, tray, startup, preview timeout)
@@ -169,7 +183,7 @@ GTK4-based settings window with custom chromeless styling and edge-drag resize:
 - `ui_support.rs` — shared CSS styling, custom traffic-light buttons, form helpers
 - `windowing.rs` — edge-drag resize, window drag, dark/light theme detection (`prefers_dark_glass_theme`), reduced-transparency support
 
-### 8. Annotation Persistence (`src/annotations/`)
+### 9. Annotation Persistence (`src/annotations/`)
 Non-destructive annotation storage:
 - `mod.rs` — public API for save/load
 - `schema.rs` — `AnnotationFile` schema with versioning, canvas size, action list
@@ -179,32 +193,32 @@ Non-destructive annotation storage:
 - Annotations: `~/.local/share/apexshot/annotations/`
 - Originals: `~/.local/share/apexshot/originals/`
 
-### 9. OCR Module (`src/ocr/`)
+### 10. OCR Module (`src/ocr/`)
 Text recognition using dual engines:
 - Tesseract for traditional OCR with multi-language support
 - QR code detection via `rqrr` (attempted first)
 - `ocrs`/`rten` engine used in `capture/editor/text_detect.rs` for ML-based text detection
 - Clipboard auto-copy option
 
-### 10. GNOME Integration (`src/gnome_integration/`, `src/gnome_shell.rs`)
+### 11. GNOME Integration (`src/gnome_integration/`, `src/gnome_shell.rs`)
 D-Bus communication with GNOME Shell extension:
 - `gnome_shell.rs` — `org.apexshot.ShellOverlay` D-Bus proxy (ShowMask, HideMask, recording pause/resume/restart/end)
 - `gnome_integration/` — extension installation, validation, metadata parsing
 
-### 11. Hotkeys (`src/hotkeys/`)
+### 12. Hotkeys (`src/hotkeys/`)
 Global hotkey management:
 - GNOME: gsettings custom keybindings pointing at `apexshot daemon` subcommands
 - Non-GNOME: portal `GlobalShortcuts` via `ashpd`
 - Desktop entry generation (`ensure_desktop_entry_pub`)
 - Config path: `~/.cache/apexshot/hotkey-daemon.log` (when not in terminal)
 
-### 12. Tray (`src/tray/`)
+### 13. Tray (`src/tray/`)
 System tray via `ksni` (StatusNotifierItem):
 - Idle and recording states with elapsed timer
 - Menu: Capture (screen/area/window), Record, Video Editor, Show Last Preview, Open Last Capture, Settings, Quit
 - Procedural Cairo-drawn "A-Mark" icon at multiple resolutions
 
-### 13. Onboarding (`src/onboarding/`)
+### 14. Onboarding (`src/onboarding/`)
 First-time setup wizard:
 - `welcome.rs` — welcome screen
 - `extensions.rs` — GNOME extension and Chrome extension installation
@@ -212,12 +226,12 @@ First-time setup wizard:
 - `complete.rs` — completion screen
 - `mod.rs` — wizard flow controller, completion flag check
 
-### 14. Utils (`src/utils/`)
+### 15. Utils (`src/utils/`)
 Shared utilities:
 - `clipboard.rs` — clipboard operations
 - `desktop_env.rs` — desktop environment detection
 
-### 15. Display Backend (`src/backend/`)
+### 16. Display Backend (`src/backend/`)
 Abstraction over display servers:
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`
 - `x11.rs` — X11 backend via `x11rb` + MIT-SHM
@@ -230,12 +244,12 @@ Abstraction over display servers:
 
 **Supported pixel formats:** RGB24, RGB32, RGBA32, BGR24, BGR32, BGRA32.
 
-### 16. QR Code Detection (`src/qr/`)
+### 17. QR Code Detection (`src/qr/`)
 Fast QR code decoding:
 - `rqrr` with raw-byte API to avoid `image` crate version conflicts
 - Integrated into OCR pipeline as primary detection path
 
-### 17. C++ Overlay Launcher (`src/capture_overlay.rs`)
+### 18. C++ Overlay Launcher (`src/capture_overlay.rs`)
 Rust wrapper for the C++ Qt5 overlay binary:
 - `run_capture_overlay()` — spawns overlay process
 - `capture_area_via_cpp()`, `capture_crosshair_via_cpp()`, `capture_screen_via_cpp()` — capture modes
@@ -243,7 +257,7 @@ Rust wrapper for the C++ Qt5 overlay binary:
 - Binary location resolved via `option_env!("APEXSHOT_CAPTURE_BIN_DIR")` set by `build.rs`
 - `CaptureOverlayGuard` / `LaunchBlockedReason` — concurrency control
 
-### 18. Library Exports (`src/lib.rs`)
+### 19. Library Exports (`src/lib.rs`)
 Public API surface for integration tests and downstream use:
 - Re-exports from `backend`, `capture`, `config`, `ocr`, `overlay`, `recording`, `settings`, `onboarding`
 
@@ -317,7 +331,7 @@ ApexShot supports two distinct recording paths: the **native Rust path** used on
 non-GNOME compositors (Hyprland, Sway, KDE, X11) and the **Qt overlay + GNOME
 extension path** used on GNOME Wayland.
 
-#### Native Rust recording path (non-GNOME): daemon → portal → GStreamer
+#### Native Rust recording path (non-GNOME): daemon → portal → native PipeWire + ffmpeg
 
 1. User triggers recording via hotkey, tray, or CLI (`apexshot record area`,
    `apexshot record screen`).
@@ -328,30 +342,34 @@ extension path** used on GNOME Wayland.
    webcam, countdown, cursor, etc.).
 4. `recording::start_recording(config)` starts the recording. On wlroots
    compositors (Hyprland/Sway), `wf-recorder` is used when available for
-   native `wlr-screencopy` capture with lower overhead. On all other Wayland
-   compositors, a GStreamer pipeline is built:
-   - **Video source:** PipeWire ScreenCast portal stream (Wayland) or X11 SHM
-     capture (X11).
-   - **Audio sources:** PulseAudio or PipeWire mic/speaker sources, mixed via
-     `audiomixer` when both are enabled.
-   - **Encoder:** VP9 for WebM, H.264 (openh264 or x264enc) for MP4, or
-     gifenc/lzw for GIF. Codec auto-detection picks the best available encoder.
-   - **Muxer:** webmmux, mp4mux, or avimux depending on format.
-   - **Webcam PiP:** If enabled and a webcam device is found, a separate
-     v4l2src pipeline captures the camera feed and composites it over the
-     recording via a `cairooverlay` element.
-5. If countdown is enabled, `countdown_overlay.rs` shows a fullscreen 3-2-1
+   native `wlr-screencopy` capture with lower overhead.
+5. On all other Wayland compositors, the flow is:
+   - **Video source:** XDG ScreenCast portal → `get_wayland_source()` returns a
+     `WaylandSource` with PipeWire fd + node_id (no GStreamer pipeline string).
+   - **Frame capture:** `PipeWireCapture` (`src/pipewire_engine.rs`) opens a
+     native libpipewire stream via `pw_stream_connect()`. Frames arrive in the
+     process callback (DMA-BUF or SHM), are converted to RGBA, and placed in a
+     `VecDeque` behind `Arc<Mutex<>>` for consumption on the application thread.
+   - **Encoding:** Raw RGBA frames are written to ffmpeg's stdin (pipe), which
+     handles encoding (VP9/libvpx-vp9, H.264/libx264, etc.) and muxing.
+   - **Audio:** mic/speaker captured via ffmpeg's PulseAudio input (`-f pulse`).
+     Multiple sources are mixed with ffmpeg's `amix` filter.
+   - **Area cropping:** CPU-side crop applied to each frame before writing to
+     ffmpeg (crop margins computed from portal stream position/size vs selection).
+6. On X11, the GStreamer `ximagesrc` pipeline is used as fallback
+   (`record_x11_with_gstreamer()`).
+7. If countdown is enabled, `countdown_overlay.rs` shows a fullscreen 3-2-1
    countdown (with Escape to cancel). A `dim_overlay.rs` dim mask covers the
    screen during the countdown.
-6. Recording starts; `control_session.rs` registers the active session on D-Bus
+8. Recording starts; `control_session.rs` registers the active session on D-Bus
    at `/org/apexshot/RecordingControl`, enabling pause/resume/restart/stop
    commands from tray, hotkeys, or other processes.
-7. The `stop_overlay.rs` GTK4 floating control bar appears with pause, stop, and
+9. The `stop_overlay.rs` GTK4 floating control bar appears with pause, stop, and
    elapsed-timer controls.
-8. User stops recording via the overlay, hotkey, or tray; the GStreamer pipeline
-   is finalized, and the file is written to the output path.
-9. After-capture actions are applied (copy to clipboard, show preview, open
-   editor, upload, etc.) based on user settings.
+10. User stops recording via the overlay, hotkey, or tray; ffmpeg is signaled
+    (stdin closed), finalizes, and the file is written.
+11. After-capture actions are applied (copy to clipboard, show preview, open
+    editor, upload, etc.) based on user settings.
 
 #### Qt overlay + GNOME extension path (GNOME Wayland)
 
@@ -359,7 +377,8 @@ extension path** used on GNOME Wayland.
 2. The C++ Qt5 overlay (`capture-overlay/`) handles area selection and recording
    configuration UI (format picker, mic/speaker toggles, webcam PiP options).
 3. The overlay outputs a JSON recording request; `RecordingConfig` is built from it.
-4. `recording::start_recording()` constructs the same GStreamer pipeline as above.
+4. `recording::start_recording()` uses the same native PipeWire + ffmpeg flow
+   as the daemon path (no GStreamer for video).
 5. The GNOME Shell extension is contacted via D-Bus to:
    - Show a recording mask (`org.apexshot.ShellOverlay.ShowMask`) that dims the
      screen outside the selected area.
@@ -368,7 +387,7 @@ extension path** used on GNOME Wayland.
    - Display webcam PiP and audio level indicators as shell actors.
 6. Countdown and recording proceed as in the native path, but mask/controls are
    shell-rendered instead of GTK4 overlays.
-7. User stops; pipeline finalized; after-capture actions applied.
+7. User stops; ffmpeg finalizes; after-capture actions applied.
 
 ### Web Scroll Capture Flow
 1. User clicks browser extension button on a webpage

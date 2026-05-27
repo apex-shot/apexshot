@@ -118,11 +118,11 @@ support is improving over time.
 | **Native Overlay** | C++17 / Qt5 (region selection, drawing) |
 | **GUI** | GTK4 + gtk4-layer-shell |
 | **Display Servers** | X11 (x11rb + MIT-SHM), GNOME Wayland screenshots via XDG Screenshot portal + C++ overlay, wlroots/Hyprland/Sway screenshots via `wlr-screencopy` + Rust GTK layer-shell, recording via `wf-recorder` on wlroots or ScreenCast portal + PipeWire elsewhere |
-| **Recording** | GStreamer (VP8, VP9, H.264, H.265, Theora, GIF) |
-| **Audio** | PipeWire (mic/speaker level monitoring) |
+| **Recording** | Native PipeWire + ffmpeg (VP9, H.264, GIF) on Wayland; GStreamer ximagesrc fallback on X11 |
+| **Audio** | PipeWire/PulseAudio (mic/speaker capture via ffmpeg) |
 | **OCR** | Tesseract + ocrs/rten |
 | **System Tray** | ksni (KDE System Tray Integration) |
-| **Webcam** | GStreamer + v4l2 |
+| **Webcam** | Camera portal + native PipeWire; v4l2 GStreamer fallback |
 
 ## Download
 
@@ -405,7 +405,7 @@ apexshot settings                # Open settings window
 
 ApexShot uses a fully self-contained Rust stack for recording on systems
 without GNOME Shell. No Qt overlay, no shell extension — the daemon, the GTK4
-overlay, and GStreamer handle everything.
+overlay, and native PipeWire handle everything.
 
 **How it works:**
 1. The daemon runs in the background with a system tray icon and global hotkeys.
@@ -415,9 +415,10 @@ overlay, and GStreamer handle everything.
    webcam PiP, format picker (MP4/GIF), countdown, and video quality settings.
 4. Once confirmed, recording begins. On wlroots compositors (Hyprland/Sway),
    `wf-recorder` is preferred when installed for native `wlr-screencopy`
-   capture. On other Wayland compositors, a GStreamer pipeline captures via
-   the XDG ScreenCast portal + PipeWire; on X11, via X11 SHM. The output
-   is encoded to the chosen format and written to disk.
+   capture. On other Wayland compositors, native PipeWire capture
+   (`src/pipewire_engine.rs`) grabs frames via the XDG ScreenCast portal,
+   and ffmpeg encodes them to the chosen format. On X11, a GStreamer
+   `ximagesrc` pipeline is used as fallback.
 5. During recording, a floating GTK4 stop overlay shows pause/stop controls
    and elapsed time. Pause/resume/stop can also be triggered from the tray menu
    or global hotkeys.
@@ -458,12 +459,12 @@ apexshot/
 │   ├── capture/            # Screen capture logic
 │   │   └── editor/         # Image annotation editor
 │   ├── backend/            # Display backend abstraction (X11, Wayland)
-│   ├── recording/          # Screen recording with GStreamer
+│   ├── recording/          # Screen recording with native PipeWire + ffmpeg
 │   ├── settings/           # Settings UI and management
 │   ├── onboarding/         # First-time setup wizard
 │   ├── gnome_integration/  # GNOME Shell integration
 │   ├── qr/                 # QR code detection
-│   ├── capture_overlay.rs  # C++ Qt5 overlay launcher
+│   ├── pipewire_engine.rs  # Native PipeWire screen capture engine
 │   └── lib.rs              # Library exports
 ├── capture-overlay/        # C++ Qt5 native overlay (region selection, drawing)
 ├── gnome-extension/        # GNOME Shell extension (preview windows, recording mask)
