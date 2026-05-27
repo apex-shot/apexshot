@@ -574,10 +574,9 @@ pub fn export_configured_hotkeys_for_hyprland(
     export_hotkeys_for_hyprland_config(&cfg.bindings)
 }
 
-pub fn export_hotkeys_for_sway() -> anyhow::Result<String> {
+fn export_hotkeys_for_sway_config(bindings: &[HotkeyBinding]) -> anyhow::Result<String> {
     let exe = resolve_action_exe()?;
     let exe_str = exe.to_string_lossy();
-    let bindings = default_hotkey_bindings();
 
     let mut output = String::new();
     output.push_str("# ApexShot Hotkeys for Sway/i3\n");
@@ -596,10 +595,13 @@ pub fn export_hotkeys_for_sway() -> anyhow::Result<String> {
     Ok(output)
 }
 
-pub fn export_hotkeys_for_niri() -> anyhow::Result<String> {
+pub fn export_hotkeys_for_sway() -> anyhow::Result<String> {
+    export_hotkeys_for_sway_config(&default_hotkey_bindings())
+}
+
+fn export_hotkeys_for_niri_config(bindings: &[HotkeyBinding]) -> anyhow::Result<String> {
     let exe = resolve_action_exe()?;
     let exe_str = exe.to_string_lossy();
-    let bindings = default_hotkey_bindings();
 
     let mut output = String::new();
     output.push_str("// ApexShot Hotkeys for Niri\n");
@@ -637,10 +639,13 @@ pub fn export_hotkeys_for_niri() -> anyhow::Result<String> {
     Ok(output)
 }
 
-pub fn export_hotkeys_for_river() -> anyhow::Result<String> {
+pub fn export_hotkeys_for_niri() -> anyhow::Result<String> {
+    export_hotkeys_for_niri_config(&default_hotkey_bindings())
+}
+
+fn export_hotkeys_for_river_config(bindings: &[HotkeyBinding]) -> anyhow::Result<String> {
     let exe = resolve_action_exe()?;
     let exe_str = exe.to_string_lossy();
-    let bindings = default_hotkey_bindings();
 
     let mut output = String::new();
     output.push_str("# ApexShot Hotkeys for River\n");
@@ -676,6 +681,10 @@ pub fn export_hotkeys_for_river() -> anyhow::Result<String> {
     }
 
     Ok(output)
+}
+
+pub fn export_hotkeys_for_river() -> anyhow::Result<String> {
+    export_hotkeys_for_river_config(&default_hotkey_bindings())
 }
 
 fn merge_missing_default_hotkeys(cfg: &mut HotkeyConfig) -> bool {
@@ -869,16 +878,26 @@ pub fn sync_hotkeys_from_app_config(app_config: &crate::config::AppConfig) -> an
     let cfg = hotkey_config_from_app_config(app_config);
     save_hotkey_config(&path, &cfg)?;
 
-    // Hyprland does not provide a desktop-agnostic global-shortcuts service the
-    // way GNOME does, so settings-tab changes need to refresh the sourced
-    // Hyprland snippet too. This is best-effort: users still need
-    // `source = ~/.config/hypr/apexshot.conf` in hyprland.conf and may need to
-    // reload Hyprland config depending on their compositor setup.
-    if crate::compositor::detect_compositor()
-        .map(|comp| comp.name() == "Hyprland")
-        .unwrap_or(false)
-    {
-        write_hyprland_hotkey_snippet(&cfg)?;
+    // For compositors that don't provide a GlobalShortcuts portal, generate
+    // compositor-native bind-snippet files so the user's configured shortcuts
+    // are picked up by the WM. The daemon portal listener is best-effort and
+    // may fail on compositors without portal support.
+    if let Some(comp) = crate::compositor::detect_compositor() {
+        match comp.name() {
+            "Hyprland" => {
+                write_hyprland_hotkey_snippet(&cfg)?;
+            }
+            "Sway/i3" => {
+                write_sway_hotkey_snippet(&cfg)?;
+            }
+            "Niri" => {
+                write_niri_hotkey_snippet(&cfg)?;
+            }
+            "River" => {
+                write_river_hotkey_snippet(&cfg)?;
+            }
+            _ => {}
+        }
     }
 
     Ok(())
@@ -958,6 +977,102 @@ fn reload_hyprland_config() {
         Ok(status) => eprintln!("[hotkeys] hyprctl reload exited with {status}"),
         Err(e) => eprintln!("[hotkeys] failed to run hyprctl reload: {e}"),
     }
+}
+
+// ── Sway hotkey snippet ──────────────────────────────────────────────────────
+
+fn sway_hotkey_snippet_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
+    path.push("sway");
+    path.push("apexshot.conf");
+    path
+}
+
+fn write_sway_hotkey_snippet(cfg: &HotkeyConfig) -> anyhow::Result<PathBuf> {
+    let snippet_path = sway_hotkey_snippet_path();
+    let output = export_hotkeys_for_sway_config(&cfg.bindings)?;
+    if let Some(parent) = snippet_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create Sway config dir {}", parent.display()))?;
+    }
+    std::fs::write(&snippet_path, &output)
+        .with_context(|| format!("Failed to write Sway hotkeys to {}", snippet_path.display()))?;
+    eprintln!(
+        "[hotkeys] Wrote Sway hotkey snippet to {} (add `include {}` to your sway config)",
+        snippet_path.display(),
+        snippet_path.display()
+    );
+    reload_sway_config();
+    Ok(snippet_path)
+}
+
+fn reload_sway_config() {
+    if std::env::var_os("SWAYSOCK").is_none() && std::env::var_os("I3SOCK").is_none() {
+        return;
+    }
+    match std::process::Command::new("swaymsg").arg("reload").status() {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("[hotkeys] swaymsg reload exited with {status}"),
+        Err(e) => eprintln!("[hotkeys] failed to run swaymsg reload: {e}"),
+    }
+}
+
+// ── Niri hotkey snippet ──────────────────────────────────────────────────────
+
+fn niri_hotkey_snippet_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
+    path.push("niri");
+    path.push("apexshot.niri");
+    path
+}
+
+fn write_niri_hotkey_snippet(cfg: &HotkeyConfig) -> anyhow::Result<PathBuf> {
+    let snippet_path = niri_hotkey_snippet_path();
+    // Wrap in a binds { } block so it can be sourced standalone.
+    let bind_lines = export_hotkeys_for_niri_config(&cfg.bindings)?;
+    let output = format!(
+        "// ApexShot hotkeys — source this from your config.niri\nbinds {{\n{bind_lines}}}\n"
+    );
+    if let Some(parent) = snippet_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create Niri config dir {}", parent.display()))?;
+    }
+    std::fs::write(&snippet_path, &output)
+        .with_context(|| format!("Failed to write Niri hotkeys to {}", snippet_path.display()))?;
+    eprintln!(
+        "[hotkeys] Wrote Niri hotkey snippet to {}",
+        snippet_path.display()
+    );
+    Ok(snippet_path)
+}
+
+// ── River hotkey snippet ─────────────────────────────────────────────────────
+
+fn river_hotkey_snippet_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
+    path.push("river");
+    path.push("apexshot");
+    path
+}
+
+fn write_river_hotkey_snippet(cfg: &HotkeyConfig) -> anyhow::Result<PathBuf> {
+    let snippet_path = river_hotkey_snippet_path();
+    let output = export_hotkeys_for_river_config(&cfg.bindings)?;
+    if let Some(parent) = snippet_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create River config dir {}", parent.display()))?;
+    }
+    std::fs::write(&snippet_path, &output).with_context(|| {
+        format!(
+            "Failed to write River hotkeys to {}",
+            snippet_path.display()
+        )
+    })?;
+    eprintln!(
+        "[hotkeys] Wrote River hotkey snippet to {} (source this from your river init script)",
+        snippet_path.display()
+    );
+    Ok(snippet_path)
 }
 
 pub fn reset_hotkey_config(config_path: Option<PathBuf>) -> anyhow::Result<PathBuf> {
@@ -1461,25 +1576,32 @@ pub fn setup_hotkeys_for_current_desktop(config_path: Option<PathBuf>) -> anyhow
                 }
             }
             "Sway/i3" => {
-                if let Ok(output) = export_hotkeys_for_sway() {
+                if let Ok(output) = export_hotkeys_for_sway_config(&cfg.bindings) {
                     println!("\n[Sway/i3 detected]");
                     println!("Add these lines to your config file:\n");
                     println!("{}", output);
                 }
             }
             "Niri" => {
-                if let Ok(output) = export_hotkeys_for_niri() {
+                if let Ok(output) = export_hotkeys_for_niri_config(&cfg.bindings) {
                     println!("\n[Niri detected]");
                     println!("Add these lines to your binds {{ ... }} block:\n");
                     println!("{}", output);
                 }
             }
             "River" => {
-                if let Ok(output) = export_hotkeys_for_river() {
+                if let Ok(output) = export_hotkeys_for_river_config(&cfg.bindings) {
                     println!("\n[River detected]");
                     println!("Add these lines to your river init script:\n");
                     println!("{}", output);
                 }
+            }
+            "COSMIC" => {
+                // COSMIC ships its own GlobalShortcuts portal backend;
+                // shortcuts work through the daemon portal listener.
+                println!("\n[COSMIC detected]");
+                println!("Shortcuts will work through the daemon and xdg-desktop-portal-cosmic.");
+                println!("If you don't see shortcut prompts, install xdg-desktop-portal-cosmic.");
             }
             _ => {
                 println!(

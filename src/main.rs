@@ -504,6 +504,16 @@ fn run_install(args: &[String]) {
     // Persist XDG portal permissions so the user doesn't have to re-approve
     // screenshot/screencast access after every reboot.
     apexshot::backend::portal_permissions::ensure_portal_permissions();
+
+    // Auto-configure shortcuts so they work out of the box on all desktops.
+    // Best-effort: don't abort the install if hotkey setup fails.
+    let app_config = apexshot::config::load_config();
+    if let Err(e) = apexshot::hotkeys::sync_hotkeys_from_app_config(&app_config) {
+        eprintln!("Warning: failed to write compositor hotkey snippets: {e}");
+    }
+    if let Err(e) = apexshot::hotkeys::sync_gnome_hotkeys_for_current_desktop(None) {
+        eprintln!("Warning: GNOME hotkey setup skipped: {e}");
+    }
 }
 
 fn run_uninstall(args: &[String]) {

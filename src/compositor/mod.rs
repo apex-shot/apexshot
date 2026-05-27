@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
+pub mod cosmic;
 pub mod hyprland;
 pub mod niri;
 pub mod river;
@@ -53,6 +54,9 @@ pub fn detect_compositor() -> Option<Box<dyn Compositor>> {
     }
     if river::River::is_supported() {
         return Some(Box::new(river::River::new()));
+    }
+    if cosmic::Cosmic::is_supported() {
+        return Some(Box::new(cosmic::Cosmic::new()));
     }
     None
 }
