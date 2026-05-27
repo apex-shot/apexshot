@@ -168,7 +168,9 @@ type RecordingPortalSession =
 struct WaylandSource {
     node_id: u32,
     pipewire_fd: OwnedFd,
+    #[allow(dead_code)]
     stream_width: u32,
+    #[allow(dead_code)]
     stream_height: u32,
     #[allow(dead_code)]
     crop: Option<CropMargins>,
@@ -2186,15 +2188,94 @@ async fn record_gif_wayland_native(
 
     let source = get_wayland_source(&config).await?;
 
-    // Use stream dimensions from the portal metadata to determine the
-    // frame size going into ffmpeg (after applying area crop when present).
-    let (raw_width, raw_height) = if let Some(ref c) = source.crop {
-        let w = source
-            .stream_width
+    // Spawn a worker thread that reads frames from PipeWire (applying the
+    // area crop when necessary) and sends them through a channel.
+    // PipeWireCapture is constructed *inside* the thread because it contains
+    // Rc types that are not Send.
+    //
+    // The channel carries (frame_pixels, frame_width, frame_height) so the
+    // consumer can learn the actual PipeWire-negotiated dimensions from the
+    // first frame — portal stream.size() reports logical pixels which may
+    // differ from physical pixels on HiDPI displays.
+    let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<(Vec<u8>, u32, u32)>(16);
+    let (error_tx, error_rx) = std::sync::mpsc::channel::<String>();
+
+    let node_id = source.node_id;
+    let pipewire_fd = source.pipewire_fd;
+    let pw_width = config.width;
+    let pw_height = config.height;
+    let crop = source.crop;
+
+    let pw_thread = std::thread::spawn(move || {
+        let capture = match crate::pipewire_engine::PipeWireCapture::connect(
+            pipewire_fd,
+            node_id,
+            None,
+            pw_width,
+            pw_height,
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = error_tx.send(format!("PipeWire: {e}"));
+                return;
+            }
+        };
+        loop {
+            match capture.try_recv_frame() {
+                Ok(Some(frame)) => {
+                    let fw = frame.width;
+                    let fh = frame.height;
+                    let pixels = if let Some(ref c) = crop {
+                        match crop_rgba_frame(&frame, *c) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                eprintln!("GIF crop error: {e}");
+                                continue;
+                            }
+                        }
+                    } else {
+                        frame.pixels
+                    };
+                    if frame_tx.send((pixels, fw, fh)).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
+                Err(e) => {
+                    let _ = error_tx.send(format!("PipeWire: {e}"));
+                    break;
+                }
+            }
+            if capture.has_error() {
+                if let Some(e) = capture.error_message() {
+                    let _ = error_tx.send(e);
+                }
+                break;
+            }
+        }
+    });
+
+    // --- Wait for the first frame to learn actual PipeWire dimensions ---
+    let (first_pixels, first_w, first_h) = loop {
+        let frame = frame_rx.recv().map_err(|_| {
+            error_rx
+                .try_recv()
+                .map(RecordError::GStreamerError)
+                .unwrap_or(RecordError::GStreamerError(
+                    "PipeWire stream closed before first frame".into(),
+                ))
+        })?;
+        if !frame.0.is_empty() && frame.1 > 0 && frame.2 > 0 {
+            break frame;
+        }
+    };
+
+    // Apply crop to get the output dimensions.
+    let (raw_width, raw_height) = if let Some(ref c) = crop {
+        let w = first_w
             .checked_sub(c.left + c.right)
             .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop width".into()))?;
-        let h = source
-            .stream_height
+        let h = first_h
             .checked_sub(c.top + c.bottom)
             .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop height".into()))?;
         eprintln!(
@@ -2203,14 +2284,8 @@ async fn record_gif_wayland_native(
         );
         (w, h)
     } else {
-        (source.stream_width, source.stream_height)
+        (first_w, first_h)
     };
-
-    if raw_width == 0 || raw_height == 0 {
-        return Err(RecordError::GStreamerError(
-            "Could not determine stream dimensions for GIF recording".into(),
-        ));
-    }
 
     println!("Detected stream: {}x{} (after crop)", raw_width, raw_height);
 
@@ -2259,65 +2334,10 @@ async fn record_gif_wayland_native(
 
     let mut stdin = child.stdin.take().expect("stdin");
 
-    // Spawn a worker thread that reads frames from PipeWire (applying the
-    // area crop when necessary) and sends them through a channel.
-    // PipeWireCapture is constructed *inside* the thread because it contains
-    // Rc types that are not Send.
-    let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(16);
-    let (error_tx, error_rx) = std::sync::mpsc::channel::<String>();
-
-    let node_id = source.node_id;
-    let pipewire_fd = source.pipewire_fd;
-    let pw_width = config.width;
-    let pw_height = config.height;
-    let crop = source.crop;
-
-    let pw_thread = std::thread::spawn(move || {
-        let capture = match crate::pipewire_engine::PipeWireCapture::connect(
-            pipewire_fd,
-            node_id,
-            None,
-            pw_width,
-            pw_height,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = error_tx.send(format!("PipeWire: {e}"));
-                return;
-            }
-        };
-        loop {
-            match capture.try_recv_frame() {
-                Ok(Some(frame)) => {
-                    let pixels = if let Some(ref c) = crop {
-                        match crop_rgba_frame(&frame, *c) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                eprintln!("GIF crop error: {e}");
-                                continue;
-                            }
-                        }
-                    } else {
-                        frame.pixels
-                    };
-                    if frame_tx.send(pixels).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
-                Err(e) => {
-                    let _ = error_tx.send(format!("PipeWire: {e}"));
-                    break;
-                }
-            }
-            if capture.has_error() {
-                if let Some(e) = capture.error_message() {
-                    let _ = error_tx.send(e);
-                }
-                break;
-            }
-        }
-    });
+    // Feed the first frame (already received above).
+    stdin
+        .write_all(&first_pixels)
+        .map_err(RecordError::IoError)?;
 
     println!("Recording GIF...");
 
@@ -2354,7 +2374,7 @@ async fn record_gif_wayland_native(
             }
         }
         match frame_rx.try_recv() {
-            Ok(data) => {
+            Ok((data, _, _)) => {
                 if stdin.write_all(&data).is_err() {
                     break;
                 }
