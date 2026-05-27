@@ -149,6 +149,8 @@ arch_portal_backend_package() {
         printf '%s' "xdg-desktop-portal-kde"
     elif [[ "$desktop" == *gnome* ]]; then
         printf '%s' "xdg-desktop-portal-gnome"
+    elif [[ "$desktop" == *cosmic* ]]; then
+        printf '%s' "xdg-desktop-portal-cosmic"
     else
         printf '%s' "xdg-desktop-portal-gtk"
     fi

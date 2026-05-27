@@ -241,6 +241,8 @@ portal_backend_packages() {
         packages="xdg-desktop-portal xdg-desktop-portal-kde"
     elif is_gnome_session; then
         packages="xdg-desktop-portal xdg-desktop-portal-gnome"
+    elif [[ "$desktop" == *cosmic* ]]; then
+        packages="xdg-desktop-portal xdg-desktop-portal-cosmic"
     else
         packages="xdg-desktop-portal xdg-desktop-portal-gtk"
     fi
