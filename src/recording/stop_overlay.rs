@@ -27,7 +27,7 @@ use x11rb::{
 };
 
 use crate::overlay::drawing::{draw_frosted_panel, rounded_rect_path};
-use crate::overlay::layout::{RectF, ACTION_CARD_GAP, FEATURE_PANEL_MARGIN};
+use crate::overlay::layout::{RectF, ACTION_CARD_GAP, FEATURE_PANEL_MARGIN, FEATURE_PANEL_TOP_GAP};
 use crate::overlay::recording::layout::REC_ACTION_HEIGHT;
 
 const BAR_PAD: f64 = 8.0;
@@ -320,6 +320,7 @@ fn compute_bar_position(
     let bar_w = compute_bar_width(params.show_timer);
     let bar_h = BAR_HEIGHT;
     let margin = FEATURE_PANEL_MARGIN;
+    let top_gap = FEATURE_PANEL_TOP_GAP;
     let screen_w_f = screen_w as f64;
     let screen_h_f = screen_h as f64;
 
@@ -337,8 +338,14 @@ fn compute_bar_position(
     let x =
         (sel_x + (sel_w - bar_w) / 2.0).clamp(margin, (screen_w_f - bar_w - margin).max(margin));
 
-    let y =
-        (sel_y + (sel_h - bar_h) / 2.0).clamp(margin, (screen_h_f - bar_h - margin).max(margin));
+    let below_y = sel_y + sel_h + top_gap;
+    let above_y = sel_y - top_gap - bar_h;
+
+    let y = if below_y + bar_h + margin <= screen_h_f {
+        below_y
+    } else {
+        above_y.clamp(margin, (screen_h_f - bar_h - margin).max(margin))
+    };
 
     (x.round() as i32, y.round() as i32)
 }
