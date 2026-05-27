@@ -1,12 +1,12 @@
-//! Webcam preview via XDG Camera portal + native PipeWire.
+//! Webcam preview via GStreamer v4l2src (matching C++ overlay behavior).
 //!
-//! Replaces the GStreamer v4l2src pipeline with proper Wayland security model:
-//! `org.freedesktop.portal.Camera` → PipeWire stream → BGRA frames.
+//! Uses direct v4l2 device access via GStreamer.  The Camera portal path was
+//! removed because `rt.block_on()` inside the GTK click handler blocked the
+//! main thread, causing Hyprland (and other compositors) to close the overlay
+//! surface when the portal permission dialog appeared.
 //!
-//! Falls back to direct v4l2 enumeration for device listing on systems
-//! without the Camera portal (older desktops, wlroots).
+//! Device enumeration still scans `/dev/video*` nodes directly.
 
-use std::os::fd::AsRawFd;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -39,6 +39,14 @@ impl WebcamPreview {
 impl Drop for WebcamPreview {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(pipeline) = self._v4l2_pipeline.as_ref() {
+            if let Ok(mut guard) = pipeline.lock() {
+                if let Some(pipeline) = guard.take() {
+                    use gstreamer::prelude::ElementExt;
+                    let _ = pipeline.set_state(gstreamer::State::Null);
+                }
+            }
+        }
     }
 }
 
@@ -92,161 +100,10 @@ pub(crate) fn first_webcam_device() -> Option<i32> {
 }
 
 // ---------------------------------------------------------------------------
-// Camera portal + native PipeWire preview
+// Webcam preview via GStreamer v4l2 (matching C++ overlay behavior)
 // ---------------------------------------------------------------------------
 
-/// Start webcam preview using the XDG Camera portal + native PipeWire.
-///
-/// This is the proper Wayland security model: the portal handles permissions,
-/// and frames arrive through a PipeWire stream (same architecture as screen
-/// capture).
-pub(crate) fn start_webcam_preview(_device: i32, _flip: bool) -> Option<WebcamPreview> {
-    // Run the async portal flow on a temporary tokio runtime.
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("[webcam] Failed to create tokio runtime: {e}");
-            return None;
-        }
-    };
-
-    let (fd, node_id) = match rt.block_on(open_camera_portal()) {
-        Ok(Some(result)) => result,
-        Ok(None) => {
-            eprintln!("[webcam] No camera available via portal");
-            return None;
-        }
-        Err(e) => {
-            eprintln!("[webcam] Camera portal failed: {e}. Falling back to v4l2.");
-            return start_webcam_preview_v4l2(_device, _flip);
-        }
-    };
-
-    eprintln!(
-        "[webcam] Camera portal: fd={}, node_id={node_id}",
-        fd.as_raw_fd()
-    );
-
-    // PipeWireCapture contains non-Send Rc types. Run it on a dedicated thread
-    // and communicate frames via channel — same pattern as recording.
-    let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<(Vec<u8>, u32, u32)>(4);
-
-    std::thread::spawn(move || {
-        let capture = match PipeWireCapture::connect(fd, node_id, None, Some(640), Some(480)) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[webcam] PipeWire connect failed: {e}");
-                return;
-            }
-        };
-
-        if let Some(format) = capture.format() {
-            eprintln!(
-                "[webcam] Camera: {}x{} @ {}/{} fps",
-                format.width, format.height, format.framerate_num, format.framerate_denom
-            );
-        }
-
-        loop {
-            match capture.try_recv_frame() {
-                Ok(Some(pw_frame)) => {
-                    // Convert RGBA to BGRA for Cairo.
-                    let mut bgra = pw_frame.pixels;
-                    for px in bgra.chunks_exact_mut(4) {
-                        px.swap(0, 2);
-                    }
-                    if frame_tx
-                        .send((bgra, pw_frame.width, pw_frame.height))
-                        .is_err()
-                    {
-                        break; // receiver dropped
-                    }
-                }
-                Ok(None) => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(e) => {
-                    eprintln!("[webcam] Frame error: {e}");
-                    break;
-                }
-            }
-        }
-    });
-
-    let frame = Arc::new(Mutex::new(None));
-    let stop = Arc::new(AtomicBool::new(false));
-    let frame_thread = frame.clone();
-    let stop_thread = stop.clone();
-
-    // Consumer thread: read from channel, update shared frame.
-    std::thread::spawn(move || {
-        while !stop_thread.load(Ordering::Relaxed) {
-            match frame_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                Ok((bgra, w, h)) => {
-                    if let Ok(mut slot) = frame_thread.lock() {
-                        *slot = Some(WebcamFrame {
-                            width: w as i32,
-                            height: h as i32,
-                            bgra,
-                        });
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    continue;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    break;
-                }
-            }
-        }
-    });
-
-    Some(WebcamPreview {
-        frame,
-        stop,
-        _capture: None, // owned by the PipeWire thread
-        _v4l2_pipeline: None,
-    })
-}
-
-/// Open the Camera portal via ashpd (proper request/response handling).
-async fn open_camera_portal() -> Result<Option<(std::os::fd::OwnedFd, u32)>, String> {
-    use ashpd::desktop::camera::Camera;
-
-    let camera = Camera::new()
-        .await
-        .map_err(|e| format!("Camera proxy: {e}"))?;
-
-    if !camera
-        .is_present()
-        .await
-        .map_err(|e| format!("IsCameraPresent: {e}"))?
-    {
-        return Ok(None);
-    }
-
-    // Request access — triggers permission dialog, waits for user response.
-    camera
-        .request_access()
-        .await
-        .map_err(|e| format!("AccessCamera: {e}"))?
-        .response()
-        .map_err(|e| format!("AccessCamera response: {e}"))?;
-
-    let fd = camera
-        .open_pipe_wire_remote()
-        .await
-        .map_err(|e| format!("OpenPipeWireRemote: {e}"))?;
-
-    eprintln!("[webcam] Camera portal opened, fd={}", fd.as_raw_fd());
-    Ok(Some((fd, pipewire::constants::ID_ANY)))
-}
-
-// ---------------------------------------------------------------------------
-// v4l2 fallback (GStreamer, used when portal is unavailable)
-// ---------------------------------------------------------------------------
-
-fn start_webcam_preview_v4l2(device: i32, flip: bool) -> Option<WebcamPreview> {
+pub(crate) fn start_webcam_preview(device: i32, flip: bool) -> Option<WebcamPreview> {
     use gstreamer as gst;
     use gstreamer::prelude::*;
     use gstreamer_app as gst_app;

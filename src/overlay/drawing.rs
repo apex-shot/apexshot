@@ -2622,26 +2622,85 @@ pub(crate) fn draw_overlay(
         // Corner markers at screen edges
         draw_resize_markers(context, 0.0, 0.0, screen_width, screen_height);
 
-        // Toolbar (auto-positioned below / above the full-screen rect)
-        draw_feature_toolbar(
-            context,
-            0.0,
-            0.0,
-            screen_width,
-            screen_height,
-            screen_width,
-            screen_height,
-            background,
-            st.active_tool_index,
-            st.hover_tool_index,
-            st.hover_size_panel,
-            st.hover_crop_panel,
-            st.capture_crop_menu_open,
-            st.capture_aspect_ratio_index,
-            st.hovered_capture_crop_menu_item,
-            st.timer_delay_active,
-            st.capture_delay_seconds,
-        );
+        if st.recording.panel_open {
+            draw_recording_panel(
+                context,
+                0.0,
+                0.0,
+                screen_width,
+                screen_height,
+                screen_width,
+                screen_height,
+                background,
+                st.recording.hover_record_tile,
+                st.recording.selected_record_type,
+                st.recording.crop_menu_open,
+                st.recording.record_aspect_ratio_index,
+                st.recording.hovered_crop_menu_item,
+                st.recording.settings_menu_open,
+                st.recording.settings_tab,
+                st.recording.hovered_settings_item,
+                st.recording.settings_dropdown_open,
+                st.recording.video_max_res,
+                st.recording.video_fps,
+                st.recording.mic_toggle,
+                st.recording.speaker_toggle,
+                st.recording.mic_level,
+                st.recording.speaker_level,
+                st.recording.record_mono,
+                st.recording.open_editor,
+                st.recording.rec_controls,
+                st.recording.hidpi,
+                st.recording.do_not_disturb,
+                st.recording.rec_webcam,
+                st.recording.remember_selection,
+                st.recording.dim_screen,
+                st.recording.show_countdown,
+                st.recording.gif_fps,
+                st.recording.gif_quality,
+                st.recording.optimize_gif,
+                st.recording.gif_size_idx,
+            );
+            if st.recording.rec_webcam {
+                draw_webcam_preview(
+                    context,
+                    0.0,
+                    0.0,
+                    screen_width,
+                    screen_height,
+                    st.recording.webcam_size,
+                    st.recording.webcam_shape,
+                    st.recording.webcam_rel_x,
+                    st.recording.webcam_rel_y,
+                    st.recording.webcam_device,
+                    st.recording
+                        .webcam_frame
+                        .as_ref()
+                        .and_then(|frame| frame.lock().ok().and_then(|slot| slot.clone())),
+                );
+            }
+        } else {
+            // Toolbar (auto-positioned below / above the full-screen rect)
+            draw_feature_toolbar(
+                context,
+                0.0,
+                0.0,
+                screen_width,
+                screen_height,
+                screen_width,
+                screen_height,
+                background,
+                st.active_tool_index,
+                st.hover_tool_index,
+                st.hover_size_panel,
+                st.hover_crop_panel,
+                st.capture_crop_menu_open,
+                st.capture_aspect_ratio_index,
+                st.hovered_capture_crop_menu_item,
+                st.timer_delay_active,
+                st.capture_delay_seconds,
+            );
+        }
     } else if st.is_dragging || st.completed {
         // ── Normal area-selection mode ──
         let rect = current_selection_rect(&st);

@@ -325,17 +325,38 @@ pub(crate) fn send_selection_result(
 ) {
     let st = state.lock().unwrap();
     let area = selection_area_from_state(&st, screen_width, screen_height, background);
-    let intent = st.intent; // Read intent to determine result type (TODO: wire up different result types)
-    drop(st);
-
-    // TODO: Based on intent, emit different result types (RecordingRequest, OcrRequested, etc.)
-    let _ = intent;
-
-    let result = if area.is_valid() {
-        Ok(OverlaySelection::Area(Some(area)))
-    } else {
-        Ok(OverlaySelection::Area(None))
+    let intent = st.intent;
+    let result = match intent {
+        OverlayIntent::Record => {
+            if area.is_valid() {
+                let record_type = st.recording.selected_record_type
+                    .map(|t| match t {
+                        RecordingType::Gif => RecordingType::Gif,
+                        RecordingType::Video => RecordingType::Video,
+                    })
+                    .unwrap_or(RecordingType::Video);
+                let request = recording_request_from_state(&st, record_type);
+                Ok(OverlaySelection::Recording(request))
+            } else {
+                Ok(OverlaySelection::Area(None))
+            }
+        }
+        OverlayIntent::Ocr => {
+            if area.is_valid() {
+                Ok(OverlaySelection::Area(Some(area)))
+            } else {
+                Ok(OverlaySelection::Area(None))
+            }
+        }
+        OverlayIntent::Area => {
+            if area.is_valid() {
+                Ok(OverlaySelection::Area(Some(area)))
+            } else {
+                Ok(OverlaySelection::Area(None))
+            }
+        }
     };
+    drop(st);
     let _ = result_tx.send(result);
     window.close();
 }

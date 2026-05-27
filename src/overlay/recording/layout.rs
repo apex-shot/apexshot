@@ -60,14 +60,11 @@ pub(crate) fn compute_recording_deck_layout(
         (screen_width - action_width - FEATURE_PANEL_MARGIN).max(FEATURE_PANEL_MARGIN),
     );
     let below_y = selection_y + selection_height + FEATURE_PANEL_TOP_GAP;
-    let above_y = selection_y - FEATURE_PANEL_TOP_GAP - REC_ACTION_HEIGHT;
     let action_y = if below_y + REC_ACTION_HEIGHT + FEATURE_PANEL_MARGIN <= screen_height {
         below_y
     } else {
-        above_y.clamp(
-            FEATURE_PANEL_MARGIN,
-            (screen_height - REC_ACTION_HEIGHT - FEATURE_PANEL_MARGIN).max(FEATURE_PANEL_MARGIN),
-        )
+        (screen_height - REC_ACTION_HEIGHT - FEATURE_PANEL_MARGIN)
+            .max(FEATURE_PANEL_MARGIN)
     };
 
     RecordingDeckLayout {
