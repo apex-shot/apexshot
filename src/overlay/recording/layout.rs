@@ -63,8 +63,7 @@ pub(crate) fn compute_recording_deck_layout(
     let action_y = if below_y + REC_ACTION_HEIGHT + FEATURE_PANEL_MARGIN <= screen_height {
         below_y
     } else {
-        (screen_height - REC_ACTION_HEIGHT - FEATURE_PANEL_MARGIN)
-            .max(FEATURE_PANEL_MARGIN)
+        (screen_height - REC_ACTION_HEIGHT - FEATURE_PANEL_MARGIN).max(FEATURE_PANEL_MARGIN)
     };
 
     RecordingDeckLayout {

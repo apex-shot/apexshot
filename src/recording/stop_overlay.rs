@@ -1761,11 +1761,15 @@ fn setup_webcam_window(
         );
     }
 
-    let webcam_preview = if params.webcam_device >= 0 {
+    // Keep the webcam capture alive for as long as the webcam window exists.
+    // `WebcamPreview` stops the v4l2/GStreamer pipeline in Drop; if this is a
+    // plain local variable it is dropped before the first draw, leaving only the
+    // black placeholder visible in the actual recording.
+    let webcam_preview = Rc::new(if params.webcam_device >= 0 {
         start_webcam_preview(params.webcam_device, params.webcam_flip)
     } else {
         None
-    };
+    });
 
     let drawing_area = DrawingArea::new();
     drawing_area.set_css_classes(&["recording-webcam-canvas"]);
@@ -1780,7 +1784,9 @@ fn setup_webcam_window(
 
     if let Some(preview) = webcam_preview.as_ref() {
         let frames = preview.frame_handle();
+        let webcam_preview_keepalive = webcam_preview.clone();
         drawing_area.set_draw_func(move |_, cr, w, h| {
+            let _keepalive = &webcam_preview_keepalive;
             let radius = (w as f64 / 2.0).min(h as f64 / 2.0);
             cr.save().ok();
             if params.webcam_shape == 0 {
@@ -1821,7 +1827,9 @@ fn setup_webcam_window(
             cr.restore().ok();
         });
         let area_weak = drawing_area.downgrade();
+        let webcam_preview_keepalive = webcam_preview.clone();
         glib::timeout_add_local(Duration::from_millis(33), move || {
+            let _keepalive = &webcam_preview_keepalive;
             if let Some(area) = area_weak.upgrade() {
                 area.queue_draw();
                 glib::ControlFlow::Continue
@@ -1934,12 +1942,6 @@ fn setup_webcam_window(
         }
     ));
     window.add_controller(drag);
-
-    if let Some(preview) = webcam_preview {
-        window.connect_destroy(move |_| {
-            let _keep_preview_alive = &preview;
-        });
-    }
 
     window.present();
     Some(window)

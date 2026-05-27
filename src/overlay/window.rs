@@ -323,19 +323,25 @@ pub(crate) fn send_selection_result(
     screen_height: i32,
     background: Option<&BackgroundFrame>,
 ) {
-    let st = state.lock().unwrap();
+    let mut st = state.lock().unwrap();
     let area = selection_area_from_state(&st, screen_width, screen_height, background);
     let intent = st.intent;
     let result = match intent {
         OverlayIntent::Record => {
             if area.is_valid() {
-                let record_type = st.recording.selected_record_type
-                    .map(|t| match t {
-                        RecordingType::Gif => RecordingType::Gif,
-                        RecordingType::Video => RecordingType::Video,
-                    })
+                let record_type = st
+                    .recording
+                    .selected_record_type
                     .unwrap_or(RecordingType::Video);
                 let request = recording_request_from_state(&st, record_type);
+
+                // Release the pre-record webcam preview before starting the
+                // actual recording UI. Many webcams allow only one v4l2 reader;
+                // if the selector preview keeps /dev/videoN open, the recording
+                // webcam window starts but receives no frames and draws black.
+                st.recording.webcam_preview = None;
+                st.recording.webcam_frame = None;
+
                 Ok(OverlaySelection::Recording(request))
             } else {
                 Ok(OverlaySelection::Area(None))
@@ -796,6 +802,18 @@ pub(crate) fn setup_window(
 
     // Set the drawing area as the child
     window.set_child(Some(&drawing_area));
+
+    // Explicitly release camera resources whenever the selector window goes
+    // away. On Hyprland the daemon process stays alive after the overlay closes;
+    // relying on the whole GTK state graph to be dropped can leave v4l2 fds open
+    // in the daemon, which makes the recording webcam black and keeps the LED on.
+    let state_cleanup = state.clone();
+    window.connect_destroy(move |_| {
+        if let Ok(mut st) = state_cleanup.lock() {
+            st.recording.webcam_preview = None;
+            st.recording.webcam_frame = None;
+        }
+    });
 
     let state_webcam_tick = state.clone();
     drawing_area.add_tick_callback(move |area, _| {

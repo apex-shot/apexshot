@@ -28,6 +28,7 @@ pub(crate) struct WebcamPreview {
     // Held to keep the capture/pipeline alive until dropped.
     _capture: Option<PipeWireCapture>,
     _v4l2_pipeline: Option<Arc<Mutex<Option<gstreamer::Element>>>>,
+    frame_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl WebcamPreview {
@@ -46,6 +47,9 @@ impl Drop for WebcamPreview {
                     let _ = pipeline.set_state(gstreamer::State::Null);
                 }
             }
+        }
+        if let Some(join) = self.frame_thread.take() {
+            let _ = join.join();
         }
     }
 }
@@ -153,7 +157,7 @@ pub(crate) fn start_webcam_preview(device: i32, flip: bool) -> Option<WebcamPrev
     let frame_thread = frame.clone();
     let stop_thread = stop.clone();
 
-    std::thread::spawn(move || {
+    let frame_thread = std::thread::spawn(move || {
         while !stop_thread.load(Ordering::Relaxed) {
             let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_mseconds(100)) else {
                 continue;
@@ -198,5 +202,6 @@ pub(crate) fn start_webcam_preview(device: i32, flip: bool) -> Option<WebcamPrev
         stop,
         _capture: None,
         _v4l2_pipeline: Some(pipeline_slot),
+        frame_thread: Some(frame_thread),
     })
 }
