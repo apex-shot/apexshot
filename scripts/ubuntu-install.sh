@@ -218,9 +218,15 @@ current_desktop_id() {
 }
 
 is_gnome_session() {
+    # GNOME_DESKTOP_SESSION_ID is the canonical signal set by gnome-session
+    # itself. XDG_CURRENT_DESKTOP / GDMSESSION / GNOME_SETUP_DISPLAY are
+    # fallbacks for edge cases (runner wrappers, nested sessions, etc.).
+    [[ -n "${GNOME_DESKTOP_SESSION_ID:-}" ]] && return 0
+    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] && return 0
+
     local desktop
     desktop=$(current_desktop_id)
-    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] || [[ "$desktop" == *gnome* ]]
+    [[ "$desktop" == *gnome* ]]
 }
 
 portal_backend_packages() {

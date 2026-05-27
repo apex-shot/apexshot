@@ -231,8 +231,14 @@ resolve_latest_gnome_extension_url() {
 }
 
 is_gnome_session() {
-    local desktop="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}"
-    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] || [[ "${desktop,,}" == *gnome* ]]
+    # GNOME_DESKTOP_SESSION_ID is the canonical signal set by gnome-session
+    # itself. XDG_CURRENT_DESKTOP / GDMSESSION / GNOME_SETUP_DISPLAY are
+    # fallbacks for edge cases (runnner wrappers, nested sessions, etc.).
+    [[ -n "${GNOME_DESKTOP_SESSION_ID:-}" ]] && return 0
+    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] && return 0
+
+    local desktop="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}:${GDMSESSION:-}"
+    [[ "${desktop,,}" == *gnome* ]]
 }
 
 should_skip_gnome_extension() {
