@@ -416,65 +416,14 @@ QRect mapLogicalSelectionToCapturedImage(const QRect& logicalSelection,
                                          const QRect& desktopBounds)
 {
     const QRect selected = logicalSelection.normalized().intersected(desktopBounds);
-    const auto screens = QGuiApplication::screens();
 
-    // Mixed-DPI Wayland screenshots are laid out in physical pixels per output,
-    // not by applying one global scale to the whole logical desktop. Pick the
-    // monitor containing the selection center and map using that monitor's DPR,
-    // with preceding monitors contributing their own physical widths/heights.
-    QScreen* target = nullptr;
-    const QPoint center = selected.center();
-    for (QScreen* screen : screens) {
-        if (screen->geometry().contains(center)) {
-            target = screen;
-            break;
-        }
-    }
-
-    if (target && target->geometry().contains(selected)) {
-        const bool horizontalLayout = desktopBounds.width() >= desktopBounds.height();
-        int originX = 0;
-        int originY = 0;
-
-        if (horizontalLayout) {
-            QList<QScreen*> sorted = screens;
-            std::sort(sorted.begin(), sorted.end(), [](QScreen* a, QScreen* b) {
-                if (a->geometry().x() == b->geometry().x()) {
-                    return a->geometry().y() < b->geometry().y();
-                }
-                return a->geometry().x() < b->geometry().x();
-            });
-            for (QScreen* screen : sorted) {
-                if (screen == target) {
-                    break;
-                }
-                originX += qRound(screen->geometry().width() * screen->devicePixelRatio());
-            }
-        } else {
-            QList<QScreen*> sorted = screens;
-            std::sort(sorted.begin(), sorted.end(), [](QScreen* a, QScreen* b) {
-                if (a->geometry().y() == b->geometry().y()) {
-                    return a->geometry().x() < b->geometry().x();
-                }
-                return a->geometry().y() < b->geometry().y();
-            });
-            for (QScreen* screen : sorted) {
-                if (screen == target) {
-                    break;
-                }
-                originY += qRound(screen->geometry().height() * screen->devicePixelRatio());
-            }
-        }
-
-        const QRect screenGeo = target->geometry();
-        const double dpr = target->devicePixelRatio();
-        return QRect(originX + qRound((selected.x() - screenGeo.x()) * dpr),
-                     originY + qRound((selected.y() - screenGeo.y()) * dpr),
-                     qMax(1, qRound(selected.width() * dpr)),
-                     qMax(1, qRound(selected.height() * dpr)));
-    }
-
-    // Fallback for spanning selections or unusual compositor layouts.
+    // Compute effective scale from actual captured image dimensions rather than
+    // relying on QScreen::devicePixelRatio(), which can be inaccurate with
+    // fractional display scaling (e.g. 133%) where the compositor renders at a
+    // scaled framebuffer that already matches the logical desktop size.
+    // The compositor's screenshot / screencast always produces a uniformly-scaled
+    // image of the whole logical desktop, so a simple ratio is correct for all
+    // monitor layouts — single, multi, and mixed-DPI.
     const double scaleX = static_cast<double>(fullImage.width()) /
                           static_cast<double>(desktopBounds.width());
     const double scaleY = static_cast<double>(fullImage.height()) /

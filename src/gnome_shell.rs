@@ -158,6 +158,337 @@ pub fn current_session_supports_gnome_shell_screenshot_lock() -> bool {
     )
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct MutterMonitorInfo {
+    pub logical_x: i32,
+    pub logical_y: i32,
+    pub logical_width: i32,
+    pub logical_height: i32,
+    pub physical_width: i32,
+    pub physical_height: i32,
+    pub scale: f64,
+}
+
+pub fn query_mutter_monitor_configs() -> Result<Vec<MutterMonitorInfo>, String> {
+    let output = Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.gnome.Mutter.DisplayConfig",
+            "--object-path",
+            "/org/gnome/Mutter/DisplayConfig",
+            "--method",
+            "org.gnome.Mutter.DisplayConfig.GetCurrentState",
+        ])
+        .output()
+        .map_err(|e| format!("gdbus command failed: {e}"))?;
+
+    if !output.status.success() {
+        return Err("gdbus call returned non-zero exit status".into());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_mutter_monitor_configs(&stdout)
+}
+
+fn parse_mutter_monitor_configs(response: &str) -> Result<Vec<MutterMonitorInfo>, String> {
+    let (monitors_section, logical_monitors_section) = split_mutter_sections(response)?;
+
+    let logical_monitors = extract_top_level_array(&logical_monitors_section)
+        .ok_or("failed to extract logical_monitors array")?;
+
+    if logical_monitors.is_empty() {
+        return Err("no logical monitors parsed".into());
+    }
+
+    let mut monitors = Vec::new();
+    for lm_text in &logical_monitors {
+        let connector = find_connector_in_logical_monitor(lm_text).unwrap_or_default();
+
+        let fields = parse_nested_values(lm_text);
+
+        if fields.len() < 3 {
+            continue;
+        }
+
+        let logical_x = fields[0].parse::<i32>().unwrap_or(0);
+        let logical_y = fields[1].parse::<i32>().unwrap_or(0);
+        let scale = fields[2].parse::<f64>().unwrap_or(1.0);
+
+        let (phys_w, phys_h, log_w, log_h) = find_monitor_mode(&monitors_section, connector);
+
+        let logical_width = log_w;
+        let logical_height = log_h;
+
+        monitors.push(MutterMonitorInfo {
+            logical_x,
+            logical_y,
+            logical_width,
+            logical_height,
+            physical_width: phys_w,
+            physical_height: phys_h,
+            scale,
+        });
+    }
+
+    Ok(monitors)
+}
+
+fn split_mutter_sections(response: &str) -> Result<(String, String), String> {
+    let mut idx = 0;
+    let chars: Vec<char> = response.chars().collect();
+
+    while idx < chars.len() && chars[idx] != '(' {
+        idx += 1;
+    }
+    idx += 1; // skip '('
+
+    while idx < chars.len() && chars[idx] != ',' {
+        idx += 1;
+    }
+    idx += 1; // skip ',' after serial
+
+    skip_whitespace(&chars, &mut idx);
+
+    // Now at start of monitors array
+    if idx >= chars.len() || chars[idx] != '[' {
+        return Err("expected '[' for monitors array".into());
+    }
+
+    let monitors_start = idx;
+    idx += 1;
+    let mut depth: i32 = 1;
+    while idx < chars.len() && depth > 0 {
+        match chars[idx] {
+            '[' => depth += 1,
+            ']' => depth -= 1,
+            _ => {}
+        }
+        idx += 1;
+    }
+
+    let monitors_section = response[monitors_start..idx].to_string();
+
+    skip_whitespace(&chars, &mut idx);
+    if idx < chars.len() && chars[idx] == ',' {
+        idx += 1;
+    }
+    skip_whitespace(&chars, &mut idx);
+
+    // Now at start of logical_monitors array
+    if idx >= chars.len() || chars[idx] != '[' {
+        return Err("expected '[' for logical_monitors array".into());
+    }
+
+    let lm_start = idx;
+    idx += 1;
+    depth = 1;
+    while idx < chars.len() && depth > 0 {
+        match chars[idx] {
+            '[' => depth += 1,
+            ']' => depth -= 1,
+            _ => {}
+        }
+        idx += 1;
+    }
+
+    let logical_monitors_section = response[lm_start..idx].to_string();
+
+    Ok((monitors_section, logical_monitors_section))
+}
+
+fn skip_whitespace(chars: &[char], idx: &mut usize) {
+    while *idx < chars.len() && chars[*idx].is_whitespace() {
+        *idx += 1;
+    }
+}
+
+fn extract_top_level_array(section: &str) -> Option<Vec<String>> {
+    let chars: Vec<char> = section.chars().collect();
+    let mut idx = 0;
+    skip_whitespace(&chars, &mut idx);
+
+    if idx >= chars.len() || chars[idx] != '[' {
+        return None;
+    }
+    idx += 1;
+
+    let mut items = Vec::new();
+    let mut depth = 0;
+    let mut start;
+
+    while idx < chars.len() {
+        match chars[idx] {
+            '(' if depth == 0 => {
+                start = idx;
+                depth = 1;
+                idx += 1;
+                while idx < chars.len() && depth > 0 {
+                    match chars[idx] {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        _ => {}
+                    }
+                    idx += 1;
+                }
+                let item = section[start..idx].to_string();
+                items.push(item);
+            }
+            ']' => {
+                break;
+            }
+            _ => {
+                idx += 1;
+            }
+        }
+    }
+
+    Some(items)
+}
+
+fn parse_nested_values(text: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        while i < chars.len()
+            && (chars[i] == '('
+                || chars[i] == ')'
+                || chars[i] == '['
+                || chars[i] == ']'
+                || chars[i] == '{'
+                || chars[i] == ' '
+                || chars[i] == ','
+                || chars[i] == '\n')
+        {
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+        if chars[i] == '<' {
+            while i < chars.len() && chars[i] != '>' {
+                i += 1;
+            }
+            if i < chars.len() {
+                i += 1;
+            }
+            continue;
+        }
+        let mut val = String::new();
+        while i < chars.len()
+            && chars[i] != ','
+            && chars[i] != ')'
+            && chars[i] != ']'
+            && chars[i] != '\n'
+        {
+            val.push(chars[i]);
+            i += 1;
+        }
+        let val = val.trim().to_string();
+        if !val.is_empty() {
+            values.push(val);
+        }
+    }
+    values
+}
+
+fn find_connector_in_logical_monitor(lm_text: &str) -> Option<&str> {
+    let start = lm_text.find("('")?;
+    let connector_start = start + 2;
+    let connector_end = lm_text[connector_start..].find('\'')?;
+    Some(&lm_text[connector_start..connector_start + connector_end])
+}
+
+fn find_monitor_mode(after_modes: &str, connector: &str) -> (i32, i32, i32, i32) {
+    let mut pos = 0;
+    while pos < after_modes.len() {
+        let remaining = &after_modes[pos..];
+        if !remaining.starts_with("(('") {
+            pos += 1;
+            continue;
+        }
+        let conn_start = pos + 3;
+        if let Some(conn_end) = after_modes[conn_start..].find('\'') {
+            let found_connector = &after_modes[conn_start..conn_start + conn_end];
+            if found_connector == connector {
+                let after_conn = &after_modes[conn_start + conn_end..];
+                if let Some(is_current) = after_conn.find("is-current") {
+                    let after_current = &after_conn[is_current..];
+                    if after_current.contains("true") {
+                        let mode_start = match after_conn.find("('") {
+                            Some(s) => s,
+                            None => return (1920, 1080, 1920, 1080),
+                        };
+                        let mode_section = &after_conn[mode_start..];
+                        let mode_close = match mode_section.find("')") {
+                            Some(s) => s,
+                            None => return (1920, 1080, 1920, 1080),
+                        };
+                        let mode_str = &mode_section[..mode_close + 2];
+                        let values = parse_nested_values(mode_str);
+                        let phys_w = values.get(1).and_then(|v| v.parse().ok()).unwrap_or(1920);
+                        let phys_h = values.get(2).and_then(|v| v.parse().ok()).unwrap_or(1080);
+                        let scale = values
+                            .get(4)
+                            .and_then(|v| v.parse::<f64>().ok())
+                            .unwrap_or(1.0);
+                        let log_w = (phys_w as f64 / scale).round() as i32;
+                        let log_h = (phys_h as f64 / scale).round() as i32;
+                        return (phys_w, phys_h, log_w, log_h);
+                    }
+                }
+            }
+        }
+        pos += 1;
+    }
+    (1920, 1080, 1920, 1080)
+}
+
+pub fn logical_to_physical_crop(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    monitors: &[MutterMonitorInfo],
+) -> Option<(u32, u32, u32, u32)> {
+    let center_x = x + width / 2;
+    let center_y = y + height / 2;
+
+    let target = monitors.iter().find(|m| {
+        center_x >= m.logical_x
+            && center_x < m.logical_x + m.logical_width
+            && center_y >= m.logical_y
+            && center_y < m.logical_y + m.logical_height
+    })?;
+
+    let mut sorted: Vec<&MutterMonitorInfo> = monitors.iter().collect();
+    sorted.sort_by(|a, b| {
+        if a.logical_x == b.logical_x {
+            a.logical_y.cmp(&b.logical_y)
+        } else {
+            a.logical_x.cmp(&b.logical_x)
+        }
+    });
+
+    let mut physical_origin_x: i32 = 0;
+    for m in &sorted {
+        if std::ptr::eq(*m, target) {
+            break;
+        }
+        physical_origin_x += m.physical_width;
+    }
+
+    let phys_x =
+        physical_origin_x as u32 + ((x - target.logical_x) as f64 * target.scale).round() as u32;
+    let phys_y = ((y - target.logical_y) as f64 * target.scale).round() as u32;
+    let phys_w = ((width as f64 * target.scale).round() as u32).max(1);
+    let phys_h = ((height as f64 * target.scale).round() as u32).max(1);
+
+    Some((phys_x, phys_y, phys_w, phys_h))
+}
+
 pub fn geometry_from_request(request: &RecordingRequest) -> RecordingMaskGeometry {
     RecordingMaskGeometry {
         x: request.x,

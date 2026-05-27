@@ -2138,10 +2138,40 @@ async fn capture_area_via_screenshot_portal_path(
     let full = capture_fullscreen_via_screenshot_portal()
         .await
         .map_err(|e| format!("Screenshot portal capture failed: {e}"))?;
-    let crop_x = x.max(0) as u32;
-    let crop_y = y.max(0) as u32;
-    let crop_w = width.max(1) as u32;
-    let crop_h = height.max(1) as u32;
+
+    let (crop_x, crop_y, crop_w, crop_h) =
+        if let Ok(monitors) = crate::gnome_shell::query_mutter_monitor_configs() {
+            eprintln!(
+                "[daemon] portal crop: logical=({x},{y},{width}x{height}), monitors={:?}",
+                monitors
+            );
+            if let Some(scaled) =
+                crate::gnome_shell::logical_to_physical_crop(x, y, width, height, &monitors)
+            {
+                eprintln!(
+                    "[daemon] portal crop: scaled=({},{},{},{})",
+                    scaled.0, scaled.1, scaled.2, scaled.3
+                );
+                (scaled.0, scaled.1, scaled.2, scaled.3)
+            } else {
+                eprintln!("[daemon] portal crop: fallback (logical->physical returned None)");
+                (
+                    x.max(0) as u32,
+                    y.max(0) as u32,
+                    width.max(1) as u32,
+                    height.max(1) as u32,
+                )
+            }
+        } else {
+            eprintln!("[daemon] portal crop: fallback (monitor query failed)");
+            (
+                x.max(0) as u32,
+                y.max(0) as u32,
+                width.max(1) as u32,
+                height.max(1) as u32,
+            )
+        };
+
     let cropped = crop_capture_data(&full, crop_x, crop_y, crop_w, crop_h)
         .ok_or_else(|| "Screenshot portal crop was out of bounds".to_string())?;
     capture_to_temp_png_path(cropped)

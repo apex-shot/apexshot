@@ -139,7 +139,33 @@ QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
     if (!desktopBounds(false, desktop)) {
         return overlayRect.topLeft();
     }
-    if (!x11NetWorkArea(available) && !desktopBounds(true, available)) {
+
+    // _NET_WORKAREA is reported in X11 device pixels (native resolution).
+    // On HiDPI / scaled displays this can differ from the Qt logical
+    // coordinate space by the device-pixel-ratio (e.g. 2.0 at 200 %).
+    // Scale the X11 values down to logical pixels so the comparison below
+    // correctly detects when the overlay sits inside a panel-constrained
+    // work area rather than the full desktop.
+    QRect x11Available;
+    if (x11NetWorkArea(x11Available)) {
+        // Use the primary screen's DPR as a uniform scale factor.
+        // In multi-monitor mixed-DPI setups the compositor typically
+        // renders the X11 root window at the highest DPR; using the
+        // primary screen's DPR aligns with the overlay's geometry.
+        qreal dpr = 1.0;
+        if (QGuiApplication::primaryScreen()) {
+            dpr = QGuiApplication::primaryScreen()->devicePixelRatio();
+        }
+        if (dpr > 1.0) {
+            available = QRect(
+                qRound(x11Available.x() / dpr),
+                qRound(x11Available.y() / dpr),
+                qRound(x11Available.width() / dpr),
+                qRound(x11Available.height() / dpr));
+        } else {
+            available = x11Available;
+        }
+    } else if (!desktopBounds(true, available)) {
         return overlayRect.topLeft();
     }
 
