@@ -589,7 +589,7 @@ where
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Public Screenshot portal helper for daemon fallback
+// Public Screenshot portal helper for explicit portal capture paths.
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// Capture fullscreen via the XDG Screenshot portal (no ScreenCast dialog).

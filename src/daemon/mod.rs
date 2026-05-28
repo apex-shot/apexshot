@@ -6,9 +6,8 @@
 //!   3. On hotkey or tray-menu trigger → runs capture + overlay IN-PROCESS
 //!      (no subprocess spawn, no GTK cold-start delay)
 //!
-//! Because the daemon is launched once via its .desktop entry, GNOME Shell
-//! trusts it — so `org.gnome.Shell.Screenshot` D-Bus calls succeed (~50 ms),
-//! giving instant popup-free captures.
+//! The daemon keeps hotkeys, tray actions, previews, and recording controls
+//! warm so user-triggered actions avoid repeated process setup work.
 
 use std::{
     path::PathBuf,
@@ -1068,102 +1067,6 @@ struct DaemonIpc {
     state: Arc<Mutex<DaemonState>>,
     scroll_injector: tokio::sync::Mutex<ScrollInjector>,
 }
-async fn try_gnome_shell_capture_area(
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Result<String, String> {
-    let conn = zbus::Connection::session()
-        .await
-        .map_err(|e| format!("Session bus error: {e}"))?;
-
-    let proxy = zbus::Proxy::new(
-        &conn,
-        "org.gnome.Shell",
-        "/org/gnome/Shell/Screenshot",
-        "org.gnome.Shell.Screenshot",
-    )
-    .await
-    .map_err(|e| format!("GNOME Shell proxy error: {e}"))?;
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_micros())
-        .unwrap_or(0);
-    let requested_path = format!("/tmp/apexshot_gnome_{timestamp}.png");
-
-    let (success, filename_used): (bool, String) = proxy
-        .call(
-            "ScreenshotArea",
-            &(x, y, width, height, false, requested_path.clone()),
-        )
-        .await
-        .map_err(|e| format!("GNOME Shell screenshot call failed: {e}"))?;
-
-    if !success {
-        return Err("ScreenshotArea returned success=false".into());
-    }
-
-    let resolved_path = if filename_used.trim().is_empty() {
-        requested_path
-    } else {
-        filename_used
-    };
-
-    if !std::path::Path::new(&resolved_path).exists() {
-        return Err(format!(
-            "GNOME Shell screenshot output file missing: {resolved_path}"
-        ));
-    }
-
-    Ok(resolved_path)
-}
-
-async fn try_gnome_shell_capture_fullscreen() -> Result<String, String> {
-    let conn = zbus::Connection::session()
-        .await
-        .map_err(|e| format!("Session bus error: {e}"))?;
-
-    let proxy = zbus::Proxy::new(
-        &conn,
-        "org.gnome.Shell",
-        "/org/gnome/Shell/Screenshot",
-        "org.gnome.Shell.Screenshot",
-    )
-    .await
-    .map_err(|e| format!("GNOME Shell proxy error: {e}"))?;
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_micros())
-        .unwrap_or(0);
-    let requested_path = format!("/tmp/apexshot_gnome_fs_{timestamp}.png");
-
-    let (success, filename_used): (bool, String) = proxy
-        .call("Screenshot", &(false, false, requested_path.clone()))
-        .await
-        .map_err(|e| format!("GNOME Shell screenshot call failed: {e}"))?;
-
-    if !success {
-        return Err("Screenshot returned success=false".into());
-    }
-
-    let resolved_path = if filename_used.trim().is_empty() {
-        requested_path
-    } else {
-        filename_used
-    };
-
-    if !std::path::Path::new(&resolved_path).exists() {
-        return Err(format!(
-            "GNOME Shell screenshot output file missing: {resolved_path}"
-        ));
-    }
-
-    Ok(resolved_path)
-}
-
 #[zbus::interface(name = "org.apexshot.Daemon")]
 impl DaemonIpc {
     fn trigger(&self, action: String) -> zbus::fdo::Result<()> {
@@ -1223,60 +1126,6 @@ impl DaemonIpc {
     /// Returns the current system audio level as a normalized f64 (0.0 to 1.0).
     fn get_speaker_level(&self) -> f64 {
         f64::from_bits(SPEAKER_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
-    }
-
-    /// Allows the untrusted C++ overlay process to request an area screenshot
-    /// via the trusted daemon on GNOME Wayland.
-    async fn capture_area_gnome(
-        &self,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-    ) -> zbus::fdo::Result<String> {
-        eprintln!("[daemon] D-Bus capture_area_gnome called: {x} {y} {width} {height}");
-        if width <= 0 || height <= 0 {
-            return Err(zbus::fdo::Error::InvalidArgs(format!(
-                "Invalid capture area: {width}x{height}"
-            )));
-        }
-
-        match try_gnome_shell_capture_area(x, y, width, height).await {
-            Ok(path) => Ok(path),
-            Err(shell_err) => {
-                eprintln!(
-                    "[daemon] GNOME Shell area screenshot failed ({shell_err}); trying Screenshot portal fallback."
-                );
-
-                match capture_area_via_screenshot_portal_path(x, y, width, height).await {
-                    Ok(path) => Ok(path),
-                    Err(portal_err) => Err(zbus::fdo::Error::Failed(format!(
-                        "GNOME Shell area screenshot failed: {shell_err}; Screenshot portal fallback failed: {portal_err}"
-                    ))),
-                }
-            }
-        }
-    }
-
-    /// Allows the untrusted C++ overlay process to request a fullscreen screenshot
-    /// via the trusted daemon on GNOME Wayland.
-    async fn capture_fullscreen_gnome(&self) -> zbus::fdo::Result<String> {
-        eprintln!("[daemon] D-Bus capture_fullscreen_gnome called");
-        match try_gnome_shell_capture_fullscreen().await {
-            Ok(path) => Ok(path),
-            Err(shell_err) => {
-                eprintln!(
-                    "[daemon] GNOME Shell fullscreen screenshot failed ({shell_err}); trying Screenshot portal fallback."
-                );
-
-                match capture_fullscreen_via_screenshot_portal_path().await {
-                    Ok(path) => Ok(path),
-                    Err(portal_err) => Err(zbus::fdo::Error::Failed(format!(
-                        "GNOME Shell fullscreen screenshot failed: {shell_err}; Screenshot portal fallback failed: {portal_err}"
-                    ))),
-                }
-            }
-        }
     }
 
     async fn scroll_begin_gnome(&self) -> zbus::fdo::Result<bool> {
@@ -2107,102 +1956,6 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Capture helpers — run on blocking thread via spawn_blocking
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn capture_to_temp_png_path(capture: crate::backend::CaptureData) -> Result<String, String> {
-    let path =
-        save_temp_png_daemon(&capture).ok_or_else(|| "Failed to save temporary PNG".to_string())?;
-    Ok(path.to_string_lossy().into_owned())
-}
-
-async fn capture_fullscreen_via_screenshot_portal_path() -> Result<String, String> {
-    use crate::backend::wayland::capture_fullscreen_via_screenshot_portal;
-    let capture = capture_fullscreen_via_screenshot_portal()
-        .await
-        .map_err(|e| format!("Screenshot portal fullscreen capture failed: {e}"))?;
-    capture_to_temp_png_path(capture)
-}
-
-async fn capture_area_via_screenshot_portal_path(
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Result<String, String> {
-    if width <= 0 || height <= 0 {
-        return Err(format!("Invalid capture area: {width}x{height}"));
-    }
-    use crate::backend::wayland::capture_fullscreen_via_screenshot_portal;
-    let full = capture_fullscreen_via_screenshot_portal()
-        .await
-        .map_err(|e| format!("Screenshot portal capture failed: {e}"))?;
-
-    let (crop_x, crop_y, crop_w, crop_h) =
-        if let Ok(monitors) = crate::gnome_shell::query_mutter_monitor_configs() {
-            eprintln!(
-                "[daemon] portal crop: logical=({x},{y},{width}x{height}), monitors={:?}",
-                monitors
-            );
-            if let Some(scaled) =
-                crate::gnome_shell::logical_to_physical_crop(x, y, width, height, &monitors)
-            {
-                eprintln!(
-                    "[daemon] portal crop: scaled=({},{},{},{})",
-                    scaled.0, scaled.1, scaled.2, scaled.3
-                );
-                (scaled.0, scaled.1, scaled.2, scaled.3)
-            } else {
-                eprintln!("[daemon] portal crop: fallback (logical->physical returned None)");
-                (
-                    x.max(0) as u32,
-                    y.max(0) as u32,
-                    width.max(1) as u32,
-                    height.max(1) as u32,
-                )
-            }
-        } else {
-            eprintln!("[daemon] portal crop: fallback (monitor query failed)");
-            (
-                x.max(0) as u32,
-                y.max(0) as u32,
-                width.max(1) as u32,
-                height.max(1) as u32,
-            )
-        };
-
-    let cropped = crop_capture_data(&full, crop_x, crop_y, crop_w, crop_h)
-        .ok_or_else(|| "Screenshot portal crop was out of bounds".to_string())?;
-    capture_to_temp_png_path(cropped)
-}
-
-fn crop_capture_data(
-    capture: &crate::backend::CaptureData,
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-) -> Option<crate::backend::CaptureData> {
-    use crate::backend::CaptureData;
-    let bpp = capture.format.bytes_per_pixel as usize;
-    let stride = capture.stride as usize;
-    let row_len = w as usize * bpp;
-
-    if x + w > capture.width || y + h > capture.height || w == 0 || h == 0 {
-        return None;
-    }
-
-    let mut pixels = Vec::with_capacity(row_len * h as usize);
-    for row in 0..h as usize {
-        let src_y = y as usize + row;
-        let src_offset = src_y * stride + x as usize * bpp;
-        pixels.extend_from_slice(&capture.pixels[src_offset..src_offset + row_len]);
-    }
-
-    Some(CaptureData::new(pixels, w, h, capture.format))
-}
-
 fn screenshot_image_format(value: &str) -> crate::capture::ImageFormat {
     match value {
         "JPEG" => crate::capture::ImageFormat::Jpeg { quality: 85 },
@@ -2676,66 +2429,6 @@ fn spawn_editor_subprocess(path: std::path::PathBuf) {
 
 fn open_file(path: std::path::PathBuf) {
     let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
-}
-
-/// Save CaptureData as a temp PNG for the C++ overlay background.
-fn save_temp_png_daemon(capture: &crate::backend::CaptureData) -> Option<std::path::PathBuf> {
-    use image::{ImageBuffer, Rgba};
-
-    let tmp = std::env::temp_dir().join(format!(
-        "apexshot_bg_{}.png",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
-    ));
-
-    let bytes_per_pixel = capture.format.bytes_per_pixel as usize;
-    let stride = capture.stride as usize;
-    let w = capture.width;
-    let h = capture.height;
-
-    use crate::backend::PixelFormat;
-    let is_bgr = capture.format == PixelFormat::BGR24
-        || capture.format == PixelFormat::BGR32
-        || capture.format == PixelFormat::BGRA32;
-
-    let mut rgba: Vec<u8> = Vec::with_capacity((w * h * 4) as usize);
-    for row in 0..h as usize {
-        let row_start = row * stride;
-        let row_end = (row_start + w as usize * bytes_per_pixel).min(capture.pixels.len());
-        let row_data = &capture.pixels[row_start..row_end];
-        for px in row_data.chunks(bytes_per_pixel) {
-            if px.len() >= 4 {
-                if is_bgr {
-                    rgba.push(px[2]); // R (from BGR byte[2])
-                    rgba.push(px[1]); // G
-                    rgba.push(px[0]); // B (from BGR byte[0])
-                    rgba.push(px[3]); // A
-                } else {
-                    rgba.push(px[0]); // R
-                    rgba.push(px[1]); // G
-                    rgba.push(px[2]); // B
-                    rgba.push(px[3]); // A
-                }
-            } else if px.len() == 3 {
-                if is_bgr {
-                    rgba.push(px[2]);
-                    rgba.push(px[1]);
-                    rgba.push(px[0]);
-                } else {
-                    rgba.push(px[0]);
-                    rgba.push(px[1]);
-                    rgba.push(px[2]);
-                }
-                rgba.push(255);
-            }
-        }
-    }
-
-    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(w, h, rgba)?;
-    img.save(&tmp).ok()?;
-    Some(tmp)
 }
 
 fn screenshot_timer_delay_duration(seconds: u32) -> Option<std::time::Duration> {

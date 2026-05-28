@@ -117,7 +117,7 @@ support is improving over time.
 | **Core** | Rust 2021 Edition |
 | **Native Overlay** | C++17 / Qt5 (region selection, drawing) |
 | **GUI** | GTK4 + gtk4-layer-shell |
-| **Display Servers** | X11 (x11rb + MIT-SHM), GNOME Wayland screenshots via XDG Screenshot portal + C++ overlay, wlroots/Hyprland/Sway screenshots via `wlr-screencopy` + Rust GTK layer-shell, recording via `wf-recorder` on wlroots or ScreenCast portal + PipeWire elsewhere |
+| **Display Servers** | X11 (x11rb + MIT-SHM), GNOME Wayland screenshots via C++ overlay + XDG Screenshot portal, wlroots/Hyprland/Sway screenshots via `wlr-screencopy` + Rust GTK layer-shell, recording via `wf-recorder` on wlroots or ScreenCast portal + PipeWire elsewhere |
 | **Recording** | Native PipeWire + ffmpeg (VP9, H.264, GIF) on Wayland; GStreamer ximagesrc fallback on X11 |
 | **Audio** | PipeWire/PulseAudio (mic/speaker capture via ffmpeg) |
 | **OCR** | Tesseract + ocrs/rten |

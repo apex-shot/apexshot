@@ -402,7 +402,7 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 **GNOME Implementation:**
 - Uses gsettings `org.gnome.settings-daemon.plugins.media-keys` custom keybindings
 - Each binding spawns `apexshot daemon` subcommand (e.g., `apexshot capture area`)
-- Desktop entry Exec line is `apexshot daemon` for trust / `org.gnome.Shell.Screenshot` access
+- Desktop entry Exec line is `apexshot daemon` so GNOME launches actions with the expected app identity
 
 **Non-GNOME Fallback:**
 - Portal `GlobalShortcuts` via `ashpd` when GNOME is not detected
@@ -469,7 +469,7 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 **Submodules:**
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`, `DisplayError`
 - `x11.rs` — `X11Backend` via `x11rb` + MIT-SHM
-- `wayland.rs` — `WaylandBackend` with tiered capture (XDG Screenshot portal, `wlr-screencopy`, or ScreenCast + PipeWire)
+- `wayland.rs` — `WaylandBackend` with tiered capture (`wlr-screencopy`, ScreenCast + PipeWire, or explicit Screenshot portal override)
 - `screencopy.rs` — `wlr-screencopy` native Wayland protocol implementation for Hyprland/Sway
 - `portal_permissions.rs` — Persistent XDG portal permission setup (`ensure_portal_permissions()`)
 
@@ -482,8 +482,7 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 - `DisplayError` — `UnsupportedBackend`, `InitializationError`, `CaptureError`, `InvalidArea`, `PortalError`, `IoError`
 
 **Platform Note:** `WaylandBackend` uses a tiered capture strategy:
-- **GNOME Wayland** — XDG Screenshot portal (fast one-shot image capture)
-  when `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL` is set.
+- **GNOME Wayland** — C++ overlay plus XDG Screenshot portal for still screenshots.
 - **Hyprland / Sway** — `wlr-screencopy` native Wayland protocol.
 - **Other compositors** — XDG ScreenCast portal + PipeWire as fallback (implemented, not yet tested on KDE/Niri)
 

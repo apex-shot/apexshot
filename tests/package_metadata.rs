@@ -109,3 +109,30 @@ fn deb_package_includes_background_gradient_assets() {
         "background gradient assets should be installed into a shared runtime directory"
     );
 }
+
+#[test]
+fn arch_pkgbuild_version_matches_cargo_package_version() {
+    let cargo_toml = include_str!("../Cargo.toml");
+    let pkgbuild = include_str!("../packaging/arch/PKGBUILD");
+
+    let cargo_version = cargo_toml
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("version = \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .expect("Cargo.toml should declare package version");
+    let pkgver = pkgbuild
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("pkgver="))
+        .expect("PKGBUILD should declare pkgver");
+
+    assert_eq!(
+        pkgver, cargo_version,
+        "Arch PKGBUILD pkgver must match Cargo.toml package version"
+    );
+
+    let expected_source = format!("archive/v{cargo_version}.tar.gz");
+    assert!(
+        pkgbuild.contains(&expected_source),
+        "Arch PKGBUILD source should download the matching release tag"
+    );
+}

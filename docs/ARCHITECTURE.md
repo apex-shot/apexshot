@@ -236,7 +236,7 @@ Abstraction over display servers:
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`
 - `x11.rs` — X11 backend via `x11rb` + MIT-SHM
 - `wayland.rs` — Wayland backend with a tiered capture strategy:
-  - **GNOME:** XDG Screenshot portal via `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL` env var (fast one-shot image)
+  - **GNOME:** still screenshots use the C++ overlay plus XDG Screenshot portal
   - **Hyprland/Sway:** `wlr-screencopy` native Wayland protocol
   - **Fallback:** XDG ScreenCast portal + PipeWire for cross-compositor compatibility
 - `screencopy.rs` — `wlr-screencopy` protocol implementation for Hyprland/Sway

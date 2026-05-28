@@ -53,36 +53,73 @@ pub enum OverlayExitCode {
     BlockedByBuiltinOverlay = 11,
 }
 
-fn current_desktop_contains(needle: &str) -> bool {
-    std::env::var("XDG_CURRENT_DESKTOP")
+fn desktop_value_contains(desktop: Option<&str>, needle: &str) -> bool {
+    desktop
         .unwrap_or_default()
         .split([':', ';', ','])
         .any(|part| part.trim().eq_ignore_ascii_case(needle))
 }
 
-fn should_use_gtk_layer_shell_selector() -> bool {
+fn is_gnome_wayland_session_from_env(
+    wayland_display: Option<&str>,
+    desktop: Option<&str>,
+    gnome_setup_display: Option<&str>,
+) -> bool {
+    let is_wayland = wayland_display.is_some_and(|value| !value.trim().is_empty());
+    let is_gnome = desktop_value_contains(desktop, "GNOME")
+        || gnome_setup_display.is_some_and(|value| !value.trim().is_empty());
+    is_wayland && is_gnome
+}
+
+fn is_gnome_wayland_session() -> bool {
+    is_gnome_wayland_session_from_env(
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("GNOME_SETUP_DISPLAY").ok().as_deref(),
+    )
+}
+
+fn should_use_gtk_layer_shell_selector_from_env(
+    wayland_display: Option<&str>,
+    desktop: Option<&str>,
+    gnome_setup_display: Option<&str>,
+    hyprland_instance_signature: Option<&str>,
+    sway_socket: Option<&str>,
+) -> bool {
     // Always use the Rust GTK LayerShell selector on wlroots compositors.
-    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
-        || std::env::var_os("SWAYSOCK").is_some()
-        || current_desktop_contains("Hyprland")
-        || current_desktop_contains("sway")
+    if hyprland_instance_signature.is_some_and(|value| !value.trim().is_empty())
+        || sway_socket.is_some_and(|value| !value.trim().is_empty())
+        || desktop_value_contains(desktop, "Hyprland")
+        || desktop_value_contains(desktop, "sway")
     {
         return true;
     }
 
     // On other Wayland desktops where the C++ capture binary (which relies on
-    // GNOME Shell D-Bus APIs and XDG portals in GNOME/KDE-specific ways) may
+    // desktop-specific XDG portal behavior and window metadata plumbing) may
     // not work, use the Rust selector. This covers COSMIC, River, Wayfire,
     // Labwc, Niri, and any other non-GNOME, non-KDE Wayland session.
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        let is_gnome = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
-        let is_kde = current_desktop_contains("KDE") || current_desktop_contains("Plasma");
+    if wayland_display.is_some_and(|value| !value.trim().is_empty()) {
+        let is_gnome =
+            is_gnome_wayland_session_from_env(wayland_display, desktop, gnome_setup_display);
+        let is_kde =
+            desktop_value_contains(desktop, "KDE") || desktop_value_contains(desktop, "Plasma");
         if !is_gnome && !is_kde {
             return true;
         }
     }
 
     false
+}
+
+fn should_use_gtk_layer_shell_selector() -> bool {
+    should_use_gtk_layer_shell_selector_from_env(
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("GNOME_SETUP_DISPLAY").ok().as_deref(),
+        std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok().as_deref(),
+        std::env::var("SWAYSOCK").ok().as_deref(),
+    )
 }
 
 fn force_wayland_gdk_for_layer_shell() {
@@ -1020,7 +1057,7 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
         return save_capture_to_temp_png(&capture);
     }
 
-    if WaylandBackend::is_supported() {
+    if !is_gnome_wayland_session() && WaylandBackend::is_supported() {
         eprintln!(
             "[capture_overlay] capture_window_via_cpp: using Wayland ScreenCast portal backend"
         );
@@ -1033,7 +1070,10 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
         return save_capture_to_temp_png(&capture);
     }
 
-    // Non-Wayland path: use the native C++ window picker/capture flow.
+    // GNOME Wayland and non-Wayland paths use the native C++ picker/capture
+    // flow. GNOME must avoid the generic ScreenCast portal path because
+    // persisted monitor grants can lock users to a single previously approved
+    // display.
     eprintln!("[capture_overlay] capture_window_via_cpp: launching --window-capture");
     let output = run_capture_binary(&["--window-capture"], None)?;
     let exit_code = output.status.code();
@@ -1634,10 +1674,12 @@ mod tests {
     use super::{
         append_screenshot_timer_args, build_area_init_args, build_crosshair_args,
         build_recording_ui_args, classify_overlay_exit_code, execute_builtin_overlay_query,
-        parse_area_capture_output, parse_capture_screen_json, parse_capture_screen_json_with_mode,
-        parse_recording_json, parse_selection_json, save_capture_to_temp_png,
-        should_request_screenshot_lock, tracked_overlay_id, CaptureSessionCoordinator,
-        LaunchBlockedReason, OverlayExitCode, OverlaySelection, RecordingType,
+        is_gnome_wayland_session_from_env, parse_area_capture_output, parse_capture_screen_json,
+        parse_capture_screen_json_with_mode, parse_recording_json, parse_selection_json,
+        save_capture_to_temp_png, should_request_screenshot_lock,
+        should_use_gtk_layer_shell_selector_from_env, tracked_overlay_id,
+        CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, OverlaySelection,
+        RecordingType,
     };
     use crate::{
         backend::{CaptureData, PixelFormat},
@@ -1677,6 +1719,73 @@ mod tests {
             },
         );
         assert_eq!(on_args, vec!["--show-timer", "--timer-seconds=3"]);
+    }
+
+    #[test]
+    fn gnome_wayland_detection_accepts_ubuntu_and_setup_display() {
+        assert!(is_gnome_wayland_session_from_env(
+            Some("wayland-0"),
+            Some("ubuntu:GNOME"),
+            None
+        ));
+        assert!(is_gnome_wayland_session_from_env(
+            Some("wayland-0"),
+            None,
+            Some(":1")
+        ));
+        assert!(!is_gnome_wayland_session_from_env(
+            Some("wayland-0"),
+            Some("KDE"),
+            None
+        ));
+        assert!(!is_gnome_wayland_session_from_env(
+            None,
+            Some("GNOME"),
+            Some(":1")
+        ));
+    }
+
+    #[test]
+    fn gtk_layer_shell_selector_is_not_used_on_gnome_wayland() {
+        assert!(!should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            Some("ubuntu:GNOME"),
+            None,
+            None,
+            None
+        ));
+        assert!(!should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            None,
+            Some(":1"),
+            None,
+            None
+        ));
+    }
+
+    #[test]
+    fn gtk_layer_shell_selector_stays_enabled_for_non_gnome_wayland() {
+        assert!(should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            Some("COSMIC"),
+            None,
+            None,
+            None
+        ));
+        assert!(should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            Some("Hyprland"),
+            None,
+            Some("hyprland-instance"),
+            None
+        ));
+        assert!(!should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            Some("KDE"),
+            None,
+            None,
+            None
+        ));
     }
 
     #[test]

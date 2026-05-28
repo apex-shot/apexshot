@@ -33,8 +33,8 @@ use apexshot::{
     },
     capture_overlay::{
         capture_area_via_cpp, capture_crosshair_via_cpp, capture_screen_via_cpp,
-        is_launch_blocked_error, open_recording_ui_via_cpp, run_capture_overlay,
-        AreaCapturePathResult, AreaCaptureResult,
+        capture_window_via_cpp, is_launch_blocked_error, open_recording_ui_via_cpp,
+        run_capture_overlay, AreaCapturePathResult, AreaCaptureResult,
     },
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
@@ -1248,9 +1248,11 @@ fn run_daemon_with_gtk_on_main_thread() {
     if !layer_shell_supported && std::env::var_os("WAYLAND_DISPLAY").is_some() {
         eprintln!(
             "[daemon] Wayland compositor does not support Layer Shell (e.g. GNOME); \
-             area selector will use screenshot-backed mode."
+             area selector will use the C++ capture overlay."
         );
-        eprintln!("[daemon] On GNOME Wayland, ApexShot now prefers ScreenCast for background capture. If ScreenCast is unavailable, it may still fall back to the Screenshot portal and trigger a flash + sound.");
+        eprintln!(
+            "[daemon] On GNOME Wayland, still screenshots use the C++ overlay with the XDG Screenshot portal for the final image."
+        );
     }
 
     // Spawn the Tokio runtime on a background thread so GTK keeps the main thread.
@@ -1717,23 +1719,24 @@ fn run_capture(args: &[String]) {
                 std::process::exit(1);
             }
         },
-        _ if WaylandBackend::is_supported() => {
-            println!("Using Wayland backend...");
-            let backend = WaylandBackend::new().expect("Failed to initialize Wayland backend");
-
-            match capture_type {
-                "window" => {
-                    println!(
-                    "Note: On Wayland, window capture requires selecting the window in the portal prompt"
-                );
-                    backend.capture_window(0).expect("Window capture failed")
-                }
-                _ => {
-                    eprintln!("Error: unknown capture type '{}'", capture_type);
-                    print_usage();
-                    std::process::exit(1);
-                }
+        "window" if WaylandBackend::is_supported() => match capture_window_via_cpp() {
+            Ok(capture) => {
+                println!("Captured window...");
+                capture
             }
+            Err(err) if is_launch_blocked_error(&err) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+            Err(err) => {
+                eprintln!("[capture] C++ window capture failed: {err}");
+                std::process::exit(1);
+            }
+        },
+        _ if WaylandBackend::is_supported() => {
+            eprintln!("Error: unknown capture type '{}'", capture_type);
+            print_usage();
+            std::process::exit(1);
         }
         _ if X11Backend::is_supported() => {
             println!("Using X11 backend...");

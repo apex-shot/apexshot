@@ -233,8 +233,7 @@ impl CameraSource {
 ```
 
 2. Note: `ashpd` crate may not have `camera` module yet. Check version.
-   If not available, use raw `zbus` D-Bus calls (same pattern as daemon's
-   `try_gnome_shell_capture_area()`).
+   If not available, use raw `zbus` D-Bus calls against the camera portal.
 
 **`src/overlay/webcam.rs`:**
 

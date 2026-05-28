@@ -579,7 +579,9 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-        // User selected a window — capture it via GNOME Shell DBus using XID
+        // User selected a window. Capture the selected rect from a portal
+        // screenshot instead of using GNOME Shell's private screenshot D-Bus
+        // API, which is sender-restricted on recent GNOME releases.
         AppWindowInfo selected = picker.selectedWindow();
         std::fprintf(stderr, "apexshot-capture: capturing window '%s' (xid=%llu)\n",
             selected.title.toLocal8Bit().constData(),
@@ -610,59 +612,16 @@ int main(int argc, char* argv[])
         QThread::msleep(180);
         QApplication::processEvents(QEventLoop::AllEvents, 50);
 
-        // Use GNOME Shell ScreenshotWindow to capture the active selected window.
-        const QString tmpPath = QDir::tempPath() + QStringLiteral("/apexshot-window-%1.png")
-                                    .arg(QCoreApplication::applicationPid());
-
-        QDBusInterface gnomeShot(
-            QStringLiteral("org.gnome.Shell.Screenshot"),
-            QStringLiteral("/org/gnome/Shell/Screenshot"),
-            QStringLiteral("org.gnome.Shell.Screenshot"),
-            QDBusConnection::sessionBus());
-
-        if (!gnomeShot.isValid()) {
-            std::fprintf(stderr, "apexshot-capture: GNOME Shell Screenshot DBus not available\n");
-            return 2;
-        }
-
-        QDBusReply<bool> reply = gnomeShot.call(
-            QStringLiteral("ScreenshotWindow"),
-            true,   // include_frame
-            false,  // include_cursor
-            false,  // flash
-            tmpPath);
-
-        if (!reply.isValid() || !reply.value()) {
-            // Fallback: capture the rect of the selected window from a fullscreen shot
-            std::fprintf(stderr, "apexshot-capture: ScreenshotWindow failed, using rect fallback\n");
-            QString imagePath;
-            QSize imageSize;
-            QString error;
-            if (ScreenCapture::captureAreaToTempPng(selected.rect, imagePath, imageSize, error)) {
-                printCaptureScreenJson(imagePath, imageSize);
-                return 0;
-            }
-            std::fprintf(stderr, "apexshot-capture: rect fallback also failed: %s\n",
+        QString imagePath;
+        QSize imageSize;
+        QString error;
+        if (!ScreenCapture::captureAreaToTempPng(selected.rect, imagePath, imageSize, error)) {
+            std::fprintf(stderr, "apexshot-capture: window rect capture failed: %s\n",
                 error.toLocal8Bit().constData());
             return 2;
         }
 
-        QString actualPath = tmpPath;
-        if (!QFileInfo::exists(actualPath)) {
-            for (const QString& suffix : {".png", "-1.png", "-0.png"}) {
-                QString candidate = tmpPath + suffix;
-                if (QFileInfo::exists(candidate)) { actualPath = candidate; break; }
-            }
-        }
-
-        QPixmap pm(actualPath);
-        if (pm.isNull()) {
-            std::fprintf(stderr, "apexshot-capture: could not load window screenshot: %s\n",
-                         actualPath.toLocal8Bit().constData());
-            return 2;
-        }
-
-        printCaptureScreenJson(actualPath, pm.size());
+        printCaptureScreenJson(imagePath, imageSize);
         return 0;
     }
 

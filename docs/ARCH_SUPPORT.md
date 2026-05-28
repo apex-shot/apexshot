@@ -107,7 +107,7 @@ Arch-specific functionality:
 - **Desktop environment detection**: GNOME, Hyprland, Sway, KDE/Plasma, and wlroots-like sessions.
 - **Portal backend preference**: `xdg-desktop-portal-gnome`, `xdg-desktop-portal-hyprland`, `xdg-desktop-portal-wlr`, `xdg-desktop-portal-kde`, or GTK fallback based on session detection.
 - **Dependency checking**: Verify pacman packages.
-- **Capture policy**: GNOME sessions use the C++ capture overlay plus the Screenshot portal for still screenshots. Hyprland/Sway/wlroots sessions use the Rust GTK layer-shell selector plus native `wlr-screencopy` for area/crosshair screenshots; recording remains ScreenCast portal + PipeWire because it needs a live stream.
+- **Capture policy**: GNOME sessions use the C++ capture overlay plus the XDG Screenshot portal for still screenshots. Hyprland/Sway/wlroots sessions use the Rust GTK layer-shell selector plus native `wlr-screencopy` for area/crosshair screenshots; recording remains ScreenCast portal + PipeWire because it needs a live stream.
 
 ## Implementation Roadmap
 
