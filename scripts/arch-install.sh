@@ -93,8 +93,14 @@ spinner() {
         i=$(( (i + 1) % 10 ))
         sleep 0.08
     done
-    printf "\r  ${GREEN}✔${RESET} %s\n" "$msg"
     wait "$pid"
+    local rc=$?
+    if [[ $rc -eq 0 ]]; then
+        printf "\r  ${GREEN}✔${RESET} %s\n" "$msg"
+    else
+        printf "\r  ${RED}✖${RESET} %s\n" "$msg"
+    fi
+    return $rc
 }
 
 run_spinner() {
@@ -262,6 +268,9 @@ should_skip_gnome_extension() {
     ! is_gnome_session
 }
 
+# Prompt the user for their sudo password up front so the subsequent
+# commands inside a spinner don't have their prompt clobbered by the
+# spinner output. No-op when running as root.
 prime_sudo() {
     if [[ -n "$SUDO" ]]; then
         $SUDO -v
@@ -543,6 +552,7 @@ install_from_source() {
         bash -c "cd '$TMPDIR/apexshot' && cargo build --release"
     
     step "Installing"
+    prime_sudo
     run_spinner "Installing to /usr/local/bin..." bash -c "${SUDO} cp '$TMPDIR/apexshot/target/release/apexshot' /usr/local/bin/"
     INSTALL_PATH="/usr/local/bin/apexshot"
     
