@@ -128,8 +128,7 @@ package() {
     install -Dm644 "gnome-extension/mask-ui.js"     "$ext_dir/mask-ui.js"
     install -Dm644 "gnome-extension/window-list.js" "$ext_dir/window-list.js"
     install -Dm644 "gnome-extension/session-state.js" "$ext_dir/session-state.js"
-    install -Dm644 "gnome-extension/click-display.js" "$ext_dir/click-display.js"
-    install -Dm644 "gnome-extension/keystroke-display.js" "$ext_dir/keystroke-display.js"
+
     install -Dm644 "gnome-extension/screenshot-lock.js" "$ext_dir/screenshot-lock.js"
     install -Dm644 "gnome-extension/gnome-version.js" "$ext_dir/gnome-version.js"
 
