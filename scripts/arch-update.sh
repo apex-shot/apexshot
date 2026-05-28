@@ -158,14 +158,25 @@ download_file() {
 
     send_download_telemetry "download_started" "$asset_type" "started" 0 "$asset_name"
 
-    if curl -fL --progress-bar -o "$output" "$url"; then
+    # Use -# for simple "#" progress bar that works across all terminals.
+    # Fall back to -sS (silent+show-errors) if stderr is not a TTY.
+    local curl_opts=(-fL)
+    if [[ -t 2 ]]; then
+        curl_opts+=(-#)
+    else
+        curl_opts+=(-sS)
+    fi
+
+    if curl "${curl_opts[@]}" -o "$output" "$url"; then
         local size_bytes=0
         size_bytes=$(stat -c%s "$output" 2>/dev/null || wc -c < "$output" 2>/dev/null || echo 0)
         send_download_telemetry "download_completed" "$asset_type" "success" "$size_bytes" "$asset_name"
     else
-        local status=$?
-        send_download_telemetry "download_failed" "$asset_type" "curl_${status}" 0 "$asset_name"
-        return "$status"
+        local rc=$?
+        send_download_telemetry "download_failed" "$asset_type" "curl_${rc}" 0 "$asset_name"
+        err "Download failed (curl exit code ${rc})"
+        err "URL: ${url}"
+        return "$rc"
     fi
 }
 
@@ -394,8 +405,11 @@ update_from_release() {
     fi
 
     local pkg_file="${TMPDIR}/apexshot_${VERSION}_x86_64.pkg.tar.zst"
-    info "Downloading Arch package with progress:"
-    download_file "$pkg_url" "$pkg_file" "arch_package"
+    info "Downloading Arch package:"
+    if ! download_file "$pkg_url" "$pkg_file" "arch_package"; then
+        err "Could not download the Arch package. Check your internet connection."
+        exit 1
+    fi
     ok "Package saved to ${pkg_file}"
 
     info "Stopping any running ApexShot daemon..."
@@ -422,8 +436,11 @@ update_gnome_extension() {
     fi
 
     local zip_file="${TMPDIR}/apexshot-gnome-integration.zip"
-    info "Downloading GNOME extension with progress:"
-    download_file "$zip_url" "$zip_file" "gnome_extension"
+    info "Downloading GNOME extension:"
+    if ! download_file "$zip_url" "$zip_file" "gnome_extension"; then
+        warn "Could not download the GNOME extension. Skipping extension update."
+        return
+    fi
 
     if ! command -v gnome-extensions >/dev/null 2>&1; then
         warn "gnome-extensions CLI not found - installing extension files directly."
