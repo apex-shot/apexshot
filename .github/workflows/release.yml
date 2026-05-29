@@ -336,11 +336,31 @@ jobs:
             sudo
           which cargo && cargo --version
 
-      - name: Build
-        run: cargo build --release --verbose
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Stage capture helper
-        run: cp target/release/apexshot-capture packaging/deb/apexshot-capture
+      - name: Update PKGBUILD version from tag
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          PKGVER="${VERSION#v}"
+          ARCHIVE="apexshot-${PKGVER}.tar.gz"
+          SOURCE_URL="https://github.com/apex-shot/apexshot/archive/${VERSION}.tar.gz"
+
+          # Download the release tarball and compute its SHA-256
+          curl -fsSL "${SOURCE_URL}" -o "/tmp/${ARCHIVE}"
+          SHA256="$(sha256sum "/tmp/${ARCHIVE}" | awk '{print $1}')"
+
+          cd packaging/arch
+          sed -i \
+            -e "s/^pkgver=.*/pkgver=${PKGVER}/" \
+            -e "s#^source=.*#source=(\"${ARCHIVE}::${SOURCE_URL}\")#" \
+            -e "s/^sha256sums=.*/sha256sums=('${SHA256}')/" \
+            PKGBUILD
+
+          echo "Updated PKGBUILD to pkgver=${PKGVER}"
+          echo "source=${SOURCE_URL}"
+          echo "sha256sums=${SHA256}"
 
       - name: Build package with makepkg
         run: |
@@ -350,10 +370,6 @@ jobs:
           echo 'builduser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
           chown -R builduser:builduser /__w/apexshot/apexshot
           sudo -u builduser makepkg -sf --noconfirm
-
-      - name: Get version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Upload Arch package to release
         uses: softprops/action-gh-release@v2
