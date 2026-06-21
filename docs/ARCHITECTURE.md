@@ -481,17 +481,22 @@ Configuration stored in `~/.config/apexshot/config.yml`:
 **Fully tested:**
 - Ubuntu GNOME Wayland
 - Arch Linux GNOME Wayland
-- GNOME Shell versions 45–50
+- Hyprland Wayland
 
 **Implemented but not thoroughly tested:**
 - X11 (backend code in `src/backend/x11.rs`)
+- GNOME Shell versions outside the maintainer's personally tested Ubuntu/Arch
+  setups
 - KDE Plasma, Niri, and other non-wlroots Wayland compositors through the
   XDG ScreenCast portal + PipeWire path (implemented, not yet tested)
-- Fedora/RHEL, openSUSE, NixOS, Alpine, Gentoo, and Void distro-family metadata
+- Sway and other wlroots-like compositors beyond Hyprland
+- Fedora/RHEL, openSUSE, NixOS, Alpine, Gentoo, and Void distro-family metadata.
+  Fedora/RHEL and openSUSE are development-stage targets until real
+  install/runtime testing is complete.
 
 **Priority manual validation targets:**
 - Fedora GNOME Wayland
 - Fedora KDE Plasma Wayland
 - openSUSE Tumbleweed or Leap KDE Plasma Wayland
-- Arch Hyprland or Sway Wayland
+- Sway Wayland
 - NixOS GNOME or KDE Wayland

@@ -277,14 +277,16 @@ elsewhere when they touch a related code path. As of today:
 | Surface                     | Tested                       | Best-effort                | Untested              |
 |-----------------------------|------------------------------|----------------------------|-----------------------|
 | Display server              | Wayland                      | X11                        | XWayland edge cases   |
-| Compositor                  | GNOME Shell 47–49            | KDE Plasma 6, Sway 1.x     | Hyprland, Niri, river |
-| Distro                      | Ubuntu 24.04 / 25.10         | Fedora, Debian             | Arch, openSUSE, NixOS |
+| Compositor                  | GNOME Shell 47–50, Hyprland  | Sway / wlroots-like        | KDE Plasma, Niri, river |
+| Distro                      | Ubuntu 24.04 / 25.10, Arch Linux | Debian / Pop!_OS through Ubuntu-compatible packaging | Fedora/RHEL, openSUSE, NixOS |
 | Recording codecs            | VP9, H.264, GIF              | VP8, H.265, Theora         | —                     |
-| Capture portal flow         | xdg-desktop-portal-gnome     | xdg-desktop-portal-gtk     | KDE / wlroots backend |
+| Capture portal flow         | xdg-desktop-portal-gnome, Hyprland/wlroots native capture | xdg-desktop-portal-gtk | KDE portal backend |
 
-If your PR exercises one of the *Untested* squares, please mention that
-in the PR description so the maintainer knows extra eyes might be
-useful before merging.
+Fedora/RHEL and openSUSE support are currently development-stage targets:
+distro metadata and, for openSUSE, installer/RPM scaffolding exist, but they
+still need real runtime validation. If your PR exercises one of the
+*Untested* squares, please mention that in the PR description so the maintainer
+knows extra eyes might be useful before merging.
 
 ## Submitting Changes
 

@@ -229,7 +229,7 @@ impl DistroSupport {
                 family,
                 tier: SupportTier::ImplementedNeedsTesting,
                 package_manager: "dnf/rpm",
-                install_command: "pending: fedora/rpm packaging",
+                install_command: "development: pending Fedora/RHEL packaging and runtime validation",
                 wayland_capture_method: "XDG ScreenCast portal + PipeWire",
                 required_runtime_packages: &[
                     "xdg-desktop-portal",
@@ -250,7 +250,7 @@ impl DistroSupport {
                 family,
                 tier: SupportTier::ImplementedNeedsTesting,
                 package_manager: "zypper/rpm",
-                install_command: "scripts/opensuse-install.sh or packaging/opensuse/apexshot.spec",
+                install_command: "development: scripts/opensuse-install.sh or packaging/opensuse/apexshot.spec; runtime validation pending",
                 wayland_capture_method: "XDG ScreenCast portal + PipeWire",
                 required_runtime_packages: &[
                     "xdg-desktop-portal",

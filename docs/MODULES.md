@@ -490,9 +490,10 @@ Recording uses the XDG ScreenCast portal + native PipeWire (`src/pipewire_engine
 + ffmpeg on most compositors. On wlroots compositors (Hyprland/Sway),
 `wf-recorder` is preferred when installed for native `wlr-screencopy` capture
 with lower overhead. Ubuntu GNOME Wayland, Arch GNOME Wayland, Hyprland, and
-Sway are confirmed; KDE Plasma, Fedora, openSUSE, Niri, and NixOS remain
-priority manual validation targets. `X11Backend` exists but is not thoroughly
-tested.
+the Ubuntu/Arch packaging paths are confirmed. Sway/wlroots-like compositors
+should follow the same native path but still need more manual coverage. KDE
+Plasma, Fedora/RHEL, openSUSE, Niri, and NixOS remain development-stage manual
+validation targets. `X11Backend` exists but is not thoroughly tested.
 
 ---
 

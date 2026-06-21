@@ -503,7 +503,8 @@ fn test_config_loading() {
 ### Manual Testing Checklist
 Before submitting a PR, manually verify on at least one known-good GNOME
 Wayland target. Currently confirmed: Ubuntu GNOME Wayland and Arch Linux GNOME
-Wayland.
+Wayland. Hyprland Wayland is also personally tested for the non-GNOME wlroots
+path.
 - [ ] `cargo run --release -- capture area` works
 - [ ] `cargo run --release -- capture screen` works
 - [ ] `cargo run --release -- record area` works (start + stop)
@@ -515,10 +516,14 @@ Wayland.
 
 For distro/compositor expansion work, also verify the shared ScreenCast portal
 path on at least one non-GNOME portal backend:
-- [ ] Fedora GNOME Wayland for Fedora/RPM family coverage
+- [ ] Fedora GNOME Wayland for Fedora/RHEL RPM-family coverage
 - [ ] Fedora or openSUSE KDE Plasma Wayland for `xdg-desktop-portal-kde`
-- [ ] Arch Hyprland or Sway Wayland for `xdg-desktop-portal-hyprland`/`wlr`
+- [ ] Sway Wayland for additional wlroots coverage beyond Hyprland
 - [ ] NixOS GNOME or KDE Wayland for non-FHS/runtime dependency coverage
+
+Fedora/RHEL and openSUSE are development-stage distro targets. Treat their
+metadata, installers, and RPM scaffolding as implementation work that still
+needs real install/runtime testing before being documented as supported.
 
 See `CONTRIBUTING.md` for more detailed manual testing guidelines.
 

@@ -45,10 +45,12 @@ quick clipboard actions in one open-source app.
 
 ## Install
 
-ApexShot is already usable as a daily screenshot tool on GNOME Wayland. The
-recommended installer detects Ubuntu/Debian vs Arch Linux, installs the right
-package type, and sets up the GNOME extension when shell-level GNOME
-integration is available:
+ApexShot is already usable as a daily screenshot tool on the configurations
+that have been personally tested: Ubuntu GNOME Wayland, Arch Linux GNOME
+Wayland, and Hyprland Wayland. The recommended installer detects
+Ubuntu/Debian, Arch Linux, or openSUSE and selects the matching install path,
+but Fedora/RHEL and openSUSE support should still be treated as development
+stage until runtime testing is complete:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
@@ -58,12 +60,16 @@ Works best today on:
 
 | Environment | Status |
 |---|---|
-| GNOME Shell 47-50 on Ubuntu 24.04 / 25.10 / Pop!_OS 22.04 / Arch (Wayland) | Public beta, tested daily |
+| Ubuntu GNOME Wayland | Public beta, personally tested |
+| Arch Linux GNOME Wayland | Public beta, personally tested |
+| Hyprland Wayland | Public beta, personally tested |
+| Pop!_OS 22.04 (Ubuntu-based, Wayland) | Expected to work through the Ubuntu/Debian package path, less exercised |
 | GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
-| Pop!_OS 22.04 (Ubuntu-based, Wayland) | Supported via deb package |
-| Hyprland / Sway / wlroots-like compositors (Wayland) | Full Rust-native stack: GTK4 layer-shell overlay for area/crosshair selection, `wlr-screencopy` for screenshots, `wf-recorder` for recording (falls back to ScreenCast + PipeWire if `wf-recorder` not installed). No Qt overlay or GNOME extension needed. |
-| KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet tested |
-| Fedora / openSUSE / NixOS / Alpine / Gentoo / Void (Wayland) | Distro-family support metadata implemented, packaging/testing pending |
+| Sway / wlroots-like compositors (Wayland) | Implementation exists through GTK4 layer-shell, `wlr-screencopy`, and `wf-recorder`, but needs more manual validation |
+| KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet personally tested |
+| Fedora / RHEL (Wayland) | Development stage: support metadata only; packaging/runtime testing pending |
+| openSUSE Tumbleweed / Leap (Wayland) | Development stage: source installer and initial RPM spec exist; runtime testing pending |
+| NixOS / Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; packaging/testing pending |
 | X11 on any distro | Experimental |
 
 If ApexShot breaks on your setup, please [open an issue](https://github.com/apex-shot/apexshot/issues/new/choose).
@@ -105,7 +111,7 @@ support is improving over time.
 ### Integration
 - **Daemon Mode** — Background service with system tray and global hotkeys for instant capture
   ![Settings and tray](media/setting-tray.png)
-- **Dual Display Support** — Wayland (including GNOME) is fully tested; X11 implementations exist but are not yet thoroughly tested
+- **Display Support** — Ubuntu GNOME Wayland, Arch Linux GNOME Wayland, and Hyprland Wayland are the known-good targets. Other Wayland desktops and X11 paths are implemented but need more manual testing.
 - **Browser Integration** — Full-page scroll capture via Chrome/Chromium extension
 - **GNOME Integration** — Always-on-top previews and shell-managed recording overlays
 - **Smart Clipboard** — Automatic clipboard integration for quick sharing
@@ -128,8 +134,9 @@ support is improving over time.
 
 ### Quick Install — Recommended
 
-Run the interactive installer. It detects Ubuntu/Debian, Arch Linux, or
-openSUSE and selects the matching install path:
+Run the interactive installer. The production-tested paths are Ubuntu/Debian
+and Arch Linux. The installer also detects openSUSE, but that path is still in
+development and needs real openSUSE runtime validation:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
@@ -179,15 +186,16 @@ AUR publishing notes for maintainers live in
 
 ### openSUSE Tumbleweed / Leap
 
-The generic installer above will select this automatically when `zypper` is
-available. Direct command:
+openSUSE support is in development. The generic installer above will select
+this automatically when `zypper` is available, but this path has not yet been
+personally runtime-tested on openSUSE Tumbleweed or Leap. Direct command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-install.sh | bash
 ```
 
 The direct openSUSE installer builds from source, installs binaries into
-`/usr/local/bin`, and installs the tested zypper dependency set.
+`/usr/local/bin`, and installs the reported zypper dependency set.
 
 An RPM spec is available for package-managed installs:
 
