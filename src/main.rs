@@ -541,10 +541,119 @@ fn run_uninstall(args: &[String]) {
     uninstall_autostart(dev_install);
 
     if !autostart_only {
+        if !dev_install && uninstall_package_managed_app_if_present() {
+            return;
+        }
         uninstall_binary(dev_install);
         uninstall_desktop_launcher(dev_install);
         if let Err(e) = uninstall_native_host_manifest(BrowserTarget::Both) {
             eprintln!("Error: failed to uninstall native host: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn command_exists(command: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {command} >/dev/null 2>&1"))
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn is_running_as_root() -> bool {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|output| {
+            output
+                .status
+                .success()
+                .then(|| String::from_utf8_lossy(&output.stdout).trim() == "0")
+        })
+        .unwrap_or(false)
+}
+
+fn pacman_has_apexshot_package() -> bool {
+    std::process::Command::new("pacman")
+        .args(["-Qq", "apexshot"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn dpkg_has_apexshot_package() -> bool {
+    std::process::Command::new("dpkg-query")
+        .args(["-W", "-f=${Status}", "apexshot"])
+        .output()
+        .map(|output| {
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("install ok installed")
+        })
+        .unwrap_or(false)
+}
+
+fn package_uninstall_command_for(manager: &str, needs_sudo: bool) -> Option<(String, Vec<String>)> {
+    match (manager, needs_sudo) {
+        ("pacman", true) => Some((
+            "sudo".into(),
+            vec!["pacman".into(), "-R".into(), "apexshot".into()],
+        )),
+        ("pacman", false) => Some(("pacman".into(), vec!["-R".into(), "apexshot".into()])),
+        ("apt", true) => Some((
+            "sudo".into(),
+            vec!["apt".into(), "remove".into(), "apexshot".into()],
+        )),
+        ("apt", false) => Some(("apt".into(), vec!["remove".into(), "apexshot".into()])),
+        _ => None,
+    }
+}
+
+fn package_uninstall_command(manager: &str) -> Option<(String, Vec<String>)> {
+    package_uninstall_command_for(manager, !is_running_as_root())
+}
+
+fn uninstall_package_managed_app_if_present() -> bool {
+    let packaged_binary = std::path::Path::new("/usr/bin/apexshot");
+    let packaged_capture = std::path::Path::new("/usr/bin/apexshot-capture");
+    if !packaged_binary.exists() && !packaged_capture.exists() {
+        return false;
+    }
+
+    let manager = if command_exists("pacman") && pacman_has_apexshot_package() {
+        Some("pacman")
+    } else if command_exists("dpkg-query") && dpkg_has_apexshot_package() {
+        Some("apt")
+    } else {
+        None
+    };
+
+    let Some(manager) = manager else {
+        eprintln!("Error: package-managed ApexShot files exist under /usr/bin, but no supported package manager owns an installed 'apexshot' package.");
+        eprintln!("Remove ApexShot with your distribution package manager, or remove the package files manually.");
+        std::process::exit(1);
+    };
+
+    let Some((program, args)) = package_uninstall_command(manager) else {
+        eprintln!("Error: unsupported package manager for ApexShot uninstall: {manager}");
+        std::process::exit(1);
+    };
+
+    println!("Package-managed ApexShot install detected; uninstalling with {manager}.");
+    let status = std::process::Command::new(&program).args(&args).status();
+    match status {
+        Ok(status) if status.success() => {
+            println!("✓ Package-managed ApexShot removed");
+            true
+        }
+        Ok(status) => {
+            eprintln!("Error: package uninstall failed with status {status}");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Error: failed to run package uninstall command: {e}");
             std::process::exit(1);
         }
     }
@@ -955,18 +1064,24 @@ fn uninstall_autostart(dev_install: bool) {
     }
 }
 
-fn uninstall_binary(dev_install: bool) {
-    let paths: &[&str] = if dev_install {
+fn uninstall_binary_paths(dev_install: bool) -> &'static [&'static str] {
+    if dev_install {
         &[
             app_identity::DEV_WRAPPER,
             "/usr/local/lib/apexshot-dev/apexshot",
             "/usr/local/lib/apexshot-dev/apexshot-capture",
         ]
     } else {
-        &["/usr/local/bin/apexshot", "/usr/local/bin/apexshot-capture"]
-    };
+        &[
+            "/usr/local/bin/apexshot",
+            "/usr/local/bin/apexshot-capture",
+            "/usr/local/bin/apexshot-native-host",
+        ]
+    }
+}
 
-    for path in paths {
+fn uninstall_binary(dev_install: bool) {
+    for path in uninstall_binary_paths(dev_install) {
         match std::fs::remove_file(path) {
             Ok(()) => println!("✓ Removed {}", path),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -1874,7 +1989,8 @@ fn run_capture(args: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::capture_daemon_action;
+    use crate::{capture_daemon_action, package_uninstall_command_for, uninstall_binary_paths};
+
     #[test]
     fn crosshair_capture_type_delegates_to_daemon() {
         assert_eq!(
@@ -1889,6 +2005,28 @@ mod tests {
         assert_eq!(capture_daemon_action("screen"), Some("capture_screen"));
         assert_eq!(capture_daemon_action("window"), Some("capture_window"));
         assert_eq!(capture_daemon_action("unknown"), None);
+    }
+
+    #[test]
+    fn package_uninstall_command_uses_pacman_for_arch_package_installs() {
+        assert_eq!(
+            package_uninstall_command_for("pacman", false),
+            Some(("pacman".into(), vec!["-R".into(), "apexshot".into()]))
+        );
+        assert_eq!(
+            package_uninstall_command_for("pacman", true),
+            Some((
+                "sudo".into(),
+                vec!["pacman".into(), "-R".into(), "apexshot".into()]
+            ))
+        );
+    }
+
+    #[test]
+    fn local_uninstall_removes_source_install_helpers() {
+        assert!(uninstall_binary_paths(false).contains(&"/usr/local/bin/apexshot"));
+        assert!(uninstall_binary_paths(false).contains(&"/usr/local/bin/apexshot-capture"));
+        assert!(uninstall_binary_paths(false).contains(&"/usr/local/bin/apexshot-native-host"));
     }
 }
 
