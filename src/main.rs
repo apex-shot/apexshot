@@ -595,6 +595,14 @@ fn dpkg_has_apexshot_package() -> bool {
         .unwrap_or(false)
 }
 
+fn rpm_has_apexshot_package() -> bool {
+    std::process::Command::new("rpm")
+        .args(["-q", "apexshot"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn package_uninstall_command_for(manager: &str, needs_sudo: bool) -> Option<(String, Vec<String>)> {
     match (manager, needs_sudo) {
         ("pacman", true) => Some((
@@ -607,6 +615,23 @@ fn package_uninstall_command_for(manager: &str, needs_sudo: bool) -> Option<(Str
             vec!["apt".into(), "remove".into(), "apexshot".into()],
         )),
         ("apt", false) => Some(("apt".into(), vec!["remove".into(), "apexshot".into()])),
+        ("zypper", true) => Some((
+            "sudo".into(),
+            vec![
+                "zypper".into(),
+                "--non-interactive".into(),
+                "remove".into(),
+                "apexshot".into(),
+            ],
+        )),
+        ("zypper", false) => Some((
+            "zypper".into(),
+            vec![
+                "--non-interactive".into(),
+                "remove".into(),
+                "apexshot".into(),
+            ],
+        )),
         _ => None,
     }
 }
@@ -626,6 +651,8 @@ fn uninstall_package_managed_app_if_present() -> bool {
         Some("pacman")
     } else if command_exists("dpkg-query") && dpkg_has_apexshot_package() {
         Some("apt")
+    } else if command_exists("zypper") && command_exists("rpm") && rpm_has_apexshot_package() {
+        Some("zypper")
     } else {
         None
     };
@@ -2018,6 +2045,33 @@ mod tests {
             Some((
                 "sudo".into(),
                 vec!["pacman".into(), "-R".into(), "apexshot".into()]
+            ))
+        );
+    }
+
+    #[test]
+    fn package_uninstall_command_uses_zypper_for_opensuse_package_installs() {
+        assert_eq!(
+            package_uninstall_command_for("zypper", false),
+            Some((
+                "zypper".into(),
+                vec![
+                    "--non-interactive".into(),
+                    "remove".into(),
+                    "apexshot".into()
+                ]
+            ))
+        );
+        assert_eq!(
+            package_uninstall_command_for("zypper", true),
+            Some((
+                "sudo".into(),
+                vec![
+                    "zypper".into(),
+                    "--non-interactive".into(),
+                    "remove".into(),
+                    "apexshot".into()
+                ]
             ))
         );
     }

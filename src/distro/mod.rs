@@ -250,7 +250,7 @@ impl DistroSupport {
                 family,
                 tier: SupportTier::ImplementedNeedsTesting,
                 package_manager: "zypper/rpm",
-                install_command: "scripts/opensuse-install.sh",
+                install_command: "scripts/opensuse-install.sh or packaging/opensuse/apexshot.spec",
                 wayland_capture_method: "XDG ScreenCast portal + PipeWire",
                 required_runtime_packages: &[
                     "xdg-desktop-portal",

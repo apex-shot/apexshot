@@ -186,9 +186,21 @@ available. Direct command:
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-install.sh | bash
 ```
 
-The openSUSE path currently builds from source, installs binaries into
-`/usr/local/bin`, and installs the tested zypper dependency set. RPM packaging
-is still pending.
+The direct openSUSE installer builds from source, installs binaries into
+`/usr/local/bin`, and installs the tested zypper dependency set.
+
+An RPM spec is available for package-managed installs:
+
+```bash
+git clone https://github.com/apex-shot/apexshot.git
+cd apexshot
+scripts/build-opensuse-rpm.sh
+sudo zypper install target/opensuse-rpmbuild/RPMS/*/apexshot-*.rpm
+```
+
+The RPM path is intended for openSUSE Tumbleweed / Leap packaging validation
+and future OBS work. Runtime testing on KDE Plasma Wayland is still in
+progress.
 
 ### Updating
 

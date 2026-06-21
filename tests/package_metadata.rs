@@ -197,3 +197,77 @@ fn opensuse_installer_contains_reported_dependency_set() {
         "generic updater should dispatch to the openSUSE updater"
     );
 }
+
+#[test]
+fn opensuse_rpm_spec_matches_project_packaging_contract() {
+    let cargo_toml = include_str!("../Cargo.toml");
+    let spec = include_str!("../packaging/opensuse/apexshot.spec");
+    let build_script = include_str!("../scripts/build-opensuse-rpm.sh");
+    let main_rs = include_str!("../src/main.rs");
+
+    let cargo_version = cargo_toml
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("version = \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .expect("Cargo.toml should declare package version");
+    let spec_version = spec
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Version:"))
+        .map(str::trim)
+        .expect("openSUSE spec should declare Version");
+
+    assert_eq!(
+        spec_version, cargo_version,
+        "openSUSE RPM spec Version must match Cargo.toml package version"
+    );
+
+    for package in [
+        "gtk4-devel",
+        "gtk4-layer-shell-devel",
+        "libadwaita-devel",
+        "libQt5Core-devel",
+        "libqt5-qtx11extras-devel",
+        "pipewire-devel",
+        "tesseract-ocr-devel",
+        "gstreamer-plugin-pipewire",
+        "xdg-desktop-portal",
+        "wl-clipboard",
+        "ffmpeg",
+    ] {
+        assert!(
+            spec.contains(package),
+            "openSUSE RPM spec should include package {package}"
+        );
+    }
+
+    for payload in [
+        "%{_bindir}/apexshot",
+        "%{_bindir}/apexshot-capture",
+        "%{_bindir}/apexshot-native-host",
+        "%{_datadir}/applications/io.github.codegoddy.apexshot.desktop",
+        "%{_datadir}/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/",
+        "%{_datadir}/apexshot/",
+        "%{_sysconfdir}/opt/chrome/NativeMessagingHosts/io.github.codegoddy.apexshot.json",
+        "%{_sysconfdir}/chromium/NativeMessagingHosts/io.github.codegoddy.apexshot.json",
+    ] {
+        assert!(
+            spec.contains(payload),
+            "openSUSE RPM spec should package {payload}"
+        );
+    }
+
+    assert!(
+        build_script.contains("git -C \"$REPO_DIR\" archive")
+            && build_script.contains("rpmbuild")
+            && build_script.contains("_topdir ${RPM_TOPDIR}"),
+        "openSUSE RPM build helper should create a source archive and call rpmbuild with a local topdir"
+    );
+
+    assert!(
+        main_rs.contains("rpm_has_apexshot_package")
+            && main_rs.contains("\"zypper\"")
+            && main_rs.contains("\"--non-interactive\"")
+            && main_rs.contains("\"remove\""),
+        "RPM package-managed installs should uninstall through zypper"
+    );
+}
