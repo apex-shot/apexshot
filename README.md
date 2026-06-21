@@ -128,8 +128,8 @@ support is improving over time.
 
 ### Quick Install — Recommended
 
-Run the interactive installer. It detects Ubuntu/Debian vs Arch Linux,
-installs the right package type, and sets up the GNOME extension:
+Run the interactive installer. It detects Ubuntu/Debian, Arch Linux, or
+openSUSE and selects the matching install path:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
@@ -177,6 +177,19 @@ AUR publishing notes for maintainers live in
 > **Note:** The package installs the GNOME Shell extension system-wide.
 > Restart GNOME Shell (log out and back in on Wayland) to activate it.
 
+### openSUSE Tumbleweed / Leap
+
+The generic installer above will select this automatically when `zypper` is
+available. Direct command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-install.sh | bash
+```
+
+The openSUSE path currently builds from source, installs binaries into
+`/usr/local/bin`, and installs the tested zypper dependency set. RPM packaging
+is still pending.
+
 ### Updating
 
 The generic updater detects the distro:
@@ -195,6 +208,12 @@ Direct Arch Linux command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-update.sh | bash
+```
+
+Direct openSUSE command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-update.sh | bash
 ```
 
 ### Build from Source

@@ -136,3 +136,64 @@ fn arch_pkgbuild_version_matches_cargo_package_version() {
         "Arch PKGBUILD source should download the matching release tag"
     );
 }
+
+#[test]
+fn opensuse_installer_contains_reported_dependency_set() {
+    let install_script = include_str!("../scripts/opensuse-install.sh");
+    let update_script = include_str!("../scripts/opensuse-update.sh");
+    let generic_install = include_str!("../scripts/install.sh");
+    let generic_update = include_str!("../scripts/update.sh");
+
+    for package in [
+        "build-essential",
+        "cmake",
+        "pkg-config",
+        "libQt5Core-devel",
+        "libQt5Widgets-devel",
+        "libQt5DBus-devel",
+        "libQt5Network-devel",
+        "libqt5-qtx11extras-devel",
+        "gstreamer-plugins-base-devel",
+        "pipewire-devel",
+        "tesseract-ocr-devel",
+        "libgraphene-devel",
+        "gtk4-devel",
+        "gtk4-layer-shell-devel",
+        "libadwaita-devel",
+        "clang",
+        "dbus-1-devel",
+        "libXtst-devel",
+        "curl-devel",
+        "git",
+        "rust",
+        "cargo",
+    ] {
+        assert!(
+            install_script.contains(package),
+            "openSUSE installer should include dependency {package}"
+        );
+    }
+
+    assert!(
+        install_script.contains("zypper --non-interactive install --needed"),
+        "openSUSE installer should install dependencies through zypper"
+    );
+    assert!(
+        install_script.contains("cargo build --release"),
+        "openSUSE installer should build ApexShot from source until RPM packaging exists"
+    );
+    assert!(
+        update_script.contains("opensuse-install.sh") && update_script.contains("--force"),
+        "openSUSE updater should refresh the source install through the installer"
+    );
+    assert!(
+        generic_install.contains("command -v zypper")
+            && generic_install.contains("opensuse-install.sh"),
+        "generic installer should dispatch to the openSUSE installer"
+    );
+    assert!(
+        generic_update.contains("command -v zypper")
+            && generic_update.contains("opensuse-update.sh"),
+        "generic updater should dispatch to the openSUSE updater"
+    );
+}
