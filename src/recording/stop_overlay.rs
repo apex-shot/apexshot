@@ -378,10 +378,23 @@ fn setup_window(
 
     let desktop_bounds = display_bounds().unwrap_or((0, 0, 1920, 1080));
     let (screen_w, screen_h) = (desktop_bounds.2, desktop_bounds.3);
-    let initial_pos = compute_bar_position(&params, desktop_bounds);
 
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
+
+    let initial_pos = if layer_shell_active {
+        if let Some(ref m) = monitor {
+            let geom = m.geometry();
+            let mut local_params = params.clone();
+            local_params.capture_x -= geom.x();
+            local_params.capture_y -= geom.y();
+            compute_bar_position(&local_params, (0, 0, geom.width(), geom.height()))
+        } else {
+            compute_bar_position(&params, desktop_bounds)
+        }
+    } else {
+        compute_bar_position(&params, desktop_bounds)
+    };
 
     let bar_w_f = compute_bar_width(params.show_timer);
     let bar_h_f = BAR_HEIGHT;
@@ -405,16 +418,7 @@ fn setup_window(
         )
     };
 
-    let initial_pos_mapped = if layer_shell_active {
-        if let Some(ref m) = monitor {
-            let geom = m.geometry();
-            (initial_pos.0 - geom.x(), initial_pos.1 - geom.y())
-        } else {
-            initial_pos
-        }
-    } else {
-        initial_pos
-    };
+    let initial_pos_mapped = initial_pos;
 
     let current_pos = Rc::new(Cell::new(initial_pos_mapped));
     let drag_start_pos = Rc::new(Cell::new(initial_pos_mapped));

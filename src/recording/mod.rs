@@ -205,6 +205,7 @@ struct WebcamPreviewHandle {
 #[derive(Debug)]
 struct BuiltPipeline {
     wayland_source: Option<WaylandSource>,
+    profile: &'static EncoderProfile,
     encoder_name: String,
     encoder_props: String,
     final_path: PathBuf,
@@ -608,6 +609,7 @@ impl Default for RecordingConfig {
     }
 }
 
+#[derive(Debug)]
 struct EncoderProfile {
     name: &'static str,
     encoder: &'static str,        // GStreamer element name (used by X11 path)
@@ -1162,7 +1164,6 @@ async fn start_recording_with_commands(
         if should_use_wf_recorder(&config) {
             return record_with_wf_recorder(config, command_rx).await;
         }
-        // GIF on wlroots: record via wf-recorder to a temp file, then convert to GIF
         if config.output_path.extension().is_some_and(|e| e == "gif") {
             return record_gif_with_wf_recorder(config, command_rx).await;
         }
@@ -1171,12 +1172,27 @@ async fn start_recording_with_commands(
         ));
     }
 
-    // Check if GIF requested
     if config.output_path.extension().is_some_and(|e| e == "gif") {
         return record_gif_rust_with_commands(config, command_rx).await;
     }
 
-    // Check ffmpeg availability (needed for encoding)
+    let built = prepare_recording_backend(config).await?;
+    start_recording_with_prepared_backend(built, command_rx).await
+}
+
+async fn prepare_recording_backend(config: RecordingConfig) -> RecordResult<BuiltPipeline> {
+    if is_wlroots_session() {
+        return Err(RecordError::UnsupportedBackend(
+            "wlroots recording must be prepared through its dedicated backend".into(),
+        ));
+    }
+
+    if config.output_path.extension().is_some_and(|e| e == "gif") {
+        return Err(RecordError::UnsupportedBackend(
+            "GIF recording must be prepared through its dedicated backend".into(),
+        ));
+    }
+
     if std::process::Command::new("ffmpeg")
         .arg("-version")
         .output()
@@ -1185,7 +1201,6 @@ async fn start_recording_with_commands(
         return Err(RecordError::NoEncoderFound);
     }
 
-    // Select encoder based on output extension
     let (profile, final_path) = select_encoder(config.output_path.as_path())?;
     let effective_config = normalize_recording_config_for_profile(profile, &config);
     println!("Using Encoder: {} ({})", profile.name, profile.encoder);
@@ -1197,17 +1212,19 @@ async fn start_recording_with_commands(
         );
     }
 
-    // Build pipeline (portal session + PipeWire fd for Wayland)
-    let built = build_pipeline(&effective_config, profile, final_path.as_path()).await?;
+    build_pipeline(&effective_config, profile, final_path.as_path()).await
+}
 
-    // For Wayland: use native PipeWire capture + ffmpeg pipe
+async fn start_recording_with_prepared_backend(
+    built: BuiltPipeline,
+    command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
     if let Some(wayland_source) = built.wayland_source {
-        // Clone what we need before the move
         let final_path = built.final_path.clone();
         let encoder_name = built.encoder_name.clone();
         let encoder_props = built.encoder_props.clone();
         let config = built.config.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        return tokio::task::spawn_blocking(move || {
             record_wayland_with_ffmpeg_sync(
                 wayland_source,
                 &final_path,
@@ -1219,11 +1236,9 @@ async fn start_recording_with_commands(
         })
         .await
         .map_err(|e| RecordError::GStreamerError(format!("Join error: {e}")))?;
-        return result;
     }
 
-    // For X11: keep GStreamer ximagesrc path
-    record_x11_with_gstreamer(&effective_config, profile, &final_path, command_rx).await
+    record_x11_with_gstreamer(&built.config, built.profile, &built.final_path, command_rx).await
 }
 
 pub fn copy_to_clipboard(path: &Path) -> RecordResult<()> {
@@ -1933,7 +1948,7 @@ fn video_post_encoder_caps(profile: &EncoderProfile) -> &'static str {
 
 async fn build_pipeline(
     config: &RecordingConfig,
-    profile: &EncoderProfile,
+    profile: &'static EncoderProfile,
     output_path: &std::path::Path,
 ) -> RecordResult<BuiltPipeline> {
     // Get video source (Portal session + PipeWire fd for Wayland)
@@ -1949,6 +1964,7 @@ async fn build_pipeline(
 
     Ok(BuiltPipeline {
         wayland_source,
+        profile,
         encoder_name: profile.ffmpeg_encoder.to_string(),
         encoder_props,
         final_path: output_path.to_path_buf(),
@@ -2206,8 +2222,22 @@ async fn record_gif_wayland_native(
     video_config.mic_source = None;
     video_config.speaker_source = None;
 
-    let (_recorded_path, stop_action) =
-        Box::pin(start_recording_with_commands(video_config, command_rx)).await?;
+    let prepared_video_backend = if is_wlroots_session() {
+        None
+    } else {
+        Some(prepare_recording_backend(video_config.clone()).await?)
+    };
+
+    let (_recorded_path, stop_action) = if let Some(prepared_video_backend) = prepared_video_backend
+    {
+        Box::pin(start_recording_with_prepared_backend(
+            prepared_video_backend,
+            command_rx,
+        ))
+        .await?
+    } else {
+        Box::pin(start_recording_with_commands(video_config, command_rx)).await?
+    };
 
     if stop_action == RecordingTerminalAction::Discard {
         let _ = std::fs::remove_file(&temp_path);
@@ -2781,6 +2811,13 @@ pub async fn run_recording_with_native_controls(
     config: RecordingConfig,
     params: RecordingControlsParams,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
+    let prepared_backend =
+        if is_wlroots_session() || config.output_path.extension().is_some_and(|e| e == "gif") {
+            None
+        } else {
+            Some(prepare_recording_backend(config.clone()).await?)
+        };
+
     let session_id = format!(
         "recording-{}-{}",
         std::process::id(),
@@ -2886,7 +2923,11 @@ pub async fn run_recording_with_native_controls(
     });
 
     control_server.set_command_sender(control_command_tx);
-    let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
+    let outcome = if let Some(prepared_backend) = prepared_backend {
+        start_recording_with_prepared_backend(prepared_backend, Some(command_rx)).await
+    } else {
+        start_recording_with_commands(config.clone(), Some(command_rx)).await
+    };
     control_server.clear_command_sender();
 
     dbus_forward.abort();
@@ -2941,6 +2982,13 @@ async fn run_recording_with_shell_controls(
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     visibility_policy: crate::gnome_shell::RecordingControlsVisibilityPolicy,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
+    let mut prepared_backend =
+        if is_wlroots_session() || config.output_path.extension().is_some_and(|e| e == "gif") {
+            None
+        } else {
+            Some(prepare_recording_backend(config.clone()).await?)
+        };
+
     let session_id = format!(
         "recording-{}-{}",
         std::process::id(),
@@ -2974,7 +3022,11 @@ async fn run_recording_with_shell_controls(
     let final_outcome = loop {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         control_server.set_command_sender(command_tx);
-        let outcome = start_recording_with_commands(config.clone(), Some(command_rx)).await;
+        let outcome = if let Some(prepared) = prepared_backend.take() {
+            start_recording_with_prepared_backend(prepared, Some(command_rx)).await
+        } else {
+            start_recording_with_commands(config.clone(), Some(command_rx)).await
+        };
         control_server.clear_command_sender();
         let outcome = match outcome {
             Ok(outcome) => outcome,
@@ -2993,6 +3045,13 @@ async fn run_recording_with_shell_controls(
                     notify_daemon_event(event);
                 }
                 let _ = std::fs::remove_file(&path);
+                prepared_backend = if is_wlroots_session()
+                    || config.output_path.extension().is_some_and(|e| e == "gif")
+                {
+                    None
+                } else {
+                    Some(prepare_recording_backend(config.clone()).await?)
+                };
                 continue;
             }
             (path, action @ RecordingTerminalAction::Save) => {
