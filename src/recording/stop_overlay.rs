@@ -120,6 +120,8 @@ pub struct RecordingControlsParams {
     pub is_fullscreen: bool,
     pub show_timer: bool,
     pub use_shell_mask: bool,
+    #[serde(default = "default_dim_screen")]
+    pub dim_screen: bool,
     pub show_webcam: bool,
     pub webcam_device: i32,
     pub webcam_size: usize,
@@ -132,6 +134,10 @@ pub struct RecordingControlsParams {
     pub session_id: Option<String>,
 }
 
+fn default_dim_screen() -> bool {
+    true
+}
+
 impl Default for RecordingControlsParams {
     fn default() -> Self {
         Self {
@@ -142,6 +148,7 @@ impl Default for RecordingControlsParams {
             is_fullscreen: false,
             show_timer: true,
             use_shell_mask: false,
+            dim_screen: default_dim_screen(),
             show_webcam: false,
             webcam_device: -1,
             webcam_size: 1,
@@ -173,6 +180,7 @@ pub fn run_recording_controls(
         is_fullscreen: params.is_fullscreen,
         show_timer: params.show_timer,
         use_shell_mask: params.use_shell_mask,
+        dim_screen: params.dim_screen,
         show_webcam: params.show_webcam,
         webcam_device: params.webcam_device,
         webcam_size: params.webcam_size,
@@ -295,6 +303,7 @@ pub fn run_recording_stop_overlay(
             is_fullscreen: true,
             show_timer: false,
             use_shell_mask: false,
+            dim_screen: false,
             show_webcam: false,
             webcam_device: -1,
             webcam_size: 1,
@@ -314,20 +323,26 @@ pub fn run_recording_stop_overlay(
 
 fn compute_bar_position(
     params: &RecordingControlsParams,
-    screen_w: i32,
-    screen_h: i32,
+    desktop_bounds: (i32, i32, i32, i32),
 ) -> (i32, i32) {
     let bar_w = compute_bar_width(params.show_timer);
     let bar_h = BAR_HEIGHT;
     let margin = FEATURE_PANEL_MARGIN;
     let top_gap = FEATURE_PANEL_TOP_GAP;
-    let screen_w_f = screen_w as f64;
-    let screen_h_f = screen_h as f64;
+    let (desktop_x, desktop_y, desktop_w, desktop_h) = desktop_bounds;
+    let desktop_left = desktop_x as f64;
+    let desktop_top = desktop_y as f64;
+    let desktop_right = (desktop_x + desktop_w) as f64;
+    let desktop_bottom = (desktop_y + desktop_h) as f64;
+
+    let clamp_x_min = desktop_left + margin;
+    let clamp_x_max = (desktop_right - bar_w - margin).max(clamp_x_min);
+    let clamp_y_min = desktop_top + margin;
+    let clamp_y_max = (desktop_bottom - bar_h - margin).max(clamp_y_min);
 
     if params.is_fullscreen || params.capture_w <= 0 || params.capture_h <= 0 {
-        let x =
-            ((screen_w_f - bar_w) / 2.0).clamp(margin, (screen_w_f - bar_w - margin).max(margin));
-        return (x.round() as i32, margin.round() as i32);
+        let x = (desktop_left + (desktop_w as f64 - bar_w) / 2.0).clamp(clamp_x_min, clamp_x_max);
+        return (x.round() as i32, clamp_y_min.round() as i32);
     }
 
     let sel_x = params.capture_x as f64;
@@ -335,16 +350,15 @@ fn compute_bar_position(
     let sel_w = params.capture_w as f64;
     let sel_h = params.capture_h as f64;
 
-    let x =
-        (sel_x + (sel_w - bar_w) / 2.0).clamp(margin, (screen_w_f - bar_w - margin).max(margin));
+    let x = (sel_x + (sel_w - bar_w) / 2.0).clamp(clamp_x_min, clamp_x_max);
 
     let below_y = sel_y + sel_h + top_gap;
     let above_y = sel_y - top_gap - bar_h;
 
-    let y = if below_y + bar_h + margin <= screen_h_f {
+    let y = if below_y + bar_h + margin <= desktop_bottom {
         below_y
     } else {
-        above_y.clamp(margin, (screen_h_f - bar_h - margin).max(margin))
+        above_y.clamp(clamp_y_min, clamp_y_max)
     };
 
     (x.round() as i32, y.round() as i32)
@@ -362,17 +376,33 @@ fn setup_window(
     let display = gdk::Display::default().expect("No display");
     let monitor = monitor_for_capture(&display, &params);
 
-    let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
-    let initial_pos = compute_bar_position(&params, screen_w, screen_h);
+    let desktop_bounds = display_bounds().unwrap_or((0, 0, 1920, 1080));
+    let (screen_w, screen_h) = (desktop_bounds.2, desktop_bounds.3);
+    let initial_pos = compute_bar_position(&params, desktop_bounds);
 
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
+
+    let bar_w_f = compute_bar_width(params.show_timer);
+    let bar_h_f = BAR_HEIGHT;
+    let bar_w_i = bar_w_f.ceil() as i32;
+    let bar_h_i = bar_h_f.ceil() as i32;
 
     let (clamp_w, clamp_h) = if let Some(ref m) = monitor {
         let geom = m.geometry();
         (geom.width(), geom.height())
     } else {
         (screen_w, screen_h)
+    };
+    let (drag_min_x, drag_min_y, drag_max_x, drag_max_y) = if layer_shell_active {
+        (0, 0, (clamp_w - bar_w_i).max(0), (clamp_h - bar_h_i).max(0))
+    } else {
+        (
+            desktop_bounds.0,
+            desktop_bounds.1,
+            desktop_bounds.0 + (desktop_bounds.2 - bar_w_i).max(0),
+            desktop_bounds.1 + (desktop_bounds.3 - bar_h_i).max(0),
+        )
     };
 
     let initial_pos_mapped = if layer_shell_active {
@@ -388,11 +418,6 @@ fn setup_window(
 
     let current_pos = Rc::new(Cell::new(initial_pos_mapped));
     let drag_start_pos = Rc::new(Cell::new(initial_pos_mapped));
-
-    let bar_w_f = compute_bar_width(params.show_timer);
-    let bar_h_f = BAR_HEIGHT;
-    let bar_w_i = bar_w_f.ceil() as i32;
-    let bar_h_i = bar_h_f.ceil() as i32;
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -690,8 +715,8 @@ fn setup_window(
         drag_start_pos,
         move |_, dx, dy| {
             let (start_x, start_y) = drag_start_pos.get();
-            let next_x = (start_x + dx.round() as i32).clamp(0, (clamp_w - bar_w_i).max(0));
-            let next_y = (start_y + dy.round() as i32).clamp(0, (clamp_h - bar_h_i).max(0));
+            let next_x = (start_x + dx.round() as i32).clamp(drag_min_x, drag_max_x);
+            let next_y = (start_y + dy.round() as i32).clamp(drag_min_y, drag_max_y);
             current_pos.set((next_x, next_y));
             if layer_shell_active {
                 window.set_margin(Edge::Left, next_x);
@@ -975,6 +1000,7 @@ fn setup_countdown_window(
 
 fn setup_dim_windows(app: &Application, params: RecordingControlsParams) -> Vec<ApplicationWindow> {
     if params.use_shell_mask
+        || !params.dim_screen
         || params.is_fullscreen
         || params.capture_w <= 0
         || params.capture_h <= 0
@@ -1000,11 +1026,14 @@ fn setup_dim_windows(app: &Application, params: RecordingControlsParams) -> Vec<
         return Vec::new();
     };
     let geometry = monitor.geometry();
-    // Coordinates from overlay are already monitor-local, no need to subtract geometry
-    let local_x = params.capture_x.clamp(0, geometry.width());
-    let local_y = params.capture_y.clamp(0, geometry.height());
-    let local_right = (params.capture_x + params.capture_w).clamp(0, geometry.width());
-    let local_bottom = (params.capture_y + params.capture_h).clamp(0, geometry.height());
+    // The C++ selector reports desktop-global coordinates. Convert them into
+    // monitor-local coordinates before creating per-output mask windows.
+    let local_x = (params.capture_x - geometry.x()).clamp(0, geometry.width());
+    let local_y = (params.capture_y - geometry.y()).clamp(0, geometry.height());
+    let local_right =
+        (params.capture_x + params.capture_w - geometry.x()).clamp(0, geometry.width());
+    let local_bottom =
+        (params.capture_y + params.capture_h - geometry.y()).clamp(0, geometry.height());
 
     let rects = vec![
         (0, 0, geometry.width(), local_y),
@@ -1409,11 +1438,51 @@ fn draw_discard_glyph(cr: &cairo::Context, rect: RectF, alpha: f64) {
     });
 }
 
-fn display_size() -> Option<(i32, i32)> {
-    let display = gdk::Display::default()?;
+fn display_bounds() -> Option<(i32, i32, i32, i32)> {
+    display_bounds_from_monitor_geometries(iter_monitor_geometries())
+}
+
+pub(super) fn display_bounds_from_monitor_geometries<I>(
+    geometries: I,
+) -> Option<(i32, i32, i32, i32)>
+where
+    I: IntoIterator<Item = (i32, i32, i32, i32)>,
+{
+    let mut min_left = i32::MAX;
+    let mut min_top = i32::MAX;
+    let mut max_right = i32::MIN;
+    let mut max_bottom = i32::MIN;
+    let mut found = false;
+
+    for (x, y, width, height) in geometries {
+        if width <= 0 || height <= 0 {
+            continue;
+        }
+        min_left = min_left.min(x);
+        min_top = min_top.min(y);
+        max_right = max_right.max(x + width);
+        max_bottom = max_bottom.max(y + height);
+        found = true;
+    }
+
+    if found && max_right > min_left && max_bottom > min_top {
+        Some((
+            min_left,
+            min_top,
+            max_right - min_left,
+            max_bottom - min_top,
+        ))
+    } else {
+        None
+    }
+}
+
+fn iter_monitor_geometries() -> Vec<(i32, i32, i32, i32)> {
+    let Some(display) = gdk::Display::default() else {
+        return Vec::new();
+    };
     let monitors = display.monitors();
-    let mut max_right = 0;
-    let mut max_bottom = 0;
+    let mut geometries = Vec::new();
     for idx in 0..monitors.n_items() {
         let Some(item) = monitors.item(idx) else {
             continue;
@@ -1422,14 +1491,18 @@ fn display_size() -> Option<(i32, i32)> {
             continue;
         };
         let geometry = monitor.geometry();
-        max_right = max_right.max(geometry.x() + geometry.width());
-        max_bottom = max_bottom.max(geometry.y() + geometry.height());
+        geometries.push((
+            geometry.x(),
+            geometry.y(),
+            geometry.width(),
+            geometry.height(),
+        ));
     }
-    if max_right > 0 && max_bottom > 0 {
-        Some((max_right, max_bottom))
-    } else {
-        None
-    }
+    geometries
+}
+
+fn display_size() -> Option<(i32, i32)> {
+    display_bounds().map(|(_, _, width, height)| (width, height))
 }
 
 fn monitor_for_capture(
@@ -1456,6 +1529,24 @@ fn monitor_for_capture(
     }
 
     None
+}
+
+#[cfg(test)]
+pub(super) fn monitor_index_for_capture_from_geometries(
+    geometries: &[(i32, i32, i32, i32)],
+    params: &RecordingControlsParams,
+) -> Option<usize> {
+    let center_x = params.capture_x + params.capture_w / 2;
+    let center_y = params.capture_y + params.capture_h / 2;
+
+    geometries.iter().position(|(x, y, width, height)| {
+        *width > 0
+            && *height > 0
+            && center_x >= *x
+            && center_x < *x + *width
+            && center_y >= *y
+            && center_y < *y + *height
+    })
 }
 
 fn send_stop_action(stop_tx: &Arc<Mutex<Option<oneshot::Sender<StopAction>>>>, action: StopAction) {
@@ -1683,18 +1774,19 @@ fn setup_webcam_window(
         .as_ref()
         .and_then(|display| monitor_for_capture(display, &params));
     let monitor_geom = monitor.as_ref().map(|m| m.geometry());
+    let desktop_bounds = display_bounds().unwrap_or((0, 0, screen_w, screen_h));
     let (mut webcam_w, mut webcam_h) = recording_webcam_size(&params, screen_w, screen_h);
     webcam_w = webcam_w.max(1);
     webcam_h = webcam_h.max(1);
     window.set_default_size(webcam_w, webcam_h);
 
     let bounds_x = if params.is_fullscreen {
-        0
+        desktop_bounds.0
     } else {
         params.capture_x
     };
     let bounds_y = if params.is_fullscreen {
-        0
+        desktop_bounds.1
     } else {
         params.capture_y
     };
@@ -1715,6 +1807,14 @@ fn setup_webcam_window(
     let y = (bounds_y as f64
         + (max_y - bounds_y) as f64 * (1.0 - params.webcam_rel_y.clamp(0.0, 1.0)))
     .round() as i32;
+    let x = x.clamp(
+        desktop_bounds.0,
+        desktop_bounds.0 + (desktop_bounds.2 - webcam_w).max(0),
+    );
+    let y = y.clamp(
+        desktop_bounds.1,
+        desktop_bounds.1 + (desktop_bounds.3 - webcam_h).max(0),
+    );
 
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();

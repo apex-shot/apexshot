@@ -2369,6 +2369,7 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             is_fullscreen: true,
             show_timer: true,
             use_shell_mask: false,
+            dim_screen: false,
             show_webcam: false,
             webcam_device: -1,
             webcam_size: 1,

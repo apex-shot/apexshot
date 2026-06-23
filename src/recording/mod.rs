@@ -17,6 +17,8 @@ use crate::{
 mod control_session;
 pub mod editor;
 mod stop_overlay;
+#[cfg(test)]
+mod stop_overlay_tests;
 use control_session::RecordingControlServer;
 pub use control_session::{
     has_active_recording_control, send_active_recording_command, toggle_active_recording_pause,
@@ -2718,6 +2720,7 @@ pub fn prepare_overlay_recording_request(
         is_fullscreen: request.fullscreen,
         show_timer: true,
         use_shell_mask,
+        dim_screen: request.dim_screen,
         show_webcam: request.webcam,
         webcam_device: request.webcam_device,
         webcam_size: request.webcam_size as usize,
@@ -3296,6 +3299,7 @@ mod tests {
                 is_fullscreen: false,
                 show_timer: true,
                 use_shell_mask: false,
+                dim_screen: false,
                 show_webcam: false,
                 webcam_device: -1,
                 webcam_size: 1,
@@ -3426,6 +3430,7 @@ mod tests {
                 is_fullscreen: true,
                 show_timer: true,
                 use_shell_mask: false,
+                dim_screen: true,
                 show_webcam: false,
                 webcam_device: -1,
                 webcam_size: 1,
@@ -3760,6 +3765,7 @@ mod tests {
                 is_fullscreen: false,
                 show_timer: true,
                 use_shell_mask: shell_supported,
+                dim_screen: true,
                 show_webcam: false,
                 webcam_device: -1,
                 webcam_size: 1,
@@ -3836,6 +3842,7 @@ mod tests {
                 is_fullscreen: true,
                 show_timer: true,
                 use_shell_mask: false, // fullscreen never uses mask
+                dim_screen: true,
                 show_webcam: false,
                 webcam_device: -1,
                 webcam_size: 1,
