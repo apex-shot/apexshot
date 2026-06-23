@@ -2381,12 +2381,7 @@ fn send_desktop_notification(summary: &str, body: &str) {
 
 /// Spawn `apexshot preview <path>` as a subprocess so it gets its own GTK context.
 fn show_preview_subprocess(path: std::path::PathBuf) -> Option<std::process::Child> {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-    match std::process::Command::new(&exe)
-        .arg("preview")
-        .arg(&path)
-        .spawn()
-    {
+    match crate::preview_launch::spawn_preview_subprocess(&path) {
         Ok(child) => Some(child),
         Err(e) => {
             eprintln!("[daemon] Failed to spawn preview subprocess: {e}, falling back to xdg-open");

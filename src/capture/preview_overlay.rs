@@ -15,9 +15,66 @@ use std::process::Command;
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, Once,
 };
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const PREVIEW_TIMING_ENV: &str = "APEXSHOT_PREVIEW_TIMING";
+const PREVIEW_PARENT_START_ENV: &str = "APEXSHOT_PREVIEW_PARENT_START_MS";
+const PREVIEW_DISABLE_LAYER_SHELL_ENV: &str = "APEXSHOT_PREVIEW_DISABLE_LAYER_SHELL";
+
+#[derive(Clone)]
+struct PreviewStartupProbe {
+    enabled: bool,
+    startup: Instant,
+    path: PathBuf,
+    parent_start_ms: Option<u128>,
+}
+
+impl PreviewStartupProbe {
+    fn from_env(path: PathBuf) -> Self {
+        let enabled = std::env::var_os(PREVIEW_TIMING_ENV).is_some();
+        let parent_start_ms = std::env::var(PREVIEW_PARENT_START_ENV)
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok());
+
+        Self {
+            enabled,
+            startup: Instant::now(),
+            path,
+            parent_start_ms,
+        }
+    }
+
+    fn log(&self, stage: &str) {
+        if !self.enabled {
+            return;
+        }
+
+        let local_ms = self.startup.elapsed().as_millis();
+        if let (Some(parent_start_ms), Ok(now)) = (
+            self.parent_start_ms,
+            SystemTime::now().duration_since(UNIX_EPOCH),
+        ) {
+            let total_ms = now.as_millis().saturating_sub(parent_start_ms);
+            eprintln!(
+                "[preview-timing] {} local={}ms total={}ms path={}",
+                stage,
+                local_ms,
+                total_ms,
+                self.path.display()
+            );
+        } else {
+            eprintln!(
+                "[preview-timing] {} local={}ms path={}",
+                stage,
+                local_ms,
+                self.path.display()
+            );
+        }
+    }
+}
+
 use thiserror::Error;
 use x11rb::wrapper::ConnectionExt;
 use x11rb::{
@@ -105,9 +162,14 @@ pub enum CapturePreviewError {
 }
 
 pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewError> {
+    let probe = PreviewStartupProbe::from_env(path.clone());
+    probe.log("preview-entry");
+
     if !path.exists() {
         return Err(CapturePreviewError::MissingFile(path));
     }
+
+    probe.log("path-exists-confirmed");
 
     // Force-set GIO_LAUNCHED_DESKTOP_FILE to the main app's desktop entry.
     // This process may have been spawned by the daemon, which sets its own
@@ -135,33 +197,53 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
     // Use the main app ID so GNOME Shell can find the desktop file and icon.
     // G_APPLICATION_NON_UNIQUE allows multiple processes with the same ID
     // (e.g. settings + preview running simultaneously).
+    probe.log("before-gtk-application-build");
     let app = gtk4::Application::builder()
         .application_id(crate::app_identity::app_id())
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
+    probe.log("after-gtk-application-build");
 
     let path_clone = path.clone();
+    let probe_activate = probe.clone();
     app.connect_activate(move |app| {
-        // Initialize relm4-icons to use the same icons as the main editor
+        probe_activate.log("activate-enter");
+        let pid = std::process::id();
+        let preview_id = generate_preview_id(pid);
+        probe_activate.log("before-setup-preview-window");
+
+        setup_preview_window(app, &path_clone, preview_id, probe_activate.clone());
+    });
+
+    probe.log("before-app-run");
+    app.run_with_args(&[""]);
+    probe.log("after-app-run");
+    Ok(())
+}
+
+fn setup_preview_window(
+    app: &gtk4::Application,
+    path: &Path,
+    preview_id: String,
+    probe: PreviewStartupProbe,
+) {
+    probe.log("setup-preview-window-enter");
+    let startup = probe.startup;
+    let path = path.to_path_buf();
+
+    static INIT_ICONS: Once = Once::new();
+    INIT_ICONS.call_once(|| {
         relm4_icons::initialize_icons(
             crate::capture::editor::window::icon_names::GRESOURCE_BYTES,
             crate::capture::editor::window::icon_names::RESOURCE_PREFIX,
         );
-
-        let pid = std::process::id();
-        let preview_id = generate_preview_id(pid);
-
-        setup_preview_window(app, &path_clone, preview_id);
     });
-
-    app.run_with_args(&[""]);
-    Ok(())
-}
-
-fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String) {
-    let path = path.to_path_buf();
+    probe.log("before-install-preview-css");
     install_preview_css();
+    probe.log("after-install-preview-css");
+    probe.log("before-load-config");
     let config = load_config();
+    probe.log("after-load-config");
     let side = preview_side(&config.quick_access_position);
     let (preview_width, preview_height) = preview_dimensions(config.quick_access_overlay_size);
     let dismiss_action = preview_dismiss_action(&config.quick_access_auto_close_action);
@@ -169,6 +251,7 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
     let start_pinned = initial_preview_pinned(config.quick_access_auto_close_enabled);
     let auto_close_seconds = config.quick_access_auto_close_interval as u64;
 
+    probe.log("before-window-build");
     let appwin = ApplicationWindow::builder()
         .application(app)
         .title("ApexShot Preview")
@@ -178,10 +261,13 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
         .resizable(false)
         .decorated(false)
         .build();
+    probe.log("after-window-build");
     // Upcast to Window for all the helper functions that expect &Window
     let window: Window = appwin.upcast();
     window.add_css_class("capture-preview-window");
+    probe.log("before-configure-window-positioning");
     let layer_shell_active = configure_window_positioning(&window, side, preview_width);
+    probe.log("after-configure-window-positioning");
     // Intentionally silent when layer-shell is unavailable — the fallback
     // (bottom-left placement via X11 input-region) works correctly on X11
     // and non-layer-shell Wayland compositors. Logging this at startup every
@@ -190,12 +276,52 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
     let emit_extension_events =
         should_emit_extension_events(config.quick_access_multi_display, layer_shell_active);
 
+    let probe_map = probe.clone();
+    window.connect_map(move |_| {
+        probe_map.log("window-map");
+    });
+
+    let probe_realize = probe.clone();
+    window.connect_realize(move |_| {
+        probe_realize.log("window-realize");
+    });
+
+    let first_frame_seen = Rc::new(RefCell::new(false));
+    let first_frame_probe = probe.clone();
+    let first_frame_seen_tick = first_frame_seen.clone();
+    window.add_tick_callback(move |widget, _| {
+        if !*first_frame_seen_tick.borrow() {
+            *first_frame_seen_tick.borrow_mut() = true;
+            first_frame_probe.log("first-frame-tick");
+            widget.queue_draw();
+            return ControlFlow::Break;
+        }
+        ControlFlow::Break
+    });
+
+    probe.log("before-window-present");
+    window.present();
+    probe.log("after-window-present");
+    eprintln!(
+        "[preview] window.present() at {}ms for {}",
+        startup.elapsed().as_millis(),
+        path.display()
+    );
+
     let pinned = Arc::new(AtomicBool::new(start_pinned));
     let edit_opened = Arc::new(AtomicBool::new(false));
     let auto_close_anchor = Arc::new(Mutex::new(Instant::now()));
     let source_bytes = Arc::new(Mutex::new(None::<Arc<Vec<u8>>>));
 
-    let preview_area = build_preview_area(path.to_path_buf(), preview_width, preview_height);
+    probe.log("before-build-preview-area");
+    let preview_area = build_preview_area(
+        path.to_path_buf(),
+        preview_width,
+        preview_height,
+        startup,
+        probe.clone(),
+    );
+    probe.log("after-build-preview-area");
     preview_area.set_widget_name("capture-preview-image");
 
     // Card = vertical box with internal padding, image sits inside with its own radius
@@ -229,7 +355,10 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
         "Cloud upload (coming soon)",
     );
     upload_btn.set_sensitive(false);
-    let (pin_btn, pin_icon) = icon_button("view-pin-symbolic", "Pin");
+    let (pin_btn, pin_icon) = icon_button(
+        crate::capture::editor::window::icon_names::VIEW_PIN,
+        "Pin",
+    );
 
     // Floating close button – centered, revealed on hover over the image
     let close_btn = Button::new();
@@ -266,6 +395,7 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
     });
     image_overlay.add_controller(hover_ctrl);
 
+    probe.log("before-toolbar-build");
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
     toolbar.add_css_class("preview-tools");
     toolbar.set_halign(Align::Fill);
@@ -281,10 +411,14 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
     toolbar.append(&copy_btn);
     toolbar.append(&save_btn);
     toolbar.append(&upload_btn);
+    probe.log("after-toolbar-build");
 
+    probe.log("before-card-assembly");
     card.append(&image_overlay);
     card.append(&toolbar);
+    probe.log("after-card-assembly");
 
+    probe.log("before-window-child-setup");
     if layer_shell_active {
         window.set_child(Some(&card));
     } else {
@@ -360,6 +494,7 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
 
         window.set_child(Some(&fallback_shell));
     }
+    probe.log("after-window-child-setup");
 
     let use_fallback_input_region = !layer_shell_active;
 
@@ -430,124 +565,155 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
 
     // Removed hover tint logic; controls are now always visible in the toolbar
 
-    let uri = match file_uri(&path) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Failed to enable drag/drop for preview: {e}");
-            window.present();
+    let path_actions = path.clone();
+    let window_actions = window.downgrade();
+    let card_actions = card.clone();
+    let pinned_actions = pinned.clone();
+    let edit_opened_actions = edit_opened.clone();
+    let auto_close_anchor_actions = auto_close_anchor.clone();
+    let source_bytes_actions = source_bytes.clone();
+    let pin_icon_actions = pin_icon.clone();
+    let edit_btn_actions = edit_btn.clone();
+    let copy_btn_actions = copy_btn.clone();
+    let save_btn_actions = save_btn.clone();
+    let close_btn_actions = close_btn.clone();
+    let pin_btn_actions = pin_btn.clone();
+    let startup_actions = startup;
+    let dismiss_action_actions = dismiss_action;
+    let start_pinned_actions = start_pinned;
+
+    glib::idle_add_local_once(move || {
+        let Some(window) = window_actions.upgrade() else {
             return;
-        }
-    };
+        };
 
-    let uri_provider = gdk::ContentProvider::for_bytes(
-        "text/uri-list",
-        &glib::Bytes::from_owned(format!("{uri}\r\n").into_bytes()),
-    );
-    let text_provider = gdk::ContentProvider::for_value(&uri.to_value());
-    let provider = gdk::ContentProvider::new_union(&[uri_provider, text_provider]);
-
-    let drag_source = DragSource::new();
-    drag_source.set_actions(gdk::DragAction::COPY);
-    drag_source.set_content(Some(&provider));
-    let provider_prepare = provider.clone();
-    drag_source.connect_prepare(move |_, _, _| Some(provider_prepare.clone()));
-    let drag_paintable = WidgetPaintable::new(Some(&card));
-    drag_source.set_icon(Some(&drag_paintable), 24, 24);
-
-    let window_weak_drag = window.downgrade();
-    let pinned_drag = pinned.clone();
-    let edit_opened_drag = edit_opened.clone();
-    let drag_dismiss_action = dismiss_action;
-    drag_source.connect_drag_end(move |_, _, _| {
-        if edit_opened_drag.load(Ordering::Relaxed) {
-            return;
-        }
-        if !should_dismiss_for_behavior(pinned_drag.load(Ordering::Relaxed), dismiss_after_dragging)
-        {
-            return;
-        }
-        if let Some(window) = window_weak_drag.upgrade() {
-            dismiss_preview_window(&window, drag_dismiss_action);
-        }
-    });
-    card.add_controller(drag_source);
-
-    let window_weak_close = window.downgrade();
-    close_btn.connect_clicked(move |_| {
-        if let Some(window) = window_weak_close.upgrade() {
-            window.close();
-        }
-    });
-
-    let pin_state = pinned.clone();
-    let auto_close_anchor_pin = auto_close_anchor.clone();
-    if start_pinned {
-        pin_icon.set_icon_name(Some("starred-symbolic"));
-    }
-    pin_btn.connect_clicked(move |_| {
-        let now_pinned = !pin_state.load(Ordering::Relaxed);
-        pin_state.store(now_pinned, Ordering::Relaxed);
-
-        if !now_pinned {
-            if let Ok(mut anchor) = auto_close_anchor_pin.lock() {
-                *anchor = Instant::now();
-            }
-        }
-
-        // Swap pin icon to reflect pinned state
-        if now_pinned {
-            pin_icon.set_icon_name(Some("starred-symbolic"));
-        } else {
-            pin_icon.set_icon_name(Some("view-pin-symbolic"));
-        }
-    });
-
-    let path_copy = path.clone();
-    copy_btn.connect_clicked(move |_| {
-        if let Err(e) = copy_uri_to_clipboard(&path_copy) {
-            eprintln!("Copy failed: {e}");
-        }
-    });
-
-    let window_weak_save = window.downgrade();
-    save_btn.connect_clicked(move |_| {
-        if let Some(window) = window_weak_save.upgrade() {
-            window.close();
-        }
-    });
-
-    let path_edit = path.clone();
-    let source_bytes_edit = source_bytes.clone();
-    let edit_opened_btn = edit_opened.clone();
-    let window_weak_edit = window.downgrade();
-    edit_btn.connect_clicked(move |_| {
-        if !path_edit.exists() {
-            let cached_bytes = source_bytes_edit
-                .lock()
-                .ok()
-                .and_then(|guard| guard.clone());
-            if let Some(bytes) = cached_bytes {
-                if let Err(e) = std::fs::write(&path_edit, bytes.as_slice()) {
-                    eprintln!("Edit failed: could not restore missing screenshot file: {e}");
-                    return;
-                }
-            } else {
-                eprintln!("Edit failed: screenshot path no longer exists");
+        let uri = match file_uri(&path_actions) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to enable drag/drop for preview: {e}");
                 return;
             }
-        }
+        };
 
-        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-        if let Err(e) = Command::new(&exe).arg("edit").arg(&path_edit).spawn() {
-            eprintln!("Edit failed: {e}");
-            return;
-        }
+        let uri_provider = gdk::ContentProvider::for_bytes(
+            "text/uri-list",
+            &glib::Bytes::from_owned(format!("{uri}\r\n").into_bytes()),
+        );
+        let text_provider = gdk::ContentProvider::for_value(&uri.to_value());
+        let provider = gdk::ContentProvider::new_union(&[uri_provider, text_provider]);
 
-        edit_opened_btn.store(true, Ordering::Relaxed);
+        let drag_source = DragSource::new();
+        drag_source.set_actions(gdk::DragAction::COPY);
+        drag_source.set_content(Some(&provider));
+        let provider_prepare = provider.clone();
+        drag_source.connect_prepare(move |_, _, _| Some(provider_prepare.clone()));
+        let drag_paintable = WidgetPaintable::new(Some(&card_actions));
+        drag_source.set_icon(Some(&drag_paintable), 24, 24);
 
-        if let Some(window) = window_weak_edit.upgrade() {
-            window.close();
+        let window_weak_drag = window.downgrade();
+        let pinned_drag = pinned_actions.clone();
+        let edit_opened_drag = edit_opened_actions.clone();
+        drag_source.connect_drag_end(move |_, _, _| {
+            if edit_opened_drag.load(Ordering::Relaxed) {
+                return;
+            }
+            if !should_dismiss_for_behavior(
+                pinned_drag.load(Ordering::Relaxed),
+                dismiss_after_dragging,
+            ) {
+                return;
+            }
+            if let Some(window) = window_weak_drag.upgrade() {
+                dismiss_preview_window(&window, dismiss_action_actions);
+            }
+        });
+        card_actions.add_controller(drag_source);
+
+        let window_weak_close = window.downgrade();
+        close_btn_actions.connect_clicked(move |_| {
+            if let Some(window) = window_weak_close.upgrade() {
+                window.close();
+            }
+        });
+
+        if start_pinned_actions {
+            pin_icon_actions
+                .set_icon_name(Some(crate::capture::editor::window::icon_names::PIN));
         }
+        let pin_state = pinned_actions.clone();
+        let auto_close_anchor_pin = auto_close_anchor_actions.clone();
+        let pin_icon_click = pin_icon_actions.clone();
+        pin_btn_actions.connect_clicked(move |_| {
+            let now_pinned = !pin_state.load(Ordering::Relaxed);
+            pin_state.store(now_pinned, Ordering::Relaxed);
+
+            if !now_pinned {
+                if let Ok(mut anchor) = auto_close_anchor_pin.lock() {
+                    *anchor = Instant::now();
+                }
+            }
+
+            if now_pinned {
+                pin_icon_click.set_icon_name(Some(crate::capture::editor::window::icon_names::PIN));
+            } else {
+                pin_icon_click
+                    .set_icon_name(Some(crate::capture::editor::window::icon_names::VIEW_PIN));
+            }
+        });
+
+        let path_copy = path_actions.clone();
+        copy_btn_actions.connect_clicked(move |_| {
+            if let Err(e) = copy_uri_to_clipboard(&path_copy) {
+                eprintln!("Copy failed: {e}");
+            }
+        });
+
+        let window_weak_save = window.downgrade();
+        save_btn_actions.connect_clicked(move |_| {
+            if let Some(window) = window_weak_save.upgrade() {
+                window.close();
+            }
+        });
+
+        let path_edit = path_actions.clone();
+        let source_bytes_edit = source_bytes_actions.clone();
+        let edit_opened_btn = edit_opened_actions.clone();
+        let window_weak_edit = window.downgrade();
+        edit_btn_actions.connect_clicked(move |_| {
+            if !path_edit.exists() {
+                let cached_bytes = source_bytes_edit
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.clone());
+                if let Some(bytes) = cached_bytes {
+                    if let Err(e) = std::fs::write(&path_edit, bytes.as_slice()) {
+                        eprintln!("Edit failed: could not restore missing screenshot file: {e}");
+                        return;
+                    }
+                } else {
+                    eprintln!("Edit failed: screenshot path no longer exists");
+                    return;
+                }
+            }
+
+            let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+            if let Err(e) = Command::new(&exe).arg("edit").arg(&path_edit).spawn() {
+                eprintln!("Edit failed: {e}");
+                return;
+            }
+
+            edit_opened_btn.store(true, Ordering::Relaxed);
+
+            if let Some(window) = window_weak_edit.upgrade() {
+                window.close();
+            }
+        });
+
+        eprintln!(
+            "[preview] deferred actions initialized at {}ms for {}",
+            startup_actions.elapsed().as_millis(),
+            path_actions.display()
+        );
     });
 
     let key_controller = EventControllerKey::builder()
@@ -627,8 +793,6 @@ fn setup_preview_window(app: &gtk4::Application, path: &Path, preview_id: String
             }
         }
     });
-
-    window.present();
 
     // Emit PreviewOpened with structured metadata so the GNOME extension can
     // track this preview by preview_id and match the Wayland window by PID.
@@ -982,8 +1146,16 @@ fn send_net_wm_state_client_message<C: Connection>(
     Ok(())
 }
 
-fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) -> DrawingArea {
+fn build_preview_area(
+    path: PathBuf,
+    preview_width: i32,
+    preview_height: i32,
+    startup: Instant,
+    probe: PreviewStartupProbe,
+) -> DrawingArea {
+    probe.log("build-preview-area-enter");
     let area = DrawingArea::new();
+    probe.log("after-drawing-area-new");
     area.set_size_request(preview_width, preview_height);
     area.set_hexpand(false);
     area.set_vexpand(false);
@@ -1025,11 +1197,24 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
         }
     });
 
+    // Try a fast GTK-native decode first so the window can draw its image as
+    // early as possible. If that fails, fall back to the existing background
+    // `image` crate decode path.
+    probe.log("before-sync-preview-texture");
+    if let Some(tex) = preview_texture(&path) {
+        *texture.borrow_mut() = Some(tex);
+        area.queue_draw();
+        probe.log("sync-texture-ready");
+        eprintln!(
+            "[preview] synchronous texture ready at {}ms for {}",
+            startup.elapsed().as_millis(),
+            path.display()
+        );
+        return area;
+    }
+
     // Decode the screenshot on a background thread so the preview card can
-    // appear immediately (often a frame or two earlier on large screenshots)
-    // without blocking the GTK main loop on PNG decode. The decoded RGBA
-    // bytes are then handed back to the main loop, which wraps them in a
-    // Pixbuf + Texture and triggers a single redraw.
+    // appear immediately without blocking the GTK main loop on PNG decode.
     let (tx, rx) = std::sync::mpsc::channel::<Option<(Vec<u8>, i32, i32)>>();
     let path_decode = path.clone();
     std::thread::spawn(move || {
@@ -1052,7 +1237,8 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
     let area_weak = area.downgrade();
     let texture_main = texture.clone();
     let path_fallback = path.clone();
-    glib::timeout_add_local(std::time::Duration::from_millis(4), move || {
+    let probe_async = probe.clone();
+    glib::timeout_add_local(Duration::from_millis(4), move || {
         match rx.try_recv() {
             Ok(Some((data, width, height))) => {
                 let stride = width.saturating_mul(4);
@@ -1070,6 +1256,12 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
                 if let Some(area) = area_weak.upgrade() {
                     area.queue_draw();
                 }
+                probe_async.log("async-texture-ready");
+                eprintln!(
+                    "[preview] async texture ready at {}ms for {}",
+                    startup.elapsed().as_millis(),
+                    path_fallback.display()
+                );
                 ControlFlow::Break
             }
             Ok(None) => {
@@ -1080,6 +1272,12 @@ fn build_preview_area(path: PathBuf, preview_width: i32, preview_height: i32) ->
                 if let Some(area) = area_weak.upgrade() {
                     area.queue_draw();
                 }
+                probe_async.log("fallback-texture-ready");
+                eprintln!(
+                    "[preview] fallback texture ready at {}ms for {}",
+                    startup.elapsed().as_millis(),
+                    path_fallback.display()
+                );
                 ControlFlow::Break
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
@@ -1106,7 +1304,11 @@ fn preview_texture(path: &Path) -> Option<gdk::Texture> {
     Some(gdk::Texture::for_pixbuf(&preview_pixbuf))
 }
 
-fn configure_window_positioning(window: &Window, side: PreviewSide, preview_width: i32) -> bool {
+fn configure_window_positioning(window: &Window, side: PreviewSide, _preview_width: i32) -> bool {
+    if std::env::var_os(PREVIEW_DISABLE_LAYER_SHELL_ENV).is_some() {
+        return false;
+    }
+
     if gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
         window.set_namespace(Some("apexshot-capture-preview"));
@@ -1117,7 +1319,11 @@ fn configure_window_positioning(window: &Window, side: PreviewSide, preview_widt
         window.set_anchor(Edge::Top, false);
         window.set_anchor(Edge::Bottom, true);
 
-        window.set_exclusive_zone(preview_width + PREVIEW_EDGE_MARGIN * 2);
+        // The screenshot preview is a transient floating card, not a panel.
+        // Do not reserve compositor-managed edge space for it, otherwise some
+        // desktops may treat the reserved strip as owned by the preview and
+        // block clicks on windows behind it.
+        window.set_exclusive_zone(0);
         window.set_margin(
             Edge::Left,
             if side == PreviewSide::Left {

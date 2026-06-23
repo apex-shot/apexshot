@@ -43,6 +43,7 @@ use apexshot::{
     },
     ocr::{extract_text_from_capture, extract_text_from_path, OcrConfig},
     onboarding::{is_onboarding_complete, show_onboarding_window},
+    preview_launch::{show_preview_direct, spawn_preview_subprocess},
     recording::{
         editor::{open_empty_recording_editor, open_recording_editor},
         run_overlay_recording_request, run_recording_countdown_bar, run_recording_ui,
@@ -1998,20 +1999,11 @@ fn run_capture(args: &[String]) {
         }
     };
 
-    // Spawn the preview as a subprocess to avoid GTK conflicts
-    // (the area selector already used GTK in this process).
-    let binary = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-
-    if let Err(e) = std::process::Command::new(&binary)
-        .arg("preview")
-        .arg(&saved_path)
-        .spawn()
-    {
+    // Keep preview in a subprocess so it preserves the existing GTK isolation,
+    // GNOME extension tracking, and daemon/show-last-preview behavior.
+    if let Err(e) = spawn_preview_subprocess(&saved_path) {
         eprintln!("Warning: Failed to spawn preview overlay: {}", e);
-        // Fall back to direct call
-        if let Err(e) = show_capture_preview_overlay(saved_path.clone()) {
-            eprintln!("Warning: Failed to show capture preview overlay: {}", e);
-        }
+        show_preview_direct(saved_path.clone());
     }
 }
 
@@ -2449,11 +2441,7 @@ fn import_web_scroll_capture_direct(
     let saved_path = save_capture(&capture, &SaveConfig::default())
         .map_err(|e| format!("Failed to save imported capture: {e}"))?;
 
-    let binary = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-    std::process::Command::new(&binary)
-        .arg("preview")
-        .arg(&saved_path)
-        .spawn()
+    spawn_preview_subprocess(&saved_path)
         .map_err(|e| format!("Failed to launch preview overlay: {e}"))?;
 
     Ok(saved_path)

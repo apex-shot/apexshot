@@ -866,6 +866,16 @@ int main(int argc, char* argv[])
           (desktop.contains("GNOME", Qt::CaseInsensitive) ||
            qEnvironmentVariableIsSet("GNOME_SETUP_DISPLAY"));
 
+        // After the overlay hides itself, some compositors/portal backends can
+        // still composite one last frame containing parts of the UI. Give the
+        // compositor a moment to fully unmap the window before requesting the
+        // actual screenshot.
+        if (isWayland) {
+            QApplication::processEvents(QEventLoop::AllEvents, 50);
+            QThread::msleep(crosshairCaptureMode ? 220 : 180);
+            QApplication::processEvents(QEventLoop::AllEvents, 50);
+        }
+
         QString imagePath;
         QSize imageSize;
         QString error;
