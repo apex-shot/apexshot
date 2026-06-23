@@ -67,7 +67,7 @@ Works best today on:
 | GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
 | Sway / wlroots-like compositors (Wayland) | Implementation exists through GTK4 layer-shell, `wlr-screencopy`, and `wf-recorder`, but needs more manual validation |
 | KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet personally tested |
-| Fedora / RHEL (Wayland) | Development stage: support metadata only; packaging/runtime testing pending |
+| Fedora / RHEL (Wayland) | Development stage: source installer and initial RPM spec exist; runtime testing pending |
 | openSUSE Tumbleweed / Leap (Wayland) | Development stage: source installer and initial RPM spec exist; runtime testing pending |
 | NixOS / Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; packaging/testing pending |
 | X11 on any distro | Experimental |
@@ -135,8 +135,8 @@ support is improving over time.
 ### Quick Install — Recommended
 
 Run the interactive installer. The production-tested paths are Ubuntu/Debian
-and Arch Linux. The installer also detects openSUSE, but that path is still in
-development and needs real openSUSE runtime validation:
+and Arch Linux. The installer also detects Fedora and openSUSE, but those RPM
+paths are still in development and need more real runtime validation:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
@@ -184,6 +184,33 @@ AUR publishing notes for maintainers live in
 > **Note:** The package installs the GNOME Shell extension system-wide.
 > Restart GNOME Shell (log out and back in on Wayland) to activate it.
 
+### Fedora Workstation / KDE Plasma / Spins
+
+Fedora support is in development. The generic installer above will select
+this automatically when `dnf` is available, but this path has not yet been
+personally runtime-tested across Fedora GNOME and KDE package installs. Direct
+command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-install.sh | bash
+```
+
+The direct Fedora installer builds from source, installs binaries into
+`/usr/local/bin`, and installs the reported dnf dependency set.
+
+An RPM spec is available for package-managed installs:
+
+```bash
+git clone https://github.com/apex-shot/apexshot.git
+cd apexshot
+scripts/build-fedora-rpm.sh
+sudo dnf install target/fedora-rpmbuild/RPMS/*/apexshot-*.rpm
+```
+
+The Fedora RPM path is intended for package validation and future Copr/RPM
+publishing work. Runtime testing on Fedora GNOME and KDE Plasma Wayland is
+still in progress.
+
 ### openSUSE Tumbleweed / Leap
 
 openSUSE support is in development. The generic installer above will select
@@ -228,6 +255,12 @@ Direct Arch Linux command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-update.sh | bash
+```
+
+Direct Fedora command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-update.sh | bash
 ```
 
 Direct openSUSE command:

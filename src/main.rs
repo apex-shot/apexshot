@@ -616,6 +616,19 @@ fn package_uninstall_command_for(manager: &str, needs_sudo: bool) -> Option<(Str
             vec!["apt".into(), "remove".into(), "apexshot".into()],
         )),
         ("apt", false) => Some(("apt".into(), vec!["remove".into(), "apexshot".into()])),
+        ("dnf", true) => Some((
+            "sudo".into(),
+            vec![
+                "dnf".into(),
+                "remove".into(),
+                "-y".into(),
+                "apexshot".into(),
+            ],
+        )),
+        ("dnf", false) => Some((
+            "dnf".into(),
+            vec!["remove".into(), "-y".into(), "apexshot".into()],
+        )),
         ("zypper", true) => Some((
             "sudo".into(),
             vec![
@@ -652,6 +665,8 @@ fn uninstall_package_managed_app_if_present() -> bool {
         Some("pacman")
     } else if command_exists("dpkg-query") && dpkg_has_apexshot_package() {
         Some("apt")
+    } else if command_exists("dnf") && command_exists("rpm") && rpm_has_apexshot_package() {
+        Some("dnf")
     } else if command_exists("zypper") && command_exists("rpm") && rpm_has_apexshot_package() {
         Some("zypper")
     } else {
@@ -2038,6 +2053,29 @@ mod tests {
             Some((
                 "sudo".into(),
                 vec!["pacman".into(), "-R".into(), "apexshot".into()]
+            ))
+        );
+    }
+
+    #[test]
+    fn package_uninstall_command_uses_dnf_for_fedora_package_installs() {
+        assert_eq!(
+            package_uninstall_command_for("dnf", false),
+            Some((
+                "dnf".into(),
+                vec!["remove".into(), "-y".into(), "apexshot".into()]
+            ))
+        );
+        assert_eq!(
+            package_uninstall_command_for("dnf", true),
+            Some((
+                "sudo".into(),
+                vec![
+                    "dnf".into(),
+                    "remove".into(),
+                    "-y".into(),
+                    "apexshot".into()
+                ]
             ))
         );
     }

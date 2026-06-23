@@ -355,10 +355,8 @@ fn setup_preview_window(
         "Cloud upload (coming soon)",
     );
     upload_btn.set_sensitive(false);
-    let (pin_btn, pin_icon) = icon_button(
-        crate::capture::editor::window::icon_names::VIEW_PIN,
-        "Pin",
-    );
+    let (pin_btn, pin_icon) =
+        icon_button(crate::capture::editor::window::icon_names::VIEW_PIN, "Pin");
 
     // Floating close button – centered, revealed on hover over the image
     let close_btn = Button::new();
@@ -637,8 +635,7 @@ fn setup_preview_window(
         });
 
         if start_pinned_actions {
-            pin_icon_actions
-                .set_icon_name(Some(crate::capture::editor::window::icon_names::PIN));
+            pin_icon_actions.set_icon_name(Some(crate::capture::editor::window::icon_names::PIN));
         }
         let pin_state = pinned_actions.clone();
         let auto_close_anchor_pin = auto_close_anchor_actions.clone();

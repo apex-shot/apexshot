@@ -31,6 +31,13 @@ if command -v apt >/dev/null 2>&1 || command -v dpkg >/dev/null 2>&1; then
     exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-update.sh)"
 fi
 
+if command -v dnf >/dev/null 2>&1; then
+    if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/fedora-update.sh" ]]; then
+        exec bash "${SCRIPT_DIR}/fedora-update.sh" "$@"
+    fi
+    exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-update.sh)"
+fi
+
 if command -v zypper >/dev/null 2>&1; then
     if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/opensuse-update.sh" ]]; then
         exec bash "${SCRIPT_DIR}/opensuse-update.sh" "$@"
@@ -38,5 +45,5 @@ if command -v zypper >/dev/null 2>&1; then
     exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-update.sh)"
 fi
 
-echo "Unsupported distribution: expected pacman, apt/dpkg, or zypper." >&2
+echo "Unsupported distribution: expected pacman, apt/dpkg, dnf, or zypper." >&2
 exit 1
