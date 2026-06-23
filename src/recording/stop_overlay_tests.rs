@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::recording::stop_overlay::{
-        display_bounds_from_monitor_geometries, monitor_index_for_capture_from_geometries,
-        RecordingControlsParams,
+        can_show_bar_outside_capture, display_bounds_from_monitor_geometries,
+        monitor_index_for_capture_from_geometries, RecordingControlsParams,
     };
 
     #[test]
@@ -94,5 +94,44 @@ mod tests {
             monitor_index_for_capture_from_geometries(&geometries, &params),
             None
         );
+    }
+
+    #[test]
+    fn controls_can_show_when_area_has_room_below() {
+        let params = RecordingControlsParams {
+            capture_x: 100,
+            capture_y: 100,
+            capture_w: 800,
+            capture_h: 400,
+            ..Default::default()
+        };
+
+        assert!(can_show_bar_outside_capture(&params, (0, 0, 1920, 1080)));
+    }
+
+    #[test]
+    fn controls_hide_when_area_fills_fullscreen_height() {
+        let params = RecordingControlsParams {
+            capture_x: 0,
+            capture_y: 0,
+            capture_w: 1920,
+            capture_h: 1080,
+            ..Default::default()
+        };
+
+        assert!(!can_show_bar_outside_capture(&params, (0, 0, 1920, 1080)));
+    }
+
+    #[test]
+    fn controls_hide_when_area_has_no_room_above_or_below() {
+        let params = RecordingControlsParams {
+            capture_x: 100,
+            capture_y: 24,
+            capture_w: 1000,
+            capture_h: 980,
+            ..Default::default()
+        };
+
+        assert!(!can_show_bar_outside_capture(&params, (0, 0, 1200, 1040)));
     }
 }

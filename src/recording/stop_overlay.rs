@@ -268,6 +268,8 @@ pub fn run_recording_ui(
         } else {
             None
         };
+        let display = gdk::Display::default().expect("No display");
+        let should_show_controls = native_controls_should_be_visible(&display, &params);
         let controls_window = setup_window(
             application,
             params.clone(),
@@ -282,7 +284,7 @@ pub fn run_recording_ui(
             dim_windows,
             Arc::new(AtomicBool::new(false)),
             true,
-            Some(controls_window),
+            should_show_controls.then_some(controls_window),
             Some(stop_tx.clone()),
         );
     });
@@ -362,6 +364,71 @@ fn compute_bar_position(
     };
 
     (x.round() as i32, y.round() as i32)
+}
+
+pub(super) fn can_show_bar_outside_capture(
+    params: &RecordingControlsParams,
+    desktop_bounds: (i32, i32, i32, i32),
+) -> bool {
+    if params.is_fullscreen || params.capture_w <= 0 || params.capture_h <= 0 {
+        return false;
+    }
+
+    let margin = FEATURE_PANEL_MARGIN;
+    let top_gap = FEATURE_PANEL_TOP_GAP;
+    let (_, desktop_y, _, desktop_h) = desktop_bounds;
+    let desktop_top = desktop_y as f64;
+    let desktop_bottom = (desktop_y + desktop_h) as f64;
+
+    let sel_y = params.capture_y as f64;
+    let sel_h = params.capture_h as f64;
+    let bar_h = BAR_HEIGHT;
+
+    let fits_below = sel_y + sel_h + top_gap + bar_h + margin <= desktop_bottom;
+    let fits_above = sel_y - top_gap - bar_h >= desktop_top + margin;
+
+    fits_below || fits_above
+}
+
+fn is_wlroots_like_session() -> bool {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .or_else(|_| std::env::var("DESKTOP_SESSION"))
+        .unwrap_or_default()
+        .to_lowercase();
+
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+        || std::env::var_os("SWAYSOCK").is_some()
+        || desktop.contains("hyprland")
+        || desktop.contains("sway")
+        || desktop.contains("river")
+        || desktop.contains("wayfire")
+        || desktop.contains("labwc")
+        || desktop.contains("niri")
+}
+
+fn native_controls_should_be_visible(
+    display: &gdk::Display,
+    params: &RecordingControlsParams,
+) -> bool {
+    let monitor = monitor_for_capture(display, params);
+    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
+
+    let fits_outside_capture = if layer_shell_active {
+        if let Some(monitor) = monitor {
+            let geom = monitor.geometry();
+            let mut local_params = params.clone();
+            local_params.capture_x -= geom.x();
+            local_params.capture_y -= geom.y();
+            can_show_bar_outside_capture(&local_params, (0, 0, geom.width(), geom.height()))
+        } else {
+            can_show_bar_outside_capture(params, display_bounds().unwrap_or((0, 0, 1920, 1080)))
+        }
+    } else {
+        can_show_bar_outside_capture(params, display_bounds().unwrap_or((0, 0, 1920, 1080)))
+    };
+
+    fits_outside_capture || is_wlroots_like_session()
 }
 
 fn setup_window(

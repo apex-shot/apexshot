@@ -22,7 +22,10 @@ pub enum TrayAction {
     OpenRecordingUi,
     OpenVideoEditor,
     RecordScreen,
+    ToggleRecordingPause,
     StopRecordingSave,
+    RestartRecording,
+    DiscardRecording,
     ShowLastPreview,
     OpenLastCapture,
     OpenSettings,
@@ -32,7 +35,7 @@ pub enum TrayAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TrayPresentation {
     Idle,
-    Recording { elapsed_text: String },
+    Recording { elapsed_text: String, paused: bool },
 }
 
 /// The ksni tray icon state.
@@ -57,6 +60,14 @@ impl ApexShotTray {
     pub fn show_recording_timer(&mut self, elapsed_text: impl Into<String>) {
         self.presentation = TrayPresentation::Recording {
             elapsed_text: elapsed_text.into(),
+            paused: false,
+        };
+    }
+
+    pub fn show_recording_paused(&mut self, elapsed_text: impl Into<String>) {
+        self.presentation = TrayPresentation::Recording {
+            elapsed_text: elapsed_text.into(),
+            paused: true,
         };
     }
 
@@ -65,36 +76,7 @@ impl ApexShotTray {
     }
 }
 
-/// Generate the new 'A-Mark' tray icon procedurally as raw ARGB32 bytes.
-///
-/// This provides razor-sharp, pixel-perfect lines by drawing the logo
-/// directly using geometric primitives at the desired resolution.
-fn apex_icon(size: i32) -> ksni::Icon {
-    use gtk4::cairo::{Context, Format, ImageSurface};
-    let mut surface = ImageSurface::create(Format::ARgb32, size, size)
-        .expect("Failed to create tray icon surface");
-    let cr = Context::new(&surface).expect("Failed to create context");
-
-    // Transparent background for system tray
-    cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
-    cr.paint()
-        .expect("Failed to clear tray transparent background");
-
-    // Scale from 24x24 viewBox to current size
-    let s = size as f64 / 24.0;
-    cr.scale(s, s);
-
-    // Draw the new logo: curved arch shape
-    // Path: M 2 21 C 6 21, 8 2, 12 2 C 16 2, 18 21, 22 21
-    cr.set_source_rgba(0.913, 0.329, 0.125, 1.0); // #E95420
-    cr.set_line_width(2.5);
-    cr.set_line_cap(gtk4::cairo::LineCap::Round);
-    cr.move_to(2.0, 21.0);
-    cr.curve_to(6.0, 21.0, 8.0, 2.0, 12.0, 2.0);
-    cr.curve_to(16.0, 2.0, 18.0, 21.0, 22.0, 21.0);
-    cr.stroke().expect("Failed to draw tray icon logo");
-
-    drop(cr);
+fn icon_from_surface(mut surface: gtk4::cairo::ImageSurface, size: i32) -> ksni::Icon {
     surface.flush();
 
     let stride = surface.stride() as usize;
@@ -106,25 +88,20 @@ fn apex_icon(size: i32) -> ksni::Icon {
         let data = surface
             .data()
             .expect("Failed to extract cairo surface data");
-        // Extract raw stride rows into exact contiguous W * 4 buffer
         for y in 0..height {
             let src_start = y * stride;
             let src_end = src_start + width * 4;
             let dst_start = y * width * 4;
             let dst_end = dst_start + width * 4;
-
             pixels[dst_start..dst_end].copy_from_slice(&data[src_start..src_end]);
         }
     }
 
-    // Convert Cairo native-endian ARGB32 (which is BGRA on little-endian) to KsNi expected ARGB byte order.
-    // KsNi expects exactly: [A, R, G, B] per pixel.
     for pixel in pixels.chunks_exact_mut(4) {
         let b = pixel[0];
         let g = pixel[1];
         let r = pixel[2];
         let a = pixel[3];
-        // Swapping to ksni network byte order format
         pixel[0] = a;
         pixel[1] = r;
         pixel[2] = g;
@@ -138,10 +115,89 @@ fn apex_icon(size: i32) -> ksni::Icon {
     }
 }
 
+/// Generate the default ApexShot tray icon procedurally.
+fn apex_icon(size: i32) -> ksni::Icon {
+    use gtk4::cairo::{Context, Format, ImageSurface};
+    let surface = ImageSurface::create(Format::ARgb32, size, size)
+        .expect("Failed to create tray icon surface");
+    let cr = Context::new(&surface).expect("Failed to create context");
+
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+    cr.paint()
+        .expect("Failed to clear tray transparent background");
+
+    let s = size as f64 / 24.0;
+    cr.scale(s, s);
+
+    cr.set_source_rgba(0.913, 0.329, 0.125, 1.0);
+    cr.set_line_width(2.5);
+    cr.set_line_cap(gtk4::cairo::LineCap::Round);
+    cr.move_to(2.0, 21.0);
+    cr.curve_to(6.0, 21.0, 8.0, 2.0, 12.0, 2.0);
+    cr.curve_to(16.0, 2.0, 18.0, 21.0, 22.0, 21.0);
+    cr.stroke().expect("Failed to draw tray icon logo");
+
+    drop(cr);
+    icon_from_surface(surface, size)
+}
+
+fn recording_circle_icon(size: i32, paused: bool) -> ksni::Icon {
+    use gtk4::cairo::{Context, Format, ImageSurface};
+    let surface = ImageSurface::create(Format::ARgb32, size, size)
+        .expect("Failed to create recording tray icon surface");
+    let cr = Context::new(&surface).expect("Failed to create recording icon context");
+
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+    cr.paint()
+        .expect("Failed to clear recording tray transparent background");
+
+    let w = size as f64;
+    let h = size as f64;
+    let diameter = (w.min(h) * 0.82).max(9.0);
+    let radius = diameter / 2.0;
+    let cx = w / 2.0;
+    let cy = h / 2.0;
+
+    if paused {
+        cr.set_source_rgba(0.74, 0.33, 0.06, 1.0);
+    } else {
+        cr.set_source_rgba(0.89, 0.16, 0.21, 1.0);
+    }
+    cr.arc(cx, cy, radius, 0.0, std::f64::consts::TAU);
+    cr.fill().expect("Failed to paint recording circle icon");
+
+    cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+    if paused {
+        let bar_h = (diameter * 0.42).round();
+        let bar_w = (diameter * 0.12).max(2.0).round();
+        let gap = (diameter * 0.10).round();
+        let total_w = bar_w * 2.0 + gap;
+        let start_x = (w - total_w) / 2.0;
+        let start_y = (h - bar_h) / 2.0;
+        cr.rectangle(start_x, start_y, bar_w, bar_h);
+        cr.rectangle(start_x + bar_w + gap, start_y, bar_w, bar_h);
+        cr.fill()
+            .expect("Failed to paint pause glyph in recording icon");
+    } else {
+        let stop_size = (diameter * 0.34).round();
+        let stop_x = (w - stop_size) / 2.0;
+        let stop_y = (h - stop_size) / 2.0;
+        cr.rectangle(stop_x, stop_y, stop_size, stop_size);
+        cr.fill()
+            .expect("Failed to paint stop glyph in recording icon");
+    }
+
+    drop(cr);
+    icon_from_surface(surface, size)
+}
+
 impl ksni::Tray for ApexShotTray {
     fn activate(&mut self, _x: i32, _y: i32) {
         // Primary click fallback on hosts that don't open the context menu on left-click.
-        self.send(TrayAction::CaptureArea);
+        match self.presentation {
+            TrayPresentation::Idle => self.send(TrayAction::CaptureArea),
+            TrayPresentation::Recording { .. } => self.send(TrayAction::StopRecordingSave),
+        }
     }
 
     fn icon_name(&self) -> String {
@@ -160,13 +216,29 @@ impl ksni::Tray for ApexShotTray {
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         // Provide multiple sizes for HiDPI support.
-        vec![apex_icon(16), apex_icon(22), apex_icon(32)]
+        match self.presentation {
+            TrayPresentation::Idle => vec![apex_icon(16), apex_icon(22), apex_icon(32)],
+            TrayPresentation::Recording { paused, .. } => vec![
+                recording_circle_icon(16, paused),
+                recording_circle_icon(22, paused),
+                recording_circle_icon(32, paused),
+            ],
+        }
     }
 
     fn title(&self) -> String {
         match &self.presentation {
             TrayPresentation::Idle => "ApexShot".to_string(),
-            TrayPresentation::Recording { elapsed_text } => elapsed_text.clone(),
+            TrayPresentation::Recording {
+                elapsed_text,
+                paused,
+            } => {
+                if *paused {
+                    format!("Paused • {elapsed_text}")
+                } else {
+                    format!("Recording • {elapsed_text}")
+                }
+            }
         }
     }
 
@@ -176,9 +248,20 @@ impl ksni::Tray for ApexShotTray {
                 "ApexShot".to_string(),
                 "Left-click: Capture Area • Right-click: Menu".to_string(),
             ),
-            TrayPresentation::Recording { elapsed_text } => (
-                elapsed_text.clone(),
-                "Recording in progress • Use shortcuts for pause, restart, or discard".to_string(),
+            TrayPresentation::Recording {
+                elapsed_text,
+                paused,
+            } => (
+                if *paused {
+                    format!("Paused • {elapsed_text}")
+                } else {
+                    format!("Recording • {elapsed_text}")
+                },
+                if *paused {
+                    "Recording paused • Click to stop • Open menu to resume • Timer is shown here on hover".to_string()
+                } else {
+                    "Recording in progress • Click to stop • Open menu for more actions • Timer is shown here on hover".to_string()
+                },
             ),
         };
 
@@ -195,13 +278,39 @@ impl ksni::Tray for ApexShotTray {
 
         let ltr = |label: &str| format!("\u{200E}{label}");
 
-        if matches!(self.presentation, TrayPresentation::Recording { .. }) {
-            return vec![StandardItem {
-                label: ltr("Stop Recording"),
-                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::StopRecordingSave)),
-                ..Default::default()
-            }
-            .into()];
+        if let TrayPresentation::Recording { paused, .. } = self.presentation {
+            return vec![
+                StandardItem {
+                    label: ltr(if paused {
+                        "Resume Recording"
+                    } else {
+                        "Pause Recording"
+                    }),
+                    activate: Box::new(|tray: &mut Self| {
+                        tray.send(TrayAction::ToggleRecordingPause)
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: ltr("Stop Recording"),
+                    activate: Box::new(|tray: &mut Self| tray.send(TrayAction::StopRecordingSave)),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: ltr("Restart Recording"),
+                    activate: Box::new(|tray: &mut Self| tray.send(TrayAction::RestartRecording)),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: ltr("Discard Recording"),
+                    activate: Box::new(|tray: &mut Self| tray.send(TrayAction::DiscardRecording)),
+                    ..Default::default()
+                }
+                .into(),
+            ];
         }
 
         vec![
@@ -312,7 +421,7 @@ mod tests {
         let mut tray = ApexShotTray::new(tx);
         tray.show_recording_timer("1:23");
 
-        assert_eq!(tray.title(), "1:23");
-        assert_eq!(tray.menu().len(), 1);
+        assert_eq!(tray.title(), "Recording • 1:23");
+        assert_eq!(tray.menu().len(), 4);
     }
 }

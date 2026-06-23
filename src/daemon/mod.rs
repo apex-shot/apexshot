@@ -88,7 +88,10 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::OpenRecordingUi => DaemonAction::OpenRecordingUi,
             TrayAction::OpenVideoEditor => DaemonAction::OpenVideoEditor,
             TrayAction::RecordScreen => DaemonAction::RecordScreen,
+            TrayAction::ToggleRecordingPause => DaemonAction::ToggleRecordingPause,
             TrayAction::StopRecordingSave => DaemonAction::StopRecordingSave,
+            TrayAction::RestartRecording => DaemonAction::RestartRecording,
+            TrayAction::DiscardRecording => DaemonAction::DiscardRecording,
             TrayAction::ShowLastPreview => DaemonAction::ShowLastPreview,
             TrayAction::OpenLastCapture => DaemonAction::OpenLastCapture,
             TrayAction::OpenSettings => DaemonAction::OpenSettings,
@@ -380,7 +383,11 @@ fn update_tray_recording_state(
 
     handle.update(|tray| {
         if let Some(state) = recording_state {
-            tray.show_recording_timer(state.elapsed_text());
+            if state.paused_at.is_some() {
+                tray.show_recording_paused(state.elapsed_text());
+            } else {
+                tray.show_recording_timer(state.elapsed_text());
+            }
         } else {
             tray.show_idle();
         }
