@@ -14,7 +14,10 @@
 //! 1. **`org.freedesktop.portal.Screenshot`** — retained only for the explicit
 //!    interactive screenshot-selector helper.
 
-use super::{screencopy, CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};
+use super::{
+    kde_screenshot, screencopy, CaptureData, DisplayBackend, DisplayError, DisplayResult,
+    PixelFormat,
+};
 use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SourceType},
     screenshot::Screenshot,
@@ -100,12 +103,13 @@ fn capture_single_frame_from_pipewire(
     node_id: u32,
     pipewire_fd: &OwnedFd,
 ) -> DisplayResult<CaptureData> {
-    let frame = crate::pipewire_engine::capture_single_frame(
+    let frame = crate::pipewire_engine::capture_single_frame_with_min_frames(
         pipewire_fd
             .try_clone()
             .map_err(|e| DisplayError::CaptureError(format!("Failed to clone fd: {e}")))?,
         node_id,
         Duration::from_secs(3),
+        3,
     )
     .map_err(|e| DisplayError::CaptureError(format!("PipeWire capture failed: {e}")))?;
 
@@ -496,6 +500,111 @@ impl WaylandBackend {
         result
     }
 
+    fn should_try_kde_native_screenshot() -> bool {
+        kde_screenshot::is_kde_wayland_session() && kde_screenshot::is_kwin_screenshot_available()
+    }
+
+    fn capture_monitor_via_kde_native() -> Option<DisplayResult<CaptureData>> {
+        if !Self::should_try_kde_native_screenshot() {
+            return None;
+        }
+
+        let start = std::time::Instant::now();
+        let result = kde_screenshot::capture_workspace();
+        match &result {
+            Ok(d) => eprintln!(
+                "[capture] KDE ScreenShot2 workspace capture succeeded in {:.0}ms ({}x{}).",
+                start.elapsed().as_millis(),
+                d.width,
+                d.height
+            ),
+            Err(e) => {
+                eprintln!(
+                    "[capture] KDE ScreenShot2 workspace capture failed ({:.0}ms): {e}",
+                    start.elapsed().as_millis()
+                );
+                if kde_screenshot::is_authorization_error(e) {
+                    eprintln!(
+                        "[capture] KDE ScreenShot2 authorization missing; falling back to existing Wayland backends. On KDE Plasma, native capture may only be granted to the real ApexShot desktop application identity, not ad-hoc helper/test binaries."
+                    );
+                }
+                return None;
+            }
+        }
+        Some(result)
+    }
+
+    fn capture_area_via_kde_native(
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) -> Option<DisplayResult<CaptureData>> {
+        if !Self::should_try_kde_native_screenshot() {
+            return None;
+        }
+        if width <= 0 || height <= 0 {
+            return Some(Err(DisplayError::InvalidArea(format!(
+                "Invalid dimensions: {}x{}",
+                width, height
+            ))));
+        }
+
+        let start = std::time::Instant::now();
+        let result = kde_screenshot::capture_area(x, y, width as u32, height as u32);
+        match &result {
+            Ok(d) => eprintln!(
+                "[capture] KDE ScreenShot2 area capture succeeded in {:.0}ms ({}x{}).",
+                start.elapsed().as_millis(),
+                d.width,
+                d.height
+            ),
+            Err(e) => {
+                eprintln!(
+                    "[capture] KDE ScreenShot2 area capture failed ({:.0}ms): {e}",
+                    start.elapsed().as_millis()
+                );
+                if kde_screenshot::is_authorization_error(e) {
+                    eprintln!(
+                        "[capture] KDE ScreenShot2 authorization missing; falling back to existing Wayland backends. On KDE Plasma, native capture may only be granted to the real ApexShot desktop application identity, not ad-hoc helper/test binaries."
+                    );
+                }
+                return None;
+            }
+        }
+        Some(result)
+    }
+
+    fn capture_window_via_kde_native() -> Option<DisplayResult<CaptureData>> {
+        if !Self::should_try_kde_native_screenshot() {
+            return None;
+        }
+
+        let start = std::time::Instant::now();
+        let result = kde_screenshot::capture_interactive(kde_screenshot::InteractiveKind::Window);
+        match &result {
+            Ok(d) => eprintln!(
+                "[capture] KDE ScreenShot2 interactive window capture succeeded in {:.0}ms ({}x{}).",
+                start.elapsed().as_millis(),
+                d.width,
+                d.height
+            ),
+            Err(e) => {
+                eprintln!(
+                    "[capture] KDE ScreenShot2 interactive window capture failed ({:.0}ms): {e}",
+                    start.elapsed().as_millis()
+                );
+                if kde_screenshot::is_authorization_error(e) {
+                    eprintln!(
+                        "[capture] KDE ScreenShot2 authorization missing; falling back to existing Wayland backends. On KDE Plasma, native capture may only be granted to the real ApexShot desktop application identity, not ad-hoc helper/test binaries."
+                    );
+                }
+                return None;
+            }
+        }
+        Some(result)
+    }
+
     /// Run a full-screen monitor capture via the ScreenCast portal + PipeWire.
     ///
     /// Always uses the ScreenCast path for full customization and cross-distro
@@ -516,6 +625,10 @@ impl WaylandBackend {
                     start.elapsed().as_millis()
                 ),
             }
+            return result;
+        }
+
+        if let Some(result) = Self::capture_monitor_via_kde_native() {
             return result;
         }
 
@@ -548,6 +661,10 @@ impl WaylandBackend {
             )));
         }
 
+        if let Some(result) = Self::capture_area_via_kde_native(x, y, width, height) {
+            return result;
+        }
+
         let full = self.capture_screen_for_selection_impl()?;
         crop_capture(full, x, y, width, height)
     }
@@ -558,6 +675,10 @@ impl WaylandBackend {
     /// back to the ScreenCast portal + PipeWire for non-wlroots desktops
     /// (COSMIC, KDE, GNOME via Rust path, etc.).
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
+        if let Some(result) = Self::capture_monitor_via_kde_native() {
+            return result;
+        }
+
         if let Some(result) = Self::capture_monitor_via_native_screencopy() {
             return result;
         }
@@ -649,6 +770,12 @@ impl DisplayBackend for WaylandBackend {
     }
 
     fn capture_window(&self, _window_id: u64) -> DisplayResult<CaptureData> {
+        if let Some(result) = Self::capture_window_via_kde_native() {
+            if result.is_ok() {
+                return result;
+            }
+        }
+
         // Try the ScreenCast portal first (works on GNOME/KDE with proper portal).
         // This shows the portal's own source-selection dialog to the user.
         let portal_result = block_on_async(async {
@@ -720,6 +847,22 @@ mod tests {
         assert_eq!(cropped.width, 2);
         assert_eq!(cropped.height, 2);
         assert_eq!(cropped.pixels.len(), 2 * 2 * 4);
+    }
+
+    #[test]
+    fn kde_native_routing_detection_is_isolated() {
+        assert!(kde_screenshot::is_kde_wayland_session_from_env(
+            Some("wayland"),
+            Some("KDE")
+        ));
+        assert!(!kde_screenshot::is_kde_wayland_session_from_env(
+            Some("wayland"),
+            Some("GNOME")
+        ));
+        assert!(!kde_screenshot::is_kde_wayland_session_from_env(
+            Some("x11"),
+            Some("KDE")
+        ));
     }
 
     #[test]

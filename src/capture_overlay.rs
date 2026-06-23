@@ -85,40 +85,39 @@ fn should_use_gtk_layer_shell_selector_from_env(
     gnome_setup_display: Option<&str>,
     hyprland_instance_signature: Option<&str>,
     sway_socket: Option<&str>,
+    distro_is_arch: bool,
 ) -> bool {
-    // Always use the Rust GTK LayerShell selector on wlroots compositors.
-    if hyprland_instance_signature.is_some_and(|value| !value.trim().is_empty())
-        || sway_socket.is_some_and(|value| !value.trim().is_empty())
-        || desktop_value_contains(desktop, "Hyprland")
-        || desktop_value_contains(desktop, "sway")
+    // Always use the Rust GTK LayerShell selector only on Arch-based wlroots
+    // compositors where that path is known to work well (e.g. Hyprland/Sway).
+    // Arch GNOME, Arch KDE, Fedora, Ubuntu, openSUSE, etc. should stay on the
+    // C++ overlay path.
+    if distro_is_arch
+        && (hyprland_instance_signature.is_some_and(|value| !value.trim().is_empty())
+            || sway_socket.is_some_and(|value| !value.trim().is_empty())
+            || desktop_value_contains(desktop, "Hyprland")
+            || desktop_value_contains(desktop, "sway"))
     {
         return true;
     }
 
-    // On other Wayland desktops where the C++ capture binary (which relies on
-    // desktop-specific XDG portal behavior and window metadata plumbing) may
-    // not work, use the Rust selector. This covers COSMIC, River, Wayfire,
-    // Labwc, Niri, and any other non-GNOME, non-KDE Wayland session.
-    if wayland_display.is_some_and(|value| !value.trim().is_empty()) {
-        let is_gnome =
-            is_gnome_wayland_session_from_env(wayland_display, desktop, gnome_setup_display);
-        let is_kde =
-            desktop_value_contains(desktop, "KDE") || desktop_value_contains(desktop, "Plasma");
-        if !is_gnome && !is_kde {
-            return true;
-        }
-    }
-
+    // Fedora/Ubuntu/openSUSE and other non-Arch paths should stay on the C++
+    // overlay path unless a compositor-specific native flow is explicitly
+    // required elsewhere.
+    let _ = (wayland_display, desktop, gnome_setup_display);
     false
 }
 
 fn should_use_gtk_layer_shell_selector() -> bool {
+    let distro_is_arch = crate::distro::DistroInfo::detect()
+        .map(|info| info.is_arch())
+        .unwrap_or(false);
     should_use_gtk_layer_shell_selector_from_env(
         std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
         std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
         std::env::var("GNOME_SETUP_DISPLAY").ok().as_deref(),
         std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok().as_deref(),
         std::env::var("SWAYSOCK").ok().as_deref(),
+        distro_is_arch,
     )
 }
 
@@ -1752,39 +1751,60 @@ mod tests {
             Some("ubuntu:GNOME"),
             None,
             None,
-            None
+            None,
+            false,
         ));
         assert!(!should_use_gtk_layer_shell_selector_from_env(
             Some("wayland-0"),
             None,
             Some(":1"),
             None,
-            None
+            None,
+            false,
         ));
     }
 
     #[test]
-    fn gtk_layer_shell_selector_stays_enabled_for_non_gnome_wayland() {
-        assert!(should_use_gtk_layer_shell_selector_from_env(
-            Some("wayland-0"),
-            Some("COSMIC"),
-            None,
-            None,
-            None
-        ));
+    fn gtk_layer_shell_selector_is_reserved_for_arch_wlroots_sessions() {
         assert!(should_use_gtk_layer_shell_selector_from_env(
             Some("wayland-0"),
             Some("Hyprland"),
             None,
             Some("hyprland-instance"),
-            None
+            None,
+            true,
+        ));
+        assert!(!should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            Some("Hyprland"),
+            None,
+            Some("hyprland-instance"),
+            None,
+            false,
+        ));
+        assert!(!should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            Some("arch:GNOME"),
+            None,
+            None,
+            None,
+            true,
         ));
         assert!(!should_use_gtk_layer_shell_selector_from_env(
             Some("wayland-0"),
             Some("KDE"),
             None,
             None,
-            None
+            None,
+            true,
+        ));
+        assert!(!should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            Some("COSMIC"),
+            None,
+            None,
+            None,
+            true,
         ));
     }
 

@@ -784,8 +784,45 @@ pub fn capture_single_frame(
     node_id: u32,
     timeout: Duration,
 ) -> PipeWireResult<PipeWireFrame> {
-    let capture = PipeWireCapture::connect(pipewire_fd, node_id, Some(1), None, None)?;
-    capture.wait_for_frame(timeout)
+    capture_single_frame_with_min_frames(pipewire_fd, node_id, timeout, 1)
+}
+
+pub fn capture_single_frame_with_min_frames(
+    pipewire_fd: OwnedFd,
+    node_id: u32,
+    timeout: Duration,
+    min_frames_before_return: u64,
+) -> PipeWireResult<PipeWireFrame> {
+    let capture = PipeWireCapture::connect(
+        pipewire_fd,
+        node_id,
+        Some(min_frames_before_return),
+        None,
+        None,
+    )?;
+    let deadline = Instant::now() + timeout;
+    let required = min_frames_before_return.max(1);
+
+    loop {
+        if capture.frames_consumed() + capture.inner.lock().unwrap().frames.len() as u64 >= required
+        {
+            break;
+        }
+        if Instant::now() > deadline {
+            return Err(PipeWireError::Timeout(timeout));
+        }
+        if let Some(err) = capture.error_message() {
+            return Err(PipeWireError::Stream(err));
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+
+    let mut last_frame = None;
+    while capture.frames_consumed() < required {
+        last_frame = Some(capture.wait_for_frame(timeout)?);
+    }
+
+    last_frame.ok_or(PipeWireError::NoFrame)
 }
 
 // ---------------------------------------------------------------------------

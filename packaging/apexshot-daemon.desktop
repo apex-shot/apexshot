@@ -12,3 +12,4 @@ X-GNOME-Autostart-Delay=2
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-Phase=Application
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2

@@ -9,3 +9,4 @@ Keywords=screenshot;capture;recording;screen;video;sharex;alternative;linux;ocr;
 StartupNotify=true
 StartupWMClass=io.github.codegoddy.apexshot
 Terminal=false
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2

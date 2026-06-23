@@ -1033,7 +1033,8 @@ fn install_desktop_launcher(dev_install: bool) {
          Keywords=screenshot;capture;recording;screen;video;ocr;annotation;\n\
          StartupNotify=true\n\
          StartupWMClass={}\n\
-         Terminal=false\n",
+         Terminal=false\n\
+         X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n",
         app_identity::DEV_WRAPPER,
         app_identity::DEV_APP_ID,
     );
