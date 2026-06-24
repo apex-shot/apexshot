@@ -12,7 +12,7 @@ pub fn should_use_direct_preview_launch() -> bool {
 }
 
 pub fn should_use_direct_editor_launch() -> bool {
-    kde_screenshot::is_kde_wayland_session()
+    false
 }
 
 fn unix_epoch_millis_now() -> Option<u128> {
