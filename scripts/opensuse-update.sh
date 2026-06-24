@@ -4,7 +4,7 @@ set -euo pipefail
 
 # ============================================================================
 # ApexShot openSUSE Updater
-# Rebuilds and refreshes the local source install.
+# Refreshes the installed package from the latest published openSUSE RPM.
 # Usage: curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-update.sh | bash
 # ============================================================================
 

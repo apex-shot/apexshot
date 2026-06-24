@@ -2,6 +2,12 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+# ============================================================================
+# ApexShot Fedora Updater
+# Refreshes the installed package from the latest published Fedora RPM.
+# Usage: curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-update.sh | bash
+# ============================================================================
+
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
 if [[ -n "$SCRIPT_SOURCE" ]]; then

@@ -195,10 +195,11 @@ command:
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-install.sh | bash
 ```
 
-The direct Fedora installer builds from source, installs binaries into
-`/usr/local/bin`, and installs the reported dnf dependency set.
+The direct Fedora installer now downloads the latest published GitHub Release
+RPM and installs it with `dnf`, after ensuring the required runtime packages are
+present.
 
-An RPM spec is available for package-managed installs:
+A local RPM build path is still available for packaging work:
 
 ```bash
 git clone https://github.com/apex-shot/apexshot.git
@@ -207,9 +208,9 @@ scripts/build-fedora-rpm.sh
 sudo dnf install target/fedora-rpmbuild/RPMS/*/apexshot-*.rpm
 ```
 
-The Fedora RPM path is intended for package validation and future Copr/RPM
-publishing work. Runtime testing on Fedora GNOME and KDE Plasma Wayland is
-still in progress.
+The Fedora RPM build path is intended for package validation and future
+Copr/RPM publishing work. Runtime testing on Fedora GNOME and KDE Plasma
+Wayland is still in progress.
 
 ### openSUSE Tumbleweed / Leap
 
@@ -221,10 +222,11 @@ personally runtime-tested on openSUSE Tumbleweed or Leap. Direct command:
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-install.sh | bash
 ```
 
-The direct openSUSE installer builds from source, installs binaries into
-`/usr/local/bin`, and installs the reported zypper dependency set.
+The direct openSUSE installer now downloads the latest published GitHub Release
+RPM and installs it with `zypper`, after ensuring the required runtime packages
+are present.
 
-An RPM spec is available for package-managed installs:
+A local RPM build path is still available for packaging work:
 
 ```bash
 git clone https://github.com/apex-shot/apexshot.git
@@ -233,9 +235,9 @@ scripts/build-opensuse-rpm.sh
 sudo zypper install target/opensuse-rpmbuild/RPMS/*/apexshot-*.rpm
 ```
 
-The RPM path is intended for openSUSE Tumbleweed / Leap packaging validation
-and future OBS work. Runtime testing on KDE Plasma Wayland is still in
-progress.
+The openSUSE RPM build path is intended for Tumbleweed / Leap packaging
+validation and future OBS work. Runtime testing on KDE Plasma Wayland is still
+in progress.
 
 ### Updating
 

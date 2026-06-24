@@ -4,14 +4,20 @@ set -euo pipefail
 
 # ============================================================================
 # ApexShot Fedora Installer
-# Builds ApexShot from source on Fedora.
+# Installs ApexShot from published GitHub Release RPMs.
 # Usage: curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-install.sh | bash
 # ============================================================================
 
 REPO="apex-shot/apexshot"
+RELEASES_URL="https://github.com/${REPO}/releases"
+VERSION=""
 TMPDIR=""
 SUDO=""
-INSTALL_ARGS=()
+SCRIPT_NAME="fedora-install"
+TELEMETRY_CHANNEL="install"
+TELEMETRY_URL="${APEXSHOT_TELEMETRY_URL:-https://apexshot.org/api/download-telemetry}"
+FORCE_REINSTALL=0
+FROM_SOURCE=0
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -31,7 +37,7 @@ header() {
     echo ' / ___ |/ ____/ /___ /   |___/ / __  / /_/ / / /    '
     echo '/_/  |_/_/   /_____//_/|_/____/_/ /_/\____/ /_/     '
     echo -e "${RESET}"
-    echo -e "${DIM}      Fedora source installer${RESET}\n"
+    echo -e "${DIM}      Fedora RPM installer${RESET}\n"
 }
 
 step() {
@@ -50,6 +56,10 @@ err() {
     echo -e "  ${RED}✖${RESET}  $1"
 }
 
+info() {
+    echo -e "  ${DIM}$1${RESET}"
+}
+
 run_spinner() {
     local msg=$1
     shift
@@ -61,6 +71,79 @@ run_spinner() {
 cleanup() {
     if [[ -n "${TMPDIR:-}" && -d "$TMPDIR" ]]; then
         rm -rf "$TMPDIR"
+    fi
+}
+
+telemetry_enabled() {
+    case "${APEXSHOT_TELEMETRY:-1}" in
+        0|false|FALSE|no|NO|off|OFF) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+json_escape() {
+    local value=${1:-}
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//$'\n'/ }
+    value=${value//$'\r'/ }
+    printf '%s' "$value"
+}
+
+telemetry_distro() {
+    if [[ -r /etc/os-release ]]; then
+        (
+            . /etc/os-release
+            printf '%s' "${ID:-linux}"
+            [[ -n "${VERSION_ID:-}" ]] && printf ':%s' "$VERSION_ID"
+        )
+    else
+        printf 'linux'
+    fi
+}
+
+send_download_telemetry() {
+    telemetry_enabled || return 0
+
+    local event=$1
+    local asset_type=$2
+    local status=${3:-}
+    local size_bytes=${4:-0}
+    local asset_name=${5:-}
+    local distro
+    distro=$(telemetry_distro)
+
+    local payload
+    payload=$(printf '{"event":"%s","script":"%s","distro":"%s","channel":"%s","version":"%s","asset_type":"%s","asset_name":"%s","status":"%s","size_bytes":%s}' \
+        "$(json_escape "$event")" \
+        "$(json_escape "$SCRIPT_NAME")" \
+        "$(json_escape "$distro")" \
+        "$(json_escape "$TELEMETRY_CHANNEL")" \
+        "$(json_escape "${VERSION:-unknown}")" \
+        "$(json_escape "$asset_type")" \
+        "$(json_escape "$asset_name")" \
+        "$(json_escape "$status")" \
+        "$size_bytes")
+
+    (curl -fsS -m 2 -H "Content-Type: application/json" -A "ApexShotDownloadTelemetry/${SCRIPT_NAME}" -d "$payload" "$TELEMETRY_URL" >/dev/null 2>&1 || true) &
+}
+
+download_file() {
+    local url=$1
+    local output=$2
+    local asset_type=${3:-package}
+    local asset_name=${output##*/}
+
+    send_download_telemetry "download_started" "$asset_type" "started" 0 "$asset_name"
+
+    if curl -fL --progress-bar -o "$output" "$url"; then
+        local size_bytes=0
+        size_bytes=$(stat -c%s "$output" 2>/dev/null || wc -c < "$output" 2>/dev/null || echo 0)
+        send_download_telemetry "download_completed" "$asset_type" "success" "$size_bytes" "$asset_name"
+    else
+        local status=$?
+        send_download_telemetry "download_failed" "$asset_type" "curl_${status}" 0 "$asset_name"
+        return "$status"
     fi
 }
 
@@ -78,7 +161,15 @@ check_prereqs() {
     elif command -v sudo >/dev/null 2>&1; then
         SUDO="sudo"
     else
-        err "Root or sudo access is required to install dependencies."
+        err "Root or sudo access is required to install ApexShot."
+        exit 1
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+        ok "curl found"
+    else
+        err "curl is required but not installed."
+        err "Install it with: sudo dnf install curl"
         exit 1
     fi
 
@@ -91,112 +182,124 @@ prime_sudo() {
     fi
 }
 
-portal_backend_package() {
-    local desktop="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-${DESKTOP_SESSION:-}}}"
-    desktop="${desktop,,}"
+fetch_version() {
+    step "Resolving latest release"
 
-    if [[ "$desktop" == *kde* || "$desktop" == *plasma* ]]; then
-        printf '%s' "xdg-desktop-portal-kde"
-    elif [[ "$desktop" == *gnome* ]]; then
-        printf '%s' "xdg-desktop-portal-gnome"
-    else
-        printf '%s' "xdg-desktop-portal-gtk"
+    local effective
+    effective=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "${RELEASES_URL}/latest" || true)
+    VERSION="${effective##*/}"
+    if [[ -z "$VERSION" ]] || [[ "$VERSION" == "latest" ]]; then
+        err "Could not determine the latest release version."
+        err "Please check your internet connection or try again later."
+        exit 1
     fi
+    ok "Latest version: ${BOLD}${VERSION}${RESET}"
 }
 
-install_dependencies() {
-    step "Installing build and runtime dependencies"
+install_runtime_dependencies() {
+    step "Installing runtime dependencies"
 
     local deps=(
-        gcc-c++
-        cmake
-        pkgconf-pkg-config
-        qt5-qtbase-devel
-        qt5-qtx11extras-devel
-        gstreamer1-devel
-        gstreamer1-plugins-base-devel
+        curl
+        ffmpeg-free
+        gstreamer1-plugins-base
         gstreamer1-plugins-good
         gstreamer1-plugins-bad-free
-        gstreamer1-libav
-        pipewire-devel
-        tesseract
-        tesseract-devel
-        gtk4-devel
-        libadwaita-devel
-        gtk4-layer-shell-devel
-        clang
-        dbus-devel
-        libXtst-devel
-        git
-        rust
-        cargo
-        xdg-desktop-portal
-        "$(portal_backend_package)"
+        gstreamer1-plugin-libav
         pipewire
         pipewire-pulseaudio
+        tesseract
+        unzip
+        wget
         wl-clipboard
-        ffmpeg
+        xdg-desktop-portal
+        xdg-utils
         desktop-file-utils
+        hicolor-icon-theme
     )
 
     prime_sudo
-    run_spinner "Installing Fedora packages" \
+    run_spinner "Installing Fedora runtime packages" \
         bash -c "${SUDO} dnf install -y ${deps[*]}"
 }
 
-build_and_install() {
-    step "Building ApexShot"
+resolve_rpm_url() {
+    local rpm_path
+    rpm_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
+               grep -oE "/${REPO}/releases/download/${VERSION}/[^\"]*\.x86_64\.rpm" |
+               grep -v '\.src\.rpm$' |
+               head -n 1 || true)
+
+    if [[ -z "$rpm_path" ]]; then
+        return 1
+    fi
+
+    printf 'https://github.com%s' "$rpm_path"
+}
+
+download_rpm() {
+    step "Downloading ApexShot ${VERSION}"
 
     TMPDIR=$(mktemp -d -t apexshot-fedora-install.XXXXXX)
-    run_spinner "Cloning repository" \
-        git clone --depth 1 "https://github.com/${REPO}.git" "$TMPDIR/apexshot"
-    run_spinner "Compiling release binaries" \
-        bash -c "cd '$TMPDIR/apexshot' && cargo build --release"
 
+    local rpm_url
+    if ! rpm_url=$(resolve_rpm_url); then
+        err "Could not find the Fedora RPM download URL for ${VERSION}."
+        err "If this release is still publishing, try again in a few minutes."
+        err "Or use --from-source as a fallback."
+        exit 1
+    fi
+
+    local rpm_file="${TMPDIR}/apexshot-${VERSION#v}.x86_64.rpm"
+    info "Downloading Fedora RPM with progress:"
+    download_file "$rpm_url" "$rpm_file" "fedora_rpm"
+
+    RPM_FILE="$rpm_file"
+    ok "Package saved to ${rpm_file}"
+}
+
+install_rpm() {
     step "Installing ApexShot"
-    prime_sudo
-    run_spinner "Installing binaries to /usr/local/bin" \
-        bash -c "${SUDO} install -m 755 '$TMPDIR/apexshot/target/release/apexshot' /usr/local/bin/apexshot && ${SUDO} install -m 755 '$TMPDIR/apexshot/target/release/apexshot-capture' /usr/local/bin/apexshot-capture"
 
-    if [[ -f "$TMPDIR/apexshot/packaging/deb/apexshot-native-host" ]]; then
-        run_spinner "Installing browser native host helper" \
-            bash -c "${SUDO} install -m 755 '$TMPDIR/apexshot/packaging/deb/apexshot-native-host' /usr/local/bin/apexshot-native-host"
+    if [[ -z "${RPM_FILE:-}" ]] || [[ ! -f "${RPM_FILE}" ]]; then
+        err "RPM file is missing."
+        exit 1
+    fi
+
+    prime_sudo
+    if [[ $FORCE_REINSTALL -eq 1 ]]; then
+        run_spinner "Reinstalling package..." \
+            bash -c "${SUDO} dnf reinstall -y '${RPM_FILE}' || ${SUDO} dnf install -y '${RPM_FILE}'"
+    else
+        run_spinner "Installing package..." \
+            bash -c "${SUDO} dnf install -y '${RPM_FILE}'"
     fi
 
     if command -v restorecon >/dev/null 2>&1; then
         run_spinner "Refreshing SELinux labels" \
-            bash -c "${SUDO} restorecon -v /usr/local/bin/apexshot /usr/local/bin/apexshot-capture /usr/local/bin/apexshot-native-host 2>/dev/null || ${SUDO} restorecon -v /usr/local/bin/apexshot /usr/local/bin/apexshot-capture"
+            bash -c "${SUDO} restorecon -v /usr/bin/apexshot /usr/bin/apexshot-capture 2>/dev/null || true"
     fi
 
-    run_spinner "Installing desktop launchers and icons" \
-        bash -c "${SUDO} install -Dm644 '$TMPDIR/apexshot/packaging/apexshot.desktop' /usr/local/share/applications/io.github.codegoddy.apexshot.desktop && ${SUDO} install -Dm644 '$TMPDIR/apexshot/packaging/apexshot-daemon.desktop' /usr/local/share/applications/io.github.codegoddy.apexshot.daemon.desktop && ${SUDO} install -Dm644 '$TMPDIR/apexshot/packaging/apexshot.svg' /usr/local/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg"
+    ok "ApexShot installed"
+}
 
-    run_spinner "Installing shared editor assets" \
-        bash -c "${SUDO} mkdir -p /usr/local/share/apexshot/background-images /usr/local/share/apexshot/sounds && ${SUDO} cp '$TMPDIR/apexshot/src/capture/editor/background-images/'*.jpg /usr/local/share/apexshot/background-images/ && ${SUDO} cp '$TMPDIR/apexshot/assets/sounds/'*.ogg /usr/local/share/apexshot/sounds/"
-
-    if command -v update-desktop-database >/dev/null 2>&1; then
-        update-desktop-database /usr/local/share/applications 2>/dev/null || true
-    fi
-
-    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-        gtk-update-icon-cache /usr/local/share/icons/hicolor 2>/dev/null || true
-    fi
-
-    if [[ $EUID -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-        run_spinner "Installing user autostart and permissions" \
-            sudo -u "${SUDO_USER}" env HOME="/home/${SUDO_USER}" /usr/local/bin/apexshot install --no-binary "${INSTALL_ARGS[@]}"
-    else
-        run_spinner "Installing user autostart and permissions" \
-            /usr/local/bin/apexshot install --no-binary "${INSTALL_ARGS[@]}"
-    fi
+install_from_source() {
+    step "Falling back to source installation"
+    info "Published Fedora RPM not available; using the source installer path."
+    local script_url="https://raw.githubusercontent.com/${REPO}/main/scripts/fedora-install.sh"
+    err "Source fallback is not embedded in this release-first installer anymore."
+    err "Use a checked-out repo copy if you need source installs."
+    err "Expected script: ${script_url}"
+    exit 1
 }
 
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is installed for Fedora${RESET}\n"
-    echo -e "  Binary:    ${BOLD}/usr/local/bin/apexshot${RESET}"
+    echo -e "  Version:   ${BOLD}${VERSION}${RESET}"
+    echo -e "  Binary:    ${BOLD}/usr/bin/apexshot${RESET}"
     echo -e "  Update:    ${DIM}curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/fedora-update.sh | bash${RESET}"
-    echo -e "  Remove:    ${DIM}apexshot uninstall --autostart-only && sudo apexshot uninstall${RESET}"
+    echo -e "  Remove:    ${DIM}sudo dnf remove apexshot${RESET}"
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}\n"
 }
 
@@ -205,8 +308,11 @@ main() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --no-autostart|--no-binary|--force)
-                INSTALL_ARGS+=("$1")
+            --force)
+                FORCE_REINSTALL=1
+                ;;
+            --from-source)
+                FROM_SOURCE=1
                 ;;
             *)
                 err "Unknown option: $1"
@@ -218,8 +324,15 @@ main() {
 
     header
     check_prereqs
-    install_dependencies
-    build_and_install
+    fetch_version
+    install_runtime_dependencies
+
+    if [[ $FROM_SOURCE -eq 1 ]]; then
+        install_from_source
+    fi
+
+    download_rpm
+    install_rpm
     summary
 }
 
