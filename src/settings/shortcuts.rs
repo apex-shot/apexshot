@@ -118,18 +118,6 @@ fn request_hotkey_suppressed(suppressed: bool) {
     });
 }
 
-fn request_hotkey_suppressed_before_present() -> std::sync::mpsc::Receiver<bool> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let success = set_daemon_hotkey_suppressed(true);
-        if !success {
-            eprintln!("[shortcuts] Failed to suppress daemon hotkeys - daemon may not be running");
-        }
-        let _ = tx.send(success);
-    });
-    rx
-}
-
 fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
     let button = button.clone();
     let parent = parent.clone();
@@ -318,24 +306,10 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
         let dialog_for_present = dialog.clone();
         let stack_for_present = stack.clone();
         let suppression_ready_for_present = suppression_ready.clone();
-        let suppression_rx = request_hotkey_suppressed_before_present();
-        gtk4::glib::timeout_add_local(std::time::Duration::from_millis(10), move || {
-            match suppression_rx.try_recv() {
-                Ok(_) => {
-                    suppression_ready_for_present.set(true);
-                    stack_for_present.set_visible_child_name("listening");
-                    dialog_for_present.present();
-                    gtk4::glib::ControlFlow::Break
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => gtk4::glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    suppression_ready_for_present.set(true);
-                    stack_for_present.set_visible_child_name("listening");
-                    dialog_for_present.present();
-                    gtk4::glib::ControlFlow::Break
-                }
-            }
-        });
+        dialog_for_present.present();
+        stack_for_present.set_visible_child_name("listening");
+        suppression_ready_for_present.set(true);
+        request_hotkey_suppressed(true);
     });
 }
 

@@ -43,7 +43,7 @@ use apexshot::{
     },
     ocr::{extract_text_from_capture, extract_text_from_path, OcrConfig},
     onboarding::{is_onboarding_complete, show_onboarding_window},
-    preview_launch::{show_preview_direct, spawn_preview_subprocess},
+    preview_launch::{launch_preview, show_preview_direct},
     recording::{
         editor::{open_empty_recording_editor, open_recording_editor},
         run_overlay_recording_request, run_recording_countdown_bar, run_recording_ui,
@@ -604,6 +604,45 @@ fn rpm_has_apexshot_package() -> bool {
         .unwrap_or(false)
 }
 
+fn os_release_field(field: &str) -> Option<String> {
+    let content = std::fs::read_to_string("/etc/os-release").ok()?;
+    content.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        if key != field {
+            return None;
+        }
+        Some(value.trim_matches('"').to_string())
+    })
+}
+
+fn rpm_package_manager() -> &'static str {
+    let id = os_release_field("ID")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let id_like = os_release_field("ID_LIKE")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let distro = format!(" {id} {id_like} ");
+
+    if distro.contains(" opensuse ") || distro.contains(" suse ") || distro.contains(" sles ") {
+        return "zypper";
+    }
+    if distro.contains(" fedora ")
+        || distro.contains(" rhel ")
+        || distro.contains(" centos ")
+        || distro.contains(" rocky ")
+        || distro.contains(" alma ")
+    {
+        return "dnf";
+    }
+
+    if command_exists("dnf") {
+        "dnf"
+    } else {
+        "zypper"
+    }
+}
+
 fn package_uninstall_command_for(manager: &str, needs_sudo: bool) -> Option<(String, Vec<String>)> {
     match (manager, needs_sudo) {
         ("pacman", true) => Some((
@@ -665,10 +704,8 @@ fn uninstall_package_managed_app_if_present() -> bool {
         Some("pacman")
     } else if command_exists("dpkg-query") && dpkg_has_apexshot_package() {
         Some("apt")
-    } else if command_exists("dnf") && command_exists("rpm") && rpm_has_apexshot_package() {
-        Some("dnf")
-    } else if command_exists("zypper") && command_exists("rpm") && rpm_has_apexshot_package() {
-        Some("zypper")
+    } else if command_exists("rpm") && rpm_has_apexshot_package() {
+        Some(rpm_package_manager())
     } else {
         None
     };
@@ -745,10 +782,19 @@ fn install_binary(force: bool, dev_install: bool) {
     if !dev_install && (packaged_dest.exists() || packaged_capture_dest.exists()) {
         eprintln!("Error: package-managed ApexShot binaries exist under /usr/bin.");
         eprintln!(
-            "`apexshot install` would write to /usr/local/bin/apexshot, which shadows the .deb installation."
+            "`apexshot install` would write to /usr/local/bin/apexshot, which shadows the distro-managed installation."
         );
         eprintln!("Use `sudo apexshot install --dev --no-autostart` for a separate test install,");
-        eprintln!("or update the package-managed app with `sudo dpkg -i apexshot_*.deb`.");
+        if command_exists("rpm") && rpm_has_apexshot_package() {
+            let manager = rpm_package_manager();
+            if manager == "dnf" {
+                eprintln!("or update the package-managed app with `sudo dnf upgrade apexshot` or an updated RPM.");
+            } else {
+                eprintln!("or update the package-managed app with `sudo zypper update apexshot` or an updated RPM.");
+            }
+        } else {
+            eprintln!("or update the package-managed app with your distro package manager.");
+        }
         std::process::exit(1);
     }
 
@@ -2014,10 +2060,11 @@ fn run_capture(args: &[String]) {
         }
     };
 
-    // Keep preview in a subprocess so it preserves the existing GTK isolation,
-    // GNOME extension tracking, and daemon/show-last-preview behavior.
-    if let Err(e) = spawn_preview_subprocess(&saved_path) {
-        eprintln!("Warning: Failed to spawn preview overlay: {}", e);
+    // Keep preview in a subprocess on desktops where that preserves the
+    // existing GTK isolation / shell tracking behavior. KDE Wayland uses a
+    // direct launch path to avoid extra taskbar/loading artifacts.
+    if let Err(e) = launch_preview(&saved_path) {
+        eprintln!("Warning: Failed to launch preview overlay: {}", e);
         show_preview_direct(saved_path.clone());
     }
 }
@@ -2480,8 +2527,7 @@ fn import_web_scroll_capture_direct(
     let saved_path = save_capture(&capture, &SaveConfig::default())
         .map_err(|e| format!("Failed to save imported capture: {e}"))?;
 
-    spawn_preview_subprocess(&saved_path)
-        .map_err(|e| format!("Failed to launch preview overlay: {e}"))?;
+    launch_preview(&saved_path).map_err(|e| format!("Failed to launch preview overlay: {e}"))?;
 
     Ok(saved_path)
 }

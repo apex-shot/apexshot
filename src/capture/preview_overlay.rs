@@ -1,4 +1,4 @@
-use crate::config::load_config;
+use crate::{backend::kde_screenshot, config::load_config};
 use gdk4x11::X11Surface;
 use gtk4::gdk::Key;
 use gtk4::{
@@ -693,10 +693,17 @@ fn setup_preview_window(
                 }
             }
 
-            let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-            if let Err(e) = Command::new(&exe).arg("edit").arg(&path_edit).spawn() {
-                eprintln!("Edit failed: {e}");
-                return;
+            if crate::preview_launch::should_use_direct_editor_launch() {
+                if let Err(e) = crate::capture::open_image_editor(path_edit.clone()) {
+                    eprintln!("Edit failed: {e}");
+                    return;
+                }
+            } else {
+                let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+                if let Err(e) = Command::new(&exe).arg("edit").arg(&path_edit).spawn() {
+                    eprintln!("Edit failed: {e}");
+                    return;
+                }
             }
 
             edit_opened_btn.store(true, Ordering::Relaxed);
@@ -1303,6 +1310,14 @@ fn preview_texture(path: &Path) -> Option<gdk::Texture> {
 
 fn configure_window_positioning(window: &Window, side: PreviewSide, _preview_width: i32) -> bool {
     if std::env::var_os(PREVIEW_DISABLE_LAYER_SHELL_ENV).is_some() {
+        return false;
+    }
+
+    // KDE Wayland handles floating transient windows better without layer-shell
+    // here; using the direct preview launch path plus plain GTK window avoids
+    // extra taskbar/loading artifacts in Plasma while preserving the existing
+    // behavior on GNOME and other desktops.
+    if kde_screenshot::is_kde_wayland_session() {
         return false;
     }
 

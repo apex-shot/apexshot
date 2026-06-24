@@ -1,5 +1,5 @@
 Name:           apexshot
-Version:        0.2.28
+Version:        0.2.29
 Release:        0
 Summary:        Linux screenshot, annotation, OCR, and screen recording tool
 License:        GPL-3.0-only

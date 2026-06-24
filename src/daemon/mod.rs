@@ -1528,6 +1528,10 @@ fn is_gnome_desktop() -> bool {
         .contains("gnome")
 }
 
+fn hotkey_debug_enabled() -> bool {
+    std::env::var_os("APEXSHOT_HOTKEY_DEBUG").is_some()
+}
+
 fn maybe_relaunch_via_desktop() -> bool {
     if !is_gnome_desktop() {
         return false;
@@ -1820,30 +1824,57 @@ async fn run_hotkey_listener_portal(
     }
 
     // ── Listen for Activated signals ─────────────────────────────────────────
-    let activated_rule = format!(
-        "type='signal',interface='org.freedesktop.portal.GlobalShortcuts',member='Activated',path='{}'",
-        session_handle.as_str()
-    );
-    let rule: zbus::MatchRule = activated_rule.as_str().try_into()?;
+    // Different portal backends may emit GlobalShortcuts signals on different
+    // object paths, so don't restrict the match rule by path; filter by the
+    // session_handle carried in the signal payload instead.
+    let debug = hotkey_debug_enabled();
+    let activated_rule = if debug {
+        "type='signal',interface='org.freedesktop.portal.GlobalShortcuts'"
+    } else {
+        "type='signal',interface='org.freedesktop.portal.GlobalShortcuts',member='Activated'"
+    };
+    let rule: zbus::MatchRule = activated_rule.try_into()?;
     let mut activated_stream = zbus::MessageStream::for_match_rule(rule, &conn, None).await?;
 
     eprintln!("[daemon] Listening for portal hotkey activations…");
 
     while let Some(Ok(msg)) = activated_stream.next().await {
-        // Signal body: (o session_handle, s shortcut_id, u timestamp, a{sv} options)
-        if let Ok((_session, shortcut_id, _ts, _opts)) =
-            msg.body()
-                .deserialize::<(OwnedObjectPath, String, u32, HashMap<String, OwnedValue>)>()
-        {
-            if is_hotkey_suppressed() {
-                eprintln!("[daemon] Hotkey suppressed (shortcut edit active)");
+        // Signal body: (o session_handle, s shortcut_id, t timestamp, a{sv} options)
+        let parsed: Result<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>), _> =
+            msg.body().deserialize();
+
+        let (signal_session, shortcut_id, _ts, _opts) = match parsed {
+            Ok(v) => v,
+            Err(e) => {
+                if debug {
+                    eprintln!(
+                        "[daemon] Hotkey debug: received non-Activated or unexpected GlobalShortcuts signal: {e}"
+                    );
+                    eprintln!("[daemon] Hotkey debug: raw message: {msg:?}");
+                }
                 continue;
             }
-            if let Some(binding) = id_to_binding.get(&shortcut_id) {
-                if let Some(act) = binding_to_daemon_action(binding) {
-                    eprintln!("[daemon] Portal hotkey fired: {:?}", act);
-                    let _ = tx.send(act);
-                }
+        };
+
+        if signal_session != session_handle {
+            if debug {
+                eprintln!(
+                    "[daemon] Hotkey debug: ignoring activation for other session {} (expected {})",
+                    signal_session.as_str(),
+                    session_handle.as_str()
+                );
+            }
+            continue;
+        }
+
+        if is_hotkey_suppressed() {
+            eprintln!("[daemon] Hotkey suppressed (shortcut edit active)");
+            continue;
+        }
+        if let Some(binding) = id_to_binding.get(&shortcut_id) {
+            if let Some(act) = binding_to_daemon_action(binding) {
+                eprintln!("[daemon] Portal hotkey fired: {:?}", act);
+                let _ = tx.send(act);
             }
         }
     }
@@ -2415,9 +2446,17 @@ fn spawn_empty_video_editor_subprocess() {
     }
 }
 
-/// Spawn `apexshot edit <path>` as a subprocess so it gets its own process
-/// and doesn't conflict with the tokio runtime in the daemon.
+/// Spawn `apexshot edit <path>` as a subprocess on desktops that need process
+/// isolation. KDE Wayland opens the editor directly to avoid extra taskbar /
+/// loading artifacts in Plasma.
 fn spawn_editor_subprocess(path: std::path::PathBuf) {
+    if crate::preview_launch::should_use_direct_editor_launch() {
+        if let Err(e) = crate::capture::open_image_editor(path) {
+            eprintln!("[daemon] Failed to open editor directly: {e}");
+        }
+        return;
+    }
+
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
 
     if let Err(e) = std::process::Command::new(&exe)

@@ -163,6 +163,11 @@ build_and_install() {
             bash -c "${SUDO} install -m 755 '$TMPDIR/apexshot/packaging/deb/apexshot-native-host' /usr/local/bin/apexshot-native-host"
     fi
 
+    if command -v restorecon >/dev/null 2>&1; then
+        run_spinner "Refreshing SELinux labels" \
+            bash -c "${SUDO} restorecon -v /usr/local/bin/apexshot /usr/local/bin/apexshot-capture /usr/local/bin/apexshot-native-host 2>/dev/null || ${SUDO} restorecon -v /usr/local/bin/apexshot /usr/local/bin/apexshot-capture"
+    fi
+
     run_spinner "Installing desktop launchers and icons" \
         bash -c "${SUDO} install -Dm644 '$TMPDIR/apexshot/packaging/apexshot.desktop' /usr/local/share/applications/io.github.codegoddy.apexshot.desktop && ${SUDO} install -Dm644 '$TMPDIR/apexshot/packaging/apexshot-daemon.desktop' /usr/local/share/applications/io.github.codegoddy.apexshot.daemon.desktop && ${SUDO} install -Dm644 '$TMPDIR/apexshot/packaging/apexshot.svg' /usr/local/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg"
 
@@ -190,7 +195,7 @@ summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is installed for Fedora${RESET}\n"
     echo -e "  Binary:    ${BOLD}/usr/local/bin/apexshot${RESET}"
-    echo -e "  Update:    ${DIM}curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/fedora-install.sh | bash -s -- --force${RESET}"
+    echo -e "  Update:    ${DIM}curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/fedora-update.sh | bash${RESET}"
     echo -e "  Remove:    ${DIM}apexshot uninstall --autostart-only && sudo apexshot uninstall${RESET}"
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}\n"
 }

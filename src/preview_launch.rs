@@ -2,10 +2,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::capture::show_capture_preview_overlay;
+use crate::{backend::kde_screenshot, capture::show_capture_preview_overlay};
 
 const PREVIEW_TIMING_ENV: &str = "APEXSHOT_PREVIEW_TIMING";
 const PREVIEW_PARENT_START_ENV: &str = "APEXSHOT_PREVIEW_PARENT_START_MS";
+
+pub fn should_use_direct_preview_launch() -> bool {
+    kde_screenshot::is_kde_wayland_session()
+}
+
+pub fn should_use_direct_editor_launch() -> bool {
+    kde_screenshot::is_kde_wayland_session()
+}
 
 fn unix_epoch_millis_now() -> Option<u128> {
     SystemTime::now()
@@ -35,5 +43,14 @@ pub fn spawn_preview_subprocess(path: &Path) -> std::io::Result<Child> {
 pub fn show_preview_direct(path: PathBuf) {
     if let Err(e) = show_capture_preview_overlay(path) {
         eprintln!("Warning: Failed to show capture preview overlay: {}", e);
+    }
+}
+
+pub fn launch_preview(path: &Path) -> std::io::Result<()> {
+    if should_use_direct_preview_launch() {
+        show_preview_direct(path.to_path_buf());
+        Ok(())
+    } else {
+        spawn_preview_subprocess(path).map(|_| ())
     }
 }

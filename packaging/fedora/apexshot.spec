@@ -1,5 +1,5 @@
 Name:           apexshot
-Version:        0.2.28
+Version:        0.2.29
 Release:        1%{?dist}
 Summary:        Linux screenshot, annotation, OCR, and screen recording tool
 License:        GPL-3.0-only
@@ -28,7 +28,7 @@ BuildRequires:  pkgconfig(gstreamer-app-1.0)
 BuildRequires:  pkgconfig(gstreamer-video-1.0)
 
 Requires:       curl
-Requires:       ffmpeg
+Requires:       ffmpeg-free
 Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
 Requires:       gstreamer1-plugins-bad-free
@@ -92,12 +92,20 @@ for snd in assets/sounds/*.ogg; do
 done
 
 %post
-%desktop_database_post
-%icon_theme_cache_post
+if [ -x %{_bindir}/update-desktop-database ]; then
+    %{_bindir}/update-desktop-database -q %{_datadir}/applications || :
+fi
+if [ -x %{_bindir}/gtk-update-icon-cache ]; then
+    %{_bindir}/gtk-update-icon-cache -q %{_datadir}/icons/hicolor || :
+fi
 
 %postun
-%desktop_database_postun
-%icon_theme_cache_postun
+if [ -x %{_bindir}/update-desktop-database ]; then
+    %{_bindir}/update-desktop-database -q %{_datadir}/applications || :
+fi
+if [ -x %{_bindir}/gtk-update-icon-cache ]; then
+    %{_bindir}/gtk-update-icon-cache -q %{_datadir}/icons/hicolor || :
+fi
 
 %files
 %license LICENSE
@@ -121,5 +129,8 @@ done
 %{_datadir}/apexshot/
 
 %changelog
-* Mon Jun 23 2026 codegoddy <codegoddy@gmail.com> - 0.2.28-1
+* Wed Jun 24 2026 codegoddy <codegoddy@gmail.com> - 0.2.29-1
+- KDE portal hotkey listener fixes and Fedora install/update improvements
+
+* Tue Jun 23 2026 codegoddy <codegoddy@gmail.com> - 0.2.28-1
 - Initial Fedora RPM recipe
