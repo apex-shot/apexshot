@@ -286,6 +286,17 @@ fn setup_preview_window(
         probe_realize.log("window-realize");
     });
 
+    // On X11: set the window-type hint as soon as the native window is
+    // realized (XID assigned) but BEFORE it is mapped/shown. This ensures
+    // the compositor sees _NET_WM_WINDOW_TYPE_NOTIFICATION on the very first
+    // MapNotify event and never starts an open/close animation.
+    let window_type_hint = window.downgrade();
+    window.connect_realize(move |_| {
+        if let Some(win) = window_type_hint.upgrade() {
+            suppress_x11_preview_window_type(&win);
+        }
+    });
+
     let first_frame_seen = Rc::new(RefCell::new(false));
     let first_frame_probe = probe.clone();
     let first_frame_seen_tick = first_frame_seen.clone();
@@ -298,15 +309,6 @@ fn setup_preview_window(
         }
         ControlFlow::Break
     });
-
-    probe.log("before-window-present");
-    window.present();
-    probe.log("after-window-present");
-    eprintln!(
-        "[preview] window.present() at {}ms for {}",
-        startup.elapsed().as_millis(),
-        path.display()
-    );
 
     let pinned = Arc::new(AtomicBool::new(start_pinned));
     let edit_opened = Arc::new(AtomicBool::new(false));
@@ -493,6 +495,10 @@ fn setup_preview_window(
         window.set_child(Some(&fallback_shell));
     }
     probe.log("after-window-child-setup");
+
+    probe.log("before-window-present");
+    window.present();
+    probe.log("after-window-present");
 
     let use_fallback_input_region = !layer_shell_active;
 
@@ -700,11 +706,13 @@ fn setup_preview_window(
             }
         });
 
-        eprintln!(
-            "[preview] deferred actions initialized at {}ms for {}",
-            startup_actions.elapsed().as_millis(),
-            path_actions.display()
-        );
+        if probe.enabled {
+            eprintln!(
+                "[preview] deferred actions initialized at {}ms for {}",
+                startup_actions.elapsed().as_millis(),
+                path_actions.display()
+            );
+        }
     });
 
     let key_controller = EventControllerKey::builder()
@@ -762,17 +770,6 @@ fn setup_preview_window(
             crate::gnome_integration::emit_tracked_window_closed(&preview_id_close);
         }
         glib::Propagation::Proceed
-    });
-
-    // On X11: set the window-type hint as soon as the native window is
-    // realized (XID assigned) but BEFORE it is mapped/shown.  This ensures
-    // the compositor sees _NET_WM_WINDOW_TYPE_NOTIFICATION on the very first
-    // MapNotify event and never starts an open/close animation.
-    let window_type_hint = window.downgrade();
-    window.connect_realize(move |_| {
-        if let Some(win) = window_type_hint.upgrade() {
-            suppress_x11_preview_window_type(&win);
-        }
     });
 
     let path_source_bytes = path.clone();
@@ -1249,22 +1246,6 @@ fn build_preview_area(
         }
     });
 
-    // Try a fast GTK-native decode first so the window can draw its image as
-    // early as possible. If that fails, fall back to the existing background
-    // `image` crate decode path.
-    probe.log("before-sync-preview-texture");
-    if let Some(tex) = preview_texture(&path) {
-        *texture.borrow_mut() = Some(tex);
-        area.queue_draw();
-        probe.log("sync-texture-ready");
-        eprintln!(
-            "[preview] synchronous texture ready at {}ms for {}",
-            startup.elapsed().as_millis(),
-            path.display()
-        );
-        return area;
-    }
-
     // Decode the screenshot on a background thread so the preview card can
     // appear immediately without blocking the GTK main loop on PNG decode.
     let (tx, rx) = std::sync::mpsc::channel::<Option<(Vec<u8>, i32, i32)>>();
@@ -1309,11 +1290,13 @@ fn build_preview_area(
                     area.queue_draw();
                 }
                 probe_async.log("async-texture-ready");
-                eprintln!(
-                    "[preview] async texture ready at {}ms for {}",
-                    startup.elapsed().as_millis(),
-                    path_fallback.display()
-                );
+                if probe_async.enabled {
+                    eprintln!(
+                        "[preview] async texture ready at {}ms for {}",
+                        startup.elapsed().as_millis(),
+                        path_fallback.display()
+                    );
+                }
                 ControlFlow::Break
             }
             Ok(None) => {
@@ -1325,11 +1308,13 @@ fn build_preview_area(
                     area.queue_draw();
                 }
                 probe_async.log("fallback-texture-ready");
-                eprintln!(
-                    "[preview] fallback texture ready at {}ms for {}",
-                    startup.elapsed().as_millis(),
-                    path_fallback.display()
-                );
+                if probe_async.enabled {
+                    eprintln!(
+                        "[preview] fallback texture ready at {}ms for {}",
+                        startup.elapsed().as_millis(),
+                        path_fallback.display()
+                    );
+                }
                 ControlFlow::Break
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
