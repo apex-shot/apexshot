@@ -877,6 +877,16 @@ fn parse_area_capture_output(
     exit_code: Option<i32>,
     stdout: &str,
 ) -> Result<AreaCapturePathResult, SelectionError> {
+    parse_area_capture_output_with_persist(exit_code, stdout, |request| {
+        crate::recording::persist_overlay_recording_request_state(request)
+    })
+}
+
+fn parse_area_capture_output_with_persist(
+    exit_code: Option<i32>,
+    stdout: &str,
+    persist_record_config: impl FnOnce(&RecordingRequest) -> anyhow::Result<()>,
+) -> Result<AreaCapturePathResult, SelectionError> {
     match exit_code {
         Some(0) => {
             let mode = extract_string(stdout.trim(), "mode");
@@ -907,13 +917,11 @@ fn parse_area_capture_output(
             let mode = extract_string(stdout.trim(), "mode");
             if matches!(mode.as_deref(), Some("record-config")) {
                 let request = parse_recording_json(stdout.trim())?;
-                crate::recording::persist_overlay_recording_request_state(&request).map_err(
-                    |e| {
-                        SelectionError::InitError(format!(
-                            "Failed to persist recording overlay state: {e}"
-                        ))
-                    },
-                )?;
+                persist_record_config(&request).map_err(|e| {
+                    SelectionError::InitError(format!(
+                        "Failed to persist recording overlay state: {e}"
+                    ))
+                })?;
                 Ok(AreaCapturePathResult::RecordingConfigUpdated)
             } else {
                 Err(SelectionError::InitError(format!(
@@ -1673,7 +1681,8 @@ mod tests {
     use super::{
         append_screenshot_timer_args, build_area_init_args, build_crosshair_args,
         build_recording_ui_args, classify_overlay_exit_code, execute_builtin_overlay_query,
-        is_gnome_wayland_session_from_env, parse_area_capture_output, parse_capture_screen_json,
+        is_gnome_wayland_session_from_env, parse_area_capture_output,
+        parse_area_capture_output_with_persist, parse_capture_screen_json,
         parse_capture_screen_json_with_mode, parse_recording_json, parse_selection_json,
         save_capture_to_temp_png, should_request_screenshot_lock,
         should_use_gtk_layer_shell_selector_from_env, tracked_overlay_id,
@@ -2047,9 +2056,10 @@ mod tests {
 
     #[test]
     fn explicit_record_config_exit_is_distinct_from_cancel() {
-        let result = parse_area_capture_output(
+        let result = parse_area_capture_output_with_persist(
             Some(OverlayExitCode::RecordConfigUpdated as i32),
             r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video","controls":true,"mic":false,"speaker":false,"webcam":false,"webcam_size":1,"webcam_shape":1,"webcam_flip":false,"webcam_device":0,"webcam_rel_x":0.0000,"webcam_rel_y":0.0000,"display_rec_time":false,"hidpi":false,"notifications":true,"cursor":true,"remember_selection":false,"dim_screen":true,"countdown":true,"video_max_res":0,"video_fps":1,"record_mono":false,"open_editor":false,"gif_fps":60,"gif_quality":0.7500,"gif_size_idx":0,"optimize_gif":true,"fullscreen":false}"#,
+            |_| Ok(()),
         )
         .expect("record config should parse");
 

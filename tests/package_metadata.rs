@@ -145,28 +145,21 @@ fn opensuse_installer_contains_reported_dependency_set() {
     let generic_update = include_str!("../scripts/update.sh");
 
     for package in [
-        "build-essential",
-        "cmake",
-        "pkg-config",
-        "libQt5Core-devel",
-        "libQt5Widgets-devel",
-        "libQt5DBus-devel",
-        "libQt5Network-devel",
-        "libqt5-qtx11extras-devel",
-        "gstreamer-plugins-base-devel",
-        "pipewire-devel",
-        "tesseract-ocr-devel",
-        "libgraphene-devel",
-        "gtk4-devel",
-        "gtk4-layer-shell-devel",
-        "libadwaita-devel",
-        "clang",
-        "dbus-1-devel",
-        "libXtst-devel",
-        "curl-devel",
-        "git",
-        "rust",
-        "cargo",
+        "curl",
+        "ffmpeg",
+        "gstreamer-plugins-base",
+        "gstreamer-plugins-good",
+        "gstreamer-plugins-bad",
+        "gstreamer-plugin-pipewire",
+        "pipewire",
+        "pipewire-pulseaudio",
+        "tesseract-ocr",
+        "unzip",
+        "wget",
+        "wl-clipboard",
+        "xdg-desktop-portal",
+        "xdg-utils",
+        "update-desktop-files",
     ] {
         assert!(
             install_script.contains(package),
@@ -179,12 +172,16 @@ fn opensuse_installer_contains_reported_dependency_set() {
         "openSUSE installer should install dependencies through zypper"
     );
     assert!(
-        install_script.contains("cargo build --release"),
-        "openSUSE installer should build ApexShot from source until RPM packaging exists"
+        install_script.contains("resolve_rpm_url") && install_script.contains("download_rpm"),
+        "openSUSE installer should resolve and download the published RPM"
+    );
+    assert!(
+        install_script.contains("zypper --non-interactive install '${RPM_FILE}'"),
+        "openSUSE installer should install the downloaded RPM with zypper"
     );
     assert!(
         update_script.contains("opensuse-install.sh") && update_script.contains("--force"),
-        "openSUSE updater should refresh the source install through the installer"
+        "openSUSE updater should refresh the RPM install through the installer"
     );
     assert!(
         generic_install.contains("command -v zypper")
