@@ -29,6 +29,9 @@ use super::types::{
     EditorError, Point, Rect, Tool, ViewTransform,
 };
 
+const MAX_PREVIEW_SHADOW_DIM: u32 = 1200;
+const PREVIEW_SHADOW_BLUR_PASSES: usize = 2;
+
 #[derive(Debug, Clone, Copy)]
 pub struct AnnotateRuntimeConfig {
     pub inverse_arrow_direction: bool,
@@ -1160,10 +1163,11 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     // Background style cache
     let cached_background_surface =
         Rc::new(std::cell::RefCell::new(None::<gtk4::cairo::ImageSurface>));
-    let cached_background_style = Rc::new(std::cell::RefCell::new(None::<BackgroundStyle>));
-    let cached_blurred_revision = Rc::new(Cell::new(0u64));
+    let cached_background_signature = Rc::new(std::cell::RefCell::new(
+        None::<(BackgroundStyle, Option<u64>)>,
+    ));
     let cached_shadow_surface = Rc::new(std::cell::RefCell::new(None::<gtk4::cairo::ImageSurface>));
-    let cached_shadow_revision = Rc::new(Cell::new(0u64));
+    let cached_shadow_signature = Rc::new(Cell::new(None::<(u32, u32, u64, u64, u64)>));
 
     let gradient_surfaces = Rc::new(RefCell::new(vec![
             None::<gtk4::cairo::ImageSurface>;
@@ -2369,7 +2373,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         // the capped overflow bucket that crop_canvas_overflow() would return and store
         // only that.  Because the function caps every side to 180 px, the bucket stays
         // constant throughout an outside-image drag gesture — no relayout churn occurs.
-        let last_canvas_signature = Rc::new(Cell::new((
+        let last_canvas_signature = Rc::new(Cell::new([
             0_i32, // scroller width
             0_i32, // scroller height
             0_i32, // image width
@@ -2378,9 +2382,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             0_i32, // overflow top  (px, capped)
             0_i32, // overflow right (px, capped)
             0_i32, // overflow bottom (px, capped)
-            false, // crop mode active
+            0_i32, // crop mode active
             0_i32, // zoom percentage
-        )));
+            0_i32, // background enabled
+            0_i32, // background padding (tenths)
+            0_i32, // background insert (tenths)
+            0_i32, // background aspect ratio
+        ]));
         let last_canvas_signature_tick = last_canvas_signature.clone();
         canvas_scroller.add_tick_callback(move |scroller, _| {
             let width = scroller.allocated_width();
@@ -2392,6 +2400,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 let crop_mode_active = st.selected_tool == Tool::Crop;
                 let crop_rect = st.draft_crop_rect().or(st.crop_selection);
                 let has_background = st.background_style != BackgroundStyle::None;
+                let background_padding = (st.background_padding * 10.0).round() as i32;
+                let background_insert = (st.background_insert * 10.0).round() as i32;
+                let background_aspect_ratio = st.background_aspect_ratio as i32;
                 let zoom_percentage = (zoom_level_tick.get() * 100.0_f64).round() as i32;
 
                 // Compute the same scale the layout function uses so we get the
@@ -2417,7 +2428,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     )
                 };
 
-                (
+                [
                     width,
                     height,
                     img_w,
@@ -2426,9 +2437,13 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                     ot.round() as i32,
                     or_.round() as i32,
                     ob.round() as i32,
-                    crop_mode_active,
+                    if crop_mode_active { 1 } else { 0 },
                     zoom_percentage,
-                )
+                    if has_background { 1 } else { 0 },
+                    background_padding,
+                    background_insert,
+                    background_aspect_ratio,
+                ]
             };
             if width > 0 && signature != last_canvas_signature_tick.get() {
                 last_canvas_signature_tick.set(signature);
@@ -2588,10 +2603,9 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
     let cached_surface_draw = cached_surface.clone();
     let cached_surface_revision_draw = cached_surface_revision.clone();
     let cached_background_surface_draw = cached_background_surface.clone();
-    let cached_background_style_draw = cached_background_style.clone();
-    let cached_blurred_revision_draw = cached_blurred_revision.clone();
+    let cached_background_signature_draw = cached_background_signature.clone();
     let cached_shadow_surface_draw = cached_shadow_surface.clone();
-    let cached_shadow_revision_draw = cached_shadow_revision.clone();
+    let cached_shadow_signature_draw = cached_shadow_signature.clone();
     let canvas_padding_draw = canvas_padding as f64;
 
     let gradient_surfaces_draw = gradient_surfaces.clone();
@@ -2758,10 +2772,24 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         if has_background {
             context.set_operator(gtk4::cairo::Operator::Over);
             let current_style = background_style.clone();
+            let current_background_signature = (
+                current_style.clone(),
+                if matches!(current_style, BackgroundStyle::Blurred(_)) {
+                    Some(working_image_revision)
+                } else {
+                    None
+                },
+            );
+            let needs_background_surface = !matches!(
+                current_style,
+                BackgroundStyle::None | BackgroundStyle::PlainColor(_)
+            );
             let mut bg_cache = cached_background_surface_draw.borrow_mut();
-            let mut bg_style_cache = cached_background_style_draw.borrow_mut();
+            let mut bg_signature_cache = cached_background_signature_draw.borrow_mut();
 
-            if bg_style_cache.as_ref() != Some(&current_style) || bg_cache.is_none() {
+            if bg_signature_cache.as_ref() != Some(&current_background_signature)
+                || (needs_background_surface && bg_cache.is_none())
+            {
                 if let BackgroundStyle::Gradient(idx) = &current_style {
                     let surfaces = gradient_surfaces_draw.borrow();
                     if let Some(surface) = surfaces.get(*idx).and_then(|s| s.as_ref()) {
@@ -2795,55 +2823,46 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 } else if let BackgroundStyle::PlainColor(_color) = &current_style {
                     *bg_cache = None;
                 } else if let BackgroundStyle::Blurred(blur_idx) = &current_style {
-                    // Only recompute blur if the working image has changed
-                    let current_revision = working_image_revision;
-                    let needs_recompute = cached_blurred_revision_draw.get() != current_revision
-                        || bg_cache.is_none();
+                    let (bw, bh) = working_image.dimensions();
 
-                    if needs_recompute {
-                        let (bw, bh) = working_image.dimensions();
+                    // Optimization: Downsample for background blur to save CPU.
+                    // For very long webpage screenshots, resize directly from the
+                    // source image to avoid cloning the full-size buffer first.
+                    let max_dim = 800u32;
+                    let mut blurred_bg = if bw > max_dim || bh > max_dim {
+                        let scale = max_dim as f64 / (bw.max(bh) as f64);
+                        image::imageops::resize(
+                            &*working_image,
+                            (bw as f64 * scale) as u32,
+                            (bh as f64 * scale) as u32,
+                            image::imageops::FilterType::Triangle,
+                        )
+                    } else {
+                        (*working_image).clone()
+                    };
 
-                        // Optimization: Downsample for background blur to save CPU.
-                        // For very long webpage screenshots, resize directly from the
-                        // source image to avoid cloning the full-size buffer first.
-                        let max_dim = 800u32;
-                        let mut blurred_bg = if bw > max_dim || bh > max_dim {
-                            let scale = max_dim as f64 / (bw.max(bh) as f64);
-                            image::imageops::resize(
-                                &*working_image,
-                                (bw as f64 * scale) as u32,
-                                (bh as f64 * scale) as u32,
-                                image::imageops::FilterType::Triangle,
-                            )
-                        } else {
-                            (*working_image).clone()
-                        };
+                    let blur_radius = match blur_idx {
+                        0 => 10.0,
+                        1 => 35.0,
+                        2 => 80.0,
+                        _ => 20.0,
+                    };
 
-                        // Different blur intensities for each tile
-                        let blur_radius = match blur_idx {
-                            0 => 10.0, // Light blur
-                            1 => 35.0, // Medium blur
-                            2 => 80.0, // Heavy blur
-                            _ => 20.0, // Default
-                        };
-
-                        let (nbw, nbh) = blurred_bg.dimensions();
-                        super::render::apply_blur_rect(
-                            &mut blurred_bg,
-                            Rect {
-                                x: 0,
-                                y: 0,
-                                width: nbw as i32,
-                                height: nbh as i32,
-                            },
-                            blur_radius,
-                            false,
-                        );
-                        *bg_cache = rgba_image_to_surface(&blurred_bg);
-                        cached_blurred_revision_draw.set(current_revision);
-                    }
+                    let (nbw, nbh) = blurred_bg.dimensions();
+                    super::render::apply_blur_rect(
+                        &mut blurred_bg,
+                        Rect {
+                            x: 0,
+                            y: 0,
+                            width: nbw as i32,
+                            height: nbh as i32,
+                        },
+                        blur_radius,
+                        false,
+                    );
+                    *bg_cache = rgba_image_to_surface(&blurred_bg);
                 }
-                *bg_style_cache = Some(current_style.clone());
+                *bg_signature_cache = Some(current_background_signature);
             }
 
             if let Some(surface) = bg_cache.as_ref() {
@@ -2875,23 +2894,34 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 t.scale = canvas_t.scale * layout.draw_scale;
 
                 if let Some(shadow) = layout.shadow {
-                    let current_revision = working_image_revision;
                     let mut shadow_surface_cache = cached_shadow_surface_draw.borrow_mut();
-                    let needs_recompute = cached_shadow_revision_draw.get() != current_revision
+                    let base_blur = shadow.blur.max(1.0);
+                    let base_corner = background_corner_radius * layout.scale_factor;
+                    let preview_scale = (MAX_PREVIEW_SHADOW_DIM as f64
+                        / image_width.max(image_height).max(1.0))
+                    .min(1.0);
+                    let preview_width = (image_width * preview_scale).round().max(1.0) as u32;
+                    let preview_height = (image_height * preview_scale).round().max(1.0) as u32;
+                    let preview_blur = (base_blur * preview_scale).max(1.0);
+                    let preview_corner = base_corner * preview_scale;
+                    let shadow_signature = (
+                        preview_width,
+                        preview_height,
+                        preview_blur.to_bits(),
+                        shadow.opacity.to_bits(),
+                        preview_corner.to_bits(),
+                    );
+                    let needs_recompute = cached_shadow_signature_draw.get()
+                        != Some(shadow_signature)
                         || shadow_surface_cache.is_none();
 
                     if needs_recompute {
-                        let base_blur = shadow.blur.max(1.0);
-                        let base_corner = background_corner_radius * layout.scale_factor;
-                        let base_w = (image_width).round().max(1.0) as u32;
-                        let base_h = (image_height).round().max(1.0) as u32;
-
                         if let Ok(mut shadow_image) = render_shadow_layer(
-                            base_w,
-                            base_h,
-                            base_blur,
+                            preview_width,
+                            preview_height,
+                            preview_blur,
                             shadow.opacity,
-                            base_corner,
+                            preview_corner,
                         ) {
                             let blur_rect = Rect {
                                 x: 0,
@@ -2899,8 +2929,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                                 width: shadow_image.width() as i32,
                                 height: shadow_image.height() as i32,
                             };
-                            let pass_radius = (base_blur / 2.0).max(1.0);
-                            for _ in 0..3 {
+                            let pass_radius = (preview_blur / 2.0).max(1.0);
+                            for _ in 0..PREVIEW_SHADOW_BLUR_PASSES {
                                 super::render::apply_blur_rect(
                                     &mut shadow_image,
                                     blur_rect,
@@ -2909,7 +2939,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                                 );
                             }
                             *shadow_surface_cache = rgba_image_to_surface(&shadow_image);
-                            cached_shadow_revision_draw.set(current_revision);
+                            cached_shadow_signature_draw.set(Some(shadow_signature));
                         }
                     }
 

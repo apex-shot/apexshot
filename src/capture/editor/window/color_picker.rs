@@ -655,7 +655,6 @@ pub fn build_color_picker(
                     st.set_crop_background_color(color);
                 } else if st.selected_tool == Tool::Background {
                     st.background_style = BackgroundStyle::PlainColor(color);
-                    st.mark_working_image_dirty();
                 } else if has_active_text {
                     st.selected_color = color;
                     let _ = st.set_selected_action_color(color);

@@ -577,7 +577,6 @@ fn rebuild_wallpaper_preview_grid(
                 st.background_style = BackgroundStyle::Wallpaper(path.clone());
                 clear_active_background_classes(sidebar.upcast_ref());
                 btn.add_css_class("active-background-option");
-                st.mark_working_image_dirty();
                 drawing_area.queue_draw();
             }
         });
@@ -647,7 +646,6 @@ pub(super) fn build_background_panel(
             st.background_style = BackgroundStyle::None;
             clear_active_background_classes(sidebar.upcast_ref());
             none_btn.add_css_class("active-background-option");
-            st.mark_working_image_dirty();
             drawing_area.queue_draw();
         }
     });
@@ -701,7 +699,6 @@ pub(super) fn build_background_panel(
                     st.background_style = BackgroundStyle::Gradient(index);
                     clear_active_background_classes(sidebar.upcast_ref());
                     btn.add_css_class("active-background-option");
-                    st.mark_working_image_dirty();
                     drawing_area.queue_draw();
                 }
             });
@@ -975,7 +972,6 @@ pub(super) fn build_background_panel(
                 st.background_style = BackgroundStyle::Blurred(index);
                 clear_active_background_classes(sidebar.upcast_ref());
                 btn.add_css_class("active-background-option");
-                st.mark_working_image_dirty();
                 drawing_area.queue_draw();
             }
         });
@@ -1036,7 +1032,6 @@ pub(super) fn build_background_panel(
                 updating.set(false);
             }
 
-            st.mark_working_image_dirty();
             drawing_area.queue_draw();
         }
     });
@@ -1095,7 +1090,6 @@ pub(super) fn build_background_panel(
                 updating.set(false);
             }
 
-            st.mark_working_image_dirty();
             drawing_area.queue_draw();
         }
     });
@@ -1133,7 +1127,6 @@ pub(super) fn build_background_panel(
         move |c| {
             let mut st = state.lock().unwrap();
             st.auto_balance = c.is_active();
-            st.mark_working_image_dirty();
             drawing_area.queue_draw();
         }
     });
@@ -1176,7 +1169,6 @@ pub(super) fn build_background_panel(
         move |s| {
             let mut st = state.lock().unwrap();
             st.background_shadow = s.value();
-            st.mark_working_image_dirty();
             drawing_area.queue_draw();
         }
     });
@@ -1309,7 +1301,6 @@ pub(super) fn build_background_panel(
                     st.background_alignment = alignment_btn_style;
                     clear_active_alignment_classes(grid.upcast_ref());
                     btn.add_css_class("active-alignment-option");
-                    st.mark_working_image_dirty();
                     drawing_area.queue_draw();
                 }
             });
@@ -1383,7 +1374,6 @@ pub(super) fn build_background_panel(
         move |s| {
             let mut st = state.lock().unwrap();
             st.background_corner_radius = s.value();
-            st.mark_working_image_dirty();
             drawing_area.queue_draw();
         }
     });
@@ -1403,7 +1393,6 @@ pub(super) fn build_background_panel(
             };
             let mut st = state.lock().unwrap();
             st.background_aspect_ratio = aspect;
-            st.mark_working_image_dirty();
             drawing_area.queue_draw();
         }
     });

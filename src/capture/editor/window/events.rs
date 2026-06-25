@@ -1413,7 +1413,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                     st.set_crop_background_color(DRAW_COLORS[index]);
                 } else if st.selected_tool == Tool::Background {
                     st.background_style = BackgroundStyle::PlainColor(DRAW_COLORS[index]);
-                    st.mark_working_image_dirty();
                     switched_background = true;
                 } else {
                     st.set_color_index(index);

@@ -497,20 +497,7 @@ fn setup_preview_window(
     let use_fallback_input_region = !layer_shell_active;
 
     if use_fallback_input_region {
-        let window_fallback_region = window.downgrade();
-        let card_fallback_region = card.downgrade();
-        window.connect_map(move |_| {
-            let window_fallback_region = window_fallback_region.clone();
-            let card_fallback_region = card_fallback_region.clone();
-            glib::idle_add_local_once(move || {
-                if let (Some(window), Some(card)) = (
-                    window_fallback_region.upgrade(),
-                    card_fallback_region.upgrade(),
-                ) {
-                    apply_fallback_input_region(&window, &card);
-                }
-            });
-        });
+        install_fallback_input_region_tracking(&window, &card);
 
         let window_fallback_stacking = window.downgrade();
         window.connect_map(move |_| {
@@ -1073,6 +1060,67 @@ fn apply_fallback_input_region(window: &Window, card: &GtkBox) {
     );
     let input_region = gtk4::cairo::Region::create_rectangle(&region_rect);
     surface.set_input_region(&input_region);
+}
+
+fn install_fallback_input_region_tracking(window: &Window, card: &GtkBox) {
+    let window_weak = window.downgrade();
+    let card_weak = card.downgrade();
+    let last_region = Rc::new(RefCell::new(None::<(i32, i32, i32, i32)>));
+
+    let reapply_region: Rc<dyn Fn()> = Rc::new({
+        let window_weak = window_weak.clone();
+        let card_weak = card_weak.clone();
+        let last_region = last_region.clone();
+        move || {
+            let (Some(window), Some(card)) = (window_weak.upgrade(), card_weak.upgrade()) else {
+                return;
+            };
+
+            let allocation = card.allocation();
+            let next_region = (
+                allocation.x(),
+                allocation.y(),
+                allocation.width(),
+                allocation.height(),
+            );
+
+            if next_region.2 <= 0 || next_region.3 <= 0 {
+                return;
+            }
+
+            if last_region.borrow().as_ref() == Some(&next_region) {
+                return;
+            }
+
+            apply_fallback_input_region(&window, &card);
+            *last_region.borrow_mut() = Some(next_region);
+        }
+    });
+
+    window.connect_map({
+        let reapply_region = reapply_region.clone();
+        move |_| {
+            let reapply_region = reapply_region.clone();
+            glib::idle_add_local_once(move || reapply_region());
+        }
+    });
+
+    card.add_tick_callback({
+        let reapply_region = reapply_region.clone();
+        move |_, _| {
+            reapply_region();
+            ControlFlow::Continue
+        }
+    });
+
+    glib::timeout_add_local(Duration::from_millis(250), move || {
+        if window_weak.upgrade().is_none() || card_weak.upgrade().is_none() {
+            return ControlFlow::Break;
+        }
+
+        reapply_region();
+        ControlFlow::Continue
+    });
 }
 
 fn is_non_x11_surface_error(err: &str) -> bool {

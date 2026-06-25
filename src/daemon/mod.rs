@@ -2422,8 +2422,10 @@ fn show_preview_subprocess(path: std::path::PathBuf) -> Option<std::process::Chi
     match crate::preview_launch::spawn_preview_subprocess(&path) {
         Ok(child) => Some(child),
         Err(e) => {
-            eprintln!("[daemon] Failed to spawn preview subprocess: {e}, falling back to xdg-open");
-            open_file(path);
+            eprintln!(
+                "[daemon] Failed to spawn preview subprocess: {e}, falling back to in-app preview"
+            );
+            crate::preview_launch::show_preview_direct(path);
             None
         }
     }
