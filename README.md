@@ -1,18 +1,19 @@
-# ApexShot
+# ApexShot: Open-Source Linux Screenshot and Screen Recording Tool
 
-**ApexShot is an open-source screenshot, annotation, and screen recording tool
-for Linux.** It brings fast captures, editing, OCR, QR code detection, browser
-scroll capture, hotkeys, and copy/share workflows to GNOME Wayland and other
-Linux desktops.
+**ApexShot is an open-source Linux screenshot tool with annotation, OCR, QR
+code detection, and screen recording built in.** It brings fast captures,
+editing, browser scroll capture, hotkeys, and copy/share workflows to GNOME
+Wayland and other Linux desktops.
 
-For people searching for a ShareX alternative for Linux, ApexShot covers many
-of the same capture, annotation, recording, OCR, and sharing workflows. This is
-the official ApexShot GitHub repository.
+If you are looking for a Linux screenshot tool, a Flameshot alternative, or a
+ShareX alternative for Linux, ApexShot is built to cover screenshots,
+annotation, recording, OCR, and quick sharing in one native app. This is the
+official ApexShot GitHub repository.
 
 ApexShot is independent and is not affiliated with ShareX, Flameshot, or
 CleanShot X.
 
-![Image editor tutorial](media/image-editor-tutorial.gif)
+![ApexShot Linux screenshot editor and annotation workflow](media/image-editor-tutorial.gif)
 
 [**▶ Install in one command**](#quick-install-recommended) ·
 [GitHub Repository](https://github.com/apex-shot/apexshot) ·
@@ -27,11 +28,15 @@ CleanShot X.
 
 ## ApexShot for Linux
 
-ApexShot is built as its own native Linux tool, not a clone. It is useful for
-Linux users who want a polished all-in-one capture workflow, and it is also a
-practical ShareX alternative for Linux users who need screenshots, annotation,
-screen recording, OCR, QR detection, browser scroll capture, global hotkeys, and
-quick clipboard actions in one open-source app.
+ApexShot is a native Linux screenshot and screen recording app, not a clone. It
+is designed for Linux users who want one open-source tool for screenshots,
+annotation, OCR, QR code scanning, browser scroll capture, screen recording,
+global hotkeys, and fast clipboard sharing.
+
+People often compare ApexShot with tools like Flameshot, ShareX, Shutter, or
+ksnip. ApexShot keeps its own identity while focusing on the workflows many
+Linux users search for: fast screenshots, useful annotation, and modern Wayland
+support.
 
 | Workflow | ApexShot support |
 |---|---|
@@ -42,6 +47,21 @@ quick clipboard actions in one open-source app.
 | Text and code extraction | OCR plus automatic QR code detection from captured regions |
 | Linux desktop integration | GNOME Wayland support, portal-backed capture paths, tray, daemon mode, and global hotkeys |
 | Open-source project | GPL-3.0 source code, GitHub releases, issues, and discussions at https://github.com/apex-shot/apexshot |
+
+## Built for common Linux screenshot workflows
+
+People usually search for terms like `linux screenshot tool`, `linux screen recorder`,
+`flameshot alternative`, `sharex alternative for linux`, or `wayland screenshot
+tool`. ApexShot is built for those workflows because it combines:
+
+- screenshots for full screen, region, window, and crosshair capture
+- built-in annotation tools for arrows, text, blur, pixelate, and markup
+- OCR and QR code detection for extracting information from screenshots
+- Wayland-focused Linux support with portal-backed and compositor-specific paths
+- screen recording, GIF export, webcam PiP, and quick clipboard workflows
+
+The goal is simple: make it obvious to GitHub visitors and search engines what
+ApexShot does, without turning the README into generic comparison copy.
 
 ## Install
 
