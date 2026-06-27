@@ -17,6 +17,7 @@ SUDO=""
 SCRIPT_NAME="ubuntu-update"
 TELEMETRY_CHANNEL="update"
 TELEMETRY_URL="${APEXSHOT_TELEMETRY_URL:-https://apexshot.org/api/download-telemetry}"
+INSTALL_ID=""
 
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
@@ -135,8 +136,33 @@ telemetry_distro() {
     fi
 }
 
+ensure_install_id() {
+    [[ -n "${INSTALL_ID:-}" ]] && return 0
+    [[ -z "${HOME:-}" ]] && return 0
+
+    local id_dir="${HOME}/.config/apexshot"
+    local id_file="${id_dir}/install_id"
+
+    if [[ -r "$id_file" ]]; then
+        INSTALL_ID="$(cat "$id_file" 2>/dev/null || true)"
+        [[ -n "$INSTALL_ID" ]] && return 0
+    fi
+
+    if command -v uuidgen >/dev/null 2>&1; then
+        INSTALL_ID="$(uuidgen)"
+    elif [[ -r /proc/sys/kernel/random/uuid ]]; then
+        INSTALL_ID="$(cat /proc/sys/kernel/random/uuid)"
+    else
+        return 0
+    fi
+
+    mkdir -p "$id_dir" 2>/dev/null || true
+    printf '%s' "$INSTALL_ID" > "$id_file" 2>/dev/null || true
+}
+
 send_download_telemetry() {
     telemetry_enabled || return 0
+    [[ -z "${INSTALL_ID:-}" ]] && ensure_install_id
 
     local event=$1
     local asset_type=$2
@@ -146,8 +172,11 @@ send_download_telemetry() {
     local distro
     distro=$(telemetry_distro)
 
+    local install_id_json="null"
+    [[ -n "$INSTALL_ID" ]] && install_id_json="\"$(json_escape "$INSTALL_ID")\""
+
     local payload
-    payload=$(printf '{"event":"%s","script":"%s","distro":"%s","channel":"%s","version":"%s","asset_type":"%s","asset_name":"%s","status":"%s","size_bytes":%s}' \
+    payload=$(printf '{"event":"%s","script":"%s","distro":"%s","channel":"%s","version":"%s","asset_type":"%s","asset_name":"%s","status":"%s","size_bytes":%s,"install_id":%s}' \
         "$(json_escape "$event")" \
         "$(json_escape "$SCRIPT_NAME")" \
         "$(json_escape "$distro")" \
@@ -156,7 +185,8 @@ send_download_telemetry() {
         "$(json_escape "$asset_type")" \
         "$(json_escape "$asset_name")" \
         "$(json_escape "$status")" \
-        "$size_bytes")
+        "$size_bytes" \
+        "$install_id_json")
 
     (curl -fsS -m 2 -H "Content-Type: application/json" -A "ApexShotDownloadTelemetry/${SCRIPT_NAME}" -d "$payload" "$TELEMETRY_URL" >/dev/null 2>&1 || true) &
 }
