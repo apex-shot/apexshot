@@ -751,24 +751,29 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             return;
         }
         let path = path_upload.clone();
-        std::thread::spawn(move || {
-            match crate::cloud::upload::upload_file(&config, &path) {
+        std::thread::spawn(
+            move || match crate::cloud::upload::upload_file(&config, &path) {
                 Ok(result) => {
-                    crate::utils::notify::desktop_notification(
-                        "Upload complete",
-                        "Share link copied to clipboard",
-                    );
                     if let Err(e) =
                         crate::utils::clipboard::copy_text_to_clipboard(&result.share_url)
                     {
                         eprintln!("Failed to copy share link to clipboard: {e}");
+                        crate::utils::notify::desktop_notification(
+                            "Upload complete",
+                            &format!("Share link: {}", result.share_url),
+                        );
+                    } else {
+                        crate::utils::notify::desktop_notification(
+                            "Upload complete",
+                            "Share link copied to clipboard",
+                        );
                     }
                 }
                 Err(e) => {
                     crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
                 }
-            }
-        });
+            },
+        );
     });
 
     let state_box = state.clone();

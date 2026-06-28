@@ -44,7 +44,10 @@ pub enum LoginError {
 impl std::fmt::Display for LoginError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LoginError::NotConfigured => write!(f, "Cloud backend URL not set. Configure it in Settings first."),
+            LoginError::NotConfigured => write!(
+                f,
+                "Cloud backend URL not set. Configure it in Settings first."
+            ),
             LoginError::HttpRequest(msg) => write!(f, "Request failed: {msg}"),
             LoginError::Expired => write!(f, "Device code expired. Run `apexshot login` again."),
             LoginError::Denied => write!(f, "Authorization was denied."),
@@ -79,7 +82,10 @@ pub fn login() -> Result<(), LoginError> {
 
     let user_code = format_user_code(&device_resp.user_code);
     println!("First copy your one-time code: {user_code}");
-    println!("Press Enter to open {} in your browser...", device_resp.verification_uri);
+    println!(
+        "Press Enter to open {} in your browser...",
+        device_resp.verification_uri
+    );
 
     let mut _input = String::new();
     let _ = std::io::stdin().read_line(&mut _input);
@@ -112,18 +118,21 @@ pub fn login() -> Result<(), LoginError> {
                     .map_err(|e| LoginError::Server(format!("Invalid token response: {e}")))?;
 
                 config.cloud_api_token = token.access_token;
+                config.cloud_refresh_token = token.refresh_token;
 
                 let account: AccountResponse = ureq::get(&format!("{backend_url}/v1/account"))
-                    .set("Authorization", &format!("Bearer {}", config.cloud_api_token))
+                    .set(
+                        "Authorization",
+                        &format!("Bearer {}", config.cloud_api_token),
+                    )
                     .call()
                     .map_err(|e| LoginError::HttpRequest(e.to_string()))?
                     .into_json()
                     .map_err(|e| LoginError::Server(format!("Invalid account response: {e}")))?;
 
                 config.cloud_user_email = account.email.clone();
-                save_config(&config).map_err(|e| {
-                    LoginError::Server(format!("Failed to save config: {e}"))
-                })?;
+                save_config(&config)
+                    .map_err(|e| LoginError::Server(format!("Failed to save config: {e}")))?;
 
                 println!("\n✓ Authentication complete.");
                 println!("✓ Logged in as {}", config.cloud_user_email);
@@ -133,9 +142,7 @@ pub fn login() -> Result<(), LoginError> {
                 return Ok(());
             }
             Err(ureq::Error::Status(400, resp)) => {
-                let body: serde_json::Value = resp
-                    .into_json()
-                    .unwrap_or(serde_json::Value::Null);
+                let body: serde_json::Value = resp.into_json().unwrap_or(serde_json::Value::Null);
                 let error = body["error"].as_str().unwrap_or("");
                 if error.contains("pending") {
                     continue;
@@ -159,17 +166,17 @@ fn format_user_code(code: &str) -> String {
     }
     let mid = chars.len() / 2;
     let (a, b) = chars.split_at(mid);
-    format!("{}-{}", a.iter().collect::<String>(), b.iter().collect::<String>())
+    format!(
+        "{}-{}",
+        a.iter().collect::<String>(),
+        b.iter().collect::<String>()
+    )
 }
 
 fn open_browser(url: &str) -> Result<(), String> {
     let commands = ["xdg-open", "gio", "sensible-browser"];
     for cmd in &commands {
-        if std::process::Command::new(cmd)
-            .arg(url)
-            .spawn()
-            .is_ok()
-        {
+        if std::process::Command::new(cmd).arg(url).spawn().is_ok() {
             return Ok(());
         }
     }

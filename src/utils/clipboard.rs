@@ -81,66 +81,10 @@ pub fn copy_uri_to_clipboard(path: &Path) -> Result<(), String> {
 
 /// Copy text to the system clipboard.
 ///
-/// On Wayland uses `wl-copy --foreground` (keeps the data source alive),
-/// fallen back to plain `wl-copy`, then to `arboard` crate.
-/// The foreground process is detached via a background thread so clipboard
-/// data persists as long as the application is running.
+/// Uses `arboard` directly (in-process, no external command) so the
+/// clipboard content is fully replaced without spawning wl-clipboard
+/// processes that trigger spurious desktop notifications.
 pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
-    let text = text.to_owned();
-
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        // Try plain wl-copy first (forks to background, exits immediately)
-        match std::process::Command::new("wl-copy")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            Ok(mut child) => {
-                if let Some(mut stdin) = child.stdin.take() {
-                    let _ = stdin.write_all(text.as_bytes());
-                }
-                match child.wait() {
-                    Ok(status) if status.success() => return Ok(()),
-                    Ok(status) => {
-                        return Err(format!("wl-copy exited with status: {}", status));
-                    }
-                    Err(e) => {
-                        return Err(format!("wl-copy wait failed: {e}"));
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Warning: wl-copy failed, trying --foreground: {e}");
-            }
-        }
-
-        // Fallback: wl-copy --foreground in a background thread (keeps data source alive
-        // even on compositors that don't support fork-to-background).
-        match std::process::Command::new("wl-copy")
-            .arg("--foreground")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            Ok(mut child) => {
-                if let Some(mut stdin) = child.stdin.take() {
-                    if let Err(e) = stdin.write_all(text.as_bytes()) {
-                        return Err(format!("Failed to write to wl-copy stdin: {e}"));
-                    }
-                }
-                std::thread::Builder::new()
-                    .name("wl-copy-foreground".into())
-                    .spawn(move || {
-                        let _ = child.wait();
-                    })
-                    .ok();
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("Warning: wl-copy --foreground failed, trying arboard: {e}");
-            }
-        }
-    }
-
-    // Try arboard (works on X11 and as fallback on Wayland)
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
 

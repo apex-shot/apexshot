@@ -129,6 +129,7 @@ pub struct AppConfig {
     pub cloud_pro_plan: bool,
     pub cloud_backend_url: String,
     pub cloud_api_token: String,
+    pub cloud_refresh_token: String,
     // Advanced settings
     pub adv_filename_pattern: String,
     pub adv_ask_name_after_capture: bool,
@@ -247,6 +248,7 @@ impl Default for AppConfig {
             cloud_pro_plan: true,
             cloud_backend_url: String::new(),
             cloud_api_token: String::new(),
+            cloud_refresh_token: String::new(),
             adv_filename_pattern: "ApexShot {Date} at {Time}".to_string(),
             adv_ask_name_after_capture: false,
             adv_retina_suffix: true,
