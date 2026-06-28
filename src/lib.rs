@@ -10,6 +10,7 @@ pub mod app_identity;
 pub mod backend;
 pub mod capture;
 pub mod capture_overlay;
+pub mod cloud;
 pub mod compositor;
 pub mod config;
 pub mod daemon;

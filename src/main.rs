@@ -57,6 +57,13 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 fn main() {
+    let _ = dotenvy::dotenv();
+    if let Some(mut config_dir) = dirs::config_dir() {
+        config_dir.push("apexshot");
+        config_dir.push(".env");
+        let _ = dotenvy::from_path(&config_dir);
+    }
+
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
@@ -112,6 +119,13 @@ fn main() {
             let path = std::path::PathBuf::from(&args[2]);
             if let Err(e) = show_capture_preview_overlay(path) {
                 eprintln!("Preview failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "login" => {
+            if let Err(e) = apexshot::cloud::auth::login() {
+                eprintln!("Login failed: {e}");
                 std::process::exit(1);
             }
             return;

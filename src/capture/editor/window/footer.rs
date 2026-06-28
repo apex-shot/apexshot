@@ -241,8 +241,7 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     zoom_popup.append(&mouse_hints);
 
     let (copy_btn, _) = footer_icon_button(copy_icon_name, "Copy file URI");
-    let (upload_btn, _) = footer_icon_button(upload_icon_name, "Cloud upload (coming soon)");
-    upload_btn.set_sensitive(false);
+    let (upload_btn, _) = footer_icon_button(upload_icon_name, "Upload to cloud");
 
     let root = GtkBox::new(Orientation::Horizontal, 0);
     root.add_css_class("editor-footer");

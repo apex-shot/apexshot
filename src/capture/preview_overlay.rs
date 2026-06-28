@@ -354,9 +354,8 @@ fn setup_preview_window(
     );
     let (upload_btn, _) = icon_button(
         crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
-        "Cloud upload (coming soon)",
+        "Upload to cloud",
     );
-    upload_btn.set_sensitive(false);
     let (pin_btn, pin_icon) =
         icon_button(crate::capture::editor::window::icon_names::VIEW_PIN, "Pin");
 
@@ -566,6 +565,7 @@ fn setup_preview_window(
     let pin_icon_actions = pin_icon.clone();
     let edit_btn_actions = edit_btn.clone();
     let copy_btn_actions = copy_btn.clone();
+    let upload_btn_actions = upload_btn.clone();
     let save_btn_actions = save_btn.clone();
     let close_btn_actions = close_btn.clone();
     let pin_btn_actions = pin_btn.clone();
@@ -656,6 +656,37 @@ fn setup_preview_window(
             if let Err(e) = copy_uri_to_clipboard(&path_copy) {
                 eprintln!("Copy failed: {e}");
             }
+        });
+
+        let path_upload = path_actions.clone();
+        upload_btn_actions.connect_clicked(move |_| {
+            let config = load_config();
+            if !crate::cloud::upload::is_configured(&config) {
+                crate::utils::notify::desktop_notification(
+                    "Cloud upload not configured",
+                    "Run `apexshot login` to connect your account",
+                );
+                return;
+            }
+            let path = path_upload.clone();
+            std::thread::spawn(move || {
+                match crate::cloud::upload::upload_file(&config, &path) {
+                    Ok(result) => {
+                        crate::utils::notify::desktop_notification(
+                            "Upload complete",
+                            "Share link copied to clipboard",
+                        );
+                        if let Err(e) = crate::utils::clipboard::copy_text_to_clipboard(
+                            &result.share_url,
+                        ) {
+                            eprintln!("Failed to copy share link to clipboard: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
+                    }
+                }
+            });
         });
 
         let window_weak_save = window.downgrade();

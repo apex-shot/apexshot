@@ -52,8 +52,9 @@ ocrs = "0.12"
 rten = "0.24"
 rten-tensor = "0.24"
 rten-imageproc = "0.24"
-ureq = "2.10"
+ureq = { version = "2.10", features = ["json"] }
 arboard = { version = "3.6", features = ["wayland-data-control"] }
+dotenvy = "0.15"
 
 # QR code detection
 rqrr = "0.9"

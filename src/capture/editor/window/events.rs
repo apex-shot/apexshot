@@ -272,7 +272,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         zoom_to_selection_btn,
         zoom_level,
         copy_btn,
-        upload_btn: _,
+        upload_btn,
         color_buttons,
         color_picker_dot,
         color_class_names,
@@ -738,6 +738,37 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         if let Err(e) = copy_uri_to_clipboard(&path_copy) {
             eprintln!("Copy failed: {e}");
         }
+    });
+
+    let path_upload = path.clone();
+    upload_btn.connect_clicked(move |_| {
+        let config = crate::config::load_config();
+        if !crate::cloud::upload::is_configured(&config) {
+            crate::utils::notify::desktop_notification(
+                "Cloud upload not configured",
+                "Run `apexshot login` to connect your account",
+            );
+            return;
+        }
+        let path = path_upload.clone();
+        std::thread::spawn(move || {
+            match crate::cloud::upload::upload_file(&config, &path) {
+                Ok(result) => {
+                    crate::utils::notify::desktop_notification(
+                        "Upload complete",
+                        "Share link copied to clipboard",
+                    );
+                    if let Err(e) =
+                        crate::utils::clipboard::copy_text_to_clipboard(&result.share_url)
+                    {
+                        eprintln!("Failed to copy share link to clipboard: {e}");
+                    }
+                }
+                Err(e) => {
+                    crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
+                }
+            }
+        });
     });
 
     let state_box = state.clone();

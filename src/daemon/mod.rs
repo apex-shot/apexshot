@@ -2406,15 +2406,7 @@ fn import_clipboard_image_to_temp_png() -> anyhow::Result<std::path::PathBuf> {
 }
 
 fn send_desktop_notification(summary: &str, body: &str) {
-    let mut cmd = std::process::Command::new("notify-send");
-    cmd.arg("-a").arg("ApexShot").arg(summary);
-    if !body.is_empty() {
-        cmd.arg(body);
-    }
-
-    if let Err(e) = cmd.spawn() {
-        eprintln!("[daemon] Failed to send desktop notification: {e}");
-    }
+    crate::utils::notify::desktop_notification(summary, body);
 }
 
 /// Spawn `apexshot preview <path>` as a subprocess so it gets its own GTK context.

@@ -127,6 +127,8 @@ pub struct AppConfig {
     pub cloud_user_name: String,
     pub cloud_user_email: String,
     pub cloud_pro_plan: bool,
+    pub cloud_backend_url: String,
+    pub cloud_api_token: String,
     // Advanced settings
     pub adv_filename_pattern: String,
     pub adv_ask_name_after_capture: bool,
@@ -243,6 +245,8 @@ impl Default for AppConfig {
             cloud_user_name: "Paweł Magiera".to_string(),
             cloud_user_email: "pawel@magiera.me".to_string(),
             cloud_pro_plan: true,
+            cloud_backend_url: String::new(),
+            cloud_api_token: String::new(),
             adv_filename_pattern: "ApexShot {Date} at {Time}".to_string(),
             adv_ask_name_after_capture: false,
             adv_retina_suffix: true,
@@ -364,9 +368,20 @@ pub fn load_config() -> AppConfig {
             if should_migrate_legacy_quick_access_overlay_size(&raw, &sanitized) {
                 sanitized.quick_access_overlay_size = QUICK_ACCESS_OVERLAY_SCALE_BASELINE;
             }
+            if sanitized.cloud_backend_url.is_empty() {
+                if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
+                    sanitized.cloud_backend_url = url;
+                }
+            }
             sanitized
         })
-        .unwrap_or_default()
+        .unwrap_or_else(|_| {
+            let mut default = AppConfig::default();
+            if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
+                default.cloud_backend_url = url;
+            }
+            default
+        })
 }
 
 pub fn save_config(config: &AppConfig) -> anyhow::Result<PathBuf> {
