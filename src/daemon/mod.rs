@@ -2093,15 +2093,21 @@ fn apply_screenshot_after_capture_actions(
     let config = load_config().sanitized();
     state.lock().unwrap().last_capture_path = Some(saved_path.clone());
 
-    copy_screenshot_to_clipboard(&saved_path, &config);
+    let open_annotate = config.after_capture_open_annotate;
+    let show_quick_access = config.after_capture_show_quick_access;
 
-    if config.after_capture_open_annotate {
+    let clip_path = saved_path.clone();
+    std::thread::spawn(move || {
+        copy_screenshot_to_clipboard(&clip_path, &config);
+    });
+
+    if open_annotate {
         // Spawn editor as subprocess to avoid tokio runtime conflicts
         // The editor runs its own GTK main loop which doesn't work inside tokio
         spawn_editor_subprocess(saved_path.clone());
     }
 
-    if config.after_capture_show_quick_access {
+    if show_quick_access {
         let child = show_preview_subprocess(saved_path);
         replace_preview_child(&state, child);
     }

@@ -509,25 +509,7 @@ QRegion CaptureOverlay::crosshairDirtyRegion(const QPoint& oldPoint,
 {
     const QRect widgetRect = rect();
     QRegion dirty;
-    constexpr int guidePad = 3;
     constexpr int selectionPad = 4;
-
-    auto addGuideRegions = [&](const QPoint& point) {
-        if (!widgetRect.contains(point)) {
-            return;
-        }
-        dirty += QRect(0,
-                       std::max(0, point.y() - guidePad),
-                       widgetRect.width(),
-                       std::min(widgetRect.height(), guidePad * 2 + 1));
-        dirty += QRect(std::max(0, point.x() - guidePad),
-                       0,
-                       std::min(widgetRect.width(), guidePad * 2 + 1),
-                       widgetRect.height());
-    };
-
-    addGuideRegions(oldPoint);
-    addGuideRegions(newPoint);
 
     if (!m_lastCrosshairBubbleRect.isNull()) {
         dirty += m_lastCrosshairBubbleRect;
@@ -599,13 +581,6 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
         const QPoint guidePoint = widgetRect.contains(m_pointerPos)
             ? m_pointerPos
             : m_lastCrosshairPaintPoint;
-
-        p.save();
-        // Brand orange for crosshair lines (more visible on white backgrounds)
-        p.setPen(QPen(QColor(255, 102, 0, 200), 1.0));
-        p.drawLine(QPoint(0, guidePoint.y()), QPoint(widgetRect.width(), guidePoint.y()));
-        p.drawLine(QPoint(guidePoint.x(), 0), QPoint(guidePoint.x(), widgetRect.height()));
-        p.restore();
 
         if (m_dragging || m_hasSelection) {
             const QRect sel = m_selection.normalized();

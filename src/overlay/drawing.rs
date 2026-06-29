@@ -2479,19 +2479,6 @@ pub(crate) fn draw_overlay(
         let guide_x = st.current_x.clamp(0.0, screen_width);
         let guide_y = st.current_y.clamp(0.0, screen_height);
 
-        context.set_source_rgba(
-            BRAND_ORANGE_R,
-            BRAND_ORANGE_G,
-            BRAND_ORANGE_B,
-            200.0 / 255.0,
-        );
-        context.set_line_width(1.0);
-        context.move_to(0.0, guide_y);
-        context.line_to(screen_width, guide_y);
-        context.move_to(guide_x, 0.0);
-        context.line_to(guide_x, screen_height);
-        let _ = context.stroke();
-
         let label = if st.is_dragging || st.completed {
             let rect = current_selection_rect(&st);
             let x = rect.left;
