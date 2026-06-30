@@ -18,7 +18,7 @@ use crate::backend::{CaptureData, CursorData, PixelFormat};
 use image::buffer::ConvertBuffer;
 use image::{ImageBuffer, RgbImage, Rgba, RgbaImage};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+
 use thiserror::Error;
 
 /// Errors that can occur during image saving
@@ -349,16 +349,11 @@ fn generate_filename(config: &SaveConfig) -> String {
     let timestamp = if config.timestamp_format.is_some() {
         "custom".to_string()
     } else {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default();
-        let datetime = chrono::DateTime::from_timestamp(now.as_secs() as i64, now.subsec_nanos())
-            .unwrap_or_else(chrono::Utc::now);
-        datetime.format("%Y-%m-%d_%H-%M-%S").to_string()
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string()
     };
 
     let prefix = config.filename_prefix.as_deref().unwrap_or("ApexShot");
-    format!("{}{}.{}", prefix, timestamp, config.format.extension())
+    format!("{}-{}.{}", prefix, timestamp, config.format.extension())
 }
 
 pub fn save_existing_png(source_path: &Path, config: &SaveConfig) -> SaveResult<PathBuf> {

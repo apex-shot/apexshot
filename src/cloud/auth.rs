@@ -58,6 +58,25 @@ impl std::fmt::Display for LoginError {
 
 impl std::error::Error for LoginError {}
 
+#[derive(Debug)]
+pub enum LogoutError {
+    NotLoggedIn,
+    HttpRequest(String),
+    Server(String),
+}
+
+impl std::fmt::Display for LogoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogoutError::NotLoggedIn => write!(f, "You are not logged in."),
+            LogoutError::HttpRequest(msg) => write!(f, "Logout request failed: {msg}"),
+            LogoutError::Server(msg) => write!(f, "Server error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for LogoutError {}
+
 pub fn needs_backend_url(config: &AppConfig) -> bool {
     config.cloud_backend_url.is_empty()
 }
@@ -72,7 +91,17 @@ pub fn login() -> Result<(), LoginError> {
     let was_logged_in = !config.cloud_api_token.is_empty();
     let previous_email = config.cloud_user_email.clone();
 
-    let device_body = serde_json::json!({ "client_id": "apexshot-desktop" }).to_string();
+    if config.cloud_install_id.is_empty() {
+        config.cloud_install_id = generate_install_id();
+        let _ = save_config(&config);
+    }
+
+    let device_body = serde_json::json!({
+        "client_id": "apexshot-desktop",
+        "device_name": device_name(),
+        "install_id": config.cloud_install_id,
+    })
+    .to_string();
     let device_resp: DeviceCodeResponse = ureq::post(&format!("{backend_url}/v1/auth/device"))
         .set("Content-Type", "application/json")
         .send_string(&device_body)
@@ -159,6 +188,42 @@ pub fn login() -> Result<(), LoginError> {
     }
 }
 
+pub fn logout() -> Result<(), LogoutError> {
+    let mut config = load_config();
+
+    if config.cloud_api_token.is_empty() {
+        return Err(LogoutError::NotLoggedIn);
+    }
+
+    let backend_url = config.cloud_backend_url.trim_end_matches('/');
+    let revoke_body =
+        serde_json::json!({ "token": config.cloud_api_token, "token_type_hint": "access_token" })
+            .to_string();
+
+    let revoke_result = ureq::post(&format!("{backend_url}/v1/auth/revoke"))
+        .set("Content-Type", "application/json")
+        .send_string(&revoke_body);
+
+    match revoke_result {
+        Ok(_) => {}
+        Err(ureq::Error::Status(code, _)) if (400..500).contains(&code) => {
+            // Token may already be expired/invalid — proceed with local cleanup.
+        }
+        Err(e) => return Err(LogoutError::HttpRequest(e.to_string())),
+    }
+
+    config.cloud_api_token.clear();
+    config.cloud_refresh_token.clear();
+    config.cloud_user_name.clear();
+    config.cloud_user_email.clear();
+    config.cloud_pro_plan = false;
+
+    save_config(&config).map_err(|e| LogoutError::Server(format!("Failed to save config: {e}")))?;
+
+    println!("✓ Logged out.");
+    Ok(())
+}
+
 fn format_user_code(code: &str) -> String {
     let chars: Vec<char> = code.chars().filter(|c| !c.is_whitespace()).collect();
     if chars.len() <= 4 {
@@ -181,4 +246,55 @@ fn open_browser(url: &str) -> Result<(), String> {
         }
     }
     Err("No browser launcher found".to_string())
+}
+
+fn hostname() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+}
+
+fn device_name() -> String {
+    const MAX_LEN: usize = 100;
+    const SUFFIX: &str = " (Linux)";
+    match hostname() {
+        Some(host) => {
+            let max_host = MAX_LEN - SUFFIX.len();
+            let host = if host.chars().count() > max_host {
+                host.chars().take(max_host).collect::<String>()
+            } else {
+                host
+            };
+            format!("{host}{SUFFIX}")
+        }
+        None => "ApexShot CLI (Linux)".to_string(),
+    }
+}
+
+fn generate_install_id() -> String {
+    use std::io::Read;
+    let mut buf = [0u8; 16];
+    let ok = std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .is_ok();
+    if ok {
+        buf[6] = (buf[6] & 0x0f) | 0x40;
+        buf[8] = (buf[8] & 0x3f) | 0x80;
+        format!(
+            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
+            buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]
+        )
+    } else {
+        format!("install-{}", chrono::Utc::now().timestamp())
+    }
 }

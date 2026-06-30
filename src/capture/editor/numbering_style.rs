@@ -1,7 +1,9 @@
 //! Numbering style and size types for number markers
 
+use serde::{Deserialize, Serialize};
+
 /// Numbering style for sequential markers
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum NumberingStyle {
     /// Numeric: 1, 2, 3, 4...
     #[default]
@@ -127,7 +129,7 @@ impl NumberingStyle {
 }
 
 /// Size preset for number markers
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum NumberSize {
     /// Small: radius 12px, font 11pt
     Small,

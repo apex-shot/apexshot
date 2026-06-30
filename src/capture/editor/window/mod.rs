@@ -523,6 +523,12 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         st.draw_object_shadow = annotate_config.draw_object_shadow;
         st.auto_expand_canvas = annotate_config.auto_expand_canvas;
 
+        // Apply persisted editor preferences (tool, color, stroke, text, etc.)
+        // so the editor reopens with the user's last-used settings.
+        // Done before annotation loading so per-image background settings from
+        // annotation files can override the preference defaults.
+        super::preferences::load_editor_prefs().apply_to_state(&mut st);
+
         // Load existing annotations if available
         match crate::annotations::load_annotations(&path) {
             Ok(Some(annotation_file)) => {
@@ -1441,6 +1447,8 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
             toolbar_color_css_provider.load_from_data(&css);
         }
     });
+    sync_toolbar_color_status();
+
     let sync_shared_colors_for_active_tool: Rc<dyn Fn()> = Rc::new({
         let sync_toolbar_color_status = sync_toolbar_color_status.clone();
         let sync_picker_for_active_tool = sync_picker_for_active_tool.clone();
@@ -3390,8 +3398,14 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         );
     }
 
+    let state_prefs = state.clone();
     window.connect_close_request(move |_| {
         crate::gnome_integration::emit_tracked_window_closed(&tracked_window_id);
+        let prefs = {
+            let st = state_prefs.lock().unwrap();
+            super::preferences::EditorPreferences::from_state(&st)
+        };
+        super::preferences::save_editor_prefs(&prefs);
         glib::Propagation::Proceed
     });
 }

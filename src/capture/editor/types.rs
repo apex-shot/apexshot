@@ -24,7 +24,7 @@ pub enum BackgroundStyle {
     PlainColor(DrawColor),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BackgroundAlignment {
     TopLeft,
     TopCenter,
@@ -88,7 +88,7 @@ impl ArrowStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tool {
     Select,
     Crop,
@@ -156,7 +156,7 @@ pub enum SizeControlMode {
     Focus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CropAspectRatio {
     Freeform,
     Original,

@@ -1,0 +1,91 @@
+name: Post Release to Discord
+
+on:
+  release:
+    types: [published, edited]
+
+jobs:
+  discord-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to changelog and announcements
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          CHANGELOG_CHANNEL_ID: ${{ secrets.DISCORD_CHANGELOG_CHANNEL_ID }}
+          ANNOUNCEMENTS_CHANNEL_ID: ${{ secrets.DISCORD_ANNOUNCEMENTS_CHANNEL_ID }}
+          ANNOUNCEMENTS_ROLE_ID: ${{ secrets.DISCORD_ANNOUNCEMENTS_ROLE_ID }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          EVENT_ACTION: ${{ github.event.action }}
+        run: |
+          set -euo pipefail
+
+          if [ "$RELEASE_TAG" = "$RELEASE_NAME" ] || [ -z "$RELEASE_NAME" ]; then
+            TITLE="ApexShot $RELEASE_TAG"
+          else
+            TITLE="ApexShot $RELEASE_NAME"
+          fi
+
+          BODY_CLEAN=$(echo "$RELEASE_BODY" | sed 's/```/|||/g' | head -c 1800)
+
+          if [ "$EVENT_ACTION" = "edited" ]; then
+            PREFIX="**$TITLE** (updated)"
+          else
+            PREFIX="**$TITLE**"
+          fi
+
+          # --- 1. Post full release notes to #changelog (update existing if re-release) ---
+
+          CHANGELOG_CONTENT="$PREFIX
+
+          $BODY_CLEAN
+
+          Release notes: $RELEASE_URL"
+
+          EXISTING_ID=$(curl -sS -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+            "https://discord.com/api/v10/channels/$CHANGELOG_CHANNEL_ID/messages?limit=50" \
+            | jq -r --arg tag "$RELEASE_TAG" \
+              '[.[] | select(.author.bot == true and (.content | contains($tag)))][0].id // empty')
+
+          if [ -n "$EXISTING_ID" ]; then
+            echo "Updating existing changelog message $EXISTING_ID for tag $RELEASE_TAG"
+            curl -sS -X PATCH \
+              "https://discord.com/api/v10/channels/$CHANGELOG_CHANNEL_ID/messages/$EXISTING_ID" \
+              -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg c "$CHANGELOG_CONTENT" '{content: $c}')"
+            echo "Updated changelog message"
+          else
+            echo "Posting new changelog message for tag $RELEASE_TAG"
+            curl -sS -X POST \
+              "https://discord.com/api/v10/channels/$CHANGELOG_CHANNEL_ID/messages" \
+              -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg c "$CHANGELOG_CONTENT" '{content: $c}')"
+            echo "Posted new changelog message"
+          fi
+
+          # --- 2. Post brief announcement to #announcements with role ping (new releases only) ---
+
+          if [ "$EVENT_ACTION" = "published" ]; then
+            ANNOUNCE_CONTENT="<@&$ANNOUNCEMENTS_ROLE_ID>
+
+          **$TITLE** is now available.
+
+          $BODY_CLEAN
+
+          Download: https://apexshot.org/download
+          Release notes: $RELEASE_URL"
+
+            echo "Posting announcement for tag $RELEASE_TAG"
+            curl -sS -X POST \
+              "https://discord.com/api/v10/channels/$ANNOUNCEMENTS_CHANNEL_ID/messages" \
+              -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg c "$ANNOUNCE_CONTENT" '{content: $c}')"
+            echo "Posted announcement"
+          else
+            echo "Skipping announcement on edited release (changelog updated only)"
+          fi

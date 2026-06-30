@@ -1,7 +1,9 @@
 //! Pen weight types for highlighter freehand mode
 
+use serde::{Deserialize, Serialize};
+
 /// Preset highlighter thickness levels for freehand highlighting
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PenWeight {
     /// Thin highlighter stroke (8px)
     Small,
@@ -76,7 +78,7 @@ impl PenWeight {
 }
 
 /// Highlighter mode selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum HighlighterMode {
     /// Text-aware: auto-detect and highlight text
     #[default]

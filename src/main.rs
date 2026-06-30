@@ -130,6 +130,13 @@ fn main() {
             }
             return;
         }
+        "logout" => {
+            if let Err(e) = apexshot::cloud::auth::logout() {
+                eprintln!("Logout failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
         _ => {}
     }
 
