@@ -74,22 +74,9 @@ void CaptureOverlay::confirmRecordingSelection()
     update();
     QApplication::processEvents();
 
-    if (m_showCountdown && !m_countdownActive) {
-        m_countdownActive = true;
-        m_countdownValue = 3;
-        m_countdownForRecording = true;
-        m_countdownCancelRequested = false;
-        m_hoveredCountdownCancel = false;
-        m_countdownTimer->setInterval(1000);
-        m_countdownTimer->start();
-        update();
-        return;
-    }
-
     releaseKeyboard();
     hide();
     QApplication::processEvents();
-    QThread::msleep(120);
     QApplication::exit(0);
 }
 

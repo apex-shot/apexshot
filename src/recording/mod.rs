@@ -2300,10 +2300,6 @@ fn shell_controls_visibility_policy_for_params(
     crate::gnome_shell::RecordingControlsVisibilityPolicy::Hidden
 }
 
-fn should_use_legacy_pre_record_dim(request: &RecordingRequest, use_shell_mask: bool) -> bool {
-    request.dim_screen && request.countdown && !use_shell_mask
-}
-
 pub fn prepare_overlay_recording_request(
     mut app_config: AppConfig,
     request: &RecordingRequest,
@@ -2483,6 +2479,33 @@ async fn run_recording_with_controls_with_runtime_overlay(
     // We use our native GTK+LayerShell overlay which implements the same mask logic.
     eprintln!("[recording] GNOME Shell not detected; using native recording overlay.");
     run_recording_with_native_controls(config, params).await
+}
+
+async fn run_recording_countdown_subprocess(
+    params: RecordingControlsParams,
+) -> anyhow::Result<bool> {
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+    let seconds = params.countdown_seconds;
+    let params_json = serde_json::to_string(&params)?;
+
+    let status = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(&exe)
+            .arg("recording-countdown-internal")
+            .arg(params_json)
+            .arg(seconds.to_string())
+            .status()
+    })
+    .await??;
+
+    if status.success() {
+        Ok(true)
+    } else if status.code() == Some(2) {
+        Ok(false)
+    } else {
+        Err(anyhow::anyhow!(
+            "recording countdown exited with status {status}"
+        ))
+    }
 }
 
 pub async fn run_recording_with_native_controls(
@@ -2667,6 +2690,28 @@ async fn run_recording_with_shell_controls(
             Some(prepare_recording_backend(config.clone()).await?)
         };
 
+    let _shell_mask = if params.use_shell_mask {
+        match crate::gnome_shell::show_recording_mask(crate::gnome_shell::RecordingMaskGeometry {
+            x: params.capture_x,
+            y: params.capture_y,
+            width: params.capture_w,
+            height: params.capture_h,
+        }) {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                eprintln!("[recording] Failed to show GNOME shell recording mask ({err}); continuing without shell mask.");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    if params.countdown_enabled && !run_recording_countdown_subprocess(params.clone()).await? {
+        notify_recording_session_ended_best_effort();
+        return Ok((config.output_path.clone(), StopAction::Discard));
+    }
+
     let session_id = format!(
         "recording-{}-{}",
         std::process::id(),
@@ -2777,37 +2822,6 @@ pub fn run_overlay_recording_request_with_gtk(
 
     let _dnd_guard = if request.notifications {
         crate::recording::dnd::DndGuard::enable()
-    } else {
-        None
-    };
-
-    let use_legacy_pre_record_dim =
-        should_use_legacy_pre_record_dim(&request, prepared.use_shell_mask);
-    let dim_close = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let dim_handle = if use_legacy_pre_record_dim {
-        let flag = dim_close.clone();
-        Some(std::thread::spawn(move || {
-            crate::recording::dim_overlay::run_dim_overlay(flag);
-        }))
-    } else {
-        None
-    };
-
-    dim_close.store(true, std::sync::atomic::Ordering::Relaxed);
-    if let Some(handle) = dim_handle {
-        let _ = handle.join();
-    }
-
-    let _shell_mask = if prepared.use_shell_mask {
-        match crate::gnome_shell::show_recording_mask(crate::gnome_shell::geometry_from_request(
-            &request,
-        )) {
-            Ok(handle) => Some(handle),
-            Err(err) => {
-                eprintln!("[recording] Failed to show GNOME shell recording mask ({err}); continuing without shell mask.");
-                None
-            }
-        }
     } else {
         None
     };
@@ -3527,72 +3541,6 @@ mod tests {
                 session_id: None,
             })
         );
-    }
-
-    #[test]
-    fn legacy_pre_record_dim_disabled_when_shell_mask_is_active() {
-        let request = RecordingRequest {
-            x: 10,
-            y: 20,
-            width: 640,
-            height: 480,
-            record_type: RecordingType::Video,
-            controls: true,
-            mic: false,
-            speaker: false,
-            display_rec_time: false,
-            hidpi: false,
-            notifications: true,
-            cursor: true,
-            remember_selection: false,
-            dim_screen: true,
-            countdown: true,
-            video_max_res: 0,
-            video_fps: 1,
-            record_mono: false,
-            open_editor: false,
-            gif_fps: 12,
-            gif_quality: 0.75,
-            gif_size_idx: 0,
-            optimize_gif: true,
-            fullscreen: false,
-            ..RecordingRequest::default()
-        };
-
-        assert!(!should_use_legacy_pre_record_dim(&request, true));
-    }
-
-    #[test]
-    fn legacy_pre_record_dim_enabled_without_shell_mask() {
-        let request = RecordingRequest {
-            x: 10,
-            y: 20,
-            width: 640,
-            height: 480,
-            record_type: RecordingType::Video,
-            controls: true,
-            mic: false,
-            speaker: false,
-            display_rec_time: false,
-            hidpi: false,
-            notifications: true,
-            cursor: true,
-            remember_selection: false,
-            dim_screen: true,
-            countdown: true,
-            video_max_res: 0,
-            video_fps: 1,
-            record_mono: false,
-            open_editor: false,
-            gif_fps: 12,
-            gif_quality: 0.75,
-            gif_size_idx: 0,
-            optimize_gif: true,
-            fullscreen: false,
-            ..RecordingRequest::default()
-        };
-
-        assert!(should_use_legacy_pre_record_dim(&request, false));
     }
 
     #[test]

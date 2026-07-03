@@ -776,28 +776,27 @@ fn setup_countdown_window(
     let display = gdk::Display::default().expect("No display");
     let monitor = monitor_for_capture(&display, &params);
     let monitor_geom = monitor.as_ref().map(|m| m.geometry());
+    let bubble_size = 184.0;
 
-    let (win_w, win_h) = if let Some(ref geom) = monitor_geom {
-        (geom.width(), geom.height())
-    } else {
-        display_size().unwrap_or((1920, 1080))
-    };
+    let win_w = bubble_size as i32;
+    let win_h = bubble_size as i32;
 
-    let countdown_center = if !params.is_fullscreen && params.capture_w > 0 && params.capture_h > 0
-    {
-        let global_center_x = params.capture_x as f64 + params.capture_w as f64 / 2.0;
-        let global_center_y = params.capture_y as f64 + params.capture_h as f64 / 2.0;
-        if let Some(ref geom) = monitor_geom {
+    let countdown_center_global =
+        if !params.is_fullscreen && params.capture_w > 0 && params.capture_h > 0 {
+            let global_center_x = params.capture_x as f64 + params.capture_w as f64 / 2.0;
+            let global_center_y = params.capture_y as f64 + params.capture_h as f64 / 2.0;
+            (global_center_x, global_center_y)
+        } else if let Some(ref geom) = monitor_geom {
             (
-                global_center_x - geom.x() as f64,
-                global_center_y - geom.y() as f64,
+                geom.x() as f64 + geom.width() as f64 / 2.0,
+                geom.y() as f64 + geom.height() as f64 / 2.0,
             )
         } else {
-            (global_center_x, global_center_y)
-        }
-    } else {
-        (win_w as f64 / 2.0, win_h as f64 / 2.0)
-    };
+            let (display_w, display_h) = display_size().unwrap_or((1920, 1080));
+            (display_w as f64 / 2.0, display_h as f64 / 2.0)
+        };
+    let countdown_x = (countdown_center_global.0 - bubble_size / 2.0).round() as i32;
+    let countdown_y = (countdown_center_global.1 - bubble_size / 2.0).round() as i32;
 
     install_countdown_css();
 
@@ -822,23 +821,28 @@ fn setup_countdown_window(
         }
         window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Left, true);
-        window.set_anchor(Edge::Bottom, true);
-        window.set_anchor(Edge::Right, true);
+        window.set_anchor(Edge::Bottom, false);
+        window.set_anchor(Edge::Right, false);
+        let (margin_x, margin_y) = if let Some(ref geom) = monitor_geom {
+            (countdown_x - geom.x(), countdown_y - geom.y())
+        } else {
+            (countdown_x, countdown_y)
+        };
         window.set_keyboard_mode(KeyboardMode::None);
         window.set_exclusive_zone(-1);
+        window.set_margin(Edge::Top, margin_y.max(0));
+        window.set_margin(Edge::Left, margin_x.max(0));
+        window.set_margin(Edge::Bottom, 0);
+        window.set_margin(Edge::Right, 0);
         window.set_namespace(Some("apexshot-recording-countdown"));
     } else {
-        if let Some(ref m) = monitor {
-            window.fullscreen_on_monitor(m);
-        } else {
-            window.fullscreen();
-        }
         window.connect_realize(clone!(
             #[weak]
             window,
             move |_| {
                 suppress_x11_controls_window_type(&window);
                 let _ = request_x11_always_on_top(&window);
+                let _ = position_x11_window(&window, countdown_x, countdown_y);
             }
         ));
     }
@@ -858,13 +862,9 @@ fn setup_countdown_window(
             let _ = cr.paint();
             cr.set_operator(cairo::Operator::Over);
 
-            let bubble_size = 184.0;
-            let center_x = countdown_center
-                .0
-                .clamp(bubble_size / 2.0, width as f64 - bubble_size / 2.0);
-            let center_y = countdown_center
-                .1
-                .clamp(bubble_size / 2.0, height as f64 - bubble_size / 2.0);
+            let bubble_size = width.min(height) as f64;
+            let center_x = width as f64 / 2.0;
+            let center_y = height as f64 / 2.0;
             let bubble_x = center_x - bubble_size / 2.0;
             let bubble_y = center_y - bubble_size / 2.0;
             let is_hovered = hovered.get();
@@ -915,13 +915,8 @@ fn setup_countdown_window(
         let hovered = hovered.clone();
         let drawing_area = drawing_area.clone();
         move |_, x, y| {
-            let bubble_size = 184.0;
-            let cx = countdown_center
-                .0
-                .clamp(bubble_size / 2.0, win_w as f64 - bubble_size / 2.0);
-            let cy = countdown_center
-                .1
-                .clamp(bubble_size / 2.0, win_h as f64 - bubble_size / 2.0);
+            let cx = win_w as f64 / 2.0;
+            let cy = win_h as f64 / 2.0;
             let inside = (x - cx).hypot(y - cy) <= bubble_size / 2.0;
             if hovered.replace(inside) != inside {
                 drawing_area.queue_draw();
@@ -945,13 +940,8 @@ fn setup_countdown_window(
         let window_weak = window.downgrade();
         let cancel_stop_tx = cancel_stop_tx.clone();
         move |_, _, x, y| {
-            let bubble_size = 184.0;
-            let cx = countdown_center
-                .0
-                .clamp(bubble_size / 2.0, win_w as f64 - bubble_size / 2.0);
-            let cy = countdown_center
-                .1
-                .clamp(bubble_size / 2.0, win_h as f64 - bubble_size / 2.0);
+            let cx = win_w as f64 / 2.0;
+            let cy = win_h as f64 / 2.0;
             if (x - cx).hypot(y - cy) <= bubble_size / 2.0 {
                 cancelled.store(true, Ordering::Relaxed);
                 if let Some(tx) = cancel_stop_tx
