@@ -393,6 +393,24 @@ fn update_tray_recording_state(
     });
 }
 
+/// During recording on GNOME Shell desktops the tray icon stays in its idle
+/// appearance — the GNOME Shell extension renders its own stop/timer pill
+/// in the panel. On non-GNOME desktops the tray *is* the recording UI so we
+/// forward the recording state to it.
+fn update_recording_tray_if_non_gnome(
+    tray_handle: &Option<ksni::Handle<ApexShotTray>>,
+    recording_state: Option<&RecordingTrayState>,
+) {
+    if !should_show_recording_tray_controls() {
+        return;
+    }
+    update_tray_recording_state(tray_handle, recording_state);
+}
+
+fn should_show_recording_tray_controls() -> bool {
+    !crate::gnome_shell::current_session_supports_gnome_shell_overlay()
+}
+
 /// A request for GTK work that must run on the main OS thread.
 /// The daemon sends these through a channel; the main thread executes them.
 pub enum GtkWork {
@@ -788,7 +806,7 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
             }
             DaemonAction::RecordingSessionStarted => {
                 recording_tray_state = Some(RecordingTrayState::started());
-                if tray_handle.is_none() {
+                if tray_handle.is_none() && should_show_recording_tray_controls() {
                     match spawn_daemon_tray(&action_tx) {
                         Ok(handle) => tray_handle = Some(handle),
                         Err(e) => {
@@ -796,38 +814,37 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
                         }
                     }
                 }
-                update_tray_recording_state(&tray_handle, recording_tray_state.as_ref());
+                update_recording_tray_if_non_gnome(&tray_handle, recording_tray_state.as_ref());
             }
             DaemonAction::RecordingSessionPaused => {
-                if let Some(state) = recording_tray_state.as_mut() {
-                    state.pause();
-                    update_tray_recording_state(&tray_handle, Some(state));
+                if recording_tray_state.as_mut().map(|s| s.pause()).is_some() {
+                    update_recording_tray_if_non_gnome(&tray_handle, recording_tray_state.as_ref());
                 }
             }
             DaemonAction::RecordingSessionResumed => {
-                if let Some(state) = recording_tray_state.as_mut() {
-                    state.resume();
-                    update_tray_recording_state(&tray_handle, Some(state));
+                if recording_tray_state.as_mut().map(|s| s.resume()).is_some() {
+                    update_recording_tray_if_non_gnome(&tray_handle, recording_tray_state.as_ref());
                 }
             }
             DaemonAction::RecordingSessionRestarted => {
-                if let Some(state) = recording_tray_state.as_mut() {
-                    state.restart();
-                    update_tray_recording_state(&tray_handle, Some(state));
+                if recording_tray_state.as_mut().map(|s| s.restart()).is_some() {
+                    update_recording_tray_if_non_gnome(&tray_handle, recording_tray_state.as_ref());
                 }
             }
             DaemonAction::RecordingSessionEnded => {
                 recording_tray_state = None;
-                if tray_requested_visible {
-                    update_tray_recording_state(&tray_handle, None);
-                } else if let Some(handle) = tray_handle.take() {
-                    handle.shutdown();
-                    eprintln!("[daemon] Recording tray removed.");
+                if should_show_recording_tray_controls() {
+                    if tray_requested_visible {
+                        update_tray_recording_state(&tray_handle, None);
+                    } else if let Some(handle) = tray_handle.take() {
+                        handle.shutdown();
+                        eprintln!("[daemon] Recording tray removed.");
+                    }
                 }
             }
             DaemonAction::RecordingTimerTick => {
-                if let Some(state) = recording_tray_state.as_ref() {
-                    update_tray_recording_state(&tray_handle, Some(state));
+                if recording_tray_state.is_some() {
+                    update_recording_tray_if_non_gnome(&tray_handle, recording_tray_state.as_ref());
                 }
             }
             DaemonAction::SetHotkeySuppressed(suppressed) => {
