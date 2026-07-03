@@ -13,7 +13,7 @@
 Take the required screenshots as described in `screenshots/README.md`:
 - Screenshot preview stacking (drag preview window)
 - Recording mask with controls
-- Runtime overlays (webcam/mic/speaker status)
+- Recording controls, mask visibility, and mic/speaker runtime state
 - Full recording session
 - Extension enabled in GNOME Extensions app
 

@@ -97,13 +97,6 @@ public:
     int recordKeyAppearance() const { return 0; }
     bool recordKeyBlurBg() const { return false; }
     int recordKeyFilter() const { return 0; }
-    bool recordWebcamEnabled() const { return m_recWebcam; }
-    int recordWebcamSize() const { return static_cast<int>(m_webcamSize); }
-    int recordWebcamShape() const { return static_cast<int>(m_webcamShape); }
-    bool recordWebcamFlip() const { return m_webcamFlip; }
-    int recordWebcamDevice() const { return m_webcamDevice; }
-    double recordWebcamRelX() const { return m_webcamRelX; }
-    double recordWebcamRelY() const { return m_webcamRelY; }
     bool recordDisplayRecTime() const { return true; } // always enabled
     bool recordHidpiEnabled() const { return m_hidpi; }
     bool recordDoNotDisturb() const { return m_doNotDisturb; }
@@ -143,38 +136,6 @@ public:
     void setInitialKeyAppearance(int) {}
     void setInitialKeyBlurBg(bool) {}
     void setInitialKeyFilter(int) {}
-    void setInitialRecWebcam(bool v)
-    {
-        m_recWebcam = v;
-        if (!m_recWebcam) {
-            stopWebcamCapture();
-        } else if (m_webcamDevice < 0) {
-            // Auto-detect first available webcam when device is None
-            enumerateWebcamDevices();
-            if (!m_webcamDeviceIndexes.isEmpty()) {
-                m_webcamDevice = m_webcamDeviceIndexes[0];
-            }
-            if (m_recordingPanelOpen && m_webcamDevice >= 0) {
-                startWebcamCapture();
-            }
-        } else if (m_recordingPanelOpen) {
-            startWebcamCapture();
-        }
-    }
-    void setInitialWebcamSize(int v) { m_webcamSize = static_cast<WebcamSize>(v); }
-    void setInitialWebcamShape(int v) { m_webcamShape = static_cast<WebcamShape>(v); }
-    void setInitialWebcamFlip(bool v) { m_webcamFlip = v; }
-    void setInitialWebcamDevice(int v)
-    {
-        m_webcamDevice = v;
-        if (m_webcamDevice < 0) {
-            stopWebcamCapture();
-        } else if (m_recordingPanelOpen && m_recWebcam) {
-            startWebcamCapture();
-        }
-    }
-    void setInitialWebcamRelX(double v) { m_webcamRelX = std::clamp(v, 0.0, 1.0); }
-    void setInitialWebcamRelY(double v) { m_webcamRelY = std::clamp(v, 0.0, 1.0); }
     void setInitialRememberSelection(bool v) { m_rememberSelection = v; }
     void setInitialDimScreen(bool v) { m_dimScreen = v; }
     void setInitialShowCountdown(bool v) { m_showCountdown = v; }
@@ -224,7 +185,7 @@ private:
     enum class RecordPanelTile {
         None,
         Controls, Size, Crop,
-        Mic, Speaker, Webcam,
+        Mic, Speaker,
         RecordVideo, RecordGif
     };
 
@@ -259,11 +220,6 @@ private:
     void drawScrollPopup(QPainter& p, double centerX, double centerY);
     static void runPactlVolume(const QString& type, int pct);
     QRectF scrollPrimaryButtonRect() const;
-    QSizeF webcamPreviewSize(double selW, double selH) const;
-    QRectF webcamPreviewRect(double selX, double selY, double selW, double selH) const;
-    void setWebcamPreviewTopLeft(const QPointF& topLeft,
-                                 double selX, double selY,
-                                 double selW, double selH);
     QRect crosshairBubbleRectForPoint(const QPoint& point) const;
     QRegion crosshairDirtyRegion(const QPoint& oldPoint,
                                  const QPoint& newPoint,
@@ -273,14 +229,6 @@ private:
                                  bool hasSelection) const;
     QRegion windowHoverDirtyRegion(int index) const;
 
-    // Webcam
-    void showWebcamContextMenu(const QPoint& globalPos);
-    void enumerateWebcamDevices();
-    void startWebcamCapture();
-    void stopWebcamCapture();
-    void* m_webcamPipeline = nullptr; // GstElement*
-    QPixmap m_webcamFrame;
-    QMutex m_webcamMutex;
 
     // Hit testing / cursor
     void updateCursor(const QPoint& pos);
@@ -437,19 +385,6 @@ private:
 
     bool m_recMic;
     bool m_recSpeaker;
-    bool m_recWebcam;
-    enum class WebcamSize { Small, Medium, Large, Huge, Fullscreen };
-    enum class WebcamShape { Circle, Square, Rectangle, Vertical };
-    WebcamSize m_webcamSize = WebcamSize::Medium;
-    WebcamShape m_webcamShape = WebcamShape::Vertical;
-    bool m_webcamFlip = false;
-    int m_webcamDevice = -1; // -1 = None, 0+ = /dev/videoN
-    double m_webcamRelX = 0.0;
-    double m_webcamRelY = 0.0;
-    bool m_draggingWebcam = false;
-    QPointF m_webcamDragOffset;
-    QStringList m_webcamDevices; // cached device names
-    QList<int> m_webcamDeviceIndexes;
     double m_micLevel; // Normalized level for animation
     double m_speakerLevel; // Normalized level for speaker animation
     QTimer* m_micTimer;

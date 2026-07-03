@@ -156,7 +156,7 @@ Screen recording with native PipeWire + ffmpeg:
 - `editor/` — GTK4 video editor for trimming, dimension conversion, quality, and audio mode (MP4 only)
 - `dnd.rs` — Do Not Disturb mode during recording
 
-**Features:** MP4/WebM/OGV/GIF output, mic + speaker audio, webcam overlay, recording mask, pause/resume/restart, countdown timer, post-recording video editor.
+**Features:** MP4/WebM/OGV/GIF output, mic + speaker audio, recording mask, pause/resume/restart, countdown timer, post-recording video editor.
 
 ### 7. X11/Wayland Area Selector (`src/overlay.rs`)
 GTK4 overlay for interactive area selection:
@@ -287,7 +287,7 @@ JavaScript/GJS extension for GNOME Shell 45–49:
 - `extension.js` — main extension logic, D-Bus service setup
 - `controls-ui.js` — recording controls UI shell elements
 - `controls-ui-layout.js` — layout positioning
-- `runtime-overlays.js` — webcam/mic/speaker runtime overlay rendering
+- `runtime-overlays.js` — runtime overlay ownership and shell actor cleanup
 - `runtime-overlays-visibility.js` — overlay show/hide logic
 - `mask-ui.js` — recording mask shell actor
 - `session-state.js` — session tracking, window list
@@ -339,7 +339,7 @@ extension path** used on GNOME Wayland.
    layer-shell overlay (`src/overlay.rs`) for interactive area selection. For
    fullscreen recording, it skips this step and captures the full monitor bounds.
 3. A `RecordingConfig` is built from user settings (format, fps, audio sources,
-   webcam, countdown, cursor, etc.).
+   countdown, cursor, etc.).
 4. `recording::start_recording(config)` starts the recording. On wlroots
    compositors (Hyprland/Sway), `wf-recorder` is used when available for
    native `wlr-screencopy` capture with lower overhead.
@@ -375,7 +375,7 @@ extension path** used on GNOME Wayland.
 
 1. User triggers recording via hotkey, tray, or CLI.
 2. The C++ Qt5 overlay (`capture-overlay/`) handles area selection and recording
-   configuration UI (format picker, mic/speaker toggles, webcam PiP options).
+   configuration UI (format picker, mic/speaker toggles, countdown, and quality options).
 3. The overlay outputs a JSON recording request; `RecordingConfig` is built from it.
 4. `recording::start_recording()` uses the same native PipeWire + ffmpeg flow
    as the daemon path (no GStreamer for video).
@@ -384,7 +384,7 @@ extension path** used on GNOME Wayland.
      screen outside the selected area.
    - Render recording controls (pause/stop/timer) directly on the GNOME Shell
      stage instead of a floating GTK4 overlay.
-   - Display webcam PiP and audio level indicators as shell actors.
+   - Render recording controls on the shell stage while mic/speaker state remains in the runtime snapshot.
 6. Countdown and recording proceed as in the native path, but mask/controls are
    shell-rendered instead of GTK4 overlays.
 7. User stops; ffmpeg finalizes; after-capture actions applied.

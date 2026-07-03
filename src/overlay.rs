@@ -12,7 +12,6 @@ pub(crate) mod icons;
 pub(crate) mod layout;
 pub(crate) mod recording;
 mod state;
-pub(crate) mod webcam;
 mod window;
 
 #[cfg(test)]

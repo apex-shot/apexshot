@@ -21,25 +21,22 @@ function runTest(name, fn) {
     }
 }
 
-runTest("parses webcam preview manifest path from the runtime snapshot", () => {
+runTest("parses mic and speaker visibility from the runtime snapshot", () => {
     const session = createSessionState();
     setControlsState(session, {
         dbusDest: "org.apexshot.RecordingControl",
-        sessionId: "recording-webcam-preview",
+        sessionId: "recording-audio-overlays",
         rect: {x: 0, y: 0, width: 100, height: 100},
         isFullscreen: false,
         showTimer: true,
         runtimeOverlaySnapshot: JSON.stringify({
-            webcam_enabled: true,
-            webcam_preview_manifest_path: "/tmp/apexshot-gnome-webcam-preview/recording-webcam-preview/manifest.json",
+            mic_visible: true,
+            speaker_visible: true,
         }),
     }, 0);
 
-    assertEqual(
-        session.runtimeOverlaySnapshot.webcam_preview_manifest_path,
-        "/tmp/apexshot-gnome-webcam-preview/recording-webcam-preview/manifest.json",
-        "manifest path should be preserved for GNOME live webcam preview"
-    );
+    assertEqual(session.runtimeOverlaySnapshot.mic_visible, true, "mic visibility should be preserved");
+    assertEqual(session.runtimeOverlaySnapshot.speaker_visible, true, "speaker visibility should be preserved");
 });
 
 runTest("stores the recording controls visibility policy on the active session", () => {

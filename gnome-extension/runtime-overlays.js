@@ -14,8 +14,7 @@ export function shouldExcludeOverlayEvent(sessionState, actor) {
 }
 
 export function attachRuntimeOverlays(_sessionState) {
-    // Click and keystroke runtime overlays were removed. Webcam overlay support
-    // is handled by the native controls/session state path.
+    // Click, keystroke, and PiP actors are not rendered by the shell extension.
 }
 
 export function destroyRuntimeOverlays(sessionState) {

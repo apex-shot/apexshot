@@ -25,7 +25,6 @@ pub(crate) enum RecordPanelTile {
     Crop,
     Mic,
     Speaker,
-    Webcam,
 
     RecordVideo,
     RecordGif,
@@ -39,7 +38,7 @@ pub(crate) fn compute_recording_deck_layout(
     screen_width: f64,
     screen_height: f64,
 ) -> RecordingDeckLayout {
-    let rail_height = FEATURE_PANEL_HEIGHT * 3.0;
+    let rail_height = FEATURE_PANEL_HEIGHT * 2.0;
     let center_y = selection_y + selection_height / 2.0;
     let rail_x = (selection_x - TOOL_RAIL_GAP - FEATURE_PANEL_ITEM_WIDTH).max(FEATURE_PANEL_MARGIN);
     let rail_y = (center_y - rail_height / 2.0).clamp(

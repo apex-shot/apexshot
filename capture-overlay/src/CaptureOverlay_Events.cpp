@@ -217,14 +217,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
     // Right-click on recording panel tiles
     if (event->button() == Qt::RightButton && m_recordingPanelOpen) {
         RecordPanelTile tile = hitTestRecordingPanel(pos);
-        if (tile == RecordPanelTile::Webcam) {
-            const QRect sel = m_selection.normalized();
-            const double contextualX = std::max(10.0, std::min(sel.x() + (sel.width() - 440.0) / 2.0, width() - 450.0));
-            const double contextualY = std::max(10.0, std::min(sel.y() + 24.0, height() - 510.0));
-            closeRecordingMenus();
-            showWebcamContextMenu(mapToGlobal(QPoint((int)contextualX, (int)contextualY)));
-            return;
-        }
         if (tile == RecordPanelTile::Mic) {
             closeRecordingMenus();
             m_micVolumePopupOpen = !m_micVolumePopupOpen;
@@ -476,19 +468,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             m_recordConfigRequested = true;
             update();
             return;
-        case RecordPanelTile::Webcam:
-            m_recWebcam = !m_recWebcam;
-            m_recordConfigRequested = true;
-            if (m_recWebcam && m_webcamDevice < 0 && !m_webcamDeviceIndexes.isEmpty()) {
-                m_webcamDevice = m_webcamDeviceIndexes.first();
-                startWebcamCapture();
-            } else if (m_recWebcam && m_webcamDevice >= 0) {
-                startWebcamCapture();
-            } else {
-                stopWebcamCapture();
-            }
-            update();
-            return;
         case RecordPanelTile::RecordVideo:
             if (m_recordType == RecordType::Video) {
                 m_captureIntent = CaptureIntent::Record;
@@ -509,17 +488,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 update();
             }
             return;
-        }
-        if (tile == RecordPanelTile::None && m_recWebcam && m_hasSelection) {
-            const QRect sel = m_selection.normalized();
-            const QRectF previewRect = webcamPreviewRect(
-                sel.x(), sel.y(), sel.width(), sel.height());
-            if (previewRect.contains(pos)) {
-                m_draggingWebcam = true;
-                m_webcamDragOffset = QPointF(pos) - previewRect.topLeft();
-                setCursor(Qt::SizeAllCursor);
-                return;
-            }
         }
         // If click is on resize/move handle, allow it to pass through to the
         // common selection manipulation code below. Otherwise, clicks on empty
@@ -660,8 +628,6 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 m_recordConfigRequested = true;
                 m_micTimer->start();
                 m_recordingToolsHidden = false;
-                if (m_recWebcam && m_webcamDevice >= 0)
-                    startWebcamCapture();
                 update();
                 return true;
             } else {
@@ -850,14 +816,6 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
-    if (m_draggingWebcam && m_hasSelection) {
-        const QRect sel = m_selection.normalized();
-        setWebcamPreviewTopLeft(QPointF(pos) - m_webcamDragOffset,
-                                sel.x(), sel.y(), sel.width(), sel.height());
-        update();
-        return;
-    }
-
     // ── Global Dropdown Hover ───────────────────────────────────────────────
     if (m_dropdownOpen != -1) {
         int newHover = -1;
@@ -963,15 +921,6 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         if (newTile != RecordPanelTile::None) {
             updateCursor(pos);
             return;
-        }
-        if (m_recWebcam && m_hasSelection) {
-            const QRect sel = m_selection.normalized();
-            const QRectF previewRect = webcamPreviewRect(
-                sel.x(), sel.y(), sel.width(), sel.height());
-            if (previewRect.contains(pos)) {
-                setCursor(Qt::SizeAllCursor);
-                return;
-            }
         }
         updateCursor(pos);
         return;
@@ -1253,11 +1202,6 @@ void CaptureOverlay::mouseReleaseEvent(QMouseEvent* event)
         m_volumeSliderDragging = false;
         update();
     }
-    if (m_draggingWebcam) {
-        m_draggingWebcam = false;
-        update();
-    }
-
     // Reset recording panel hover state
     if (m_recordingPanelOpen) {
         m_hoveredRecordTile = RecordPanelTile::None;
@@ -1373,8 +1317,6 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
                         m_recordingPanelOpen = true;
                         m_micTimer->start();
                         m_recordingToolsHidden = false;
-                        if (m_recWebcam && m_webcamDevice >= 0)
-                            startWebcamCapture();
                         update();
                     } else {
                         exitScrollMode();
@@ -1428,8 +1370,6 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
             if (m_recordingToolsHidden) {
                 // Back to full recording panel
                 m_recordingToolsHidden = false;
-                if (m_recWebcam && m_webcamDevice >= 0)
-                    startWebcamCapture();
             } else {
                 // Close recording panel, restore normal capture mode
                 resetRecordingPanelToAreaMode();

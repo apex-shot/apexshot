@@ -42,7 +42,7 @@ support.
 |---|---|
 | ShareX-style capture | Full screen, area, window, and crosshair screenshots |
 | Annotation and editing | Arrows, shapes, text, blur, pixelate, crop, highlighter, and color picker |
-| Screen recording | Area or full-screen recording with MP4/GIF output, audio monitoring, and webcam PiP |
+| Screen recording | Area or full-screen recording with MP4/GIF output, audio monitoring, countdown, and controls |
 | Video editing | Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings |
 | Text and code extraction | OCR plus automatic QR code detection from captured regions |
 | Linux desktop integration | GNOME Wayland support, portal-backed capture paths, tray, daemon mode, and global hotkeys |
@@ -58,7 +58,7 @@ tool`. ApexShot is built for those workflows because it combines:
 - built-in annotation tools for arrows, text, blur, pixelate, and markup
 - OCR and QR code detection for extracting information from screenshots
 - Wayland-focused Linux support with portal-backed and compositor-specific paths
-- screen recording, GIF export, webcam PiP, and quick clipboard workflows
+- screen recording, GIF export, audio capture, and quick clipboard workflows
 
 The goal is simple: make it obvious to GitHub visitors and search engines what
 ApexShot does, without turning the README into generic comparison copy.
@@ -123,7 +123,6 @@ support is improving over time.
 - **Flexible Recording** — Area or full-screen recording with MP4/GIF output
   ![Video recording UI](media/video-recording.png)
 - **Audio Monitoring** — Real-time mic and speaker level monitoring via PipeWire
-- **Webcam PiP** — Picture-in-picture webcam overlay during recording
 - **Recording Controls** — Pause, resume, and stop recording with on-screen controls
 - **Video Editor** — Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings. Open from the tray menu, CLI (`apexshot video-editor`), or a global hotkey. Supports drag-and-drop and file chooser for loading videos.
   ![Video editor UI](media/video-editor.png)
@@ -148,7 +147,6 @@ support is improving over time.
 | **Audio** | PipeWire/PulseAudio (mic/speaker capture via ffmpeg) |
 | **OCR** | Tesseract + ocrs/rten |
 | **System Tray** | ksni (KDE System Tray Integration) |
-| **Webcam** | Camera portal + native PipeWire; v4l2 GStreamer fallback |
 
 ## Download
 
@@ -506,7 +504,7 @@ overlay, and native PipeWire handle everything.
 2. Triggering a recording action (`apexshot record area`, tray click, or hotkey)
    opens the Rust GTK4 overlay for area selection and recording configuration.
 3. The overlay provides the same controls as the GNOME path: mic/speaker toggles,
-   webcam PiP, format picker (MP4/GIF), countdown, and video quality settings.
+   format picker (MP4/GIF), countdown, and video quality settings.
 4. Once confirmed, recording begins. On wlroots compositors (Hyprland/Sway),
    `wf-recorder` is preferred when installed for native `wlr-screencopy`
    capture. On other Wayland compositors, native PipeWire capture
@@ -520,7 +518,6 @@ overlay, and native PipeWire handle everything.
 **What you get without GNOME:**
 - Full screen and area recording (MP4, WebM, GIF)
 - Mic and speaker audio capture with level monitoring
-- Webcam picture-in-picture overlay
 - Countdown timer before recording starts
 - Pause/resume/restart/stop during recording
 - Post-recording video editor (trim, resize, re-encode)

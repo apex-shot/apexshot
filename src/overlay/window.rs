@@ -19,13 +19,11 @@ use super::layout::{
 };
 use super::recording::hit_testing::{
     recording_crop_menu_contains, recording_crop_menu_hit_item, recording_tile_at,
-    settings_menu_contains, settings_menu_hit_item, webcam_options_hit_item,
-    webcam_options_menu_contains,
+    settings_menu_contains, settings_menu_hit_item,
 };
 use super::recording::layout::{compute_dropdown_popup_y, RecordPanelTile};
 use super::recording::state::{OverlayIntent, SettingsTab};
 use super::state::{DragMode, OverlayMode, SelectorState};
-use super::webcam::{first_webcam_device, start_webcam_preview};
 use crate::capture_overlay::{RecordingRequest, RecordingType};
 use gtk4::gdk::Key;
 use gtk4::{
@@ -61,13 +59,6 @@ fn recording_request_from_state(
         controls: st.recording.rec_controls,
         mic: st.recording.mic_toggle,
         speaker: st.recording.speaker_toggle,
-        webcam: st.recording.rec_webcam,
-        webcam_size: st.recording.webcam_size as u8,
-        webcam_shape: st.recording.webcam_shape as u8,
-        webcam_flip: st.recording.webcam_flip,
-        webcam_device: st.recording.webcam_device,
-        webcam_rel_x: st.recording.webcam_rel_x,
-        webcam_rel_y: st.recording.webcam_rel_y,
         display_rec_time: true, // always show recording time in top bar
         hidpi: st.recording.hidpi,
         notifications: st.recording.do_not_disturb,
@@ -299,22 +290,6 @@ fn spawn_overlay_pw_stream(
     });
 }
 
-fn sync_webcam_preview(st: &mut SelectorState) {
-    if !st.recording.rec_webcam || st.recording.webcam_device < 0 {
-        st.recording.webcam_preview = None;
-        st.recording.webcam_frame = None;
-        return;
-    }
-    if st.recording.webcam_preview.is_none() {
-        if let Some(preview) =
-            start_webcam_preview(st.recording.webcam_device, st.recording.webcam_flip)
-        {
-            st.recording.webcam_frame = Some(preview.frame_handle());
-            st.recording.webcam_preview = Some(preview);
-        }
-    }
-}
-
 pub(crate) fn send_selection_result(
     state: &Arc<Mutex<SelectorState>>,
     result_tx: &std::sync::mpsc::Sender<SelectionResult>,
@@ -323,7 +298,7 @@ pub(crate) fn send_selection_result(
     screen_height: i32,
     background: Option<&BackgroundFrame>,
 ) {
-    let mut st = state.lock().unwrap();
+    let st = state.lock().unwrap();
     let area = selection_area_from_state(&st, screen_width, screen_height, background);
     let intent = st.intent;
     let result = match intent {
@@ -334,14 +309,6 @@ pub(crate) fn send_selection_result(
                     .selected_record_type
                     .unwrap_or(RecordingType::Video);
                 let request = recording_request_from_state(&st, record_type);
-
-                // Release the pre-record webcam preview before starting the
-                // actual recording UI. Many webcams allow only one v4l2 reader;
-                // if the selector preview keeps /dev/videoN open, the recording
-                // webcam window starts but receives no frames and draws black.
-                st.recording.webcam_preview = None;
-                st.recording.webcam_frame = None;
-
                 Ok(OverlaySelection::Recording(request))
             } else {
                 Ok(OverlaySelection::Area(None))
@@ -480,89 +447,6 @@ pub(crate) fn suppress_x11_compositor_animation(window: &ApplicationWindow) {
     }
 
     let _ = conn.flush();
-}
-
-fn webcam_preview_size(
-    sel_w: f64,
-    sel_h: f64,
-    webcam_size: usize,
-    webcam_shape: usize,
-) -> (f64, f64) {
-    const MARGIN: f64 = 10.0;
-    let (mut preview_w, mut preview_h) = match webcam_size {
-        0 => (120.0, 160.0),
-        2 => (280.0, 370.0),
-        3 => (360.0, 480.0),
-        4 => (
-            (sel_w - 2.0 * MARGIN).max(1.0),
-            (sel_h - 2.0 * MARGIN).max(1.0),
-        ),
-        _ => (200.0, 260.0),
-    };
-
-    match webcam_shape {
-        0 | 1 => preview_h = preview_w,
-        2 => preview_h = preview_w * 0.75,
-        _ => {}
-    }
-
-    preview_w = preview_w.min((sel_w - 2.0 * MARGIN).max(1.0));
-    preview_h = preview_h.min((sel_h - 2.0 * MARGIN).max(1.0));
-    (preview_w, preview_h)
-}
-
-fn webcam_preview_rect(st: &SelectorState, selection: SelectionRectF) -> RectF {
-    const MARGIN: f64 = 10.0;
-    let sel_w = selection.width();
-    let sel_h = selection.height();
-    let (preview_w, preview_h) = webcam_preview_size(
-        sel_w,
-        sel_h,
-        st.recording.webcam_size,
-        st.recording.webcam_shape,
-    );
-    let min_x = selection.left + MARGIN;
-    let max_x = min_x.max(selection.left + sel_w - preview_w - MARGIN);
-    let min_y = selection.top + MARGIN;
-    let max_y = min_y.max(selection.top + sel_h - preview_h - MARGIN);
-
-    RectF {
-        x: min_x + (max_x - min_x) * st.recording.webcam_rel_x.clamp(0.0, 1.0),
-        y: min_y + (max_y - min_y) * (1.0 - st.recording.webcam_rel_y.clamp(0.0, 1.0)),
-        width: preview_w,
-        height: preview_h,
-    }
-}
-
-fn set_webcam_preview_top_left(st: &mut SelectorState, selection: SelectionRectF, x: f64, y: f64) {
-    const MARGIN: f64 = 10.0;
-    let sel_w = selection.width();
-    let sel_h = selection.height();
-    let (preview_w, preview_h) = webcam_preview_size(
-        sel_w,
-        sel_h,
-        st.recording.webcam_size,
-        st.recording.webcam_shape,
-    );
-    let min_x = selection.left + MARGIN;
-    let max_x = min_x.max(selection.left + sel_w - preview_w - MARGIN);
-    let min_y = selection.top + MARGIN;
-    let max_y = min_y.max(selection.top + sel_h - preview_h - MARGIN);
-    let clamped_x = x.clamp(min_x, max_x);
-    let clamped_y = y.clamp(min_y, max_y);
-
-    st.recording.webcam_rel_x = if max_x > min_x {
-        (clamped_x - min_x) / (max_x - min_x)
-    } else {
-        0.0
-    }
-    .clamp(0.0, 1.0);
-    st.recording.webcam_rel_y = if max_y > min_y {
-        1.0 - ((clamped_y - min_y) / (max_y - min_y))
-    } else {
-        0.0
-    }
-    .clamp(0.0, 1.0);
 }
 
 fn aspect_ratio_for_index(index: usize) -> f64 {
@@ -803,32 +687,6 @@ pub(crate) fn setup_window(
     // Set the drawing area as the child
     window.set_child(Some(&drawing_area));
 
-    // Explicitly release camera resources whenever the selector window goes
-    // away. On Hyprland the daemon process stays alive after the overlay closes;
-    // relying on the whole GTK state graph to be dropped can leave v4l2 fds open
-    // in the daemon, which makes the recording webcam black and keeps the LED on.
-    let state_cleanup = state.clone();
-    window.connect_destroy(move |_| {
-        if let Ok(mut st) = state_cleanup.lock() {
-            st.recording.webcam_preview = None;
-            st.recording.webcam_frame = None;
-        }
-    });
-
-    let state_webcam_tick = state.clone();
-    drawing_area.add_tick_callback(move |area, _| {
-        if state_webcam_tick
-            .lock()
-            .map(|st| st.recording.rec_webcam && st.recording.webcam_preview.is_some())
-            .unwrap_or(false)
-        {
-            area.queue_draw();
-            glib::ControlFlow::Continue
-        } else {
-            glib::ControlFlow::Continue
-        }
-    });
-
     let audio_levels = Arc::new(Mutex::new((0.0_f64, 0.0_f64)));
     {
         let audio_levels = audio_levels.clone();
@@ -1052,30 +910,6 @@ pub(crate) fn setup_window(
                         st.recording.hover_record_tile = None;
                         ("pointer".to_string(), changed, true)
                     }
-                } else if st.recording.webcam_options_open {
-                    let item = webcam_options_hit_item(
-                        rect.left,
-                        rect.top,
-                        rect.width(),
-                        rect.height(),
-                        screen_width as f64,
-                        screen_height as f64,
-                        x,
-                        y,
-                    );
-                    let next = item.unwrap_or(-1);
-                    let changed = next != st.recording.hovered_webcam_item;
-                    if changed {
-                        st.recording.hovered_webcam_item = next;
-                    }
-                    st.recording.hovered_settings_item = -1;
-                    st.hovered_capture_crop_menu_item = -1;
-                    st.recording.hovered_crop_menu_item = -1;
-                    st.hover_tool_index = None;
-                    st.hover_size_panel = false;
-                    st.hover_crop_panel = false;
-                    st.recording.hover_record_tile = None;
-                    ("pointer".to_string(), changed, true)
                 } else if st.window_picker_open {
                     const POPUP_W_P: f64 = 320.0;
                     const ITEM_H_P: f64 = 28.0;
@@ -1219,10 +1053,7 @@ pub(crate) fn setup_window(
                                 (None, false, false, Some(tile), "pointer")
                             } else {
                                 let c = if st.completed || st.is_dragging {
-                                    if st.recording.panel_open
-                                        && st.recording.rec_webcam
-                                        && webcam_preview_rect(&st, rect).contains(x, y)
-                                    {
+                                    if st.recording.panel_open {
                                         "fleur"
                                     } else {
                                         detect_resize_handle(x, y, rect)
@@ -1751,75 +1582,6 @@ pub(crate) fn setup_window(
             return;
         }
 
-        // ── Webcam options menu click handling ──
-        if st.recording.webcam_options_open {
-            if let Some(item) = webcam_options_hit_item(
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-                screen_width as f64,
-                screen_height as f64,
-                x,
-                y,
-            ) {
-                match item {
-                    0 => {
-                        st.recording.webcam_device = -1;
-                        st.recording.webcam_preview = None;
-                        st.recording.webcam_frame = None;
-                    }
-                    1 => st.recording.webcam_size = 0,
-                    2 => st.recording.webcam_size = 1,
-                    3 => st.recording.webcam_size = 2,
-                    4 => st.recording.webcam_size = 3,
-                    5 => st.recording.webcam_size = 4,
-                    6 => st.recording.webcam_shape = 0,
-                    7 => st.recording.webcam_shape = 1,
-                    8 => st.recording.webcam_shape = 2,
-                    9 => st.recording.webcam_shape = 3,
-                    10 => {
-                        st.recording.webcam_flip = !st.recording.webcam_flip;
-                        st.recording.webcam_preview = None;
-                        st.recording.webcam_frame = None;
-                    }
-                    device_id if device_id >= 100 => {
-                        st.recording.webcam_device = device_id - 100;
-                        st.recording.rec_webcam = true;
-                        st.recording.webcam_preview = None;
-                        st.recording.webcam_frame = None;
-                    }
-                    _ => {}
-                }
-                sync_webcam_preview(&mut st);
-                st.recording.hovered_webcam_item = -1;
-                drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() {
-                    da.queue_draw();
-                }
-                return;
-            }
-            if webcam_options_menu_contains(
-                rect.left,
-                rect.top,
-                rect.width(),
-                screen_width as f64,
-                screen_height as f64,
-                x,
-                y,
-            ) {
-                // Click was inside webcam options (empty area) — ignore it
-                return;
-            }
-            st.recording.webcam_options_open = false;
-            st.recording.hovered_webcam_item = -1;
-            drop(st);
-            if let Some(da) = drawing_area_weak_click.upgrade() {
-                da.queue_draw();
-            }
-            return;
-        }
-
         // ── Volume popup click handling ──
         if st.recording.mic_volume_popup_open || st.recording.speaker_volume_popup_open {
             let popup_w = 280.0;
@@ -2034,7 +1796,6 @@ pub(crate) fn setup_window(
                                 st.recording.hovered_crop_menu_item = -1;
                                 st.recording.settings_menu_open = false;
                                 st.recording.settings_dropdown_open = None;
-                                st.recording.webcam_options_open = false;
                                 st.recording.mic_volume_popup_open = false;
                                 st.recording.speaker_volume_popup_open = false;
                                 st.hover_tool_index = None;
@@ -2044,7 +1805,6 @@ pub(crate) fn setup_window(
                                 st.recording.hovered_settings_item = -1;
                                 st.recording.settings_dropdown_open = None;
                                 st.recording.crop_menu_open = false;
-                                st.recording.webcam_options_open = false;
                                 st.recording.mic_volume_popup_open = false;
                                 st.recording.speaker_volume_popup_open = false;
                                 st.recording.hover_record_tile = None;
@@ -2057,24 +1817,6 @@ pub(crate) fn setup_window(
                             RecordPanelTile::Speaker => {
                                 st.recording.speaker_toggle = !st.recording.speaker_toggle;
                                 st.recording.speaker_volume_popup_open = false;
-                            }
-                            RecordPanelTile::Webcam => {
-                                st.recording.rec_webcam = !st.recording.rec_webcam;
-                                if st.recording.rec_webcam && st.recording.webcam_device < 0 {
-                                    if let Some(device) = first_webcam_device() {
-                                        st.recording.webcam_device = device;
-                                    }
-                                }
-                                sync_webcam_preview(&mut st);
-                                st.recording.crop_menu_open = false;
-                                st.recording.settings_menu_open = false;
-                                st.recording.settings_dropdown_open = None;
-                                st.recording.webcam_options_open = false;
-                                st.recording.mic_volume_popup_open = false;
-                                st.recording.speaker_volume_popup_open = false;
-                                st.recording.hovered_webcam_item = -1;
-                                st.recording.hover_record_tile = None;
-                                st.hover_tool_index = None;
                             }
                             RecordPanelTile::Size => {}
                             RecordPanelTile::RecordVideo | RecordPanelTile::RecordGif => {
@@ -2098,7 +1840,6 @@ pub(crate) fn setup_window(
                                 st.recording.crop_menu_open = false;
                                 st.recording.settings_menu_open = false;
                                 st.recording.settings_dropdown_open = None;
-                                st.recording.webcam_options_open = false;
                                 st.recording.mic_volume_popup_open = false;
                                 st.recording.speaker_volume_popup_open = false;
                                 st.recording.hover_record_tile = None;
@@ -2163,23 +1904,12 @@ pub(crate) fn setup_window(
                 y,
             ) {
                 match tile {
-                    RecordPanelTile::Webcam => {
-                        st.recording.webcam_options_open = !st.recording.webcam_options_open;
-                        st.recording.hovered_webcam_item = -1;
-                        st.recording.settings_menu_open = false;
-                        st.recording.crop_menu_open = false;
-                        st.recording.mic_volume_popup_open = false;
-                        st.recording.speaker_volume_popup_open = false;
-                        st.recording.hover_record_tile = None;
-                        st.hover_tool_index = None;
-                    }
                     RecordPanelTile::Mic => {
                         st.recording.mic_volume_popup_open = !st.recording.mic_volume_popup_open;
                         st.recording.speaker_volume_popup_open = false;
                         st.recording.volume_slider_dragging = false;
                         st.recording.settings_menu_open = false;
                         st.recording.crop_menu_open = false;
-                        st.recording.webcam_options_open = false;
                         st.recording.hover_record_tile = None;
                         st.hover_tool_index = None;
                     }
@@ -2190,7 +1920,6 @@ pub(crate) fn setup_window(
                         st.recording.volume_slider_dragging = false;
                         st.recording.settings_menu_open = false;
                         st.recording.crop_menu_open = false;
-                        st.recording.webcam_options_open = false;
                         st.recording.hover_record_tile = None;
                         st.hover_tool_index = None;
                     }
@@ -2319,32 +2048,14 @@ pub(crate) fn setup_window(
             if st.capture_crop_menu_open
                 || st.recording.crop_menu_open
                 || st.recording.settings_menu_open
-                || st.recording.webcam_options_open
                 || st.recording.mic_volume_popup_open
                 || st.recording.speaker_volume_popup_open
             {
                 st.is_dragging = false;
                 st.drag_mode = None;
                 st.initial_rect = None;
-                st.recording.dragging_webcam = false;
                 drop(st);
                 return;
-            }
-
-            if st.recording.panel_open && st.recording.rec_webcam {
-                let preview = webcam_preview_rect(&st, rect);
-                if preview.contains(start_x, start_y) {
-                    st.drag_origin_x = start_x;
-                    st.drag_origin_y = start_y;
-                    st.recording.dragging_webcam = true;
-                    st.recording.webcam_drag_offset_x = start_x - preview.x;
-                    st.recording.webcam_drag_offset_y = start_y - preview.y;
-                    st.is_dragging = false;
-                    st.drag_mode = None;
-                    st.initial_rect = None;
-                    drop(st);
-                    return;
-                }
             }
 
             st.drag_origin_x = start_x;
@@ -2415,19 +2126,6 @@ pub(crate) fn setup_window(
         drawing_area_weak,
         move |_gesture, x, y| {
             let mut st = state_drag.lock().unwrap();
-            if st.recording.dragging_webcam {
-                let pointer_x = st.drag_origin_x + x;
-                let pointer_y = st.drag_origin_y + y;
-                let rect = current_selection_rect(&st);
-                let top_left_x = pointer_x - st.recording.webcam_drag_offset_x;
-                let top_left_y = pointer_y - st.recording.webcam_drag_offset_y;
-                set_webcam_preview_top_left(&mut st, rect, top_left_x, top_left_y);
-                drop(st);
-                if let Some(drawing_area) = drawing_area_weak.upgrade() {
-                    drawing_area.queue_draw();
-                }
-                return;
-            }
             if st.recording.gif_slider_dragging.is_some() || st.recording.volume_slider_dragging {
                 drop(st);
                 return;
@@ -2463,22 +2161,6 @@ pub(crate) fn setup_window(
         background_drag,
         move |_gesture, x, y| {
             let mut st = state_drag.lock().unwrap();
-            if st.recording.dragging_webcam {
-                let pointer_x = st.drag_origin_x + x;
-                let pointer_y = st.drag_origin_y + y;
-                let rect = current_selection_rect(&st);
-                let top_left_x = pointer_x - st.recording.webcam_drag_offset_x;
-                let top_left_y = pointer_y - st.recording.webcam_drag_offset_y;
-                set_webcam_preview_top_left(&mut st, rect, top_left_x, top_left_y);
-                st.recording.dragging_webcam = false;
-                st.recording.webcam_drag_offset_x = 0.0;
-                st.recording.webcam_drag_offset_y = 0.0;
-                drop(st);
-                if let Some(drawing_area) = drawing_area_weak.upgrade() {
-                    drawing_area.queue_draw();
-                }
-                return;
-            }
             if st.recording.gif_slider_dragging.is_some() || st.recording.volume_slider_dragging {
                 st.recording.gif_slider_dragging = None;
                 st.recording.volume_slider_dragging = false;

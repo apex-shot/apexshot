@@ -2,8 +2,6 @@
 
 use super::layout::RecordPanelTile;
 use crate::capture_overlay::RecordingType;
-use crate::overlay::webcam::{WebcamFrame, WebcamPreview};
-use std::sync::{Arc, Mutex};
 
 /// Mirrors the C++ CaptureIntent enum — distinguishes what the user
 /// wants to do with the selected area when they confirm.
@@ -40,7 +38,6 @@ pub(crate) struct RecordingState {
     pub(crate) rec_controls: bool,
     pub(crate) hidpi: bool,
     pub(crate) do_not_disturb: bool,
-    pub(crate) rec_webcam: bool,
     pub(crate) remember_selection: bool,
     pub(crate) dim_screen: bool,
     pub(crate) show_countdown: bool,
@@ -75,21 +72,6 @@ pub(crate) struct RecordingState {
     pub(crate) mic_volume: f64,
     pub(crate) speaker_volume: f64,
     pub(crate) volume_slider_dragging: bool,
-
-    // Webcam options menu
-    pub(crate) webcam_options_open: bool,
-    pub(crate) hovered_webcam_item: i32,
-    pub(crate) webcam_device: i32,
-    pub(crate) webcam_size: usize,
-    pub(crate) webcam_shape: usize,
-    pub(crate) webcam_flip: bool,
-    pub(crate) webcam_rel_x: f64,
-    pub(crate) webcam_rel_y: f64,
-    pub(crate) dragging_webcam: bool,
-    pub(crate) webcam_drag_offset_x: f64,
-    pub(crate) webcam_drag_offset_y: f64,
-    pub(crate) webcam_preview: Option<WebcamPreview>,
-    pub(crate) webcam_frame: Option<Arc<Mutex<Option<WebcamFrame>>>>,
 }
 
 impl Default for RecordingState {
@@ -105,7 +87,6 @@ impl Default for RecordingState {
             rec_controls: true,
             hidpi: false,
             do_not_disturb: true,
-            rec_webcam: false,
             remember_selection: false,
             dim_screen: false,
             show_countdown: true,
@@ -130,19 +111,6 @@ impl Default for RecordingState {
             mic_volume: 1.0,
             speaker_volume: 1.0,
             volume_slider_dragging: false,
-            webcam_options_open: false,
-            hovered_webcam_item: -1,
-            webcam_device: -1,
-            webcam_size: 1,
-            webcam_shape: 0,
-            webcam_flip: false,
-            webcam_rel_x: 0.0,
-            webcam_rel_y: 0.0,
-            dragging_webcam: false,
-            webcam_drag_offset_x: 0.0,
-            webcam_drag_offset_y: 0.0,
-            webcam_preview: None,
-            webcam_frame: None,
         }
     }
 }

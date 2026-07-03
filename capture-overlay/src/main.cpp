@@ -136,11 +136,9 @@ void printCaptureScreenJson(const QString& path, const QSize& size, const char* 
 void printRecordingJson(const QRect& sel, const char* mode, const char* recordType,
                          bool controls, bool mic, bool speaker,
                          bool clicks, bool keystrokes,
-                         bool webcam, double clickSize, int clickColor, int clickStyle,
+                         double clickSize, int clickColor, int clickStyle,
                          bool clickAnimate, double keySize, int keyPosition,
                          int keyAppearance, bool keyBlurBg, int keyFilter,
-                         int webcamSize, int webcamShape, bool webcamFlip,
-                         int webcamDevice, double webcamRelX, double webcamRelY,
                          bool displayRecTime, bool hidpi, bool doNotDisturb,
                          bool showCursor, bool rememberSelection,
                          bool dimScreen, bool countdown,
@@ -152,12 +150,10 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 "\"mode\":\"%s\",\"record_type\":\"%s\","
                 "\"controls\":%s,\"mic\":%s,\"speaker\":%s,"
                 "\"clicks\":%s,\"keystrokes\":%s,"
-                "\"webcam\":%s,\"click_size\":%.4f,\"click_color\":%d,"
+                "\"click_size\":%.4f,\"click_color\":%d,"
                 "\"click_style\":%d,\"click_animate\":%s,"
                 "\"key_size\":%.4f,\"key_position\":%d,\"key_appearance\":%d,"
                 "\"key_blur_bg\":%s,\"key_filter\":%d,"
-                "\"webcam_size\":%d,\"webcam_shape\":%d,\"webcam_flip\":%s,"
-                "\"webcam_device\":%d,\"webcam_rel_x\":%.4f,\"webcam_rel_y\":%.4f,"
                 "\"display_rec_time\":%s,\"hidpi\":%s,"
                 "\"notifications\":%s,\"cursor\":%s,"
                 "\"remember_selection\":%s,\"dim_screen\":%s,"
@@ -174,7 +170,6 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 speaker ? "true" : "false",
                 clicks ? "true" : "false",
                 keystrokes ? "true" : "false",
-                webcam ? "true" : "false",
                 clickSize,
                 clickColor,
                 clickStyle,
@@ -184,12 +179,6 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 keyAppearance,
                 keyBlurBg ? "true" : "false",
                 keyFilter,
-                webcamSize,
-                webcamShape,
-                webcamFlip ? "true" : "false",
-                webcamDevice,
-                webcamRelX,
-                webcamRelY,
                 displayRecTime ? "true" : "false",
                 hidpi ? "true" : "false",
                 doNotDisturb ? "true" : "false",
@@ -252,7 +241,6 @@ int main(int argc, char* argv[])
     bool initialShowCursor = true;
     bool initialRecClicks = false;
     bool initialRecKeystrokes = false;
-    bool initialRecWebcam = false;
     double initialClickSize = 0.3;
     int initialClickColor = 0;
     int initialClickStyle = 0;
@@ -262,12 +250,6 @@ int main(int argc, char* argv[])
     int initialKeyAppearance = 0;
     bool initialKeyBlurBg = true;
     int initialKeyFilter = 0;
-    int initialWebcamSize = 1;
-    int initialWebcamShape = 3;
-    bool initialWebcamFlip = false;
-    int initialWebcamDevice = -1;
-    double initialWebcamRelX = 0.0;
-    double initialWebcamRelY = 0.0;
     bool initialRememberSelection = false;
     bool initialDimScreen = true;
     bool initialShowCountdown = true;
@@ -406,34 +388,6 @@ int main(int argc, char* argv[])
             bool ok = false;
             int v = QString(argv[i]).mid(17).toInt(&ok);
             if (ok) initialKeyFilter = std::clamp(v, 0, 1);
-        } else if (std::strcmp(argv[i], "--rec-webcam") == 0) {
-            initialRecWebcam = true;
-        } else if (std::strcmp(argv[i], "--no-rec-webcam") == 0) {
-            initialRecWebcam = false;
-        } else if (QString(argv[i]).startsWith("--rec-webcam-size=")) {
-            bool ok = false;
-            int v = QString(argv[i]).mid(18).toInt(&ok);
-            if (ok) initialWebcamSize = std::clamp(v, 0, 4);
-        } else if (QString(argv[i]).startsWith("--rec-webcam-shape=")) {
-            bool ok = false;
-            int v = QString(argv[i]).mid(19).toInt(&ok);
-            if (ok) initialWebcamShape = std::clamp(v, 0, 3);
-        } else if (std::strcmp(argv[i], "--rec-webcam-flip") == 0) {
-            initialWebcamFlip = true;
-        } else if (std::strcmp(argv[i], "--no-rec-webcam-flip") == 0) {
-            initialWebcamFlip = false;
-        } else if (QString(argv[i]).startsWith("--rec-webcam-device=")) {
-            bool ok = false;
-            int v = QString(argv[i]).mid(20).toInt(&ok);
-            if (ok) initialWebcamDevice = v;
-        } else if (QString(argv[i]).startsWith("--rec-webcam-rel-x=")) {
-            bool ok = false;
-            double v = QString(argv[i]).mid(19).toDouble(&ok);
-            if (ok) initialWebcamRelX = std::clamp(v, 0.0, 1.0);
-        } else if (QString(argv[i]).startsWith("--rec-webcam-rel-y=")) {
-            bool ok = false;
-            double v = QString(argv[i]).mid(19).toDouble(&ok);
-            if (ok) initialWebcamRelY = std::clamp(v, 0.0, 1.0);
         } else if (std::strcmp(argv[i], "--remember-selection") == 0) {
             initialRememberSelection = true;
         } else if (std::strcmp(argv[i], "--no-remember-selection") == 0) {
@@ -679,7 +633,6 @@ int main(int argc, char* argv[])
     overlay.setInitialShowCursor(initialShowCursor);
     overlay.setInitialRecClicks(initialRecClicks);
     overlay.setInitialRecKeystrokes(initialRecKeystrokes);
-    overlay.setInitialRecWebcam(initialRecWebcam);
     overlay.setInitialClickSize(initialClickSize);
     overlay.setInitialClickColor(initialClickColor);
     overlay.setInitialClickStyle(initialClickStyle);
@@ -689,12 +642,6 @@ int main(int argc, char* argv[])
     overlay.setInitialKeyAppearance(initialKeyAppearance);
     overlay.setInitialKeyBlurBg(initialKeyBlurBg);
     overlay.setInitialKeyFilter(initialKeyFilter);
-    overlay.setInitialWebcamSize(initialWebcamSize);
-    overlay.setInitialWebcamShape(initialWebcamShape);
-    overlay.setInitialWebcamFlip(initialWebcamFlip);
-    overlay.setInitialWebcamDevice(initialWebcamDevice);
-    overlay.setInitialWebcamRelX(initialWebcamRelX);
-    overlay.setInitialWebcamRelY(initialWebcamRelY);
     overlay.setInitialRememberSelection(initialRememberSelection);
     overlay.setInitialDimScreen(initialDimScreen);
     overlay.setInitialShowCountdown(initialShowCountdown);
@@ -744,7 +691,6 @@ int main(int argc, char* argv[])
                                overlay.recordSpeakerEnabled(),
                                overlay.recordClicksEnabled(),
                                overlay.recordKeystrokesEnabled(),
-                               overlay.recordWebcamEnabled(),
                                overlay.recordClickSize(),
                                overlay.recordClickColor(),
                                overlay.recordClickStyle(),
@@ -754,12 +700,6 @@ int main(int argc, char* argv[])
                                overlay.recordKeyAppearance(),
                                overlay.recordKeyBlurBg(),
                                overlay.recordKeyFilter(),
-                               overlay.recordWebcamSize(),
-                               overlay.recordWebcamShape(),
-                               overlay.recordWebcamFlip(),
-                               overlay.recordWebcamDevice(),
-                               overlay.recordWebcamRelX(),
-                               overlay.recordWebcamRelY(),
                                overlay.recordDisplayRecTime(),
                                overlay.recordHidpiEnabled(),
                                overlay.recordDoNotDisturb(),
@@ -819,7 +759,6 @@ int main(int argc, char* argv[])
                            overlay.recordSpeakerEnabled(),
                            overlay.recordClicksEnabled(),
                            overlay.recordKeystrokesEnabled(),
-                           overlay.recordWebcamEnabled(),
                            overlay.recordClickSize(),
                            overlay.recordClickColor(),
                            overlay.recordClickStyle(),
@@ -829,12 +768,6 @@ int main(int argc, char* argv[])
                            overlay.recordKeyAppearance(),
                            overlay.recordKeyBlurBg(),
                            overlay.recordKeyFilter(),
-                           overlay.recordWebcamSize(),
-                           overlay.recordWebcamShape(),
-                           overlay.recordWebcamFlip(),
-                           overlay.recordWebcamDevice(),
-                           overlay.recordWebcamRelX(),
-                           overlay.recordWebcamRelY(),
                            overlay.recordDisplayRecTime(),
                            overlay.recordHidpiEnabled(),
                            overlay.recordDoNotDisturb(),

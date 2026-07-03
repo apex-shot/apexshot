@@ -14,8 +14,8 @@ are **not** considered supported.
 
 ## Reporting a Vulnerability
 
-ApexShot captures the user's screen, microphone, speaker output, webcam,
-and clipboard, and persists XDG ScreenCast portal grants on disk. Issues
+ApexShot captures the user's screen, microphone, speaker output, and
+clipboard, and persists XDG ScreenCast portal grants on disk. Issues
 that could expose any of these to other users or processes deserve
 responsible disclosure.
 

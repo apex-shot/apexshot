@@ -71,13 +71,13 @@ runTest("menu and popup styles include the updated border treatment", () => {
     assert(createWarningPopupStyle().includes("border:"), "warning popup should render the updated border outline");
 });
 
-runTest("overlay header matches the webcam menu heading treatment", () => {
+runTest("overlay header keeps the runtime overlay menu heading treatment", () => {
     const style = createRuntimeOverlayHeaderStyle();
 
     assertEqual(
         style,
         "padding: 10px 14px 6px 14px; font-size: 10px; font-weight: 800; color: rgba(255, 255, 255, 0.45); background: transparent; letter-spacing: 0.8px;",
-        "header style should match the webcam menu disabled header"
+        "header style should match the runtime overlay menu disabled header"
     );
 });
 

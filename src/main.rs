@@ -250,26 +250,6 @@ async fn async_main(args: Vec<String>) {
                 "discard" => {
                     trigger_daemon_action("recording_discard").await;
                 }
-                "move-webcam" => {
-                    if args.len() < 5 {
-                        eprintln!("Error: move-webcam requires x and y coordinates");
-                        std::process::exit(1);
-                    }
-                    let x: f64 = args[3].parse().unwrap_or(0.0);
-                    let y: f64 = args[4].parse().unwrap_or(0.0);
-                    if let Ok(conn) = zbus::Connection::session().await {
-                        if let Ok(proxy) = zbus::Proxy::new(
-                            &conn,
-                            apexshot::daemon::DAEMON_BUS_NAME,
-                            apexshot::daemon::DAEMON_OBJECT_PATH,
-                            apexshot::daemon::DAEMON_INTERFACE,
-                        )
-                        .await
-                        {
-                            let _ = proxy.call::<_, _, ()>("move_webcam", &(x, y)).await;
-                        }
-                    }
-                }
                 _ => {
                     eprintln!("Error: unknown recording control action '{}'", args[2]);
                     std::process::exit(1);
@@ -2438,13 +2418,6 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             show_timer: true,
             use_shell_mask: false,
             dim_screen: false,
-            show_webcam: false,
-            webcam_device: -1,
-            webcam_size: 1,
-            webcam_shape: 0,
-            webcam_rel_x: 0.0,
-            webcam_rel_y: 0.0,
-            webcam_flip: false,
             countdown_enabled: false,
             countdown_seconds: 3,
             session_id: None,

@@ -1,5 +1,7 @@
 # Plan: OBS Feature Adoption for ApexShot
 
+**Historical status:** Webcam/PiP recording support described in this plan has since been removed from ApexShot. Current recording support covers screen capture, GIF export, mic/speaker audio, countdown, controls, and editor workflows.
+
 ## Overview
 
 Five features from OBS's `linux-pipewire` plugin to adopt, ordered by impact-to-effort ratio.

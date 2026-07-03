@@ -788,13 +788,6 @@ pub struct RecordingRequest {
     pub controls: bool,
     pub mic: bool,
     pub speaker: bool,
-    pub webcam: bool,
-    pub webcam_size: u8,
-    pub webcam_shape: u8,
-    pub webcam_flip: bool,
-    pub webcam_device: i32,
-    pub webcam_rel_x: f64,
-    pub webcam_rel_y: f64,
     // General tab settings
     pub display_rec_time: bool,
     pub hidpi: bool,
@@ -828,13 +821,6 @@ impl Default for RecordingRequest {
             controls: false,
             mic: false,
             speaker: false,
-            webcam: false,
-            webcam_size: 1,
-            webcam_shape: 3,
-            webcam_flip: false,
-            webcam_device: -1,
-            webcam_rel_x: 0.0,
-            webcam_rel_y: 0.0,
             display_rec_time: false,
             hidpi: true,
             notifications: true,
@@ -1233,21 +1219,6 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     } else {
         "--no-show-cursor".into()
     });
-    if config.rec_webcam_enabled {
-        extra_args.push("--rec-webcam".into());
-    } else {
-        extra_args.push("--no-rec-webcam".into());
-    }
-    extra_args.push(format!("--rec-webcam-size={}", config.rec_webcam_size));
-    extra_args.push(format!("--rec-webcam-shape={}", config.rec_webcam_shape));
-    if config.rec_webcam_flip {
-        extra_args.push("--rec-webcam-flip".into());
-    } else {
-        extra_args.push("--no-rec-webcam-flip".into());
-    }
-    extra_args.push(format!("--rec-webcam-device={}", config.rec_webcam_device));
-    extra_args.push(format!("--rec-webcam-rel-x={:.4}", config.rec_webcam_rel_x));
-    extra_args.push(format!("--rec-webcam-rel-y={:.4}", config.rec_webcam_rel_y));
     extra_args.push(if config.rec_remember_selection {
         "--remember-selection".into()
     } else {
@@ -1517,13 +1488,6 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let controls = extract_bool(json, "controls").unwrap_or(false);
     let mic = extract_bool(json, "mic").unwrap_or(false);
     let speaker = extract_bool(json, "speaker").unwrap_or(false);
-    let webcam = extract_bool(json, "webcam").unwrap_or(false);
-    let webcam_size = extract_int(json, "webcam_size").unwrap_or(1) as u8;
-    let webcam_shape = extract_int(json, "webcam_shape").unwrap_or(3) as u8;
-    let webcam_flip = extract_bool(json, "webcam_flip").unwrap_or(false);
-    let webcam_device = extract_int(json, "webcam_device").unwrap_or(-1);
-    let webcam_rel_x = extract_float(json, "webcam_rel_x").unwrap_or(0.0);
-    let webcam_rel_y = extract_float(json, "webcam_rel_y").unwrap_or(0.0);
 
     // General tab settings
     let display_rec_time = extract_bool(json, "display_rec_time").unwrap_or(false);
@@ -1557,13 +1521,6 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         controls,
         mic,
         speaker,
-        webcam,
-        webcam_size,
-        webcam_shape,
-        webcam_flip,
-        webcam_device,
-        webcam_rel_x,
-        webcam_rel_y,
         display_rec_time,
         hidpi,
         notifications,
@@ -1880,9 +1837,7 @@ mod tests {
                 "video_format":1,"video_max_res":2,"video_fps":1,
                 "record_mono":true,"open_editor":false,
                 "gif_fps":33,"gif_quality":0.8125,
-                "gif_size_idx":2,"optimize_gif":false,"fullscreen":true,
-                "webcam":true,"webcam_size":2,"webcam_shape":1,"webcam_flip":true,
-                "webcam_device":2,"webcam_rel_x":0.125,"webcam_rel_y":0.875
+                "gif_size_idx":2,"optimize_gif":false,"fullscreen":true
             }"#,
         )
         .unwrap();
@@ -1912,39 +1867,18 @@ mod tests {
         assert_eq!(request.gif_size_idx, 2);
         assert!(!request.optimize_gif);
         assert!(request.fullscreen);
-        assert!(request.webcam);
-        assert_eq!(request.webcam_size, 2);
-        assert_eq!(request.webcam_shape, 1);
-        assert!(request.webcam_flip);
-        assert_eq!(request.webcam_device, 2);
-        assert_eq!(request.webcam_rel_x, 0.125);
-        assert_eq!(request.webcam_rel_y, 0.875);
     }
 
     #[test]
     fn build_area_init_args_includes_runtime_overlay_defaults() {
         let config = AppConfig {
             rec_video_format: 1,
-            rec_webcam_enabled: true,
-            rec_webcam_size: 2,
-            rec_webcam_shape: 1,
-            rec_webcam_flip: true,
-            rec_webcam_device: 2,
-            rec_webcam_rel_x: 0.125,
-            rec_webcam_rel_y: 0.875,
             ..AppConfig::default()
         };
 
         let args = build_area_init_args(&config);
 
         assert!(args.contains(&"--video-format=0".to_string()));
-        assert!(args.contains(&"--rec-webcam".to_string()));
-        assert!(args.contains(&"--rec-webcam-size=2".to_string()));
-        assert!(args.contains(&"--rec-webcam-shape=1".to_string()));
-        assert!(args.contains(&"--rec-webcam-flip".to_string()));
-        assert!(args.contains(&"--rec-webcam-device=2".to_string()));
-        assert!(args.contains(&"--rec-webcam-rel-x=0.1250".to_string()));
-        assert!(args.contains(&"--rec-webcam-rel-y=0.8750".to_string()));
     }
 
     #[test]
@@ -2058,7 +1992,7 @@ mod tests {
     fn explicit_record_config_exit_is_distinct_from_cancel() {
         let result = parse_area_capture_output_with_persist(
             Some(OverlayExitCode::RecordConfigUpdated as i32),
-            r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video","controls":true,"mic":false,"speaker":false,"webcam":false,"webcam_size":1,"webcam_shape":1,"webcam_flip":false,"webcam_device":0,"webcam_rel_x":0.0000,"webcam_rel_y":0.0000,"display_rec_time":false,"hidpi":false,"notifications":true,"cursor":true,"remember_selection":false,"dim_screen":true,"countdown":true,"video_max_res":0,"video_fps":1,"record_mono":false,"open_editor":false,"gif_fps":60,"gif_quality":0.7500,"gif_size_idx":0,"optimize_gif":true,"fullscreen":false}"#,
+            r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video","controls":true,"mic":false,"speaker":false,"display_rec_time":false,"hidpi":false,"notifications":true,"cursor":true,"remember_selection":false,"dim_screen":true,"countdown":true,"video_max_res":0,"video_fps":1,"record_mono":false,"open_editor":false,"gif_fps":60,"gif_quality":0.7500,"gif_size_idx":0,"optimize_gif":true,"fullscreen":false}"#,
             |_| Ok(()),
         )
         .expect("record config should parse");

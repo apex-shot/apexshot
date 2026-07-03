@@ -65,7 +65,6 @@ void CaptureOverlay::confirmRecordingSelection()
 {
     m_recordConfigRequested = false;
     m_micTimer->stop();
-    stopWebcamCapture();
     m_recordingToolsHidden = true;
     m_hoveredRecordTile = RecordPanelTile::None;
     m_cropMenuOpen = false;
@@ -107,9 +106,6 @@ void CaptureOverlay::onCountdownTick()
         m_hoveredCountdownCancel = false;
         if (m_countdownForRecording) {
             m_recordingToolsHidden = false;
-            if (m_recWebcam && m_webcamDevice >= 0) {
-                startWebcamCapture();
-            }
         }
         update();
         return;
@@ -147,7 +143,6 @@ void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
     m_recordType = RecordType::None;
     m_countdownCancelRequested = false;
     m_hoveredCountdownCancel = false;
-    stopWebcamCapture();
     m_micLevel = 0.0;
     m_speakerLevel = 0.0;
 }
@@ -220,7 +215,7 @@ CaptureOverlay::RecordPanelTile CaptureOverlay::hitTestRecordingPanel(const QPoi
     // Rect order must match the append order in drawRecordingPanel().
     static const RecordPanelTile tileOrder[] = {
         RecordPanelTile::Controls, RecordPanelTile::Size, RecordPanelTile::Crop,
-        RecordPanelTile::Mic, RecordPanelTile::Speaker, RecordPanelTile::Webcam,
+        RecordPanelTile::Mic, RecordPanelTile::Speaker,
         RecordPanelTile::RecordVideo, RecordPanelTile::RecordGif
     };
 

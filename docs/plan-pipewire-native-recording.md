@@ -1,6 +1,6 @@
 # Plan: Replace GStreamer with Native libpipewire (OBS-style)
 
-**Status: ✅ Phases 1–4 complete. Phase 5 (webcam) complete via Camera portal. Phase 6 (cleanup) partially done — GStreamer retained for X11 fallback and v4l2 webcam fallback.**
+**Historical status:** Webcam/PiP recording support described in this plan has since been removed from ApexShot. GStreamer is retained where still needed for non-webcam recording fallback paths such as X11/GIF/audio-related pipelines.
 
 ## Goal
 

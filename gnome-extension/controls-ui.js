@@ -32,7 +32,6 @@ const RUNTIME_OVERLAY_MENU_WIDTH = 168;
 const RUNTIME_OVERLAY_MENU_GAP = 10;
 const RUNTIME_OVERLAY_MENU_MARGIN = 24;
 const RUNTIME_OVERLAY_TOGGLE_SPECS = Object.freeze([
-    {key: "webcam", icon: "camera-web-symbolic", label: "Webcam"},
     {key: "mic", icon: "audio-input-microphone-symbolic", label: "Mic"},
     {key: "speaker", icon: "audio-volume-high-symbolic", label: "Speaker"},
 ]);

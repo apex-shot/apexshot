@@ -93,15 +93,6 @@ pub(crate) fn recording_tile_at(
                 height: FEATURE_PANEL_HEIGHT,
             },
         ),
-        (
-            RecordPanelTile::Webcam,
-            RectF {
-                x: rail.x,
-                y: rail.y + FEATURE_PANEL_HEIGHT * 2.0,
-                width: rail.width,
-                height: FEATURE_PANEL_HEIGHT,
-            },
-        ),
     ];
     for (tile, rect) in [
         (RecordPanelTile::Controls, controls),
@@ -260,74 +251,6 @@ pub(crate) fn settings_menu_hit_item(
     None
 }
 
-pub(crate) fn webcam_options_hit_item(
-    selection_x: f64,
-    selection_y: f64,
-    selection_width: f64,
-    _selection_height: f64,
-    screen_width: f64,
-    screen_height: f64,
-    x: f64,
-    y: f64,
-) -> Option<i32> {
-    let menu_w = 320.0;
-    let item_h = 28.0;
-    let header_h = 30.0;
-    let pad = 8.0;
-
-    let camera_ids: Vec<i32> = std::iter::once(0)
-        .chain(
-            crate::overlay::webcam::enumerate_webcam_devices()
-                .into_iter()
-                .map(|d| 100 + d),
-        )
-        .collect();
-    let sections: Vec<Vec<i32>> = vec![
-        camera_ids,
-        vec![1, 2, 3, 4],
-        vec![5],
-        vec![6, 7, 8, 9],
-        vec![10],
-    ];
-
-    let mut total_h = pad * 2.0;
-    for section in &sections {
-        total_h += header_h + section.len() as f64 * item_h;
-    }
-
-    let menu_x =
-        (selection_x + (selection_width - menu_w) / 2.0).clamp(10.0, screen_width - menu_w - 10.0);
-    let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - total_h - 10.0);
-    if !(RectF {
-        x: menu_x,
-        y: menu_y,
-        width: menu_w,
-        height: total_h,
-    })
-    .contains(x, y)
-    {
-        return None;
-    }
-
-    let mut curr_y = menu_y + pad;
-    for section in &sections {
-        curr_y += header_h; // skip header
-        for &item_id in section {
-            let item_rect = RectF {
-                x: menu_x + 4.0,
-                y: curr_y + 1.0,
-                width: menu_w - 8.0,
-                height: item_h - 2.0,
-            };
-            if item_rect.contains(x, y) {
-                return Some(item_id);
-            }
-            curr_y += item_h;
-        }
-    }
-    None
-}
-
 pub(crate) fn recording_crop_menu_contains(
     selection_x: f64,
     selection_y: f64,
@@ -374,39 +297,6 @@ pub(crate) fn settings_menu_contains(
         y: menu_y,
         width: menu_w,
         height: 560.0,
-    }
-    .contains(x, y)
-}
-
-pub(crate) fn webcam_options_menu_contains(
-    selection_x: f64,
-    selection_y: f64,
-    selection_width: f64,
-    screen_width: f64,
-    screen_height: f64,
-    x: f64,
-    y: f64,
-) -> bool {
-    let menu_w = 320.0;
-    let item_h = 28.0;
-    let header_h = 30.0;
-    let pad = 8.0;
-
-    let camera_count = 1 + crate::overlay::webcam::enumerate_webcam_devices().len();
-    let item_counts: &[usize] = &[4, 1, 4, 1];
-    let mut total_h = pad * 2.0 + header_h + camera_count as f64 * item_h;
-    for &c in item_counts {
-        total_h += header_h + c as f64 * item_h;
-    }
-
-    let menu_x =
-        (selection_x + (selection_width - menu_w) / 2.0).clamp(10.0, screen_width - menu_w - 10.0);
-    let menu_y = (selection_y + 24.0).clamp(10.0, screen_height - total_h - 10.0);
-    RectF {
-        x: menu_x,
-        y: menu_y,
-        width: menu_w,
-        height: total_h,
     }
     .contains(x, y)
 }

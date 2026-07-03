@@ -17,8 +17,8 @@ For the GNOME Extension submission, you need 3-5 screenshots showing the extensi
 - This demonstrates the recording mask feature
 
 ### 3. Runtime Overlays (OPTIONAL)
-- During recording, enable webcam and audio indicators
-- Capture the webcam preview and mic/speaker status overlays
+- During recording, enable audio indicators
+- Capture the mic/speaker status overlays
 - This demonstrates the remaining runtime overlay features
 
 ### 4. Full Recording Session (OPTIONAL)
@@ -26,7 +26,7 @@ For the GNOME Extension submission, you need 3-5 screenshots showing the extensi
   - Recording mask
   - Timer display
   - Control buttons (pause, stop, mic)
-  - Any enabled overlays (webcam, mic, speaker)
+  - Any enabled mic/speaker overlays
 
 ### 5. Extension Enabled (OPTIONAL)
 - Show GNOME Extensions app with the extension enabled

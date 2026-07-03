@@ -57,13 +57,6 @@ pub struct AppConfig {
     pub rec_gif_quality: f64,
     pub rec_gif_size_idx: u8,
     pub rec_gif_optimize: bool,
-    pub rec_webcam_enabled: bool,
-    pub rec_webcam_size: u8,
-    pub rec_webcam_shape: u8,
-    pub rec_webcam_flip: bool,
-    pub rec_webcam_device: i32,
-    pub rec_webcam_rel_x: f64,
-    pub rec_webcam_rel_y: f64,
     pub rec_mic: bool,
     pub rec_speaker: bool,
     // Quick Access settings
@@ -183,13 +176,6 @@ impl Default for AppConfig {
             rec_gif_quality: 0.75,
             rec_gif_size_idx: 0,
             rec_gif_optimize: true,
-            rec_webcam_enabled: false,
-            rec_webcam_size: 1,
-            rec_webcam_shape: 3,
-            rec_webcam_flip: false,
-            rec_webcam_device: -1,
-            rec_webcam_rel_x: 0.0,
-            rec_webcam_rel_y: 0.0,
             rec_mic: false,
             rec_speaker: false,
             quick_access_position: "Left".to_string(),
@@ -295,10 +281,6 @@ impl AppConfig {
         self.rec_gif_fps = self.rec_gif_fps.clamp(5, 60);
         self.rec_gif_quality = self.rec_gif_quality.clamp(0.0, 1.0);
         self.rec_gif_size_idx = self.rec_gif_size_idx.min(3);
-        self.rec_webcam_size = self.rec_webcam_size.min(4);
-        self.rec_webcam_shape = self.rec_webcam_shape.min(3);
-        self.rec_webcam_rel_x = self.rec_webcam_rel_x.clamp(0.0, 1.0);
-        self.rec_webcam_rel_y = self.rec_webcam_rel_y.clamp(0.0, 1.0);
         self.quick_access_overlay_size =
             sanitize_quick_access_overlay_size(self.quick_access_overlay_size);
         self.quick_access_position = match self.quick_access_position.as_str() {
@@ -621,13 +603,6 @@ mod tests {
         let cfg = AppConfig::default();
         assert!(!cfg.rec_mic);
         assert!(!cfg.rec_speaker);
-        assert!(!cfg.rec_webcam_enabled);
-        assert_eq!(cfg.rec_webcam_size, 1);
-        assert_eq!(cfg.rec_webcam_shape, 3);
-        assert!(!cfg.rec_webcam_flip);
-        assert_eq!(cfg.rec_webcam_device, -1);
-        assert_eq!(cfg.rec_webcam_rel_x, 0.0);
-        assert_eq!(cfg.rec_webcam_rel_y, 0.0);
     }
 
     #[test]
@@ -635,13 +610,6 @@ mod tests {
         let original = AppConfig {
             rec_mic: true,
             rec_speaker: true,
-            rec_webcam_enabled: true,
-            rec_webcam_size: 2,
-            rec_webcam_shape: 1,
-            rec_webcam_flip: true,
-            rec_webcam_device: 7,
-            rec_webcam_rel_x: 0.25,
-            rec_webcam_rel_y: 0.75,
             ..AppConfig::default()
         };
 
@@ -650,30 +618,6 @@ mod tests {
 
         assert_eq!(loaded.rec_mic, original.rec_mic);
         assert_eq!(loaded.rec_speaker, original.rec_speaker);
-        assert_eq!(loaded.rec_webcam_enabled, original.rec_webcam_enabled);
-        assert_eq!(loaded.rec_webcam_size, original.rec_webcam_size);
-        assert_eq!(loaded.rec_webcam_shape, original.rec_webcam_shape);
-        assert_eq!(loaded.rec_webcam_flip, original.rec_webcam_flip);
-        assert_eq!(loaded.rec_webcam_device, original.rec_webcam_device);
-        assert_eq!(loaded.rec_webcam_rel_x, original.rec_webcam_rel_x);
-        assert_eq!(loaded.rec_webcam_rel_y, original.rec_webcam_rel_y);
-    }
-
-    #[test]
-    fn recording_overlay_settings_are_sanitized() {
-        let cfg = AppConfig {
-            rec_webcam_size: 99,
-            rec_webcam_shape: 99,
-            rec_webcam_rel_x: -0.5,
-            rec_webcam_rel_y: 1.5,
-            ..AppConfig::default()
-        }
-        .sanitized();
-
-        assert_eq!(cfg.rec_webcam_size, 4);
-        assert_eq!(cfg.rec_webcam_shape, 3);
-        assert_eq!(cfg.rec_webcam_rel_x, 0.0);
-        assert_eq!(cfg.rec_webcam_rel_y, 1.0);
     }
 
     #[test]
@@ -682,13 +626,6 @@ mod tests {
         let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
         assert!(!cfg.rec_mic);
         assert!(!cfg.rec_speaker);
-        assert!(!cfg.rec_webcam_enabled);
-        assert_eq!(cfg.rec_webcam_size, 1);
-        assert_eq!(cfg.rec_webcam_shape, 3);
-        assert!(!cfg.rec_webcam_flip);
-        assert_eq!(cfg.rec_webcam_device, -1);
-        assert_eq!(cfg.rec_webcam_rel_x, 0.0);
-        assert_eq!(cfg.rec_webcam_rel_y, 0.0);
         assert!(cfg.rec_controls);
         assert!(cfg.rec_cursor);
         assert!(cfg.rec_hidpi);

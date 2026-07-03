@@ -30,21 +30,15 @@ runTest("renderable visibility ignores mic and speaker overlays", () => {
     const visibility = createRenderableRuntimeOverlayVisibility({
         mic: true,
         speaker: true,
-        webcam: false,
     });
 
     assertEqual(visibility.mic, false, "mic should not render as an on-screen overlay");
     assertEqual(visibility.speaker, false, "speaker should not render as an on-screen overlay");
-    assertEqual(visibility.webcam, false, "webcam should reflect visibility");
 });
 
-runTest("renderable overlays require webcam", () => {
+runTest("audio-only visibility does not create renderable shell overlays", () => {
     assert(
-        !hasRenderableRuntimeOverlays({mic: true, speaker: true, webcam: false}),
+        !hasRenderableRuntimeOverlays({mic: true, speaker: true}),
         "audio-only visibility should not create GNOME on-screen overlays"
-    );
-    assert(
-        hasRenderableRuntimeOverlays({mic: false, speaker: false, webcam: true}),
-        "webcam visibility should still create GNOME on-screen overlays"
     );
 });

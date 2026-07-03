@@ -7,7 +7,6 @@ use super::recording::layout::{
 };
 use super::recording::state::{OverlayIntent, SettingsTab};
 use super::state::{OverlayMode, SelectorState};
-use super::webcam::WebcamFrame;
 use crate::capture_overlay::RecordingType;
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
@@ -444,7 +443,7 @@ fn draw_popup_panel(
     screen_height: f64,
     background: Option<&BackgroundFrame>,
 ) {
-    // Same polished glass treatment used by the recording/webcam menus: warm glow,
+    // Same polished glass treatment used by the recording menus: warm glow,
     // soft shadow, frosted fill and subtle rim highlight.
     let _ = context.save();
     let glow_cx = x + width * 0.5;
@@ -524,7 +523,6 @@ pub(crate) fn draw_recording_panel(
     rec_controls: bool,
     hidpi: bool,
     do_not_disturb: bool,
-    rec_webcam: bool,
     remember_selection: bool,
     dim_screen: bool,
     show_countdown: bool,
@@ -609,13 +607,6 @@ pub(crate) fn draw_recording_panel(
             ToolbarIcon::Speaker,
             "Speaker",
             speaker_enabled,
-            false,
-        ),
-        (
-            RecordPanelTile::Webcam,
-            ToolbarIcon::Webcam,
-            "Cam",
-            rec_webcam,
             false,
         ),
     ];
@@ -895,7 +886,6 @@ pub(crate) fn draw_recording_panel(
             rec_controls,
             hidpi,
             do_not_disturb,
-            rec_webcam,
             remember_selection,
             dim_screen,
             show_countdown,
@@ -1190,7 +1180,6 @@ pub(crate) fn draw_settings_menu(
     rec_controls: bool,
     hidpi: bool,
     do_not_disturb: bool,
-    rec_webcam: bool,
     remember_selection: bool,
     dim_screen: bool,
     show_countdown: bool,
@@ -1340,7 +1329,6 @@ pub(crate) fn draw_settings_menu(
             rec_controls,
             hidpi,
             do_not_disturb,
-            rec_webcam,
             remember_selection,
             dim_screen,
             show_countdown,
@@ -1406,7 +1394,6 @@ pub(crate) fn draw_settings_general_tab(
     rec_controls: bool,
     hidpi: bool,
     do_not_disturb: bool,
-    _rec_webcam: bool,
     remember_selection: bool,
     dim_screen: bool,
     show_countdown: bool,
@@ -1980,318 +1967,6 @@ pub(crate) fn draw_settings_dropdown_popup(
     }
 }
 
-pub(crate) fn draw_webcam_options(
-    context: &gtk4::cairo::Context,
-    menu_x: f64,
-    menu_y: f64,
-    screen_width: f64,
-    screen_height: f64,
-    _background: Option<&BackgroundFrame>,
-    hovered_item: i32,
-    webcam_device: i32,
-    webcam_size: usize,
-    webcam_shape: usize,
-    webcam_flip: bool,
-) {
-    let menu_w = 320.0;
-    let item_h = 28.0;
-    let header_h = 30.0;
-    let pad = 8.0;
-
-    let webcam_devices = super::webcam::enumerate_webcam_devices();
-    let mut camera_section: Vec<(String, bool, i32)> = vec![
-        ("Camera".to_string(), false, -1),
-        ("None".to_string(), true, 0),
-    ];
-    for device in webcam_devices {
-        camera_section.push((
-            format!("Camera {device} (/dev/video{device})"),
-            true,
-            100 + device,
-        ));
-    }
-
-    let sections: Vec<Vec<(String, bool, i32)>> = vec![
-        camera_section,
-        vec![
-            ("Size".to_string(), false, -1),
-            ("Small".to_string(), true, 1),
-            ("Medium".to_string(), true, 2),
-            ("Large".to_string(), true, 3),
-            ("Huge".to_string(), true, 4),
-        ],
-        vec![
-            (
-                "Click on camera to toggle Full Screen".to_string(),
-                false,
-                -1,
-            ),
-            ("Full Screen".to_string(), true, 5),
-        ],
-        vec![
-            ("Shape".to_string(), false, -1),
-            ("Circle".to_string(), true, 6),
-            ("Square".to_string(), true, 7),
-            ("Rectangle".to_string(), true, 8),
-            ("Vertical".to_string(), true, 9),
-        ],
-        vec![
-            ("Options".to_string(), false, -1),
-            ("Flip Camera".to_string(), true, 10),
-        ],
-    ];
-
-    let mut total_h = pad * 2.0;
-    for section in &sections {
-        for (ii, _) in section.iter().enumerate() {
-            total_h += if ii == 0 { header_h } else { item_h };
-        }
-    }
-
-    let popup_x = menu_x.clamp(10.0, screen_width - menu_w - 10.0);
-    let popup_y = menu_y.clamp(10.0, screen_height - total_h - 10.0);
-
-    draw_popup_panel(
-        context,
-        popup_x,
-        popup_y,
-        menu_w,
-        total_h,
-        12.0,
-        screen_width,
-        screen_height,
-        _background,
-    );
-
-    let mut curr_y = popup_y + pad;
-    for section in sections {
-        for (ii, (label, _is_clickable, item_idx)) in section.iter().enumerate() {
-            if ii == 0 {
-                // Section header — dimmed, bold, smaller text
-                context.select_font_face(
-                    "Sans",
-                    gtk4::cairo::FontSlant::Normal,
-                    gtk4::cairo::FontWeight::Bold,
-                );
-                context.set_font_size(11.0);
-                context.set_source_rgba(1.0, 1.0, 1.0, 110.0 / 255.0);
-                context.move_to(popup_x + 18.0, curr_y + 14.0);
-                context.show_text(label.as_str()).ok();
-                curr_y += header_h;
-            } else {
-                // Clickable item
-                let item_rect = RectF {
-                    x: popup_x + 4.0,
-                    y: curr_y + 1.0,
-                    width: menu_w - 8.0,
-                    height: item_h - 2.0,
-                };
-                let hovered = *item_idx == hovered_item;
-
-                if hovered {
-                    rounded_rect_path(
-                        context,
-                        item_rect.x,
-                        item_rect.y,
-                        item_rect.width,
-                        item_rect.height,
-                        6.0,
-                    );
-                    context.set_source_rgba(
-                        176.0 / 255.0,
-                        92.0 / 255.0,
-                        56.0 / 255.0,
-                        220.0 / 255.0,
-                    );
-                    let _ = context.fill();
-                }
-
-                let is_selected = match *item_idx {
-                    0 => webcam_device == -1,
-                    1 => webcam_size == 0,
-                    2 => webcam_size == 1,
-                    3 => webcam_size == 2,
-                    4 => webcam_size == 3,
-                    5 => webcam_size == 4,
-                    6 => webcam_shape == 0,
-                    7 => webcam_shape == 1,
-                    8 => webcam_shape == 2,
-                    9 => webcam_shape == 3,
-                    10 => webcam_flip,
-                    _ => false,
-                };
-
-                let text_color = if hovered {
-                    (1.0, 234.0 / 255.0, 214.0 / 255.0, 1.0)
-                } else {
-                    (241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 1.0)
-                };
-
-                // Checkmark
-                if is_selected {
-                    context.new_path();
-                    context.move_to(popup_x + 18.0, curr_y + item_h / 2.0 + 1.0);
-                    context.rel_line_to(3.0, 3.0);
-                    context.rel_line_to(6.0, -6.0);
-                    context.set_source_rgba(text_color.0, text_color.1, text_color.2, text_color.3);
-                    context.set_line_width(1.8);
-                    let _ = context.stroke();
-                }
-
-                // Item text
-                context.select_font_face(
-                    "Sans",
-                    gtk4::cairo::FontSlant::Normal,
-                    gtk4::cairo::FontWeight::Normal,
-                );
-                context.set_font_size(13.0);
-                context.set_source_rgba(text_color.0, text_color.1, text_color.2, text_color.3);
-                context.move_to(popup_x + 32.0, curr_y + item_h / 2.0 + 4.5);
-                context.show_text(label.as_str()).ok();
-
-                curr_y += item_h;
-            }
-        }
-    }
-}
-
-fn webcam_preview_size(
-    sel_w: f64,
-    sel_h: f64,
-    webcam_size: usize,
-    webcam_shape: usize,
-) -> (f64, f64) {
-    const MARGIN: f64 = 10.0;
-    let (mut preview_w, mut preview_h) = match webcam_size {
-        0 => (120.0, 160.0),
-        2 => (280.0, 370.0),
-        3 => (360.0, 480.0),
-        4 => (
-            (sel_w - 2.0 * MARGIN).max(1.0),
-            (sel_h - 2.0 * MARGIN).max(1.0),
-        ),
-        _ => (200.0, 260.0),
-    };
-
-    match webcam_shape {
-        0 | 1 => preview_h = preview_w,
-        2 => preview_h = preview_w * 0.75,
-        _ => {}
-    }
-
-    preview_w = preview_w.min((sel_w - 2.0 * MARGIN).max(1.0));
-    preview_h = preview_h.min((sel_h - 2.0 * MARGIN).max(1.0));
-    (preview_w, preview_h)
-}
-
-fn webcam_preview_rect(
-    sel_x: f64,
-    sel_y: f64,
-    sel_w: f64,
-    sel_h: f64,
-    webcam_size: usize,
-    webcam_shape: usize,
-    webcam_rel_x: f64,
-    webcam_rel_y: f64,
-) -> RectF {
-    const MARGIN: f64 = 10.0;
-    let (preview_w, preview_h) = webcam_preview_size(sel_w, sel_h, webcam_size, webcam_shape);
-    let min_x = sel_x + MARGIN;
-    let max_x = min_x.max(sel_x + sel_w - preview_w - MARGIN);
-    let min_y = sel_y + MARGIN;
-    let max_y = min_y.max(sel_y + sel_h - preview_h - MARGIN);
-    RectF {
-        x: min_x + (max_x - min_x) * webcam_rel_x.clamp(0.0, 1.0),
-        y: min_y + (max_y - min_y) * (1.0 - webcam_rel_y.clamp(0.0, 1.0)),
-        width: preview_w,
-        height: preview_h,
-    }
-}
-
-fn draw_webcam_preview(
-    context: &gtk4::cairo::Context,
-    sel_x: f64,
-    sel_y: f64,
-    sel_w: f64,
-    sel_h: f64,
-    webcam_size: usize,
-    webcam_shape: usize,
-    webcam_rel_x: f64,
-    webcam_rel_y: f64,
-    webcam_device: i32,
-    webcam_frame: Option<WebcamFrame>,
-) {
-    let rect = webcam_preview_rect(
-        sel_x,
-        sel_y,
-        sel_w,
-        sel_h,
-        webcam_size,
-        webcam_shape,
-        webcam_rel_x,
-        webcam_rel_y,
-    );
-    let _ = context.save();
-    context.set_antialias(gtk4::cairo::Antialias::Best);
-
-    context.new_path();
-    if webcam_shape == 0 {
-        context.arc(
-            rect.x + rect.width / 2.0,
-            rect.y + rect.height / 2.0,
-            rect.width.min(rect.height) / 2.0,
-            0.0,
-            PI * 2.0,
-        );
-    } else {
-        let radius = if webcam_shape == 1 { 8.0 } else { 12.0 };
-        rounded_rect_path(context, rect.x, rect.y, rect.width, rect.height, radius);
-    }
-    if let Some(frame) = webcam_frame {
-        context.clip_preserve();
-        if let Ok(surface) = gtk4::cairo::ImageSurface::create_for_data(
-            frame.bgra,
-            gtk4::cairo::Format::ARgb32,
-            frame.width,
-            frame.height,
-            frame.width * 4,
-        ) {
-            let _ = context.save();
-            context.translate(rect.x, rect.y);
-            context.scale(
-                rect.width / frame.width as f64,
-                rect.height / frame.height as f64,
-            );
-            let _ = context.set_source_surface(&surface, 0.0, 0.0);
-            let _ = context.paint();
-            let _ = context.restore();
-        }
-    } else {
-        context.set_source_rgba(0.0, 0.0, 0.0, 180.0 / 255.0);
-        let _ = context.fill_preserve();
-    }
-    context.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0);
-    context.set_line_width(1.5);
-    let _ = context.stroke();
-
-    let label = if webcam_device >= 0 {
-        format!("Camera {}", webcam_device)
-    } else {
-        "Webcam".to_string()
-    };
-    context.select_font_face(
-        "Sans",
-        gtk4::cairo::FontSlant::Normal,
-        gtk4::cairo::FontWeight::Bold,
-    );
-    context.set_font_size(10.0);
-    context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
-    context.move_to(rect.x + 8.0, rect.y + rect.height - 8.0);
-    let _ = context.show_text(&label);
-
-    let _ = context.restore();
-}
-
 pub(crate) fn draw_volume_popup(
     context: &gtk4::cairo::Context,
     panel_x: f64,
@@ -2639,7 +2314,6 @@ pub(crate) fn draw_overlay(
                 st.recording.rec_controls,
                 st.recording.hidpi,
                 st.recording.do_not_disturb,
-                st.recording.rec_webcam,
                 st.recording.remember_selection,
                 st.recording.dim_screen,
                 st.recording.show_countdown,
@@ -2648,24 +2322,6 @@ pub(crate) fn draw_overlay(
                 st.recording.optimize_gif,
                 st.recording.gif_size_idx,
             );
-            if st.recording.rec_webcam {
-                draw_webcam_preview(
-                    context,
-                    0.0,
-                    0.0,
-                    screen_width,
-                    screen_height,
-                    st.recording.webcam_size,
-                    st.recording.webcam_shape,
-                    st.recording.webcam_rel_x,
-                    st.recording.webcam_rel_y,
-                    st.recording.webcam_device,
-                    st.recording
-                        .webcam_frame
-                        .as_ref()
-                        .and_then(|frame| frame.lock().ok().and_then(|slot| slot.clone())),
-                );
-            }
         } else {
             // Toolbar (auto-positioned below / above the full-screen rect)
             draw_feature_toolbar(
@@ -2759,7 +2415,6 @@ pub(crate) fn draw_overlay(
                 st.recording.rec_controls,
                 st.recording.hidpi,
                 st.recording.do_not_disturb,
-                st.recording.rec_webcam,
                 st.recording.remember_selection,
                 st.recording.dim_screen,
                 st.recording.show_countdown,
@@ -2768,24 +2423,6 @@ pub(crate) fn draw_overlay(
                 st.recording.optimize_gif,
                 st.recording.gif_size_idx,
             );
-            if st.recording.rec_webcam {
-                draw_webcam_preview(
-                    context,
-                    x,
-                    y,
-                    sel_w,
-                    sel_h,
-                    st.recording.webcam_size,
-                    st.recording.webcam_shape,
-                    st.recording.webcam_rel_x,
-                    st.recording.webcam_rel_y,
-                    st.recording.webcam_device,
-                    st.recording
-                        .webcam_frame
-                        .as_ref()
-                        .and_then(|frame| frame.lock().ok().and_then(|slot| slot.clone())),
-                );
-            }
             // Volume popup menus (positioned top-centre of selection like other menus)
             {
                 let popup_x = (x + (sel_w - 280.0) / 2.0).clamp(10.0, screen_width - 290.0);
@@ -2816,24 +2453,6 @@ pub(crate) fn draw_overlay(
                         st.recording.volume_slider_dragging,
                     );
                 }
-            }
-            // Webcam options menu
-            if st.recording.webcam_options_open {
-                let panel_x = (x + (sel_w - 320.0) / 2.0).clamp(10.0, screen_width - 330.0);
-                let panel_y = (y + 24.0).clamp(10.0, screen_height - 350.0);
-                draw_webcam_options(
-                    context,
-                    panel_x,
-                    panel_y,
-                    screen_width,
-                    screen_height,
-                    background,
-                    st.recording.hovered_webcam_item,
-                    st.recording.webcam_device,
-                    st.recording.webcam_size,
-                    st.recording.webcam_shape,
-                    st.recording.webcam_flip,
-                );
             }
         } else {
             draw_feature_toolbar(

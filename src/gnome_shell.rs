@@ -730,14 +730,6 @@ mod tests {
         let snapshot = crate::recording::RuntimeOverlaySnapshot {
             mic_visible: true,
             speaker_visible: false,
-            webcam_enabled: true,
-            webcam_preview_manifest_path: String::new(),
-            webcam_rel_x: 0.61,
-            webcam_rel_y: 0.17,
-            webcam_size: 2,
-            webcam_shape: 1,
-            webcam_flip: true,
-            webcam_device: 7,
         };
         let spec = RecordingControlsSpec {
             dbus_dest: "org.apexshot.RecordingControl".into(),
@@ -798,24 +790,11 @@ mod tests {
         let snapshot = crate::recording::RuntimeOverlaySnapshot {
             mic_visible: true,
             speaker_visible: false,
-            webcam_enabled: true,
-            webcam_preview_manifest_path: String::new(),
-            webcam_rel_x: 0.61,
-            webcam_rel_y: 0.17,
-            webcam_size: 2,
-            webcam_shape: 1,
-            webcam_flip: true,
-            webcam_device: 7,
         };
 
-        let toggle_args = show_toggle_overlay_args("webcam", false);
-        assert_eq!(
-            toggle_args,
-            vec!["string:webcam".to_string(), "boolean:false".to_string()]
-        );
-
         let snapshot_json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
-        assert!(snapshot_json.contains("\"webcam_rel_x\":0.61"));
+        assert!(snapshot_json.contains("mic_visible"));
+        assert!(snapshot_json.contains("speaker_visible"));
     }
 
     #[test]

@@ -22,7 +22,7 @@ This document provides detailed information about every module and submodule in 
 - General: `play_sounds`, `start_at_login`, `show_menu_bar_icon`, `preview_auto_close_seconds`
 - Storage: `export_location`, `screenshot_export_location`, `video_export_location`, `hide_desktop_icons_while_capturing`
 - Screenshots: format, cursor, timer, after-capture actions (`after_capture_save`, `after_capture_copy_file_to_clipboard`, `after_capture_show_quick_access`, `after_capture_open_annotate`)
-- Recording: format, fps, quality, overlays, audio (mic/speaker), countdown, webcam
+- Recording: format, fps, quality, overlays, audio (mic/speaker), countdown
 - Annotation: default colors, tool preferences (`annotate_inverse_arrow`, `annotate_smooth_drawing`, `annotate_draw_shadow`, `annotate_auto_expand`, `annotate_show_color_names`)
 - Shortcuts: global hotkey bindings per action
 - Advanced: filename patterns, OCR language, clipboard behavior
@@ -252,13 +252,12 @@ the C++ Qt5 overlay (`capture-overlay/`) handles area selection instead.
 
 **Capabilities:**
 - Click-and-drag area selection with resize handles
-- Recording panel with mic, speaker, webcam toggles, format picker, and
+- Recording panel with mic/speaker toggles, format picker, and
   countdown options
 - Settings menu for video/GIF/control preferences
 - Window picker mode for selecting application windows
 - Fullscreen capture mode
 - Crosshair pixel-zoom mode for precise point capture
-- Webcam PiP preview with drag-to-reposition
 - Built with GTK4 + `gtk4-layer-shell` for always-on-top behaviour
 
 **Key Types:**
@@ -616,7 +615,7 @@ without requiring the Qt overlay or GNOME Shell extension.
 - `extension.js` — Main extension logic, D-Bus service registration, cleanup
 - `controls-ui.js` — Recording controls UI shell elements (pause/stop buttons)
 - `controls-ui-layout.js` — Positioning logic for controls UI
-- `runtime-overlays.js` — Webcam/mic/speaker runtime overlay rendering on shell stage
+- `runtime-overlays.js` — Runtime overlay ownership and shell actor cleanup
 - `runtime-overlays-visibility.js` — Show/hide logic for runtime overlays
 - `mask-ui.js` — Recording mask shell actor (dimmed region around capture area)
 - `session-state.js` — Session tracking, window list management
@@ -677,8 +676,6 @@ Configuration for a recording session.
 - `max_resolution: Option<u32>`
 - `mono_audio: bool`
 - `mic_enabled, speaker_enabled: bool`
-- `show_webcam: bool`
-- `webcam_size, webcam_position: String`
 - `gif_quality, gif_optimize, gif_max_width: u32`
 - `countdown_seconds: u32`
 

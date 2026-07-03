@@ -561,7 +561,7 @@ busctl monitor --session org.apexshot.ShellOverlay
 ### Extension File Guide
 - `extension.js` — Entry point; registers D-Bus services, connects signals
 - `controls-ui.js` — Recording control buttons rendered on the shell stage
-- `runtime-overlays.js` — Webcam/mic/speaker display rendered on the shell stage
+- `runtime-overlays.js` — Runtime overlay ownership and shell actor cleanup
 - `mask-ui.js` — Recording mask (dimmed region) rendered on the shell stage
 - `session-state.js` — Tracks active sessions, window lists
 
@@ -684,7 +684,7 @@ sudo apt install libpipewire-0.3-dev pipewire
 ### Recording Performance
 - Use appropriate FPS (24–30 for most use cases)
 - Consider resolution limits for lower-end systems (`max_resolution` config)
-- Disable runtime overlays (webcam) if not needed
+- Reduce FPS or resolution limits for lower-end systems
 - Use hardware-accelerated codecs (H.264/VA-API if available)
 
 ### Capture Performance

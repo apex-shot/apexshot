@@ -20,7 +20,6 @@ fn build_capture_overlay() {
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Drawing.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Events.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Scroll.cpp");
-    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Webcam.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_HitTest.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Window.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_p.h");

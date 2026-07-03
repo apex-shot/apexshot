@@ -215,89 +215,6 @@ void CaptureOverlay::updateDesktopOriginFromMouseEvent(QMouseEvent* event)
     m_hasEventDesktopOrigin = true;
 }
 
-QSizeF CaptureOverlay::webcamPreviewSize(double selW, double selH) const
-{
-    constexpr double kMargin = 10.0;
-
-    double previewW = 200.0;
-    double previewH = 260.0;
-    switch (m_webcamSize) {
-    case WebcamSize::Small:
-        previewW = 120.0;
-        previewH = 160.0;
-        break;
-    case WebcamSize::Medium:
-        previewW = 200.0;
-        previewH = 260.0;
-        break;
-    case WebcamSize::Large:
-        previewW = 280.0;
-        previewH = 370.0;
-        break;
-    case WebcamSize::Huge:
-        previewW = 360.0;
-        previewH = 480.0;
-        break;
-    case WebcamSize::Fullscreen:
-        previewW = std::max(1.0, selW - (2.0 * kMargin));
-        previewH = std::max(1.0, selH - (2.0 * kMargin));
-        break;
-    }
-
-    switch (m_webcamShape) {
-    case WebcamShape::Circle:
-    case WebcamShape::Square:
-        previewH = previewW;
-        break;
-    case WebcamShape::Rectangle:
-        previewH = previewW * 0.75;
-        break;
-    case WebcamShape::Vertical:
-        break;
-    }
-
-    previewW = std::min(previewW, std::max(1.0, selW - (2.0 * kMargin)));
-    previewH = std::min(previewH, std::max(1.0, selH - (2.0 * kMargin)));
-    return QSizeF(previewW, previewH);
-}
-
-QRectF CaptureOverlay::webcamPreviewRect(double selX, double selY, double selW, double selH) const
-{
-    constexpr double kMargin = 10.0;
-    const QSizeF previewSize = webcamPreviewSize(selW, selH);
-
-    const double minX = selX + kMargin;
-    const double maxX = std::max(minX, selX + selW - previewSize.width() - kMargin);
-    const double minY = selY + kMargin;
-    const double maxY = std::max(minY, selY + selH - previewSize.height() - kMargin);
-
-    const double px = minX + ((maxX - minX) * std::clamp(m_webcamRelX, 0.0, 1.0));
-    // Preserve the existing bottom-left default when rel_y is 0.0.
-    const double py = minY + ((maxY - minY) * (1.0 - std::clamp(m_webcamRelY, 0.0, 1.0)));
-    return QRectF(px, py, previewSize.width(), previewSize.height());
-}
-
-void CaptureOverlay::setWebcamPreviewTopLeft(const QPointF& topLeft,
-                                             double selX, double selY,
-                                             double selW, double selH)
-{
-    constexpr double kMargin = 10.0;
-    const QSizeF previewSize = webcamPreviewSize(selW, selH);
-
-    const double minX = selX + kMargin;
-    const double maxX = std::max(minX, selX + selW - previewSize.width() - kMargin);
-    const double minY = selY + kMargin;
-    const double maxY = std::max(minY, selY + selH - previewSize.height() - kMargin);
-
-    const double clampedX = std::clamp(topLeft.x(), minX, maxX);
-    const double clampedY = std::clamp(topLeft.y(), minY, maxY);
-
-    m_webcamRelX = (maxX > minX) ? (clampedX - minX) / (maxX - minX) : 0.0;
-    m_webcamRelY = (maxY > minY) ? 1.0 - ((clampedY - minY) / (maxY - minY)) : 0.0;
-    m_webcamRelX = std::clamp(m_webcamRelX, 0.0, 1.0);
-    m_webcamRelY = std::clamp(m_webcamRelY, 0.0, 1.0);
-}
-
 void CaptureOverlay::focusAndRaiseOverlay()
 {
     show();
@@ -341,9 +258,6 @@ void CaptureOverlay::openRecordingPanelForShortcut()
     m_captureIntent = CaptureIntent::Area;
     if (m_recordType == RecordType::None) {
         m_recordType = RecordType::Video;
-    }
-    if (m_recWebcam && m_webcamDevice >= 0) {
-        startWebcamCapture();
     }
     update();
 }
@@ -423,9 +337,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_gifSizeIdx(0) // 800 x auto (default)
     , m_recMic(initialMic)
     , m_recSpeaker(initialSpeaker)
-    , m_recWebcam(false)
-    , m_webcamRelX(0.0)
-    , m_webcamRelY(0.0)
+
     , m_micLevel(0.0)
     , m_speakerLevel(0.0)
     , m_micTimer(new QTimer(this))

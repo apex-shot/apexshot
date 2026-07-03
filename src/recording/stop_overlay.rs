@@ -1,4 +1,3 @@
-use crate::overlay::webcam::start_webcam_preview;
 use gdk4x11::X11Surface;
 use gtk4::cairo;
 use gtk4::gdk::{self, Key};
@@ -122,13 +121,6 @@ pub struct RecordingControlsParams {
     pub use_shell_mask: bool,
     #[serde(default = "default_dim_screen")]
     pub dim_screen: bool,
-    pub show_webcam: bool,
-    pub webcam_device: i32,
-    pub webcam_size: usize,
-    pub webcam_shape: usize,
-    pub webcam_rel_x: f64,
-    pub webcam_rel_y: f64,
-    pub webcam_flip: bool,
     pub countdown_enabled: bool,
     pub countdown_seconds: u32,
     pub session_id: Option<String>,
@@ -149,13 +141,6 @@ impl Default for RecordingControlsParams {
             show_timer: true,
             use_shell_mask: false,
             dim_screen: default_dim_screen(),
-            show_webcam: false,
-            webcam_device: -1,
-            webcam_size: 1,
-            webcam_shape: 3,
-            webcam_rel_x: 0.0,
-            webcam_rel_y: 0.0,
-            webcam_flip: false,
             countdown_enabled: false,
             countdown_seconds: 3,
             session_id: None,
@@ -181,13 +166,6 @@ pub fn run_recording_controls(
         show_timer: params.show_timer,
         use_shell_mask: params.use_shell_mask,
         dim_screen: params.dim_screen,
-        show_webcam: params.show_webcam,
-        webcam_device: params.webcam_device,
-        webcam_size: params.webcam_size,
-        webcam_shape: params.webcam_shape,
-        webcam_rel_x: params.webcam_rel_x,
-        webcam_rel_y: params.webcam_rel_y,
-        webcam_flip: params.webcam_flip,
         countdown_enabled: params.countdown_enabled,
         countdown_seconds: params.countdown_seconds,
         session_id: session_id.clone(),
@@ -200,11 +178,6 @@ pub fn run_recording_controls(
     let stop_tx_activate = stop_tx.clone();
     app.connect_activate(move |application| {
         let dim_windows = setup_dim_windows(application, params.clone());
-        let _webcam_window = if params.show_webcam {
-            setup_webcam_window(application, params.clone(), session_id.clone())
-        } else {
-            None
-        };
         let controls_window = setup_window(
             application,
             params.clone(),
@@ -263,11 +236,6 @@ pub fn run_recording_ui(
 
     app.connect_activate(move |application| {
         let dim_windows = setup_dim_windows(application, params.clone());
-        let _webcam_window = if params.show_webcam {
-            setup_webcam_window(application, params.clone(), params.session_id.clone())
-        } else {
-            None
-        };
         let display = gdk::Display::default().expect("No display");
         let should_show_controls = native_controls_should_be_visible(&display, &params);
         let controls_window = setup_window(
@@ -306,13 +274,6 @@ pub fn run_recording_stop_overlay(
             show_timer: false,
             use_shell_mask: false,
             dim_screen: false,
-            show_webcam: false,
-            webcam_device: -1,
-            webcam_size: 1,
-            webcam_shape: 0,
-            webcam_rel_x: 0.0,
-            webcam_rel_y: 0.0,
-            webcam_flip: false,
             countdown_enabled: false,
             countdown_seconds: 3,
             session_id: None,
@@ -1262,21 +1223,6 @@ fn install_controls_css() {
                 background: linear-gradient(to right, #f46357, #ff9b8a);
                 border-radius: 4px;
                 min-height: 8px;
-            }
-            .webcam-window {
-                border-radius: 1000px; /* Overridden for square */
-                overflow: hidden;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-                border: 2px solid rgba(255, 255, 255, 0.2);
-            }
-            .recording-webcam-window,
-            .recording-webcam-window > contents,
-            .recording-webcam-canvas {
-                background: transparent;
-                background-color: transparent;
-            }
-            .webcam-picture {
-                background-color: #000;
             }",
         );
         gtk4::style_context_add_provider_for_display(
@@ -1759,361 +1705,4 @@ fn send_net_wm_state_client_message<C: Connection>(
     .map_err(|e| e.to_string())?;
 
     Ok(())
-}
-
-fn rounded_rect_path_local(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
-    let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
-    cr.new_sub_path();
-    cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
-    cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
-    cr.arc(
-        x + r,
-        y + h - r,
-        r,
-        std::f64::consts::FRAC_PI_2,
-        std::f64::consts::PI,
-    );
-    cr.arc(
-        x + r,
-        y + r,
-        r,
-        std::f64::consts::PI,
-        std::f64::consts::PI * 1.5,
-    );
-    cr.close_path();
-}
-
-fn recording_webcam_size(
-    params: &RecordingControlsParams,
-    screen_w: i32,
-    screen_h: i32,
-) -> (i32, i32) {
-    const MARGIN: i32 = 10;
-    let bounds_w = if params.is_fullscreen || params.capture_w <= 0 {
-        screen_w
-    } else {
-        params.capture_w
-    };
-    let bounds_h = if params.is_fullscreen || params.capture_h <= 0 {
-        screen_h
-    } else {
-        params.capture_h
-    };
-
-    let (mut width, mut height) = match params.webcam_size {
-        0 => (120, 160),
-        2 => (280, 370),
-        3 => (360, 480),
-        4 => (
-            (bounds_w - 2 * MARGIN).max(1),
-            (bounds_h - 2 * MARGIN).max(1),
-        ),
-        _ => (200, 260),
-    };
-
-    match params.webcam_shape {
-        0 | 1 => height = width,
-        2 => height = ((width as f64) * 0.75).round() as i32,
-        _ => {}
-    }
-
-    width = width.min((bounds_w - 2 * MARGIN).max(1));
-    height = height.min((bounds_h - 2 * MARGIN).max(1));
-    (width, height)
-}
-
-fn setup_webcam_window(
-    application: &Application,
-    params: RecordingControlsParams,
-    _session_id: Option<String>,
-) -> Option<ApplicationWindow> {
-    let window = ApplicationWindow::builder()
-        .application(application)
-        .title("ApexShot Webcam")
-        .default_width(240)
-        .default_height(240)
-        .decorated(false)
-        .resizable(false)
-        .focusable(false)
-        .build();
-
-    window.add_css_class("recording-webcam-window");
-
-    let (screen_w, screen_h) = display_size().unwrap_or((1920, 1080));
-    let display = gdk::Display::default();
-    let monitor = display
-        .as_ref()
-        .and_then(|display| monitor_for_capture(display, &params));
-    let monitor_geom = monitor.as_ref().map(|m| m.geometry());
-    let desktop_bounds = display_bounds().unwrap_or((0, 0, screen_w, screen_h));
-    let (mut webcam_w, mut webcam_h) = recording_webcam_size(&params, screen_w, screen_h);
-    webcam_w = webcam_w.max(1);
-    webcam_h = webcam_h.max(1);
-    window.set_default_size(webcam_w, webcam_h);
-
-    let bounds_x = if params.is_fullscreen {
-        desktop_bounds.0
-    } else {
-        params.capture_x
-    };
-    let bounds_y = if params.is_fullscreen {
-        desktop_bounds.1
-    } else {
-        params.capture_y
-    };
-    let bounds_w = if params.is_fullscreen || params.capture_w <= 0 {
-        screen_w
-    } else {
-        params.capture_w
-    };
-    let bounds_h = if params.is_fullscreen || params.capture_h <= 0 {
-        screen_h
-    } else {
-        params.capture_h
-    };
-    let max_x = (bounds_x + bounds_w - webcam_w).max(bounds_x);
-    let max_y = (bounds_y + bounds_h - webcam_h).max(bounds_y);
-    let x = (bounds_x as f64 + (max_x - bounds_x) as f64 * params.webcam_rel_x.clamp(0.0, 1.0))
-        .round() as i32;
-    let y = (bounds_y as f64
-        + (max_y - bounds_y) as f64 * (1.0 - params.webcam_rel_y.clamp(0.0, 1.0)))
-    .round() as i32;
-    let x = x.clamp(
-        desktop_bounds.0,
-        desktop_bounds.0 + (desktop_bounds.2 - webcam_w).max(0),
-    );
-    let y = y.clamp(
-        desktop_bounds.1,
-        desktop_bounds.1 + (desktop_bounds.3 - webcam_h).max(0),
-    );
-
-    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
-
-    if layer_shell_active {
-        let output_origin_x = monitor_geom.as_ref().map(|g| g.x()).unwrap_or(0);
-        let output_origin_y = monitor_geom.as_ref().map(|g| g.y()).unwrap_or(0);
-        window.init_layer_shell();
-        window.set_layer(Layer::Overlay);
-        if let Some(ref monitor) = monitor {
-            window.set_monitor(Some(monitor));
-        }
-        window.set_anchor(Edge::Top, true);
-        window.set_anchor(Edge::Left, true);
-        window.set_anchor(Edge::Bottom, false);
-        window.set_anchor(Edge::Right, false);
-        window.set_margin(Edge::Top, bounds_y - output_origin_y);
-        window.set_margin(Edge::Left, bounds_x - output_origin_x);
-        window.set_default_size(bounds_w, bounds_h);
-        window.set_opacity(1.0);
-        window.set_keyboard_mode(KeyboardMode::None);
-        window.set_exclusive_zone(-1);
-        window.set_namespace(Some("apexshot-webcam"));
-    } else {
-        window.connect_realize(clone!(
-            #[weak]
-            window,
-            move |_| {
-                suppress_x11_controls_window_type(&window);
-                let _ = request_x11_always_on_top(&window);
-                let _ = position_x11_window(&window, x, y);
-            }
-        ));
-    }
-
-    if params.webcam_shape == 1 {
-        window.add_css_class("webcam-circle");
-        let provider = CssProvider::new();
-        provider.load_from_data(".webcam-circle { border-radius: 9999px; overflow: hidden; }");
-        gtk4::style_context_add_provider_for_display(
-            &gtk4::gdk::Display::default().expect("No display"),
-            &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
-
-    // Keep the webcam capture alive for as long as the webcam window exists.
-    // `WebcamPreview` stops the v4l2/GStreamer pipeline in Drop; if this is a
-    // plain local variable it is dropped before the first draw, leaving only the
-    // black placeholder visible in the actual recording.
-    let webcam_preview = Rc::new(if params.webcam_device >= 0 {
-        start_webcam_preview(params.webcam_device, params.webcam_flip)
-    } else {
-        None
-    });
-
-    let drawing_area = DrawingArea::new();
-    drawing_area.set_css_classes(&["recording-webcam-canvas"]);
-    drawing_area.set_content_width(webcam_w);
-    drawing_area.set_content_height(webcam_h);
-    if layer_shell_active {
-        drawing_area.set_halign(gtk4::Align::Start);
-        drawing_area.set_valign(gtk4::Align::Start);
-        drawing_area.set_margin_start(x - bounds_x);
-        drawing_area.set_margin_top(y - bounds_y);
-    }
-
-    if let Some(preview) = webcam_preview.as_ref() {
-        let frames = preview.frame_handle();
-        let webcam_preview_keepalive = webcam_preview.clone();
-        drawing_area.set_draw_func(move |_, cr, w, h| {
-            let _keepalive = &webcam_preview_keepalive;
-            let radius = (w as f64 / 2.0).min(h as f64 / 2.0);
-            cr.save().ok();
-            if params.webcam_shape == 0 {
-                cr.arc(
-                    w as f64 / 2.0,
-                    h as f64 / 2.0,
-                    radius,
-                    0.0,
-                    std::f64::consts::TAU,
-                );
-                cr.clip();
-            } else {
-                let r = if params.webcam_shape == 1 { 8.0 } else { 12.0 };
-                rounded_rect_path_local(cr, 0.0, 0.0, w as f64, h as f64, r);
-                cr.clip();
-            }
-
-            let frame = frames.lock().ok().and_then(|slot| slot.clone());
-            if let Some(frame) = frame {
-                if let Ok(surface) = cairo::ImageSurface::create_for_data(
-                    frame.bgra,
-                    cairo::Format::ARgb32,
-                    frame.width,
-                    frame.height,
-                    frame.width * 4,
-                ) {
-                    cr.scale(
-                        w as f64 / frame.width as f64,
-                        h as f64 / frame.height as f64,
-                    );
-                    let _ = cr.set_source_surface(&surface, 0.0, 0.0);
-                    let _ = cr.paint();
-                }
-            } else {
-                cr.set_source_rgb(0.05, 0.05, 0.05);
-                let _ = cr.paint();
-            }
-            cr.restore().ok();
-        });
-        let area_weak = drawing_area.downgrade();
-        let webcam_preview_keepalive = webcam_preview.clone();
-        glib::timeout_add_local(Duration::from_millis(33), move || {
-            let _keepalive = &webcam_preview_keepalive;
-            if let Some(area) = area_weak.upgrade() {
-                area.queue_draw();
-                glib::ControlFlow::Continue
-            } else {
-                glib::ControlFlow::Break
-            }
-        });
-    } else {
-        drawing_area.set_draw_func(move |_, cr, w, h| {
-            cr.set_source_rgb(0.05, 0.05, 0.05);
-            if params.webcam_shape == 0 {
-                cr.arc(
-                    w as f64 / 2.0,
-                    h as f64 / 2.0,
-                    (w as f64 / 2.0).min(h as f64 / 2.0),
-                    0.0,
-                    2.0 * std::f64::consts::PI,
-                );
-            } else {
-                let r = if params.webcam_shape == 1 { 8.0 } else { 12.0 };
-                rounded_rect_path_local(cr, 0.0, 0.0, w as f64, h as f64, r);
-            }
-            let _ = cr.fill();
-
-            cr.set_source_rgb(0.3, 0.3, 0.3);
-            cr.set_line_width(2.0);
-            let cx = w as f64 / 2.0;
-            let cy = h as f64 / 2.0;
-            cr.arc(cx, cy - 10.0, 15.0, 0.0, 2.0 * std::f64::consts::PI);
-            let _ = cr.stroke();
-            cr.move_to(cx - 20.0, cy + 20.0);
-            cr.line_to(cx + 20.0, cy + 20.0);
-            let _ = cr.stroke();
-        });
-    }
-    window.set_child(Some(&drawing_area));
-
-    let drag = GestureDrag::new();
-    let current_x = Rc::new(Cell::new(x));
-    let current_y = Rc::new(Cell::new(y));
-    let drag_start_x = Rc::new(Cell::new(x));
-    let drag_start_y = Rc::new(Cell::new(y));
-
-    drag.connect_drag_begin(clone!(
-        #[strong]
-        current_x,
-        #[strong]
-        current_y,
-        #[strong]
-        drag_start_x,
-        #[strong]
-        drag_start_y,
-        move |_, _, _| {
-            drag_start_x.set(current_x.get());
-            drag_start_y.set(current_y.get());
-        }
-    ));
-
-    drag.connect_drag_update(clone!(
-        #[weak]
-        window,
-        #[weak]
-        drawing_area,
-        #[strong]
-        current_x,
-        #[strong]
-        current_y,
-        #[strong]
-        drag_start_x,
-        #[strong]
-        drag_start_y,
-        move |_, dx, dy| {
-            let next_x = (drag_start_x.get() + dx as i32).clamp(bounds_x, max_x);
-            let next_y = (drag_start_y.get() + dy as i32).clamp(bounds_y, max_y);
-            current_x.set(next_x);
-            current_y.set(next_y);
-            if layer_shell_active {
-                drawing_area.set_margin_start(next_x - bounds_x);
-                drawing_area.set_margin_top(next_y - bounds_y);
-            } else {
-                let _ = position_x11_window(&window, next_x, next_y);
-            }
-        }
-    ));
-
-    drag.connect_drag_end(clone!(
-        #[strong]
-        current_x,
-        #[strong]
-        current_y,
-        move |_, _, _| {
-            let rel_x = if max_x > bounds_x {
-                (current_x.get() - bounds_x) as f64 / (max_x - bounds_x) as f64
-            } else {
-                0.0
-            };
-            let rel_y = if max_y > bounds_y {
-                1.0 - ((current_y.get() - bounds_y) as f64 / (max_y - bounds_y) as f64)
-            } else {
-                0.0
-            };
-            let exe =
-                std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-            let _ = std::process::Command::new(exe)
-                .arg("recording-control")
-                .arg("move-webcam")
-                .arg(rel_x.to_string())
-                .arg(rel_y.to_string())
-                .spawn();
-        }
-    ));
-    window.add_controller(drag);
-
-    window.present();
-    Some(window)
 }

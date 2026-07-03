@@ -798,65 +798,6 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
         drawRecordingPanel(p, sx, sy, selW, selH);
     }
 
-    // ── Webcam preview ──────────────────────────────────────────────────────
-    if (m_recordingPanelOpen && m_recWebcam) {
-        p.save();
-        p.setRenderHint(QPainter::Antialiasing);
-        const QRectF previewRect = webcamPreviewRect(sx, sy, selW, selH);
-        const double previewW = previewRect.width();
-        const double previewH = previewRect.height();
-        const double px = previewRect.x();
-        const double py = previewRect.y();
-
-        // Flip
-        if (m_webcamFlip) {
-            p.translate(px + previewW / 2.0, 0);
-            p.scale(-1, 1);
-            p.translate(-(px + previewW / 2.0), 0);
-        }
-
-        // Create clipping path for the shape
-        QPainterPath clipPath;
-        if (m_webcamShape == WebcamShape::Circle) {
-            clipPath.addEllipse(previewRect);
-        } else {
-            double radius = (m_webcamShape == WebcamShape::Square) ? 8 : 12;
-            clipPath.addRoundedRect(previewRect, radius, radius);
-        }
-
-        // Draw frame if available
-        QPixmap frame;
-        { QMutexLocker lock(&m_webcamMutex); frame = m_webcamFrame; }
-
-        if (!frame.isNull()) {
-            p.setClipPath(clipPath);
-            p.drawPixmap(previewRect.toRect(), frame);
-            p.setClipping(false);
-        } else {
-            // Dark placeholder
-            p.setBrush(QColor(0, 0, 0, 180));
-            p.setPen(Qt::NoPen);
-            p.drawPath(clipPath);
-        }
-
-        // Shape border
-        p.setPen(QPen(QColor(255, 255, 255, 40), 1.5));
-        p.setBrush(Qt::NoBrush);
-        p.drawPath(clipPath);
-
-        // Device label
-        QString label = "Webcam";
-        if (m_webcamDevice >= 0) {
-            label = QStringLiteral("Camera %1").arg(m_webcamDevice);
-        }
-        QFont wf; wf.setFamily("Sans"); wf.setPointSizeF(10.0); wf.setBold(true);
-        p.setFont(wf);
-        p.setPen(QColor(255, 255, 255, 120));
-        p.drawText(QRectF(px + 8, py + previewH - 22, previewW - 16, 18),
-                   Qt::AlignLeft | Qt::AlignVCenter, label);
-        p.restore();
-    }
-
     // ── Visible countdown overlay ───────────────────────────────────────────
     if (m_countdownActive && m_countdownValue > 0) {
         p.save();
@@ -1171,7 +1112,6 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
 
     const QRectF micRect(railX, railY + TOOL_CARD_H * 0.0, TOOL_RAIL_W, TOOL_CARD_H);
     const QRectF speakerRect(railX, railY + TOOL_CARD_H * 1.0, TOOL_RAIL_W, TOOL_CARD_H);
-    const QRectF webcamRect(railX, railY + TOOL_CARD_H * 2.0, TOOL_RAIL_W, TOOL_CARD_H);
 
     m_recTileRects.append(controlsRect);
     drawModuleTile(controlsRect, RecordPanelTile::Controls, 8, m_settingsOpen, QString(), false, false, 0.0);
@@ -1200,8 +1140,6 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
     drawModuleTile(micRect, RecordPanelTile::Mic, 11, m_recMic, QStringLiteral("Mic"), true, m_recMic, m_micLevel);
     m_recTileRects.append(speakerRect);
     drawModuleTile(speakerRect, RecordPanelTile::Speaker, 12, m_recSpeaker, QStringLiteral("Speaker"), false, m_recSpeaker, m_speakerLevel);
-    m_recTileRects.append(webcamRect);
-    drawModuleTile(webcamRect, RecordPanelTile::Webcam, 13, m_recWebcam, QStringLiteral("Cam"), false, false, 0.0);
     const QRectF videoRect(bottomX, bottomY, ACTION_RAIL_W, ACTION_CARD_H);
     const QRectF gifRect(videoRect.right() + ACTION_CARD_GAP, bottomY, ACTION_RAIL_W, ACTION_CARD_H);
     m_recTileRects.append(videoRect);

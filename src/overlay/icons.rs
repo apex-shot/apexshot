@@ -14,7 +14,6 @@ pub(crate) enum ToolbarIcon {
     Crop,
     Mic,
     Speaker,
-    Webcam,
 
     Video,
     Gif,
@@ -199,18 +198,6 @@ pub(crate) fn draw_toolbar_icon(
             context.arc(cx + 1.2, cy, 7.0, -0.7, 0.7);
             let _ = context.stroke();
         }
-        ToolbarIcon::Webcam => {
-            rounded_rect_path(context, cx - 7.2, cy - 4.6, 14.4, 9.8, 2.2);
-            let _ = context.stroke();
-            context.arc(cx, cy + 0.3, 3.0, 0.0, PI * 2.0);
-            let _ = context.stroke();
-            context.move_to(cx - 4.6, cy - 4.6);
-            context.line_to(cx - 2.2, cy - 6.8);
-            context.line_to(cx + 1.8, cy - 6.8);
-            context.line_to(cx + 3.8, cy - 4.6);
-            let _ = context.stroke();
-        }
-
         ToolbarIcon::Video => {
             rounded_rect_path(context, cx - 8.0, cy - 5.0, 10.5, 10.0, 2.5);
             let _ = context.stroke();
