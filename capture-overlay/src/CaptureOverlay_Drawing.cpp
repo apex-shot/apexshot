@@ -155,7 +155,7 @@ RecordingDeckLayout computeRecordingDeckLayout(double selX, double selY,
                                                double screenW, double screenH)
 {
     RecordingDeckLayout layout;
-    const double railH = TOOL_CARD_H * 3.0;
+    const double railH = TOOL_CARD_H * 2.0;
     const double centerY = selY + (selH / 2.0);
     const double leftCandidateX = selX - TOOL_RAIL_GAP - TOOL_RAIL_W;
     const double leftPanelX = std::max(FEATURE_PANEL_MARGIN, leftCandidateX);
@@ -2167,4 +2167,3 @@ void CaptureOverlay::drawScrollPopup(QPainter& p, double centerX, double centerY
     m_scrollCloseRect = QRectF(closeX, closeY, closeSize, closeSize);
     m_scrollDownloadBtnRect = QRectF(btnX, btnY, btnW, btnH);
 }
-

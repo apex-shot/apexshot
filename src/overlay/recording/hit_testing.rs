@@ -131,6 +131,72 @@ pub(crate) fn recording_tile_at(
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recording_audio_rail_has_only_mic_and_speaker_slots() {
+        let selection_x = 300.0;
+        let selection_y = 220.0;
+        let selection_width = 640.0;
+        let selection_height = 360.0;
+        let screen_width = 1600.0;
+        let screen_height = 1000.0;
+
+        let deck = compute_recording_deck_layout(
+            selection_x,
+            selection_y,
+            selection_width,
+            selection_height,
+            screen_width,
+            screen_height,
+        );
+        let rail = deck.left_toggle_rail;
+
+        assert_eq!(rail.height, FEATURE_PANEL_HEIGHT * 2.0);
+        assert_eq!(
+            recording_tile_at(
+                selection_x,
+                selection_y,
+                selection_width,
+                selection_height,
+                screen_width,
+                screen_height,
+                rail.x + rail.width / 2.0,
+                rail.y + FEATURE_PANEL_HEIGHT / 2.0,
+            ),
+            Some(RecordPanelTile::Mic)
+        );
+        assert_eq!(
+            recording_tile_at(
+                selection_x,
+                selection_y,
+                selection_width,
+                selection_height,
+                screen_width,
+                screen_height,
+                rail.x + rail.width / 2.0,
+                rail.y + FEATURE_PANEL_HEIGHT + FEATURE_PANEL_HEIGHT / 2.0,
+            ),
+            Some(RecordPanelTile::Speaker)
+        );
+        assert_eq!(
+            recording_tile_at(
+                selection_x,
+                selection_y,
+                selection_width,
+                selection_height,
+                screen_width,
+                screen_height,
+                rail.x + rail.width / 2.0,
+                rail.y + FEATURE_PANEL_HEIGHT * 2.0 + 1.0,
+            ),
+            None
+        );
+    }
+}
+
 pub(crate) fn settings_menu_hit_item(
     selection_x: f64,
     selection_y: f64,
