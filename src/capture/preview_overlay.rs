@@ -662,10 +662,8 @@ fn setup_preview_window(
         upload_btn_actions.connect_clicked(move |_| {
             let config = load_config();
             if !crate::cloud::upload::is_configured(&config) {
-                crate::utils::notify::desktop_notification(
-                    "Cloud upload not configured",
-                    "Run `apexshot login` to connect your account",
-                );
+                let (title, body) = crate::cloud::upload::not_configured_notification(&config);
+                crate::utils::notify::desktop_notification(title, body);
                 return;
             }
             let path = path_upload.clone();

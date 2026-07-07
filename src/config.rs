@@ -124,6 +124,10 @@ pub struct AppConfig {
     pub cloud_api_token: String,
     pub cloud_refresh_token: String,
     pub cloud_install_id: String,
+    // Upload destination selection + self-hosted XBackBone settings
+    pub cloud_destination: String,
+    pub xbackbone_url: String,
+    pub xbackbone_api_token: String,
     // Advanced settings
     pub adv_filename_pattern: String,
     pub adv_ask_name_after_capture: bool,
@@ -237,6 +241,9 @@ impl Default for AppConfig {
             cloud_api_token: String::new(),
             cloud_refresh_token: String::new(),
             cloud_install_id: String::new(),
+            cloud_destination: "apexshot".to_string(),
+            xbackbone_url: String::new(),
+            xbackbone_api_token: String::new(),
             adv_filename_pattern: "ApexShot {Date} at {Time}".to_string(),
             adv_ask_name_after_capture: false,
             adv_retina_suffix: true,
@@ -308,6 +315,12 @@ impl AppConfig {
             _ => "Wallpaper".to_string(),
         };
         self.window_screenshot_padding = self.window_screenshot_padding.clamp(0.0, 1.0);
+        self.cloud_destination = match self.cloud_destination.as_str() {
+            "apexshot" | "xbackbone" => self.cloud_destination,
+            _ => "apexshot".to_string(),
+        };
+        self.xbackbone_url = self.xbackbone_url.trim().to_string();
+        self.xbackbone_api_token = self.xbackbone_api_token.trim().to_string();
         self
     }
 }
@@ -341,11 +354,11 @@ pub fn config_path() -> Option<PathBuf> {
 
 pub fn load_config() -> AppConfig {
     let Some(path) = config_path() else {
-        return AppConfig::default();
+        return apply_cloud_env_overrides(AppConfig::default());
     };
 
     let Ok(raw) = std::fs::read_to_string(path) else {
-        return AppConfig::default();
+        return apply_cloud_env_overrides(AppConfig::default());
     };
 
     serde_yml::from_str::<AppConfig>(&raw)
@@ -359,6 +372,7 @@ pub fn load_config() -> AppConfig {
                     sanitized.cloud_backend_url = url;
                 }
             }
+            apply_xbackbone_overrides(&mut sanitized);
             sanitized
         })
         .unwrap_or_else(|_| {
@@ -366,8 +380,71 @@ pub fn load_config() -> AppConfig {
             if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
                 default.cloud_backend_url = url;
             }
-            default
+            apply_cloud_env_overrides(default)
         })
+}
+
+fn apply_cloud_env_overrides(mut config: AppConfig) -> AppConfig {
+    if config.cloud_backend_url.is_empty() {
+        if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
+            config.cloud_backend_url = url;
+        }
+    }
+    apply_xbackbone_overrides(&mut config);
+    config
+}
+
+fn apply_xbackbone_overrides(config: &mut AppConfig) {
+    if config.xbackbone_url.is_empty() {
+        if let Ok(url) = std::env::var("APEXSHOT_XBACKBONE_URL") {
+            config.xbackbone_url = url.trim().to_string();
+        }
+    }
+    if config.xbackbone_api_token.is_empty() {
+        if let Ok(token) = std::env::var("APEXSHOT_XBACKBONE_TOKEN") {
+            config.xbackbone_api_token = token.trim().to_string();
+        }
+    }
+    // Auto-detect an existing XBackBone CLI / KDE plugin config so users who
+    // already have `xbb` set up can go zero-config. Only used as a default —
+    // explicit Settings values (or env vars above) always win.
+    if config.xbackbone_url.is_empty() && config.xbackbone_api_token.is_empty() {
+        if let Some((url, token)) = read_xbackbone_config_file() {
+            config.xbackbone_url = url;
+            config.xbackbone_api_token = token;
+        }
+    }
+}
+
+fn read_xbackbone_config_file() -> Option<(String, String)> {
+    let mut path = dirs::config_dir()?;
+    path.push("xbackbone");
+    path.push("config");
+    let content = std::fs::read_to_string(path).ok()?;
+    parse_xbackbone_config_file(&content)
+}
+
+fn parse_xbackbone_config_file(content: &str) -> Option<(String, String)> {
+    let mut url = None;
+    let mut token = None;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (key, value) = line.split_once('=')?;
+        let key = key.trim();
+        let value = value.trim().trim_matches('"');
+        match key {
+            "XBB_URL" if !value.is_empty() => url = Some(value.to_string()),
+            "XBB_TOKEN" if !value.is_empty() => token = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    match (url, token) {
+        (Some(u), Some(t)) => Some((u, t)),
+        _ => None,
+    }
 }
 
 pub fn save_config(config: &AppConfig) -> anyhow::Result<PathBuf> {
@@ -777,5 +854,106 @@ quick_access_overlay_size: 0.5
             loaded.shortcut_recording_discard,
             original.shortcut_recording_discard
         );
+    }
+
+    #[test]
+    fn sanitize_clamps_cloud_destination_to_known_values() {
+        let unknown = AppConfig {
+            cloud_destination: "imgur".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(unknown.cloud_destination, "apexshot");
+
+        let apexshot = AppConfig {
+            cloud_destination: "apexshot".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(apexshot.cloud_destination, "apexshot");
+
+        let xbackbone = AppConfig {
+            cloud_destination: "xbackbone".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(xbackbone.cloud_destination, "xbackbone");
+    }
+
+    #[test]
+    fn sanitize_trims_xbackbone_fields() {
+        let cfg = AppConfig {
+            xbackbone_url: "  https://xb.example  ".into(),
+            xbackbone_api_token: "  tok123  ".into(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+
+        assert_eq!(cfg.xbackbone_url, "https://xb.example");
+        assert_eq!(cfg.xbackbone_api_token, "tok123");
+    }
+
+    #[test]
+    fn xbackbone_fields_round_trip_through_yaml() {
+        let original = AppConfig {
+            cloud_destination: "xbackbone".into(),
+            xbackbone_url: "https://xb.example".into(),
+            xbackbone_api_token: "secret-token".into(),
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+
+        assert_eq!(loaded.cloud_destination, original.cloud_destination);
+        assert_eq!(loaded.xbackbone_url, original.xbackbone_url);
+        assert_eq!(loaded.xbackbone_api_token, original.xbackbone_api_token);
+    }
+
+    #[test]
+    fn default_cloud_destination_is_apexshot() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.cloud_destination, "apexshot");
+        assert!(cfg.xbackbone_url.is_empty());
+        assert!(cfg.xbackbone_api_token.is_empty());
+    }
+
+    #[test]
+    fn parse_xbackbone_config_file_reads_url_and_token() {
+        let content =
+            "# XBackBone CLI config\nXBB_URL=https://files.example.com\nXBB_TOKEN=abc-123\n";
+        let (url, token) = parse_xbackbone_config_file(content).expect("parsed");
+        assert_eq!(url, "https://files.example.com");
+        assert_eq!(token, "abc-123");
+    }
+
+    #[test]
+    fn parse_xbackbone_config_file_strips_surrounding_quotes() {
+        let content = "XBB_URL=\"https://files.example.com\"\nXBB_TOKEN=\"abc-123\"\n";
+        let (url, token) = parse_xbackbone_config_file(content).expect("parsed");
+        assert_eq!(url, "https://files.example.com");
+        assert_eq!(token, "abc-123");
+    }
+
+    #[test]
+    fn parse_xbackbone_config_file_ignores_comments_and_blank_lines() {
+        let content =
+            "\n# a comment\n\nXBB_URL=https://files.example.com\n# mid comment\nXBB_TOKEN=tok\n";
+        let (url, token) = parse_xbackbone_config_file(content).expect("parsed");
+        assert_eq!(url, "https://files.example.com");
+        assert_eq!(token, "tok");
+    }
+
+    #[test]
+    fn parse_xbackbone_config_file_returns_none_when_a_value_is_missing() {
+        assert!(parse_xbackbone_config_file("XBB_URL=https://files.example.com\n").is_none());
+        assert!(parse_xbackbone_config_file("XBB_TOKEN=tok\n").is_none());
+        assert!(parse_xbackbone_config_file("").is_none());
+    }
+
+    #[test]
+    fn parse_xbackbone_config_file_ignores_empty_values() {
+        let content = "XBB_URL=\nXBB_TOKEN=\n";
+        assert!(parse_xbackbone_config_file(content).is_none());
     }
 }
