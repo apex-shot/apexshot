@@ -2855,6 +2855,26 @@ pub fn run_overlay_recording_request_with_gtk(
         }
         Ok((path, StopAction::Save)) => {
             eprintln!("Recording saved to {:?}", path);
+            let config = crate::config::load_config().sanitized();
+
+            if config.rec_after_capture_copy_to_clipboard {
+                if let Err(e) = crate::utils::clipboard::copy_uri_to_clipboard(&path) {
+                    eprintln!("[recording] Failed to copy recording to clipboard: {e}");
+                }
+            }
+
+            if !config.rec_after_capture_save {
+                let _ = std::fs::remove_file(&path);
+                eprintln!(
+                    "[recording] Recording discarded because Save is disabled in after-capture settings"
+                );
+                crate::utils::notify::desktop_notification(
+                    "Recording not saved",
+                    "Save is disabled in After capture settings",
+                );
+                return Ok(path);
+            }
+
             if prepared.open_editor {
                 spawn_recording_editor_subprocess(path.clone());
             }

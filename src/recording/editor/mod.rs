@@ -24,7 +24,9 @@ pub fn open_recording_editor(path: PathBuf) -> anyhow::Result<()> {
         anyhow::bail!("recording editor only supports MP4 files in this version");
     }
 
-    ffmpeg::ensure_tools_available()?;
-    let metadata = ffmpeg::probe_metadata(&path)?;
-    window::open(metadata)
+    // Open the editor window immediately and load the recording
+    // asynchronously (ffprobe + thumbnails run in a background thread with
+    // a loading spinner). This avoids a long frozen gap before the window
+    // appears for large recordings.
+    window::open_with_path(path)
 }

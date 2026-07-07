@@ -5,6 +5,8 @@ use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, Grid, Label, Orientati
 pub struct AfterCaptureWidgets {
     pub wrapper: GtkBox,
     pub screenshot_after_capture_checks: Vec<CheckButton>,
+    pub rec_copy_to_clipboard: CheckButton,
+    pub rec_save: CheckButton,
     pub rec_open_video_editor: CheckButton,
 }
 
@@ -86,6 +88,8 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         ("Open Video Editor", config.rec_video_open_editor),
     ];
     let mut screenshot_after_capture_checks = Vec::new();
+    let mut rec_copy_to_clipboard = CheckButton::new();
+    let mut rec_save = CheckButton::new();
     let mut rec_open_video_editor = CheckButton::new();
 
     for (index, (action, active)) in screenshot_after_capture_rows.into_iter().enumerate() {
@@ -110,11 +114,22 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         let recording_cell = GtkBox::new(Orientation::Horizontal, 0);
         recording_cell.set_size_request(80, -1);
         recording_cell.set_halign(Align::Center);
-        if action != "Open Annotate tool" {
+        if action != "Show Quick Access overlay" && action != "Open Annotate tool" {
             let recording_check = CheckButton::new();
-            if action == "Open Video Editor" {
-                recording_check.set_active(active);
-                rec_open_video_editor = recording_check.clone();
+            match action {
+                "Copy to clipboard" => {
+                    recording_check.set_active(config.rec_after_capture_copy_to_clipboard);
+                    rec_copy_to_clipboard = recording_check.clone();
+                }
+                "Save" => {
+                    recording_check.set_active(config.rec_after_capture_save);
+                    rec_save = recording_check.clone();
+                }
+                "Open Video Editor" => {
+                    recording_check.set_active(active);
+                    rec_open_video_editor = recording_check.clone();
+                }
+                _ => {}
             }
             recording_cell.append(&recording_check);
         }
@@ -149,6 +164,8 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     AfterCaptureWidgets {
         wrapper: after_capture_wrapper,
         screenshot_after_capture_checks,
+        rec_copy_to_clipboard,
+        rec_save,
         rec_open_video_editor,
     }
 }

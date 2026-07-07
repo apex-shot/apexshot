@@ -48,6 +48,8 @@ pub struct SaveInputs {
     pub screenshot_copy_to_clipboard: CheckButton,
     pub screenshot_save: CheckButton,
     pub screenshot_open_annotate: CheckButton,
+    pub rec_copy_to_clipboard: CheckButton,
+    pub rec_save: CheckButton,
     pub rec_open_video_editor: CheckButton,
     pub quick_access_position: ComboBoxText,
     pub quick_access_multi_display: CheckButton,
@@ -187,6 +189,8 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.after_capture_copy_file_to_clipboard = inputs.screenshot_copy_to_clipboard.is_active();
     config.after_capture_save = inputs.screenshot_save.is_active();
     config.after_capture_open_annotate = inputs.screenshot_open_annotate.is_active();
+    config.rec_after_capture_copy_to_clipboard = inputs.rec_copy_to_clipboard.is_active();
+    config.rec_after_capture_save = inputs.rec_save.is_active();
     config.rec_video_open_editor = inputs.rec_open_video_editor.is_active();
     config.quick_access_position = combo_value(&inputs.quick_access_position, "Left");
     config.quick_access_multi_display = inputs.quick_access_multi_display.is_active();

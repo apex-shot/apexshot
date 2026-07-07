@@ -11,6 +11,8 @@ pub const DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS: bool = true;
 pub const DEFAULT_AFTER_CAPTURE_COPY_FILE_TO_CLIPBOARD: bool = false;
 pub const DEFAULT_AFTER_CAPTURE_SAVE: bool = true;
 pub const DEFAULT_AFTER_CAPTURE_OPEN_ANNOTATE: bool = false;
+pub const DEFAULT_REC_AFTER_CAPTURE_COPY_TO_CLIPBOARD: bool = false;
+pub const DEFAULT_REC_AFTER_CAPTURE_SAVE: bool = true;
 pub const QUICK_ACCESS_OVERLAY_SCALE_MIN: f64 = 0.5;
 pub const QUICK_ACCESS_OVERLAY_SCALE_BASELINE: f64 = 1.0;
 pub const QUICK_ACCESS_OVERLAY_SCALE_MAX: f64 = 1.5;
@@ -32,6 +34,8 @@ pub struct AppConfig {
     pub after_capture_copy_file_to_clipboard: bool,
     pub after_capture_save: bool,
     pub after_capture_open_annotate: bool,
+    pub rec_after_capture_copy_to_clipboard: bool,
+    pub rec_after_capture_save: bool,
     // Recording General tab settings
     pub rec_controls: bool,
     pub rec_display_time: bool,
@@ -158,6 +162,8 @@ impl Default for AppConfig {
             after_capture_copy_file_to_clipboard: DEFAULT_AFTER_CAPTURE_COPY_FILE_TO_CLIPBOARD,
             after_capture_save: DEFAULT_AFTER_CAPTURE_SAVE,
             after_capture_open_annotate: DEFAULT_AFTER_CAPTURE_OPEN_ANNOTATE,
+            rec_after_capture_copy_to_clipboard: DEFAULT_REC_AFTER_CAPTURE_COPY_TO_CLIPBOARD,
+            rec_after_capture_save: DEFAULT_REC_AFTER_CAPTURE_SAVE,
             rec_controls: true,
             rec_display_time: false,
             rec_hidpi: true,

@@ -26,6 +26,7 @@ struct XbV3Response {
     message: Option<String>,
     url: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     raw_url: Option<String>,
 }
 

@@ -16,23 +16,36 @@ use gtk4::{
     FileChooserAction, FileChooserNative, FileFilter, Image, Label, MenuButton, Orientation,
     Overlay, ResponseType, Revealer, Scale, Spinner,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub fn open(metadata: VideoMetadata) -> anyhow::Result<()> {
-    let state = Arc::new(Mutex::new(VideoEditState::new(metadata)));
-    let thumbnail_paths = {
-        let state_guard = state.lock().unwrap();
-        ffmpeg::generate_thumbnails(&state_guard.metadata).unwrap_or_default()
-    };
-    let thumbnail_dir = {
-        let state_guard = state.lock().unwrap();
-        ffmpeg::thumbnail_cache_dir(&state_guard.metadata.path)
-    };
+pub fn open_empty() -> anyhow::Result<()> {
+    let app = Application::builder()
+        .application_id(crate::app_identity::app_id())
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+
+    let initial = InitialVideo::None;
+    app.connect_activate(move |application| {
+        crate::capture::editor::ui_support::install_editor_css();
+        install_recording_editor_css();
+        build_window(application, initial.clone());
+    });
+
+    let _ = app.run_with_args::<String>(&[]);
+    Ok(())
+}
+
+/// Open the editor with an empty window and load the video asynchronously,
+/// showing a loading spinner while ffprobe + thumbnail generation run in
+/// the background. This avoids a long frozen gap before the window appears
+/// for large recordings.
+pub fn open_with_path(path: PathBuf) -> anyhow::Result<()> {
+    let thumbnail_dir = ffmpeg::thumbnail_cache_dir(&path);
 
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
@@ -44,36 +57,24 @@ pub fn open(metadata: VideoMetadata) -> anyhow::Result<()> {
         let _ = std::fs::remove_dir_all(&thumbnail_dir_for_cleanup);
     });
 
+    let initial = InitialVideo::AsyncLoad(path);
     app.connect_activate(move |application| {
         crate::capture::editor::ui_support::install_editor_css();
         install_recording_editor_css();
-        build_window(application, Some((state.clone(), thumbnail_paths.clone())));
+        build_window(application, initial.clone());
     });
 
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }
 
-pub fn open_empty() -> anyhow::Result<()> {
-    let app = Application::builder()
-        .application_id(crate::app_identity::app_id())
-        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
-        .build();
-
-    app.connect_activate(move |application| {
-        crate::capture::editor::ui_support::install_editor_css();
-        install_recording_editor_css();
-        build_window(application, None);
-    });
-
-    let _ = app.run_with_args::<String>(&[]);
-    Ok(())
+#[derive(Clone)]
+enum InitialVideo {
+    None,
+    AsyncLoad(PathBuf),
 }
 
-fn build_window(
-    application: &Application,
-    initial_video: Option<(Arc<Mutex<VideoEditState>>, Vec<PathBuf>)>,
-) {
+fn build_window(application: &Application, initial_video: InitialVideo) {
     let window = ApplicationWindow::builder()
         .application(application)
         .title("ApexShot Recording Editor")
@@ -149,17 +150,43 @@ fn build_window(
     loading_revealer.set_reveal_child(false);
     overlay.add_overlay(&loading_revealer);
 
+    let loading = Rc::new(Cell::new(false));
+    let open_button_slot = Rc::new(RefCell::new(None::<Button>));
+
     match initial_video {
-        Some((state, thumbnails)) => {
-            populate_loaded_root(&root, &window, state, thumbnails, exporting.clone());
-        }
-        None => {
+        InitialVideo::None => {
             populate_empty_root(
                 &root,
                 &window,
                 exporting.clone(),
                 &loading_revealer,
                 &loading_spinner,
+                open_button_slot.clone(),
+                loading.clone(),
+            );
+        }
+        InitialVideo::AsyncLoad(path) => {
+            populate_empty_root(
+                &root,
+                &window,
+                exporting.clone(),
+                &loading_revealer,
+                &loading_spinner,
+                open_button_slot.clone(),
+                loading.clone(),
+            );
+            if let Some(btn) = open_button_slot.borrow().as_ref() {
+                btn.set_sensitive(false);
+            }
+            load_video_async(
+                path,
+                &root,
+                &window,
+                exporting.clone(),
+                &loading_revealer,
+                &loading_spinner,
+                open_button_slot.clone(),
+                loading.clone(),
             );
         }
     }
@@ -169,20 +196,29 @@ fn build_window(
     let drop_target = DropTarget::new(gio::File::static_type(), gdk::DragAction::COPY);
     let drop_revealer_enter = drop_revealer.clone();
     let drop_revealer_leave = drop_revealer.clone();
+    let root_ref = root.clone();
+    let window_ref = window.clone();
+    let exporting_for_drop = exporting.clone();
+    let loading_revealer_drop = loading_revealer.clone();
+    let loading_spinner_drop = loading_spinner.clone();
+    let open_button_slot_drop = open_button_slot.clone();
+    let loading_drop = loading.clone();
+    let loading_drop_enter = loading.clone();
     drop_target.connect_enter(move |_, _x, _y| {
+        if loading_drop_enter.get() {
+            return gdk::DragAction::empty();
+        }
         drop_revealer_enter.set_reveal_child(true);
         gdk::DragAction::COPY
     });
     drop_target.connect_leave(move |_| {
         drop_revealer_leave.set_reveal_child(false);
     });
-    let root_ref = root.clone();
-    let window_ref = window.clone();
-    let exporting_for_drop = exporting.clone();
-    let loading_revealer_drop = loading_revealer.clone();
-    let loading_spinner_drop = loading_spinner.clone();
     drop_target.connect_drop(move |_, value, _x, _y| {
         drop_revealer.set_reveal_child(false);
+        if loading_drop.get() {
+            return false;
+        }
         let Ok(file) = value.get::<gio::File>() else {
             return false;
         };
@@ -199,6 +235,8 @@ fn build_window(
             exporting_for_drop.clone(),
             &loading_revealer_drop,
             &loading_spinner_drop,
+            open_button_slot_drop.clone(),
+            loading_drop.clone(),
         );
         true
     });
@@ -262,6 +300,8 @@ fn populate_empty_root(
     exporting: Rc<Cell<bool>>,
     loading_revealer: &Revealer,
     loading_spinner: &Spinner,
+    open_button_slot: Rc<RefCell<Option<Button>>>,
+    loading: Rc<Cell<bool>>,
 ) {
     while let Some(child) = root.first_child() {
         root.remove(&child);
@@ -276,6 +316,8 @@ fn populate_empty_root(
         exporting.clone(),
         loading_revealer,
         loading_spinner,
+        open_button_slot.clone(),
+        loading.clone(),
     );
     root.append(&empty_preview);
 
@@ -291,6 +333,8 @@ fn build_empty_preview_area(
     exporting: Rc<Cell<bool>>,
     loading_revealer: &Revealer,
     loading_spinner: &Spinner,
+    open_button_slot: Rc<RefCell<Option<Button>>>,
+    loading: Rc<Cell<bool>>,
 ) -> GtkBox {
     let frame = GtkBox::new(Orientation::Vertical, 0);
     frame.add_css_class("recording-editor-preview-frame");
@@ -333,6 +377,8 @@ fn build_empty_preview_area(
     let window_for_open = window.clone();
     let loading_revealer_for_open = loading_revealer.clone();
     let loading_spinner_for_open = loading_spinner.clone();
+    let open_button_slot_for_open = open_button_slot.clone();
+    let loading_for_open = loading.clone();
     open_button.connect_clicked(move |_| {
         show_open_video_dialog(
             &root_for_open,
@@ -340,8 +386,12 @@ fn build_empty_preview_area(
             exporting.clone(),
             &loading_revealer_for_open,
             &loading_spinner_for_open,
+            open_button_slot_for_open.clone(),
+            loading_for_open.clone(),
         );
     });
+
+    *open_button_slot.borrow_mut() = Some(open_button.clone());
 
     center.append(&icon);
     center.append(&title);
@@ -575,6 +625,8 @@ fn show_open_video_dialog(
     exporting: Rc<Cell<bool>>,
     loading_revealer: &Revealer,
     loading_spinner: &Spinner,
+    open_button_slot: Rc<RefCell<Option<Button>>>,
+    loading: Rc<Cell<bool>>,
 ) {
     let chooser = FileChooserNative::new(
         Some("Open video"),
@@ -594,6 +646,8 @@ fn show_open_video_dialog(
     let window_ref = window.clone();
     let loading_revealer_ref = loading_revealer.clone();
     let loading_spinner_ref = loading_spinner.clone();
+    let open_button_slot_ref = open_button_slot.clone();
+    let loading_ref = loading.clone();
     chooser.connect_response(move |dialog, response| {
         if response == ResponseType::Accept {
             if let Some(file) = dialog.file() {
@@ -606,6 +660,8 @@ fn show_open_video_dialog(
                             exporting.clone(),
                             &loading_revealer_ref,
                             &loading_spinner_ref,
+                            open_button_slot_ref.clone(),
+                            loading_ref.clone(),
                         );
                     }
                 }
@@ -623,10 +679,16 @@ fn load_video_async(
     exporting: Rc<Cell<bool>>,
     loading_revealer: &Revealer,
     loading_spinner: &Spinner,
+    open_button_slot: Rc<RefCell<Option<Button>>>,
+    loading: Rc<Cell<bool>>,
 ) {
+    loading.set(true);
     loading_revealer.set_reveal_child(true);
     loading_spinner.set_visible(true);
     loading_spinner.start();
+    if let Some(btn) = open_button_slot.borrow().as_ref() {
+        btn.set_sensitive(false);
+    }
 
     let (sender, receiver) = mpsc::channel::<Result<(VideoMetadata, Vec<PathBuf>), String>>();
     std::thread::spawn(move || {
@@ -643,12 +705,21 @@ fn load_video_async(
     let window = window.clone();
     let loading_revealer = loading_revealer.clone();
     let loading_spinner = loading_spinner.clone();
+    let open_button_slot = open_button_slot.clone();
+    let loading = loading.clone();
     glib::timeout_add_local(Duration::from_millis(100), move || {
+        let stop_loading = || {
+            loading.set(false);
+            loading_revealer.set_reveal_child(false);
+            loading_spinner.stop();
+            loading_spinner.set_visible(false);
+            if let Some(btn) = open_button_slot.borrow().as_ref() {
+                btn.set_sensitive(true);
+            }
+        };
         match receiver.try_recv() {
             Ok(Ok((metadata, thumbnails))) => {
-                loading_revealer.set_reveal_child(false);
-                loading_spinner.stop();
-                loading_spinner.set_visible(false);
+                stop_loading();
 
                 let state = Arc::new(Mutex::new(VideoEditState::new(metadata)));
                 {
@@ -660,9 +731,7 @@ fn load_video_async(
                 glib::ControlFlow::Break
             }
             Ok(Err(err)) => {
-                loading_revealer.set_reveal_child(false);
-                loading_spinner.stop();
-                loading_spinner.set_visible(false);
+                stop_loading();
                 dialogs::show_error(
                     &window,
                     "Failed to open video",
@@ -673,9 +742,7 @@ fn load_video_async(
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => {
-                loading_revealer.set_reveal_child(false);
-                loading_spinner.stop();
-                loading_spinner.set_visible(false);
+                stop_loading();
                 glib::ControlFlow::Break
             }
         }
