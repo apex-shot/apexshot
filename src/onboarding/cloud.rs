@@ -53,7 +53,7 @@ pub fn build(content: &GtkBox) {
     options_title.set_margin_bottom(4);
     options_box.append(&options_title);
 
-    let apexshot_label = Label::new(Some("ApexShot Cloud — hosted by us, ready out of the box"));
+    let apexshot_label = Label::new(Some("ApexShot Cloud (hosted by us, ready out of the box)"));
     apexshot_label.set_halign(Align::Start);
     apexshot_label.set_margin_start(40);
     apexshot_label.set_margin_end(40);
@@ -62,7 +62,7 @@ pub fn build(content: &GtkBox) {
     options_box.append(&apexshot_label);
 
     let xb_label = Label::new(Some(
-        "XBackBone — self-host your own instance for full control",
+        "XBackBone (self-host your own instance for full control)",
     ));
     xb_label.set_halign(Align::Start);
     xb_label.set_margin_start(40);
@@ -75,7 +75,7 @@ pub fn build(content: &GtkBox) {
 
     // Pointer to settings
     let hint = Label::new(Some(
-        "Use whichever you want — configure it later in Settings → Cloud.",
+        "Use whichever you want, configure it later in Settings > Cloud.",
     ));
     hint.set_halign(Align::Center);
     hint.set_wrap(true);

@@ -209,7 +209,7 @@ const SETTINGS_CSS: &str = r#"
                 opacity: 1;
             }
 
-            button.settings-primary-btn {
+            .editor-root button.settings-primary-btn {
                 background-image: none;
                 background-color: #b05c38;
                 border: none;
@@ -222,7 +222,7 @@ const SETTINGS_CSS: &str = r#"
                 box-shadow: none;
             }
 
-            button.settings-primary-btn:hover {
+            .editor-root button.settings-primary-btn:hover {
                 background-image: none;
                 background-color: #c06540;
                 box-shadow: none;
