@@ -92,14 +92,26 @@ fn upload_v4(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadErro
     let body = build_multipart(&boundary, "file", &filename, &content_type, &file_bytes);
 
     let endpoint = format!("{url}/api/v1/upload");
-    let resp = ureq::post(&endpoint)
+    let send_result = ureq::post(&endpoint)
         .set("Authorization", &format!("Bearer {token}"))
         .set(
             "Content-Type",
             &format!("multipart/form-data; boundary={boundary}"),
         )
-        .send_bytes(&body)
-        .map_err(map_http_error_v4)?;
+        .send_bytes(&body);
+
+    // A 404 on the 4.x route means the instance is 3.x (the route does not
+    // exist). Surface it as a marker the dispatcher recognises so it can fall
+    // back to the 3.x upload path. Any other failure is a real error.
+    let resp = match send_result {
+        Ok(r) => r,
+        Err(ureq::Error::Status(404, _)) => {
+            return Err(UploadError::HttpRequest(
+                "404 Not Found: instance has no 4.x upload API".to_string(),
+            ));
+        }
+        Err(e) => return Err(map_http_error_v4(e)),
+    };
 
     let parsed: XbV4Response = resp
         .into_json()
@@ -276,8 +288,16 @@ fn test_connection_v3(config: &AppConfig) -> Result<(), String> {
     match result {
         Ok(_) => Ok(()),
         Err(ureq::Error::Status(400, _)) => Ok(()), // "Request without file attached."
-        Err(ureq::Error::Status(404, _)) => {
-            Err("Upload endpoint not found. Check the instance URL.".into())
+        Err(ureq::Error::Status(404, resp)) => {
+            // XBackBone 3.x returns 404 both when the token is rejected
+            // (`{message: "Token not found."}`) and when the route is absent.
+            // Distinguish them so the user gets an actionable message.
+            match parse_v3_message(resp).as_deref() {
+                Some(m) if m.to_lowercase().contains("token") => {
+                    Err("Token rejected. Check the API token.".into())
+                }
+                _ => Err("Upload endpoint not found. Check the instance URL.".into()),
+            }
         }
         Err(ureq::Error::Status(401, _)) => Err("Account disabled on the instance.".into()),
         Err(ureq::Error::Status(503, _)) => Err("Instance is under maintenance.".into()),
