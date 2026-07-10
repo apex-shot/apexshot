@@ -173,6 +173,7 @@ pub fn run_recording_controls(
 
     let app = Application::builder()
         .application_id("com.apexshot.recording")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     let stop_tx_activate = stop_tx.clone();
@@ -198,6 +199,7 @@ pub fn run_recording_countdown_bar(
 ) -> Result<bool, StopOverlayError> {
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -232,6 +234,7 @@ pub fn run_recording_ui(
 
     let app = Application::builder()
         .application_id("com.apexshot.recording")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     app.connect_activate(move |application| {
@@ -978,7 +981,7 @@ fn setup_countdown_window(
 
     glib::timeout_add_local(Duration::from_secs(1), move || {
         let next = remaining.get() - 1;
-        if next <= 0 {
+        if next <= 1 {
             if !unified_mode {
                 for dim_window in &dim_window_weaks {
                     if let Some(window) = dim_window.upgrade() {
@@ -986,27 +989,28 @@ fn setup_countdown_window(
                     }
                 }
                 if let Some(window) = window_weak.upgrade() {
-                    if let Some(app) = window.application() {
-                        app.quit();
-                    } else {
-                        window.close();
-                    }
-                } else if let Some(app) = app_weak.upgrade() {
-                    app.quit();
+                    window.set_visible(false);
                 }
+                let app_weak = app_weak.clone();
+                glib::timeout_add_local_once(Duration::from_millis(1100), move || {
+                    if let Some(app) = app_weak.upgrade() {
+                        app.quit();
+                    }
+                });
             } else {
                 if let Some(window) = window_weak.upgrade() {
                     window.close();
                 }
-                // Show controls window after countdown finishes
-                if let Some(controls) = controls_window.as_ref() {
-                    controls.set_visible(true);
-                }
-                println!("ready");
-                {
+                let controls_window = controls_window.clone();
+                glib::timeout_add_local_once(Duration::from_millis(1100), move || {
+                    // Keep the final "1" second hidden so it cannot leak into the recording.
+                    if let Some(controls) = controls_window.as_ref() {
+                        controls.set_visible(true);
+                    }
+                    println!("ready");
                     use std::io::Write;
                     let _ = std::io::stdout().flush();
-                }
+                });
             }
             return glib::ControlFlow::Break;
         }

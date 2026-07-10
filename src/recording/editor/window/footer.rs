@@ -25,6 +25,9 @@ pub(super) fn build_footer(
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
 
+    let upload = Button::with_label("Upload");
+    upload.set_has_frame(false);
+    upload.add_css_class("recording-editor-secondary-button");
     let trim_only = Button::with_label("Save Trim");
     trim_only.set_has_frame(false);
     trim_only.add_css_class("recording-editor-secondary-button");
@@ -35,6 +38,7 @@ pub(super) fn build_footer(
     spinner.set_visible(false);
 
     let export_controls = vec![
+        upload.clone().upcast::<gtk4::Widget>(),
         trim_only.clone().upcast::<gtk4::Widget>(),
         convert.clone().upcast::<gtk4::Widget>(),
         controls.dimension_button.clone().upcast::<gtk4::Widget>(),
@@ -45,6 +49,14 @@ pub(super) fn build_footer(
         controls.audio_mono.clone().upcast::<gtk4::Widget>(),
         controls.audio_muted.clone().upcast::<gtk4::Widget>(),
     ];
+
+    wire_upload_button(
+        &upload,
+        state.clone(),
+        export_controls.clone(),
+        spinner.clone(),
+        exporting.clone(),
+    );
 
     wire_export_button(
         &trim_only,
@@ -65,6 +77,7 @@ pub(super) fn build_footer(
         exporting,
     );
 
+    footer.append(&upload);
     footer.append(&spacer);
     footer.append(&estimate_label);
     footer.append(&spinner);
@@ -79,6 +92,95 @@ pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>,
         "Estimated file size: ~{}",
         format_size(state.estimated_size_bytes(trim_only))
     ));
+}
+
+fn wire_upload_button(
+    button: &Button,
+    state: Arc<Mutex<VideoEditState>>,
+    controls: Vec<gtk4::Widget>,
+    spinner: Spinner,
+    exporting: Rc<Cell<bool>>,
+) {
+    button.connect_clicked(move |_| {
+        if exporting.get() {
+            return;
+        }
+
+        let config = crate::config::load_config();
+        if !crate::cloud::upload::is_configured(&config) {
+            let (title, body) = crate::cloud::upload::not_configured_notification(&config);
+            crate::utils::notify::desktop_notification(title, body);
+            return;
+        }
+
+        exporting.set(true);
+        spinner.set_visible(true);
+        spinner.start();
+        for control in &controls {
+            control.set_sensitive(false);
+        }
+
+        let path = state.lock().unwrap().metadata.path.clone();
+        let (sender, receiver) = std::sync::mpsc::channel::<Result<String, String>>();
+        std::thread::spawn(move || {
+            let result = crate::cloud::upload::upload_file(&config, &path)
+                .map(|result| result.share_url)
+                .map_err(|err| err.to_string());
+            let _ = sender.send(result);
+        });
+
+        let controls = controls.clone();
+        let spinner = spinner.clone();
+        let exporting = exporting.clone();
+        glib::timeout_add_local(Duration::from_millis(100), move || {
+            match receiver.try_recv() {
+                Ok(result) => {
+                    exporting.set(false);
+                    spinner.stop();
+                    spinner.set_visible(false);
+                    for control in &controls {
+                        control.set_sensitive(true);
+                    }
+                    match result {
+                        Ok(share_url) => {
+                            if let Err(e) =
+                                crate::utils::clipboard::copy_text_to_clipboard(&share_url)
+                            {
+                                eprintln!("Failed to copy share link to clipboard: {e}");
+                                crate::utils::notify::desktop_notification(
+                                    "Upload complete",
+                                    &format!("Share link: {share_url}"),
+                                );
+                            } else {
+                                crate::utils::notify::desktop_notification(
+                                    "Upload complete",
+                                    "Share link copied to clipboard",
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            crate::utils::notify::desktop_notification("Upload failed", &err);
+                        }
+                    }
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    exporting.set(false);
+                    spinner.stop();
+                    spinner.set_visible(false);
+                    for control in &controls {
+                        control.set_sensitive(true);
+                    }
+                    crate::utils::notify::desktop_notification(
+                        "Upload failed",
+                        "ApexShot lost contact with the upload worker.",
+                    );
+                    glib::ControlFlow::Break
+                }
+            }
+        });
+    });
 }
 
 fn wire_export_button(

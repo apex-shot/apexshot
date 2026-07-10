@@ -95,7 +95,8 @@ pub struct SaveInputs {
     pub adv_clipboard_mode: ComboBoxText,
     pub adv_ocr_language: ComboBoxText,
     pub adv_ocr_keep_line_breaks: CheckButton,
-    pub cloud_destination: ComboBoxText,
+    pub cloud_apexshot: CheckButton,
+    pub cloud_xbackbone: CheckButton,
     pub xbackbone_url: Entry,
     pub xbackbone_api_token: Entry,
 }
@@ -259,7 +260,11 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.adv_ocr_language = combo_value(&inputs.adv_ocr_language, "eng");
     config.adv_ocr_keep_line_breaks = inputs.adv_ocr_keep_line_breaks.is_active();
 
-    config.cloud_destination = combo_value(&inputs.cloud_destination, "apexshot");
+    config.cloud_destination = if inputs.cloud_xbackbone.is_active() {
+        "xbackbone".to_string()
+    } else {
+        "apexshot".to_string()
+    };
     config.xbackbone_url = inputs.xbackbone_url.text().to_string();
     config.xbackbone_api_token = inputs.xbackbone_api_token.text().to_string();
 

@@ -223,7 +223,7 @@ fn upload_v3(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadErro
     let boundary = boundary();
     let body = build_multipart_v3(
         &boundary,
-        "file",
+        "upload",
         &filename,
         &content_type,
         &file_bytes,

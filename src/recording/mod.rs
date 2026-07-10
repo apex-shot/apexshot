@@ -1142,6 +1142,7 @@ fn record_wayland_with_ffmpeg_sync(
     let mut frames_written = 0u64;
     let frame_interval = std::time::Duration::from_secs_f64(1.0 / fps as f64);
     let mut next_frame_at: Option<std::time::Instant> = None;
+    let mut last_pixels: Option<Vec<u8>> = None;
     let mut paused = false;
 
     loop {
@@ -1193,35 +1194,45 @@ fn record_wayland_with_ffmpeg_sync(
             continue;
         }
 
-        // Try to get a frame from PipeWire
-        let frame = match capture.try_recv_frame() {
-            Ok(Some(f)) => f,
-            Ok(None) => {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-                continue;
+        // Keep the latest PipeWire frame, but write to ffmpeg on our own clock.
+        // Some compositors only deliver changed frames; without duplicates a
+        // 16s mostly-static recording can encode as a 4s video at 30fps.
+        match capture.try_recv_frame() {
+            Ok(Some(frame)) => {
+                last_pixels = Some(if let Some(crop) = wayland_source.crop {
+                    crop_rgba_frame(&frame, crop)?
+                } else {
+                    frame.pixels
+                });
+                if next_frame_at.is_none() {
+                    next_frame_at = Some(std::time::Instant::now());
+                }
             }
+            Ok(None) => {}
             Err(e) => {
                 eprintln!("PipeWire frame error: {e}");
                 break;
             }
+        }
+
+        let Some(pixels) = last_pixels.as_ref() else {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            continue;
         };
 
         let now = std::time::Instant::now();
-        if let Some(deadline) = next_frame_at {
-            if now < deadline {
-                continue;
-            }
-        }
-        next_frame_at = Some(now + frame_interval);
-
-        let pixels = if let Some(crop) = wayland_source.crop {
-            crop_rgba_frame(&frame, crop)?
-        } else {
-            frame.pixels
+        let Some(deadline) = next_frame_at else {
+            next_frame_at = Some(now);
+            continue;
         };
+        if now < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            continue;
+        }
+        next_frame_at = Some(deadline + frame_interval);
 
         // Write frame to ffmpeg stdin
-        if let Err(e) = stdin.write_all(&pixels) {
+        if let Err(e) = stdin.write_all(pixels) {
             if e.kind() == std::io::ErrorKind::BrokenPipe {
                 eprintln!("ffmpeg pipe broken (likely exited)");
             } else {
@@ -2512,12 +2523,14 @@ pub async fn run_recording_with_native_controls(
     config: RecordingConfig,
     params: RecordingControlsParams,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    let prepared_backend =
-        if is_wlroots_session() || config.output_path.extension().is_some_and(|e| e == "gif") {
-            None
-        } else {
-            Some(prepare_recording_backend(config.clone()).await?)
-        };
+    let prepared_backend = if params.countdown_enabled
+        || is_wlroots_session()
+        || config.output_path.extension().is_some_and(|e| e == "gif")
+    {
+        None
+    } else {
+        Some(prepare_recording_backend(config.clone()).await?)
+    };
 
     let session_id = format!(
         "recording-{}-{}",
@@ -2683,12 +2696,14 @@ async fn run_recording_with_shell_controls(
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     visibility_policy: crate::gnome_shell::RecordingControlsVisibilityPolicy,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    let mut prepared_backend =
-        if is_wlroots_session() || config.output_path.extension().is_some_and(|e| e == "gif") {
-            None
-        } else {
-            Some(prepare_recording_backend(config.clone()).await?)
-        };
+    let mut prepared_backend = if params.countdown_enabled
+        || is_wlroots_session()
+        || config.output_path.extension().is_some_and(|e| e == "gif")
+    {
+        None
+    } else {
+        Some(prepare_recording_backend(config.clone()).await?)
+    };
 
     let _shell_mask = if params.use_shell_mask {
         match crate::gnome_shell::show_recording_mask(crate::gnome_shell::RecordingMaskGeometry {

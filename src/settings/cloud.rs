@@ -1,13 +1,12 @@
 use crate::config::AppConfig;
 use gtk4::prelude::*;
-use gtk4::{
-    glib, Align, Box as GtkBox, Button, CheckButton, ComboBoxText, Entry, Label, Orientation,
-};
+use gtk4::{glib, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 use std::process::Command;
 
 pub struct CloudSettingsWidgets {
     pub section: GtkBox,
-    pub destination_combo: ComboBoxText,
+    pub apexshot_check: CheckButton,
+    pub xbackbone_check: CheckButton,
     pub xb_url_entry: Entry,
     pub xb_token_entry: Entry,
 }
@@ -52,24 +51,22 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
 
     let dest_frame = build_frame();
 
-    let destination_combo = ComboBoxText::new();
-    destination_combo.add_css_class("settings-select");
-    destination_combo.append(Some("apexshot"), "ApexShot Cloud");
-    destination_combo.append(Some("xbackbone"), "XBackBone (self-hosted)");
-    let active_id = if config.cloud_destination == "xbackbone" {
-        "xbackbone"
-    } else {
-        "apexshot"
-    };
-    destination_combo.set_active_id(Some(active_id));
+    let apexshot_check = CheckButton::with_label("ApexShot Cloud");
+    let xbackbone_check = CheckButton::with_label("XBackBone (self-hosted)");
+    let is_xb = config.cloud_destination == "xbackbone";
+    apexshot_check.set_active(!is_xb);
+    xbackbone_check.set_active(is_xb);
 
     let dest_hbox = GtkBox::new(Orientation::Horizontal, 12);
     dest_hbox.set_hexpand(true);
-    let dest_label = Label::new(Some("Upload to"));
+    let dest_label = Label::new(Some("Upload with"));
     dest_label.set_xalign(0.0);
     dest_label.set_hexpand(true);
+    let dest_actions = GtkBox::new(Orientation::Vertical, 8);
+    dest_actions.append(&apexshot_check);
+    dest_actions.append(&xbackbone_check);
     dest_hbox.append(&dest_label);
-    dest_hbox.append(&destination_combo);
+    dest_hbox.append(&dest_actions);
     dest_frame.append(&build_row!(&dest_hbox, false));
     section.append(&dest_frame);
 
@@ -81,25 +78,32 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     let xb_panel = build_xbackbone_panel(config);
     section.append(&xb_panel.container);
 
-    // Wire the destination dropdown to swap which panel is visible.
+    // Keep the two checkboxes mutually exclusive without hiding either setup panel.
     {
-        let apexshot_container = apexshot_panel.container.clone();
-        let xb_container = xb_panel.container.clone();
-        destination_combo.connect_changed(move |combo| {
-            let is_xb = combo.active_id().as_deref() == Some("xbackbone");
-            apexshot_container.set_visible(!is_xb);
-            xb_container.set_visible(is_xb);
+        let xb = xbackbone_check.clone();
+        apexshot_check.connect_toggled(move |check| {
+            if check.is_active() {
+                xb.set_active(false);
+            } else if !xb.is_active() {
+                check.set_active(true);
+            }
+        });
+    }
+    {
+        let apex = apexshot_check.clone();
+        xbackbone_check.connect_toggled(move |check| {
+            if check.is_active() {
+                apex.set_active(false);
+            } else if !apex.is_active() {
+                check.set_active(true);
+            }
         });
     }
 
-    // Apply the initial visibility based on the loaded config.
-    let is_xb = active_id == "xbackbone";
-    apexshot_panel.container.set_visible(!is_xb);
-    xb_panel.container.set_visible(is_xb);
-
     CloudSettingsWidgets {
         section,
-        destination_combo,
+        apexshot_check,
+        xbackbone_check,
         xb_url_entry: xb_panel.url_entry,
         xb_token_entry: xb_panel.token_entry,
     }
@@ -207,13 +211,9 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
             glib::source::idle_add_local(move || match receiver.try_recv() {
                 Ok(result) => {
                     if result.is_ok() {
-                        avatar_i.set_visible(false);
-                        status_i.set_text("Not connected");
-                        email_i.set_text(
-                            "Run `apexshot login` in a terminal, or click Connect below.",
+                        set_apexshot_status(
+                            &avatar_i, &status_i, &email_i, &connect_i, &logout_i, "",
                         );
-                        connect_i.set_visible(true);
-                        logout_i.set_visible(false);
                     }
                     logout_i.set_sensitive(true);
                     glib::ControlFlow::Break
@@ -223,7 +223,48 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
         });
     }
 
+    // Refresh while settings stays open, so a terminal login updates without reopening Settings.
+    {
+        let avatar_c = avatar.clone();
+        let status_c = status_label.clone();
+        let email_c = email_label.clone();
+        let connect_c = connect_btn.clone();
+        let logout_c = logout_btn.clone();
+        glib::timeout_add_seconds_local(2, move || {
+            let email = crate::config::load_config().cloud_user_email;
+            set_apexshot_status(
+                &avatar_c, &status_c, &email_c, &connect_c, &logout_c, &email,
+            );
+            glib::ControlFlow::Continue
+        });
+    }
+
     ApexShotPanel { container }
+}
+
+fn set_apexshot_status(
+    avatar: &Label,
+    status_label: &Label,
+    email_label: &Label,
+    connect_btn: &Button,
+    logout_btn: &Button,
+    email: &str,
+) {
+    let is_connected = !email.is_empty();
+    avatar.set_text(&initial(email));
+    avatar.set_visible(is_connected);
+    status_label.set_text(if is_connected {
+        "Connected"
+    } else {
+        "Not connected"
+    });
+    email_label.set_text(if is_connected {
+        email
+    } else {
+        "Run `apexshot login` in a terminal, or click Connect below."
+    });
+    connect_btn.set_visible(!is_connected);
+    logout_btn.set_visible(is_connected);
 }
 
 struct XBackbonePanel {

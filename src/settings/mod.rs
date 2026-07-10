@@ -484,7 +484,8 @@ fn build_settings_window(app: &Application) {
         adv_clipboard_mode: screenshots.clipboard_mode_input.clone(),
         adv_ocr_language: advanced.ocr_lang_input.clone(),
         adv_ocr_keep_line_breaks: advanced.ocr_line_breaks_check.clone(),
-        cloud_destination: cloud.destination_combo.clone(),
+        cloud_apexshot: cloud.apexshot_check.clone(),
+        cloud_xbackbone: cloud.xbackbone_check.clone(),
         xbackbone_url: cloud.xb_url_entry.clone(),
         xbackbone_api_token: cloud.xb_token_entry.clone(),
     });
