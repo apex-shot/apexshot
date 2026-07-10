@@ -32,8 +32,8 @@ Thank you for your interest in contributing to ApexShot! This document provides 
 - **PipeWire**, **Tesseract**, **xkbcommon**, **libxtst**, **libwayland**,
   **libdbus-1**, **pkg-config**.
 - **Node.js ≥ 20** is needed *only* if you want to run the JS syntax
-  check locally (`node --check gnome-extension/*.js`); the GNOME-side
-  tests themselves run inside GJS, not Node.
+  check locally (`pnpm check:gnome` or `node --check gnome-extension/*.js`);
+  the GNOME-side tests themselves run inside GJS, not Node.
 
 The full list of run-time package names that ship via the `.deb` is in
 `Cargo.toml` under `[package.metadata.deb] depends = ...`. The full list
@@ -150,7 +150,7 @@ The extension is plain ES modules in `gnome-extension/`. Two workflows:
 
 ```bash
 # Quick syntax check (the same one CI runs):
-node --check gnome-extension/*.js
+pnpm check:gnome
 
 # Live-install into your session (works on GNOME 45–49):
 make -C gnome-extension install     # if a Makefile is present, otherwise:
@@ -199,7 +199,7 @@ root, all of which CI honours:
 ```bash
 cargo fmt --all                 # format
 cargo fmt --all -- --check      # CI gate (must pass before merge)
-cargo clippy --workspace --all-targets    # surfaces warnings
+cargo clippy --workspace --all-targets    # CI lint command; surfaces warnings
 ```
 
 The CI lint job currently runs `cargo clippy` *without* `-D warnings`
@@ -226,7 +226,8 @@ clang-format -i capture-overlay/src/*.{cpp,h}
 ### JavaScript (GNOME extension)
 
 ```bash
-node --check gnome-extension/*.js   # CI gate
+pnpm check:gnome                    # CI-equivalent syntax check
+node --check gnome-extension/*.js    # same check without package scripts
 ```
 
 - ES modules, modern (ES2022+) syntax — GNOME Shell ≥ 45 ships a recent
@@ -314,6 +315,19 @@ knows extra eyes might be useful before merging.
 
 4. Create a pull request on GitHub
 
+### Quick PR Paths
+
+Use the smallest relevant verification set for the subsystem you touched:
+
+- **Docs-only change:** preview the Markdown and link to the changed docs in
+  the PR description. No build is required unless examples changed.
+- **Rust-only change:** run `cargo fmt --all -- --check`, `cargo clippy
+  --workspace --all-targets`, and the most relevant `cargo test` target.
+- **GNOME extension-only change:** run `pnpm check:gnome` and include any
+  manual GNOME Shell validation if the change affects runtime behavior.
+- **Packaging or installer change:** run the relevant script/package build in
+  a disposable VM or container when possible, and describe the distro tested.
+
 ### Commit Messages
 
 Follow conventional commits format:
@@ -362,6 +376,21 @@ GitHub will offer two structured templates when you click **New issue**:
 
 For security issues, please follow [`SECURITY.md`](SECURITY.md) and
 **do not** open a public GitHub issue.
+
+### Privacy-safe reports
+
+ApexShot handles screenshots, recordings, audio devices, clipboard contents,
+browser pages, and XDG portal restore tokens. Please keep public issues safe:
+
+- Do not paste API tokens, cloud credentials, portal restore-token files, or
+  full `.env` / config files.
+- Redact private window titles, file paths, usernames, URLs, QR codes,
+  clipboard contents, and captured screen/audio content before uploading logs,
+  screenshots, or recordings.
+- Prefer short excerpts around the error instead of full terminal or journal
+  dumps. If full logs are needed, attach a redacted file.
+- Use [`SECURITY.md`](SECURITY.md) for anything that could expose another
+  user's screen, microphone, speaker output, clipboard, or browser data.
 
 ## Areas for Contribution
 

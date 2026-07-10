@@ -1,16 +1,18 @@
 # Rust / Cargo
 /target/
-Cargo.lock
 *.rs.bk
 
 # Build artifacts
 *.deb
+*.rpm
 /build/
 /capture-overlay/build/
 /capture-overlay/dist/
 /capture-overlay/out/
 .tmp-capture-overlay-build/
 apexshot-gnome-integration@apexshot.github.io.zip
+/gnome-extension/apexshot-gnome-integration.zip
+/web-scroll-extension/apexshot-web-scroll-extension.zip
 /packaging/deb/apexshot-capture
 
 # Native/C++ build outputs
@@ -75,16 +77,13 @@ backend/target
 /ocrs-cli/
 /ocrs-extension/
 
-# Personal planning documents
+# Personal scratch files
 scripts/youtube-video-script.md
 flameshot/
 reddit-opensource-post.md
 reddit-reply.txt
 src/capture/editor/window-refactor-plan.md
-gnome-extension/SUBMISSION_GUIDE.md
-web-scroll-extension/STORE_LISTING.md
 docs/superpowers/
-ANNOUNCEMENTS.md
 CLICK_KEYSTROKE_REMOVAL_PLAN.md
 CLICK_KEYSTROKE_REMOVAL_IMPLEMENTATION_PLAN.md
 fedora-kde-reply.txt

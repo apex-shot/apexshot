@@ -1,4 +1,9 @@
 {
+	"private": true,
+	"scripts": {
+		"check:gnome": "node --check gnome-extension/*.js",
+		"check:web-extension": "node --check web-scroll-extension/*.js"
+	},
 	"dependencies": {
 		"t3": "^0.0.22"
 	}

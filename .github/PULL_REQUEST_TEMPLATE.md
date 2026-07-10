@@ -24,11 +24,11 @@ parts that don't apply.
 <!--
 List the verification you ran. Paste copy-pastable commands when possible.
 Examples:
-  - `cargo fmt --check`
-  - `cargo clippy --all-targets -- -D warnings`
-  - `cargo test --workspace`
+  - `cargo fmt --all -- --check`
+  - `cargo clippy --workspace --all-targets`
+  - `cargo test`
   - `cmake --build capture-overlay/build`
-  - `node --check gnome-extension/runtime-overlays.js`
+  - `pnpm check:gnome`
   - Manual: triggered "Crosshair capture" on GNOME Wayland, confirmed the
     portal dialog only appeared on first run.
 -->
@@ -54,12 +54,13 @@ Examples:
 
 - [ ] I read [`CONTRIBUTING.md`](../CONTRIBUTING.md) and followed the code
       style for the language I touched.
-- [ ] I ran `cargo fmt` and `cargo clippy --all-targets -- -D warnings`
-      locally (Rust changes).
+- [ ] I ran `cargo fmt --all -- --check` and `cargo clippy --workspace
+      --all-targets` locally (Rust changes).
 - [ ] I ran `cargo test` locally and all tests pass.
 - [ ] I rebuilt the C++ overlay if I changed it (`cmake --build
       capture-overlay/build`).
-- [ ] I `node --check`-ed any modified GNOME extension files (`.js`).
+- [ ] I ran `pnpm check:gnome` or `node --check` on modified GNOME extension
+      files (`.js`).
 - [ ] I updated documentation / `README.md` / inline comments where
       behaviour changed.
 - [ ] My commits follow [Conventional Commits](https://www.conventionalcommits.org/)

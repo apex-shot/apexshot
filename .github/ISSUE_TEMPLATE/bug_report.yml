@@ -12,6 +12,8 @@ body:
         - Search [existing issues](https://github.com/apex-shot/apexshot/issues?q=is%3Aissue) for duplicates.
         - Try the latest release — many bugs are fixed within days.
         - Read the *Known Limitations* section in the [README](https://github.com/apex-shot/apexshot#known-limitations).
+        - Redact private screenshots, recordings, window titles, URLs, tokens,
+          clipboard contents, and local file paths from anything you paste or attach.
 
   - type: input
     id: version
@@ -89,16 +91,18 @@ body:
     attributes:
       label: Relevant logs
       description: |
-        Run the offending command in a terminal and paste the output. For
-        the daemon, also include `journalctl --user -u apexshot.service` or
+        Run the offending command in a terminal and paste the relevant output.
+        For the daemon, also include `journalctl --user -u apexshot.service` or
         the output of `journalctl /usr/bin/gnome-shell -f | grep apexshot`.
+        Redact tokens, private URLs, usernames, local paths, clipboard data,
+        window titles, and captured screen/audio content before submitting.
       render: shell
 
   - type: textarea
     id: screenshots
     attributes:
       label: Screenshots / recordings
-      description: Drag-and-drop images or videos here if it's a visual bug.
+      description: Drag-and-drop images or videos here if it's a visual bug. Crop or blur private windows, files, QR codes, chat messages, and account details first.
 
   - type: checkboxes
     id: sanity
