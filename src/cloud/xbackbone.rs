@@ -171,7 +171,7 @@ fn test_connection_v4(config: &AppConfig) -> Result<(), V4Probe> {
     match result {
         Ok(_) => Ok(()),
         Err(ureq::Error::Status(404, _)) => Err(V4Probe::NotFound),
-        Err(ureq::Error::Status(422, _)) => Ok(()),
+        Err(ureq::Error::Status(400, _)) | Err(ureq::Error::Status(422, _)) => Ok(()),
         Err(ureq::Error::Status(401, _)) => Err(V4Probe::Error(
             "Token rejected. Check the API token.".into(),
         )),
@@ -223,7 +223,7 @@ fn upload_v3(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadErro
     let boundary = boundary();
     let body = build_multipart_v3(
         &boundary,
-        "upload",
+        "file",
         &filename,
         &content_type,
         &file_bytes,
@@ -271,7 +271,7 @@ fn test_connection_v3(config: &AppConfig) -> Result<(), String> {
     let boundary = boundary();
     let body = build_multipart_v3(
         &boundary,
-        "upload",
+        "file",
         "probe",
         "application/octet-stream",
         &[],
@@ -469,7 +469,7 @@ mod tests {
         let boundary = "apexshot-xb-test";
         let body = build_multipart_v3(
             boundary,
-            "upload",
+            "file",
             "shot.png",
             "image/png",
             &[1, 2, 3],
@@ -479,7 +479,7 @@ mod tests {
         let s = String::from_utf8_lossy(&body);
         assert!(s.contains("name=\"token\""));
         assert!(s.contains("my-secret-token"));
-        assert!(s.contains("name=\"upload\"; filename=\"shot.png\""));
+        assert!(s.contains("name=\"file\"; filename=\"shot.png\""));
         assert!(s.contains("Content-Type: image/png"));
         assert!(s.ends_with("--apexshot-xb-test--\r\n"));
     }

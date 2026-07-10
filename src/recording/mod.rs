@@ -3004,7 +3004,6 @@ mod tests {
             gif_size_idx: 2,
             optimize_gif: false,
             fullscreen: false,
-            ..RecordingRequest::default()
         };
 
         let prepared = prepare_overlay_recording_request(
@@ -3298,7 +3297,6 @@ mod tests {
             gif_size_idx: 1,
             optimize_gif: false,
             fullscreen: true,
-            ..RecordingRequest::default()
         };
 
         let prepared = prepare_overlay_recording_request(
