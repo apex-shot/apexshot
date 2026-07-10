@@ -20,6 +20,8 @@
 #include <QUrl>
 #include <QEventLoop>
 #include <QThread>
+#include <memory>
+#include <vector>
 
 #include <QCoreApplication>
 #include <cstdio>
@@ -592,16 +594,96 @@ int main(int argc, char* argv[])
     const CaptureOverlay::OverlayMode overlayMode =
       crosshairCaptureMode ? CaptureOverlay::OverlayMode::CrosshairCapture
                            : CaptureOverlay::OverlayMode::StandardArea;
-    CaptureOverlay overlay(background, nullptr, timerCaptureEnabled, initialMic, initialSpeaker, overlayMode);
-    QObject::connect(&sessionServer, &QLocalServer::newConnection, [&sessionServer, &overlay, &app]() {
+
+    const bool isWaylandSession = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
+    const QString currentDesktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
+    const bool isGnomeWaylandSession =
+      isWaylandSession &&
+      (currentDesktop.contains("GNOME", Qt::CaseInsensitive) ||
+       qEnvironmentVariableIsSet("GNOME_SETUP_DISPLAY"));
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    const bool usePerScreenOverlays =
+      isGnomeWaylandSession && screens.size() > 1;
+
+    std::vector<std::unique_ptr<CaptureOverlay>> overlayWindows;
+    overlayWindows.reserve(usePerScreenOverlays ? static_cast<size_t>(screens.size()) : 1);
+
+    auto applyInitialOverlaySettings = [&](CaptureOverlay* overlay) {
+        overlay->setSelectionCursorMode(selectionCursor);
+        overlay->setShowZoomPreview(showZoomPreview);
+        overlay->setFreezeSelectionBackground(freezeSelectionBackground);
+        overlay->setInitialCaptureDelaySeconds(initialCaptureDelaySeconds);
+        overlay->setInitialGifFps(initialGifFps);
+        overlay->setInitialGifQuality(initialGifQuality);
+        overlay->setInitialGifSizeIdx(initialGifSizeIdx);
+        overlay->setInitialGifOptimize(initialGifOptimize);
+        overlay->setInitialRecControls(initialRecControls);
+        overlay->setInitialDisplayRecTime(initialDisplayRecTime);
+        overlay->setInitialHidpi(initialHidpi);
+        overlay->setInitialDoNotDisturb(initialDoNotDisturb);
+        overlay->setInitialShowCursor(initialShowCursor);
+        overlay->setInitialRecClicks(initialRecClicks);
+        overlay->setInitialRecKeystrokes(initialRecKeystrokes);
+        overlay->setInitialClickSize(initialClickSize);
+        overlay->setInitialClickColor(initialClickColor);
+        overlay->setInitialClickStyle(initialClickStyle);
+        overlay->setInitialClickAnimate(initialClickAnimate);
+        overlay->setInitialKeySize(initialKeySize);
+        overlay->setInitialKeyPosition(initialKeyPosition);
+        overlay->setInitialKeyAppearance(initialKeyAppearance);
+        overlay->setInitialKeyBlurBg(initialKeyBlurBg);
+        overlay->setInitialKeyFilter(initialKeyFilter);
+        overlay->setInitialRememberSelection(initialRememberSelection);
+        overlay->setInitialDimScreen(initialDimScreen);
+        overlay->setInitialShowCountdown(initialShowCountdown);
+        overlay->setInitialVideoFormat(initialVideoFormat);
+        overlay->setInitialVideoMaxRes(initialVideoMaxRes);
+        overlay->setInitialVideoFps(initialVideoFps);
+        overlay->setInitialRecordMono(initialRecordMono);
+        overlay->setInitialOpenEditor(initialOpenEditor);
+        if (openRecordingUiMode) {
+            overlay->openRecordingPanelForShortcut();
+        }
+    };
+
+    auto createOverlay = [&](QScreen* targetScreen) {
+        auto overlay = std::make_unique<CaptureOverlay>(
+            background,
+            nullptr,
+            timerCaptureEnabled,
+            initialMic,
+            initialSpeaker,
+            overlayMode,
+            targetScreen);
+        applyInitialOverlaySettings(overlay.get());
+        overlayWindows.push_back(std::move(overlay));
+    };
+
+    if (usePerScreenOverlays) {
+        for (QScreen* screen : screens) {
+            createOverlay(screen);
+        }
+    } else {
+        createOverlay(nullptr);
+    }
+
+    CaptureOverlay* overlay = overlayWindows.front().get();
+
+    QObject::connect(&sessionServer, &QLocalServer::newConnection, [&sessionServer, &overlayWindows, &app]() {
         while (QLocalSocket* socket = sessionServer.nextPendingConnection()) {
-            QObject::connect(socket, &QLocalSocket::readyRead, [socket, &overlay, &app]() {
+            QObject::connect(socket, &QLocalSocket::readyRead, [socket, &overlayWindows, &app]() {
                 const QByteArray payload = socket->readAll().trimmed();
                 handleOverlayControlPayload(
                     payload,
-                    [&overlay]() { overlay.focusAndRaiseOverlay(); },
-                    [&overlay, &app]() {
-                        overlay.hide();
+                    [&overlayWindows]() {
+                        for (const auto& overlayWindow : overlayWindows) {
+                            overlayWindow->focusAndRaiseOverlay();
+                        }
+                    },
+                    [&overlayWindows, &app]() {
+                        for (const auto& overlayWindow : overlayWindows) {
+                            overlayWindow->hide();
+                        }
                         app.exit(1);
                     });
             });
@@ -610,61 +692,39 @@ int main(int argc, char* argv[])
                 const QByteArray payload = socket->readAll().trimmed();
                 handleOverlayControlPayload(
                     payload,
-                    [&overlay]() { overlay.focusAndRaiseOverlay(); },
-                    [&overlay, &app]() {
-                        overlay.hide();
+                    [&overlayWindows]() {
+                        for (const auto& overlayWindow : overlayWindows) {
+                            overlayWindow->focusAndRaiseOverlay();
+                        }
+                    },
+                    [&overlayWindows, &app]() {
+                        for (const auto& overlayWindow : overlayWindows) {
+                            overlayWindow->hide();
+                        }
                         app.exit(1);
                     });
             }
         }
     });
-    overlay.setSelectionCursorMode(selectionCursor);
-    overlay.setShowZoomPreview(showZoomPreview);
-    overlay.setFreezeSelectionBackground(freezeSelectionBackground);
-    overlay.setInitialCaptureDelaySeconds(initialCaptureDelaySeconds);
-    overlay.setInitialGifFps(initialGifFps);
-    overlay.setInitialGifQuality(initialGifQuality);
-    overlay.setInitialGifSizeIdx(initialGifSizeIdx);
-    overlay.setInitialGifOptimize(initialGifOptimize);
-    overlay.setInitialRecControls(initialRecControls);
-    overlay.setInitialDisplayRecTime(initialDisplayRecTime);
-    overlay.setInitialHidpi(initialHidpi);
-    overlay.setInitialDoNotDisturb(initialDoNotDisturb);
-    overlay.setInitialShowCursor(initialShowCursor);
-    overlay.setInitialRecClicks(initialRecClicks);
-    overlay.setInitialRecKeystrokes(initialRecKeystrokes);
-    overlay.setInitialClickSize(initialClickSize);
-    overlay.setInitialClickColor(initialClickColor);
-    overlay.setInitialClickStyle(initialClickStyle);
-    overlay.setInitialClickAnimate(initialClickAnimate);
-    overlay.setInitialKeySize(initialKeySize);
-    overlay.setInitialKeyPosition(initialKeyPosition);
-    overlay.setInitialKeyAppearance(initialKeyAppearance);
-    overlay.setInitialKeyBlurBg(initialKeyBlurBg);
-    overlay.setInitialKeyFilter(initialKeyFilter);
-    overlay.setInitialRememberSelection(initialRememberSelection);
-    overlay.setInitialDimScreen(initialDimScreen);
-    overlay.setInitialShowCountdown(initialShowCountdown);
-    overlay.setInitialVideoFormat(initialVideoFormat);
-    overlay.setInitialVideoMaxRes(initialVideoMaxRes);
-    overlay.setInitialVideoFps(initialVideoFps);
-    overlay.setInitialRecordMono(initialRecordMono);
-    overlay.setInitialOpenEditor(initialOpenEditor);
-    if (openRecordingUiMode) {
-        overlay.openRecordingPanelForShortcut();
+
+    for (const auto& overlayWindow : overlayWindows) {
+        overlayWindow->focusAndRaiseOverlay();
     }
-    overlay.show();
-    overlay.raise();
     QApplication::processEvents();
 
     // Capture the overlay's local-to-desktop origin after the compositor has
     // placed it. Fixed panels/docks can make the overlay local coordinate
     // space start inside the full desktop instead of at (0,0).
-    const QPoint overlayGlobalOrigin = overlay.desktopOriginForLocalCoordinates();
-    const QPoint& ogo = overlayGlobalOrigin;
     if (!restoreSel.isNull() && restoreSel.isValid()) {
-        overlay.setInitialSelection(restoreSel.translated(-ogo.x(), -ogo.y()));
-        overlay.update();
+        for (const auto& overlayWindow : overlayWindows) {
+            const QPoint overlayGlobalOrigin = overlayWindow->desktopOriginForLocalCoordinates();
+            const QRect overlayGeometry(overlayGlobalOrigin, overlayWindow->geometry().size());
+            if (overlayGeometry.intersects(restoreSel)) {
+                overlayWindow->setInitialSelection(
+                    restoreSel.translated(-overlayGlobalOrigin.x(), -overlayGlobalOrigin.y()));
+                overlayWindow->update();
+            }
+        }
     }
 
     const int ret = app.exec();
@@ -673,50 +733,62 @@ int main(int argc, char* argv[])
         QLocalServer::removeServer(sessionSocketPath);
     }
 
+    for (const auto& overlayWindow : overlayWindows) {
+        if (overlayWindow->selectionConfirmed()
+            || (ret == kExitRecordConfigUpdated && overlayWindow->recordConfigRequested())) {
+            overlay = overlayWindow.get();
+            break;
+        }
+    }
+    for (const auto& overlayWindow : overlayWindows) {
+        overlayWindow->hide();
+    }
+    QApplication::processEvents(QEventLoop::AllEvents, 50);
+
     if (ret == 3) {
         // Window capture requested via toolbar button
         return 3;
     }
     if (ret == kExitRecordConfigUpdated) {
-        if (areaInitMode && overlay.recordConfigRequested()) {
-            const QRect sel = overlay.selection();
-            const QRect selGlobal = overlay.desktopSelection();
+        if (areaInitMode && overlay->recordConfigRequested()) {
+            const QRect sel = overlay->selection();
+            const QRect selGlobal = overlay->desktopSelection();
             const char* recordType = "video";
-            if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
+            if (overlay->recordType() == CaptureOverlay::RecordType::Gif) {
                 recordType = "gif";
             }
             printRecordingJson(selGlobal, "record-config", recordType,
-                               overlay.recordControlsEnabled(),
-                               overlay.recordMicEnabled(),
-                               overlay.recordSpeakerEnabled(),
-                               overlay.recordClicksEnabled(),
-                               overlay.recordKeystrokesEnabled(),
-                               overlay.recordClickSize(),
-                               overlay.recordClickColor(),
-                               overlay.recordClickStyle(),
-                               overlay.recordClickAnimate(),
-                               overlay.recordKeySize(),
-                               overlay.recordKeyPosition(),
-                               overlay.recordKeyAppearance(),
-                               overlay.recordKeyBlurBg(),
-                               overlay.recordKeyFilter(),
-                               overlay.recordDisplayRecTime(),
-                               overlay.recordHidpiEnabled(),
-                               overlay.recordDoNotDisturb(),
-                               overlay.recordShowCursor(),
-                               overlay.recordRememberSelection(),
-                               overlay.recordDimScreen(),
-                               overlay.recordShowCountdown(),
-                               overlay.recordVideoFormat(),
-                               overlay.recordVideoMaxRes(),
-                               overlay.recordVideoFps(),
-                               overlay.recordMono(),
-                               overlay.recordOpenEditor(),
-                               overlay.recordGifFps(),
-                               overlay.recordGifQuality(),
-                               overlay.recordGifSizeIdx(),
-                               overlay.recordOptimizeGif(),
-                               overlay.recordFullscreen());
+                               overlay->recordControlsEnabled(),
+                               overlay->recordMicEnabled(),
+                               overlay->recordSpeakerEnabled(),
+                               overlay->recordClicksEnabled(),
+                               overlay->recordKeystrokesEnabled(),
+                               overlay->recordClickSize(),
+                               overlay->recordClickColor(),
+                               overlay->recordClickStyle(),
+                               overlay->recordClickAnimate(),
+                               overlay->recordKeySize(),
+                               overlay->recordKeyPosition(),
+                               overlay->recordKeyAppearance(),
+                               overlay->recordKeyBlurBg(),
+                               overlay->recordKeyFilter(),
+                               overlay->recordDisplayRecTime(),
+                               overlay->recordHidpiEnabled(),
+                               overlay->recordDoNotDisturb(),
+                               overlay->recordShowCursor(),
+                               overlay->recordRememberSelection(),
+                               overlay->recordDimScreen(),
+                               overlay->recordShowCountdown(),
+                               overlay->recordVideoFormat(),
+                               overlay->recordVideoMaxRes(),
+                               overlay->recordVideoFps(),
+                               overlay->recordMono(),
+                               overlay->recordOpenEditor(),
+                               overlay->recordGifFps(),
+                               overlay->recordGifQuality(),
+                               overlay->recordGifSizeIdx(),
+                               overlay->recordOptimizeGif(),
+                               overlay->recordFullscreen());
             return kExitRecordConfigUpdated;
         }
         std::fprintf(stderr,
@@ -728,9 +800,9 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    if (areaInitMode && overlay.scrollCaptureCompleted()) {
-        const QString scrollPath = overlay.scrollCapturePath();
-        const QSize scrollSize = overlay.scrollCaptureSize();
+    if (areaInitMode && overlay->scrollCaptureCompleted()) {
+        const QString scrollPath = overlay->scrollCapturePath();
+        const QSize scrollSize = overlay->scrollCaptureSize();
         if (scrollPath.isEmpty() || scrollSize.isEmpty() || !QFileInfo::exists(scrollPath)) {
             std::fprintf(stderr,
                          "apexshot-capture: scroll capture completed but output is missing\n");
@@ -740,58 +812,58 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    const QRect sel = overlay.selection();
+    const QRect sel = overlay->selection();
     if (sel.isEmpty()) {
         std::fprintf(stderr, "apexshot-capture: empty selection\n");
         return 2;
     }
 
     // Handle recording request
-    if (overlay.recordRequested()) {
+    if (overlay->recordRequested()) {
         const char* recordType = "video";
-        if (overlay.recordType() == CaptureOverlay::RecordType::Gif) {
+        if (overlay->recordType() == CaptureOverlay::RecordType::Gif) {
             recordType = "gif";
         }
-        const QRect selGlobal = overlay.desktopSelection();
+        const QRect selGlobal = overlay->desktopSelection();
         printRecordingJson(selGlobal, "record", recordType,
-                           overlay.recordControlsEnabled(),
-                           overlay.recordMicEnabled(),
-                           overlay.recordSpeakerEnabled(),
-                           overlay.recordClicksEnabled(),
-                           overlay.recordKeystrokesEnabled(),
-                           overlay.recordClickSize(),
-                           overlay.recordClickColor(),
-                           overlay.recordClickStyle(),
-                           overlay.recordClickAnimate(),
-                           overlay.recordKeySize(),
-                           overlay.recordKeyPosition(),
-                           overlay.recordKeyAppearance(),
-                           overlay.recordKeyBlurBg(),
-                           overlay.recordKeyFilter(),
-                           overlay.recordDisplayRecTime(),
-                           overlay.recordHidpiEnabled(),
-                           overlay.recordDoNotDisturb(),
-                           overlay.recordShowCursor(),
-                           overlay.recordRememberSelection(),
-                           overlay.recordDimScreen(),
-                           overlay.recordShowCountdown(),
-                           overlay.recordVideoFormat(),
-                           overlay.recordVideoMaxRes(),
-                           overlay.recordVideoFps(),
-                           overlay.recordMono(),
-                           overlay.recordOpenEditor(),
-                           overlay.recordGifFps(),
-                           overlay.recordGifQuality(),
-                           overlay.recordGifSizeIdx(),
-                           overlay.recordOptimizeGif(),
-                           overlay.recordFullscreen());
+                           overlay->recordControlsEnabled(),
+                           overlay->recordMicEnabled(),
+                           overlay->recordSpeakerEnabled(),
+                           overlay->recordClicksEnabled(),
+                           overlay->recordKeystrokesEnabled(),
+                           overlay->recordClickSize(),
+                           overlay->recordClickColor(),
+                           overlay->recordClickStyle(),
+                           overlay->recordClickAnimate(),
+                           overlay->recordKeySize(),
+                           overlay->recordKeyPosition(),
+                           overlay->recordKeyAppearance(),
+                           overlay->recordKeyBlurBg(),
+                           overlay->recordKeyFilter(),
+                           overlay->recordDisplayRecTime(),
+                           overlay->recordHidpiEnabled(),
+                           overlay->recordDoNotDisturb(),
+                           overlay->recordShowCursor(),
+                           overlay->recordRememberSelection(),
+                           overlay->recordDimScreen(),
+                           overlay->recordShowCountdown(),
+                           overlay->recordVideoFormat(),
+                           overlay->recordVideoMaxRes(),
+                           overlay->recordVideoFps(),
+                           overlay->recordMono(),
+                           overlay->recordOpenEditor(),
+                           overlay->recordGifFps(),
+                           overlay->recordGifQuality(),
+                           overlay->recordGifSizeIdx(),
+                           overlay->recordOptimizeGif(),
+                           overlay->recordFullscreen());
         return 0;
     }
 
     if (areaInitMode || crosshairCaptureMode) {
-        const bool ocrRequested = overlay.ocrRequested();
-        const bool fullscreenRequested = overlay.recordFullscreen();
-        const QRect selGlobal = overlay.desktopSelection();
+        const bool ocrRequested = overlay->ocrRequested();
+        const bool fullscreenRequested = overlay->recordFullscreen();
+        const QRect selGlobal = overlay->desktopSelection();
         const bool isWayland = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
         const QString desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
         const bool isGnomeWayland =
@@ -824,11 +896,11 @@ int main(int argc, char* argv[])
 
         if (!ok && isWayland && !isGnomeWayland) {
             QString fallbackError;
-            const QPoint fallbackOrigin = overlay.desktopOriginForLocalCoordinates();
+            const QPoint fallbackOrigin = overlay->desktopOriginForLocalCoordinates();
             const QRect overlayGlobalGeometry(fallbackOrigin.x(),
                                               fallbackOrigin.y(),
-                                              overlay.geometry().width(),
-                                              overlay.geometry().height());
+                                              overlay->geometry().width(),
+                                              overlay->geometry().height());
             ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
               sel, overlayGlobalGeometry, imagePath, imageSize, fallbackError);
             if (!ok) {
@@ -847,7 +919,7 @@ int main(int argc, char* argv[])
           imageSize,
           crosshairCaptureMode ? "area" : (ocrRequested ? "ocr" : "area"));
     } else {
-        const QRect selGlobal = overlay.desktopSelection();
+        const QRect selGlobal = overlay->desktopSelection();
         std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d}\n",
                     selGlobal.x(),
                     selGlobal.y(),

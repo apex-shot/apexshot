@@ -35,6 +35,7 @@ void CaptureOverlay::cycleCaptureDelay()
 void CaptureOverlay::confirmSelection()
 {
     m_recordConfigRequested = false;
+    m_selectionConfirmed = false;
     m_captureCropMenuOpen = false;
     m_hoveredCaptureCropMenuItem = -1;
     m_captureCropMenuPanelRect = QRectF();
@@ -56,6 +57,7 @@ void CaptureOverlay::confirmSelection()
 
     releaseKeyboard();
     hide();
+    m_selectionConfirmed = true;
     QApplication::processEvents();
     QThread::msleep(120);
     QApplication::exit(0);
@@ -64,6 +66,7 @@ void CaptureOverlay::confirmSelection()
 void CaptureOverlay::confirmRecordingSelection()
 {
     m_recordConfigRequested = false;
+    m_selectionConfirmed = true;
     m_micTimer->stop();
     m_recordingToolsHidden = true;
     m_hoveredRecordTile = RecordPanelTile::None;
@@ -111,6 +114,7 @@ void CaptureOverlay::onCountdownTick()
     m_hoveredCountdownCancel = false;
     releaseKeyboard();
     hide();
+    m_selectionConfirmed = true;
     QApplication::processEvents();
     QThread::msleep(120);
     QApplication::exit(0);
@@ -136,6 +140,7 @@ void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
 
 void CaptureOverlay::cancelSelection()
 {
+    m_selectionConfirmed = false;
     resetRecordingPanelToAreaMode();
     m_captureCropMenuOpen = false;
     m_hoveredCaptureCropMenuItem = -1;

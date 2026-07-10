@@ -28,6 +28,7 @@
 #include <algorithm>
 
 class QTimer;
+class QScreen;
 
 #include "ScrollControlPanel.h"
 
@@ -60,7 +61,8 @@ public:
                              bool timerCaptureEnabled = false,
                              bool initialMic = false,
                              bool initialSpeaker = false,
-                             OverlayMode overlayMode = OverlayMode::StandardArea);
+                             OverlayMode overlayMode = OverlayMode::StandardArea,
+                             QScreen* targetScreen = nullptr);
 
     /// Returns the selected rectangle in overlay-local logical pixels.
     /// Only valid when QApplication exits with code 0.
@@ -68,6 +70,7 @@ public:
     QRect desktopSelection() const;
     QPoint desktopOriginForLocalCoordinates() const;
     void setInitialSelection(const QRect& rect) { m_selection = rect; }
+    bool selectionConfirmed() const { return m_selectionConfirmed; }
     bool ocrRequested() const { return m_captureIntent == CaptureIntent::Ocr; }
     bool scrollCaptureCompleted() const { return m_scrollCaptureReady; }
     QString scrollCapturePath() const { return m_scrollCapturePath; }
@@ -277,7 +280,9 @@ private:
     QPixmap   m_background;
     QImage    m_blurredBg;          // 1/4-res blurred bg for frosted glass
     OverlayMode m_overlayMode;
+    QScreen*  m_targetScreen;
     QRect     m_selection;
+    bool      m_selectionConfirmed;
     QPoint    m_eventDesktopOrigin;
     bool      m_hasEventDesktopOrigin;
     bool      m_hasSelection;

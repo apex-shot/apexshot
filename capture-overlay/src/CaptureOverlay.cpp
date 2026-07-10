@@ -195,6 +195,9 @@ QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
 
 QPoint CaptureOverlay::desktopOriginForLocalCoordinates() const
 {
+    if (m_targetScreen) {
+        return m_targetScreen->geometry().topLeft();
+    }
     if (!qEnvironmentVariableIsSet("WAYLAND_DISPLAY") && m_hasEventDesktopOrigin) {
         return m_eventDesktopOrigin;
     }
@@ -217,7 +220,16 @@ void CaptureOverlay::updateDesktopOriginFromMouseEvent(QMouseEvent* event)
 
 void CaptureOverlay::focusAndRaiseOverlay()
 {
-    show();
+    if (m_targetScreen) {
+        create();
+        if (windowHandle()) {
+            windowHandle()->setScreen(m_targetScreen);
+        }
+        setGeometry(m_targetScreen->geometry());
+        showFullScreen();
+    } else {
+        show();
+    }
     raise();
     activateWindow();
     if (windowHandle()) {
@@ -265,10 +277,13 @@ void CaptureOverlay::openRecordingPanelForShortcut()
 CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
                                bool timerCaptureEnabled,
                                bool initialMic, bool initialSpeaker,
-                               OverlayMode overlayMode)
+                               OverlayMode overlayMode,
+                               QScreen* targetScreen)
     : QWidget(parent)
     , m_background(background)
     , m_overlayMode(overlayMode)
+    , m_targetScreen(targetScreen)
+    , m_selectionConfirmed(false)
     , m_eventDesktopOrigin(0, 0)
     , m_hasEventDesktopOrigin(false)
     , m_hasSelection(false)
@@ -352,8 +367,12 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
 {
     // Cover entire virtual desktop
     QRect desktop;
-    for (QScreen* screen : QGuiApplication::screens())
-        desktop = desktop.united(screen->geometry());
+    if (m_targetScreen) {
+        desktop = m_targetScreen->geometry();
+    } else {
+        for (QScreen* screen : QGuiApplication::screens())
+            desktop = desktop.united(screen->geometry());
+    }
     setGeometry(desktop);
 
     setWindowFlags(captureOverlayWindowFlags());
