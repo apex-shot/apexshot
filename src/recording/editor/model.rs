@@ -244,18 +244,34 @@ impl VideoEditState {
     }
 
     pub fn target_dimensions(&self) -> (u32, u32) {
-        let (width, height) = match self.dimension_preset {
-            DimensionPreset::Original => (self.metadata.width, self.metadata.height),
-            DimensionPreset::P1080 => (1920, 1080),
-            DimensionPreset::P720 => (1280, 720),
-            DimensionPreset::P480 => (854, 480),
-            DimensionPreset::Custom => (self.custom_width, self.custom_height),
-        };
+        let src_w = self.metadata.width.max(1);
+        let src_h = self.metadata.height.max(1);
+        match self.dimension_preset {
+            DimensionPreset::Original => (even_dimension(src_w), even_dimension(src_h)),
+            DimensionPreset::P1080 => fit_dimensions(src_w, src_h, 1920, 1080),
+            DimensionPreset::P720 => fit_dimensions(src_w, src_h, 1280, 720),
+            DimensionPreset::P480 => fit_dimensions(src_w, src_h, 854, 480),
+            DimensionPreset::Custom => fit_dimensions(
+                src_w,
+                src_h,
+                self.custom_width.max(MIN_DIMENSION),
+                self.custom_height.max(MIN_DIMENSION),
+            ),
+        }
+    }
 
-        (
-            even_dimension(width.clamp(MIN_DIMENSION, self.metadata.width.max(MIN_DIMENSION))),
-            even_dimension(height.clamp(MIN_DIMENSION, self.metadata.height.max(MIN_DIMENSION))),
-        )
+    /// True when quality/dimensions require a re-encode (stream-copy cannot apply them).
+    pub fn needs_reencode(&self) -> bool {
+        let (tw, th) = self.target_dimensions();
+        let (sw, sh) = (
+            even_dimension(self.metadata.width.max(1)),
+            even_dimension(self.metadata.height.max(1)),
+        );
+        if tw != sw || th != sh {
+            return true;
+        }
+        // Quality only takes effect when re-encoding.
+        self.quality != 70
     }
 
     pub fn estimated_size_bytes(&self, trim_only: bool) -> u64 {
@@ -263,8 +279,23 @@ impl VideoEditState {
     }
 }
 
+/// Fit `src` inside `box` without upscaling or stretching (aspect preserved).
+pub fn fit_dimensions(src_w: u32, src_h: u32, box_w: u32, box_h: u32) -> (u32, u32) {
+    let src_w = src_w.max(1);
+    let src_h = src_h.max(1);
+    let box_w = box_w.max(MIN_DIMENSION);
+    let box_h = box_h.max(MIN_DIMENSION);
+    // Cap the box at the source so we never upscale past the original.
+    let max_w = box_w.min(src_w);
+    let max_h = box_h.min(src_h);
+    let scale = (max_w as f64 / src_w as f64).min(max_h as f64 / src_h as f64);
+    let width = even_dimension(((src_w as f64 * scale).round() as u32).max(2));
+    let height = even_dimension(((src_h as f64 * scale).round() as u32).max(2));
+    (width.max(2), height.max(2))
+}
+
 pub fn even_dimension(value: u32) -> u32 {
-    let clamped = value.max(MIN_DIMENSION);
+    let clamped = value.max(2);
     if clamped.is_multiple_of(2) {
         clamped
     } else {
@@ -432,13 +463,49 @@ mod tests {
     }
 
     #[test]
-    fn dimension_preset_clamps_to_even_dimensions() {
+    fn dimension_preset_fits_inside_box_preserving_aspect() {
         let mut state = VideoEditState::new(metadata());
         state.dimension_preset = DimensionPreset::Custom;
+        // Box is clamped to at least MIN_DIMENSION (64) on each side, then
+        // the source is fitted inside without stretching.
         state.custom_width = 1919;
         state.custom_height = 57;
 
-        assert_eq!(state.target_dimensions(), (1918, 64));
+        let (w, h) = state.target_dimensions();
+        assert_eq!((w, h), (114, 64));
+        // Aspect roughly matches 16:9 source.
+        let aspect = w as f64 / h as f64;
+        let src_aspect = 1920.0 / 1080.0;
+        assert!((aspect - src_aspect).abs() < 0.05);
+    }
+
+    #[test]
+    fn dimension_preset_does_not_upscale_or_stretch() {
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/input.mp4"),
+            duration_seconds: 5.0,
+            width: 600,
+            height: 744,
+            file_size_bytes: 1024,
+            has_audio: false,
+        });
+        state.dimension_preset = DimensionPreset::P1080;
+        let (w, h) = state.target_dimensions();
+        assert!(w <= 600 && h <= 744);
+        assert_eq!((w, h), (600, 744));
+    }
+
+    #[test]
+    fn needs_reencode_when_dimensions_or_quality_change() {
+        let mut state = VideoEditState::new(metadata());
+        assert!(!state.needs_reencode());
+
+        state.quality = 40;
+        assert!(state.needs_reencode());
+
+        state.quality = 70;
+        state.dimension_preset = DimensionPreset::P720;
+        assert!(state.needs_reencode());
     }
 
     #[test]

@@ -74,24 +74,48 @@ pub fn run_countdown_overlay(seconds: u32) {
     });
     window.add_controller(key_controller);
 
-    let remaining_timer = remaining.clone();
-    let done_timer = done.clone();
-    let loop_for_timer = main_loop.clone();
-    let window_ref = window.downgrade();
-    glib::timeout_add_local(Duration::from_secs(1), move || {
-        let val = remaining_timer.get();
-        if val <= 1 || done_timer.get() {
-            done_timer.set(true);
-            if let Some(win) = window_ref.upgrade() {
-                win.close();
+    // Start ticking only after the window is mapped so the first number is
+    // actually visible for a full second (avoids "3" being skipped when map
+    // latency eats the first tick).
+    let timer_started = Rc::new(Cell::new(false));
+    window.connect_map(glib::clone!(
+        #[strong]
+        remaining,
+        #[strong]
+        done,
+        #[strong]
+        main_loop,
+        #[strong]
+        label,
+        #[strong]
+        timer_started,
+        #[weak]
+        window,
+        move |_| {
+            if timer_started.replace(true) {
+                return;
             }
-            loop_for_timer.quit();
-            return glib::ControlFlow::Break;
+            let remaining_timer = remaining.clone();
+            let done_timer = done.clone();
+            let loop_for_timer = main_loop.clone();
+            let window_ref = window.downgrade();
+            let label = label.clone();
+            glib::timeout_add_local(Duration::from_secs(1), move || {
+                let val = remaining_timer.get();
+                if val <= 1 || done_timer.get() {
+                    done_timer.set(true);
+                    if let Some(win) = window_ref.upgrade() {
+                        win.close();
+                    }
+                    loop_for_timer.quit();
+                    return glib::ControlFlow::Break;
+                }
+                remaining_timer.set(val - 1);
+                label.set_text(&format!("{}", val - 1));
+                glib::ControlFlow::Continue
+            });
         }
-        remaining_timer.set(val - 1);
-        label.set_text(&format!("{}", val - 1));
-        glib::ControlFlow::Continue
-    });
+    ));
 
     window.present();
     main_loop.run();

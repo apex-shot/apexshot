@@ -28,12 +28,21 @@ pub(super) fn build_footer(
     let upload = Button::with_label("Upload");
     upload.set_has_frame(false);
     upload.add_css_class("recording-editor-secondary-button");
+    upload.set_tooltip_text(Some(
+        "Export with your current settings (trim, cuts, audio, quality, dimensions), then upload",
+    ));
     let trim_only = Button::with_label("Save Trim");
     trim_only.set_has_frame(false);
     trim_only.add_css_class("recording-editor-secondary-button");
+    trim_only.set_tooltip_text(Some(
+        "Fast export: applies trim, cuts, and audio only. Quality and dimensions are not applied — use Save & Convert for those.",
+    ));
     let convert = Button::with_label("Save & Convert");
     convert.set_has_frame(false);
     convert.add_css_class("recording-editor-primary-button");
+    convert.set_tooltip_text(Some(
+        "Re-encode with quality, dimensions, audio, trim, and cuts applied",
+    ));
     let spinner = Spinner::new();
     spinner.set_visible(false);
 
@@ -86,11 +95,15 @@ pub(super) fn build_footer(
     footer
 }
 
-pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, trim_only: bool) {
+pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, _trim_only: bool) {
     let state = state.lock().unwrap();
     label.set_text(&format!(
-        "Estimated file size: ~{}",
-        format_size(state.estimated_size_bytes(trim_only))
+        "Trim ~{} · Convert ~{}",
+        format_size(state.estimated_size_bytes(true)),
+        format_size(state.estimated_size_bytes(false)),
+    ));
+    label.set_tooltip_text(Some(
+        "Trim = stream-copy size (timeline + audio only). Convert = re-encode with quality and dimensions.",
     ));
 }
 
@@ -120,12 +133,17 @@ fn wire_upload_button(
             control.set_sensitive(false);
         }
 
-        let path = state.lock().unwrap().metadata.path.clone();
+        // Export with current editor settings first, then upload the result.
+        let state_snapshot = state.lock().unwrap().clone();
         let (sender, receiver) = std::sync::mpsc::channel::<Result<String, String>>();
         std::thread::spawn(move || {
-            let result = crate::cloud::upload::upload_file(&config, &path)
-                .map(|result| result.share_url)
-                .map_err(|err| err.to_string());
+            let result = (|| {
+                let path = ffmpeg::export_edited(&state_snapshot)
+                    .map_err(|err| format!("Export before upload failed: {err}"))?;
+                crate::cloud::upload::upload_file(&config, &path)
+                    .map(|result| result.share_url)
+                    .map_err(|err| err.to_string())
+            })();
             let _ = sender.send(result);
         });
 
@@ -232,7 +250,7 @@ fn wire_export_button(
                     Err(err) if !convert => dialogs::show_error(
                         &window,
                         "Trim failed",
-                        "ApexShot could not trim this recording without conversion. Try Trim & Convert.",
+                        "ApexShot could not trim this recording without conversion. Try Save & Convert.",
                         Some(&err),
                     ),
                     Err(err) => dialogs::show_error(

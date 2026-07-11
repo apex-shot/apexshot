@@ -979,47 +979,87 @@ fn setup_countdown_window(
         .map(|window| window.downgrade())
         .collect();
 
-    glib::timeout_add_local(Duration::from_secs(1), move || {
-        let next = remaining.get() - 1;
-        if next <= 1 {
-            if !unified_mode {
-                for dim_window in &dim_window_weaks {
-                    if let Some(window) = dim_window.upgrade() {
-                        window.close();
-                    }
-                }
-                if let Some(window) = window_weak.upgrade() {
-                    window.set_visible(false);
-                }
-                let app_weak = app_weak.clone();
-                glib::timeout_add_local_once(Duration::from_millis(1100), move || {
-                    if let Some(app) = app_weak.upgrade() {
-                        app.quit();
-                    }
-                });
-            } else {
-                if let Some(window) = window_weak.upgrade() {
-                    window.close();
-                }
-                let controls_window = controls_window.clone();
-                glib::timeout_add_local_once(Duration::from_millis(1100), move || {
-                    // Keep the final "1" second hidden so it cannot leak into the recording.
-                    if let Some(controls) = controls_window.as_ref() {
-                        controls.set_visible(true);
-                    }
-                    println!("ready");
-                    use std::io::Write;
-                    let _ = std::io::stdout().flush();
-                });
+    // Start the countdown clock only after the window is mapped/shown.
+    // Arming the 1s timer before present() races with compositor map latency
+    // (layer-shell, process spawn of recording-ui-internal, etc.): if the first
+    // frame arrives after the first tick, "3" is never visible and the user only
+    // sees "2". Permissions dialogs are not the cause on the current path —
+    // when countdown is enabled the ScreenCast portal runs *after* countdown.
+    let timer_started = Rc::new(Cell::new(false));
+    window.connect_map(clone!(
+        #[strong]
+        remaining,
+        #[strong]
+        drawing_area_weak,
+        #[strong]
+        window_weak,
+        #[strong]
+        app_weak,
+        #[strong]
+        dim_window_weaks,
+        #[strong]
+        controls_window,
+        #[strong]
+        timer_started,
+        move |_| {
+            if timer_started.replace(true) {
+                return;
             }
-            return glib::ControlFlow::Break;
+            // Ensure the initial "3" (or configured seconds) is painted before we tick.
+            if let Some(area) = drawing_area_weak.upgrade() {
+                area.queue_draw();
+            }
+
+            let remaining = remaining.clone();
+            let drawing_area_weak = drawing_area_weak.clone();
+            let window_weak = window_weak.clone();
+            let app_weak = app_weak.clone();
+            let dim_window_weaks = dim_window_weaks.clone();
+            let controls_window = controls_window.clone();
+            glib::timeout_add_local(Duration::from_secs(1), move || {
+                let next = remaining.get() - 1;
+                if next <= 1 {
+                    // Intentionally never paint "1" so it cannot leak into the recording.
+                    if !unified_mode {
+                        for dim_window in &dim_window_weaks {
+                            if let Some(window) = dim_window.upgrade() {
+                                window.close();
+                            }
+                        }
+                        if let Some(window) = window_weak.upgrade() {
+                            window.set_visible(false);
+                        }
+                        let app_weak = app_weak.clone();
+                        glib::timeout_add_local_once(Duration::from_millis(1100), move || {
+                            if let Some(app) = app_weak.upgrade() {
+                                app.quit();
+                            }
+                        });
+                    } else {
+                        if let Some(window) = window_weak.upgrade() {
+                            window.close();
+                        }
+                        let controls_window = controls_window.clone();
+                        glib::timeout_add_local_once(Duration::from_millis(1100), move || {
+                            // Keep the final "1" second hidden so it cannot leak into the recording.
+                            if let Some(controls) = controls_window.as_ref() {
+                                controls.set_visible(true);
+                            }
+                            println!("ready");
+                            use std::io::Write;
+                            let _ = std::io::stdout().flush();
+                        });
+                    }
+                    return glib::ControlFlow::Break;
+                }
+                remaining.set(next);
+                if let Some(area) = drawing_area_weak.upgrade() {
+                    area.queue_draw();
+                }
+                glib::ControlFlow::Continue
+            });
         }
-        remaining.set(next);
-        if let Some(area) = drawing_area_weak.upgrade() {
-            area.queue_draw();
-        }
-        glib::ControlFlow::Continue
-    });
+    ));
 
     window.present();
 }

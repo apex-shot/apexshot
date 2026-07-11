@@ -1,4 +1,6 @@
-use super::model::{edited_output_path, quality_to_crf, AudioMode, VideoEditState, VideoMetadata};
+use super::model::{
+    edited_output_path, even_dimension, quality_to_crf, AudioMode, VideoEditState, VideoMetadata,
+};
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -159,19 +161,26 @@ pub fn generate_thumbnails(metadata: &VideoMetadata) -> anyhow::Result<Vec<PathB
     let count = thumbnail_count(metadata.duration_seconds);
     let mut paths = Vec::with_capacity(count);
     for index in 0..count {
-        let timestamp = if count <= 1 {
-            0.0
-        } else {
-            metadata.duration_seconds * (index as f64 / (count - 1) as f64)
-        };
+        let timestamp = thumbnail_timestamp(metadata.duration_seconds, index, count);
         let output_path = dir.join(format!("thumb-{index:02}.png"));
-        let output = Command::new("ffmpeg")
-            .arg("-y")
-            .arg("-ss")
-            .arg(format!("{timestamp:.3}"))
-            .arg("-i")
-            .arg(&metadata.path)
-            .args(["-frames:v", "1", "-vf", "scale=160:-1"])
+        // Prefer fast input seeking for early tiles. For the final tile, decode
+        // accurately: keyframe-only -ss before -i near EOF often overshoots the
+        // last frame and writes a blank/white PNG.
+        let mut cmd = Command::new("ffmpeg");
+        cmd.arg("-y");
+        if index + 1 == count {
+            cmd.arg("-i")
+                .arg(&metadata.path)
+                .arg("-ss")
+                .arg(format!("{timestamp:.3}"));
+        } else {
+            cmd.arg("-ss")
+                .arg(format!("{timestamp:.3}"))
+                .arg("-i")
+                .arg(&metadata.path);
+        }
+        let output = cmd
+            .args(["-an", "-frames:v", "1", "-vf", "scale=160:-1"])
             .arg(&output_path)
             .output()
             .with_context(|| format!("failed to generate thumbnail {}", output_path.display()))?;
@@ -194,6 +203,24 @@ fn thumbnail_count(duration_seconds: f64) -> usize {
     } else {
         12
     }
+}
+
+/// Sample times for filmstrip frames.
+///
+/// Never seeks to exact EOF: ffprobe duration is often slightly past the last
+/// decodable frame, so `-ss duration` yields a blank/white last tile.
+fn thumbnail_timestamp(duration_seconds: f64, index: usize, count: usize) -> f64 {
+    if count == 0 || duration_seconds <= 0.0 || !duration_seconds.is_finite() {
+        return 0.0;
+    }
+    if count == 1 {
+        return 0.0;
+    }
+    // Keep the last sample a little before the reported end so ffmpeg still
+    // decodes a real frame (important for short clips and VFR webm).
+    let epsilon = (duration_seconds * 0.02).clamp(0.04, 0.15);
+    let usable_end = (duration_seconds - epsilon).max(0.0);
+    usable_end * (index as f64 / (count - 1) as f64)
 }
 
 pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
@@ -244,6 +271,22 @@ pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     Ok(output_path)
 }
 
+/// Export applying the user's editor settings (for Upload and shared export).
+/// Uses stream-copy when quality/dimensions are unchanged; otherwise re-encodes.
+/// Falls back to convert if trim-only fails (e.g. awkward codecs/containers).
+pub fn export_edited(state: &VideoEditState) -> anyhow::Result<PathBuf> {
+    if state.needs_reencode() {
+        return run_convert(state);
+    }
+    match run_trim_only(state) {
+        Ok(path) => Ok(path),
+        Err(err) => {
+            eprintln!("[video-editor] trim-only export failed ({err}); falling back to convert");
+            run_convert(state)
+        }
+    }
+}
+
 fn build_single_trim_args(
     state: &VideoEditState,
     start: f64,
@@ -290,7 +333,6 @@ fn build_single_convert_args(
     end: f64,
     output_path: &Path,
 ) -> Vec<String> {
-    let (width, height) = state.target_dimensions();
     let mut args = vec![
         "-y".into(),
         "-ss".into(),
@@ -299,18 +341,36 @@ fn build_single_convert_args(
         format_seconds(end),
         "-i".into(),
         state.metadata.path.to_string_lossy().into_owned(),
-        "-vf".into(),
-        format!("scale={width}:{height}"),
+    ];
+    if let Some(scale) = convert_scale_filter(state) {
+        args.push("-vf".into());
+        args.push(scale);
+    }
+    args.extend([
         "-c:v".into(),
         "libx264".into(),
         "-preset".into(),
         "veryfast".into(),
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
-    ];
+    ]);
     args.extend(audio_args(state.audio_mode, state.metadata.has_audio));
     args.push(output_path.to_string_lossy().into_owned());
     args
+}
+
+/// Build an aspect-preserving scale filter, or `None` when output matches source.
+fn convert_scale_filter(state: &VideoEditState) -> Option<String> {
+    let (width, height) = state.target_dimensions();
+    let src_w = even_dimension(state.metadata.width.max(1));
+    let src_h = even_dimension(state.metadata.height.max(1));
+    if width == src_w && height == src_h {
+        return None;
+    }
+    // force_original_aspect_ratio=decrease is belt-and-suspenders with fit_dimensions.
+    Some(format!(
+        "scale={width}:{height}:force_original_aspect_ratio=decrease"
+    ))
 }
 
 fn run_multi_segment_trim(
@@ -435,6 +495,7 @@ mod tests {
         let mut state = state();
         state.quality = 70;
         state.audio_mode = AudioMode::Muted;
+        state.dimension_preset = crate::recording::editor::model::DimensionPreset::P720;
         let args = build_single_convert_args(
             &state,
             state.trim_start_seconds,
@@ -444,10 +505,57 @@ mod tests {
 
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
         assert!(args.windows(2).any(|pair| pair == ["-crf", "22"]));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["-vf", "scale=1920:1080"]));
+        assert!(args.windows(2).any(|pair| {
+            pair[0] == "-vf"
+                && pair[1].starts_with("scale=1280:720:force_original_aspect_ratio=decrease")
+        }));
         assert!(args.iter().any(|arg| arg == "-an"));
         assert_eq!(args.last().map(String::as_str), Some("/tmp/output.mp4"));
+    }
+
+    #[test]
+    fn convert_skips_scale_when_dimensions_match_source() {
+        let mut state = state();
+        state.dimension_preset = crate::recording::editor::model::DimensionPreset::Original;
+        let args = build_single_convert_args(
+            &state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        assert!(!args.iter().any(|arg| arg == "-vf"));
+    }
+
+    #[test]
+    fn export_edited_uses_trim_when_no_reencode_needed() {
+        let s = state();
+        assert!(!s.needs_reencode());
+        // We only assert the decision helper here; full export needs a real file.
+        let mut reencode = s.clone();
+        reencode.quality = 30;
+        assert!(reencode.needs_reencode());
+    }
+
+    #[test]
+    fn thumbnail_timestamps_start_at_zero_and_stay_before_eof() {
+        let duration = 10.0;
+        let count = 12;
+        assert!((thumbnail_timestamp(duration, 0, count) - 0.0).abs() < 1e-9);
+
+        let last = thumbnail_timestamp(duration, count - 1, count);
+        assert!(last < duration);
+        assert!(last >= duration - 0.15);
+        assert!(last <= duration - 0.04);
+
+        let mid = thumbnail_timestamp(duration, 6, count);
+        assert!(mid > 0.0 && mid < last);
+    }
+
+    #[test]
+    fn thumbnail_timestamp_handles_single_and_short_clips() {
+        assert_eq!(thumbnail_timestamp(0.5, 0, 1), 0.0);
+        let last = thumbnail_timestamp(1.0, 11, 12);
+        assert!(last < 1.0);
+        assert!(last >= 0.0);
     }
 }

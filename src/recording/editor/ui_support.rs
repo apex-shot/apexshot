@@ -404,8 +404,19 @@ pub fn install_recording_editor_css() {
                 color: alpha(white, 0.45);
                 font-size: 11px;
                 font-weight: 600;
-                margin-bottom: 6px;
+                margin-bottom: 2px;
                 letter-spacing: 0.3px;
+            }
+
+            .recording-editor-convert-hint {
+                color: alpha(#f0a07a, 0.85);
+                font-size: 10px;
+                font-weight: 500;
+                margin-bottom: 6px;
+            }
+
+            .recording-editor-convert-only {
+                opacity: 0.92;
             }
 
             .recording-editor-panel-body {
@@ -840,6 +851,10 @@ pub fn install_recording_editor_css() {
 
             .editor-theme-light .recording-editor-panel-title {
                 color: alpha(#1d2129, 0.45);
+            }
+
+            .editor-theme-light .recording-editor-convert-hint {
+                color: #b05c38;
             }
 
             .editor-theme-light button.recording-editor-dropdown {
