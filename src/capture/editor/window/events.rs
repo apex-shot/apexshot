@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::super::{
     color::{palette_index_for_color, DRAG_REDRAW_INTERVAL_US, DRAW_COLORS},
@@ -734,16 +735,45 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     });
 
     let path_upload = path.clone();
+    // Prevent concurrent uploads from double-clicks. Worker signals completion
+    // back to the GTK main loop so we can re-enable the button (widgets are !Send).
+    let uploading = Rc::new(Cell::new(false));
+    let (upload_done_tx, upload_done_rx) = std::sync::mpsc::channel::<()>();
+    let upload_btn_poll = upload_btn.clone();
+    let uploading_poll = uploading.clone();
+    glib::timeout_add_local(Duration::from_millis(50), move || {
+        match upload_done_rx.try_recv() {
+            Ok(()) => {
+                uploading_poll.set(false);
+                upload_btn_poll.set_sensitive(true);
+                // Keep listening for subsequent uploads after a failure/retry.
+                glib::ControlFlow::Continue
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+    let uploading_click = uploading.clone();
+    let upload_btn_click = upload_btn.clone();
     upload_btn.connect_clicked(move |_| {
+        if uploading_click.get() {
+            return;
+        }
+
         let config = crate::config::load_config();
         if !crate::cloud::upload::is_configured(&config) {
             let (title, body) = crate::cloud::upload::not_configured_notification(&config);
             crate::utils::notify::desktop_notification(title, body);
             return;
         }
+
+        uploading_click.set(true);
+        upload_btn_click.set_sensitive(false);
+
         let path = path_upload.clone();
-        std::thread::spawn(
-            move || match crate::cloud::upload::upload_file(&config, &path) {
+        let upload_done_tx = upload_done_tx.clone();
+        std::thread::spawn(move || {
+            match crate::cloud::upload::upload_file(&config, &path) {
                 Ok(result) => {
                     if let Err(e) =
                         crate::utils::clipboard::copy_text_to_clipboard(&result.share_url)
@@ -763,8 +793,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
                 Err(e) => {
                     crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
                 }
-            },
-        );
+            }
+            let _ = upload_done_tx.send(());
+        });
     });
 
     let state_box = state.clone();

@@ -9,7 +9,7 @@ use gtk4::{
     EventControllerKey, EventControllerMotion, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
@@ -18,6 +18,12 @@ use std::sync::{
     Arc, Mutex, Once,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// Messages from the upload worker back to the GTK main loop.
+enum UploadUiEvent {
+    /// Upload finished (success or failure). Re-enable the button; dismiss only on success when configured.
+    Finished { dismiss: bool },
+}
 
 const PREVIEW_TIMING_ENV: &str = "APEXSHOT_PREVIEW_TIMING";
 const PREVIEW_PARENT_START_ENV: &str = "APEXSHOT_PREVIEW_PARENT_START_MS";
@@ -665,36 +671,54 @@ fn setup_preview_window(
 
         let path_upload = path_actions.clone();
         // Worker thread signals the GTK main loop via this channel (GTK widgets
-        // are !Send, so we cannot close the window directly from the upload thread).
-        let (upload_dismiss_tx, upload_dismiss_rx) = std::sync::mpsc::channel::<()>();
+        // are !Send, so we cannot touch the window/button from the upload thread).
+        let (upload_ui_tx, upload_ui_rx) = std::sync::mpsc::channel::<UploadUiEvent>();
+        let uploading = Rc::new(Cell::new(false));
         let window_weak_upload_poll = window.downgrade();
         let dismiss_action_upload_poll = dismiss_action_actions;
+        let upload_btn_poll = upload_btn_actions.clone();
+        let uploading_poll = uploading.clone();
         glib::timeout_add_local(Duration::from_millis(50), move || {
-            match upload_dismiss_rx.try_recv() {
-                Ok(()) => {
-                    if let Some(window) = window_weak_upload_poll.upgrade() {
-                        dismiss_preview_window(&window, dismiss_action_upload_poll);
+            match upload_ui_rx.try_recv() {
+                Ok(UploadUiEvent::Finished { dismiss }) => {
+                    uploading_poll.set(false);
+                    upload_btn_poll.set_sensitive(true);
+                    if dismiss {
+                        if let Some(window) = window_weak_upload_poll.upgrade() {
+                            dismiss_preview_window(&window, dismiss_action_upload_poll);
+                        }
                     }
-                    // Keep listening so a later successful upload can still dismiss.
+                    // Keep listening so a later upload (after a failure) can still finish/dismiss.
                     ControlFlow::Continue
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
             }
         });
+        let uploading_click = uploading.clone();
+        let upload_btn_click = upload_btn_actions.clone();
         upload_btn_actions.connect_clicked(move |_| {
+            // Ignore re-entrant clicks while an upload is already in flight.
+            if uploading_click.get() {
+                return;
+            }
+
             let config = load_config();
             if !crate::cloud::upload::is_configured(&config) {
                 let (title, body) = crate::cloud::upload::not_configured_notification(&config);
                 crate::utils::notify::desktop_notification(title, body);
                 return;
             }
+
+            uploading_click.set(true);
+            upload_btn_click.set_sensitive(false);
+
             // Live Settings value so Quick Access toggles apply without reopening.
             let close_after_upload = config.quick_access_close_after_uploading;
             let path = path_upload.clone();
-            let upload_dismiss_tx = upload_dismiss_tx.clone();
+            let upload_ui_tx = upload_ui_tx.clone();
             std::thread::spawn(move || {
-                match crate::cloud::upload::upload_file(&config, &path) {
+                let dismiss = match crate::cloud::upload::upload_file(&config, &path) {
                     Ok(result) => {
                         if let Err(e) =
                             crate::utils::clipboard::copy_text_to_clipboard(&result.share_url)
@@ -713,14 +737,14 @@ fn setup_preview_window(
 
                         // Honor Quick Access "Close window after uploading".
                         // Failed uploads never dismiss the preview.
-                        if should_close_preview_after_upload(close_after_upload) {
-                            let _ = upload_dismiss_tx.send(());
-                        }
+                        should_close_preview_after_upload(close_after_upload)
                     }
                     Err(e) => {
                         crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
+                        false
                     }
-                }
+                };
+                let _ = upload_ui_tx.send(UploadUiEvent::Finished { dismiss });
             });
         });
 
