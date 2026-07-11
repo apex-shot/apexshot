@@ -59,10 +59,6 @@ pub struct SaveInputs {
     pub quick_access_auto_close_interval: ComboBoxText,
     pub quick_access_close_after_dragging: CheckButton,
     pub quick_access_close_after_uploading: CheckButton,
-    pub screenshot_crosshair_mode: ComboBoxText,
-    pub screenshot_show_magnifier: CheckButton,
-    // pub screenshot_selection_color: ColorButton, // Removed missing mapping
-    pub screenshot_freeze_screen: CheckButton,
     pub screenshot_timer_interval: ComboBoxText,
     pub screenshot_capture_cursor: CheckButton,
     pub annotate_inverse_arrow: CheckButton,
@@ -74,7 +70,6 @@ pub struct SaveInputs {
     pub rec_notifications: CheckButton,
     pub rec_countdown: CheckButton,
     pub rec_remember_selection: CheckButton,
-    pub rec_display_time: CheckButton,
     pub shortcut_open_file: Button,
     pub shortcut_open_from_clipboard: Button,
     pub shortcut_restore_recently_closed: Button,
@@ -111,8 +106,6 @@ pub fn install_checkbox_behaviors(
     quick_access_auto_close_enabled_check: &CheckButton,
     quick_access_auto_close_action_input: &ComboBoxText,
     quick_access_auto_close_interval_input: &ComboBoxText,
-    screenshot_crosshair_mode_input: &ComboBoxText,
-    screenshot_show_magnifier_check: &CheckButton,
 ) {
     let shutter_sound_input_toggle = shutter_sound_input.clone();
     play_sounds_check.connect_toggled(move |check| {
@@ -155,16 +148,6 @@ pub fn install_checkbox_behaviors(
         let active = check.is_active();
         a1.set_sensitive(active);
         a2.set_sensitive(active);
-    });
-
-    let m1 = screenshot_show_magnifier_check.clone();
-    m1.set_sensitive(matches!(
-        screenshot_crosshair_mode_input.active_id().as_deref(),
-        Some("Crosshair") | Some("Magnifier")
-    ));
-    screenshot_crosshair_mode_input.connect_changed(move |combo| {
-        let id = combo.active_id().unwrap_or_default();
-        m1.set_sensitive(id == "Crosshair" || id == "Magnifier");
     });
 }
 
@@ -211,9 +194,8 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         inputs.quick_access_close_after_uploading.is_active();
 
     config.screenshot_format = combo_value(&inputs.screenshot_format, "PNG");
-    config.screenshot_crosshair_mode = combo_value(&inputs.screenshot_crosshair_mode, "Disabled");
-    config.screenshot_show_magnifier = inputs.screenshot_show_magnifier.is_active();
-    config.screenshot_freeze_screen = inputs.screenshot_freeze_screen.is_active();
+    // Interface capture options (freeze/crosshair/magnifier) are no longer
+    // exposed in Settings; keep whatever is already in config (defaults for new users).
     config.screenshot_timer_interval = inputs
         .screenshot_timer_interval
         .active_id()
@@ -232,7 +214,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.rec_notifications = inputs.rec_notifications.is_active();
     config.rec_countdown = inputs.rec_countdown.is_active();
     config.rec_remember_selection = inputs.rec_remember_selection.is_active();
-    config.rec_display_time = inputs.rec_display_time.is_active();
+    // rec_display_time is no longer exposed; recording UI always shows the timer.
 
     config.shortcut_open_file = button_label_value(&inputs.shortcut_open_file);
     config.shortcut_open_from_clipboard = button_label_value(&inputs.shortcut_open_from_clipboard);

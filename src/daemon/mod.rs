@@ -1097,10 +1097,15 @@ impl DaemonIpc {
             "record_area" => DaemonAction::RecordArea,
             "open_recording_ui" => DaemonAction::OpenRecordingUi,
             "open_video_editor" => DaemonAction::OpenVideoEditor,
-            "recording_pause_resume" => DaemonAction::ToggleRecordingPause,
-            "recording_stop_save" => DaemonAction::StopRecordingSave,
-            "recording_restart" => DaemonAction::RestartRecording,
-            "recording_discard" => DaemonAction::DiscardRecording,
+            // Canonical control action names (used by CLI + settings shortcuts).
+            "recording_pause_resume" | "toggle_recording_pause" => {
+                DaemonAction::ToggleRecordingPause
+            }
+            "recording_stop_save" | "stop_recording" | "stop_recording_save" => {
+                DaemonAction::StopRecordingSave
+            }
+            "recording_restart" | "restart_recording" => DaemonAction::RestartRecording,
+            "recording_discard" | "discard_recording" => DaemonAction::DiscardRecording,
             "recording_session_started" => DaemonAction::RecordingSessionStarted,
             "recording_session_paused" => DaemonAction::RecordingSessionPaused,
             "recording_session_resumed" => DaemonAction::RecordingSessionResumed,
@@ -1949,16 +1954,25 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
             "open_video_editor" | "open-video-editor" => {
                 return Some(DaemonAction::OpenVideoEditor);
             }
-            "recording_pause_resume" | "recording-pause-resume" => {
+            "recording_pause_resume"
+            | "recording-pause-resume"
+            | "toggle_recording_pause"
+            | "toggle-recording-pause" => {
                 return Some(DaemonAction::ToggleRecordingPause);
             }
-            "recording_stop_save" | "recording-stop-save" => {
+            "recording_stop_save"
+            | "recording-stop-save"
+            | "stop_recording"
+            | "stop-recording"
+            | "stop_recording_save" => {
                 return Some(DaemonAction::StopRecordingSave);
             }
-            "recording_restart" | "recording-restart" => {
+            "recording_restart" | "recording-restart" | "restart_recording"
+            | "restart-recording" => {
                 return Some(DaemonAction::RestartRecording);
             }
-            "recording_discard" | "recording-discard" => {
+            "recording_discard" | "recording-discard" | "discard_recording"
+            | "discard-recording" => {
                 return Some(DaemonAction::DiscardRecording);
             }
             _ => {}
@@ -1983,6 +1997,12 @@ fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
             Some("ui") => Some(DaemonAction::OpenRecordingUi),
             Some("screen") => Some(DaemonAction::RecordScreen),
             Some("area") => Some(DaemonAction::RecordArea),
+            Some("stop") => Some(DaemonAction::StopRecordingSave),
+            Some("pause") | Some("resume") | Some("toggle-pause") | Some("toggle_pause") => {
+                Some(DaemonAction::ToggleRecordingPause)
+            }
+            Some("restart") => Some(DaemonAction::RestartRecording),
+            Some("discard") => Some(DaemonAction::DiscardRecording),
             _ => None,
         },
         Some("recording-control") => match binding.args.get(1).map(|s| s.as_str()) {
@@ -2974,22 +2994,22 @@ mod tests {
     fn binding_to_daemon_action_maps_recording_control_hotkeys() {
         let pause_resume = crate::hotkeys::HotkeyBinding {
             accelerator: "CTRL+ALT+SHIFT+P".into(),
-            args: vec!["recording-control".into(), "pause-resume".into()],
+            args: vec!["record".into(), "toggle-pause".into()],
             name: Some("recording_pause_resume".into()),
         };
         let stop_save = crate::hotkeys::HotkeyBinding {
             accelerator: "CTRL+ALT+SHIFT+S".into(),
-            args: vec!["recording-control".into(), "stop-save".into()],
+            args: vec!["record".into(), "stop".into()],
             name: Some("recording_stop_save".into()),
         };
         let restart = crate::hotkeys::HotkeyBinding {
             accelerator: "CTRL+ALT+SHIFT+N".into(),
-            args: vec!["recording-control".into(), "restart".into()],
+            args: vec!["record".into(), "restart".into()],
             name: Some("recording_restart".into()),
         };
         let discard = crate::hotkeys::HotkeyBinding {
             accelerator: "CTRL+ALT+SHIFT+BackSpace".into(),
-            args: vec!["recording-control".into(), "discard".into()],
+            args: vec!["record".into(), "discard".into()],
             name: Some("recording_discard".into()),
         };
 
@@ -3008,6 +3028,26 @@ mod tests {
         assert!(matches!(
             super::binding_to_daemon_action(&discard),
             Some(super::DaemonAction::DiscardRecording)
+        ));
+
+        // Legacy recording-control args and legacy binding names still map.
+        let legacy_stop = crate::hotkeys::HotkeyBinding {
+            accelerator: String::new(),
+            args: vec!["recording-control".into(), "stop-save".into()],
+            name: Some("stop_recording".into()),
+        };
+        assert!(matches!(
+            super::binding_to_daemon_action(&legacy_stop),
+            Some(super::DaemonAction::StopRecordingSave)
+        ));
+        let stop_by_args_only = crate::hotkeys::HotkeyBinding {
+            accelerator: String::new(),
+            args: vec!["record".into(), "stop".into()],
+            name: None,
+        };
+        assert!(matches!(
+            super::binding_to_daemon_action(&stop_by_args_only),
+            Some(super::DaemonAction::StopRecordingSave)
         ));
     }
 

@@ -25,6 +25,30 @@ fn capture_daemon_action(capture_type: &str) -> Option<&'static str> {
     }
 }
 
+/// Map `apexshot record <type>` to a daemon D-Bus Trigger action name.
+/// Control actions (stop/pause/…) require a running daemon; start actions can
+/// fall back to an in-process path when the daemon is unavailable.
+fn record_daemon_action(record_type: &str) -> Option<&'static str> {
+    match record_type {
+        "ui" => Some("open_recording_ui"),
+        "screen" => Some("record_screen"),
+        "area" => Some("record_area"),
+        // Must match `DaemonIpc::trigger` action names in daemon/mod.rs.
+        "stop" => Some("recording_stop_save"),
+        "pause" | "resume" | "toggle-pause" | "toggle_pause" => Some("recording_pause_resume"),
+        "restart" => Some("recording_restart"),
+        "discard" => Some("recording_discard"),
+        _ => None,
+    }
+}
+
+fn is_record_control_action(record_type: &str) -> bool {
+    matches!(
+        record_type,
+        "stop" | "pause" | "resume" | "toggle-pause" | "toggle_pause" | "restart" | "discard"
+    )
+}
+
 use apexshot::{
     app_identity,
     backend::{CaptureData, DisplayBackend, WaylandBackend, X11Backend},
@@ -280,22 +304,18 @@ async fn async_main(args: Vec<String>) {
                 print_usage();
                 std::process::exit(1);
             }
+            let record_type = args[2].as_str();
             // Try to delegate to the running daemon first.
-            let daemon_action = match args[2].as_str() {
-                "ui" => Some("open_recording_ui"),
-                "screen" => Some("record_screen"),
-                "area" => Some("record_area"),
-                "stop" => Some("stop_recording_save"),
-                "pause" => Some("toggle_recording_pause"), // Simplified to toggle for now
-                "resume" => Some("toggle_recording_pause"),
-                "toggle-pause" => Some("toggle_recording_pause"),
-                "restart" => Some("restart_recording"),
-                "discard" => Some("discard_recording"),
-                _ => None,
-            };
-            if let Some(action) = daemon_action {
+            if let Some(action) = record_daemon_action(record_type) {
                 if trigger_daemon_action(action).await {
                     return;
+                }
+                // Control actions only work through the daemon.
+                if is_record_control_action(record_type) {
+                    eprintln!(
+                        "Error: 'record {record_type}' requires a running ApexShot daemon (apexshot daemon)."
+                    );
+                    std::process::exit(1);
                 }
             }
             if let Err(e) = run_record(&args).await {
@@ -430,7 +450,7 @@ async fn async_main(args: Vec<String>) {
             }
         }
         "--version" | "-V" => println!("apexshot {}", env!("CARGO_PKG_VERSION")),
-        "--help" | "-h" => print_usage(),
+        "--help" | "-h" | "help" => print_usage(),
         "install" => {
             run_install(&args);
         }
@@ -1636,10 +1656,22 @@ fn print_usage() {
     println!("  --prefix <text>   Prefix for filename (default: 'screenshot')");
     println!("  --ocr             Run OCR on captured image and copy to clipboard");
     println!();
+    println!("Recording types:");
+    println!("  screen            Record the full screen");
+    println!("  area              Record a selected area");
+    println!("  ui                Open the recording configuration UI");
+    println!("  stop              Stop and save the active recording (requires daemon)");
+    println!("  pause|resume|toggle-pause  Pause/resume (requires daemon)");
+    println!("  restart           Restart the active recording (requires daemon)");
+    println!("  discard           Discard the active recording (requires daemon)");
+    println!();
     println!("Recording options:");
     println!("  --output <path>   Save to specific path (default: ~/Videos/output.mp4)");
     println!("  --gif             Record as GIF and copy to clipboard");
     println!("  --overlay-stop    Show a small window to stop recording (Esc/Stop button)");
+    println!();
+    println!("Recording control (requires daemon):");
+    println!("  recording-control pause-resume|stop-save|restart|discard");
     println!();
     println!("Install options:");
     println!("  --no-autostart            Skip autostart desktop file");
@@ -2074,7 +2106,10 @@ fn run_capture(args: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{capture_daemon_action, package_uninstall_command_for, uninstall_binary_paths};
+    use crate::{
+        capture_daemon_action, is_record_control_action, package_uninstall_command_for,
+        record_daemon_action, uninstall_binary_paths,
+    };
 
     #[test]
     fn crosshair_capture_type_delegates_to_daemon() {
@@ -2090,6 +2125,42 @@ mod tests {
         assert_eq!(capture_daemon_action("screen"), Some("capture_screen"));
         assert_eq!(capture_daemon_action("window"), Some("capture_window"));
         assert_eq!(capture_daemon_action("unknown"), None);
+    }
+
+    #[test]
+    fn record_types_map_to_expected_daemon_actions() {
+        assert_eq!(record_daemon_action("ui"), Some("open_recording_ui"));
+        assert_eq!(record_daemon_action("screen"), Some("record_screen"));
+        assert_eq!(record_daemon_action("area"), Some("record_area"));
+        // Control actions must use the daemon Trigger names (not legacy aliases).
+        assert_eq!(record_daemon_action("stop"), Some("recording_stop_save"));
+        assert_eq!(
+            record_daemon_action("pause"),
+            Some("recording_pause_resume")
+        );
+        assert_eq!(
+            record_daemon_action("resume"),
+            Some("recording_pause_resume")
+        );
+        assert_eq!(
+            record_daemon_action("toggle-pause"),
+            Some("recording_pause_resume")
+        );
+        assert_eq!(record_daemon_action("restart"), Some("recording_restart"));
+        assert_eq!(record_daemon_action("discard"), Some("recording_discard"));
+        assert_eq!(record_daemon_action("unknown"), None);
+    }
+
+    #[test]
+    fn record_control_actions_require_daemon() {
+        assert!(is_record_control_action("stop"));
+        assert!(is_record_control_action("pause"));
+        assert!(is_record_control_action("toggle-pause"));
+        assert!(is_record_control_action("restart"));
+        assert!(is_record_control_action("discard"));
+        assert!(!is_record_control_action("screen"));
+        assert!(!is_record_control_action("area"));
+        assert!(!is_record_control_action("ui"));
     }
 
     #[test]
@@ -2404,8 +2475,8 @@ async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     } else if record_type != "screen" {
         eprintln!(
-            "Error: recording type '{}' not supported (use 'screen', 'area', or 'ui')",
-            record_type
+            "Error: recording type '{record_type}' not supported \
+             (use 'screen', 'area', 'ui', or control: stop|pause|resume|toggle-pause|restart|discard)"
         );
         std::process::exit(1);
     }

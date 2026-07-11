@@ -542,7 +542,13 @@ apexshot daemon
 # Record directly from CLI without the daemon
 apexshot record screen              # Full screen recording
 apexshot record area --gif          # Area recording as GIF
-apexshot record area --format mp4   # Area recording as MP4
+apexshot record area                # Area recording as MP4 (default)
+
+# Control an active recording (requires daemon)
+apexshot record stop                # Stop and save
+apexshot record toggle-pause        # Pause / resume
+apexshot record restart             # Restart
+apexshot record discard             # Discard without saving
 ```
 
 ### Keyboard Shortcuts

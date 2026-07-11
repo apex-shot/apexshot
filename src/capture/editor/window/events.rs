@@ -18,8 +18,9 @@ use super::super::{
     render::cursor_position_for_text_point,
     state::EditorState,
     types::{
-        tool_shortcut_target, ArrowStyle, BackgroundStyle, DrawColor, FontSettings, FontStyle,
-        MoveHandle, ObfuscateMethod, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
+        tool_button_index, tool_shortcut_target, ArrowStyle, BackgroundStyle, DrawColor,
+        FontSettings, FontStyle, MoveHandle, ObfuscateMethod, Point, TextAlignment, TextDecoration,
+        Tool, ViewTransform,
     },
     ui_support::{
         arrow_style_toolbar_icon, set_active_tool_button, set_button_tool_icon,
@@ -334,7 +335,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_select_inspector_select = sync_select_inspector.clone();
     let rebuild_effects_async_select = rebuild_effects_async.clone();
     select_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_select, 2);
+        set_active_tool_button(&buttons_select, tool_button_index(Tool::Select));
         if state_select
             .lock()
             .unwrap()
@@ -395,11 +396,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             (rebuild.0, rebuild.1)
         };
 
-        if matches!(next_tool, Tool::Crop) {
-            set_active_tool_button(&buttons_crop, 0);
-        } else {
-            set_active_tool_button(&buttons_crop, 6);
-        }
+        set_active_tool_button(&buttons_crop, tool_button_index(next_tool));
         update_toolbar_for_tool_crop(next_tool);
         sync_picker_for_active_tool_crop();
         sync_size_control_crop();
@@ -438,11 +435,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             rebuild.0
         };
 
-        if matches!(next_tool, Tool::Background) {
-            set_active_tool_button(&buttons_background, 1);
-        } else {
-            set_active_tool_button(&buttons_background, 6);
-        }
+        set_active_tool_button(&buttons_background, tool_button_index(next_tool));
 
         update_toolbar_for_tool_background(next_tool);
         sync_picker_for_active_tool_background();
@@ -462,7 +455,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let rebuild_effects_async_draw = rebuild_effects_async.clone();
     let window_draw = window.clone();
     draw_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_draw_mode, 3);
+        set_active_tool_button(&buttons_draw_mode, tool_button_index(Tool::Pen));
         if state_draw_mode
             .lock()
             .unwrap()
@@ -490,7 +483,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_arrow = sync_size_control.clone();
     let rebuild_effects_async_arrow = rebuild_effects_async.clone();
     arrow_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_arrow, 6);
+        set_active_tool_button(&buttons_arrow, tool_button_index(Tool::Arrow));
         if state_arrow
             .lock()
             .unwrap()
@@ -514,7 +507,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_line = sync_size_control.clone();
     let rebuild_effects_async_line = rebuild_effects_async.clone();
     line_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_line, 7);
+        set_active_tool_button(&buttons_line, tool_button_index(Tool::Line));
         if state_line
             .lock()
             .unwrap()
@@ -782,7 +775,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_box = sync_size_control.clone();
     let rebuild_effects_async_box = rebuild_effects_async.clone();
     box_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_box, 4);
+        set_active_tool_button(&buttons_box, tool_button_index(Tool::Box));
         if state_box
             .lock()
             .unwrap()
@@ -806,7 +799,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_circle = sync_size_control.clone();
     let rebuild_effects_async_circle = rebuild_effects_async.clone();
     circle_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_circle, 5);
+        set_active_tool_button(&buttons_circle, tool_button_index(Tool::Circle));
         if state_circle
             .lock()
             .unwrap()
@@ -830,7 +823,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_text = sync_size_control.clone();
     let rebuild_effects_async_text = rebuild_effects_async.clone();
     text_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_text, 8);
+        set_active_tool_button(&buttons_text, tool_button_index(Tool::Text));
         if state_text
             .lock()
             .unwrap()
@@ -854,7 +847,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_obfuscate = sync_size_control.clone();
     let rebuild_effects_async_obfuscate = rebuild_effects_async.clone();
     obfuscate_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_obfuscate, 9);
+        set_active_tool_button(&buttons_obfuscate, tool_button_index(Tool::Obfuscate));
         {
             let mut st = state_obfuscate.lock().unwrap();
             let changed = st.set_tool_without_rebuild(Tool::Obfuscate);
@@ -891,7 +884,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     let sync_size_control_focus = sync_size_control.clone();
     let rebuild_effects_async_focus = rebuild_effects_async.clone();
     focus_btn.connect_clicked(move |_| {
-        set_active_tool_button(&buttons_focus, 12);
+        set_active_tool_button(&buttons_focus, tool_button_index(Tool::Focus));
         if state_focus
             .lock()
             .unwrap()
@@ -929,11 +922,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             rebuild_effects_async_number();
         }
 
-        if matches!(next_tool.0, Tool::Number) {
-            set_active_tool_button(&buttons_number, 10);
-        } else {
-            set_active_tool_button(&buttons_number, 6);
-        }
+        set_active_tool_button(&buttons_number, tool_button_index(next_tool.0));
 
         update_toolbar_for_tool_number(next_tool.0);
         sync_size_control_number();
@@ -967,10 +956,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             rebuild.0
         };
 
-        if matches!(next_tool, Tool::Highlighter) {
-            set_active_tool_button(&buttons_highlighter, 11);
-        } else {
-            set_active_tool_button(&buttons_highlighter, 6);
+        set_active_tool_button(&buttons_highlighter, tool_button_index(next_tool));
+        if !matches!(next_tool, Tool::Highlighter) {
             set_window_cursor_name(&window_highlighter, Some("default"));
         }
 

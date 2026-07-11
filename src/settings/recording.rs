@@ -10,7 +10,6 @@ pub struct RecordingSettingsWidgets {
     pub rec_notifications_check: CheckButton,
     pub rec_countdown_check: CheckButton,
     pub rec_remember_selection_check: CheckButton,
-    pub rec_display_time_check: CheckButton,
 }
 
 pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
@@ -130,15 +129,11 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     rec_countdown_check.set_active(config.rec_countdown);
 
     let rec_remember_selection_check =
-        create_row(&behavior_frame, "Remember last selection area", false);
+        create_row(&behavior_frame, "Remember last selection area", true);
     rec_remember_selection_check.set_active(config.rec_remember_selection);
 
-    let rec_display_time_check = create_row(
-        &behavior_frame,
-        "Display recording time in the top bar",
-        true,
-    );
-    rec_display_time_check.set_active(config.rec_display_time);
+    // "Display recording time in the top bar" was removed: the recording controls
+    // always show the timer, so the setting was a no-op.
 
     section.append(&behavior_frame);
 
@@ -150,6 +145,5 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         rec_notifications_check,
         rec_countdown_check,
         rec_remember_selection_check,
-        rec_display_time_check,
     }
 }

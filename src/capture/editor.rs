@@ -36,6 +36,9 @@ mod tests {
 
     #[test]
     fn tool_shortcuts_map_to_expected_tools() {
+        // Indices must match the tool_buttons vector in window/mod.rs
+        // (Crop, Background, Select, Pen, Box, Circle, Arrow, Line, Text,
+        //  Obfuscate, Number, Highlighter, Focus).
         assert_eq!(tool_shortcut_target('0'), Some((Tool::Select, 2)));
         assert_eq!(tool_shortcut_target('P'), Some((Tool::Pen, 3)));
         assert_eq!(tool_shortcut_target('t'), Some((Tool::Text, 8)));
@@ -43,13 +46,31 @@ mod tests {
         assert_eq!(tool_shortcut_target('a'), Some((Tool::Arrow, 6)));
         assert_eq!(tool_shortcut_target('r'), Some((Tool::Box, 4)));
         assert_eq!(tool_shortcut_target('o'), Some((Tool::Circle, 5)));
-        assert_eq!(tool_shortcut_target('h'), Some((Tool::Highlighter, 12)));
+        assert_eq!(tool_shortcut_target('h'), Some((Tool::Highlighter, 11)));
+        assert_eq!(tool_shortcut_target('7'), Some((Tool::Highlighter, 11)));
         assert_eq!(tool_shortcut_target('c'), Some((Tool::Obfuscate, 9)));
-        assert_eq!(tool_shortcut_target('n'), Some((Tool::Number, 11)));
+        assert_eq!(tool_shortcut_target('n'), Some((Tool::Number, 10)));
         assert_eq!(tool_shortcut_target('x'), Some((Tool::Crop, 0)));
         assert_eq!(tool_shortcut_target('b'), Some((Tool::Obfuscate, 9)));
-        assert_eq!(tool_shortcut_target('f'), Some((Tool::Focus, 10)));
+        assert_eq!(tool_shortcut_target('f'), Some((Tool::Focus, 12)));
         assert_eq!(tool_shortcut_target('q'), None);
+    }
+
+    #[test]
+    fn tool_button_index_matches_toolbar_vector_order() {
+        assert_eq!(tool_button_index(Tool::Crop), 0);
+        assert_eq!(tool_button_index(Tool::Background), 1);
+        assert_eq!(tool_button_index(Tool::Select), 2);
+        assert_eq!(tool_button_index(Tool::Pen), 3);
+        assert_eq!(tool_button_index(Tool::Box), 4);
+        assert_eq!(tool_button_index(Tool::Circle), 5);
+        assert_eq!(tool_button_index(Tool::Arrow), 6);
+        assert_eq!(tool_button_index(Tool::Line), 7);
+        assert_eq!(tool_button_index(Tool::Text), 8);
+        assert_eq!(tool_button_index(Tool::Obfuscate), 9);
+        assert_eq!(tool_button_index(Tool::Number), 10);
+        assert_eq!(tool_button_index(Tool::Highlighter), 11);
+        assert_eq!(tool_button_index(Tool::Focus), 12);
     }
 
     #[test]

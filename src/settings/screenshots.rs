@@ -10,9 +10,6 @@ pub struct ScreenshotsSettingsWidgets {
     pub export_location_browse: Button,
     pub format_input: ComboBoxText,
     pub clipboard_mode_input: ComboBoxText,
-    pub freeze_screen_check: CheckButton,
-    pub crosshair_mode_input: ComboBoxText,
-    pub show_magnifier_check: CheckButton,
     pub timer_interval_input: ComboBoxText,
     pub show_cursor_check: CheckButton,
 }
@@ -116,57 +113,9 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
 
     section.append(&export_frame);
 
-    // --- Interface Group ---
-    let interface_title = Label::new(Some("Interface"));
-    interface_title.add_css_class("settings-group-title");
-    interface_title.set_xalign(0.0);
-    interface_title.set_halign(Align::Start);
-    interface_title.set_margin_bottom(8);
-    section.append(&interface_title);
-
-    let interface_frame = build_frame();
-
-    // Freeze screen
-    let freeze_screen_check = CheckButton::new();
-    freeze_screen_check.set_active(config.screenshot_freeze_screen);
-    let freeze_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    freeze_hbox.set_hexpand(true);
-    let freeze_option = Label::new(Some("Use frozen background during selection"));
-    freeze_option.set_xalign(0.0);
-    freeze_option.set_hexpand(true);
-    freeze_hbox.append(&freeze_option);
-    freeze_hbox.append(&freeze_screen_check);
-    interface_frame.append(&build_row!(&freeze_hbox, false));
-
-    // Crosshair mode
-    let crosshair_mode_input = ComboBoxText::new();
-    crosshair_mode_input.add_css_class("settings-select");
-    for mode in ["Disabled", "Crosshair", "Magnifier"] {
-        crosshair_mode_input.append(Some(mode), mode);
-    }
-    crosshair_mode_input.set_active_id(Some(&config.screenshot_crosshair_mode));
-    let cross_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    cross_hbox.set_hexpand(true);
-    let cross_label = Label::new(Some("Selection cursor"));
-    cross_label.set_xalign(0.0);
-    cross_label.set_hexpand(true);
-    cross_hbox.append(&cross_label);
-    cross_hbox.append(&crosshair_mode_input);
-    interface_frame.append(&build_row!(&cross_hbox, true));
-
-    // Show magnifier sub-option
-    let show_magnifier_check = CheckButton::new();
-    show_magnifier_check.set_active(config.screenshot_show_magnifier);
-    let mag_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    mag_hbox.set_hexpand(true);
-    let mag_option = Label::new(Some("Show zoom preview while selecting"));
-    mag_option.set_xalign(0.0);
-    mag_option.set_hexpand(true);
-    mag_hbox.append(&mag_option);
-    mag_hbox.append(&show_magnifier_check);
-    interface_frame.append(&build_row!(&mag_hbox, false));
-
-    section.append(&interface_frame);
+    // Interface options (frozen selection background, crosshair, magnifier) were
+    // removed: they are hard to keep reliable across Linux compositors/distros.
+    // Capture still uses fixed AppConfig defaults for those fields.
 
     // --- Advanced Group ---
     let adv_title = Label::new(Some("Advanced"));
@@ -230,9 +179,6 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
         export_location_browse,
         format_input,
         clipboard_mode_input,
-        freeze_screen_check,
-        crosshair_mode_input,
-        show_magnifier_check,
         timer_interval_input,
         show_cursor_check,
     }

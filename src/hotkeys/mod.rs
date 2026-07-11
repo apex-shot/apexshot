@@ -505,22 +505,22 @@ fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
         HotkeyBinding {
             name: Some("recording_pause_resume".into()),
             accelerator: "CTRL+ALT+SHIFT+P".into(),
-            args: vec!["recording-control".into(), "pause-resume".into()],
+            args: vec!["record".into(), "toggle-pause".into()],
         },
         HotkeyBinding {
             name: Some("recording_stop_save".into()),
             accelerator: "CTRL+ALT+SHIFT+S".into(),
-            args: vec!["recording-control".into(), "stop-save".into()],
+            args: vec!["record".into(), "stop".into()],
         },
         HotkeyBinding {
             name: Some("recording_restart".into()),
             accelerator: "CTRL+ALT+SHIFT+N".into(),
-            args: vec!["recording-control".into(), "restart".into()],
+            args: vec!["record".into(), "restart".into()],
         },
         HotkeyBinding {
             name: Some("recording_discard".into()),
             accelerator: "CTRL+ALT+SHIFT+BackSpace".into(),
-            args: vec!["recording-control".into(), "discard".into()],
+            args: vec!["record".into(), "discard".into()],
         },
     ]
 }
@@ -811,24 +811,6 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
     );
     push_binding(
         &mut bindings,
-        "stop_recording",
-        &app_config.shortcut_recording_stop_save,
-        &["record", "stop"],
-    );
-    push_binding(
-        &mut bindings,
-        "toggle_recording_pause",
-        &app_config.shortcut_recording_pause_resume,
-        &["record", "toggle-pause"],
-    );
-    push_binding(
-        &mut bindings,
-        "restart_recording",
-        &app_config.shortcut_recording_restart,
-        &["record", "restart"],
-    );
-    push_binding(
-        &mut bindings,
         "show_last_preview",
         &app_config.shortcut_show_last_preview,
         &["show-last-preview"],
@@ -845,29 +827,31 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
         &app_config.shortcut_record_screen,
         &["record", "screen", "--overlay-stop"],
     );
+    // Recording controls — one binding each (names must match DaemonIpc::trigger).
+    // CLI aliases `apexshot record stop|toggle-pause|restart|discard` also work.
     push_binding(
         &mut bindings,
         "recording_pause_resume",
         &app_config.shortcut_recording_pause_resume,
-        &["recording-control", "pause-resume"],
+        &["record", "toggle-pause"],
     );
     push_binding(
         &mut bindings,
         "recording_stop_save",
         &app_config.shortcut_recording_stop_save,
-        &["recording-control", "stop-save"],
+        &["record", "stop"],
     );
     push_binding(
         &mut bindings,
         "recording_restart",
         &app_config.shortcut_recording_restart,
-        &["recording-control", "restart"],
+        &["record", "restart"],
     );
     push_binding(
         &mut bindings,
         "recording_discard",
         &app_config.shortcut_recording_discard,
-        &["recording-control", "discard"],
+        &["record", "discard"],
     );
 
     HotkeyConfig { bindings }

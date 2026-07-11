@@ -140,6 +140,11 @@ fn should_dismiss_for_behavior(currently_pinned: bool, behavior_enabled: bool) -
     behavior_enabled || !currently_pinned
 }
 
+/// Whether a successful Quick Access upload should dismiss the preview overlay.
+fn should_close_preview_after_upload(close_after_uploading: bool) -> bool {
+    close_after_uploading
+}
+
 #[derive(Debug, Error)]
 pub enum CapturePreviewError {
     #[error("Screenshot file not found: {0}")]
@@ -659,6 +664,24 @@ fn setup_preview_window(
         });
 
         let path_upload = path_actions.clone();
+        // Worker thread signals the GTK main loop via this channel (GTK widgets
+        // are !Send, so we cannot close the window directly from the upload thread).
+        let (upload_dismiss_tx, upload_dismiss_rx) = std::sync::mpsc::channel::<()>();
+        let window_weak_upload_poll = window.downgrade();
+        let dismiss_action_upload_poll = dismiss_action_actions;
+        glib::timeout_add_local(Duration::from_millis(50), move || {
+            match upload_dismiss_rx.try_recv() {
+                Ok(()) => {
+                    if let Some(window) = window_weak_upload_poll.upgrade() {
+                        dismiss_preview_window(&window, dismiss_action_upload_poll);
+                    }
+                    // Keep listening so a later successful upload can still dismiss.
+                    ControlFlow::Continue
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
+            }
+        });
         upload_btn_actions.connect_clicked(move |_| {
             let config = load_config();
             if !crate::cloud::upload::is_configured(&config) {
@@ -666,9 +689,12 @@ fn setup_preview_window(
                 crate::utils::notify::desktop_notification(title, body);
                 return;
             }
+            // Live Settings value so Quick Access toggles apply without reopening.
+            let close_after_upload = config.quick_access_close_after_uploading;
             let path = path_upload.clone();
-            std::thread::spawn(
-                move || match crate::cloud::upload::upload_file(&config, &path) {
+            let upload_dismiss_tx = upload_dismiss_tx.clone();
+            std::thread::spawn(move || {
+                match crate::cloud::upload::upload_file(&config, &path) {
                     Ok(result) => {
                         if let Err(e) =
                             crate::utils::clipboard::copy_text_to_clipboard(&result.share_url)
@@ -684,12 +710,18 @@ fn setup_preview_window(
                                 "Share link copied to clipboard",
                             );
                         }
+
+                        // Honor Quick Access "Close window after uploading".
+                        // Failed uploads never dismiss the preview.
+                        if should_close_preview_after_upload(close_after_upload) {
+                            let _ = upload_dismiss_tx.send(());
+                        }
                     }
                     Err(e) => {
                         crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
                     }
-                },
-            );
+                }
+            });
         });
 
         let window_weak_save = window.downgrade();
@@ -1468,5 +1500,12 @@ mod tests {
     fn preview_starts_pinned_when_auto_close_is_disabled() {
         assert!(initial_preview_pinned(false));
         assert!(!initial_preview_pinned(true));
+    }
+
+    #[test]
+    fn close_after_upload_follows_checkbox_literally() {
+        // Upload dismiss is gated only on the setting (not pin state).
+        assert!(should_close_preview_after_upload(true));
+        assert!(!should_close_preview_after_upload(false));
     }
 }

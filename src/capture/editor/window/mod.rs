@@ -3265,20 +3265,21 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
         let _ = context.restore();
     });
 
+    // Order must match `tool_button_index` in types.rs (used by click handlers + shortcuts).
     let tool_buttons = vec![
-        crop_btn.clone(),
-        background_btn.clone(),
-        select_btn.clone(),
-        draw_btn.clone(),
-        box_btn.clone(),
-        circle_btn.clone(),
-        arrow_btn.clone(),
-        line_btn.clone(),
-        text_btn.clone(),
-        obfuscate_btn.clone(),
-        number_btn.clone(),
-        highlighter_btn.clone(),
-        focus_btn.clone(),
+        crop_btn.clone(),        // 0 Crop
+        background_btn.clone(),  // 1 Background
+        select_btn.clone(),      // 2 Select
+        draw_btn.clone(),        // 3 Pen
+        box_btn.clone(),         // 4 Box
+        circle_btn.clone(),      // 5 Circle
+        arrow_btn.clone(),       // 6 Arrow
+        line_btn.clone(),        // 7 Line
+        text_btn.clone(),        // 8 Text
+        obfuscate_btn.clone(),   // 9 Obfuscate
+        number_btn.clone(),      // 10 Number
+        highlighter_btn.clone(), // 11 Highlighter
+        focus_btn.clone(),       // 12 Focus
     ];
 
     // Set initial active tool button (Background is default)

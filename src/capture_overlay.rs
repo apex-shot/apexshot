@@ -1199,11 +1199,8 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     } else {
         "--no-rec-controls".into()
     });
-    extra_args.push(if config.rec_display_time {
-        "--display-rec-time".into()
-    } else {
-        "--no-display-rec-time".into()
-    });
+    // Recording controls always show elapsed time; the old setting is unused.
+    extra_args.push("--display-rec-time".into());
     extra_args.push(if config.rec_hidpi {
         "--hidpi".into()
     } else {

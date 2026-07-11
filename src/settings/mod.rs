@@ -449,9 +449,6 @@ fn build_settings_window(app: &Application) {
         quick_access_auto_close_interval: quick_access.auto_close_interval_input.clone(),
         quick_access_close_after_dragging: quick_access.close_after_dragging_check.clone(),
         quick_access_close_after_uploading: quick_access.close_after_uploading_check.clone(),
-        screenshot_crosshair_mode: screenshots.crosshair_mode_input.clone(),
-        screenshot_show_magnifier: screenshots.show_magnifier_check.clone(),
-        screenshot_freeze_screen: screenshots.freeze_screen_check.clone(),
         screenshot_timer_interval: screenshots.timer_interval_input.clone(),
         screenshot_capture_cursor: screenshots.show_cursor_check.clone(),
         annotate_inverse_arrow: annotate.inverse_arrow_check.clone(),
@@ -463,7 +460,6 @@ fn build_settings_window(app: &Application) {
         rec_notifications: recordings.rec_notifications_check.clone(),
         rec_countdown: recordings.rec_countdown_check.clone(),
         rec_remember_selection: recordings.rec_remember_selection_check.clone(),
-        rec_display_time: recordings.rec_display_time_check.clone(),
         shortcut_open_file: shortcuts.open_file_btn.clone(),
         shortcut_open_from_clipboard: shortcuts.open_clipboard_btn.clone(),
         shortcut_restore_recently_closed: shortcuts.restore_file_btn.clone(),
@@ -531,8 +527,6 @@ fn build_settings_window(app: &Application) {
         &quick_access.auto_close_enabled_check,
         &quick_access.auto_close_action_input,
         &quick_access.auto_close_interval_input,
-        &screenshots.crosshair_mode_input,
-        &screenshots.show_magnifier_check,
     );
 
     window.present();

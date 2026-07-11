@@ -631,23 +631,43 @@ pub fn tool_uses_stroke_size(tool: Tool) -> bool {
     )
 }
 
-pub fn tool_shortcut_target(key: char) -> Option<(Tool, usize)> {
-    match key.to_ascii_lowercase() {
-        '0' | '`' | 's' => Some((Tool::Select, 2)),
-        '1' | 'd' | 'p' => Some((Tool::Pen, 3)),
-        '2' | 't' => Some((Tool::Text, 8)),
-        '3' | 'l' => Some((Tool::Line, 7)),
-        '4' | 'a' => Some((Tool::Arrow, 6)),
-        '5' | 'r' => Some((Tool::Box, 4)),
-        '6' | 'o' => Some((Tool::Circle, 5)),
-        '7' | 'h' => Some((Tool::Highlighter, 12)),
-        'c' | 'C' => Some((Tool::Obfuscate, 9)),
-        'n' | 'N' => Some((Tool::Number, 11)),
-        'x' | 'X' => Some((Tool::Crop, 0)),
-        'b' | 'B' => Some((Tool::Obfuscate, 9)),
-        'f' | 'F' => Some((Tool::Focus, 10)),
-        _ => None,
+/// Index into the editor toolbar `tool_buttons` vector built in `window/mod.rs`.
+/// Keep this match arm order identical to that vector or active-tool highlighting breaks.
+pub fn tool_button_index(tool: Tool) -> usize {
+    match tool {
+        Tool::Crop => 0,
+        Tool::Background => 1,
+        Tool::Select => 2,
+        Tool::Pen => 3,
+        Tool::Box => 4,
+        Tool::Circle => 5,
+        Tool::Arrow => 6,
+        Tool::Line => 7,
+        Tool::Text => 8,
+        Tool::Obfuscate => 9,
+        Tool::Number => 10,
+        Tool::Highlighter => 11,
+        Tool::Focus => 12,
     }
+}
+
+pub fn tool_shortcut_target(key: char) -> Option<(Tool, usize)> {
+    let tool = match key.to_ascii_lowercase() {
+        '0' | '`' | 's' => Tool::Select,
+        '1' | 'd' | 'p' => Tool::Pen,
+        '2' | 't' => Tool::Text,
+        '3' | 'l' => Tool::Line,
+        '4' | 'a' => Tool::Arrow,
+        '5' | 'r' => Tool::Box,
+        '6' | 'o' => Tool::Circle,
+        '7' | 'h' => Tool::Highlighter,
+        'c' | 'b' => Tool::Obfuscate,
+        'n' => Tool::Number,
+        'x' => Tool::Crop,
+        'f' => Tool::Focus,
+        _ => return None,
+    };
+    Some((tool, tool_button_index(tool)))
 }
 
 pub fn constrained_drag_endpoint(
