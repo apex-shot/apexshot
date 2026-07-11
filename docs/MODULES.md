@@ -26,6 +26,7 @@ This document provides detailed information about every module and submodule in 
 - Annotation: default colors, tool preferences (`annotate_inverse_arrow`, `annotate_smooth_drawing`, `annotate_draw_shadow`, `annotate_auto_expand`, `annotate_show_color_names`)
 - Shortcuts: global hotkey bindings per action
 - Advanced: filename patterns, OCR language, clipboard behavior
+- Cloud: `cloud_destination` (`apexshot` | `xbackbone`), ApexShot auth tokens, XBackBone URL/token, upload preferences
 
 **File Format:** YAML stored at `~/.config/apexshot/config.yml`
 
@@ -292,7 +293,7 @@ the C++ Qt5 overlay (`capture-overlay/`) handles area selection instead.
 - `shortcuts.rs` — Global hotkey recording, binding editor, key normalization
 - `after_capture.rs` — Per-action after-capture matrix (screenshot vs recording checkboxes)
 - `storage.rs` — Export location entry with browse button, hide desktop icons toggle
-- `cloud.rs` — Cloud sync waitlist placeholder UI
+- `cloud.rs` — ApexShot Cloud login/logout UI and XBackBone self-hosted destination setup
 - `about.rs` — Procedural Cairo logo, version, update check links, legal footer
 - `actions.rs` — `SaveInputs` struct, save logic, validation, config write
 - `ui_support.rs` — Shared CSS, traffic-light buttons, form helpers, style classes
@@ -436,7 +437,7 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 - `mod.rs` — Wizard flow controller, `is_onboarding_complete()`, `show_onboarding_window()`
 - `welcome.rs` — Welcome screen with app introduction
 - `extensions.rs` — GNOME extension and Chrome extension installation steps
-- `cloud.rs` — Cloud sync waitlist placeholder
+- `cloud.rs` — Cloud upload intro (ApexShot Cloud + XBackBone; configure in Settings)
 - `complete.rs` — Completion screen with "Get Started" button
 
 **Key Functions:**
@@ -446,8 +447,31 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 **Wizard Steps:**
 1. Welcome (`welcome.rs`)
 2. Extensions — GNOME Shell + Chrome (`extensions.rs`)
-3. Cloud Sync — waitlist placeholder (`cloud.rs`)
+3. Cloud Upload — ApexShot Cloud + XBackBone overview (`cloud.rs`)
 4. Complete (`complete.rs`)
+
+---
+
+### Cloud Module (`src/cloud/`)
+
+**Purpose:** Upload captures and recordings to remote destinations.
+
+**Submodules:**
+- `mod.rs` — Module root
+- `upload.rs` — Public `upload_file()` entry point used by preview/editor flows
+- `destination.rs` — `Destination::{ApexShot, XBackbone}` routing from config
+- `apexshot.rs` — ApexShot Cloud REST upload client
+- `auth.rs` — OAuth 2.0 device authorization (`apexshot login` / `logout`)
+- `xbackbone.rs` — Self-hosted XBackBone client (API token, test connection, upload)
+
+**Config fields (in `AppConfig`):**
+- `cloud_destination` — `"apexshot"` or `"xbackbone"`
+- `cloud_backend_url`, `cloud_api_token`, `cloud_refresh_token`, `cloud_install_id`, `cloud_user_email`
+- `xbackbone_url`, `xbackbone_api_token`
+
+**Env overrides (see `.env.example`):**
+- `APEXSHOT_CLOUD_BACKEND_URL`
+- `APEXSHOT_XBACKBONE_URL`, `APEXSHOT_XBACKBONE_TOKEN`
 
 ---
 
@@ -458,6 +482,7 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 **Submodules:**
 - `clipboard.rs` — Clipboard operations
 - `desktop_env.rs` — Desktop environment detection (GNOME, KDE, etc.)
+- `notify.rs` — Desktop notification helpers
 
 ---
 
@@ -468,7 +493,8 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 **Submodules:**
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`, `DisplayError`
 - `x11.rs` — `X11Backend` via `x11rb` + MIT-SHM
-- `wayland.rs` — `WaylandBackend` with tiered capture (`wlr-screencopy`, ScreenCast + PipeWire, or explicit Screenshot portal override)
+- `wayland.rs` — `WaylandBackend` with tiered capture (`wlr-screencopy`, KDE ScreenShot2, ScreenCast + PipeWire, or Screenshot portal)
+- `kde_screenshot.rs` — KWin `org.kde.KWin.ScreenShot2` client for KDE Plasma Wayland
 - `screencopy.rs` — `wlr-screencopy` native Wayland protocol implementation for Hyprland/Sway
 - `portal_permissions.rs` — Persistent XDG portal permission setup (`ensure_portal_permissions()`)
 
@@ -482,8 +508,9 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 
 **Platform Note:** `WaylandBackend` uses a tiered capture strategy:
 - **GNOME Wayland** — C++ overlay plus XDG Screenshot portal for still screenshots.
+- **KDE Plasma Wayland** — `org.kde.KWin.ScreenShot2` via `kde_screenshot.rs` when available.
 - **Hyprland / Sway** — `wlr-screencopy` native Wayland protocol.
-- **Other compositors** — XDG ScreenCast portal + PipeWire as fallback (implemented, not yet tested on KDE/Niri)
+- **Other compositors** — XDG ScreenCast portal + PipeWire as fallback (implemented; broader DE coverage still needs manual validation)
 
 Recording uses the XDG ScreenCast portal + native PipeWire (`src/pipewire_engine.rs`)
 + ffmpeg on most compositors. On wlroots compositors (Hyprland/Sway),
@@ -493,6 +520,26 @@ the Ubuntu/Arch packaging paths are confirmed. Sway/wlroots-like compositors
 should follow the same native path but still need more manual coverage. KDE
 Plasma, Fedora/RHEL, openSUSE, Niri, and NixOS remain development-stage manual
 validation targets. `X11Backend` exists but is not thoroughly tested.
+
+---
+
+### Compositor Helpers (`src/compositor/`)
+
+**Purpose:** Compositor-specific helpers for window geometry, workspaces, and capture affordances.
+
+**Submodules:**
+- `mod.rs` — Shared compositor detection/dispatch
+- `hyprland.rs`, `sway.rs`, `niri.rs`, `river.rs`, `cosmic.rs` — Per-compositor integrations
+
+---
+
+### Distro Module (`src/distro/`)
+
+**Purpose:** Distribution detection and distro-family helpers used by packaging/support paths.
+
+**Submodules:**
+- `mod.rs` — `DistroInfo::detect()` from `/etc/os-release`, helpers like `is_arch()`, `is_debian()`, `is_fedora()`
+- `arch/mod.rs` — Arch-specific integration hooks
 
 ---
 
@@ -551,8 +598,9 @@ without requiring the Qt overlay or GNOME Shell extension.
    `select_area_for_recording()`. The user draws a selection rectangle and
    configures recording options directly inside the GTK overlay panel.
 3. Builds a `RecordingConfig` from the overlay result and user settings.
-4. Calls `recording::start_recording(config)` which builds the GStreamer
-   pipeline and blocks until recording completes.
+4. Calls `recording::start_recording(config)` which selects the backend
+   (`wf-recorder` on wlroots when available, native PipeWire + ffmpeg on other
+   Wayland compositors, GStreamer `ximagesrc` on X11) and blocks until complete.
 5. During recording: the daemon tracks elapsed time for tray display and relays
    pause/resume/stop commands from hotkeys to the active `control_session`.
 6. On completion: fires after-capture actions (preview, clipboard, editor, etc.).
@@ -609,7 +657,7 @@ without requiring the Qt overlay or GNOME Shell extension.
 
 ### GNOME Shell Extension (`gnome-extension/`)
 
-**Purpose:** JavaScript/GJS extension for GNOME Shell 45–49 providing always-on-top stacking, recording masks, and runtime overlays.
+**Purpose:** JavaScript/GJS extension for GNOME Shell 45–50 providing always-on-top stacking, recording masks, and shell-side recording controls.
 
 **Key Files:**
 - `extension.js` — Main extension logic, D-Bus service registration, cleanup
@@ -629,7 +677,7 @@ without requiring the Qt overlay or GNOME Shell extension.
 
 **UUID:** `apexshot-gnome-integration@apexshot.github.io`
 
-**Supported GNOME Versions:** 45–49
+**Supported GNOME Versions:** 45–50 (see `gnome-extension/metadata.json`)
 
 ---
 
@@ -763,5 +811,7 @@ Most modules use `anyhow::Result<T>` for general error propagation.
 - `x11_backend_test.rs` — X11 backend integration
 - `window_picker_ui_contract.rs` — UI contract tests
 - `wayland_backend_mock_test.rs` — Mock backend tests
+- `xbackbone_upload.rs` / `xbackbone_e2e.rs` — XBackBone upload coverage
+- `test_dimensions.rs` / `test_layer.rs` — Additional UI/layout helpers
 
 **Test crates:** `pretty_assertions`, `test-case`, `mockall`

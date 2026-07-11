@@ -8,7 +8,7 @@ This guide provides information for developers who want to contribute to ApexSho
 - Linux (Ubuntu or Arch GNOME Wayland recommended for the known-good path)
   - X11 backend implementations exist in the codebase but have not been thoroughly tested
 - Rust toolchain (latest stable)
-- CMake 3.10 or later
+- CMake 3.16 or later (required by `capture-overlay/CMakeLists.txt`)
 - Qt5 development libraries
 - GStreamer development libraries
 - GTK4 development libraries
@@ -187,6 +187,10 @@ cargo run --release -- video-editor /path/to/recording.mp4
 cargo run --release -- hotkeys install
 cargo run --release -- hotkeys uninstall
 cargo run --release -- hotkeys reset
+
+# Cloud auth
+cargo run --release -- login
+cargo run --release -- logout
 ```
 
 ### Environment Variables for Development
@@ -196,6 +200,8 @@ cargo run --release -- hotkeys reset
 - `APEXSHOT_HOTKEY_LOG=/path/to/log` — Redirect daemon logs to file
 - `APEXSHOT_REDUCED_TRANSPARENCY=1` — Disable transparent effects in overlays
 - `APEXSHOT_APP_ID=your.app.id` — Override default portal app ID
+- `APEXSHOT_CLOUD_BACKEND_URL` — Override ApexShot Cloud API base URL (see `.env.example`)
+- `APEXSHOT_XBACKBONE_URL` / `APEXSHOT_XBACKBONE_TOKEN` — Override XBackBone destination
 
 ## Development Workflow
 
@@ -232,124 +238,68 @@ cargo test --test x11_backend_test
 ```
 apexshot/
 ├── src/                           # Rust source code
-│   ├── annotations/               # Annotation persistence (mod.rs, schema.rs, storage.rs)
+│   ├── annotations/               # Annotation persistence
+│   ├── app_identity.rs            # App ID / desktop identity helpers
 │   ├── backend/                   # Display backend abstraction
 │   │   ├── mod.rs                 # DisplayBackend trait, CaptureData, PixelFormat
 │   │   ├── x11.rs                 # X11 backend (x11rb + MIT-SHM)
-│   │   ├── wayland.rs             # Wayland backend (ashpd ScreenCast portal + PipeWire)
+│   │   ├── wayland.rs             # Wayland backend (tiered capture strategy)
+│   │   ├── kde_screenshot.rs      # KWin ScreenShot2 for KDE Plasma Wayland
 │   │   ├── screencopy.rs          # wlr-screencopy protocol
 │   │   └── portal_permissions.rs  # XDG portal permission persistence
 │   ├── capture/                   # Screen capture + annotation editor
-│   │   ├── mod.rs                 # Image saving, format conversion, cursor compositing
-│   │   ├── editor.rs              # Annotation editor module root
-│   │   ├── preview_overlay.rs     # Post-capture preview overlay
-│   │   └── editor/                # Annotation editor submodules
-│   │       ├── window/            # GTK4 editor window, toolbars, canvas
-│   │       ├── types.rs           # Tool, AnnotationAction, DrawColor, etc.
-│   │       ├── state.rs           # EditorState, undo/redo
-│   │       ├── render.rs          # Cairo rendering for all tools
-│   │       ├── selection.rs       # Hit-testing, resize handles
-│   │       ├── color.rs           # Color palette, conversions
-│   │       ├── pen_weight.rs      # Brush stroke weights
-│   │       ├── numbering_style.rs # Numbered callout styles
-│   │       ├── text_detect.rs     # ML text detection (ocrs/rten)
-│   │       ├── preprocess.rs      # Image preprocessing
-│   │       ├── io_ops.rs          # Clipboard URI operations
-│   │       └── ui_support.rs     # Shared GTK4 UI helpers
+│   ├── capture_overlay.rs         # C++ Qt5 overlay launcher wrapper
+│   ├── cloud/                     # ApexShot Cloud + XBackBone uploads
+│   │   ├── apexshot.rs
+│   │   ├── auth.rs
+│   │   ├── destination.rs
+│   │   ├── upload.rs
+│   │   └── xbackbone.rs
+│   ├── compositor/                # Hyprland/Sway/Niri/River/COSMIC helpers
 │   ├── config.rs                  # YAML configuration, AppConfig
-│   ├── daemon/                    # Background daemon (single file: mod.rs)
+│   ├── daemon/                    # Background daemon
+│   ├── distro/                    # Distro detection / packaging helpers
 │   ├── gnome_integration/         # GNOME extension installation helpers
 │   ├── gnome_shell.rs             # D-Bus proxy for GNOME Shell extension
-│   ├── hotkeys/                   # Global hotkey management (single file: mod.rs)
+│   ├── hotkeys/                   # Global hotkey management
 │   ├── icons/                     # Icon resources
 │   ├── lib.rs                     # Library exports for tests/downstream
 │   ├── main.rs                    # CLI entry point, argument parsing
 │   ├── ocr/                       # OCR functionality (Tesseract + QR)
 │   ├── onboarding/                # First-time setup wizard
-│   │   ├── mod.rs                 # Wizard flow controller
-│   │   ├── welcome.rs             # Welcome screen
-│   │   ├── extensions.rs          # Extension installation
-│   │   ├── cloud.rs               # Cloud sync waitlist
-│   │   └── complete.rs            # Completion screen
-│   ├── overlay.rs                 # X11 area selector (GTK4 + gtk4-layer-shell)
+│   │   ├── welcome.rs
+│   │   ├── extensions.rs
+│   │   ├── cloud.rs               # Cloud upload intro (configure in Settings)
+│   │   └── complete.rs
+│   ├── overlay.rs / overlay/      # GTK4 area/recording selection overlay
+│   ├── pipewire_engine.rs         # Native PipeWire capture engine
+│   ├── preview_launch.rs          # Preview launch helpers
 │   ├── qr/                        # QR code detection (rqrr)
-│   ├── recording/                 # Screen recording with native PipeWire + ffmpeg
-│   │   ├── mod.rs                 # Native PipeWire + ffmpeg, X11 GStreamer fallback, codec detection
-│   │   ├── control_session.rs     # Active session D-Bus commands
-│   │   ├── stop_overlay.rs        # Floating recording control bar
-│   │   ├── countdown_overlay.rs   # Fullscreen 3-2-1 countdown
-│   │   ├── dim_overlay.rs         # Fullscreen dim mask
-│   │   └── dnd.rs                 # Do Not Disturb inhibition
-│   ├── settings/                  # GTK4 settings window
-│   │   ├── mod.rs                 # Main window builder
-│   │   ├── general.rs             # General settings tab
-│   │   ├── screenshots.rs         # Screenshot settings
-│   │   ├── recording.rs           # Recording settings
-│   │   ├── annotate.rs            # Annotation defaults
-│   │   ├── quick_access.rs        # Quick-access overlay settings
-│   │   ├── advanced.rs            # Advanced settings
-│   │   ├── shortcuts.rs           # Hotkey binding editor
-│   │   ├── after_capture.rs       # After-capture action matrix
-│   │   ├── storage.rs             # Export location settings
-│   │   ├── cloud.rs               # Cloud sync waitlist
-│   │   ├── about.rs               # About tab (logo, version, links)
-│   │   ├── actions.rs             # SaveInputs, save logic
-│   │   ├── ui_support.rs          # Shared CSS, form helpers
-│   │   └── windowing.rs           # Edge-drag resize, theme detection
-│   ├── tray/                      # System tray (ksni) (single file: mod.rs)
-│   ├── utils/                     # Utilities
-│   │   ├── clipboard.rs
-│   │   └── desktop_env.rs
-│   └── capture_overlay.rs         # C++ Qt5 overlay launcher wrapper
-├── capture-overlay/               # C++ Qt5 overlay (CMake)
-│   ├── src/                       # C++ source files
-│   │   ├── main.cpp
-│   │   ├── CaptureOverlay.cpp/h
-│   │   ├── CaptureOverlay_Drawing.cpp
-│   │   ├── CaptureOverlay_Events.cpp
-│   │   ├── CaptureOverlay_HitTest.cpp
-│   │   ├── WindowPickerOverlay.cpp/h
-│   │   ├── ScreenCapture.cpp/h
-│   │   └── request.cpp/h
-│   └── CMakeLists.txt
-├── gnome-extension/               # GNOME Shell extension (JavaScript/GJS)
+│   ├── recording/                 # PipeWire + ffmpeg recording + video editor
+│   ├── settings/                  # GTK4 settings window (includes cloud destination UI)
+│   ├── tray/                      # System tray (ksni)
+│   └── utils/                     # clipboard, desktop_env, notify
+├── capture-overlay/               # C++ Qt5 overlay (CMake ≥ 3.16)
+├── gnome-extension/               # GNOME Shell extension (JS/GJS, shell 45–50)
 │   ├── extension.js
-│   ├── controls-ui.js
-│   ├── controls-ui-layout.js
-│   ├── runtime-overlays.js
-│   ├── runtime-overlays-visibility.js
-│   ├── mask-ui.js
-│   ├── session-state.js
-│   ├── window-list.js
-│   ├── screenshot-lock.js
+│   ├── gnome-version.js
+│   ├── controls-ui.js / controls-ui-layout.js
+│   ├── runtime-overlays.js / runtime-overlays-visibility.js
+│   ├── mask-ui.js / session-state.js / window-list.js / screenshot-lock.js
 │   └── metadata.json
-├── web-scroll-extension/          # Chrome/Chromium extension
-│   ├── manifest.json
-│   ├── background.js
-│   ├── popup.html
-│   └── popup.js
+├── web-scroll-extension/          # Chrome/Chromium full-page capture
 ├── native-host/                   # Native messaging host manifest
-│   ├── io.github.codegoddy.apexshot.json
-│   └── apexshot-native-host
 ├── packaging/                     # Package assets
-│   ├── apexshot.desktop
-│   ├── apexshot-daemon.desktop
-│   ├── apexshot.svg
-│   ├── deb/                       # Deb helper scripts
-│   └── debian/                    # Debian packaging control files
-├── tests/                         # Integration tests
-│   ├── desktop_identity.rs
-│   ├── package_metadata.rs
-│   ├── wayland_backend_test.rs
-│   ├── x11_backend_test.rs
-│   ├── window_picker_ui_contract.rs
-│   └── wayland_backend_mock_test.rs
-├── docs/                          # Documentation
-│   ├── ARCHITECTURE.md
-│   ├── DEVELOPER_GUIDE.md
-│   └── MODULES.md
-├── Cargo.toml                     # Rust dependencies
-├── build.rs                       # Build script (CMake + relm4-icons)
+│   ├── apexshot.desktop / apexshot-daemon.desktop / apexshot.svg
+│   ├── deb/ + debian/             # Debian packaging
+│   ├── arch/                      # PKGBUILD + AUR install script
+│   ├── fedora/                    # RPM spec
+│   └── opensuse/                  # RPM spec
+├── scripts/                       # installers, updaters, RPM helpers
+├── tests/                         # Integration tests (incl. xbackbone_*)
+├── docs/                          # Architecture, modules, developer guide, plans
+├── Cargo.toml
+├── build.rs                       # CMake C++ overlay + relm4-icons
 ├── README.md
 ├── CONTRIBUTING.md
 └── LICENSE
@@ -661,7 +611,7 @@ sudo apt install libpipewire-0.3-dev pipewire
 ### GNOME Extension Issues
 
 **Extension not loading:**
-- Check GNOME version compatibility (45–49) against `metadata.json`
+- Check GNOME version compatibility (45–50) against `metadata.json`
 - Verify UUID matches directory name: `apexshot-gnome-integration@apexshot.github.io`
 - Check D-Bus signals with `busctl monitor --session`
 - Look for errors in `journalctl /usr/bin/gnome-shell -f`

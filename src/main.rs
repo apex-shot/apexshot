@@ -1598,8 +1598,9 @@ fn print_usage() {
     println!("  ocr <image>       Extract text from an image");
     println!("  edit <image>      Open image editor window");
     println!("  show-last-preview Reopen the last capture preview via daemon");
-    println!("  recent-captures   Open the recent captures gallery");
     println!("  settings          Open settings window");
+    println!("  login             Sign in to ApexShot Cloud (device authorization)");
+    println!("  logout            Sign out of ApexShot Cloud");
     println!("  native-host <sub> Install/uninstall native messaging host");
     println!("  video-editor [mp4] Open the recording editor");
     println!("  install           Install local binary and set up autostart");
@@ -1626,6 +1627,7 @@ fn print_usage() {
     println!("  screen            Capture the entire screen");
     println!("  area              Capture a selected area (Wayland: interactive)");
     println!("  window            Capture a specific window (Wayland: interactive)");
+    println!("  crosshair         Capture around a precise point (crosshair mode)");
     println!();
     println!("Capture options:");
     println!("  --output <path>   Save to specific path (default: ~/Pictures)");

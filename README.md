@@ -133,6 +133,7 @@ support is improving over time.
 - **Display Support** — Ubuntu GNOME Wayland, Arch Linux GNOME Wayland, and Hyprland Wayland are the known-good targets. Other Wayland desktops and X11 paths are implemented but need more manual testing.
 - **Browser Integration** — Full-page scroll capture via Chrome/Chromium extension
 - **GNOME Integration** — Always-on-top previews and shell-managed recording overlays
+- **Cloud Upload** — Upload captures to ApexShot Cloud (device login) or self-hosted XBackBone; configure in Settings → Cloud
 - **Smart Clipboard** — Automatic clipboard integration for quick sharing
 
 ## Tech Stack
@@ -333,9 +334,9 @@ sudo pacman -S --needed \
 
 After installation, ApexShot will launch an onboarding wizard to help you:
 
-1. **GNOME Extension** (required) — Install the GNOME Shell extension for full functionality
+1. **GNOME Extension** (required on GNOME) — Install the GNOME Shell extension for full functionality
 2. **Browser Extension** (optional) — Set up Chrome/Chromium extension for full-page capture
-3. **Cloud Sync** (coming soon) — Configure cloud storage for automatic backup
+3. **Cloud Upload** (optional) — Configure ApexShot Cloud or self-hosted XBackBone for share links
 
 ### Manual Install
 
@@ -380,7 +381,7 @@ sudo apexshot-dev uninstall --dev
 
 ApexShot requires the GNOME Shell extension for full functionality on GNOME
 Wayland. Without it, preview windows may not stay on top, recording masks will
-not appear, and runtime overlays will not work.
+not appear, and shell-managed recording controls will not work.
 
 This is a GNOME platform limitation, not a sign that the app is unfinished:
 normal desktop apps cannot freely draw above every window or listen to every
@@ -474,10 +475,12 @@ apexshot daemon
 apexshot capture screen          # Full screen capture
 apexshot capture area            # Area selection capture
 apexshot capture window          # Window capture
+apexshot capture crosshair       # Crosshair / precise point capture
 
 # Recording
 apexshot record screen           # Full screen recording
 apexshot record area --gif       # Area recording as GIF
+apexshot record ui               # Open recording configuration UI
 
 # OCR (requires image path)
 apexshot ocr <image-path>        # Extract text from image
@@ -489,8 +492,16 @@ apexshot edit <image-path>       # Open image in annotation editor
 apexshot video-editor            # Open video editor (with optional MP4 path)
 apexshot video-editor <video>    # Open video editor with a specific video
 
-# Settings
+# Settings and cloud
 apexshot settings                # Open settings window
+apexshot login                   # Sign in to ApexShot Cloud (device flow)
+apexshot logout                  # Sign out of ApexShot Cloud
+
+# Daemon / install helpers
+apexshot daemon                  # Background tray + hotkeys
+apexshot hotkeys install         # Install desktop keybindings
+apexshot install                 # Local binary + autostart install
+apexshot --version               # Print version
 ```
 
 ### Recording on non-GNOME systems (Hyprland, Sway, KDE, X11)
@@ -547,23 +558,26 @@ Configure global hotkeys in Settings > Shortcuts. The daemon supports:
 ```
 apexshot/
 ├── src/                    # Rust core (capture, editor, recording, settings, daemon)
-│   ├── capture/            # Screen capture logic
-│   │   └── editor/         # Image annotation editor
-│   ├── backend/            # Display backend abstraction (X11, Wayland)
-│   ├── recording/          # Screen recording with native PipeWire + ffmpeg
-│   ├── settings/           # Settings UI and management
+│   ├── capture/            # Screen capture logic + annotation editor
+│   ├── backend/            # Display backends (X11, Wayland, KDE ScreenShot2, wlr-screencopy)
+│   ├── cloud/              # ApexShot Cloud + XBackBone upload destinations
+│   ├── compositor/         # Compositor helpers (Hyprland, Sway, Niri, River, COSMIC)
+│   ├── distro/             # Distro detection / packaging metadata
+│   ├── recording/          # Screen recording (PipeWire + ffmpeg, X11 GStreamer fallback)
+│   ├── settings/           # Settings UI
 │   ├── onboarding/         # First-time setup wizard
-│   ├── gnome_integration/  # GNOME Shell integration
+│   ├── gnome_integration/  # GNOME Shell extension helpers
 │   ├── qr/                 # QR code detection
-│   ├── pipewire_engine.rs  # Native PipeWire screen capture engine
+│   ├── pipewire_engine.rs  # Native PipeWire capture engine
 │   └── lib.rs              # Library exports
 ├── capture-overlay/        # C++ Qt5 native overlay (region selection, drawing)
 ├── gnome-extension/        # GNOME Shell extension (preview windows, recording mask)
 ├── web-scroll-extension/   # Chrome/Chromium extension (full-page scroll capture)
 ├── native-host/            # Native messaging host for browser integration
-├── packaging/              # Package assets (desktop files, icons, deb helper)
+├── packaging/              # Desktop files, icons, deb/arch/fedora/opensuse assets
+├── scripts/                # Installers, updaters, RPM helpers
 ├── tests/                  # Integration tests
-├── docs/                   # Architecture, data flow, and implementation docs
+├── docs/                   # Architecture, module, and developer docs
 ├── build.rs                # Build script (CMake C++ overlay + icon bundling)
 └── Cargo.toml              # Rust dependencies and package metadata
 ```

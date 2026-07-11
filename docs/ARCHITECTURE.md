@@ -47,6 +47,11 @@ ApexShot is a Linux screen capture tool written in Rust, featuring screenshot ca
 │  │   (qr/)     │  │  (tray/)    │  │(onboarding/)│  │  (utils/)   │      │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘      │
 │                                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
+│  │    Cloud    │  │ Compositor  │  │   Distro    │  │  PipeWire   │      │
+│  │  (cloud/)   │  │(compositor/)│  │  (distro/)  │  │  engine.rs  │      │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘      │
+│                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                 C++ Qt5 Capture Overlay                              │   │
 │  │              (capture-overlay/ — CMake)                              │   │
@@ -91,9 +96,12 @@ Entry point handling CLI arguments, mode selection, and subprocess delegation:
 - `edit <path>` — open annotation editor
 - `video-editor [path]` — open video editor (with optional MP4 path)
 - `settings` — open settings window
-- `hotkeys {install|uninstall|reset}` — hotkey management
+- `login` / `logout` — ApexShot Cloud device authorization
+- `hotkeys {install|uninstall|reset|setup}` — hotkey management
 - `show-last-preview`, `open-file`, `open-from-clipboard`, `restore-recently-closed`, `toggle-overlays` — daemon-triggered actions
 - `recording-control {pause-resume|stop-save|restart|discard}` — recording control
+- `install` / `uninstall` — local binary + autostart helpers
+- `native-host` — Chrome/Chromium native messaging host
 - `edit-internal`, `settings-internal`, `preview` — GTK-only subprocess commands
 
 ### 3. Configuration (`src/config.rs`)
@@ -106,7 +114,9 @@ Centralized YAML configuration management:
 - Advanced settings (filename patterns, OCR, clipboard, desktop icon hiding)
 - Storage settings (export location browse, hide desktop icons while capturing)
 - After-capture settings (quick access, clipboard copy, save, open annotate)
-- Cloud settings (waitlist placeholder)
+- Cloud settings (destination: ApexShot Cloud or XBackBone, auth tokens, upload prefs)
+  - `cloud_backend_url` can also come from `APEXSHOT_CLOUD_BACKEND_URL`
+  - XBackBone URL/token can come from Settings or `APEXSHOT_XBACKBONE_*` env vars
 
 **Storage:** `~/.config/apexshot/config.yml`
 
@@ -177,13 +187,21 @@ GTK4-based settings window with custom chromeless styling and edge-drag resize:
 - `shortcuts.rs` — global hotkey recording and binding editor
 - `after_capture.rs` — per-action after-capture behavior matrix (screenshot vs recording)
 - `storage.rs` — export location, hide desktop icons while capturing
-- `cloud.rs` — cloud sync waitlist placeholder
+- `cloud.rs` — ApexShot Cloud login UI + XBackBone self-hosted destination setup
 - `about.rs` — app logo (Cairo-drawn procedural), version, update check, links
 - `actions.rs` — `SaveInputs` struct, settings save/load logic, validation
 - `ui_support.rs` — shared CSS styling, custom traffic-light buttons, form helpers
 - `windowing.rs` — edge-drag resize, window drag, dark/light theme detection (`prefers_dark_glass_theme`), reduced-transparency support
 
-### 9. Annotation Persistence (`src/annotations/`)
+### 9. Cloud Upload (`src/cloud/`)
+Upload destinations for captures and recordings:
+- `upload.rs` — public entry point used by preview overlay and annotation editor
+- `destination.rs` — routes uploads to ApexShot Cloud or XBackBone based on config
+- `apexshot.rs` — ApexShot Cloud REST upload client
+- `auth.rs` — OAuth 2.0 device authorization (`apexshot login` / `logout`)
+- `xbackbone.rs` — self-hosted XBackBone upload client (API token)
+
+### 10. Annotation Persistence (`src/annotations/`)
 Non-destructive annotation storage:
 - `mod.rs` — public API for save/load
 - `schema.rs` — `AnnotationFile` schema with versioning, canvas size, action list
@@ -193,63 +211,71 @@ Non-destructive annotation storage:
 - Annotations: `~/.local/share/apexshot/annotations/`
 - Originals: `~/.local/share/apexshot/originals/`
 
-### 10. OCR Module (`src/ocr/`)
+### 11. OCR Module (`src/ocr/`)
 Text recognition using dual engines:
 - Tesseract for traditional OCR with multi-language support
 - QR code detection via `rqrr` (attempted first)
 - `ocrs`/`rten` engine used in `capture/editor/text_detect.rs` for ML-based text detection
 - Clipboard auto-copy option
 
-### 11. GNOME Integration (`src/gnome_integration/`, `src/gnome_shell.rs`)
+### 12. GNOME Integration (`src/gnome_integration/`, `src/gnome_shell.rs`)
 D-Bus communication with GNOME Shell extension:
 - `gnome_shell.rs` — `org.apexshot.ShellOverlay` D-Bus proxy (ShowMask, HideMask, recording pause/resume/restart/end)
 - `gnome_integration/` — extension installation, validation, metadata parsing
 
-### 12. Hotkeys (`src/hotkeys/`)
+### 13. Hotkeys (`src/hotkeys/`)
 Global hotkey management:
 - GNOME: gsettings custom keybindings pointing at `apexshot daemon` subcommands
 - Non-GNOME: portal `GlobalShortcuts` via `ashpd`
 - Desktop entry generation (`ensure_desktop_entry_pub`)
 - Config path: `~/.cache/apexshot/hotkey-daemon.log` (when not in terminal)
 
-### 13. Tray (`src/tray/`)
+### 14. Tray (`src/tray/`)
 System tray via `ksni` (StatusNotifierItem):
 - Idle and recording states with elapsed timer
 - Menu: Capture (screen/area/window), Record, Video Editor, Show Last Preview, Open Last Capture, Settings, Quit
 - Procedural Cairo-drawn "A-Mark" icon at multiple resolutions
 
-### 14. Onboarding (`src/onboarding/`)
+### 15. Onboarding (`src/onboarding/`)
 First-time setup wizard:
 - `welcome.rs` — welcome screen
 - `extensions.rs` — GNOME extension and Chrome extension installation
-- `cloud.rs` — cloud sync waitlist
+- `cloud.rs` — cloud upload intro (ApexShot Cloud + XBackBone; configure later in Settings)
 - `complete.rs` — completion screen
 - `mod.rs` — wizard flow controller, completion flag check
 
-### 15. Utils (`src/utils/`)
+### 16. Utils (`src/utils/`)
 Shared utilities:
 - `clipboard.rs` — clipboard operations
 - `desktop_env.rs` — desktop environment detection
 
-### 16. Display Backend (`src/backend/`)
+### 17. Display Backend (`src/backend/`)
 Abstraction over display servers:
 - `mod.rs` — `DisplayBackend` trait, `CaptureData`, `PixelFormat`, `CursorData`
 - `x11.rs` — X11 backend via `x11rb` + MIT-SHM
 - `wayland.rs` — Wayland backend with a tiered capture strategy:
   - **GNOME:** still screenshots use the C++ overlay plus XDG Screenshot portal
+  - **KDE Plasma Wayland:** `org.kde.KWin.ScreenShot2` (`kde_screenshot.rs`) when available
   - **Hyprland/Sway:** `wlr-screencopy` native Wayland protocol
   - **Fallback:** XDG ScreenCast portal + PipeWire for cross-compositor compatibility
 - `screencopy.rs` — `wlr-screencopy` protocol implementation for Hyprland/Sway
+- `kde_screenshot.rs` — KWin ScreenShot2 D-Bus client for KDE Plasma
 - `portal_permissions.rs` — persistent XDG portal permission setup
 
 **Supported pixel formats:** RGB24, RGB32, RGBA32, BGR24, BGR32, BGRA32.
 
-### 17. QR Code Detection (`src/qr/`)
+### 18. Compositor Helpers (`src/compositor/`)
+Compositor-specific helpers for Hyprland, Sway, Niri, River, and COSMIC (window geometry, workspaces, etc.).
+
+### 19. Distro Metadata (`src/distro/`)
+Distribution detection from `/etc/os-release` and distro-family helpers used by packaging/support paths.
+
+### 20. QR Code Detection (`src/qr/`)
 Fast QR code decoding:
 - `rqrr` with raw-byte API to avoid `image` crate version conflicts
 - Integrated into OCR pipeline as primary detection path
 
-### 18. C++ Overlay Launcher (`src/capture_overlay.rs`)
+### 21. C++ Overlay Launcher (`src/capture_overlay.rs`)
 Rust wrapper for the C++ Qt5 overlay binary:
 - `run_capture_overlay()` — spawns overlay process
 - `capture_area_via_cpp()`, `capture_crosshair_via_cpp()`, `capture_screen_via_cpp()` — capture modes
@@ -257,9 +283,10 @@ Rust wrapper for the C++ Qt5 overlay binary:
 - Binary location resolved via `option_env!("APEXSHOT_CAPTURE_BIN_DIR")` set by `build.rs`
 - `CaptureOverlayGuard` / `LaunchBlockedReason` — concurrency control
 
-### 19. Library Exports (`src/lib.rs`)
+### 22. Library Exports (`src/lib.rs`)
 Public API surface for integration tests and downstream use:
 - Re-exports from `backend`, `capture`, `config`, `ocr`, `overlay`, `recording`, `settings`, `onboarding`
+- Modules also public: `cloud`, `compositor`, `distro`, `daemon`, `pipewire_engine`, etc.
 
 ## External Components
 
@@ -283,7 +310,7 @@ Native C++ overlay built with CMake and Qt5:
 - `src/request.cpp/h` — IPC request format
 
 ### GNOME Shell Extension (`gnome-extension/`)
-JavaScript/GJS extension for GNOME Shell 45–49:
+JavaScript/GJS extension for GNOME Shell 45–50:
 - `extension.js` — main extension logic, D-Bus service setup
 - `controls-ui.js` — recording controls UI shell elements
 - `controls-ui-layout.js` — layout positioning

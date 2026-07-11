@@ -72,7 +72,9 @@ right starting point for a change.
 | Settings UI                           | `src/settings/`                                     | GTK4 preferences window, shortcut editor, recording options. |
 | Onboarding wizard                     | `src/onboarding/`                                   | First-run setup, GNOME extension installer (`wget` + `curl`). |
 | Cross-cutting utilities               | `src/utils/`                                        | Clipboard, desktop env detection, scoped portal identity. |
-| Native interactive overlay (Qt5)      | `capture-overlay/src/`                              | Selection, recording controls; built independently with CMake. |
+| Native interactive overlay (Qt5)      | `capture-overlay/src/`                              | Selection, recording controls; built automatically by `build.rs` (manual CMake still OK for debugging). |
+| Cloud upload destinations             | `src/cloud/`                                        | ApexShot Cloud + XBackBone; Settings → Cloud + `apexshot login`. |
+| Compositor helpers                    | `src/compositor/`                                   | Hyprland/Sway/Niri/River/COSMIC helpers. |
 | GNOME Shell extension                 | `gnome-extension/`                                  | Mask UI, recording controls dock, screenshot lock. ES modules + GJS tests. |
 | Native messaging host (browser)       | `native-host/`                                      | Bridge between Chrome/Chromium and the daemon. |
 | Chrome/Chromium extension             | `web-scroll-extension/`                             | Full-page scroll capture orchestration. |
@@ -152,14 +154,14 @@ The extension is plain ES modules in `gnome-extension/`. Two workflows:
 # Quick syntax check (the same one CI runs):
 pnpm check:gnome
 
-# Live-install into your session (works on GNOME 45–49):
+# Live-install into your session (works on GNOME 45–50):
 make -C gnome-extension install     # if a Makefile is present, otherwise:
 gnome-extensions pack gnome-extension --force \
   --extra-source=controls-ui.js --extra-source=controls-ui-layout.js \
   --extra-source=mask-ui.js --extra-source=runtime-overlays.js \
   --extra-source=runtime-overlays-visibility.js \
   --extra-source=screenshot-lock.js --extra-source=session-state.js \
-  --extra-source=window-list.js
+  --extra-source=window-list.js --extra-source=gnome-version.js
 gnome-extensions install --force apexshot-gnome-integration@apexshot.github.io.shell-extension.zip
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ```
@@ -173,7 +175,7 @@ apexshot` to follow extension logs.
 ```bash
 cd gnome-extension
 zip apexshot-gnome-integration.zip \
-  extension.js metadata.json \
+  extension.js metadata.json gnome-version.js \
   controls-ui.js controls-ui-layout.js \
   mask-ui.js runtime-overlays.js runtime-overlays-visibility.js \
   screenshot-lock.js session-state.js window-list.js

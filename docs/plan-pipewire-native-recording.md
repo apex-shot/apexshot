@@ -1,6 +1,6 @@
 # Plan: Replace GStreamer with Native libpipewire (OBS-style)
 
-**Historical status:** Webcam/PiP recording support described in this plan has since been removed from ApexShot. GStreamer is retained where still needed for non-webcam recording fallback paths such as X11/GIF/audio-related pipelines.
+**Historical status:** Core native PipeWire path is implemented in `src/pipewire_engine.rs` and used by Wayland recording/screenshot capture. Webcam/PiP recording support described in this plan has since been removed from ApexShot. GStreamer is retained where still needed for non-webcam recording fallback paths such as X11/GIF/audio-related pipelines. Treat remaining “current state” tables below as design history, not live inventory.
 
 ## Goal
 

@@ -1,9 +1,10 @@
 # ApexShot GNOME Helper (GNOME Extension)
 
-This GNOME extension currently supports two ApexShot GNOME Wayland integrations:
+This GNOME extension supports ApexShot GNOME Wayland integrations:
 
-- keeping ApexShot screenshot preview windows on top during drag operations
+- keeping ApexShot screenshot preview / editor windows on top during drag operations
 - drawing a shell-managed dimmed recording mask around the selected recording area
+- shell-side recording controls (pause / stop / timer) via D-Bus
 
 ## Why This Extension?
 
@@ -36,7 +37,7 @@ gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 
 ## Requirements
 - ApexShot built with D-Bus integration (default build)
-- GNOME Shell 45, 46, or 47
+- GNOME Shell 45–50 (see `metadata.json` `shell-version`)
 - D-Bus session bus available
 
 ## Troubleshooting

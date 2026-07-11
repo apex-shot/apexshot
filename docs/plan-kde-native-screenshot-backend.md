@@ -1,5 +1,9 @@
 # Plan: KDE Plasma Native Screenshot Backend
 
+**Status: Implemented in tree** (`src/backend/kde_screenshot.rs`, wired from `src/backend/wayland.rs`).
+Broader KDE Plasma runtime testing is still called out as development-stage in the root README.
+This document is retained as design history / testing checklist.
+
 ## Goal
 Add a KDE-native Wayland screenshot path that avoids the ScreenCast portal permission flow by using:
 

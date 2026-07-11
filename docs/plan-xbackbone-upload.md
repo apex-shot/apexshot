@@ -1,33 +1,39 @@
 # Plan: Native XBackBone (self-hosted) upload support
 
+**Status: Implemented.** Kept as historical design notes. Live code lives in:
+
+- `src/cloud/{mod.rs, upload.rs, destination.rs, apexshot.rs, auth.rs, xbackbone.rs}`
+- Settings UI: `src/settings/cloud.rs` (ApexShot Cloud + XBackBone destination panels)
+- Onboarding: `src/onboarding/cloud.rs`
+- CLI: `apexshot login` / `apexshot logout`
+- Env: `.env.example` (`APEXSHOT_CLOUD_BACKEND_URL`, `APEXSHOT_XBACKBONE_*`)
+- Tests: `tests/xbackbone_upload.rs`, `tests/xbackbone_e2e.rs`
+
+Do not treat the “current state of the codebase” snapshot below as accurate —
+it describes pre-implementation research for issue #36.
+
+---
+
 Resolves GitHub issue #36 — feature request to add native support for uploading
 screenshots and recordings to a self-hosted XBackBone instance from ApexShot.
 
-## Background research
+## Background research (pre-implementation snapshot)
 
-### Current state of the codebase
+### Codebase state *before* XBackBone landed
 
-- Only **one upload destination** exists today: ApexShot Cloud (proprietary REST API).
-- Upload code lives in `src/cloud/{mod.rs, upload.rs, auth.rs}`.
-  - `upload.rs::upload_file()` is the public entry point (called from
-    `src/capture/preview_overlay.rs:662` and `src/capture/editor/window/events.rs:744`).
+- Only **one upload destination** existed at research time: ApexShot Cloud (proprietary REST API).
+- Upload code lived in `src/cloud/{mod.rs, upload.rs, auth.rs}`.
+  - `upload.rs::upload_file()` is the public entry point (preview overlay + annotation editor).
   - ApexShot Cloud uses an OAuth 2.0 Device Authorization Grant (`auth.rs::login()`),
-    accessible only via the `apexshot login` CLI subcommand (`src/main.rs:126-139`).
+    accessible via the `apexshot login` CLI subcommand.
   - Upload is two-step: `POST /v1/uploads` (create session) → `PUT uploadUrl` (upload bytes).
   - Tokens auto-refresh on 401/403 via `refresh_access_token()`.
-- Config (`src/config.rs`): `AppConfig` has `cloud_*` fields (lines 115-126) stored at
+- Config (`src/config.rs`): `AppConfig` has `cloud_*` and `xbackbone_*` fields stored at
   `~/.config/apexshot/config.yml`. `cloud_backend_url` falls back to the
   `APEXSHOT_CLOUD_BACKEND_URL` env var.
-- Settings Cloud tab (`src/settings/cloud.rs`): a **waitlist placeholder** that only
-  shows "Coming Soon" and a button to open `https://apexshot.org/waitlist`. The `_config`
-  parameter is unused.
-- CSS classes `.cloud-avatar`, `.cloud-user-name`, `.cloud-user-email` already exist in
-  `src/settings/ui_support.rs:1160-1176` but are unused — they were prepared for an
-  account panel that was never built.
-- Call sites call `is_configured()` + `upload_file()` — if those dispatch internally by
-  destination, no UI changes are needed at the call sites.
-- `ureq` is at version `2.10` with the `json` feature. **No multipart feature** — the
-  multipart body for XBackBone must be built manually.
+- **Post-implementation:** Settings Cloud tab is a real destination picker (ApexShot Cloud + XBackBone), not a waitlist.
+- Call sites still go through `is_configured()` + `upload_file()`, which dispatch via `destination.rs`.
+- `ureq` is at version `2.10` with the `json` feature; multipart for XBackBone is built in `xbackbone.rs`.
 
 ### XBackBone (3.x stable AND 4.x upcoming)
 
