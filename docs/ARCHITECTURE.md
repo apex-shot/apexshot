@@ -358,6 +358,10 @@ ApexShot supports two distinct recording paths: the **native Rust path** used on
 non-GNOME compositors (Hyprland, Sway, KDE, X11) and the **Qt overlay + GNOME
 extension path** used on GNOME Wayland.
 
+**Exception — Fedora:** video recording is not supported. All recording entry
+points call `refuse_fedora_recording()` and return before any portal/encode
+session is created. Screenshots on Fedora remain supported.
+
 #### Native Rust recording path (non-GNOME): daemon → portal → native PipeWire + ffmpeg
 
 1. User triggers recording via hotkey, tray, or CLI (`apexshot record area`,
@@ -518,12 +522,16 @@ Configuration stored in `~/.config/apexshot/config.yml`:
   XDG ScreenCast portal + PipeWire path (implemented, not yet tested)
 - Sway and other wlroots-like compositors beyond Hyprland
 - Fedora/RHEL, openSUSE, NixOS, Alpine, Gentoo, and Void distro-family metadata.
-  Fedora/RHEL and openSUSE are development-stage targets until real
-  install/runtime testing is complete.
+  openSUSE and several of these remain development-stage for full install/runtime
+  coverage.
+- **Fedora video recording is intentionally unsupported.** Screenshot capture on
+  Fedora (especially KDE Plasma Wayland) is supported; recording hotkeys/CLI
+  refuse with a user notification. Prefer Spectacle or Kooha for Fedora screen
+  recording. See `docs/progress-fedora-kde-overlay-and-preview.md`.
 
 **Priority manual validation targets:**
-- Fedora GNOME Wayland
-- Fedora KDE Plasma Wayland
+- Fedora GNOME Wayland (screenshots only — recording is disabled by product decision)
+- Fedora KDE Plasma Wayland (screenshots validated; recording unsupported)
 - openSUSE Tumbleweed or Leap KDE Plasma Wayland
 - Sway Wayland
 - NixOS GNOME or KDE Wayland

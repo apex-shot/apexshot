@@ -458,22 +458,24 @@ path.
 - [ ] `cargo run --release -- capture area` works
 - [ ] `cargo run --release -- capture screen` works
 - [ ] `cargo run --release -- record area` works (start + stop)
+  — **except on Fedora**, where recording must refuse with a notification
 - [ ] Annotation editor opens and all tools render correctly
 - [ ] Settings window opens and saves changes persist after restart
 - [ ] Daemon mode starts and tray icon appears
 - [ ] Global hotkeys trigger captures
 - [ ] GNOME extension keeps preview windows on top
 
-For distro/compositor expansion work, also verify the shared ScreenCast portal
-path on at least one non-GNOME portal backend:
-- [ ] Fedora GNOME Wayland for Fedora/RHEL RPM-family coverage
-- [ ] Fedora or openSUSE KDE Plasma Wayland for `xdg-desktop-portal-kde`
+For distro/compositor expansion work, also verify the shared capture path on at
+least one non-GNOME portal backend:
+- [ ] Fedora GNOME Wayland — screenshots only (recording unsupported by design)
+- [ ] Fedora or openSUSE KDE Plasma Wayland for `xdg-desktop-portal-kde` screenshots
+- [ ] On Fedora: `apexshot record screen` (or record hotkey) shows “Recording not supported” and does not start a session
 - [ ] Sway Wayland for additional wlroots coverage beyond Hyprland
 - [ ] NixOS GNOME or KDE Wayland for non-FHS/runtime dependency coverage
 
-Fedora/RHEL and openSUSE are development-stage distro targets. Treat their
-metadata, installers, and RPM scaffolding as implementation work that still
-needs real install/runtime testing before being documented as supported.
+**Fedora:** screenshots are supported; **video recording is not**. openSUSE and
+other RPM-family targets remain development-stage for full install/runtime
+coverage.
 
 See `CONTRIBUTING.md` for more detailed manual testing guidelines.
 

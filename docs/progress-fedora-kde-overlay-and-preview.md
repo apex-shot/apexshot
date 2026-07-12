@@ -11,6 +11,30 @@ Stabilize ApexShot behavior for Fedora KDE Plasma and related Linux desktop path
 
 ---
 
+## Product decision: no video recording on Fedora
+
+**ApexShot does not support video recording on Fedora.**
+
+| Supported on Fedora | Not supported on Fedora |
+|---|---|
+| Screenshots (area / screen / window) | Screen recording (area / full screen / UI / GIF) |
+| Preview overlay, tray, settings, hotkeys | Portal / OpenH264 / VP9 encode paths for ApexShot |
+| Cloud upload for images | In-app recording controls / stop indicator for video |
+
+**User-facing behavior:** hotkeys, tray “record”, and `apexshot record …` show a
+desktop notification (“Recording not supported”) and do not start a session.
+Message points users to **Spectacle** or **Kooha** for screen recording.
+
+**Code entry points (all refuse on Fedora):**
+- `recording::is_fedora_recording_unsupported()` / `refuse_fedora_recording()`
+- Daemon: `handle_record_screen`, `handle_record_area`, `handle_open_recording_ui`
+- CLI: `run_record` in `src/main.rs`
+- Overlay request path: `run_overlay_recording_request_with_gtk`
+
+Other distros keep full recording UX unchanged.
+
+---
+
 ## What has been done so far
 
 ### 1. KDE native screenshot backend added
@@ -290,6 +314,10 @@ Use:
 - **portal-based actual screenshot capture**
 
 This path is currently working.
+
+### Fedora video recording
+**Unsupported.** Do not implement or document ApexShot screen recording for
+Fedora users until this product decision is reversed.
 
 ### Arch Hyprland/Sway path
 Use:

@@ -113,8 +113,16 @@ ApexShot picks the best capture route at runtime (not at package build time):
 
 Arch package dependencies intentionally include both Wayland and X11 clipboard helpers (`wl-clipboard`, `xclip`) so one package works across desktops.
 
+## Fedora note
+
+**Video recording is not supported on Fedora** (`DistroInfo::is_fedora()`). All
+recording entry points refuse with a desktop notification; screenshots remain
+supported. Details:
+[`progress-fedora-kde-overlay-and-preview.md`](progress-fedora-kde-overlay-and-preview.md).
+
 ## Related docs
 
 - [`README.md`](../README.md) — install matrix and user commands
 - [`AUR_PUBLISHING.md`](AUR_PUBLISHING.md) — release → AUR automation
 - [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) — build from source
+- [`progress-fedora-kde-overlay-and-preview.md`](progress-fedora-kde-overlay-and-preview.md) — Fedora product limits

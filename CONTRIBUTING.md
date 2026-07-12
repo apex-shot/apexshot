@@ -281,15 +281,16 @@ elsewhere when they touch a related code path. As of today:
 |-----------------------------|------------------------------|----------------------------|-----------------------|
 | Display server              | Wayland                      | X11                        | XWayland edge cases   |
 | Compositor                  | GNOME Shell 47–50, Hyprland  | Sway / wlroots-like        | KDE Plasma, Niri, river |
-| Distro                      | Ubuntu 24.04 / 25.10, Arch Linux | Debian / Pop!_OS through Ubuntu-compatible packaging | Fedora/RHEL, openSUSE, NixOS |
-| Recording codecs            | VP9, H.264, GIF              | VP8, H.265, Theora         | —                     |
-| Capture portal flow         | xdg-desktop-portal-gnome, Hyprland/wlroots native capture | xdg-desktop-portal-gtk | KDE portal backend |
+| Distro                      | Ubuntu 24.04 / 25.10, Arch Linux | Debian / Pop!_OS through Ubuntu-compatible packaging; Fedora screenshots (KDE validated) | openSUSE, NixOS; full Fedora GNOME matrix |
+| Recording codecs            | VP9, H.264, GIF (Ubuntu/Arch and similar) | VP8, H.265, Theora | **Fedora: recording unsupported** |
+| Capture portal flow         | xdg-desktop-portal-gnome, Hyprland/wlroots native capture | xdg-desktop-portal-gtk, xdg-desktop-portal-kde (screenshots) | — |
 
-Fedora/RHEL and openSUSE support are currently development-stage targets:
-distro metadata and, for openSUSE, installer/RPM scaffolding exist, but they
-still need real runtime validation. If your PR exercises one of the
-*Untested* squares, please mention that in the PR description so the maintainer
-knows extra eyes might be useful before merging.
+**Fedora product limit:** ApexShot does **not** support video recording on
+Fedora. Recording entry points refuse with a desktop notification; screenshots
+and related tools still work. Prefer Spectacle or Kooha for Fedora screen
+recording. openSUSE and other RPM-family targets remain development-stage for
+full install/runtime coverage. If your PR exercises an *Untested* square,
+mention that in the PR description.
 
 ## Submitting Changes
 

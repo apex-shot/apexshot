@@ -42,7 +42,7 @@ support.
 |---|---|
 | ShareX-style capture | Full screen, area, window, and crosshair screenshots |
 | Annotation and editing | Arrows, shapes, text, blur, pixelate, crop, highlighter, and color picker |
-| Screen recording | Area or full-screen recording with MP4/GIF output, audio monitoring, countdown, and controls |
+| Screen recording | Area or full-screen recording with MP4/GIF output, audio monitoring, countdown, and controls (**not supported on Fedora**) |
 | Video editing | Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings |
 | Text and code extraction | OCR plus automatic QR code detection from captured regions |
 | Linux desktop integration | GNOME Wayland support, portal-backed capture paths, tray, daemon mode, and global hotkeys |
@@ -67,10 +67,10 @@ ApexShot does, without turning the README into generic comparison copy.
 
 ApexShot is already usable as a daily screenshot tool on the configurations
 that have been personally tested: Ubuntu GNOME Wayland, Arch Linux GNOME
-Wayland, and Hyprland Wayland. The recommended installer detects
-Ubuntu/Debian, Arch Linux, or openSUSE and selects the matching install path,
-but Fedora/RHEL and openSUSE support should still be treated as development
-stage until runtime testing is complete:
+Wayland, Hyprland Wayland, and Fedora KDE Plasma Wayland (screenshots). The
+recommended installer detects Ubuntu/Debian, Arch Linux, Fedora, or openSUSE
+and selects the matching install path. **Video recording is not supported on
+Fedora**; openSUSE remains development-stage for full runtime coverage:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
@@ -87,7 +87,7 @@ Works best today on:
 | GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
 | Sway / wlroots-like compositors (Wayland) | Implementation exists through GTK4 layer-shell, `wlr-screencopy`, and `wf-recorder`, but needs more manual validation |
 | KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet personally tested |
-| Fedora / RHEL (Wayland) | Development stage: source installer and initial RPM spec exist; runtime testing pending |
+| Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). **Video recording is not supported** — use Spectacle or Kooha for screen recording |
 | openSUSE Tumbleweed / Leap (Wayland) | Development stage: source installer and initial RPM spec exist; runtime testing pending |
 | NixOS / Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; packaging/testing pending |
 | X11 on any distro | Experimental |
@@ -154,8 +154,8 @@ support is improving over time.
 ### Quick Install — Recommended
 
 Run the interactive installer. The production-tested paths are Ubuntu/Debian
-and Arch Linux. The installer also detects Fedora and openSUSE, but those RPM
-paths are still in development and need more real runtime validation:
+and Arch Linux; Fedora is usable for **screenshots** (video recording is not
+supported). openSUSE remains development-stage for full runtime validation:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
@@ -205,20 +205,26 @@ AUR publishing notes for maintainers live in
 
 ### Fedora Workstation / KDE Plasma / Spins
 
-Fedora support is in development. The generic installer above will select
-this automatically when `dnf` is available, but this path has not yet been
-personally runtime-tested across Fedora GNOME and KDE package installs. Direct
-command:
+Fedora is supported for **screenshots** (area / screen / window), preview,
+settings, tray, and hotkeys. Fedora KDE Plasma Wayland has been runtime-validated
+for the capture path.
+
+> **Video recording is not supported on Fedora.**  
+> Hotkeys, tray actions, and CLI `apexshot record …` show a desktop notification
+> and exit without starting a session. For screen recording on Fedora, use
+> **Spectacle** or **Kooha**. Screenshots in ApexShot continue to work normally.
+
+The generic installer selects the Fedora path automatically when `dnf` is
+available. Direct command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-install.sh | bash
 ```
 
-The direct Fedora installer now downloads the latest published GitHub Release
-RPM and installs it with `dnf`, after ensuring the required runtime packages are
-present.
+The direct Fedora installer downloads the latest published GitHub Release RPM and
+installs it with `dnf`, after ensuring the required runtime packages are present.
 
-A local RPM build path is still available for packaging work:
+A local RPM build path is available for packaging work:
 
 ```bash
 git clone https://github.com/apex-shot/apexshot.git
@@ -227,9 +233,11 @@ scripts/build-fedora-rpm.sh
 sudo dnf install target/fedora-rpmbuild/RPMS/*/apexshot-*.rpm
 ```
 
-The Fedora RPM build path is intended for package validation and future
-Copr/RPM publishing work. Runtime testing on Fedora GNOME and KDE Plasma
-Wayland is still in progress.
+For local development reinstalls on Fedora:
+
+```bash
+./scripts/fedora-reinstall.sh --start
+```
 
 ### openSUSE Tumbleweed / Leap
 
@@ -506,9 +514,13 @@ apexshot --version               # Print version
 
 ### Recording on non-GNOME systems (Hyprland, Sway, KDE, X11)
 
+> **Fedora:** Video recording is **not supported**. Recording actions show a
+> notification and exit. Use Spectacle or Kooha for screen recording on Fedora.
+> Screenshots still work. See the [Fedora install section](#fedora-workstation--kde-plasma--spins).
+
 ApexShot uses a fully self-contained Rust stack for recording on systems
-without GNOME Shell. No Qt overlay, no shell extension — the daemon, the GTK4
-overlay, and native PipeWire handle everything.
+without GNOME Shell (except Fedora, above). No Qt overlay, no shell extension —
+the daemon, the GTK4 overlay, and native PipeWire handle everything.
 
 **How it works:**
 1. The daemon runs in the background with a system tray icon and global hotkeys.
