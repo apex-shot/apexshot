@@ -245,11 +245,46 @@ fn pipewire_source_pipeline(node_id: u32, fd: i32) -> String {
     format!("pipewiresrc fd={fd} path={node_id} do-timestamp=true{copy_buffers_prop}")
 }
 
-fn overlay_recording_output_dir(app_config: &AppConfig) -> PathBuf {
+/// Directory for new recordings: Settings `video_export_location`, else XDG Videos.
+pub fn recording_output_dir(app_config: &AppConfig) -> PathBuf {
     if !app_config.video_export_location.is_empty() {
         PathBuf::from(&app_config.video_export_location)
     } else {
         dirs::video_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+}
+
+/// Expand `rec_filename_pattern` (`{Date}`, `{Time}`) and join under the export dir.
+pub fn recording_output_path(
+    app_config: &AppConfig,
+    extension: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> PathBuf {
+    let date_str = now.format("%Y-%m-%d").to_string();
+    let time_str = now.format("%H-%M-%S").to_string();
+    let pattern = app_config.rec_filename_pattern.trim();
+    let pattern = if pattern.is_empty() {
+        "ApexShot Recording {Date} at {Time}"
+    } else {
+        pattern
+    };
+    let filename = pattern
+        .replace("{Date}", &date_str)
+        .replace("{Time}", &time_str)
+        // Patterns must stay single-path-segment filenames.
+        .replace(['/', '\\'], "-");
+    let ext = extension.trim_start_matches('.');
+    recording_output_dir(app_config).join(format!("{filename}.{ext}"))
+}
+
+fn ensure_recording_parent_dir(path: &Path) {
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!(
+                "[recording] Warning: could not create output directory {}: {e}",
+                parent.display()
+            );
+        }
     }
 }
 
@@ -285,6 +320,7 @@ fn compute_wayland_crop(
 
 impl Default for RecordingConfig {
     fn default() -> Self {
+        // Fallback only for tests/ad-hoc callers. Prefer `from_app_config`.
         let mut path = dirs::video_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push("output.mp4");
         Self {
@@ -305,6 +341,63 @@ impl Default for RecordingConfig {
             gif_quality: 0.75,
             gif_optimize: true,
             gif_max_width: Some(800),
+        }
+    }
+}
+
+impl RecordingConfig {
+    /// Build a recording config from Settings (export folder, filename pattern,
+    /// fps / resolution / cursor / HiDPI / mono). Used by daemon screen/area
+    /// hotkeys so they match the overlay recording path.
+    pub fn from_app_config(app_config: &AppConfig, extension: &str) -> Self {
+        Self::from_app_config_at(app_config, extension, chrono::Utc::now())
+    }
+
+    pub fn from_app_config_at(
+        app_config: &AppConfig,
+        extension: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        let output_path = recording_output_path(app_config, extension, now);
+        ensure_recording_parent_dir(&output_path);
+
+        let fps = match app_config.rec_video_fps {
+            0 => 24,
+            1 => 30,
+            2 => 50,
+            3 => 60,
+            _ => 30,
+        };
+        let max_resolution = match app_config.rec_video_max_res {
+            0 => None,
+            1 => Some((1920, 1080)),
+            2 => Some((1280, 720)),
+            _ => None,
+        };
+
+        Self {
+            output_path,
+            width: None,
+            height: None,
+            x: None,
+            y: None,
+            cursor: app_config.rec_cursor,
+            hidpi: app_config.rec_hidpi,
+            max_resolution,
+            fps,
+            mono_audio: app_config.rec_video_mono,
+            mic_enabled: false,
+            speaker_enabled: false,
+            mic_source: None,
+            speaker_source: None,
+            gif_quality: app_config.rec_gif_quality,
+            gif_optimize: app_config.rec_gif_optimize,
+            gif_max_width: match app_config.rec_gif_size_idx {
+                0 => Some(800),
+                1 => Some(640),
+                2 => Some(480),
+                _ => None,
+            },
         }
     }
 }
@@ -2354,16 +2447,8 @@ pub fn prepare_overlay_recording_request(
         RecordingType::Video => "mp4",
         RecordingType::Gif => "gif",
     };
-    let output_dir = overlay_recording_output_dir(&app_config);
-
-    // Generate filename using pattern from config
-    let date_str = now.format("%Y-%m-%d").to_string();
-    let time_str = now.format("%H-%M-%S").to_string();
-    let filename = app_config
-        .rec_filename_pattern
-        .replace("{Date}", &date_str)
-        .replace("{Time}", &time_str);
-    let output_path = output_dir.join(format!("{}.{}", filename, extension));
+    let output_path = recording_output_path(&app_config, extension, now);
+    ensure_recording_parent_dir(&output_path);
 
     let max_resolution = match request.video_max_res {
         0 => None,
@@ -2989,6 +3074,49 @@ mod tests {
             .iter()
             .find(|profile| profile.encoder == encoder)
             .expect("expected encoder profile to exist")
+    }
+
+    #[test]
+    fn recording_output_path_uses_export_location_and_filename_pattern() {
+        let app = AppConfig {
+            video_export_location: "/mnt/media/apexshot".into(),
+            rec_filename_pattern: "Clip {Date} {Time}".into(),
+            ..AppConfig::default()
+        };
+        let now = chrono::Utc
+            .with_ymd_and_hms(2026, 7, 12, 11, 0, 49)
+            .unwrap();
+        let path = recording_output_path(&app, "mp4", now);
+        assert_eq!(
+            path,
+            PathBuf::from("/mnt/media/apexshot/Clip 2026-07-12 11-00-49.mp4")
+        );
+        assert!(!path.to_string_lossy().contains("output.mp4"));
+    }
+
+    #[test]
+    fn from_app_config_does_not_use_hardcoded_output_mp4() {
+        let app = AppConfig {
+            video_export_location: "/tmp/apexshot-daemon-recs".into(),
+            rec_filename_pattern: "ApexShot Recording {Date} at {Time}".into(),
+            rec_video_fps: 3, // 60
+            rec_cursor: false,
+            rec_hidpi: false,
+            ..AppConfig::default()
+        };
+        let now = chrono::Utc
+            .with_ymd_and_hms(2026, 7, 12, 15, 30, 0)
+            .unwrap();
+        let config = RecordingConfig::from_app_config_at(&app, "mp4", now);
+        assert_eq!(
+            config.output_path,
+            PathBuf::from(
+                "/tmp/apexshot-daemon-recs/ApexShot Recording 2026-07-12 at 15-30-00.mp4"
+            )
+        );
+        assert_eq!(config.fps, 60);
+        assert!(!config.cursor);
+        assert!(!config.hidpi);
     }
 
     #[test]

@@ -51,7 +51,8 @@ pub type SelectionResult = Result<OverlaySelection, SelectionError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SelectionError {
-    #[error("GTK initialization failed: {0}")]
+    /// Generic capture/overlay setup failure. Message is user-facing when possible.
+    #[error("{0}")]
     InitError(String),
 
     #[error("{0}")]

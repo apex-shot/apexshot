@@ -27,8 +27,9 @@ use crate::{
     capture_overlay::{
         begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
         capture_screen_file_via_cpp, capture_window_file_via_cpp, is_launch_blocked_error,
-        open_recording_ui_via_cpp, request_existing_overlay_focus, AreaCapturePathResult,
-        CaptureOverlayGuard, LaunchBlockedReason,
+        open_recording_ui_via_cpp, request_existing_overlay_focus,
+        user_facing_capture_failure_message, AreaCapturePathResult, CaptureOverlayGuard,
+        LaunchBlockedReason,
     },
     config::load_config,
     hotkeys::{
@@ -2119,9 +2120,14 @@ fn apply_screenshot_after_capture_actions(
     let show_quick_access = config.after_capture_show_quick_access;
 
     let clip_path = saved_path.clone();
+    let clip_config = config.clone();
     std::thread::spawn(move || {
-        copy_screenshot_to_clipboard(&clip_path, &config);
+        copy_screenshot_to_clipboard(&clip_path, &clip_config);
     });
+
+    // Upload when Cloud is configured and auto-upload is enabled (manual
+    // Upload button on Quick Access still works for re-uploads).
+    crate::cloud::upload::spawn_auto_upload_after_capture(saved_path.clone());
 
     if open_annotate {
         // Spawn editor as subprocess to avoid tokio runtime conflicts
@@ -2437,6 +2443,15 @@ fn send_desktop_notification(summary: &str, body: &str) {
     crate::utils::notify::desktop_notification(summary, body);
 }
 
+/// Surface a capture failure to the user (Spectacle-style: failures are never silent).
+/// Cancel / launch-blocked paths should not call this.
+fn notify_screenshot_capture_failed(context: &str, err: &impl std::fmt::Display) {
+    let technical = err.to_string();
+    eprintln!("[daemon] {context} capture failed: {technical}");
+    let body = user_facing_capture_failure_message(&technical);
+    send_desktop_notification("Screenshot failed", &body);
+}
+
 /// Spawn `apexshot preview <path>` as a subprocess so it gets its own GTK context.
 fn show_preview_subprocess(path: std::path::PathBuf) -> Option<std::process::Child> {
     match crate::preview_launch::spawn_preview_subprocess(&path) {
@@ -2595,7 +2610,7 @@ fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
                 eprintln!("[daemon] Area capture blocked: {err}");
                 return;
             }
-            eprintln!("[daemon] C++ area-init capture path failed: {err}");
+            notify_screenshot_capture_failed("Area", &err);
         }
     }
 }
@@ -2637,7 +2652,7 @@ fn handle_capture_crosshair_with_active_session(state: Arc<Mutex<DaemonState>>) 
             eprintln!("[daemon] Crosshair capture cancelled.");
         }
         Err(err) => {
-            eprintln!("[daemon] Crosshair capture failed: {err}");
+            notify_screenshot_capture_failed("Crosshair", &err);
         }
     }
 }
@@ -2684,8 +2699,11 @@ fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonState>>) {
         Err(err) if is_launch_blocked_error(&err) => {
             eprintln!("[daemon] Fullscreen capture blocked: {err}");
         }
+        Err(crate::overlay::SelectionError::Cancelled) => {
+            eprintln!("[daemon] Fullscreen capture cancelled.");
+        }
         Err(err) => {
-            eprintln!("[daemon] C++ fullscreen capture failed: {err}");
+            notify_screenshot_capture_failed("Fullscreen", &err);
         }
     }
 }
@@ -2732,7 +2750,12 @@ fn handle_capture_window_with_active_session(state: Arc<Mutex<DaemonState>>) {
         Err(err) if is_launch_blocked_error(&err) => {
             eprintln!("[daemon] Window capture blocked: {err}");
         }
+        Err(crate::overlay::SelectionError::Cancelled) => {
+            eprintln!("[daemon] Window capture cancelled.");
+        }
         Err(e) => {
+            // Area fallback may also fail (e.g. portal status=2). It notifies on its
+            // own failure path; log the original window error for diagnosis.
             eprintln!("[daemon] Window capture failed: {e}; falling back to area capture.");
             handle_capture_area_with_active_session(state);
         }
@@ -2765,7 +2788,12 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
 
     eprintln!("[daemon] Starting screen recording…");
 
-    let config = RecordingConfig::default();
+    let app_config = load_config().sanitized();
+    let config = RecordingConfig::from_app_config(&app_config, "mp4");
+    eprintln!(
+        "[daemon] Recording output path: {}",
+        config.output_path.display()
+    );
     let params = RecordingControlsParams {
         capture_x: 0,
         capture_y: 0,
@@ -2857,17 +2885,20 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         height: cpp_area.height,
     };
 
-    let config = RecordingConfig {
-        x: Some(area.x),
-        y: Some(area.y),
-        width: Some(area.width as u32),
-        height: Some(area.height as u32),
-        ..Default::default()
-    };
+    let app_config = load_config().sanitized();
+    let mut config = RecordingConfig::from_app_config(&app_config, "mp4");
+    config.x = Some(area.x);
+    config.y = Some(area.y);
+    config.width = Some(area.width as u32);
+    config.height = Some(area.height as u32);
 
     eprintln!(
-        "[daemon] Starting area recording ({},{} {}x{})…",
-        area.x, area.y, area.width, area.height
+        "[daemon] Starting area recording ({},{} {}x{}) → {}…",
+        area.x,
+        area.y,
+        area.width,
+        area.height,
+        config.output_path.display()
     );
 
     let params = RecordingControlsParams {

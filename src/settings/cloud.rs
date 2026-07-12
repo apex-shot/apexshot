@@ -7,6 +7,7 @@ pub struct CloudSettingsWidgets {
     pub section: GtkBox,
     pub apexshot_check: CheckButton,
     pub xbackbone_check: CheckButton,
+    pub auto_upload_check: CheckButton,
     pub xb_url_entry: Entry,
     pub xb_token_entry: Entry,
 }
@@ -68,6 +69,29 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     dest_hbox.append(&dest_label);
     dest_hbox.append(&dest_actions);
     dest_frame.append(&build_row!(&dest_hbox, false));
+
+    let auto_upload_check = CheckButton::new();
+    auto_upload_check.set_active(config.cloud_auto_upload_after_capture);
+    let auto_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    auto_hbox.set_hexpand(true);
+    let auto_label = Label::new(Some("Upload after capture"));
+    auto_label.set_xalign(0.0);
+    auto_label.set_hexpand(true);
+    let auto_help = Label::new(Some(
+        "When the selected destination is configured, upload each saved screenshot automatically.",
+    ));
+    auto_help.add_css_class("dim-label");
+    auto_help.set_wrap(true);
+    auto_help.set_xalign(0.0);
+    auto_help.set_hexpand(true);
+    let auto_col = GtkBox::new(Orientation::Vertical, 4);
+    auto_col.set_hexpand(true);
+    auto_col.append(&auto_label);
+    auto_col.append(&auto_help);
+    auto_hbox.append(&auto_col);
+    auto_hbox.append(&auto_upload_check);
+    dest_frame.append(&build_row!(&auto_hbox, true));
+
     section.append(&dest_frame);
 
     // --- ApexShot Cloud panel ---
@@ -104,6 +128,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
         section,
         apexshot_check,
         xbackbone_check,
+        auto_upload_check,
         xb_url_entry: xb_panel.url_entry,
         xb_token_entry: xb_panel.token_entry,
     }

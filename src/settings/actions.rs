@@ -92,6 +92,7 @@ pub struct SaveInputs {
     pub adv_ocr_keep_line_breaks: CheckButton,
     pub cloud_apexshot: CheckButton,
     pub cloud_xbackbone: CheckButton,
+    pub cloud_auto_upload: CheckButton,
     pub xbackbone_url: Entry,
     pub xbackbone_api_token: Entry,
 }
@@ -247,6 +248,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     } else {
         "apexshot".to_string()
     };
+    config.cloud_auto_upload_after_capture = inputs.cloud_auto_upload.is_active();
     config.xbackbone_url = inputs.xbackbone_url.text().to_string();
     config.xbackbone_api_token = inputs.xbackbone_api_token.text().to_string();
 

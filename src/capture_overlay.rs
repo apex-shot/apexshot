@@ -605,7 +605,9 @@ fn run_capture_binary(
     cmd.env("QT_IM_MODULE", "compose")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        // Capture stderr so portal/KWin failure detail can reach the UI.
+        // Re-emit to the process journal after wait so existing log workflows still work.
+        .stderr(Stdio::piped());
 
     for arg in extra_args {
         cmd.arg(arg);
@@ -631,6 +633,8 @@ fn run_capture_binary(
         ))
     })?;
 
+    reemit_capture_stderr(&output.stderr);
+
     match classify_overlay_exit_code(output.status.code()) {
         Ok(Some("forwarded")) => {
             #[cfg(unix)]
@@ -649,6 +653,116 @@ fn run_capture_binary(
     }
 
     Ok(output)
+}
+
+/// Write capture-helper stderr to our own stderr so journalctl still shows it.
+fn reemit_capture_stderr(stderr: &[u8]) {
+    if stderr.is_empty() {
+        return;
+    }
+    use std::io::Write;
+    let _ = std::io::stderr().write_all(stderr);
+}
+
+/// Pull the most useful line from apexshot-capture stderr for error messages.
+fn extract_capture_error_detail(stderr: &str) -> Option<String> {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+
+    // Prefer the last line that looks like a capture failure (C++ logs prefix these).
+    let preferred = lines
+        .iter()
+        .rev()
+        .find(|line| {
+            line.contains("capture failed")
+                || line.contains("Portal ")
+                || line.contains("status=")
+                || line.starts_with("apexshot-capture:")
+        })
+        .copied()
+        .unwrap_or(*lines.last().unwrap());
+
+    let detail = preferred
+        .strip_prefix("apexshot-capture:")
+        .map(str::trim)
+        .unwrap_or(preferred);
+
+    Some(detail.to_string())
+}
+
+/// Build a SelectionError for a non-success apexshot-capture exit code.
+fn overlay_exit_error(mode: &str, code: i32, stderr: &str) -> SelectionError {
+    let message = match extract_capture_error_detail(stderr) {
+        Some(detail) => format!("apexshot-capture {mode} exited with code {code}: {detail}"),
+        None => format!("apexshot-capture {mode} exited with code {code}"),
+    };
+    SelectionError::InitError(message)
+}
+
+/// Whether the error text points at a portal rejection / compositor refuse.
+fn looks_like_portal_rejection(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("portal screenshot rejected")
+        || lower.contains("status=2")
+        || lower.contains("portal permission capture failed")
+        || lower.contains("portal fullscreen capture failed")
+        || lower.contains("the name is not activatable")
+        || lower.contains("serviceunknown")
+}
+
+/// Strip `apexshot-capture <mode> exited with code <n>: ` when present.
+fn strip_overlay_exit_prefix(detail: &str) -> &str {
+    if !detail.starts_with("apexshot-capture ") {
+        return detail;
+    }
+    let Some(exit_idx) = detail.find(" exited with code ") else {
+        return detail;
+    };
+    let after_exit = &detail[exit_idx + " exited with code ".len()..];
+    // Expect "<n>: <rest>" or just "<n>" with no detail.
+    if let Some(colon_idx) = after_exit.find(": ") {
+        return &after_exit[colon_idx + 2..];
+    }
+    detail
+}
+
+/// Build a concise, user-facing body for desktop notifications on capture failure.
+///
+/// Keeps technical detail when available and adds a KDE-specific hint when the
+/// compositor's screenshot backend is missing or the portal returns status=2.
+pub fn user_facing_capture_failure_message(err: &str) -> String {
+    let detail = err.trim();
+    let mut body = if detail.is_empty() {
+        "An error occurred while taking a screenshot.".to_string()
+    } else {
+        let cleaned = strip_overlay_exit_prefix(detail);
+        // Generic exit-code form with no extra detail → plain message.
+        if cleaned.starts_with("apexshot-capture ") && cleaned.contains("exited with code") {
+            "An error occurred while taking a screenshot.".to_string()
+        } else {
+            cleaned.to_string()
+        }
+    };
+
+    let on_kde = crate::backend::kde_screenshot::is_kde_wayland_session();
+    if on_kde {
+        let kwin_missing = !crate::backend::kde_screenshot::is_kwin_screenshot_available();
+        if kwin_missing || looks_like_portal_rejection(err) {
+            body.push_str(
+                "\n\nOn KDE Plasma, the compositor refused the screenshot. \
+Enable KWin's screenshot plugin (System Settings → Desktop Effects, or set \
+screenshotEnabled=true under [Plugins] in ~/.config/kwinrc) and try again.",
+            );
+        }
+    }
+
+    body
 }
 
 impl InteractiveOverlaySessionGuard {
@@ -859,11 +973,12 @@ pub enum AreaCapturePathResult {
     Cancelled,
 }
 
-fn parse_area_capture_output(
+fn parse_area_capture_output_with_stderr(
     exit_code: Option<i32>,
     stdout: &str,
+    stderr: &str,
 ) -> Result<AreaCapturePathResult, SelectionError> {
-    parse_area_capture_output_with_persist(exit_code, stdout, |request| {
+    parse_area_capture_output_with_persist(exit_code, stdout, stderr, |request| {
         crate::recording::persist_overlay_recording_request_state(request)
     })
 }
@@ -871,6 +986,7 @@ fn parse_area_capture_output(
 fn parse_area_capture_output_with_persist(
     exit_code: Option<i32>,
     stdout: &str,
+    stderr: &str,
     persist_record_config: impl FnOnce(&RecordingRequest) -> anyhow::Result<()>,
 ) -> Result<AreaCapturePathResult, SelectionError> {
     match exit_code {
@@ -931,9 +1047,7 @@ fn parse_area_capture_output_with_persist(
             );
             capture_window_file_via_cpp().map(AreaCapturePathResult::Captured)
         }
-        Some(code) => Err(SelectionError::InitError(format!(
-            "apexshot-capture --area-init exited with code {code}"
-        ))),
+        Some(code) => Err(overlay_exit_error("--area-init", code, stderr)),
     }
 }
 
@@ -979,9 +1093,11 @@ pub fn run_capture_overlay_with_window(
                 height: i32::MIN,
             })))
         }
-        Some(code) => Err(SelectionError::InitError(format!(
-            "apexshot-capture exited with code {code}"
-        ))),
+        Some(code) => Err(overlay_exit_error(
+            "overlay",
+            code,
+            &String::from_utf8_lossy(&output.stderr),
+        )),
     }
 }
 
@@ -1011,9 +1127,11 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
             let _ = capture_window_via_cpp();
             Ok(OverlaySelection::Area(None))
         }
-        Some(code) => Err(SelectionError::InitError(format!(
-            "apexshot-capture exited with code {code}"
-        ))),
+        Some(code) => Err(overlay_exit_error(
+            "overlay",
+            code,
+            &String::from_utf8_lossy(&output.stderr),
+        )),
     }
 }
 
@@ -1085,9 +1203,7 @@ pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
         Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
             Err(SelectionError::Cancelled)
         }
-        Some(code) => Err(SelectionError::InitError(format!(
-            "apexshot-capture --window-capture exited with code {code}"
-        ))),
+        Some(code) => Err(overlay_exit_error("--window-capture", code, stderr.trim())),
     }
 }
 
@@ -1127,9 +1243,11 @@ pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
         Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
             Err(SelectionError::Cancelled)
         }
-        Some(code) => Err(SelectionError::InitError(format!(
-            "apexshot-capture --capture-screen exited with code {code}"
-        ))),
+        Some(code) => Err(overlay_exit_error(
+            "--capture-screen",
+            code,
+            &String::from_utf8_lossy(&output.stderr),
+        )),
     }
 }
 
@@ -1268,7 +1386,8 @@ pub fn open_recording_ui_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
     let arg_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
     let output = run_capture_binary(&arg_refs, None)?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_area_capture_output(output.status.code(), stdout.trim())
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_area_capture_output_with_stderr(output.status.code(), stdout.trim(), stderr.trim())
 }
 
 pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
@@ -1295,12 +1414,13 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
         exit_code
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     eprintln!(
         "[capture_overlay] capture_area_via_cpp: stdout = {:?}",
         stdout.trim()
     );
 
-    parse_area_capture_output(exit_code, stdout.trim())
+    parse_area_capture_output_with_stderr(exit_code, stdout.trim(), stderr.trim())
 }
 
 pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
@@ -1358,9 +1478,11 @@ pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
         Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
             Err(SelectionError::Cancelled)
         }
-        Some(code) => Err(SelectionError::InitError(format!(
-            "apexshot-capture crosshair mode exited with code {code}"
-        ))),
+        Some(code) => Err(overlay_exit_error(
+            "crosshair mode",
+            code,
+            &String::from_utf8_lossy(&output.stderr),
+        )),
     }
 }
 
@@ -1635,8 +1757,8 @@ mod tests {
     use super::{
         append_screenshot_timer_args, build_area_init_args, build_crosshair_args,
         build_recording_ui_args, classify_overlay_exit_code, execute_builtin_overlay_query,
-        is_gnome_wayland_session_from_env, parse_area_capture_output,
-        parse_area_capture_output_with_persist, parse_capture_screen_json,
+        is_gnome_wayland_session_from_env, parse_area_capture_output_with_persist,
+        parse_area_capture_output_with_stderr, parse_capture_screen_json,
         parse_capture_screen_json_with_mode, parse_recording_json, parse_selection_json,
         save_capture_to_temp_png, should_request_screenshot_lock,
         should_use_gtk_layer_shell_selector_from_env, tracked_overlay_id,
@@ -1976,9 +2098,10 @@ mod tests {
 
     #[test]
     fn area_init_cancel_does_not_parse_record_config_payload() {
-        let result = parse_area_capture_output(
+        let result = parse_area_capture_output_with_stderr(
             Some(OverlayExitCode::Cancelled as i32),
             r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video"}"#,
+            "",
         )
         .expect("cancel should parse");
 
@@ -1990,6 +2113,7 @@ mod tests {
         let result = parse_area_capture_output_with_persist(
             Some(OverlayExitCode::RecordConfigUpdated as i32),
             r#"{"x":636,"y":177,"width":600,"height":744,"mode":"record-config","record_type":"video","controls":true,"mic":false,"speaker":false,"display_rec_time":false,"hidpi":false,"notifications":true,"cursor":true,"remember_selection":false,"dim_screen":true,"countdown":true,"video_max_res":0,"video_fps":1,"record_mono":false,"open_editor":false,"gif_fps":60,"gif_quality":0.7500,"gif_size_idx":0,"optimize_gif":true,"fullscreen":false}"#,
+            "",
             |_| Ok(()),
         )
         .expect("record config should parse");
@@ -1998,6 +2122,39 @@ mod tests {
             result,
             super::AreaCapturePathResult::RecordingConfigUpdated
         ));
+    }
+
+    #[test]
+    fn area_init_error_includes_portal_stderr_detail() {
+        let err = parse_area_capture_output_with_stderr(
+            Some(2),
+            "",
+            "apexshot-capture: area capture failed: Portal permission capture failed (Portal screenshot rejected: status=2); overlay-local fallback failed (Portal fullscreen capture failed (Portal screenshot rejected: status=2))\n",
+        )
+        .expect_err("exit 2 should be an error");
+
+        let msg = err.to_string();
+        assert!(msg.contains("status=2"), "msg={msg}");
+        assert!(msg.contains("Portal"), "msg={msg}");
+    }
+
+    #[test]
+    fn user_facing_message_strips_exit_prefix_and_keeps_portal_detail() {
+        let technical = "apexshot-capture --area-init exited with code 2: area capture failed: Portal permission capture failed (Portal screenshot rejected: status=2)";
+        let body = super::user_facing_capture_failure_message(technical);
+        assert!(
+            body.contains("Portal screenshot rejected: status=2"),
+            "body={body}"
+        );
+        assert!(!body.contains("exited with code"), "body={body}");
+    }
+
+    #[test]
+    fn extract_capture_error_prefers_capture_failed_line() {
+        let stderr = "qt.something: noise\napexshot-capture: area capture failed: Portal screenshot rejected: status=2\n";
+        let detail = super::extract_capture_error_detail(stderr).expect("detail");
+        assert!(detail.contains("Portal screenshot rejected: status=2"));
+        assert!(!detail.starts_with("apexshot-capture:"));
     }
 
     #[test]

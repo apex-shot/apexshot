@@ -718,32 +718,17 @@ fn setup_preview_window(
             let path = path_upload.clone();
             let upload_ui_tx = upload_ui_tx.clone();
             std::thread::spawn(move || {
-                let dismiss = match crate::cloud::upload::upload_file(&config, &path) {
-                    Ok(result) => {
-                        if let Err(e) =
-                            crate::utils::clipboard::copy_text_to_clipboard(&result.share_url)
-                        {
-                            eprintln!("Failed to copy share link to clipboard: {e}");
-                            crate::utils::notify::desktop_notification(
-                                "Upload complete",
-                                &format!("Share link: {}", result.share_url),
-                            );
-                        } else {
-                            crate::utils::notify::desktop_notification(
-                                "Upload complete",
-                                "Share link copied to clipboard",
-                            );
+                // Shared upload path (logs + notifications). Auto-upload after
+                // capture uses the same helper so behavior stays consistent.
+                let dismiss =
+                    match crate::cloud::upload::upload_file_with_notifications(&config, &path) {
+                        Ok(_) => {
+                            // Honor Quick Access "Close window after uploading".
+                            // Failed uploads never dismiss the preview.
+                            should_close_preview_after_upload(close_after_upload)
                         }
-
-                        // Honor Quick Access "Close window after uploading".
-                        // Failed uploads never dismiss the preview.
-                        should_close_preview_after_upload(close_after_upload)
-                    }
-                    Err(e) => {
-                        crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
-                        false
-                    }
-                };
+                        Err(_) => false,
+                    };
                 let _ = upload_ui_tx.send(UploadUiEvent::Finished { dismiss });
             });
         });

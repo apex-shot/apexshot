@@ -1,6 +1,6 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::config::AppConfig;
+use crate::config::{load_config, AppConfig};
 
 use super::destination::Destination;
 
@@ -36,12 +36,68 @@ pub fn is_configured(config: &AppConfig) -> bool {
     Destination::from_config(config).is_configured(config)
 }
 
+/// True when Settings has auto-upload enabled and the selected destination is ready.
+pub fn should_auto_upload_after_capture(config: &AppConfig) -> bool {
+    config.cloud_auto_upload_after_capture && is_configured(config)
+}
+
 pub fn upload_file(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
     Destination::from_config(config).upload(config, path)
 }
 
 pub fn not_configured_notification(config: &AppConfig) -> (&'static str, &'static str) {
     Destination::from_config(config).not_configured_notification(config)
+}
+
+/// Run an upload and surface the result with desktop notifications + optional
+/// share-link clipboard copy. Logs start/success/failure so daemon debug
+/// sessions show activity even without RUST_LOG instrumentation.
+pub fn upload_file_with_notifications(
+    config: &AppConfig,
+    path: &Path,
+) -> Result<UploadResult, UploadError> {
+    let dest = Destination::from_config(config);
+    let dest_label = match dest {
+        Destination::ApexShot => "ApexShot Cloud",
+        Destination::XBackbone => "XBackBone",
+    };
+    eprintln!("[cloud] Uploading {} via {dest_label}…", path.display());
+
+    match upload_file(config, path) {
+        Ok(result) => {
+            eprintln!("[cloud] Upload complete: {}", result.share_url);
+            if let Err(e) = crate::utils::clipboard::copy_text_to_clipboard(&result.share_url) {
+                eprintln!("[cloud] Failed to copy share link to clipboard: {e}");
+                crate::utils::notify::desktop_notification(
+                    "Upload complete",
+                    &format!("Share link: {}", result.share_url),
+                );
+            } else {
+                crate::utils::notify::desktop_notification(
+                    "Upload complete",
+                    "Share link copied to clipboard",
+                );
+            }
+            Ok(result)
+        }
+        Err(e) => {
+            eprintln!("[cloud] Upload failed: {e}");
+            crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
+            Err(e)
+        }
+    }
+}
+
+/// Background auto-upload after a screenshot is saved. No-op when disabled or
+/// the selected destination is not configured.
+pub fn spawn_auto_upload_after_capture(path: PathBuf) {
+    let config = load_config().sanitized();
+    if !should_auto_upload_after_capture(&config) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let _ = upload_file_with_notifications(&config, &path);
+    });
 }
 
 pub(crate) fn guess_content_type(filename: &str) -> String {
@@ -62,6 +118,25 @@ pub(crate) fn guess_content_type(filename: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_auto_upload_requires_flag_and_destination_config() {
+        let mut cfg = AppConfig {
+            cloud_auto_upload_after_capture: true,
+            cloud_destination: "xbackbone".to_string(),
+            xbackbone_url: "https://xb.example".to_string(),
+            xbackbone_api_token: "tok".to_string(),
+            ..AppConfig::default()
+        };
+        assert!(should_auto_upload_after_capture(&cfg));
+
+        cfg.cloud_auto_upload_after_capture = false;
+        assert!(!should_auto_upload_after_capture(&cfg));
+
+        cfg.cloud_auto_upload_after_capture = true;
+        cfg.xbackbone_api_token.clear();
+        assert!(!should_auto_upload_after_capture(&cfg));
+    }
 
     #[test]
     fn guess_content_type_maps_common_image_formats() {

@@ -132,6 +132,10 @@ pub struct AppConfig {
     pub cloud_destination: String,
     pub xbackbone_url: String,
     pub xbackbone_api_token: String,
+    /// When true and the selected cloud destination is configured, upload
+    /// automatically after a screenshot is saved (in addition to the manual
+    /// Upload button on Quick Access / the editor).
+    pub cloud_auto_upload_after_capture: bool,
     // Advanced settings
     pub adv_filename_pattern: String,
     pub adv_ask_name_after_capture: bool,
@@ -250,6 +254,7 @@ impl Default for AppConfig {
             cloud_destination: "apexshot".to_string(),
             xbackbone_url: String::new(),
             xbackbone_api_token: String::new(),
+            cloud_auto_upload_after_capture: true,
             adv_filename_pattern: "ApexShot {Date} at {Time}".to_string(),
             adv_ask_name_after_capture: false,
             adv_retina_suffix: true,
