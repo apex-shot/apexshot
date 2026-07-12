@@ -4,7 +4,7 @@ This document outlines Arch Linux packaging and install paths for ApexShot.
 
 ## Status
 
-- PKGBUILD and AUR install hooks are in-tree and versioned with the project (`0.2.30` at time of writing; always trust `Cargo.toml` / the release tag).
+- PKGBUILD and AUR install hooks are in-tree and versioned with the project (`0.2.31` at time of writing; always trust `Cargo.toml` / the release tag).
 - Runtime distro metadata is wired in `src/distro/`.
 - Ubuntu GNOME Wayland, Arch GNOME Wayland, and Hyprland Wayland are the known-good personal-test targets (see root `README.md`).
 - Broader desktop-environment coverage on Arch still benefits from community testing.
