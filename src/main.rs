@@ -1117,7 +1117,8 @@ fn install_desktop_launcher(dev_install: bool) {
          StartupNotify=true\n\
          StartupWMClass={}\n\
          Terminal=false\n\
-         X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n",
+         X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n\
+         X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1\n",
         app_identity::DEV_WRAPPER,
         app_identity::DEV_APP_ID,
     );

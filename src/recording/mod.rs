@@ -158,17 +158,40 @@ struct CropMargins {
 type RecordingPortalSession =
     ashpd::desktop::Session<'static, ashpd::desktop::screencast::Screencast<'static>>;
 
+/// Backend that owns the lifetime of a Wayland capture stream.
+enum WaylandCaptureSession {
+    /// XDG ScreenCast portal session (GNOME and generic fallback).
+    Portal(#[allow(dead_code)] RecordingPortalSession),
+    /// KWin `zkde_screencast_unstable_v1` (Spectacle-style, no portal dialog).
+    /// Boxed so the portal variant stays small (clippy `large_enum_variant`).
+    KdeNative(Box<crate::backend::kde_screencast::KdeScreencastHandle>),
+}
+
+impl std::fmt::Debug for WaylandCaptureSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Portal(_) => f.write_str("Portal(..)"),
+            Self::KdeNative(handle) => f
+                .debug_struct("KdeNative")
+                .field("node_id", &handle.node_id())
+                .finish(),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct WaylandSource {
     node_id: u32,
-    pipewire_fd: OwnedFd,
+    /// Portal remote FD. `None` for KDE-native streams that publish on the
+    /// default session PipeWire socket (same as Spectacle / KPipeWire).
+    pipewire_fd: Option<OwnedFd>,
     #[allow(dead_code)]
     stream_width: u32,
     #[allow(dead_code)]
     stream_height: u32,
     #[allow(dead_code)]
     crop: Option<CropMargins>,
-    _session: RecordingPortalSession,
+    _session: WaylandCaptureSession,
 }
 
 #[derive(Debug)]
@@ -1079,14 +1102,24 @@ fn record_wayland_with_ffmpeg_sync(
 
     let final_path = final_path.to_path_buf();
 
-    // Open PipeWire capture stream (continuous)
-    let capture = crate::pipewire_engine::PipeWireCapture::connect(
-        wayland_source.pipewire_fd,
-        wayland_source.node_id,
-        None, // continuous — no max frame limit
-        config.width,
-        config.height,
-    )
+    // Open PipeWire capture stream (continuous).
+    // Portal path: connect via the remote FD from OpenPipeWireRemote.
+    // KDE-native path: node lives on the default session socket.
+    let capture = match wayland_source.pipewire_fd {
+        Some(fd) => crate::pipewire_engine::PipeWireCapture::connect(
+            fd,
+            wayland_source.node_id,
+            None, // continuous — no max frame limit
+            config.width,
+            config.height,
+        ),
+        None => crate::pipewire_engine::PipeWireCapture::connect_default(
+            wayland_source.node_id,
+            None,
+            config.width,
+            config.height,
+        ),
+    }
     .map_err(|e| RecordError::GStreamerError(format!("PipeWire capture failed: {e}")))?;
 
     let format = capture.format().ok_or_else(|| {
@@ -1777,6 +1810,22 @@ async fn build_pipeline(
 }
 
 async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSource> {
+    // Prefer KDE-native screencast (Spectacle path) — no portal permission UI.
+    // Same idea as Hyprland/wlroots using wf-recorder instead of the portal.
+    if crate::backend::kde_screencast::is_kde_native_screencast_preferred() {
+        match get_kde_wayland_source(config) {
+            Ok(source) => {
+                println!("Using KDE-native zkde_screencast (no portal dialog).");
+                return Ok(source);
+            }
+            Err(err) => {
+                eprintln!(
+                    "[recording] KDE-native screencast unavailable ({err}); falling back to ScreenCast portal."
+                );
+            }
+        }
+    }
+
     use ashpd::desktop::{
         screencast::{CursorMode, Screencast, SourceType},
         PersistMode,
@@ -1954,11 +2003,44 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
 
     Ok(WaylandSource {
         node_id,
-        pipewire_fd,
+        pipewire_fd: Some(pipewire_fd),
         stream_width,
         stream_height,
         crop,
-        _session: session,
+        _session: WaylandCaptureSession::Portal(session),
+    })
+}
+
+/// Spectacle-style KWin screencast: `zkde_screencast_unstable_v1` → PipeWire node
+/// on the default session socket. No xdg-desktop-portal dialog.
+fn get_kde_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSource> {
+    use crate::backend::kde_screencast::{start_stream, KdeScreencastTarget};
+
+    let target = match (config.x, config.y, config.width, config.height) {
+        (Some(x), Some(y), Some(w), Some(h)) if w > 0 && h > 0 => KdeScreencastTarget::Region {
+            x,
+            y,
+            width: w,
+            height: h,
+        },
+        _ => KdeScreencastTarget::Output,
+    };
+
+    let handle = start_stream(target, config.cursor)
+        .map_err(|e| RecordError::PortalError(format!("KDE-native screencast failed: {e}")))?;
+
+    let stream_width = handle.width();
+    let stream_height = handle.height();
+    let node_id = handle.node_id();
+
+    // Region streams are already cropped by KWin — no client-side crop.
+    Ok(WaylandSource {
+        node_id,
+        pipewire_fd: None,
+        stream_width,
+        stream_height,
+        crop: None,
+        _session: WaylandCaptureSession::KdeNative(Box::new(handle)),
     })
 }
 

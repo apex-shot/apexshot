@@ -69,6 +69,7 @@ wayland-protocols = "0.32.10"
 wayland-protocols-wlr = "0.3.10"
 libc = "0.2.182"
 ksni = "0.2"
+wayland-protocols-plasma = { version = "0.3.12", features = ["client"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"  # better test output

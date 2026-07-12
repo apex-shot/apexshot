@@ -10,3 +10,4 @@ StartupNotify=true
 StartupWMClass=io.github.codegoddy.apexshot
 Terminal=false
 X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2
+X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1

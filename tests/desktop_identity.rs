@@ -37,9 +37,20 @@ fn packaged_desktop_identity_matches_primary_ui_application_id() {
     );
 
     assert!(
+        packaged_desktop.contains("X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1"),
+        "the packaged desktop entry should declare KWin native screencast for KDE Plasma Wayland"
+    );
+
+    assert!(
         packaged_daemon_desktop
             .contains("X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2"),
         "the packaged daemon desktop entry should declare KWin screenshot authorization for KDE Plasma Wayland"
+    );
+
+    assert!(
+        packaged_daemon_desktop
+            .contains("X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1"),
+        "the packaged daemon desktop entry should declare KWin native screencast for KDE Plasma Wayland"
     );
 
     assert!(
@@ -48,7 +59,17 @@ fn packaged_desktop_identity_matches_primary_ui_application_id() {
     );
 
     assert!(
+        main_source.contains("X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1"),
+        "dev-generated desktop entries should declare KWin native screencast"
+    );
+
+    assert!(
         windowing_source.contains("X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2"),
         "autostart desktop entries should preserve KWin screenshot authorization"
+    );
+
+    assert!(
+        windowing_source.contains("X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1"),
+        "autostart desktop entries should preserve KWin native screencast authorization"
     );
 }

@@ -177,6 +177,13 @@ struct StreamInner {
 // PipeWireCapture
 // ---------------------------------------------------------------------------
 
+enum PipeWireCoreSource {
+    /// XDG ScreenCast portal remote (scoped graph).
+    PortalFd(OwnedFd),
+    /// Default session socket — KDE `zkde_screencast` / system nodes.
+    DefaultSocket,
+}
+
 pub struct PipeWireCapture {
     inner: Arc<Mutex<StreamInner>>,
     _thread_loop: pw::thread_loop::ThreadLoopRc,
@@ -190,8 +197,45 @@ pub struct PipeWireCapture {
 }
 
 impl PipeWireCapture {
+    /// Connect using a portal-provided PipeWire remote FD.
     pub fn connect(
         pipewire_fd: OwnedFd,
+        node_id: u32,
+        max_frames: Option<u64>,
+        width_hint: Option<u32>,
+        height_hint: Option<u32>,
+    ) -> PipeWireResult<Self> {
+        Self::connect_inner(
+            PipeWireCoreSource::PortalFd(pipewire_fd),
+            node_id,
+            max_frames,
+            width_hint,
+            height_hint,
+        )
+    }
+
+    /// Connect to the default session PipeWire socket.
+    ///
+    /// Used by KDE-native `zkde_screencast_unstable_v1` streams, which publish
+    /// a node on the regular session graph (same approach as Spectacle's
+    /// `PipeWireRecord`) rather than a portal-scoped remote.
+    pub fn connect_default(
+        node_id: u32,
+        max_frames: Option<u64>,
+        width_hint: Option<u32>,
+        height_hint: Option<u32>,
+    ) -> PipeWireResult<Self> {
+        Self::connect_inner(
+            PipeWireCoreSource::DefaultSocket,
+            node_id,
+            max_frames,
+            width_hint,
+            height_hint,
+        )
+    }
+
+    fn connect_inner(
+        source: PipeWireCoreSource,
         node_id: u32,
         max_frames: Option<u64>,
         width_hint: Option<u32>,
@@ -208,9 +252,16 @@ impl PipeWireCapture {
         let context = pw::context::ContextRc::new(&thread_loop, None)
             .map_err(|e| PipeWireError::Init(format!("Failed to create context: {e}")))?;
 
-        let core = context
-            .connect_fd_rc(pipewire_fd, None)
-            .map_err(|e| PipeWireError::Init(format!("Failed to connect core via fd: {e}")))?;
+        let core = match source {
+            PipeWireCoreSource::PortalFd(pipewire_fd) => {
+                context.connect_fd_rc(pipewire_fd, None).map_err(|e| {
+                    PipeWireError::Init(format!("Failed to connect core via fd: {e}"))
+                })?
+            }
+            PipeWireCoreSource::DefaultSocket => context.connect_rc(None).map_err(|e| {
+                PipeWireError::Init(format!("Failed to connect to default PipeWire socket: {e}"))
+            })?,
+        };
 
         let inner = Arc::new(Mutex::new(StreamInner {
             format: None,

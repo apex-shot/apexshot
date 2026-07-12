@@ -138,7 +138,8 @@ pub fn install_autostart_entry_for_current_exe() -> anyhow::Result<std::path::Pa
          X-GNOME-Autostart-Delay=2\n\
          Hidden=false\n\
          NoDisplay=true\n\
-         X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n",
+         X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n\
+         X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1\n",
         crate::app_identity::daemon_name(),
         crate::app_identity::icon_name(),
     );
@@ -173,7 +174,8 @@ pub fn install_autostart_entry_smart() -> anyhow::Result<std::path::PathBuf> {
          X-GNOME-Autostart-Delay=2\n\
          Hidden=false\n\
          NoDisplay=true\n\
-         X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n",
+         X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n\
+         X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1\n",
         crate::app_identity::daemon_name(),
         crate::app_identity::icon_name(),
     );

@@ -1,3 +1,4 @@
+pub mod kde_screencast;
 pub mod kde_screenshot;
 pub mod portal_permissions;
 pub mod screencopy;

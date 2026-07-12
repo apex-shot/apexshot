@@ -1,18 +1,16 @@
 //! Wayland backend implementation.
 //!
-//! Capture strategy:
+//! Capture strategy (first match wins):
 //!
-//! 0. **ScreenCast portal + PipeWire** — primary Wayland path. This is the
-//!    "share screen" flow and gives ApexShot a frame stream we can customize
-//!    consistently across GNOME, KDE Plasma, Sway, Hyprland, Niri, and other
-//!    portal-backed desktops.
+//! 0. **KDE native** `org.kde.KWin.ScreenShot2` — preferred on Plasma Wayland
+//!    (same as Spectacle). No portal permission dialog.
+//! 1. **wlroots native** `zwlr_screencopy_manager_v1` — Hyprland, Sway, Niri, …
+//! 2. **ScreenCast portal + PipeWire** — cross-desktop fallback (GNOME etc.).
+//! 3. **`org.freedesktop.portal.Screenshot`** — optional via
+//!    `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL`; interactive selector helper.
 //!
-//! Legacy/native paths are intentionally not used for normal screen capture
-//! because they do not provide the same controllable stream behavior across
-//! desktops.
-//!
-//! 1. **`org.freedesktop.portal.Screenshot`** — retained only for the explicit
-//!    interactive screenshot-selector helper.
+//! Recording uses a parallel split: KDE → `zkde_screencast_unstable_v1`,
+//! wlroots → `wf-recorder`, else ScreenCast portal.
 
 use super::{
     kde_screenshot, screencopy, CaptureData, DisplayBackend, DisplayError, DisplayResult,
