@@ -154,7 +154,9 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
     frame.set_margin_start(4);
     frame.set_margin_end(4);
 
-    let is_connected = !config.cloud_user_email.is_empty();
+    // Session = access token. Email alone was a bug that showed "Connected"
+    // for stale/stray account metadata without a real login.
+    let is_connected = crate::config::is_cloud_logged_in(config);
 
     let status_row = GtkBox::new(Orientation::Horizontal, 12);
     status_row.set_hexpand(true);
@@ -180,7 +182,11 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
     status_label.set_halign(Align::Start);
 
     let email_label = Label::new(Some(if is_connected {
-        config.cloud_user_email.as_str()
+        if config.cloud_user_email.is_empty() {
+            "Signed in"
+        } else {
+            config.cloud_user_email.as_str()
+        }
     } else {
         "Run `apexshot login` in a terminal, or click Connect below."
     }));

@@ -1,8 +1,15 @@
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::config::{load_config, AppConfig};
 
 use super::destination::Destination;
+
+/// Avoid spamming "not configured" toasts on every capture while auto-upload
+/// stays enabled after logout / missing destination setup.
+const NOT_CONFIGURED_NOTIFY_COOLDOWN: Duration = Duration::from_secs(120);
+static LAST_NOT_CONFIGURED_NOTIFY: Mutex<Option<Instant>> = Mutex::new(None);
 
 #[derive(Debug)]
 pub struct UploadResult {
@@ -39,6 +46,38 @@ pub fn is_configured(config: &AppConfig) -> bool {
 /// True when Settings has auto-upload enabled and the selected destination is ready.
 pub fn should_auto_upload_after_capture(config: &AppConfig) -> bool {
     config.cloud_auto_upload_after_capture && is_configured(config)
+}
+
+/// True when auto-upload is on but the selected cloud destination has no credentials.
+pub fn auto_upload_enabled_but_not_configured(config: &AppConfig) -> bool {
+    config.cloud_auto_upload_after_capture && !is_configured(config)
+}
+
+fn should_emit_not_configured_notification(now: Instant) -> bool {
+    let Ok(mut guard) = LAST_NOT_CONFIGURED_NOTIFY.lock() else {
+        return true;
+    };
+    if let Some(prev) = *guard {
+        if now.duration_since(prev) < NOT_CONFIGURED_NOTIFY_COOLDOWN {
+            return false;
+        }
+    }
+    *guard = Some(now);
+    true
+}
+
+/// Notify that auto-upload cannot run until the user connects a destination.
+/// Rate-limited so rapid captures do not flood the desktop.
+pub fn notify_auto_upload_not_configured(config: &AppConfig) {
+    if !should_emit_not_configured_notification(Instant::now()) {
+        eprintln!(
+            "[cloud] Auto-upload enabled but destination not configured (notification suppressed by cooldown)"
+        );
+        return;
+    }
+    let (title, body) = not_configured_notification(config);
+    eprintln!("[cloud] Auto-upload enabled but destination not configured — notifying user");
+    crate::utils::notify::desktop_notification(title, body);
 }
 
 pub fn upload_file(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
@@ -88,11 +127,18 @@ pub fn upload_file_with_notifications(
     }
 }
 
-/// Background auto-upload after a screenshot is saved. No-op when disabled or
-/// the selected destination is not configured.
+/// Background auto-upload after a screenshot is saved.
+///
+/// - Auto-upload off → silent no-op
+/// - Auto-upload on, destination not configured → desktop notification (rate-limited)
+/// - Auto-upload on, destination ready → upload with success/failure notifications
 pub fn spawn_auto_upload_after_capture(path: PathBuf) {
     let config = load_config().sanitized();
-    if !should_auto_upload_after_capture(&config) {
+    if !config.cloud_auto_upload_after_capture {
+        return;
+    }
+    if !is_configured(&config) {
+        notify_auto_upload_not_configured(&config);
         return;
     }
     std::thread::spawn(move || {
@@ -129,13 +175,31 @@ mod tests {
             ..AppConfig::default()
         };
         assert!(should_auto_upload_after_capture(&cfg));
+        assert!(!auto_upload_enabled_but_not_configured(&cfg));
 
         cfg.cloud_auto_upload_after_capture = false;
         assert!(!should_auto_upload_after_capture(&cfg));
+        assert!(!auto_upload_enabled_but_not_configured(&cfg));
 
         cfg.cloud_auto_upload_after_capture = true;
         cfg.xbackbone_api_token.clear();
         assert!(!should_auto_upload_after_capture(&cfg));
+        assert!(auto_upload_enabled_but_not_configured(&cfg));
+    }
+
+    #[test]
+    fn not_configured_notify_cooldown_suppresses_rapid_repeats() {
+        if let Ok(mut guard) = LAST_NOT_CONFIGURED_NOTIFY.lock() {
+            *guard = None;
+        }
+        let t0 = Instant::now();
+        assert!(should_emit_not_configured_notification(t0));
+        assert!(!should_emit_not_configured_notification(
+            t0 + Duration::from_secs(30)
+        ));
+        assert!(should_emit_not_configured_notification(
+            t0 + NOT_CONFIGURED_NOTIFY_COOLDOWN + Duration::from_secs(1)
+        ));
     }
 
     #[test]

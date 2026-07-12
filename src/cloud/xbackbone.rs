@@ -37,7 +37,7 @@ pub(crate) fn is_configured(config: &AppConfig) -> bool {
 pub(crate) fn not_configured_notification(_config: &AppConfig) -> (&'static str, &'static str) {
     (
         "XBackBone upload not configured",
-        "Set the instance URL and API token in Settings \u{2192} Cloud",
+        "Set the instance URL and API token in Settings \u{2192} Cloud, or switch to ApexShot Cloud and sign in.",
     )
 }
 

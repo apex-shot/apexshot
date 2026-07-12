@@ -2389,6 +2389,13 @@ fn run_ocr(args: &[String]) {
 }
 
 async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // Fedora: video recording intentionally unsupported (screenshots still work).
+    if apexshot::recording::is_fedora_recording_unsupported() {
+        apexshot::recording::refuse_fedora_recording()
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        return Ok(());
+    }
+
     let record_type = args[2].as_str();
     let mut output_path: Option<PathBuf> = None;
     let mut is_gif = false;

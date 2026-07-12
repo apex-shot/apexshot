@@ -7,6 +7,11 @@ pub const MIN_PREVIEW_AUTO_CLOSE_SECONDS: u32 = 3;
 pub const MAX_PREVIEW_AUTO_CLOSE_SECONDS: u32 = 120;
 pub const DEFAULT_SHUTTER_SOUND: &str = "Camera";
 
+/// Public ApexShot Cloud API. Used for normal installs when no override is set.
+/// Self-hosters / local dev can override via config `cloud_backend_url` or
+/// `APEXSHOT_CLOUD_BACKEND_URL` (and optionally `~/.config/apexshot/.env`).
+pub const DEFAULT_CLOUD_BACKEND_URL: &str = "https://api.apexshot.org";
+
 pub const DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS: bool = true;
 pub const DEFAULT_AFTER_CAPTURE_COPY_FILE_TO_CLIPBOARD: bool = false;
 pub const DEFAULT_AFTER_CAPTURE_SAVE: bool = true;
@@ -247,7 +252,7 @@ impl Default for AppConfig {
             cloud_user_name: String::new(),
             cloud_user_email: String::new(),
             cloud_pro_plan: false,
-            cloud_backend_url: String::new(),
+            cloud_backend_url: DEFAULT_CLOUD_BACKEND_URL.to_string(),
             cloud_api_token: String::new(),
             cloud_refresh_token: String::new(),
             cloud_install_id: String::new(),
@@ -368,7 +373,7 @@ pub fn load_config() -> AppConfig {
         return apply_cloud_env_overrides(AppConfig::default());
     };
 
-    let Ok(raw) = std::fs::read_to_string(path) else {
+    let Ok(raw) = std::fs::read_to_string(&path) else {
         return apply_cloud_env_overrides(AppConfig::default());
     };
 
@@ -378,31 +383,82 @@ pub fn load_config() -> AppConfig {
             if should_migrate_legacy_quick_access_overlay_size(&raw, &sanitized) {
                 sanitized.quick_access_overlay_size = QUICK_ACCESS_OVERLAY_SCALE_BASELINE;
             }
-            if sanitized.cloud_backend_url.is_empty() {
-                if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
-                    sanitized.cloud_backend_url = url;
-                }
+            let cloud_changed = apply_cloud_env_overrides_in_place(&mut sanitized);
+            if cloud_changed {
+                // Persist migrations (default backend URL, drop ghost sessions)
+                // so Settings/login don't keep lying after the first launch.
+                let _ = save_config(&sanitized);
             }
-            apply_xbackbone_overrides(&mut sanitized);
             sanitized
         })
-        .unwrap_or_else(|_| {
-            let mut default = AppConfig::default();
-            if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
-                default.cloud_backend_url = url;
-            }
-            apply_cloud_env_overrides(default)
-        })
+        .unwrap_or_else(|_| apply_cloud_env_overrides(AppConfig::default()))
+}
+
+/// Resolve the cloud API base URL for requests.
+///
+/// Priority: non-empty config → `APEXSHOT_CLOUD_BACKEND_URL` → public default.
+pub fn resolve_cloud_backend_url(config: &AppConfig) -> String {
+    let from_config = config.cloud_backend_url.trim();
+    if !from_config.is_empty() {
+        return from_config.trim_end_matches('/').to_string();
+    }
+    if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
+        let url = url.trim();
+        if !url.is_empty() {
+            return url.trim_end_matches('/').to_string();
+        }
+    }
+    DEFAULT_CLOUD_BACKEND_URL.trim_end_matches('/').to_string()
+}
+
+/// True when a real cloud session exists (access token present).
+/// Email alone is never enough — that produced false "Connected" states.
+pub fn is_cloud_logged_in(config: &AppConfig) -> bool {
+    !config.cloud_api_token.trim().is_empty()
 }
 
 fn apply_cloud_env_overrides(mut config: AppConfig) -> AppConfig {
-    if config.cloud_backend_url.is_empty() {
-        if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
+    apply_cloud_env_overrides_in_place(&mut config);
+    config
+}
+
+/// Apply cloud defaults / env overrides. Returns true if the config was changed
+/// and should be persisted.
+fn apply_cloud_env_overrides_in_place(config: &mut AppConfig) -> bool {
+    let mut changed = false;
+
+    // Env override always wins when set (dev / self-host).
+    if let Ok(url) = std::env::var("APEXSHOT_CLOUD_BACKEND_URL") {
+        let url = url.trim().to_string();
+        if !url.is_empty() && config.cloud_backend_url != url {
             config.cloud_backend_url = url;
+            changed = true;
         }
     }
-    apply_xbackbone_overrides(&mut config);
-    config
+
+    // Production installs must not require a .env file.
+    if config.cloud_backend_url.trim().is_empty() {
+        config.cloud_backend_url = DEFAULT_CLOUD_BACKEND_URL.to_string();
+        changed = true;
+    }
+
+    // Ghost account: email/name/pro without a token is not a session.
+    // Clear it so Settings cannot show "Connected" for a stranger.
+    if config.cloud_api_token.trim().is_empty()
+        && (!config.cloud_user_email.is_empty()
+            || !config.cloud_user_name.is_empty()
+            || config.cloud_pro_plan
+            || !config.cloud_refresh_token.is_empty())
+    {
+        config.cloud_user_email.clear();
+        config.cloud_user_name.clear();
+        config.cloud_refresh_token.clear();
+        config.cloud_pro_plan = false;
+        changed = true;
+    }
+
+    apply_xbackbone_overrides(config);
+    changed
 }
 
 fn apply_xbackbone_overrides(config: &mut AppConfig) {
@@ -487,6 +543,62 @@ mod tests {
             cfg.preview_auto_close_seconds,
             DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS
         );
+    }
+
+    #[test]
+    fn default_config_has_public_cloud_backend_url() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.cloud_backend_url, DEFAULT_CLOUD_BACKEND_URL);
+        assert_eq!(
+            resolve_cloud_backend_url(&cfg),
+            DEFAULT_CLOUD_BACKEND_URL.trim_end_matches('/')
+        );
+    }
+
+    #[test]
+    fn resolve_cloud_backend_url_falls_back_when_empty() {
+        let cfg = AppConfig {
+            cloud_backend_url: String::new(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            resolve_cloud_backend_url(&cfg),
+            DEFAULT_CLOUD_BACKEND_URL.trim_end_matches('/')
+        );
+    }
+
+    #[test]
+    fn ghost_cloud_account_without_token_is_cleared() {
+        let mut cfg = AppConfig {
+            cloud_user_email: "stranger@example.com".to_string(),
+            cloud_user_name: "Stranger".to_string(),
+            cloud_pro_plan: true,
+            cloud_api_token: String::new(),
+            cloud_backend_url: String::new(),
+            ..AppConfig::default()
+        };
+        assert!(apply_cloud_env_overrides_in_place(&mut cfg));
+        assert!(cfg.cloud_user_email.is_empty());
+        assert!(cfg.cloud_user_name.is_empty());
+        assert!(!cfg.cloud_pro_plan);
+        assert_eq!(cfg.cloud_backend_url, DEFAULT_CLOUD_BACKEND_URL);
+        assert!(!is_cloud_logged_in(&cfg));
+    }
+
+    #[test]
+    fn cloud_session_requires_token() {
+        let with_email_only = AppConfig {
+            cloud_user_email: "a@b.c".to_string(),
+            cloud_api_token: String::new(),
+            ..AppConfig::default()
+        };
+        assert!(!is_cloud_logged_in(&with_email_only));
+
+        let with_token = AppConfig {
+            cloud_api_token: "tok".to_string(),
+            ..AppConfig::default()
+        };
+        assert!(is_cloud_logged_in(&with_token));
     }
 
     #[test]

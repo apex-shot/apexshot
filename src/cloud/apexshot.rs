@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::config::{save_config, AppConfig};
+use crate::config::{resolve_cloud_backend_url, save_config, AppConfig};
 
 use super::upload::{guess_content_type, UploadError, UploadResult};
 
@@ -21,13 +21,15 @@ struct RefreshResponse {
 }
 
 pub(crate) fn is_configured(config: &AppConfig) -> bool {
-    !config.cloud_api_token.is_empty() && !config.cloud_backend_url.is_empty()
+    // Token is the real session. Backend URL always resolves to the public
+    // default when unset, so end-user installs work without a .env file.
+    !config.cloud_api_token.is_empty() && !resolve_cloud_backend_url(config).is_empty()
 }
 
 pub(crate) fn not_configured_notification(_config: &AppConfig) -> (&'static str, &'static str) {
     (
         "Cloud upload not configured",
-        "Run `apexshot login` to connect your account",
+        "Connect ApexShot Cloud in Settings → Cloud, or switch destination to XBackBone and configure it.",
     )
 }
 
@@ -57,7 +59,7 @@ fn is_auth_error(result: &Result<UploadResult, UploadError>) -> bool {
 }
 
 fn refresh_access_token(config: &mut AppConfig) -> Result<String, UploadError> {
-    let backend_url = config.cloud_backend_url.trim_end_matches('/');
+    let backend_url = resolve_cloud_backend_url(config);
 
     let refresh_body =
         serde_json::json!({ "refresh_token": config.cloud_refresh_token }).to_string();
@@ -78,7 +80,7 @@ fn refresh_access_token(config: &mut AppConfig) -> Result<String, UploadError> {
 }
 
 fn upload_file_with_token(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
-    let backend_url = config.cloud_backend_url.trim_end_matches('/');
+    let backend_url = resolve_cloud_backend_url(config);
     let token = &config.cloud_api_token;
 
     let file_bytes = std::fs::read(path).map_err(|e| UploadError::FileRead(e.to_string()))?;
@@ -123,7 +125,7 @@ fn upload_file_with_token(config: &AppConfig, path: &Path) -> Result<UploadResul
     }
 
     Ok(UploadResult {
-        share_url: normalize_share_url(&session.share_url, backend_url)?,
+        share_url: normalize_share_url(&session.share_url, &backend_url)?,
     })
 }
 

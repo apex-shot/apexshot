@@ -1,4 +1,4 @@
-use crate::{backend::kde_screenshot, config::load_config};
+use crate::config::load_config;
 use gdk4x11::X11Surface;
 use gtk4::gdk::Key;
 use gtk4::{
@@ -629,6 +629,8 @@ fn setup_preview_window(
                 dismiss_preview_window(&window, dismiss_action_actions);
             }
         });
+        // Keep drag on the full card (same as Ubuntu/GNOME). Toolbar buttons still
+        // win short clicks; only a drag past the threshold starts DND.
         card_actions.add_controller(drag_source);
 
         let window_weak_close = window.downgrade();
@@ -1114,24 +1116,37 @@ fn open_target(path: &Path) -> Result<(), CapturePreviewError> {
         .map_err(|e| CapturePreviewError::OpenTargetError(e.to_string()))
 }
 
-fn apply_fallback_input_region(window: &Window, card: &GtkBox) {
+/// Compute the card's input region in surface-local coordinates.
+///
+/// `Widget::allocation()` is parent-relative and can miss window chrome / overlay
+/// offsets. On KDE Wayland that produced a region that did not cover the visible
+/// card, so pointer events passed through (no drag, no toolbar clicks).
+fn card_input_region_rect(window: &Window, card: &GtkBox) -> Option<(i32, i32, i32, i32)> {
+    let bounds = card.compute_bounds(window)?;
+    let x = bounds.x().floor() as i32;
+    let y = bounds.y().floor() as i32;
+    let width = bounds.width().ceil() as i32;
+    let height = bounds.height().ceil() as i32;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some((x, y, width, height))
+}
+
+/// Restrict pointer hit-testing to the preview card on full-surface fallback windows.
+/// Returns `true` when the region was applied to a live surface.
+fn apply_fallback_input_region(window: &Window, card: &GtkBox) -> bool {
     let Some(surface) = window.surface() else {
-        return;
+        return false;
+    };
+    let Some((x, y, width, height)) = card_input_region_rect(window, card) else {
+        return false;
     };
 
-    let allocation = card.allocation();
-    if allocation.width() <= 0 || allocation.height() <= 0 {
-        return;
-    }
-
-    let region_rect = gtk4::cairo::RectangleInt::new(
-        allocation.x(),
-        allocation.y(),
-        allocation.width(),
-        allocation.height(),
-    );
+    let region_rect = gtk4::cairo::RectangleInt::new(x, y, width, height);
     let input_region = gtk4::cairo::Region::create_rectangle(&region_rect);
     surface.set_input_region(&input_region);
+    true
 }
 
 fn install_fallback_input_region_tracking(window: &Window, card: &GtkBox) {
@@ -1148,24 +1163,19 @@ fn install_fallback_input_region_tracking(window: &Window, card: &GtkBox) {
                 return;
             };
 
-            let allocation = card.allocation();
-            let next_region = (
-                allocation.x(),
-                allocation.y(),
-                allocation.width(),
-                allocation.height(),
-            );
-
-            if next_region.2 <= 0 || next_region.3 <= 0 {
+            let Some(next_region) = card_input_region_rect(&window, &card) else {
                 return;
-            }
+            };
 
             if last_region.borrow().as_ref() == Some(&next_region) {
                 return;
             }
 
-            apply_fallback_input_region(&window, &card);
-            *last_region.borrow_mut() = Some(next_region);
+            // Only cache the region after a successful apply. Caching before the
+            // GdkSurface exists would permanently skip reapplication.
+            if apply_fallback_input_region(&window, &card) {
+                *last_region.borrow_mut() = Some(next_region);
+            }
         }
     });
 
@@ -1421,14 +1431,13 @@ fn configure_window_positioning(window: &Window, side: PreviewSide, _preview_wid
         return false;
     }
 
-    // KDE Wayland handles floating transient windows better without layer-shell
-    // here; using the direct preview launch path plus plain GTK window avoids
-    // extra taskbar/loading artifacts in Plasma while preserving the existing
-    // behavior on GNOME and other desktops.
-    if kde_screenshot::is_kde_wayland_session() {
-        return false;
-    }
-
+    // Use the same layer-shell setup on every compositor that supports it
+    // (Ubuntu/GNOME, Fedora KDE Plasma 6+, wlroots, …).
+    //
+    // Ubuntu already used this path and must keep the same anchors, margins,
+    // exclusive_zone(0), and keyboard mode. The Fedora bug was a KDE-only
+    // early-return that forced a full-screen fallback + input-region instead;
+    // that return is intentionally gone so KDE joins this proven path.
     if gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
         window.set_namespace(Some("apexshot-capture-preview"));
@@ -1443,6 +1452,7 @@ fn configure_window_positioning(window: &Window, side: PreviewSide, _preview_wid
         // Do not reserve compositor-managed edge space for it, otherwise some
         // desktops may treat the reserved strip as owned by the preview and
         // block clicks on windows behind it.
+        // Keep exclusive_zone(0) — this is the Ubuntu/GNOME-proven value.
         window.set_exclusive_zone(0);
         window.set_margin(
             Edge::Left,

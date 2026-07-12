@@ -103,6 +103,12 @@ pub enum KdeScreencastError {
 
 pub type KdeScreencastResult<T> = Result<T, KdeScreencastError>;
 
+/// Whether the *session* is KDE Wayland (candidate for native screencast).
+///
+/// Native capture is **not** the default product path anymore — KWin only
+/// exposes `zkde_screencast_unstable_v1` to well-authorized clients, which is
+/// unreliable for third-party apps. Callers should also require
+/// `APEXSHOT_KDE_NATIVE_SCREENCAST` (see `recording::prefer_kde_native_screencast`).
 pub fn is_kde_native_screencast_preferred() -> bool {
     if std::env::var_os("APEXSHOT_FORCE_PORTAL_RECORDING").is_some() {
         return false;
@@ -403,10 +409,8 @@ impl Dispatch<zkde_screencast_stream_unstable_v1::ZkdeScreencastStreamUnstableV1
             zkde_screencast_stream_unstable_v1::Event::Failed { error } => {
                 state.error = Some(error);
             }
-            zkde_screencast_stream_unstable_v1::Event::Closed => {
-                if state.node_id.is_none() {
-                    state.error = Some("screencast stream closed before creation".into());
-                }
+            zkde_screencast_stream_unstable_v1::Event::Closed if state.node_id.is_none() => {
+                state.error = Some("screencast stream closed before creation".into());
             }
             _ => {
                 // Future protocol events (e.g. object serial) are ignored;

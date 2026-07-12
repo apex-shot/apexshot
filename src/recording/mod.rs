@@ -16,6 +16,7 @@ use crate::{
 
 mod control_session;
 pub mod editor;
+mod indicator_notify;
 mod stop_overlay;
 #[cfg(test)]
 mod stop_overlay_tests;
@@ -75,18 +76,25 @@ fn notify_daemon_event(event: &str) {
     match event {
         "recording_session_started" => {
             let _ = crate::daemon::notify_daemon_recording_started();
+            // Persistent blinking red-circle notification (click → stop).
+            // Used instead of a short-lived “started” toast while recording.
+            indicator_notify::show_recording_indicator();
         }
         "recording_session_paused" => {
             let _ = crate::daemon::notify_daemon_recording_paused();
+            indicator_notify::set_recording_indicator_paused(true);
         }
         "recording_session_resumed" => {
             let _ = crate::daemon::notify_daemon_recording_resumed();
+            indicator_notify::set_recording_indicator_paused(false);
         }
         "recording_session_restarted" => {
             let _ = crate::daemon::notify_daemon_recording_restarted();
+            indicator_notify::show_recording_indicator();
         }
         "recording_session_ended" => {
             let _ = crate::daemon::notify_daemon_recording_ended();
+            indicator_notify::hide_recording_indicator();
         }
         _ => {}
     }
@@ -339,6 +347,87 @@ fn compute_wayland_crop(
         top: top as u32,
         bottom: bottom as u32,
     })
+}
+
+/// Resolve the stream's top-left in global coordinates.
+///
+/// KDE's ScreenCast portal often returns `position=None` even for monitor
+/// streams. Infer from the monitor that contains the selection when possible,
+/// otherwise fall back to `(0, 0)` so area recording does not hard-crash.
+fn resolve_wayland_stream_position(
+    reported: Option<(i32, i32)>,
+    stream_size: (i32, i32),
+    selection: (i32, i32, u32, u32),
+) -> (i32, i32) {
+    if let Some(pos) = reported {
+        return pos;
+    }
+
+    let (sel_x, sel_y, sel_w, sel_h) = selection;
+    let cx = sel_x + (sel_w as i32) / 2;
+    let cy = sel_y + (sel_h as i32) / 2;
+    let (stream_w, stream_h) = stream_size;
+
+    // Prefer a monitor that contains the selection center and matches the
+    // stream size (typical when the portal returns a single-monitor stream).
+    for (mx, my, mw, mh) in iter_gdk_monitor_geometries() {
+        if cx >= mx
+            && cy >= my
+            && cx < mx + mw
+            && cy < my + mh
+            && (stream_w <= 0 || stream_h <= 0 || (mw == stream_w && mh == stream_h))
+        {
+            eprintln!(
+                "[recording] Stream missing position metadata; using monitor origin ({mx},{my}) for crop"
+            );
+            return (mx, my);
+        }
+    }
+
+    eprintln!("[recording] Stream missing position metadata; assuming (0,0) for crop");
+    (0, 0)
+}
+
+fn iter_gdk_monitor_geometries() -> Vec<(i32, i32, i32, i32)> {
+    use gtk4::gdk::prelude::*;
+    use gtk4::glib::object::Cast;
+    use gtk4::prelude::ListModelExt;
+
+    let Some(display) = gtk4::gdk::Display::default() else {
+        return Vec::new();
+    };
+    let monitors = display.monitors();
+    let mut out = Vec::new();
+    for i in 0..monitors.n_items() {
+        let Some(item) = monitors.item(i) else {
+            continue;
+        };
+        let Ok(monitor) = item.downcast::<gtk4::gdk::Monitor>() else {
+            continue;
+        };
+        let g = monitor.geometry();
+        out.push((g.x(), g.y(), g.width(), g.height()));
+    }
+    out
+}
+
+/// Build a client-side crop for a pre-selected area, or `None` to record the
+/// whole stream when crop math cannot be resolved (never fail the session).
+fn wayland_area_crop_or_full(
+    stream_position: Option<(i32, i32)>,
+    stream_size: (i32, i32),
+    selection: (i32, i32, u32, u32),
+) -> Option<CropMargins> {
+    let position = resolve_wayland_stream_position(stream_position, stream_size, selection);
+    match compute_wayland_crop(position, stream_size, selection) {
+        Ok(crop) => Some(crop),
+        Err(err) => {
+            eprintln!(
+                "[recording] Could not crop to selected region ({err}); recording the full stream instead"
+            );
+            None
+        }
+    }
 }
 
 impl Default for RecordingConfig {
@@ -1066,26 +1155,116 @@ pub fn copy_to_clipboard(path: &Path) -> RecordResult<()> {
     Ok(())
 }
 
+/// Cached set of encoder names reported by `ffmpeg -encoders`.
+/// Fedora ships `ffmpeg-free` without `libx264`; `libopenh264` is the usual
+/// H.264 path. Ubuntu/etc. typically have `libx264`. Probe once per process.
+fn ffmpeg_available_encoders() -> &'static std::collections::HashSet<String> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<std::collections::HashSet<String>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let mut set = std::collections::HashSet::new();
+        let Ok(output) = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-encoders"])
+            .output()
+        else {
+            return set;
+        };
+        // ffmpeg prints the encoder table to stdout (sometimes mixed with
+        // banner noise on stderr). Parse both.
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for line in text.lines() {
+            // Lines look like: " V....D libopenh264          OpenH264 ..."
+            let trimmed = line.trim();
+            if trimmed.len() < 10 {
+                continue;
+            }
+            // Flag field is typically 6 chars then space then name.
+            let rest = if trimmed.starts_with([' ', 'V', 'A', 'S']) && trimmed.len() > 8 {
+                trimmed.get(7..).unwrap_or(trimmed).trim_start()
+            } else {
+                continue;
+            };
+            let name = rest.split_whitespace().next().unwrap_or("");
+            if name.starts_with("lib")
+                || name.contains("264")
+                || name.contains("265")
+                || name.contains("vp8")
+                || name.contains("vp9")
+                || name.contains("theora")
+                || name.contains("av1")
+            {
+                set.insert(name.to_string());
+            }
+        }
+        set
+    })
+}
+
+fn ffmpeg_encoder_available(name: &str) -> bool {
+    ffmpeg_available_encoders().contains(name)
+}
+
+/// Whether this profile can be used on the current session.
+/// Wayland recording encodes with ffmpeg; X11 uses GStreamer elements.
+fn encoder_profile_available(profile: &EncoderProfile) -> bool {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return ffmpeg_encoder_available(profile.ffmpeg_encoder);
+    }
+    // X11 / GStreamer path — best-effort; init is cheap if already done.
+    if gst::init().is_err() {
+        // Fall back to ffmpeg availability if GST is unavailable.
+        return ffmpeg_encoder_available(profile.ffmpeg_encoder);
+    }
+    gst::ElementFactory::find(profile.encoder).is_some()
+        || ffmpeg_encoder_available(profile.ffmpeg_encoder)
+}
+
 fn select_encoder(
     requested_path: &std::path::Path,
 ) -> RecordResult<(&'static EncoderProfile, PathBuf)> {
+    // Prefer the requested container when an actually-installed encoder supports it.
+    // Important where ffmpeg-free lacks libx264: pick OpenH264 or another format
+    // instead of hard-failing mid-encode.
     if let Some(ext) = requested_path.extension().and_then(|s| s.to_str()) {
+        let mut matched_ext = false;
         for profile in PROFILES {
-            if profile.extension == ext {
+            if profile.extension != ext {
+                continue;
+            }
+            matched_ext = true;
+            if encoder_profile_available(profile) {
                 return Ok((profile, requested_path.to_path_buf()));
             }
         }
-        println!(
-            "Warning: Requested format '{}' not in profile list; using default.",
-            ext
-        );
+        if matched_ext {
+            println!("Warning: no installed encoder for '.{ext}'; trying another format.");
+        } else {
+            println!("Warning: Requested format '{ext}' not in profile list; using default.");
+        }
     }
 
-    // Default to VP9/WebM
-    let profile = PROFILES.first().ok_or(RecordError::NoEncoderFound)?;
-    let mut new_path = requested_path.to_path_buf();
-    new_path.set_extension(profile.extension);
-    Ok((profile, new_path))
+    // Fall back: first available profile in priority order (VP9 → VP8 → x264 → OpenH264 → Theora).
+    for profile in PROFILES {
+        if encoder_profile_available(profile) {
+            let mut new_path = requested_path.to_path_buf();
+            new_path.set_extension(profile.extension);
+            if new_path != requested_path {
+                println!(
+                    "Note: using {} ({}) → {}",
+                    profile.name,
+                    profile.ffmpeg_encoder,
+                    new_path.display()
+                );
+            }
+            return Ok((profile, new_path));
+        }
+    }
+
+    Err(RecordError::NoEncoderFound)
 }
 
 /// Wayland recording: native PipeWire frame capture + ffmpeg pipe for encoding.
@@ -1196,6 +1375,18 @@ fn record_wayland_with_ffmpeg_sync(
         if encoder_name == "libx264" {
             ffmpeg_cmd.arg("-preset").arg("veryfast");
             ffmpeg_cmd.arg("-crf").arg("23");
+        } else if encoder_name == "libopenh264" {
+            // Fedora ffmpeg-free ships OpenH264 (no libx264). CRF is not
+            // supported; use a solid CBR-ish bitrate for desktop capture.
+            ffmpeg_cmd.arg("-b:v").arg("8M");
+            ffmpeg_cmd.arg("-maxrate").arg("10M");
+            ffmpeg_cmd.arg("-bufsize").arg("16M");
+            ffmpeg_cmd.arg("-allow_skip_frames").arg("0");
+        } else if encoder_name == "libvpx-vp9" || encoder_name == "libvpx" {
+            ffmpeg_cmd.arg("-b:v").arg("0");
+            ffmpeg_cmd.arg("-crf").arg("32");
+            ffmpeg_cmd.arg("-deadline").arg("realtime");
+            ffmpeg_cmd.arg("-cpu-used").arg("6");
         }
         if !encoder_props.is_empty() {
             for prop in encoder_props.split_whitespace() {
@@ -1387,21 +1578,39 @@ fn record_wayland_with_ffmpeg_sync(
         .wait()
         .map_err(|e| RecordError::GStreamerError(format!("Failed to wait for ffmpeg: {e}")))?;
 
-    if !status.success() && stop_action == RecordingTerminalAction::Save {
-        eprintln!("ffmpeg exited with non-zero status: {status}");
-    }
-
     if stop_action == RecordingTerminalAction::Discard {
         let _ = std::fs::remove_file(&final_path);
+        return Ok((final_path, stop_action));
     }
 
-    if stop_action == RecordingTerminalAction::Save {
-        println!("Recording saved to {:?}", final_path);
-        if let Ok(metadata) = std::fs::metadata(&final_path) {
+    if !status.success() {
+        let _ = std::fs::remove_file(&final_path);
+        return Err(RecordError::GStreamerError(format!(
+            "ffmpeg failed to encode the recording (exit {status}). \
+             On Fedora, install a codec pack or ensure libopenh264 is available \
+             (ffmpeg-free typically provides it)."
+        )));
+    }
+
+    // Guard against zero-byte / missing outputs that used to be reported as saved.
+    match std::fs::metadata(&final_path) {
+        Ok(metadata) if metadata.len() > 0 => {
+            println!("Recording saved to {:?}", final_path);
             println!(
                 "File size: {:.2} MB",
                 metadata.len() as f64 / 1024.0 / 1024.0
             );
+        }
+        Ok(_) => {
+            let _ = std::fs::remove_file(&final_path);
+            return Err(RecordError::GStreamerError(
+                "Recording finished but the output file is empty (encoder failed).".into(),
+            ));
+        }
+        Err(err) => {
+            return Err(RecordError::GStreamerError(format!(
+                "Recording finished but output file is missing: {err}"
+            )));
         }
     }
 
@@ -1742,7 +1951,8 @@ fn normalize_recording_config_for_profile(
 ) -> RecordingConfig {
     let mut normalized = config.clone();
 
-    if profile.encoder != "x264enc" {
+    // H.264 encoders (x264 / OpenH264) need even dimensions for yuv420p.
+    if !matches!(profile.encoder, "x264enc" | "openh264enc") {
         return normalized;
     }
 
@@ -1809,18 +2019,69 @@ async fn build_pipeline(
     })
 }
 
+/// On KDE Plasma, the reliable capture path is the desktop portal UI
+/// (same chooser Spectacle uses under the hood). KDE-native
+/// `zkde_screencast` is opt-in only — it needs compositor authorization that
+/// often fails for third-party apps and caused confusing dual-UI / crashes.
+fn prefer_kde_native_screencast() -> bool {
+    std::env::var_os("APEXSHOT_KDE_NATIVE_SCREENCAST").is_some()
+        && crate::backend::kde_screencast::is_kde_native_screencast_preferred()
+}
+
+/// User-facing copy when recording is attempted on Fedora.
+pub const FEDORA_RECORDING_UNSUPPORTED_MSG: &str = "Video recording is not supported on Fedora. \
+Screenshots still work. For screen recording, use Spectacle or Kooha.";
+
+/// Video recording is intentionally **unsupported** on Fedora.
+///
+/// Screenshots, preview, settings, tray, and shortcuts for capture remain
+/// supported. Other distros keep their full recording UX unchanged.
+pub fn is_fedora_recording_unsupported() -> bool {
+    crate::distro::DistroInfo::detect()
+        .map(|d| d.is_fedora())
+        .unwrap_or(false)
+}
+
+/// Backward-compatible alias used by older call sites.
+#[inline]
+pub fn is_fedora_portal_only_recording() -> bool {
+    is_fedora_recording_unsupported()
+}
+
+/// Notify the user and fail. Never starts a recording session on Fedora.
+pub fn refuse_fedora_recording() -> anyhow::Result<()> {
+    if !is_fedora_recording_unsupported() {
+        return Ok(());
+    }
+    eprintln!("[recording] {FEDORA_RECORDING_UNSUPPORTED_MSG}");
+    // Notify on a plain OS thread so zbus blocking does not nest inside Tokio
+    // (daemon hotkeys run on the async runtime).
+    let summary = "Recording not supported".to_string();
+    let body = FEDORA_RECORDING_UNSUPPORTED_MSG.to_string();
+    let _ = std::thread::spawn(move || {
+        crate::utils::notify::desktop_notification(&summary, &body);
+    })
+    .join();
+    anyhow::bail!("{FEDORA_RECORDING_UNSUPPORTED_MSG}")
+}
+
+/// Former Fedora portal entry — now always refuses.
+pub async fn run_fedora_portal_recording() -> anyhow::Result<(PathBuf, StopAction)> {
+    refuse_fedora_recording()?;
+    unreachable!("refuse_fedora_recording always errors on Fedora")
+}
+
 async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSource> {
-    // Prefer KDE-native screencast (Spectacle path) — no portal permission UI.
-    // Same idea as Hyprland/wlroots using wf-recorder instead of the portal.
-    if crate::backend::kde_screencast::is_kde_native_screencast_preferred() {
+    // Optional experimental path only (APEXSHOT_KDE_NATIVE_SCREENCAST=1).
+    if prefer_kde_native_screencast() {
         match get_kde_wayland_source(config) {
             Ok(source) => {
-                println!("Using KDE-native zkde_screencast (no portal dialog).");
+                println!("Using KDE-native zkde_screencast (APEXSHOT_KDE_NATIVE_SCREENCAST).");
                 return Ok(source);
             }
             Err(err) => {
                 eprintln!(
-                    "[recording] KDE-native screencast unavailable ({err}); falling back to ScreenCast portal."
+                    "[recording] KDE-native screencast failed ({err}); using ScreenCast portal."
                 );
             }
         }
@@ -1831,11 +2092,13 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         PersistMode,
     };
 
-    println!("Requesting Wayland ScreenCast session...");
+    // Fedora / KDE / GNOME: system portal picks the source; ApexShot settings
+    // still control countdown, audio, shortcuts, notifications, and save path.
+    println!("Requesting Wayland ScreenCast session (system share UI)…");
 
     let wants_area_crop = matches!(
         (config.x, config.y, config.width, config.height),
-        (Some(_), Some(_), Some(_), Some(_))
+        (Some(_), Some(_), Some(w), Some(h)) if w > 0 && h > 0
     );
     let target = if wants_area_crop {
         RecordingScreenCastTarget::Area
@@ -1984,11 +2247,6 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
         .unwrap_or((0, 0));
 
     let crop = if wants_area_crop {
-        let position = stream.position().ok_or_else(|| {
-            RecordError::PortalError(
-                "The selected Wayland stream did not expose monitor position metadata".into(),
-            )
-        })?;
         let size = (stream_width as i32, stream_height as i32);
         let selection = (
             config.x.expect("checked above"),
@@ -1996,7 +2254,9 @@ async fn get_wayland_source(config: &RecordingConfig) -> RecordResult<WaylandSou
             config.width.expect("checked above"),
             config.height.expect("checked above"),
         );
-        Some(compute_wayland_crop(position, size, selection).map_err(RecordError::PortalError)?)
+        // KDE portal frequently omits stream position. Infer it or fall back to
+        // full-stream capture instead of aborting after the user already confirmed.
+        wayland_area_crop_or_full(stream.position(), size, selection)
     } else {
         None
     };
@@ -2641,6 +2901,9 @@ async fn run_recording_with_controls_with_runtime_overlay(
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     visibility_policy: Option<crate::gnome_shell::RecordingControlsVisibilityPolicy>,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
+    // Fedora: video recording is not supported.
+    refuse_fedora_recording()?;
+
     // If GNOME Shell extension is available, use it (premium experience)
     if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
         return run_recording_with_shell_controls(
@@ -2653,9 +2916,11 @@ async fn run_recording_with_controls_with_runtime_overlay(
         .await;
     }
 
-    // Fallback for non-GNOME (Hyprland, Sway, Niri, River, etc.)
-    // We use our native GTK+LayerShell overlay which implements the same mask logic.
-    eprintln!("[recording] GNOME Shell not detected; using native recording overlay.");
+    // Fallback for non-GNOME (Fedora KDE, Hyprland, Sway, Niri, River, etc.).
+    // No floating control bar — shortcuts, tray, and desktop notifications only.
+    eprintln!(
+        "[recording] GNOME Shell not detected; using native recording path (shortcuts + notifications)."
+    );
     run_recording_with_native_controls(config, params).await
 }
 
@@ -2686,92 +2951,57 @@ async fn run_recording_countdown_subprocess(
     }
 }
 
+/// Non-GNOME recording path (Fedora KDE, wlroots, etc.).
+///
+/// No floating control bar — users control the session with configured
+/// global shortcuts and the tray. Lifecycle feedback is via desktop
+/// notifications (same idea as Spectacle / system recorders).
 pub async fn run_recording_with_native_controls(
     config: RecordingConfig,
     params: RecordingControlsParams,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    let prepared_backend = if params.countdown_enabled
-        || is_wlroots_session()
-        || config.output_path.extension().is_some_and(|e| e == "gif")
-    {
-        None
-    } else {
-        Some(prepare_recording_backend(config.clone()).await?)
-    };
+    // Belt-and-suspenders: Fedora never records (entry points refuse first).
+    if is_fedora_recording_unsupported() {
+        refuse_fedora_recording()?;
+    }
+
+    // Prepare the capture backend *before* countdown so any portal / permission
+    // UI appears first. Countdown then leads straight into recording without a
+    // second chooser after "3-2-1".
+    let prepared_backend =
+        if is_wlroots_session() || config.output_path.extension().is_some_and(|e| e == "gif") {
+            None
+        } else {
+            match prepare_recording_backend(config.clone()).await {
+                Ok(prepared) => Some(prepared),
+                Err(err) => {
+                    notify_recording_session_ended_best_effort();
+                    return Err(err.into());
+                }
+            }
+        };
 
     let session_id = format!(
         "recording-{}-{}",
         std::process::id(),
         chrono::Utc::now().timestamp_millis()
     );
-    let control_server = RecordingControlServer::start(session_id.clone()).await?;
+    let control_server = RecordingControlServer::start(session_id).await?;
 
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-    let mut ui_params = params.clone();
-    ui_params.session_id = Some(session_id);
-    let params_json = serde_json::to_string(&ui_params)?;
-
-    let mut child = std::process::Command::new(&exe)
-        .arg("recording-ui-internal")
-        .arg(&params_json)
-        .arg(params.countdown_seconds.to_string())
-        .stdout(Stdio::piped())
-        .spawn()?;
-
-    let child_stdout = child.stdout.take().expect("failed to take child stdout");
-
-    let (ui_line_tx, mut ui_line_rx) = mpsc::unbounded_channel::<String>();
-    let stdout_task = tokio::task::spawn_blocking(move || {
-        use std::io::{BufRead, BufReader};
-        let reader = BufReader::new(child_stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(l) => {
-                    if ui_line_tx.send(l).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
+    // Optional pre-roll — never spawn the floating controls UI on native path.
+    if params.countdown_enabled {
+        match run_recording_countdown_subprocess(params.clone()).await {
+            Ok(true) => {}
+            Ok(false) => {
+                notify_recording_session_ended_best_effort();
+                return Ok((config.output_path.clone(), StopAction::Discard));
             }
-        }
-    });
-
-    let timeout_secs = if params.countdown_enabled {
-        params.countdown_seconds + 5
-    } else {
-        5
-    };
-    let ready = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs as u64), async {
-        while let Some(line) = ui_line_rx.recv().await {
-            match line.trim() {
-                "ready" => return Some(true),
-                "discard" => return Some(false),
-                _ => {}
-            }
-        }
-        None
-    })
-    .await;
-
-    match ready {
-        Ok(Some(true)) => {}
-        Ok(Some(false)) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            notify_recording_session_ended_best_effort();
-            return Ok((config.output_path.clone(), StopAction::Discard));
-        }
-        Ok(None) | Err(_) => {
-            if let Ok(Some(status)) = child.try_wait() {
-                if status.code() == Some(2) {
-                    notify_recording_session_ended_best_effort();
-                    return Ok((config.output_path.clone(), StopAction::Discard));
-                }
+            Err(err) => {
+                notify_recording_session_ended_best_effort();
+                return Err(err);
             }
         }
     }
-
-    notify_daemon_event("recording_session_started");
 
     let (recording_command_tx, command_rx) = mpsc::unbounded_channel();
     let (control_command_tx, mut control_command_rx) =
@@ -2786,75 +3016,47 @@ pub async fn run_recording_with_native_controls(
         }
     });
 
-    let ui_tx = recording_command_tx.clone();
-    let ui_forward = tokio::spawn(async move {
-        while let Some(line) = ui_line_rx.recv().await {
-            let cmd = match line.trim() {
-                "save" => RecordingControlCommand::StopSave,
-                "discard" => RecordingControlCommand::StopDiscard,
-                "pause" => RecordingControlCommand::Pause,
-                "resume" => RecordingControlCommand::Resume,
-                "restart" => RecordingControlCommand::Restart,
-                _ => continue,
-            };
-            if ui_tx.send(cmd).is_err() {
-                break;
-            }
-        }
-    });
-
     control_server.set_command_sender(control_command_tx);
+    // `start_recording_*` emits recording_session_started (tray + desktop toast).
     let outcome = if let Some(prepared_backend) = prepared_backend {
         start_recording_with_prepared_backend(prepared_backend, Some(command_rx)).await
     } else {
         start_recording_with_commands(config.clone(), Some(command_rx)).await
     };
     control_server.clear_command_sender();
-
     dbus_forward.abort();
-    ui_forward.abort();
 
     let outcome = match outcome {
         Ok(outcome) => outcome,
         Err(err) => {
-            let _ = child.kill();
-            let _ = child.wait();
             notify_recording_session_ended_best_effort();
             return Err(err.into());
         }
     };
 
-    let final_outcome = match outcome {
+    match outcome {
         (path, RecordingTerminalAction::Restart) => {
             if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Restart)
             {
                 notify_daemon_event(event);
             }
             let _ = std::fs::remove_file(&path);
-            stdout_task.abort();
-            let _ = child.kill();
-            let _ = child.wait();
-            return Box::pin(run_recording_with_native_controls(config, params)).await;
+            Box::pin(run_recording_with_native_controls(config, params)).await
         }
         (path, RecordingTerminalAction::Save) => {
             if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Save) {
                 notify_daemon_event(event);
             }
-            (path, StopAction::Save)
+            Ok((path, StopAction::Save))
         }
         (path, RecordingTerminalAction::Discard) => {
             if let Some(event) = daemon_event_for_terminal_action(RecordingTerminalAction::Discard)
             {
                 notify_daemon_event(event);
             }
-            (path, StopAction::Discard)
+            Ok((path, StopAction::Discard))
         }
-    };
-
-    stdout_task.abort();
-    let _ = child.wait();
-
-    Ok(final_outcome)
+    }
 }
 
 async fn run_recording_with_shell_controls(
@@ -2863,14 +3065,13 @@ async fn run_recording_with_shell_controls(
     runtime_overlay_snapshot: Option<RuntimeOverlaySnapshot>,
     visibility_policy: crate::gnome_shell::RecordingControlsVisibilityPolicy,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    let mut prepared_backend = if params.countdown_enabled
-        || is_wlroots_session()
-        || config.output_path.extension().is_some_and(|e| e == "gif")
-    {
-        None
-    } else {
-        Some(prepare_recording_backend(config.clone()).await?)
-    };
+    // Same ordering as the native path: portal / backend first, then countdown.
+    let mut prepared_backend =
+        if is_wlroots_session() || config.output_path.extension().is_some_and(|e| e == "gif") {
+            None
+        } else {
+            Some(prepare_recording_backend(config.clone()).await?)
+        };
 
     let _shell_mask = if params.use_shell_mask {
         match crate::gnome_shell::show_recording_mask(crate::gnome_shell::RecordingMaskGeometry {
@@ -2990,6 +3191,9 @@ pub fn run_overlay_recording_request_with_gtk(
     request: RecordingRequest,
     _gtk_tx: Option<std::sync::mpsc::Sender<crate::daemon::GtkWork>>,
 ) -> anyhow::Result<PathBuf> {
+    // Fedora: video recording is not supported.
+    refuse_fedora_recording()?;
+
     let prepared = prepare_overlay_recording_request(
         crate::config::load_config(),
         &request,
@@ -3056,6 +3260,12 @@ pub fn run_overlay_recording_request_with_gtk(
                 );
                 return Ok(path);
             }
+
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("recording");
+            crate::utils::notify::desktop_notification("Recording saved", file_name);
 
             if prepared.open_editor {
                 spawn_recording_editor_subprocess(path.clone());
@@ -3156,6 +3366,40 @@ mod tests {
             .iter()
             .find(|profile| profile.encoder == encoder)
             .expect("expected encoder profile to exist")
+    }
+
+    #[test]
+    fn normalize_openh264_forces_even_dimensions() {
+        let mut config = x11_recording_config();
+        config.width = Some(641);
+        config.height = Some(481);
+        let normalized =
+            normalize_recording_config_for_profile(profile_by_encoder("openh264enc"), &config);
+        assert_eq!(normalized.width, Some(640));
+        assert_eq!(normalized.height, Some(480));
+    }
+
+    #[test]
+    fn ffmpeg_encoder_probe_sees_common_fedora_or_ubuntu_codecs() {
+        // Skip cleanly when ffmpeg is not installed in the test environment.
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let encoders = ffmpeg_available_encoders();
+        // At least one of the H.264 or VP* software encoders should exist on
+        // any distro that can run ApexShot recording (Fedora: openh264/vpx,
+        // Ubuntu: often libx264 + vpx).
+        assert!(
+            encoders.contains("libopenh264")
+                || encoders.contains("libx264")
+                || encoders.contains("libvpx-vp9")
+                || encoders.contains("libvpx"),
+            "expected a usable ffmpeg video encoder, got: {encoders:?}"
+        );
     }
 
     #[test]
@@ -3659,6 +3903,28 @@ mod tests {
                 bottom: 496,
             }
         );
+    }
+
+    #[test]
+    fn missing_stream_position_defaults_to_origin() {
+        let pos = resolve_wayland_stream_position(None, (1920, 1080), (100, 100, 200, 200));
+        // Without GDK monitors in unit tests, falls back to (0, 0).
+        assert_eq!(pos, (0, 0));
+        assert_eq!(
+            resolve_wayland_stream_position(Some((1920, 0)), (2560, 1440), (2000, 10, 100, 100)),
+            (1920, 0)
+        );
+    }
+
+    #[test]
+    fn area_crop_soft_fails_instead_of_erroring() {
+        // Selection completely outside a (0,0) 100x100 stream → soft fail to None.
+        assert!(wayland_area_crop_or_full(None, (100, 100), (500, 500, 50, 50)).is_none());
+        // Valid selection on assumed (0,0) origin.
+        let crop = wayland_area_crop_or_full(None, (1920, 1080), (100, 100, 200, 200))
+            .expect("in-bounds selection should crop");
+        assert_eq!(crop.left, 100);
+        assert_eq!(crop.top, 100);
     }
 
     #[test]

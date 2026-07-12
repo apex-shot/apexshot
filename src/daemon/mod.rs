@@ -2786,6 +2786,12 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
         run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
     };
 
+    // Fedora: video recording intentionally unsupported.
+    if crate::recording::is_fedora_recording_unsupported() {
+        let _ = crate::recording::refuse_fedora_recording();
+        return;
+    }
+
     eprintln!("[daemon] Starting screen recording…");
 
     let app_config = load_config().sanitized();
@@ -2821,6 +2827,12 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
 }
 
 async fn handle_open_recording_ui(_tx: std::sync::mpsc::Sender<DaemonAction>) {
+    // Fedora: video recording intentionally unsupported.
+    if crate::recording::is_fedora_recording_unsupported() {
+        let _ = crate::recording::refuse_fedora_recording();
+        return;
+    }
+
     match tokio::task::spawn_blocking(open_recording_ui_via_cpp).await {
         Ok(Ok(AreaCapturePathResult::RecordingRequested(request))) => {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, None) {
@@ -2857,6 +2869,12 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
     use crate::recording::{
         run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
     };
+
+    // Fedora: video recording intentionally unsupported.
+    if crate::recording::is_fedora_recording_unsupported() {
+        let _ = crate::recording::refuse_fedora_recording();
+        return;
+    }
 
     eprintln!("[daemon] Selecting area for recording…");
 

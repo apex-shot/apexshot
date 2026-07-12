@@ -1,6 +1,6 @@
 # Fedora/KDE Overlay + Preview Progress
 
-_Last updated: 2026-06-23_
+_Last updated: 2026-07-12_
 
 ## Goal
 Stabilize ApexShot behavior for Fedora KDE Plasma and related Linux desktop paths without breaking:
@@ -169,6 +169,45 @@ This was done specifically to avoid breaking:
 - edit button behavior
 - close behavior
 - pinned/unpinned logic
+
+---
+
+### 8. Fedora KDE notifications fixed (2026-07-12)
+
+Upload completed in the daemon/journal but popups were missing.
+
+Root causes in `src/utils/notify.rs`:
+- Only `notify-send -a ApexShot` (no `desktop-entry`, no icon)
+- `spawn()` and forget — races when a short-lived preview process exits
+- No D-Bus fallback
+
+**Fix (Ubuntu-safe):**
+- Prefer session-bus `org.freedesktop.Notifications.Notify` via zbus
+  (same freedsktop API GNOME already uses).
+- Set `desktop-entry` to `io.github.codegoddy.apexshot`, app name/icon from
+  `app_identity`, normal urgency, explicit timeout.
+- Fall back to `notify-send` with the same branding flags if D-Bus fails.
+- Wait for `notify-send` to finish so the notification is registered before
+  process exit.
+
+### 9. Fedora KDE preview click-through fixed (2026-07-12)
+
+On Plasma Wayland the preview used to **skip layer-shell** and fall back to a
+monitor-sized transparent GTK window with a card-only `set_input_region`.
+
+That path was broken in practice:
+- Input region used parent-relative `allocation()` instead of surface-local
+  `compute_bounds()`, so the hit box often missed the visible card.
+- Clicks passed through → no drag/drop, no toolbar actions.
+- Ubuntu/GNOME was fine because it already used layer-shell (compact surface).
+
+**Fix (Ubuntu-safe):**
+- Drop the KDE-only layer-shell skip so Plasma uses the **same** layer-shell
+  path Ubuntu/GNOME already uses (same anchors, margins, `exclusive_zone(0)`,
+  keyboard mode, drag-on-card).
+- Harden the non-layer-shell fallback input region only
+  (`compute_bounds` + cache after successful apply). That path is unused when
+  layer-shell is active (Ubuntu default).
 
 ---
 

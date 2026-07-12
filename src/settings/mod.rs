@@ -34,6 +34,23 @@ use self::{
     },
 };
 
+/// Short, user-facing summary of a save failure (full chain goes to stderr).
+fn format_save_error(err: &anyhow::Error) -> String {
+    const MAX_LEN: usize = 160;
+    let root = err
+        .chain()
+        .last()
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| err.to_string());
+    let compact = root.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= MAX_LEN {
+        compact
+    } else {
+        let truncated: String = compact.chars().take(MAX_LEN.saturating_sub(1)).collect();
+        format!("{truncated}…")
+    }
+}
+
 pub fn show_settings_window() -> anyhow::Result<()> {
     // Force-set GIO_LAUNCHED_DESKTOP_FILE to the main app's desktop entry
     // so GNOME Shell shows the correct icon and name.
@@ -500,7 +517,10 @@ fn build_settings_window(app: &Application) {
                     toast.add_css_class("settings-toast-success");
                 }
                 Err(e) => {
-                    toast.set_text(&format!("Save failed: {}", e));
+                    // Keep the toast readable; long D-Bus / IO chains overflow the UI.
+                    let message = format_save_error(&e);
+                    eprintln!("[settings] Save failed: {e:#}");
+                    toast.set_text(&format!("Save failed: {message}"));
                     toast.add_css_class("settings-toast-error");
                 }
             }

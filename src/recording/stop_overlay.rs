@@ -330,6 +330,8 @@ fn compute_bar_position(
     (x.round() as i32, y.round() as i32)
 }
 
+/// Layout helper kept for unit tests and possible future control-bar layouts.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn can_show_bar_outside_capture(
     params: &RecordingControlsParams,
     desktop_bounds: (i32, i32, i32, i32),
@@ -354,45 +356,14 @@ pub(super) fn can_show_bar_outside_capture(
     fits_below || fits_above
 }
 
-fn is_wlroots_like_session() -> bool {
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
-        .or_else(|_| std::env::var("DESKTOP_SESSION"))
-        .unwrap_or_default()
-        .to_lowercase();
-
-    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
-        || std::env::var_os("SWAYSOCK").is_some()
-        || desktop.contains("hyprland")
-        || desktop.contains("sway")
-        || desktop.contains("river")
-        || desktop.contains("wayfire")
-        || desktop.contains("labwc")
-        || desktop.contains("niri")
-}
-
 fn native_controls_should_be_visible(
-    display: &gdk::Display,
-    params: &RecordingControlsParams,
+    _display: &gdk::Display,
+    _params: &RecordingControlsParams,
 ) -> bool {
-    let monitor = monitor_for_capture(display, params);
-    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
-
-    let fits_outside_capture = if layer_shell_active {
-        if let Some(monitor) = monitor {
-            let geom = monitor.geometry();
-            let mut local_params = params.clone();
-            local_params.capture_x -= geom.x();
-            local_params.capture_y -= geom.y();
-            can_show_bar_outside_capture(&local_params, (0, 0, geom.width(), geom.height()))
-        } else {
-            can_show_bar_outside_capture(params, display_bounds().unwrap_or((0, 0, 1920, 1080)))
-        }
-    } else {
-        can_show_bar_outside_capture(params, display_bounds().unwrap_or((0, 0, 1920, 1080)))
-    };
-
-    fits_outside_capture || is_wlroots_like_session()
+    // Floating recording controls are disabled on the native (non-GNOME) path.
+    // Fedora/KDE and other desktops use global shortcuts + tray + desktop
+    // notifications, matching system tools like Spectacle.
+    false
 }
 
 fn setup_window(

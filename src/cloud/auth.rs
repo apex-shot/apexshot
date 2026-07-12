@@ -1,7 +1,9 @@
 use serde::Deserialize;
 use std::time::Duration;
 
-use crate::config::{load_config, save_config, AppConfig};
+use crate::config::{
+    is_cloud_logged_in, load_config, resolve_cloud_backend_url, save_config, AppConfig,
+};
 
 const POLL_INTERVAL: u64 = 5;
 const MAX_POLL_SECONDS: u64 = 900;
@@ -78,7 +80,8 @@ impl std::fmt::Display for LogoutError {
 impl std::error::Error for LogoutError {}
 
 pub fn needs_backend_url(config: &AppConfig) -> bool {
-    config.cloud_backend_url.is_empty()
+    // Public installs always resolve to DEFAULT_CLOUD_BACKEND_URL when empty.
+    resolve_cloud_backend_url(config).is_empty()
 }
 
 pub fn login() -> Result<(), LoginError> {
@@ -87,8 +90,14 @@ pub fn login() -> Result<(), LoginError> {
         return Err(LoginError::NotConfigured);
     }
 
-    let backend_url = config.cloud_backend_url.trim_end_matches('/');
-    let was_logged_in = !config.cloud_api_token.is_empty();
+    // Ensure config carries the resolved URL so later upload/login paths match.
+    let backend_url = resolve_cloud_backend_url(&config);
+    if config.cloud_backend_url.trim().is_empty() {
+        config.cloud_backend_url = backend_url.clone();
+        let _ = save_config(&config);
+    }
+
+    let was_logged_in = is_cloud_logged_in(&config);
     let previous_email = config.cloud_user_email.clone();
 
     if config.cloud_install_id.is_empty() {
@@ -195,7 +204,7 @@ pub fn logout() -> Result<(), LogoutError> {
         return Err(LogoutError::NotLoggedIn);
     }
 
-    let backend_url = config.cloud_backend_url.trim_end_matches('/');
+    let backend_url = resolve_cloud_backend_url(&config);
     let revoke_body =
         serde_json::json!({ "token": config.cloud_api_token, "token_type_hint": "access_token" })
             .to_string();

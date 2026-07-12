@@ -900,12 +900,15 @@ fn is_kde_desktop() -> bool {
             .contains("plasma")
 }
 
-fn kde_component_action(binding: &HotkeyBinding, idx: usize) -> [String; 4] {
+/// KGlobalAccel action id must be D-Bus type `as` (string array), not a struct.
+/// Using `[String; 4]` made zbus emit `(ssss)`, which Plasma rejects with
+/// UnknownMethod and a long signature error shown in Settings.
+fn kde_component_action(binding: &HotkeyBinding, idx: usize) -> Vec<String> {
     let id = binding
         .name
         .clone()
         .unwrap_or_else(|| format!("binding_{idx}"));
-    [
+    vec![
         crate::app_identity::app_id().to_string(),
         id.clone(),
         crate::app_identity::app_name().to_string(),
@@ -967,6 +970,8 @@ fn sync_kde_hotkeys_if_applicable(cfg: &HotkeyConfig) -> anyhow::Result<()> {
         }
     };
 
+    // Best-effort: never fail Settings save because one KDE shortcut could not
+    // be registered. Config + hotkeys.yml are already written by the caller.
     for (idx, binding) in cfg.bindings.iter().enumerate() {
         let action = kde_component_action(binding, idx);
         let Some(keys) = kde_shortcut_keys_for_accel(&binding.accelerator) else {
@@ -977,9 +982,15 @@ fn sync_kde_hotkeys_if_applicable(cfg: &HotkeyConfig) -> anyhow::Result<()> {
             continue;
         };
 
-        let _: Vec<(Vec<i32>,)> = proxy
-            .call("setShortcutKeys", &(action, keys, 4u32))
-            .map_err(|e| anyhow::anyhow!("KDE setShortcutKeys failed: {e}"))?;
+        match proxy.call::<_, _, Vec<(Vec<i32>,)>>("setShortcutKeys", &(action, keys, 4u32)) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!(
+                    "[hotkeys] KDE setShortcutKeys failed for {:?}: {e}",
+                    binding.name
+                );
+            }
+        }
     }
 
     Ok(())
@@ -2605,5 +2616,21 @@ mod tests {
             .bindings
             .iter()
             .any(|binding| binding.name.as_deref() == Some("recording_restart")));
+    }
+
+    #[test]
+    fn kde_component_action_is_string_array_of_four() {
+        // Must be Vec (D-Bus `as`), not a fixed array (which zbus encodes as struct).
+        let binding = HotkeyBinding {
+            accelerator: "CTRL+ALT+F".into(),
+            args: vec!["capture".into(), "area".into()],
+            name: Some("capture_area".into()),
+        };
+        let action = kde_component_action(&binding, 0);
+        assert_eq!(action.len(), 4);
+        assert_eq!(action[0], crate::app_identity::app_id());
+        assert_eq!(action[1], "capture_area");
+        assert_eq!(action[2], crate::app_identity::app_name());
+        assert_eq!(action[3], "capture area");
     }
 }
