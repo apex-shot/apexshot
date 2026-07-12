@@ -89,5 +89,8 @@ CLICK_KEYSTROKE_REMOVAL_IMPLEMENTATION_PLAN.md
 fedora-kde-reply.txt
 install-fixed-apexshot.txt
 obs-studio/
+# Local research clones (not part of ApexShot)
+Kooha/
+spectacle/
 .antigravitycli/
 reinstall-dev-deb.sh
