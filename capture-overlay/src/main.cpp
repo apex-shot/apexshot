@@ -606,6 +606,9 @@ int main(int argc, char* argv[])
         if (!targetScreen) {
             return 1; // cancelled
         }
+        // Picker already waits for its own unmap; one more event-loop drain so
+        // freeze never samples a leftover picker surface on slow Wayland.
+        QApplication::processEvents(QEventLoop::AllEvents, 50);
     }
 
     // 2) Freeze only for the capture-area overlay (opaque underlay + crop source).

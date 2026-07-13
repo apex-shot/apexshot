@@ -5,6 +5,7 @@
 #include "MonitorPicker.h"
 
 #include <QApplication>
+#include <QCloseEvent>
 #include <QCursor>
 #include <QEvent>
 #include <QEventLoop>
@@ -19,6 +20,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QScreen>
+#include <QThread>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QWindow>
@@ -26,6 +28,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <functional>
+#include <memory>
 
 namespace {
 
@@ -257,6 +260,8 @@ private:
 };
 
 /// Compact floating panel — does NOT cover the full screen (live desktop stays).
+/// Opaque (not WA_TranslucentBackground): translucent Tool/Dialog surfaces on
+/// GNOME Wayland sometimes linger as semi-transparent ghosts after hide().
 class PickerPanel : public QWidget
 {
 public:
@@ -265,10 +270,31 @@ public:
                   Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
         , m_loop(loop)
         , m_result(result)
+        , m_dismissing(false)
     {
-        setAttribute(Qt::WA_TranslucentBackground, true);
+        setAttribute(Qt::WA_TranslucentBackground, false);
+        setAttribute(Qt::WA_OpaquePaintEvent, true);
+        setAttribute(Qt::WA_DeleteOnClose, false);
         setFocusPolicy(Qt::StrongFocus);
         setMouseTracking(true);
+    }
+
+    /// Unmap immediately and drain the event loop so the compositor drops the
+    /// surface before freeze / capture-overlay runs (avoids ghost picker).
+    void dismissAndQuit(int code)
+    {
+        if (m_dismissing) {
+            return;
+        }
+        m_dismissing = true;
+        *m_result = code;
+        hide();
+        if (windowHandle()) {
+            windowHandle()->setVisible(false);
+        }
+        // Let Wayland process the unmap before the event loop returns.
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        m_loop->quit();
     }
 
 protected:
@@ -277,15 +303,10 @@ protected:
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
 
-        const QRectF r = QRectF(rect()).adjusted(6, 4, -6, -10);
+        // Full opaque fill first so nothing under the window shows through.
+        p.fillRect(rect(), kBgRoot);
 
-        // Drop shadow
-        {
-            QPainterPath sh;
-            sh.addRoundedRect(r.translated(0, 6), kPanelRadius, kPanelRadius);
-            p.fillPath(sh, QColor(0, 0, 0, 90));
-        }
-
+        const QRectF r = QRectF(rect()).adjusted(1, 1, -1, -1);
         QPainterPath panel;
         panel.addRoundedRect(r, kPanelRadius, kPanelRadius);
         p.fillPath(panel, kBgRoot);
@@ -301,30 +322,36 @@ protected:
     void keyPressEvent(QKeyEvent* event) override
     {
         if (event->key() == Qt::Key_Escape) {
-            *m_result = -1;
-            m_loop->quit();
+            dismissAndQuit(-1);
             return;
         }
         if (event->key() >= Qt::Key_1 && event->key() <= Qt::Key_9) {
-            *m_result = event->key() - Qt::Key_1;
-            m_loop->quit();
+            dismissAndQuit(event->key() - Qt::Key_1);
             return;
         }
         QWidget::keyPressEvent(event);
     }
 
+    void closeEvent(QCloseEvent* event) override
+    {
+        if (!m_dismissing) {
+            dismissAndQuit(-1);
+        }
+        QWidget::closeEvent(event);
+    }
+
 private:
     QEventLoop* m_loop;
     int* m_result;
+    bool m_dismissing;
 };
 
 class CancelLabel : public QLabel
 {
 public:
-    CancelLabel(QEventLoop* loop, int* result, QWidget* parent)
+    CancelLabel(PickerPanel* panel, QWidget* parent)
         : QLabel(QStringLiteral("Cancel"), parent)
-        , m_loop(loop)
-        , m_result(result)
+        , m_panel(panel)
     {
         setAlignment(Qt::AlignCenter);
         setCursor(Qt::PointingHandCursor);
@@ -336,8 +363,9 @@ public:
 protected:
     void mousePressEvent(QMouseEvent*) override
     {
-        *m_result = -1;
-        m_loop->quit();
+        if (m_panel) {
+            m_panel->dismissAndQuit(-1);
+        }
     }
 
     void enterEvent(QEvent*) override
@@ -355,8 +383,7 @@ protected:
     }
 
 private:
-    QEventLoop* m_loop;
-    int* m_result;
+    PickerPanel* m_panel;
 };
 
 } // namespace
@@ -380,13 +407,15 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
         return 0;
     }
 
-    PickerPanel panel(&loop, &result);
+    // Heap-allocate so we can destroy the surface before returning; stack
+    // destruction alone is not enough for Wayland unmap timing.
+    auto panel = std::make_unique<PickerPanel>(&loop, &result);
 
-    auto* root = new QVBoxLayout(&panel);
+    auto* root = new QVBoxLayout(panel.get());
     root->setContentsMargins(36, 28, 36, 20);
     root->setSpacing(0);
 
-    auto* title = new QLabel(QStringLiteral("Select a display"), &panel);
+    auto* title = new QLabel(QStringLiteral("Select a display"), panel.get());
     title->setAlignment(Qt::AlignCenter);
     {
         QFont f = title->font();
@@ -403,7 +432,7 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
     auto* hint = new QLabel(
       QStringLiteral("Click a display  ·  Esc to cancel  ·  1–%1")
         .arg(std::min(9, screens.size())),
-      &panel);
+      panel.get());
     hint->setAlignment(Qt::AlignCenter);
     {
         QFont f = hint->font();
@@ -416,8 +445,7 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
 
     root->addSpacing(22);
 
-    auto* row = new QWidget(&panel);
-    row->setAttribute(Qt::WA_TranslucentBackground, true);
+    auto* row = new QWidget(panel.get());
     auto* rowLayout = new QHBoxLayout(row);
     rowLayout->setSpacing(16);
     rowLayout->setContentsMargins(0, 0, 0, 0);
@@ -433,13 +461,13 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
 
     QScreen* primary = QGuiApplication::primaryScreen();
     MonitorCard* firstCard = nullptr;
+    PickerPanel* panelPtr = panel.get();
 
     for (int i : sorted) {
         QScreen* screen = screens[i];
         auto* card = new MonitorCard(i, screen, screen == primary, row);
-        card->onSelected = [&](int index) {
-            result = index;
-            loop.quit();
+        card->onSelected = [panelPtr](int index) {
+            panelPtr->dismissAndQuit(index);
         };
         rowLayout->addWidget(card, 0, Qt::AlignTop);
         if (!firstCard) {
@@ -449,31 +477,42 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
     root->addWidget(row, 0, Qt::AlignCenter);
 
     root->addSpacing(12);
-    root->addWidget(new CancelLabel(&loop, &result, &panel), 0, Qt::AlignCenter);
+    root->addWidget(new CancelLabel(panelPtr, panel.get()), 0, Qt::AlignCenter);
 
-    panel.adjustSize();
-    const QSize sz = panel.sizeHint().expandedTo(panel.minimumSizeHint());
-    panel.resize(sz);
+    panel->adjustSize();
+    const QSize sz = panel->sizeHint().expandedTo(panel->minimumSizeHint());
+    panel->resize(sz);
 
     // Center on host screen — floating only, desktop remains visible around it.
     const QRect avail = host->availableGeometry();
-    panel.move(avail.center() - QPoint(panel.width() / 2, panel.height() / 2));
-    if (panel.windowHandle()) {
-        panel.windowHandle()->setScreen(host);
+    panel->move(avail.center() - QPoint(panel->width() / 2, panel->height() / 2));
+    if (panel->windowHandle()) {
+        panel->windowHandle()->setScreen(host);
     }
 
-    panel.show();
-    panel.raise();
-    panel.activateWindow();
-    panel.setFocus(Qt::ActiveWindowFocusReason);
+    panel->show();
+    panel->raise();
+    panel->activateWindow();
+    panel->setFocus(Qt::ActiveWindowFocusReason);
     if (firstCard) {
         firstCard->setFocus(Qt::TabFocusReason);
     }
     QApplication::processEvents();
 
     loop.exec();
-    panel.hide();
-    QApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    // Force-destroy the surface and wait for the compositor to finish unmap
+    // before the caller freezes the desktop / opens the capture overlay.
+    panel->hide();
+    if (panel->windowHandle()) {
+        panel->windowHandle()->setVisible(false);
+    }
+    panel->close();
+    panel.reset();
+    QApplication::processEvents(QEventLoop::AllEvents, 100);
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 100);
+
     return result;
 }
 
