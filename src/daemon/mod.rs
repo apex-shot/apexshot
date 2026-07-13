@@ -174,6 +174,28 @@ static SPEAKER_LEVEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 /// When true, hotkey activations are suppressed (e.g. during shortcut editing).
 static HOTKEY_SUPPRESSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+// ── Lazy audio level monitors ───────────────────────────────────────────────
+// Mic/speaker PipeWire capture streams are NOT opened at daemon startup.
+// Holding a mic capture stream forces Bluetooth headsets into HSP/HFP
+// ("headset mode") and degrades music quality (GitHub issue #41). Streams are
+// started on demand when the recording UI polls GetMicLevel/GetSpeakerLevel,
+// and stopped after a short idle period so the tray can sit quietly.
+
+/// How long after the last level poll before mic/speaker capture streams stop.
+const AUDIO_MONITOR_IDLE: Duration = Duration::from_secs(3);
+
+static MIC_MONITOR_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static SPEAKER_MONITOR_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static MIC_LAST_POLL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SPEAKER_LAST_POLL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static MIC_MONITOR_STOP: Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
+    Mutex::new(None);
+static SPEAKER_MONITOR_STOP: Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
+    Mutex::new(None);
+static AUDIO_IDLE_REAPER: std::sync::Once = std::sync::Once::new();
+
 /// Returns true if hotkey activations are currently suppressed.
 pub fn is_hotkey_suppressed() -> bool {
     HOTKEY_SUPPRESSED.load(std::sync::atomic::Ordering::Relaxed)
@@ -1134,12 +1156,21 @@ impl DaemonIpc {
     }
 
     /// Returns the current mic level as a normalized f64 (0.0 to 1.0).
+    ///
+    /// Lazily starts the mic capture stream used for the recording UI meter.
+    /// The stream is released after [`AUDIO_MONITOR_IDLE`] without polls so a
+    /// tray-only daemon does not keep Bluetooth headsets in HSP/HFP mode.
     fn get_mic_level(&self) -> f64 {
+        touch_mic_monitor();
         f64::from_bits(MIC_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// Returns the current system audio level as a normalized f64 (0.0 to 1.0).
+    ///
+    /// Lazily starts the speaker (sink-monitor) capture stream for the recording
+    /// UI meter; released after idle like the mic stream.
     fn get_speaker_level(&self) -> f64 {
+        touch_speaker_monitor();
         f64::from_bits(SPEAKER_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
     }
 
@@ -1212,16 +1243,166 @@ impl DaemonIpc {
     }
 }
 
+fn monitor_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Returns true when `last_poll_ms` is older than `idle` relative to `now_ms`.
+fn audio_monitor_is_idle(last_poll_ms: u64, now_ms: u64, idle: Duration) -> bool {
+    if last_poll_ms == 0 {
+        return true;
+    }
+    now_ms.saturating_sub(last_poll_ms) >= idle.as_millis() as u64
+}
+
+fn ensure_audio_idle_reaper() {
+    AUDIO_IDLE_REAPER.call_once(|| {
+        std::thread::spawn(|| loop {
+            std::thread::sleep(Duration::from_millis(500));
+            let now = monitor_now_ms();
+            if MIC_MONITOR_RUNNING.load(std::sync::atomic::Ordering::Acquire)
+                && audio_monitor_is_idle(
+                    MIC_LAST_POLL_MS.load(std::sync::atomic::Ordering::Relaxed),
+                    now,
+                    AUDIO_MONITOR_IDLE,
+                )
+            {
+                stop_mic_monitor();
+            }
+            if SPEAKER_MONITOR_RUNNING.load(std::sync::atomic::Ordering::Acquire)
+                && audio_monitor_is_idle(
+                    SPEAKER_LAST_POLL_MS.load(std::sync::atomic::Ordering::Relaxed),
+                    now,
+                    AUDIO_MONITOR_IDLE,
+                )
+            {
+                stop_speaker_monitor();
+            }
+        });
+    });
+}
+
+fn touch_mic_monitor() {
+    MIC_LAST_POLL_MS.store(monitor_now_ms(), std::sync::atomic::Ordering::Relaxed);
+    ensure_audio_idle_reaper();
+    ensure_mic_monitor();
+}
+
+fn touch_speaker_monitor() {
+    SPEAKER_LAST_POLL_MS.store(monitor_now_ms(), std::sync::atomic::Ordering::Relaxed);
+    ensure_audio_idle_reaper();
+    ensure_speaker_monitor();
+}
+
+fn ensure_mic_monitor() {
+    use std::sync::atomic::Ordering;
+    if MIC_MONITOR_RUNNING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    if let Ok(mut guard) = MIC_MONITOR_STOP.lock() {
+        *guard = Some(stop.clone());
+    }
+    let mic_target = find_physical_input_device();
+    start_audio_level_stream(
+        "mic",
+        "apexshot-mic-monitor",
+        mic_target.as_deref(),
+        false,
+        &MIC_LEVEL,
+        stop,
+        &MIC_MONITOR_RUNNING,
+    );
+}
+
+fn ensure_speaker_monitor() {
+    use std::sync::atomic::Ordering;
+    if SPEAKER_MONITOR_RUNNING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    if let Ok(mut guard) = SPEAKER_MONITOR_STOP.lock() {
+        *guard = Some(stop.clone());
+    }
+    start_audio_level_stream(
+        "speaker",
+        "apexshot-speaker-monitor",
+        None,
+        true,
+        &SPEAKER_LEVEL,
+        stop,
+        &SPEAKER_MONITOR_RUNNING,
+    );
+}
+
+fn stop_mic_monitor() {
+    if let Ok(mut guard) = MIC_MONITOR_STOP.lock() {
+        if let Some(stop) = guard.take() {
+            eprintln!("[daemon] PipeWire (mic): releasing capture (idle / not needed)");
+            stop.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    MIC_LEVEL.store(0.0f64.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+fn stop_speaker_monitor() {
+    if let Ok(mut guard) = SPEAKER_MONITOR_STOP.lock() {
+        if let Some(stop) = guard.take() {
+            eprintln!("[daemon] PipeWire (speaker): releasing capture (idle / not needed)");
+            stop.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    SPEAKER_LEVEL.store(0.0f64.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
 fn start_audio_level_stream(
     label: &'static str,
     stream_name: &'static str,
     target: Option<&str>,
     capture_sink: bool,
     level: &'static std::sync::atomic::AtomicU64,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    running: &'static std::sync::atomic::AtomicBool,
 ) {
     let target_owned = target.map(String::from);
     std::thread::spawn(move || {
+        struct ClearRunning {
+            running: &'static std::sync::atomic::AtomicBool,
+            level: &'static std::sync::atomic::AtomicU64,
+            label: &'static str,
+        }
+        impl Drop for ClearRunning {
+            fn drop(&mut self) {
+                self.level
+                    .store(0.0f64.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                self.running
+                    .store(false, std::sync::atomic::Ordering::Release);
+                eprintln!("[daemon] PipeWire ({}): monitoring stopped.", self.label);
+            }
+        }
+        let _clear = ClearRunning {
+            running,
+            level,
+            label,
+        };
+
+        if stop.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
+
         std::thread::sleep(std::time::Duration::from_millis(200));
+        if stop.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
 
         use pipewire as pw;
         use pw::{properties::properties, spa};
@@ -1397,6 +1578,19 @@ fn start_audio_level_stream(
             }
         }
 
+        // Poll stop flag on the PipeWire thread (MainLoopRc is !Send).
+        let stop_for_timer = stop.clone();
+        let mainloop_for_timer = mainloop.clone();
+        let stop_timer = mainloop.loop_().add_timer(move |_| {
+            if stop_for_timer.load(std::sync::atomic::Ordering::Acquire) {
+                mainloop_for_timer.quit();
+            }
+        });
+        let _ = stop_timer.update_timer(
+            Some(Duration::from_millis(250)),
+            Some(Duration::from_millis(250)),
+        );
+
         mainloop.run();
     });
 }
@@ -1443,24 +1637,10 @@ async fn run_dbus_server(
     // Serve the IPC object on the existing connection (name already registered)
     conn.object_server().at(DAEMON_OBJECT_PATH, ipc).await?;
 
-    // Mic: detect physical input device at runtime to avoid picking up system audio
-    // Falls back to PipeWire default if no physical device is found
-    let mic_target = find_physical_input_device();
-    start_audio_level_stream(
-        "mic",
-        "apexshot-mic-monitor",
-        mic_target.as_deref(),
-        false,
-        &MIC_LEVEL,
-    );
-    // Speaker: capture from sink monitor (digital tap of system audio output)
-    start_audio_level_stream(
-        "speaker",
-        "apexshot-speaker-monitor",
-        None,
-        true,
-        &SPEAKER_LEVEL,
-    );
+    // Do NOT open mic/speaker capture streams here. Holding a mic capture open
+    // keeps Bluetooth headsets in low-quality HSP/HFP mode for the whole tray
+    // lifetime (issue #41). Streams start lazily when GetMicLevel/GetSpeakerLevel
+    // are polled by the recording UI, and stop after AUDIO_MONITOR_IDLE.
 
     eprintln!("[daemon] D-Bus IPC ready on {DAEMON_BUS_NAME}");
     std::future::pending::<()>().await;
@@ -2973,6 +3153,17 @@ mod tests {
     #[test]
     fn daemon_does_not_autostart_ydotoold_by_default() {
         assert!(!should_autostart_ydotoold());
+    }
+
+    #[test]
+    fn audio_monitor_idle_detection() {
+        use super::audio_monitor_is_idle;
+        let idle = Duration::from_secs(3);
+        assert!(audio_monitor_is_idle(0, 10_000, idle));
+        assert!(!audio_monitor_is_idle(10_000, 10_500, idle));
+        assert!(!audio_monitor_is_idle(10_000, 12_999, idle));
+        assert!(audio_monitor_is_idle(10_000, 13_000, idle));
+        assert!(audio_monitor_is_idle(10_000, 20_000, idle));
     }
 
     #[test]

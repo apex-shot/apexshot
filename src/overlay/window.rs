@@ -43,7 +43,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// level monitoring and stores the results here.
 static OVERLAY_MIC_LEVEL: AtomicU64 = AtomicU64::new(0);
 static OVERLAY_SPEAKER_LEVEL: AtomicU64 = AtomicU64::new(0);
-static START_LOCAL_MONITORING: std::sync::Once = std::sync::Once::new();
+static LOCAL_MONITOR_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static LOCAL_MONITOR_STOP: std::sync::Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
+    std::sync::Mutex::new(None);
 
 fn recording_request_from_state(
     st: &SelectorState,
@@ -96,26 +99,54 @@ fn poll_daemon_audio_levels() -> Option<(f64, f64)> {
 /// Start local PipeWire audio-level monitoring for the overlay.
 ///
 /// Used when the daemon is not running (standalone capture mode on
-/// compositors like Hyprland).  Spawns two PipeWire capture streams
-/// (mic + system audio) and writes peak/RMS levels into the atomics.
+/// compositors like Hyprland). Spawns two PipeWire capture streams
+/// (mic + system audio) only while the recording panel needs meters so we
+/// do not force Bluetooth headsets into HSP/HFP mode (issue #41).
 fn start_local_audio_monitoring() {
-    START_LOCAL_MONITORING.call_once(|| {
-        let mic_target = crate::daemon::find_physical_input_device();
-        spawn_overlay_pw_stream(
-            "mic",
-            "apexshot-overlay-mic",
-            mic_target.as_deref(),
-            false,
-            &OVERLAY_MIC_LEVEL,
-        );
-        spawn_overlay_pw_stream(
-            "speaker",
-            "apexshot-overlay-speaker",
-            None,
-            true,
-            &OVERLAY_SPEAKER_LEVEL,
-        );
-    });
+    use std::sync::atomic::Ordering;
+    if LOCAL_MONITOR_RUNNING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    if let Ok(mut guard) = LOCAL_MONITOR_STOP.lock() {
+        *guard = Some(stop.clone());
+    }
+    let mic_target = crate::daemon::find_physical_input_device();
+    // Two streams share one stop flag; clear RUNNING when both threads exit
+    // via a simple join counter.
+    let remaining = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(2));
+    spawn_overlay_pw_stream(
+        "mic",
+        "apexshot-overlay-mic",
+        mic_target.as_deref(),
+        false,
+        &OVERLAY_MIC_LEVEL,
+        stop.clone(),
+        remaining.clone(),
+    );
+    spawn_overlay_pw_stream(
+        "speaker",
+        "apexshot-overlay-speaker",
+        None,
+        true,
+        &OVERLAY_SPEAKER_LEVEL,
+        stop,
+        remaining,
+    );
+}
+
+fn stop_local_audio_monitoring() {
+    if let Ok(mut guard) = LOCAL_MONITOR_STOP.lock() {
+        if let Some(stop) = guard.take() {
+            eprintln!("[overlay] PipeWire: releasing local audio meters");
+            stop.store(true, Ordering::Release);
+        }
+    }
+    OVERLAY_MIC_LEVEL.store(0.0f64.to_bits(), Ordering::Relaxed);
+    OVERLAY_SPEAKER_LEVEL.store(0.0f64.to_bits(), Ordering::Relaxed);
 }
 
 /// Spawn a single PipeWire capture stream for the overlay's audio meter.
@@ -125,10 +156,38 @@ fn spawn_overlay_pw_stream(
     target: Option<&str>,
     capture_sink: bool,
     level: &'static AtomicU64,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    remaining: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let target_owned = target.map(String::from);
     std::thread::spawn(move || {
+        struct ClearRunning {
+            remaining: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+            level: &'static AtomicU64,
+            label: &'static str,
+        }
+        impl Drop for ClearRunning {
+            fn drop(&mut self) {
+                self.level.store(0.0f64.to_bits(), Ordering::Relaxed);
+                if self.remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
+                    LOCAL_MONITOR_RUNNING.store(false, Ordering::Release);
+                }
+                eprintln!("[overlay] PipeWire ({}) monitoring stopped.", self.label);
+            }
+        }
+        let _clear = ClearRunning {
+            remaining,
+            level,
+            label,
+        };
+
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
         std::thread::sleep(std::time::Duration::from_millis(200));
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
 
         use pipewire as pw;
         use pw::{properties::properties, spa};
@@ -285,6 +344,18 @@ fn spawn_overlay_pw_stream(
                 return;
             }
         }
+
+        let stop_for_timer = stop.clone();
+        let mainloop_for_timer = mainloop.clone();
+        let stop_timer = mainloop.loop_().add_timer(move |_| {
+            if stop_for_timer.load(Ordering::Acquire) {
+                mainloop_for_timer.quit();
+            }
+        });
+        let _ = stop_timer.update_timer(
+            Some(std::time::Duration::from_millis(250)),
+            Some(std::time::Duration::from_millis(250)),
+        );
 
         mainloop.run();
     });
@@ -690,11 +761,29 @@ pub(crate) fn setup_window(
     let audio_levels = Arc::new(Mutex::new((0.0_f64, 0.0_f64)));
     {
         let audio_levels = audio_levels.clone();
+        let state_for_audio = state.clone();
         std::thread::spawn(move || {
-            // Try daemon D-Bus first.  If the daemon is not running (standalone
+            // Try daemon D-Bus first. If the daemon is not running (standalone
             // capture mode on Hyprland), fall back to local PipeWire monitoring.
+            // Only open capture streams while the recording panel is open so a
+            // plain area-select (or tray-only daemon) never holds the mic
+            // (Bluetooth HSP/HFP / issue #41).
             let mut try_daemon = true;
             loop {
+                let panel_open = state_for_audio
+                    .lock()
+                    .map(|st| st.recording.panel_open)
+                    .unwrap_or(false);
+
+                if !panel_open {
+                    stop_local_audio_monitoring();
+                    if let Ok(mut guard) = audio_levels.lock() {
+                        *guard = (0.0, 0.0);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+
                 if try_daemon {
                     if let Some(levels) = poll_daemon_audio_levels() {
                         if let Ok(mut guard) = audio_levels.lock() {
@@ -705,6 +794,7 @@ pub(crate) fn setup_window(
                         start_local_audio_monitoring();
                     }
                 } else {
+                    start_local_audio_monitoring();
                     let mic = f64::from_bits(OVERLAY_MIC_LEVEL.load(Ordering::Relaxed));
                     let speaker = f64::from_bits(OVERLAY_SPEAKER_LEVEL.load(Ordering::Relaxed));
                     if let Ok(mut guard) = audio_levels.lock() {
