@@ -680,6 +680,89 @@ bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outEr
 #endif
 }
 
+bool captureFullscreenToImage(QImage& outImage, QString& outError)
+{
+    QString path;
+    QSize size;
+    if (!captureFullscreenToTempPng(path, size, outError)) {
+        return false;
+    }
+
+    outImage = QImage(path);
+    QFile::remove(path);
+    if (outImage.isNull()) {
+        outError = QStringLiteral("Failed to load freeze screenshot image");
+        return false;
+    }
+    return true;
+}
+
+QPixmap freezeBackgroundForLogicalRect(const QImage& fullDesktopImage,
+                                       const QRect& logicalRect)
+{
+    if (fullDesktopImage.isNull()) {
+        return QPixmap();
+    }
+
+    QRect desktopBounds;
+    if (!logicalDesktopBounds(desktopBounds)) {
+        return QPixmap();
+    }
+
+    const QRect selected = logicalRect.normalized().intersected(desktopBounds);
+    if (selected.width() <= 0 || selected.height() <= 0) {
+        return QPixmap();
+    }
+
+    const QRect crop =
+      mapLogicalSelectionToCapturedImage(selected, fullDesktopImage, desktopBounds);
+    QImage cropped = fullDesktopImage.copy(
+      crop.intersected(QRect(0, 0, fullDesktopImage.width(), fullDesktopImage.height())));
+    if (cropped.isNull()) {
+        return QPixmap();
+    }
+
+    // CaptureOverlay paints in logical widget coords; match that space 1:1.
+    const QSize logicalSize = selected.size();
+    if (cropped.size() != logicalSize && logicalSize.isValid()) {
+        cropped = cropped.scaled(logicalSize,
+                                 Qt::IgnoreAspectRatio,
+                                 Qt::SmoothTransformation);
+    }
+    return QPixmap::fromImage(cropped);
+}
+
+bool cropFromDesktopImageToTempPng(const QImage& fullDesktopImage,
+                                   const QRect& logicalSelection,
+                                   QString& outPath,
+                                   QSize& outSize,
+                                   QString& outError)
+{
+    if (fullDesktopImage.isNull()) {
+        outError = QStringLiteral("Freeze image is empty");
+        return false;
+    }
+
+    QRect desktopBounds;
+    if (!logicalDesktopBounds(desktopBounds)) {
+        outError = QStringLiteral("Unable to determine logical desktop bounds");
+        return false;
+    }
+
+    const QRect selected = logicalSelection.normalized().intersected(desktopBounds);
+    if (selected.width() <= 0 || selected.height() <= 0) {
+        outError = QStringLiteral("Selection is outside desktop bounds");
+        return false;
+    }
+
+    return saveCroppedToTemp(
+      fullDesktopImage,
+      mapLogicalSelectionToCapturedImage(selected, fullDesktopImage, desktopBounds),
+      outPath,
+      outSize,
+      outError);
+}
+
 bool captureFullscreenToTempPngViaPortal(QString& outPath,
                                          QSize& outSize,
                                          QString& outError)

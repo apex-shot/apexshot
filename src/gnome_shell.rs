@@ -151,6 +151,32 @@ pub fn current_session_supports_gnome_shell_mask() -> bool {
     )
 }
 
+/// True when the ApexShot GNOME Shell extension is on the bus
+/// (`org.apexshot.ShellOverlay`). Used to prefer panel timer / shell stop UI
+/// over the desktop-notification recording indicator (Ubuntu GNOME path).
+pub fn is_shell_overlay_service_available() -> bool {
+    let output = Command::new("dbus-send")
+        .args([
+            "--session",
+            "--dest=org.freedesktop.DBus",
+            "--type=method_call",
+            "--print-reply=literal",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus.NameHasOwner",
+            &format!("string:{MASK_DBUS_DEST}"),
+        ])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            // dbus-send --print-reply=literal prints e.g. "   boolean true"
+            stdout.contains("true")
+        }
+        _ => false,
+    }
+}
+
 pub fn current_session_supports_gnome_shell_screenshot_lock() -> bool {
     should_use_gnome_shell_screenshot_lock(
         std::env::var("WAYLAND_DISPLAY").ok().as_deref(),

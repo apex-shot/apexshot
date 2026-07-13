@@ -77,7 +77,9 @@ fn notify_daemon_event(event: &str) {
         "recording_session_started" => {
             let _ = crate::daemon::notify_daemon_recording_started();
             // Persistent blinking red-circle notification (click → stop).
-            // Used instead of a short-lived “started” toast while recording.
+            // Skip when the GNOME Shell extension is live: Ubuntu/GNOME already
+            // has panel timer + stop chrome. Indicator is for non-extension
+            // sessions (e.g. Fedora-style notification-only affordances).
             indicator_notify::show_recording_indicator();
         }
         "recording_session_paused" => {
@@ -94,6 +96,10 @@ fn notify_daemon_event(event: &str) {
         }
         "recording_session_ended" => {
             let _ = crate::daemon::notify_daemon_recording_ended();
+            // Tear shell chrome down immediately on stop so the area dim/mask
+            // does not linger while encode / after-capture work continues.
+            crate::gnome_shell::hide_recording_mask_best_effort();
+            crate::gnome_shell::hide_recording_controls_best_effort();
             indicator_notify::hide_recording_indicator();
         }
         _ => {}
@@ -101,7 +107,6 @@ fn notify_daemon_event(event: &str) {
 }
 
 fn notify_recording_session_ended_best_effort() {
-    crate::gnome_shell::hide_recording_mask_best_effort();
     notify_daemon_event("recording_session_ended");
 }
 

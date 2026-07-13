@@ -153,6 +153,11 @@ public:
     }
     void setShowZoomPreview(bool enabled) { m_showZoomPreview = enabled; }
     void setFreezeSelectionBackground(bool enabled) { m_freezeSelectionBackground = enabled; }
+    /// Replace the freeze underlay after the window is mapped. Used when GNOME
+    /// places the overlay in the work area (below panels) so we re-crop the
+    /// freeze to the actual window rect instead of stretching a full-screen
+    /// freeze and painting a second status bar under the real one.
+    void setFreezeBackground(const QPixmap& freeze);
     void setInitialVideoFormat(int v) { m_videoFormat = std::clamp(v, 0, 1); }
     void setInitialVideoMaxRes(int v) { m_videoMaxRes = v; }
     void setInitialVideoFps(int v) { m_videoFps = v; }

@@ -31,6 +31,8 @@ fn build_capture_overlay() {
     println!("cargo:rerun-if-changed=capture-overlay/src/WindowPickerOverlay.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/ScreenCapture.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/ScreenCapture.h");
+    println!("cargo:rerun-if-changed=capture-overlay/src/MonitorPicker.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/MonitorPicker.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/request.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/request.h");
 

@@ -195,6 +195,12 @@ QPoint overlayLocalOriginForDesktop(const QRect& overlayRect)
 
 QPoint CaptureOverlay::desktopOriginForLocalCoordinates() const
 {
+    // Prefer the real mapped origin once visible. GNOME Wayland often places
+    // fullscreen Tool windows in the work area (below the top bar), so using
+    // QScreen::geometry().topLeft() would misalign freeze crops and selection.
+    if (isVisible()) {
+        return mapToGlobal(QPoint(0, 0));
+    }
     if (m_targetScreen) {
         return m_targetScreen->geometry().topLeft();
     }
@@ -218,17 +224,65 @@ void CaptureOverlay::updateDesktopOriginFromMouseEvent(QMouseEvent* event)
     m_hasEventDesktopOrigin = true;
 }
 
+void CaptureOverlay::setFreezeBackground(const QPixmap& freeze)
+{
+    m_background = freeze;
+    m_blurredBg = QImage();
+    if (!m_background.isNull()) {
+        // Opaque freeze underlay — do not rely on compositor alpha.
+        setAttribute(Qt::WA_TranslucentBackground, false);
+        QImage full = m_background.toImage().convertToFormat(QImage::Format_ARGB32);
+        int bw = std::max(1, full.width() / 4);
+        int bh = std::max(1, full.height() / 4);
+        QImage small = full.scaled(bw, bh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        for (int pass = 0; pass < 3; ++pass) {
+            small = small.scaled(bw * 2, bh * 2, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                         .scaled(bw, bh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
+        m_blurredBg = small;
+    }
+    update();
+}
+
 void CaptureOverlay::focusAndRaiseOverlay()
 {
+    // Flameshot-style placement: pin to full screen geometry (including panel
+    // regions), then request fullscreen so the freeze can cover shell chrome
+    // instead of sitting under it and painting a second status bar.
+    QRect targetGeom;
     if (m_targetScreen) {
+        targetGeom = m_targetScreen->geometry();
         create();
         if (windowHandle()) {
             windowHandle()->setScreen(m_targetScreen);
         }
-        setGeometry(m_targetScreen->geometry());
+        move(targetGeom.topLeft());
+        resize(targetGeom.size());
+        setGeometry(targetGeom);
         showFullScreen();
+        // Re-assert after the compositor applies fullscreen state.
+        setGeometry(targetGeom);
     } else {
-        show();
+        // Single virtual-desktop overlay: still prefer true fullscreen when we
+        // have an opaque freeze so we match Flameshot's cover-everything UX.
+        if (!m_background.isNull()) {
+            create();
+            QRect desktop;
+            for (QScreen* screen : QGuiApplication::screens()) {
+                desktop = desktop.united(screen->geometry());
+            }
+            if (desktop.isValid()) {
+                move(desktop.topLeft());
+                resize(desktop.size());
+                setGeometry(desktop);
+            }
+            showFullScreen();
+            if (desktop.isValid()) {
+                setGeometry(desktop);
+            }
+        } else {
+            show();
+        }
     }
     raise();
     activateWindow();

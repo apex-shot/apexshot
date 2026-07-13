@@ -1,4 +1,5 @@
 #include "CaptureOverlay.h"
+#include "MonitorPicker.h"
 #include "RecordingControlsWindow.h"
 #include "WindowPickerOverlay.h"
 #include "ScreenCapture.h"
@@ -595,18 +596,55 @@ int main(int argc, char* argv[])
       crosshairCaptureMode ? CaptureOverlay::OverlayMode::CrosshairCapture
                            : CaptureOverlay::OverlayMode::StandardArea;
 
-    const bool isWaylandSession = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
-    const QString currentDesktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
-    const bool isGnomeWaylandSession =
-      isWaylandSession &&
-      (currentDesktop.contains("GNOME", Qt::CaseInsensitive) ||
-       qEnvironmentVariableIsSet("GNOME_SETUP_DISPLAY"));
-    const QList<QScreen*> screens = QGuiApplication::screens();
-    const bool usePerScreenOverlays =
-      isGnomeWaylandSession && screens.size() > 1;
+    const bool interactiveSelectorMode =
+      areaInitMode || crosshairCaptureMode || openRecordingUiMode;
+
+    // 1) Pick monitor first (metadata UI only — no freeze/screenshot).
+    QScreen* targetScreen = nullptr;
+    if (interactiveSelectorMode) {
+        targetScreen = MonitorPicker::selectTargetScreen();
+        if (!targetScreen) {
+            return 1; // cancelled
+        }
+    }
+
+    // 2) Freeze only for the capture-area overlay (opaque underlay + crop source).
+    QImage desktopFreezeImage;
+    if (interactiveSelectorMode && freezeSelectionBackground && background.isNull()) {
+        QString freezeError;
+        if (ScreenCapture::captureFullscreenToImage(desktopFreezeImage, freezeError)) {
+            std::fprintf(stderr,
+                         "apexshot-capture: capture-area freeze ok (%dx%d)\n",
+                         desktopFreezeImage.width(),
+                         desktopFreezeImage.height());
+        } else {
+            std::fprintf(stderr,
+                         "apexshot-capture: capture-area freeze failed (%s); "
+                         "falling back to translucent overlay\n",
+                         freezeError.toLocal8Bit().constData());
+            desktopFreezeImage = QImage();
+        }
+    }
+
+    QPixmap overlayBackground = background;
+    if (overlayBackground.isNull() && !desktopFreezeImage.isNull() && targetScreen) {
+        overlayBackground = ScreenCapture::freezeBackgroundForLogicalRect(
+          desktopFreezeImage, targetScreen->geometry());
+        if (overlayBackground.isNull()) {
+            std::fprintf(stderr,
+                         "apexshot-capture: failed to crop freeze for selected monitor\n");
+        }
+    } else if (overlayBackground.isNull() && !desktopFreezeImage.isNull()) {
+        QRect desktopBounds;
+        for (QScreen* screen : QGuiApplication::screens()) {
+            desktopBounds = desktopBounds.united(screen->geometry());
+        }
+        overlayBackground = ScreenCapture::freezeBackgroundForLogicalRect(
+          desktopFreezeImage, desktopBounds);
+    }
 
     std::vector<std::unique_ptr<CaptureOverlay>> overlayWindows;
-    overlayWindows.reserve(usePerScreenOverlays ? static_cast<size_t>(screens.size()) : 1);
+    overlayWindows.reserve(1);
 
     auto applyInitialOverlaySettings = [&](CaptureOverlay* overlay) {
         overlay->setSelectionCursorMode(selectionCursor);
@@ -646,25 +684,17 @@ int main(int argc, char* argv[])
         }
     };
 
-    auto createOverlay = [&](QScreen* targetScreen) {
-        auto overlay = std::make_unique<CaptureOverlay>(
-            background,
+    {
+        auto overlayWindow = std::make_unique<CaptureOverlay>(
+            overlayBackground,
             nullptr,
             timerCaptureEnabled,
             initialMic,
             initialSpeaker,
             overlayMode,
             targetScreen);
-        applyInitialOverlaySettings(overlay.get());
-        overlayWindows.push_back(std::move(overlay));
-    };
-
-    if (usePerScreenOverlays) {
-        for (QScreen* screen : screens) {
-            createOverlay(screen);
-        }
-    } else {
-        createOverlay(nullptr);
+        applyInitialOverlaySettings(overlayWindow.get());
+        overlayWindows.push_back(std::move(overlayWindow));
     }
 
     CaptureOverlay* overlay = overlayWindows.front().get();
@@ -710,11 +740,39 @@ int main(int argc, char* argv[])
     for (const auto& overlayWindow : overlayWindows) {
         overlayWindow->focusAndRaiseOverlay();
     }
-    QApplication::processEvents();
+    QApplication::processEvents(QEventLoop::AllEvents, 100);
+    // One more raise after the compositor has applied fullscreen / exclusive
+    // zone rules (GNOME often settles geometry one frame late).
+    for (const auto& overlayWindow : overlayWindows) {
+        overlayWindow->focusAndRaiseOverlay();
+    }
+    QApplication::processEvents(QEventLoop::AllEvents, 100);
 
-    // Capture the overlay's local-to-desktop origin after the compositor has
-    // placed it. Fixed panels/docks can make the overlay local coordinate
-    // space start inside the full desktop instead of at (0,0).
+    // Align freeze underlay to the *actual* mapped window rect so panel chrome
+    // is not painted twice when the compositor maps us into the work area.
+    if (!desktopFreezeImage.isNull()) {
+        for (const auto& overlayWindow : overlayWindows) {
+            const QPoint origin = overlayWindow->mapToGlobal(QPoint(0, 0));
+            const QRect mapped(origin, overlayWindow->size());
+            if (!mapped.isValid() || mapped.width() <= 0 || mapped.height() <= 0) {
+                continue;
+            }
+            const QPixmap aligned = ScreenCapture::freezeBackgroundForLogicalRect(
+              desktopFreezeImage, mapped);
+            if (!aligned.isNull()) {
+                overlayWindow->setFreezeBackground(aligned);
+                std::fprintf(stderr,
+                             "apexshot-capture: freeze aligned to mapped window "
+                             "%dx%d+%d+%d\n",
+                             mapped.width(),
+                             mapped.height(),
+                             mapped.x(),
+                             mapped.y());
+            }
+        }
+    }
+
+    // Restore last selection only if it intersects the chosen monitor.
     if (!restoreSel.isNull() && restoreSel.isValid()) {
         for (const auto& overlayWindow : overlayWindows) {
             const QPoint overlayGlobalOrigin = overlayWindow->desktopOriginForLocalCoordinates();
@@ -871,41 +929,66 @@ int main(int argc, char* argv[])
           (desktop.contains("GNOME", Qt::CaseInsensitive) ||
            qEnvironmentVariableIsSet("GNOME_SETUP_DISPLAY"));
 
-        // After the overlay hides itself, some compositors/portal backends can
-        // still composite one last frame containing parts of the UI. Give the
-        // compositor a moment to fully unmap the window before requesting the
-        // actual screenshot.
-        if (isWayland) {
-            QApplication::processEvents(QEventLoop::AllEvents, 50);
-            QThread::msleep(crosshairCaptureMode ? 220 : 180);
-            QApplication::processEvents(QEventLoop::AllEvents, 50);
-        }
-
         QString imagePath;
         QSize imageSize;
         QString error;
         bool ok = false;
 
-        if (crosshairCaptureMode) {
-            ok = ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
-        } else if (fullscreenRequested) {
-            ok = ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error);
-        } else {
-            ok = ScreenCapture::captureAreaToTempPng(selGlobal, imagePath, imageSize, error);
+        // Flameshot-style: crop from the freeze when available (no second portal
+        // round-trip, no risk of capturing residual overlay frames).
+        if (!desktopFreezeImage.isNull() && !fullscreenRequested) {
+            ok = ScreenCapture::cropFromDesktopImageToTempPng(
+              desktopFreezeImage, selGlobal, imagePath, imageSize, error);
+            if (ok) {
+                std::fprintf(stderr,
+                             "apexshot-capture: cropped selection from freeze "
+                             "(%dx%d)\n",
+                             imageSize.width(),
+                             imageSize.height());
+            } else {
+                std::fprintf(stderr,
+                             "apexshot-capture: freeze crop failed (%s); "
+                             "falling back to live capture\n",
+                             error.toLocal8Bit().constData());
+            }
         }
 
-        if (!ok && isWayland && !isGnomeWayland) {
-            QString fallbackError;
-            const QPoint fallbackOrigin = overlay->desktopOriginForLocalCoordinates();
-            const QRect overlayGlobalGeometry(fallbackOrigin.x(),
-                                              fallbackOrigin.y(),
-                                              overlay->geometry().width(),
-                                              overlay->geometry().height());
-            ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-              sel, overlayGlobalGeometry, imagePath, imageSize, fallbackError);
-            if (!ok) {
-                error = QStringLiteral("%1; overlay-local fallback failed (%2)")
-                          .arg(error, fallbackError);
+        if (!ok) {
+            // After the overlay hides itself, some compositors/portal backends can
+            // still composite one last frame containing parts of the UI. Give the
+            // compositor a moment to fully unmap the window before requesting the
+            // actual screenshot.
+            if (isWayland) {
+                QApplication::processEvents(QEventLoop::AllEvents, 50);
+                QThread::msleep(crosshairCaptureMode ? 220 : 180);
+                QApplication::processEvents(QEventLoop::AllEvents, 50);
+            }
+
+            if (crosshairCaptureMode) {
+                ok = ScreenCapture::captureAreaToTempPng(
+                  selGlobal, imagePath, imageSize, error);
+            } else if (fullscreenRequested) {
+                ok = ScreenCapture::captureFullscreenToTempPng(
+                  imagePath, imageSize, error);
+            } else {
+                ok = ScreenCapture::captureAreaToTempPng(
+                  selGlobal, imagePath, imageSize, error);
+            }
+
+            if (!ok && isWayland && !isGnomeWayland) {
+                QString fallbackError;
+                const QPoint fallbackOrigin =
+                  overlay->desktopOriginForLocalCoordinates();
+                const QRect overlayGlobalGeometry(fallbackOrigin.x(),
+                                                  fallbackOrigin.y(),
+                                                  overlay->geometry().width(),
+                                                  overlay->geometry().height());
+                ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
+                  sel, overlayGlobalGeometry, imagePath, imageSize, fallbackError);
+                if (!ok) {
+                    error = QStringLiteral("%1; overlay-local fallback failed (%2)")
+                              .arg(error, fallbackError);
+                }
             }
         }
         if (!ok) {

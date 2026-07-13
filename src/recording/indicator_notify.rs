@@ -1,9 +1,15 @@
 //! Persistent “recording in progress” desktop notification.
 //!
-//! While recording, ApexShot keeps a system notification with a red record
-//! icon that blinks (by alternating the icon / title). Clicking the
-//! notification (default action) or the **Stop** button sends `StopSave` to
-//! the active in-process recording control session.
+//! While recording **without** the GNOME Shell extension panel UI, ApexShot
+//! keeps a system notification with a red record icon that blinks (by
+//! alternating the icon / title). Clicking the notification (default action)
+//! or the **Stop** button sends `StopSave` to the active in-process recording
+//! control session.
+//!
+//! On Ubuntu/GNOME with `org.apexshot.ShellOverlay` available, this indicator
+//! is **not** shown — the extension already provides a panel timer and stop
+//! affordance. Spamming critical notifications there also races GNOME's
+//! notification server (replace can fail and stack duplicates).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -26,6 +32,8 @@ struct IndicatorState {
     active: Arc<AtomicBool>,
     notification_id: Arc<AtomicU32>,
     paused: Arc<AtomicBool>,
+    /// Once the user dismisses the banner, do not recreate it for this session.
+    user_dismissed: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -42,8 +50,22 @@ fn desktop_entry() -> &'static str {
     crate::app_identity::app_id()
 }
 
+/// Whether the blinking notification stop affordance should run.
+///
+/// Returns false when the ApexShot GNOME Shell extension is on the bus
+/// (Ubuntu/GNOME path with panel timer). True for sessions that need a
+/// notification-based stop control instead.
+pub fn should_show_recording_indicator() -> bool {
+    !crate::gnome_shell::is_shell_overlay_service_available()
+}
+
 /// Start (or re-assert) the persistent recording indicator.
 pub fn show_recording_indicator() {
+    if !should_show_recording_indicator() {
+        eprintln!("[recording] indicator: skipped (GNOME Shell overlay service present)");
+        return;
+    }
+
     let mut slot = match indicator_slot().lock() {
         Ok(g) => g,
         Err(_) => return,
@@ -52,8 +74,11 @@ pub fn show_recording_indicator() {
     if let Some(existing) = slot.as_ref() {
         if existing.active.load(Ordering::Relaxed) {
             existing.paused.store(false, Ordering::Relaxed);
+            existing.user_dismissed.store(false, Ordering::Relaxed);
             let id = existing.notification_id.load(Ordering::Relaxed);
-            let _ = post_notification_blocking(id, true, false);
+            if id != 0 {
+                let _ = post_notification_blocking(id, true, false);
+            }
             return;
         }
     }
@@ -68,10 +93,12 @@ pub fn show_recording_indicator() {
     let active = Arc::new(AtomicBool::new(true));
     let notification_id = Arc::new(AtomicU32::new(0));
     let paused = Arc::new(AtomicBool::new(false));
+    let user_dismissed = Arc::new(AtomicBool::new(false));
 
     let active_w = active.clone();
     let id_w = notification_id.clone();
     let paused_w = paused.clone();
+    let dismissed_w = user_dismissed.clone();
     let join = thread::Builder::new()
         .name("apexshot-rec-indicator".into())
         .spawn(move || {
@@ -79,7 +106,7 @@ pub fn show_recording_indicator() {
                 .enable_all()
                 .build()
             {
-                rt.block_on(indicator_worker(active_w, id_w, paused_w));
+                rt.block_on(indicator_worker(active_w, id_w, paused_w, dismissed_w));
             } else {
                 eprintln!("[recording] indicator: failed to start tokio runtime");
             }
@@ -90,6 +117,7 @@ pub fn show_recording_indicator() {
         active,
         notification_id,
         paused,
+        user_dismissed,
         join,
     });
 }
@@ -108,7 +136,9 @@ pub fn set_recording_indicator_paused(is_paused: bool) {
     }
     state.paused.store(is_paused, Ordering::Relaxed);
     let id = state.notification_id.load(Ordering::Relaxed);
-    let _ = post_notification_blocking(id, true, is_paused);
+    if id != 0 {
+        let _ = post_notification_blocking(id, true, is_paused);
+    }
 }
 
 /// Close the indicator notification and stop the worker.
@@ -134,6 +164,7 @@ async fn indicator_worker(
     active: Arc<AtomicBool>,
     notification_id: Arc<AtomicU32>,
     paused: Arc<AtomicBool>,
+    user_dismissed: Arc<AtomicBool>,
 ) {
     let conn = match zbus::Connection::session().await {
         Ok(c) => c,
@@ -154,11 +185,31 @@ async fn indicator_worker(
             }
         };
 
+    let closed_rule: zbus::MatchRule<'_> =
+        match "type='signal',interface='org.freedesktop.Notifications',member='NotificationClosed'"
+            .try_into()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] indicator: bad NotificationClosed match: {e}");
+                return;
+            }
+        };
+
     let mut action_stream =
         match zbus::MessageStream::for_match_rule(action_rule, &conn, None).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[recording] indicator: ActionInvoked stream failed: {e}");
+                return;
+            }
+        };
+
+    let mut closed_stream =
+        match zbus::MessageStream::for_match_rule(closed_rule, &conn, None).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[recording] indicator: NotificationClosed stream failed: {e}");
                 return;
             }
         };
@@ -185,18 +236,32 @@ async fn indicator_worker(
                 if paused.load(Ordering::Relaxed) {
                     continue;
                 }
-                blink_on = !blink_on;
-                let id = notification_id.load(Ordering::Relaxed);
-                if id == 0 {
-                    // User dismissed it — re-show so the stop affordance stays available.
-                    if let Ok(new_id) = post_notification_async(&conn, 0, blink_on, false).await {
-                        notification_id.store(new_id, Ordering::Relaxed);
-                    }
+                if user_dismissed.load(Ordering::Relaxed) {
+                    // User closed the banner once — do not recreate (avoids
+                    // stacked critical notifications on GNOME).
                     continue;
                 }
+                let id = notification_id.load(Ordering::Relaxed);
+                if id == 0 {
+                    // Closed out from under us without the signal path; do not
+                    // re-post (that is what caused multi-notification spam).
+                    continue;
+                }
+                blink_on = !blink_on;
                 match post_notification_async(&conn, id, blink_on, false).await {
-                    Ok(new_id) => notification_id.store(new_id, Ordering::Relaxed),
-                    Err(e) => eprintln!("[recording] indicator: blink update failed: {e}"),
+                    Ok(new_id) => {
+                        // Some servers return a new id when replace fails and
+                        // create a second banner. Prefer the returned id, but
+                        // if it differs and the old one was non-zero, close the
+                        // previous one so we never stack.
+                        if new_id != 0 && new_id != id {
+                            let _ = close_notification_async(&conn, id).await;
+                        }
+                        notification_id.store(new_id, Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        eprintln!("[recording] indicator: blink update failed: {e}");
+                    }
                 }
             }
             msg = action_stream.next() => {
@@ -219,12 +284,29 @@ async fn indicator_worker(
                     break;
                 }
             }
+            msg = closed_stream.next() => {
+                let Some(Ok(msg)) = msg else {
+                    continue;
+                };
+                // NotificationClosed(u32 id, u32 reason)
+                let Ok((id, _reason)) = msg.body().deserialize::<(u32, u32)>() else {
+                    continue;
+                };
+                let our_id = notification_id.load(Ordering::Relaxed);
+                if id != our_id || our_id == 0 {
+                    continue;
+                }
+                // User or server closed our single banner — do not re-open.
+                notification_id.store(0, Ordering::Relaxed);
+                user_dismissed.store(true, Ordering::Relaxed);
+            }
         }
     }
 
     let id = notification_id.load(Ordering::Relaxed);
     if id != 0 {
         let _ = close_notification_async(&conn, id).await;
+        notification_id.store(0, Ordering::Relaxed);
     }
 }
 
@@ -252,7 +334,9 @@ fn notification_content(blink_on: bool, paused: bool) -> (String, String, &'stat
 fn build_hints<'a>() -> HashMap<&'a str, Value<'a>> {
     let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
     hints.insert("desktop-entry", Value::from(desktop_entry()));
-    hints.insert("urgency", Value::U8(2)); // critical — stays visible
+    // Normal urgency: critical + blink replace races on GNOME and can stack
+    // duplicate banners. The panel path does not use this indicator at all.
+    hints.insert("urgency", Value::U8(1));
     hints.insert("suppress-sound", Value::Bool(true));
     hints.insert("resident", Value::Bool(true));
     hints
