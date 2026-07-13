@@ -2119,10 +2119,24 @@ fn apply_screenshot_after_capture_actions(
     let open_annotate = config.after_capture_open_annotate;
     let show_quick_access = config.after_capture_show_quick_access;
 
+    // When auto-upload will put a share URL on the text clipboard, only copy the
+    // image (not file:// URI). Otherwise the URI wins for a few seconds and
+    // looks like "upload did nothing" when the user pastes.
+    let defer_text_clipboard =
+        crate::cloud::upload::should_defer_text_clipboard_to_share_url(&config);
     let clip_path = saved_path.clone();
     let clip_config = config.clone();
     std::thread::spawn(move || {
-        copy_screenshot_to_clipboard(&clip_path, &clip_config);
+        if defer_text_clipboard {
+            if !clip_config.after_capture_copy_file_to_clipboard {
+                return;
+            }
+            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(&clip_path) {
+                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+            }
+        } else {
+            copy_screenshot_to_clipboard(&clip_path, &clip_config);
+        }
     });
 
     // Upload when Cloud is configured and auto-upload is enabled (manual

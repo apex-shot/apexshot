@@ -763,7 +763,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let config = crate::config::load_config();
         if !crate::cloud::upload::is_configured(&config) {
             let (title, body) = crate::cloud::upload::not_configured_notification(&config);
-            crate::utils::notify::desktop_notification(title, body);
+            crate::utils::notify::desktop_notification_important(title, body);
             return;
         }
 
@@ -773,27 +773,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         let path = path_upload.clone();
         let upload_done_tx = upload_done_tx.clone();
         std::thread::spawn(move || {
-            match crate::cloud::upload::upload_file(&config, &path) {
-                Ok(result) => {
-                    if let Err(e) =
-                        crate::utils::clipboard::copy_text_to_clipboard(&result.share_url)
-                    {
-                        eprintln!("Failed to copy share link to clipboard: {e}");
-                        crate::utils::notify::desktop_notification(
-                            "Upload complete",
-                            &format!("Share link: {}", result.share_url),
-                        );
-                    } else {
-                        crate::utils::notify::desktop_notification(
-                            "Upload complete",
-                            "Share link copied to clipboard",
-                        );
-                    }
-                }
-                Err(e) => {
-                    crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
-                }
-            }
+            // Shared path: critical-urgency toasts + share URL in the body
+            // (GNOME/Ubuntu often suppresses normal banners from background work).
+            let _ = crate::cloud::upload::upload_file_with_notifications(&config, &path);
             let _ = upload_done_tx.send(());
         });
     });

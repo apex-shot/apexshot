@@ -708,7 +708,7 @@ fn setup_preview_window(
             let config = load_config();
             if !crate::cloud::upload::is_configured(&config) {
                 let (title, body) = crate::cloud::upload::not_configured_notification(&config);
-                crate::utils::notify::desktop_notification(title, body);
+                crate::utils::notify::desktop_notification_important(title, body);
                 return;
             }
 

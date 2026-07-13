@@ -2096,6 +2096,12 @@ fn run_capture(args: &[String]) {
         }
     };
 
+    // Hotkeys normally go through the daemon (which auto-uploads). When the
+    // daemon is down we fall back to this in-process path — still honor
+    // Settings → Cloud → "Upload after capture" so Ubuntu/GNOME keybindings
+    // don't silently skip cloud upload.
+    apexshot::cloud::upload::spawn_auto_upload_after_capture(saved_path.clone());
+
     // Keep preview in a subprocess on desktops where that preserves the
     // existing GTK isolation / shell tracking behavior. KDE Wayland uses a
     // direct launch path to avoid extra taskbar/loading artifacts.

@@ -77,7 +77,8 @@ pub fn notify_auto_upload_not_configured(config: &AppConfig) {
     }
     let (title, body) = not_configured_notification(config);
     eprintln!("[cloud] Auto-upload enabled but destination not configured — notifying user");
-    crate::utils::notify::desktop_notification(title, body);
+    // Critical urgency: Ubuntu/GNOME often suppresses normal banners from daemons.
+    crate::utils::notify::desktop_notification_important(title, body);
 }
 
 pub fn upload_file(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
@@ -91,9 +92,20 @@ pub fn not_configured_notification(config: &AppConfig) -> (&'static str, &'stati
 /// Run an upload and surface the result with desktop notifications + optional
 /// share-link clipboard copy. Logs start/success/failure so daemon debug
 /// sessions show activity even without RUST_LOG instrumentation.
+///
+/// `replaces_notification_id` is the server id of a prior "Uploading…" toast
+/// (if any) so GNOME replaces it with the final result instead of stacking.
 pub fn upload_file_with_notifications(
     config: &AppConfig,
     path: &Path,
+) -> Result<UploadResult, UploadError> {
+    upload_file_with_notifications_replacing(config, path, 0)
+}
+
+fn upload_file_with_notifications_replacing(
+    config: &AppConfig,
+    path: &Path,
+    replaces_notification_id: u32,
 ) -> Result<UploadResult, UploadError> {
     let dest = Destination::from_config(config);
     let dest_label = match dest {
@@ -105,23 +117,28 @@ pub fn upload_file_with_notifications(
     match upload_file(config, path) {
         Ok(result) => {
             eprintln!("[cloud] Upload complete: {}", result.share_url);
+            let mut body = result.share_url.to_string();
             if let Err(e) = crate::utils::clipboard::copy_text_to_clipboard(&result.share_url) {
                 eprintln!("[cloud] Failed to copy share link to clipboard: {e}");
-                crate::utils::notify::desktop_notification(
-                    "Upload complete",
-                    &format!("Share link: {}", result.share_url),
-                );
             } else {
-                crate::utils::notify::desktop_notification(
-                    "Upload complete",
-                    "Share link copied to clipboard",
-                );
+                body = format!("Copied to clipboard\n{}", result.share_url);
             }
+            // Always include the URL in the body so the toast is useful even if
+            // the user misses the clipboard, and use critical urgency on Ubuntu.
+            let _ = crate::utils::notify::desktop_notification_replace(
+                replaces_notification_id,
+                "Upload complete",
+                &body,
+            );
             Ok(result)
         }
         Err(e) => {
             eprintln!("[cloud] Upload failed: {e}");
-            crate::utils::notify::desktop_notification("Upload failed", &e.to_string());
+            let _ = crate::utils::notify::desktop_notification_replace(
+                replaces_notification_id,
+                "Upload failed",
+                &e.to_string(),
+            );
             Err(e)
         }
     }
@@ -132,6 +149,10 @@ pub fn upload_file_with_notifications(
 /// - Auto-upload off → silent no-op
 /// - Auto-upload on, destination not configured → desktop notification (rate-limited)
 /// - Auto-upload on, destination ready → upload with success/failure notifications
+///
+/// Always emits a short "Uploading…" toast up front so capture hotkeys feel
+/// responsive; the network round-trip can take several seconds and otherwise
+/// looks like a no-op (especially when the share URL races with file clipboard).
 pub fn spawn_auto_upload_after_capture(path: PathBuf) {
     let config = load_config().sanitized();
     if !config.cloud_auto_upload_after_capture {
@@ -141,9 +162,25 @@ pub fn spawn_auto_upload_after_capture(path: PathBuf) {
         notify_auto_upload_not_configured(&config);
         return;
     }
+
+    let dest = Destination::from_config(&config);
+    let dest_label = match dest {
+        Destination::ApexShot => "ApexShot Cloud",
+        Destination::XBackbone => "XBackBone",
+    };
+    eprintln!(
+        "[cloud] Auto-upload after capture: {} via {dest_label}",
+        path.display()
+    );
     std::thread::spawn(move || {
-        let _ = upload_file_with_notifications(&config, &path);
+        let _ = upload_file_with_notifications_replacing(&config, &path, 0);
     });
+}
+
+/// True when post-capture auto-upload will place a share URL on the text
+/// clipboard, so callers should avoid also writing a `file://` URI there.
+pub fn should_defer_text_clipboard_to_share_url(config: &AppConfig) -> bool {
+    should_auto_upload_after_capture(config)
 }
 
 pub(crate) fn guess_content_type(filename: &str) -> String {
@@ -223,5 +260,24 @@ mod tests {
     fn guess_content_type_falls_back_to_octet_stream() {
         assert_eq!(guess_content_type("notes.txt"), "application/octet-stream");
         assert_eq!(guess_content_type("noext"), "application/octet-stream");
+    }
+
+    #[test]
+    fn defer_text_clipboard_only_when_auto_upload_can_run() {
+        let mut cfg = AppConfig {
+            cloud_auto_upload_after_capture: true,
+            cloud_destination: "apexshot".to_string(),
+            cloud_api_token: "tok".to_string(),
+            cloud_backend_url: "https://api.example".to_string(),
+            ..AppConfig::default()
+        };
+        assert!(should_defer_text_clipboard_to_share_url(&cfg));
+
+        cfg.cloud_api_token.clear();
+        assert!(!should_defer_text_clipboard_to_share_url(&cfg));
+
+        cfg.cloud_api_token = "tok".to_string();
+        cfg.cloud_auto_upload_after_capture = false;
+        assert!(!should_defer_text_clipboard_to_share_url(&cfg));
     }
 }
