@@ -333,12 +333,7 @@ impl ksni::Tray for ApexShotTray {
                 ..Default::default()
             }
             .into(),
-            StandardItem {
-                label: ltr("Capture Window"),
-                activate: Box::new(|tray: &mut Self| tray.send(TrayAction::CaptureWindow)),
-                ..Default::default()
-            }
-            .into(),
+            // Capture Window removed — window capture is temporarily discontinued.
             // ── Separator ────────────────────────────────────────────────
             MenuItem::Separator,
             // ── Recording section ─────────────────────────────────────────

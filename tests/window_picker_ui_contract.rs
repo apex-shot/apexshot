@@ -1,35 +1,30 @@
 #[test]
-fn window_picker_uses_reduced_toolbar_and_warm_hover_contract() {
-    let source = include_str!("../capture-overlay/src/WindowPickerOverlay.cpp");
+fn window_tool_removed_from_toolbars() {
+    let cpp_drawing = include_str!("../capture-overlay/src/CaptureOverlay_Drawing.cpp");
+    let cpp_events = include_str!("../capture-overlay/src/CaptureOverlay_Events.cpp");
+    let rust_icons = include_str!("../src/overlay/icons.rs");
+    let rust_window = include_str!("../src/overlay/window.rs");
 
     assert!(
-        source.contains("WINDOW_PICKER_TOOL_INDICES[] = {1, 3}")
-            || source.contains("WINDOW_PICKER_TOOL_INDICES[] = { 1, 3 }")
-            || source.contains("kWindowPickerToolIndices[] = {1, 3}"),
-        "window picker should expose only Area and Window toolbar tools"
+        cpp_drawing.contains("\"Area\", \"Fullscreen\", \"Scroll\"")
+            || cpp_drawing.contains("\"Area\", \"Fullscreen\", \"Scroll\", \"Timer\""),
+        "C++ toolbar labels must not include Window"
+    );
+    assert!(
+        !cpp_drawing.contains("\"Window\""),
+        "C++ toolbar must not list Window as a tool label"
+    );
+    assert!(
+        !cpp_events.contains("Window tool ignored") && !cpp_events.contains("enterWindowMode()"),
+        "C++ toolbar click handler must not keep a Window tool branch"
     );
 
     assert!(
-        source.contains("for (int i = m_thumbnailRects.size() - 1; i >= 0; --i)")
-            || source.contains(
-                "for (int i = static_cast<int>(m_thumbnailRects.size()) - 1; i >= 0; --i)"
-            ),
-        "window picker hover hit testing should walk cards from topmost to bottommost"
+        rust_icons.contains("ToolbarIcon::Scroll") && !rust_icons.contains("ToolbarIcon::Window,"),
+        "Rust TOOLBAR_ICONS must not include Window"
     );
-
     assert!(
-        source.contains("QColor(176, 92, 56") || source.contains("QColor(255, 212, 178"),
-        "window picker should use the same warm accent family as the capture toolbar"
-    );
-
-    assert!(
-        !source.contains("QColor(0, 122, 255") && !source.contains("QColor(90, 170, 255"),
-        "window picker should not use the old blue hover accent anymore"
-    );
-
-    assert!(
-        source.contains("drawWindowCard(p, thumb, win, scaled, false);")
-            && source.contains("drawWindowCard(p, m_thumbnailRects[m_hoveredIdx], m_windows[m_hoveredIdx], scaled, true);"),
-        "window picker should render base cards first and the hovered card in a dedicated second pass"
+        !rust_window.contains("ToolbarIcon::Window"),
+        "Rust overlay click handler must not handle a Window toolbar tool"
     );
 }

@@ -513,13 +513,10 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         &config.shortcut_capture_fullscreen,
         true,
     );
-    let capture_window_btn = create_row(
-        &screenshots_frame,
-        "Capture Window:",
-        None,
-        &config.shortcut_capture_window,
-        false,
-    );
+    // Window capture is temporarily discontinued — hide the shortcut row so
+    // users cannot rebind a dead action from Settings.
+    let capture_window_btn = Button::new();
+    capture_window_btn.set_visible(false);
     let show_last_preview_btn = create_row(
         &screenshots_frame,
         "Show Last Preview:",

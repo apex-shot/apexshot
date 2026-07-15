@@ -5,7 +5,6 @@ use std::f64::consts::PI;
 pub(crate) enum ToolbarIcon {
     Area,
     Fullscreen,
-    Window,
     Scroll,
     Timer,
     Ocr,
@@ -19,10 +18,9 @@ pub(crate) enum ToolbarIcon {
     Gif,
 }
 
-pub(crate) const TOOLBAR_ICONS: [ToolbarIcon; 7] = [
+pub(crate) const TOOLBAR_ICONS: [ToolbarIcon; 6] = [
     ToolbarIcon::Area,
     ToolbarIcon::Fullscreen,
-    ToolbarIcon::Window,
     ToolbarIcon::Scroll,
     ToolbarIcon::Timer,
     ToolbarIcon::Ocr,
@@ -31,19 +29,13 @@ pub(crate) const TOOLBAR_ICONS: [ToolbarIcon; 7] = [
 
 pub(crate) const TOOLBAR_AREA_INDEX: usize = 0;
 pub(crate) const TOOLBAR_FULLSCREEN_INDEX: usize = 1;
-pub(crate) const TOOLBAR_WINDOW_INDEX: usize = 2;
-pub(crate) const TOOLBAR_SCROLL_INDEX: usize = 3;
-pub(crate) const TOOLBAR_RECORDING_INDEX: usize = 6;
+pub(crate) const TOOLBAR_SCROLL_INDEX: usize = 2;
+pub(crate) const TOOLBAR_TIMER_INDEX: usize = 3;
+pub(crate) const TOOLBAR_OCR_INDEX: usize = 4;
+pub(crate) const TOOLBAR_RECORDING_INDEX: usize = 5;
 
-pub(crate) const TOOLBAR_LABELS: [&str; 7] = [
-    "Area",
-    "Fullscreen",
-    "Window",
-    "Scroll",
-    "Timer",
-    "OCR",
-    "Recording",
-];
+pub(crate) const TOOLBAR_LABELS: [&str; 6] =
+    ["Area", "Fullscreen", "Scroll", "Timer", "OCR", "Recording"];
 
 pub(crate) fn draw_toolbar_icon(
     context: &gtk4::cairo::Context,
@@ -86,13 +78,6 @@ pub(crate) fn draw_toolbar_icon(
             context.line_to(cx, cy + 7.5);
             context.move_to(cx - 4.5, cy + 7.5);
             context.line_to(cx + 4.5, cy + 7.5);
-            let _ = context.stroke();
-        }
-        ToolbarIcon::Window => {
-            rounded_rect_path(context, cx - 7.0, cy - 5.5, 14.0, 9.5, 1.7);
-            let _ = context.stroke();
-            context.move_to(cx - 7.0, cy - 2.0);
-            context.line_to(cx + 7.0, cy - 2.0);
             let _ = context.stroke();
         }
         ToolbarIcon::Scroll => {

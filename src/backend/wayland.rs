@@ -1,13 +1,15 @@
 //! Wayland backend implementation.
 //!
-//! Capture strategy (first match wins):
+//! Still-image capture strategy (first match wins):
 //!
 //! 0. **KDE native** `org.kde.KWin.ScreenShot2` — preferred on Plasma Wayland
 //!    (same as Spectacle). No portal permission dialog.
 //! 1. **wlroots native** `zwlr_screencopy_manager_v1` — Hyprland, Sway, Niri, …
-//! 2. **ScreenCast portal + PipeWire** — cross-desktop fallback (GNOME etc.).
-//! 3. **`org.freedesktop.portal.Screenshot`** — optional via
-//!    `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL`; interactive selector helper.
+//! 2. **`org.freedesktop.portal.Screenshot`** — Flameshot-style single still
+//!    grab (GNOME and most desktops). Opt-in force-first via
+//!    `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL`.
+//! 3. **ScreenCast portal + PipeWire** — last-resort still fallback (heavy;
+//!    preferred for *recording*, not screenshots).
 //!
 //! Recording uses a parallel split: KDE → `zkde_screencast_unstable_v1`,
 //! wlroots → `wf-recorder`, else ScreenCast portal.
@@ -175,8 +177,32 @@ fn crop_capture(
 // ──────────────────────────────────────────────────────────────────────────────
 
 impl WaylandBackend {
-    fn should_use_screenshot_portal() -> bool {
+    /// When set, try the Screenshot portal before compositor-native paths.
+    /// Useful for debugging / matching Flameshot exactly on a given desktop.
+    fn should_force_screenshot_portal_first() -> bool {
         std::env::var_os("APEXSHOT_WAYLAND_SCREENSHOT_PORTAL").is_some()
+    }
+
+    /// Preferred still-image path after native compositors fail.
+    ///
+    /// Screenshot portal is a single D-Bus call (like Flameshot). ScreenCast +
+    /// PipeWire remains a last resort because it is much slower for freezes.
+    fn capture_still_via_screenshot_portal() -> DisplayResult<CaptureData> {
+        let start = std::time::Instant::now();
+        let result = block_on_async(Self::capture_via_screenshot_portal(false));
+        match &result {
+            Ok(d) => eprintln!(
+                "[capture] Screenshot portal succeeded in {:.0}ms ({}x{}).",
+                start.elapsed().as_millis(),
+                d.width,
+                d.height
+            ),
+            Err(e) => eprintln!(
+                "[capture] Screenshot portal failed ({:.0}ms): {e}",
+                start.elapsed().as_millis()
+            ),
+        }
+        result
     }
 
     fn should_try_native_screencopy() -> bool {
@@ -603,27 +629,16 @@ impl WaylandBackend {
         Some(result)
     }
 
-    /// Run a full-screen monitor capture via the ScreenCast portal + PipeWire.
-    ///
-    /// Always uses the ScreenCast path for full customization and cross-distro
-    /// consistency. wlr-screencopy, grim, and the Screenshot portal are bypassed.
+    /// Full-screen still capture. Prefers fast native/Screenshot paths; only
+    /// falls back to ScreenCast + PipeWire when those fail.
     pub fn capture_screen_impl(&self) -> DisplayResult<CaptureData> {
-        if Self::should_use_screenshot_portal() {
-            let start = std::time::Instant::now();
-            let result = block_on_async(Self::capture_via_screenshot_portal(false));
-            match &result {
-                Ok(d) => eprintln!(
-                    "[capture] Screenshot portal succeeded in {:.0}ms ({}x{}).",
-                    start.elapsed().as_millis(),
-                    d.width,
-                    d.height
-                ),
-                Err(e) => eprintln!(
-                    "[capture] Screenshot portal failed ({:.0}ms): {e}",
-                    start.elapsed().as_millis()
+        if Self::should_force_screenshot_portal_first() {
+            match Self::capture_still_via_screenshot_portal() {
+                Ok(data) => return Ok(data),
+                Err(err) => eprintln!(
+                    "[capture] Forced Screenshot portal failed ({err}); trying native backends."
                 ),
             }
-            return result;
         }
 
         if let Some(result) = Self::capture_monitor_via_kde_native() {
@@ -632,6 +647,13 @@ impl WaylandBackend {
 
         if let Some(result) = Self::capture_monitor_via_native_screencopy() {
             return result;
+        }
+
+        match Self::capture_still_via_screenshot_portal() {
+            Ok(data) => return Ok(data),
+            Err(err) => eprintln!(
+                "[capture] Screenshot portal unavailable ({err}); falling back to ScreenCast."
+            ),
         }
 
         Self::capture_monitor_via_screencast()
@@ -667,12 +689,20 @@ impl WaylandBackend {
         crop_capture(full, x, y, width, height)
     }
 
-    /// Capture used for direct area crops on Wayland.
+    /// Capture used for direct area crops / selection freezes on Wayland.
     ///
-    /// Tries wlr-screencopy first (~50 ms on wlroots compositors), then falls
-    /// back to the ScreenCast portal + PipeWire for non-wlroots desktops
-    /// (COSMIC, KDE, GNOME via Rust path, etc.).
+    /// Order: KDE native → wlr-screencopy (~50 ms) → Screenshot portal
+    /// (Flameshot-style) → ScreenCast last resort.
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
+        if Self::should_force_screenshot_portal_first() {
+            match Self::capture_still_via_screenshot_portal() {
+                Ok(data) => return Ok(data),
+                Err(err) => eprintln!(
+                    "[capture] Forced Screenshot portal failed ({err}); trying native backends."
+                ),
+            }
+        }
+
         if let Some(result) = Self::capture_monitor_via_kde_native() {
             return result;
         }
@@ -681,9 +711,14 @@ impl WaylandBackend {
             return result;
         }
 
-        eprintln!(
-            "[capture] Native wlr-screencopy unavailable; falling back to ScreenCast portal."
-        );
+        match Self::capture_still_via_screenshot_portal() {
+            Ok(data) => return Ok(data),
+            Err(err) => eprintln!(
+                "[capture] Native still capture unavailable; Screenshot portal failed ({err}); \
+                 falling back to ScreenCast portal."
+            ),
+        }
+
         Self::capture_monitor_via_screencast()
     }
 }

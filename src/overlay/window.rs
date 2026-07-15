@@ -11,7 +11,7 @@ use super::hit_testing::{
 };
 use super::icons::{
     ToolbarIcon, TOOLBAR_AREA_INDEX, TOOLBAR_FULLSCREEN_INDEX, TOOLBAR_ICONS,
-    TOOLBAR_RECORDING_INDEX, TOOLBAR_SCROLL_INDEX, TOOLBAR_WINDOW_INDEX,
+    TOOLBAR_RECORDING_INDEX, TOOLBAR_SCROLL_INDEX,
 };
 use super::layout::{
     RectF, ToolbarHit, DEFAULT_SELECTION_HEIGHT, DEFAULT_SELECTION_WIDTH, MIN_SELECTION_HEIGHT,
@@ -1840,23 +1840,8 @@ pub(crate) fn setup_window(
                     da.queue_draw();
                 }
             }
-            Some(ToolbarIcon::Window) => {
-                st.capture_crop_menu_open = false;
-                st.scroll_popup_open = false;
-                st.hovered_scroll_popup_close = false;
-                st.hovered_scroll_download = false;
-                st.active_tool_index = TOOLBAR_WINDOW_INDEX;
-                st.intent = OverlayIntent::Area;
-                st.hover_tool_index = None;
-                st.window_picker_open = true;
-                st.hovered_window_picker_entry = -1;
-                drop(st);
-                if let Some(da) = drawing_area_weak_click.upgrade() {
-                    da.queue_draw();
-                }
-            }
             Some(ToolbarIcon::Ocr) => {
-                st.active_tool_index = 5;
+                st.active_tool_index = crate::overlay::icons::TOOLBAR_OCR_INDEX;
                 st.intent = OverlayIntent::Ocr;
                 st.hover_tool_index = None;
                 drop(st);

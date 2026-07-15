@@ -79,6 +79,11 @@ public:
     bool countdownHandledInOverlay() const { return true; }
     void focusAndRaiseOverlay();
     void openRecordingPanelForShortcut();
+    /// Enter the in-overlay window picker (used by Window tool and --window-capture).
+    void openWindowPickerMode();
+    /// Full window-surface PNG written when a card was selected (may be empty).
+    QString preCapturedImagePath() const { return m_preCapturedImagePath; }
+    bool hasPreCapturedImage() const { return !m_preCapturedImagePath.isEmpty(); }
 
     // Recording accessors
     bool recordRequested() const { return m_captureIntent == CaptureIntent::Record; }
@@ -236,7 +241,12 @@ private:
                                  bool hadSelection,
                                  bool hasSelection) const;
     QRegion windowHoverDirtyRegion(int index) const;
-
+    void drawWindowPickerMode(QPainter& p, const QRect& widgetRect);
+    void recomputeWindowPickerLayout();
+    QRectF windowPickerToolbarRect() const;
+    QRectF windowPickerToolbarItemRect(int index) const;
+    int hitTestWindowPickerToolbar(const QPoint& pos) const;
+    int hitTestWindowPickerCard(const QPoint& pos) const;
 
     // Hit testing / cursor
     void updateCursor(const QPoint& pos);
@@ -273,13 +283,21 @@ private:
     void updateDesktopOriginFromMouseEvent(QMouseEvent* event);
 
     struct WindowInfo {
-        QRect   rect;
+        quint64 id = 0;      // compositor / extension window id (0 if unknown)
+        QRect   rect;        // overlay-local logical pixels (selection space)
+        QRect   desktopRect; // absolute desktop coordinates
         QString title;
+        QString appName;
     };
 
     void enterWindowMode();
-    void exitWindowMode();
+    void exitWindowMode(bool restoreAreaSelection = true);
     QList<WindowInfo> enumerateWindows() const;
+    QList<WindowInfo> enumerateWindowsFromExtension() const;
+    QList<WindowInfo> enumerateWindowsFromX11() const;
+    QPoint windowListDesktopOrigin() const;
+    QRect targetScreenDesktopGeometry() const;
+    bool captureWindowByIdToTemp(quint64 windowId, QString& outPath, QSize& outSize) const;
 
     // ── State ──────────────────────────────────────────────────────────────
     QPixmap   m_background;
@@ -343,9 +361,15 @@ private:
     static constexpr int kScrollLinesPerTick         = 1;   // micro-step scrolling for stronger overlap
     static constexpr int kScrollSettleMs             = 180; // faster cadence for near-continuous capture
 
-    // Window mode state
+    // Window mode state (in-overlay modal picker)
     QList<WindowInfo> m_windows;
-    int               m_hoveredWindow; // index into m_windows, -1 = none
+    QList<QRect>      m_windowCardRects;
+    int               m_hoveredWindow; // index into m_windows / cards, -1 = none
+    int               m_hoveredWindowTool; // 0=Area, 1=Window, -1=none
+    QRect             m_selectionBeforeWindowMode;
+    bool              m_hadSelectionBeforeWindowMode;
+    bool              m_fullscreenBeforeWindowMode;
+    QString           m_preCapturedImagePath; // full window surface capture path
 
     // Recording panel state
     bool m_recordingPanelOpen;

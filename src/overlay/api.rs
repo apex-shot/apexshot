@@ -1,11 +1,8 @@
 use super::background::{
     background_frame_from_capture, background_frame_from_image, BackgroundFrame,
 };
+use super::state::{OverlayMode, SelectorState};
 use super::window::setup_window;
-use super::{
-    icons::TOOLBAR_WINDOW_INDEX,
-    state::{OverlayMode, SelectorState},
-};
 use crate::backend::CaptureData;
 use crate::capture_overlay::RecordingRequest;
 use gtk4::{prelude::*, Application};
@@ -118,14 +115,8 @@ impl AreaSelector {
     }
 
     fn new_window_picker() -> Self {
-        let selector = Self::new();
-        {
-            let mut st = selector.state.lock().unwrap();
-            st.active_tool_index = TOOLBAR_WINDOW_INDEX;
-            st.window_picker_open = true;
-            st.hovered_window_picker_entry = -1;
-        }
-        selector
+        // Window capture is discontinued — open a normal area selector.
+        Self::new()
     }
 
     /// Run the area selection dialog

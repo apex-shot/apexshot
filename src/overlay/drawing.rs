@@ -159,8 +159,12 @@ pub(crate) fn draw_feature_toolbar(
     };
 
     draw_accent(context, layout.item_cells[active_tool_index], true);
-    if timer_tool_active && active_tool_index != 4 {
-        draw_accent(context, layout.item_cells[4], true);
+    if timer_tool_active && active_tool_index != super::icons::TOOLBAR_TIMER_INDEX {
+        draw_accent(
+            context,
+            layout.item_cells[super::icons::TOOLBAR_TIMER_INDEX],
+            true,
+        );
     }
     if let Some(index) = hover_tool_index {
         if let Some(cell) = layout.item_cells.get(index) {
@@ -182,7 +186,8 @@ pub(crate) fn draw_feature_toolbar(
         let center_x = cell.x + cell.width / 2.0;
         let label = TOOLBAR_LABELS[index];
         let is_hovered = hover_tool_index == Some(index);
-        let is_active = index == active_tool_index || (index == 4 && timer_tool_active);
+        let is_active = index == active_tool_index
+            || (index == super::icons::TOOLBAR_TIMER_INDEX && timer_tool_active);
 
         // Icon: brighter + reduced shadow on hover
         let icon_alpha = if is_hovered || is_active { 1.0 } else { 0.94 };

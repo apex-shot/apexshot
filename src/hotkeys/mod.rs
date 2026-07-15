@@ -803,12 +803,9 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
         &app_config.shortcut_capture_fullscreen,
         &["capture", "screen"],
     );
-    push_binding(
-        &mut bindings,
-        "capture_window",
-        &app_config.shortcut_capture_window,
-        &["capture", "window"],
-    );
+    // Window capture is temporarily discontinued — do not register the binding
+    // even if a leftover config shortcut remains.
+    let _ = &app_config.shortcut_capture_window;
     push_binding(
         &mut bindings,
         "show_last_preview",

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Multi-monitor picker — floating panel only (live desktop stays visible).
-// No freeze/screenshot. Freeze is only for the capture-area overlay.
+// Multi-monitor picker — floating panel only.
+// Freeze is taken before this UI (see main.cpp) so picker never appears in it.
 
 #include "MonitorPicker.h"
 

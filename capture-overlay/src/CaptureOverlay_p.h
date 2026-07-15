@@ -30,7 +30,8 @@ inline constexpr double REC_DECK_TOP_GAP          = 14.0;
 inline constexpr int    SCROLL_CAPTURE_INTERVAL_MS = 300;
 inline constexpr int    DEFAULT_SELECTION_W       = 600;
 inline constexpr int    DEFAULT_SELECTION_H       = 744;
-inline constexpr int    NUM_TOOLS                 = 7;
+// Area, Fullscreen, Scroll, Timer, OCR, Recording (Window capture removed)
+inline constexpr int    NUM_TOOLS                 = 6;
 
 extern const char* TOOLBAR_LABELS[NUM_TOOLS];
 extern const int TOOLBAR_ICON_IDS[NUM_TOOLS];

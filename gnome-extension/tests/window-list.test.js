@@ -23,7 +23,7 @@ function runTest(name, fn) {
     }
 }
 
-runTest("buildWindowListPayload keeps visible normal windows and strips invalid entries", () => {
+runTest("buildWindowListPayload keeps normal windows and strips apexshot/skip-taskbar entries", () => {
     const payload = buildWindowListPayload([
         {
             id: 7,
@@ -40,15 +40,15 @@ runTest("buildWindowListPayload keeps visible normal windows and strips invalid 
         },
         {
             id: 8,
-            title: "Hidden",
-            app: "Hidden",
+            title: "Skip me",
+            app: "Dock",
             x: 0,
             y: 0,
             width: 800,
-            height: 600,
-            visible: false,
+            height: 48,
+            visible: true,
             minimized: false,
-            skipTaskbar: false,
+            skipTaskbar: true,
             apexshot: false,
         },
         {
@@ -64,12 +64,26 @@ runTest("buildWindowListPayload keeps visible normal windows and strips invalid 
             skipTaskbar: false,
             apexshot: true,
         },
+        {
+            id: 10,
+            title: "Background app",
+            app: "Notes",
+            x: 40,
+            y: 40,
+            width: 600,
+            height: 400,
+            visible: false,
+            minimized: true,
+            skipTaskbar: false,
+            apexshot: false,
+        },
     ]);
 
-    assertEqual(payload.length, 1, "only one eligible window should remain");
+    assertEqual(payload.length, 2, "normal + minimized windows should remain");
     assertEqual(payload[0].id, 7, "eligible window id should be preserved");
     assertEqual(payload[0].title, "Firefox", "title should be preserved");
     assertEqual(payload[0].app, "Firefox", "app should be preserved");
+    assertEqual(payload[1].id, 10, "minimized windows should be listed");
     assertEqual(payload[0].thumbnail_b64, "", "static payload starts without inline thumbnails");
 });
 

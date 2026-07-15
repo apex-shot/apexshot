@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <cmath>
+#include <cstdio>
 
 namespace {
 constexpr double kAspectRatios[] = {
@@ -427,13 +428,51 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         }
     }
 
-    // Window mode — click selects the hovered window
+    // Window picker mode — stay in this overlay; Area restores selection UI.
     if (m_windowMode) {
-        if (m_hoveredWindow >= 0 && m_hoveredWindow < m_windows.size()) {
-            m_selection = m_windows[m_hoveredWindow].rect;
+        if (event->button() != Qt::LeftButton) {
+            return;
+        }
+
+        const int toolIndex = hitTestWindowPickerToolbar(pos);
+        if (toolIndex == 0) {
+            // Area — leave picker, restore prior (or default) area selection
+            std::fprintf(stderr, "[CaptureOverlay] Window picker → Area (stay in overlay)\n");
+            exitWindowMode(true);
+            return;
+        }
+        if (toolIndex == 1) {
+            // Window — already in window picker
+            return;
+        }
+
+        const int rowIndex = hitTestWindowPickerCard(pos);
+        if (rowIndex >= 0 && rowIndex < m_windows.size()) {
+            const WindowInfo chosen = m_windows[rowIndex];
+            // List pick → crop the freeze (or live area) to this window's rect.
+            m_selection = chosen.rect.normalized();
+            if (m_selection.width() < kMinSize || m_selection.height() < kMinSize) {
+                // Fall back to desktop rect mapped into overlay space.
+                const QPoint origin = desktopOriginForLocalCoordinates();
+                m_selection = chosen.desktopRect.translated(-origin.x(), -origin.y()).normalized();
+            }
             m_hasSelection = true;
-            exitWindowMode();
+            m_captureIntent = CaptureIntent::Area;
+            m_windowMode = false;
+            m_hoveredWindow = -1;
+            m_hoveredWindowTool = -1;
+            m_windows.clear();
+            m_windowCardRects.clear();
+            m_preCapturedImagePath.clear();
+            std::fprintf(stderr,
+                         "[CaptureOverlay] Window list pick: '%s' %dx%d+%d+%d\n",
+                         chosen.title.toLocal8Bit().constData(),
+                         m_selection.width(),
+                         m_selection.height(),
+                         m_selection.x(),
+                         m_selection.y());
             confirmSelection();
+            return;
         }
         return;
     }
@@ -572,25 +611,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 update();
                 return true;
             } else if (toolIndex == 2) {
-                // Window: on Wayland use GNOME DBus (exit code 3),
-                // on X11 use hover-select mode
-                closeCaptureCropMenu();
-                exitScrollMode();
-                std::fprintf(stderr, "[CaptureOverlay] Window tool clicked (index 3)\n");
-                std::fprintf(stderr, "[CaptureOverlay] WAYLAND_DISPLAY=%s\n",
-                    qgetenv("WAYLAND_DISPLAY").constData());
-                if (qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
-                    std::fprintf(stderr, "[CaptureOverlay] Exiting with code 3 for window capture\n");
-                    releaseKeyboard();
-                    hide();
-                    QApplication::exit(3); // special code: window capture via DBus
-                } else {
-                    std::fprintf(stderr, "[CaptureOverlay] Entering X11 window mode\n");
-                    m_captureIntent = CaptureIntent::Area;
-                    enterWindowMode();
-                }
-                return true;
-            } else if (toolIndex == 3) {
+                // Scroll
                 closeCaptureCropMenu();
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Area;
@@ -598,7 +619,8 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 m_hoveredScrollClose = false;
                 update();
                 return true;
-            } else if (toolIndex == 4) {
+            } else if (toolIndex == 3) {
+                // Timer
                 closeCaptureCropMenu();
                 if (!m_timerCaptureEnabled) {
                     m_timerCaptureEnabled = true;
@@ -613,13 +635,14 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                     cycleCaptureDelay();
                 }
                 return true;
-            } else if (toolIndex == 5) {
+            } else if (toolIndex == 4) {
+                // OCR
                 closeCaptureCropMenu();
                 exitScrollMode();
                 m_captureIntent = CaptureIntent::Ocr;
                 update();
                 return true;
-            } else if (toolIndex == 6) {
+            } else if (toolIndex == 5) {
                 // Recording: open recording panel
                 closeCaptureCropMenu();
                 exitScrollMode();
@@ -833,26 +856,26 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
-    // Window mode — highlight the window under the cursor
+    // Window picker — hover cards + reduced toolbar
     if (m_windowMode) {
-        int newHover = -1;
-        for (int i = 0; i < m_windows.size(); ++i) {
-            if (m_windows[i].rect.contains(pos)) {
-                newHover = i;
-                break; // first (topmost) match wins
-            }
+        const int newToolHover = hitTestWindowPickerToolbar(pos);
+        const int newCardHover =
+            (newToolHover >= 0) ? -1 : hitTestWindowPickerCard(pos);
+
+        bool dirty = false;
+        if (newToolHover != m_hoveredWindowTool) {
+            m_hoveredWindowTool = newToolHover;
+            dirty = true;
         }
-        if (newHover != m_hoveredWindow) {
-            const int previousHover = m_hoveredWindow;
-            m_hoveredWindow = newHover;
-            QRegion dirty = windowHoverDirtyRegion(previousHover);
-            dirty += windowHoverDirtyRegion(newHover);
-            if (dirty.isEmpty()) {
-                update();
-            } else {
-                update(dirty);
-            }
+        if (newCardHover != m_hoveredWindow) {
+            m_hoveredWindow = newCardHover;
+            dirty = true;
         }
+        if (dirty) {
+            update();
+        }
+        setCursor((newToolHover >= 0 || newCardHover >= 0) ? Qt::PointingHandCursor
+                                                           : Qt::ArrowCursor);
         return;
     }
 
@@ -1414,7 +1437,12 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
     bool shift = event->modifiers() & Qt::ShiftModifier;
     switch (event->key()) {
     case Qt::Key_Escape:
-        if (m_windowMode) { exitWindowMode(); } else { cancelSelection(); }
+        // In window picker, ESC returns to area selection instead of quitting.
+        if (m_windowMode) {
+            exitWindowMode(true);
+        } else {
+            cancelSelection();
+        }
         break;
     case Qt::Key_Return:
     case Qt::Key_Enter:

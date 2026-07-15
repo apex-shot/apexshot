@@ -359,26 +359,169 @@ fetch_version() {
 
 # --- Install system dependencies ---------------------------------------------
 
+# True when the dynamic linker can already resolve libgtk4-layer-shell.so.0
+# (either the distro package or a previous from-source install).
+has_gtk4_layer_shell_lib() {
+    if dpkg -s libgtk4-layer-shell0 >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v ldconfig >/dev/null 2>&1; then
+        if ldconfig -p 2>/dev/null | grep -q 'libgtk4-layer-shell\.so\.0'; then
+            return 0
+        fi
+    fi
+    # Common install locations used by distro packages and our source fallback.
+    local candidate
+    for candidate in \
+        /usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so.0 \
+        /usr/lib/aarch64-linux-gnu/libgtk4-layer-shell.so.0 \
+        /usr/lib/libgtk4-layer-shell.so.0 \
+        /usr/local/lib/libgtk4-layer-shell.so.0 \
+        /usr/local/lib/x86_64-linux-gnu/libgtk4-layer-shell.so.0
+    do
+        if [[ -e "$candidate" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Ubuntu 24.04 (noble) and several Mint/older bases do not ship
+# libgtk4-layer-shell0. The prebuilt binary still needs the shared library
+# (NEEDED: libgtk4-layer-shell.so.0), so fall back to the same from-source
+# install path used by CI. Distros that already have the package keep the
+# apt path unchanged.
+install_gtk4_layer_shell_from_source() {
+    step "Installing libgtk4-layer-shell from source"
+
+    if has_gtk4_layer_shell_lib; then
+        ok "libgtk4-layer-shell already available on this system"
+        return 0
+    fi
+
+    info "libgtk4-layer-shell0 is not in your apt repositories (common on Ubuntu 24.04 / Mint)."
+    info "Building a compatible runtime library from source — this may take a minute..."
+
+    # Build tools only; not required at ApexShot runtime after install.
+    local build_deps=(
+        build-essential git meson ninja-build pkg-config
+        libgtk-4-dev libwayland-dev
+        gobject-introspection libgirepository1.0-dev
+        valac
+    )
+    local build_missing=()
+    local pkg
+    for pkg in "${build_deps[@]}"; do
+        if dpkg -s "$pkg" >/dev/null 2>&1; then
+            continue
+        fi
+        if apt-cache show "$pkg" >/dev/null 2>&1; then
+            build_missing+=("$pkg")
+        fi
+    done
+
+    if [[ ${#build_missing[@]} -gt 0 ]]; then
+        info "Installing build tools: ${build_missing[*]}"
+        if ! run_spinner "Installing build tools..." bash -c "${SUDO} apt-get install -y -qq ${build_missing[*]}"; then
+            err "Failed to install build tools needed for gtk4-layer-shell."
+            err "Install them manually and re-run, or use Ubuntu 25.10+ where libgtk4-layer-shell0 is packaged."
+            exit 1
+        fi
+    fi
+
+    # Pin a stable release that matches the Ubuntu 25.10 package series so
+    # runtime behavior stays close to the official .deb CI build target.
+    local layer_shell_tag="${APEXSHOT_GTK4_LAYER_SHELL_TAG:-v1.0.4}"
+    local src_dir
+    src_dir=$(mktemp -d -t apexshot-gtk4-layer-shell.XXXXXX)
+
+    cleanup_layer_shell_src() {
+        rm -rf "${src_dir}"
+    }
+
+    if ! run_spinner "Cloning gtk4-layer-shell ${layer_shell_tag}..." \
+        bash -c "git clone --depth 1 --branch '${layer_shell_tag}' https://github.com/wmww/gtk4-layer-shell.git '${src_dir}/src'"; then
+        # Tag may not exist on older git mirrors; fall back to default branch.
+        warn "Tagged clone failed; falling back to latest default branch."
+        if ! run_spinner "Cloning gtk4-layer-shell..." \
+            bash -c "git clone --depth 1 https://github.com/wmww/gtk4-layer-shell.git '${src_dir}/src'"; then
+            cleanup_layer_shell_src
+            err "Could not clone gtk4-layer-shell. Check your network and try again."
+            exit 1
+        fi
+    fi
+
+    # Same prefix as the release CI job so the soname lands on the default
+    # linker path without extra ld.so.conf entries.
+    if ! run_spinner "Building gtk4-layer-shell..." \
+        bash -c "cd '${src_dir}/src' && meson setup build --prefix=/usr && ninja -C build"; then
+        cleanup_layer_shell_src
+        err "Failed to build gtk4-layer-shell from source."
+        exit 1
+    fi
+
+    if ! run_spinner "Installing gtk4-layer-shell..." \
+        bash -c "cd '${src_dir}/src' && ${SUDO} ninja -C build install && ${SUDO} ldconfig"; then
+        cleanup_layer_shell_src
+        err "Failed to install gtk4-layer-shell."
+        exit 1
+    fi
+
+    cleanup_layer_shell_src
+
+    if ! has_gtk4_layer_shell_lib; then
+        err "gtk4-layer-shell installed, but libgtk4-layer-shell.so.0 is still not visible to the linker."
+        err "Please open an issue with your distro/version: https://github.com/${REPO}/issues"
+        exit 1
+    fi
+
+    ok "libgtk4-layer-shell installed from source"
+}
+
+warn_if_x11_session() {
+    # ApexShot has an X11 backend, but Wayland (especially GNOME) is the
+    # personally tested path. X11 remains experimental — do not block install.
+    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+        return 0
+    fi
+    if [[ -z "${DISPLAY:-}" ]]; then
+        return 0
+    fi
+    warn "X11 session detected. ApexShot supports X11, but it is experimental."
+    info "Primary testing is on GNOME Wayland (Ubuntu/Arch) and Hyprland."
+    info "If something breaks on X11, please report it: https://github.com/${REPO}/issues"
+}
+
 install_deps() {
     step "Installing system dependencies"
 
     info "This may take a few minutes..."
 
     # This installer installs a prebuilt .deb, so only runtime packages belong
-    # here. Do not install -dev/build packages: some Ubuntu derivatives (for
-    # example Linux Mint Cinnamon) do not publish libgtk4-layer-shell-dev even
-    # though users are not building ApexShot from source.
+    # here. Do not install -dev/build packages unless we hit the
+    # libgtk4-layer-shell from-source fallback below.
+    #
+    # libgtk4-layer-shell0 is preferred from apt when present (Ubuntu 25.10+,
+    # Debian with the package). On Ubuntu 24.04 / some Mint bases it is
+    # missing from apt — those systems use install_gtk4_layer_shell_from_source.
     local deps=(
         libx11-6 libxext6 libxtst6
         libqt5widgets5 libqt5dbus5 libqt5network5 libqt5x11extras5
         gstreamer1.0-plugins-base gstreamer1.0-plugins-good
         gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-pipewire
         tesseract-ocr tesseract-ocr-eng
-        libgtk-4-1 libadwaita-1-0 libgtk4-layer-shell0
+        libgtk-4-1 libadwaita-1-0
         wl-clipboard xclip
         xdg-utils libnotify-bin ffmpeg unzip curl wget
         pipewire pipewire-pulse
     )
+
+    local need_layer_shell_from_source=0
+    if apt-cache show libgtk4-layer-shell0 >/dev/null 2>&1; then
+        deps+=(libgtk4-layer-shell0)
+    else
+        need_layer_shell_from_source=1
+    fi
 
     local portal_pkg
     for portal_pkg in $(portal_backend_packages); do
@@ -390,6 +533,12 @@ install_deps() {
     # Update apt before checking availability so derivatives with stale package
     # lists do not produce false "Unable to locate package" failures.
     run_spinner "Updating package lists..." bash -c "${SUDO} apt-get update -qq"
+
+    # Re-evaluate after apt-get update in case a stale cache hid the package.
+    if [[ $need_layer_shell_from_source -eq 1 ]] && apt-cache show libgtk4-layer-shell0 >/dev/null 2>&1; then
+        deps+=(libgtk4-layer-shell0)
+        need_layer_shell_from_source=0
+    fi
 
     local missing=()
     local unavailable=()
@@ -407,21 +556,28 @@ install_deps() {
 
     if [[ ${#unavailable[@]} -gt 0 ]]; then
         err "Your apt repositories do not provide required ApexShot runtime package(s): ${unavailable[*]}"
-        err "This commonly happens on older Ubuntu/Mint bases with libgtk4-layer-shell0."
         err "Please open an issue with your distro/version, or use a newer Ubuntu/Debian base that provides these packages."
         exit 1
     fi
 
-    if [[ ${#missing[@]} -eq 0 ]]; then
-        ok "All dependencies already satisfied"
-        return
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        info "Missing packages: ${missing[*]}"
+        run_spinner "Installing missing packages..." bash -c "${SUDO} apt-get install -y -qq ${missing[*]}"
+        ok "Dependencies installed"
+    else
+        ok "All apt dependencies already satisfied"
     fi
 
-    info "Missing packages: ${missing[*]}"
+    if [[ $need_layer_shell_from_source -eq 1 ]]; then
+        install_gtk4_layer_shell_from_source
+    elif ! has_gtk4_layer_shell_lib; then
+        # Package was supposed to be available but the library is still missing
+        # (broken local install, partial purge, etc.).
+        warn "libgtk4-layer-shell0 was expected from apt but the shared library is not visible."
+        install_gtk4_layer_shell_from_source
+    fi
 
-    run_spinner "Installing missing packages..." bash -c "${SUDO} apt-get install -y -qq ${missing[*]}"
-
-    ok "Dependencies installed"
+    warn_if_x11_session
 }
 
 # --- Download .deb -----------------------------------------------------------

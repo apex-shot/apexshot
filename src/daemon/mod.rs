@@ -26,8 +26,8 @@ use crate::{
     capture::{copy_capture_uri_to_clipboard, save_capture, save_existing_png, SaveConfig},
     capture_overlay::{
         begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
-        capture_screen_file_via_cpp, capture_window_file_via_cpp, is_launch_blocked_error,
-        open_recording_ui_via_cpp, request_existing_overlay_focus,
+        capture_screen_file_via_cpp, ensure_warm_capture_helper, is_launch_blocked_error,
+        open_recording_ui_via_cpp, request_existing_overlay_focus, shutdown_warm_capture_helper,
         user_facing_capture_failure_message, AreaCapturePathResult, CaptureOverlayGuard,
         LaunchBlockedReason,
     },
@@ -532,6 +532,9 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     // to re-approve screenshot/screencast access after reboot.
     crate::backend::portal_permissions::ensure_portal_permissions();
 
+    // Pre-warm apexshot-capture so the first hotkey doesn't pay Qt cold start.
+    ensure_warm_capture_helper();
+
     if should_autostart_ydotoold() {
         ensure_ydotoold_running();
     }
@@ -884,6 +887,7 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
         }
     }
 
+    shutdown_warm_capture_helper();
     eprintln!("[daemon] Exiting.");
     Ok(())
 }
@@ -2902,58 +2906,12 @@ fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonState>>) {
     }
 }
 
-fn handle_capture_window(state: Arc<Mutex<DaemonState>>) {
-    let Some(_session_guard) = acquire_capture_session_guard("window") else {
-        return;
-    };
-    // Close any existing preview before starting capture
-    let _ = stop_preview_overlay(&state);
-    handle_capture_window_with_active_session(state);
-}
-
-fn handle_capture_window_with_active_session(state: Arc<Mutex<DaemonState>>) {
-    let app_config = load_config().sanitized();
-    apply_screenshot_timer_if_needed("window", &app_config);
-
-    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
-
-    let path_result = if let Some(gtk_tx) = gtk_tx {
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
-        match gtk_tx.send(GtkWork::CaptureWindow { reply: reply_tx }) {
-            Ok(()) => match reply_rx.recv() {
-                Ok(result) => result.map_err(|err| match err.as_str() {
-                    "cancelled" => crate::overlay::SelectionError::Cancelled,
-                    other => crate::overlay::SelectionError::InitError(other.to_string()),
-                }),
-                Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
-                    "GTK main-thread window capture reply failed: {err}"
-                ))),
-            },
-            Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
-                "GTK main-thread window capture dispatch failed: {err}"
-            ))),
-        }
-    } else {
-        capture_window_file_via_cpp()
-    };
-
-    match path_result {
-        Ok(path) => {
-            save_existing_png_and_open(path, state);
-        }
-        Err(err) if is_launch_blocked_error(&err) => {
-            eprintln!("[daemon] Window capture blocked: {err}");
-        }
-        Err(crate::overlay::SelectionError::Cancelled) => {
-            eprintln!("[daemon] Window capture cancelled.");
-        }
-        Err(e) => {
-            // Area fallback may also fail (e.g. portal status=2). It notifies on its
-            // own failure path; log the original window error for diagnosis.
-            eprintln!("[daemon] Window capture failed: {e}; falling back to area capture.");
-            handle_capture_area_with_active_session(state);
-        }
-    }
+fn handle_capture_window(_state: Arc<Mutex<DaemonState>>) {
+    // Window capture is temporarily discontinued — do not fall back to area
+    // capture, which surprises users who pressed a leftover window shortcut.
+    eprintln!(
+        "[daemon] Window capture is temporarily discontinued. Use area or fullscreen capture."
+    );
 }
 
 fn acquire_capture_session_guard(context: &str) -> Option<CaptureOverlayGuard<'static>> {

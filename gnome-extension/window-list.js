@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+// Fast metadata-only window list for ApexShot (no surface previews).
 
 const WINDOW_LIST_DBUS_NAME = "org.apexshot.WindowList";
 const WINDOW_LIST_DBUS_PATH = "/org/apexshot/WindowList";
@@ -29,6 +30,15 @@ function sanitizeText(value, fallback = "") {
     return text || fallback;
 }
 
+function isApexShotWindowIdentity(appName, wmClass) {
+    const app = sanitizeText(appName).toLowerCase();
+    const klass = sanitizeText(wmClass).toLowerCase();
+    return app === "apexshot"
+        || klass === "io.github.codegoddy.apexshot"
+        || klass === "apexshot"
+        || klass === "com.apexshot.recording";
+}
+
 function normalizeWindowRecord(window) {
     if (!window)
         return null;
@@ -39,14 +49,18 @@ function normalizeWindowRecord(window) {
         ...window,
         app,
         wmClass,
+        x: Number.isFinite(window.x) ? Math.trunc(window.x) : 0,
+        y: Number.isFinite(window.y) ? Math.trunc(window.y) : 0,
+        width: clampDimension(window.width),
+        height: clampDimension(window.height),
         apexshot: isApexShotWindowIdentity(app, wmClass),
     };
 }
 
 function isEligibleWindowRecord(window) {
-    if (!window || !window.visible)
+    if (!window)
         return false;
-    if (window.minimized || window.skipTaskbar || window.apexshot)
+    if (window.skipTaskbar || window.apexshot)
         return false;
     if (!Number.isFinite(window.id))
         return false;
@@ -62,21 +76,14 @@ export function buildWindowListPayload(windows) {
             id: Math.trunc(window.id),
             title: sanitizeText(window.title, "Window"),
             app: window.app,
-            x: Number.isFinite(window.x) ? Math.trunc(window.x) : 0,
-            y: Number.isFinite(window.y) ? Math.trunc(window.y) : 0,
-            width: clampDimension(window.width),
-            height: clampDimension(window.height),
+            x: window.x,
+            y: window.y,
+            width: window.width,
+            height: window.height,
+            minimized: Boolean(window.minimized),
+            // Always empty — ApexShot uses a text list picker, not previews.
             thumbnail_b64: "",
         }));
-}
-
-function isApexShotWindowIdentity(appName, wmClass) {
-    const app = sanitizeText(appName).toLowerCase();
-    const klass = sanitizeText(wmClass).toLowerCase();
-    return app === "apexshot"
-        || klass === "io.github.codegoddy.apexshot"
-        || klass === "apexshot"
-        || klass === "com.apexshot.recording";
 }
 
 function readFrameRect(metaWindow) {
@@ -124,9 +131,6 @@ function extractWindowRecord(metaWindow, windowTracker) {
     const wmClass = typeof metaWindow.get_wm_class === "function" ? metaWindow.get_wm_class() : "";
     const appName = app?.get_name?.() ?? wmClass;
     const rect = readFrameRect(metaWindow);
-    const visible = typeof metaWindow.showing_on_its_workspace === "function"
-        ? metaWindow.showing_on_its_workspace()
-        : true;
     const minimized = typeof metaWindow.minimized === "boolean"
         ? metaWindow.minimized
         : typeof metaWindow.get_minimized === "function"
@@ -135,7 +139,6 @@ function extractWindowRecord(metaWindow, windowTracker) {
     const skipTaskbar = typeof metaWindow.is_skip_taskbar === "function"
         ? metaWindow.is_skip_taskbar()
         : false;
-    const hasActor = Boolean(metaWindow.get_compositor_private?.());
 
     return {
         id: typeof metaWindow.get_id === "function" ? metaWindow.get_id() : NaN,
@@ -146,19 +149,19 @@ function extractWindowRecord(metaWindow, windowTracker) {
         y: rect.y,
         width: rect.width,
         height: rect.height,
-        visible: visible && hasActor,
         minimized,
         skipTaskbar,
-        hasActor,
         apexshot: isApexShotWindowIdentity(appName, wmClass),
+        _metaWindow: metaWindow,
     };
 }
 
 export class WindowListService {
-    constructor({Gio, GLib, Meta, shellGlobal, windowTracker}) {
+    constructor({Gio, GLib, Meta, Shell, shellGlobal, windowTracker}) {
         this._Gio = Gio;
         this._GLib = GLib;
         this._Meta = Meta;
+        this._Shell = Shell; // optional; kept for constructor compat
         this._global = shellGlobal;
         this._windowTracker = windowTracker;
         this._dbusObject = null;
@@ -202,6 +205,7 @@ export class WindowListService {
 
     GetWindowsAsync(_params, invocation) {
         try {
+            // Sync, metadata-only — no per-window surface screenshots.
             const payload = buildWindowListPayload(this._listCurrentWindows());
             invocation.return_value(this._GLib.Variant.new("(s)", [JSON.stringify(payload)]));
         } catch (e) {
@@ -210,42 +214,12 @@ export class WindowListService {
     }
 
     CaptureWindowByIdAsync(params, invocation) {
+        // Not used by the list picker; kept for D-Bus compatibility.
         try {
             const [windowId, filename] = params;
-            const target = this._listCurrentWindows().find(window => window.id === windowId);
-            if (!target) {
-                invocation.return_value(this._GLib.Variant.new("(b)", [false]));
-                return;
-            }
-
-            this._Gio.DBus.session.call(
-                "org.gnome.Shell.Screenshot",
-                "/org/gnome/Shell/Screenshot",
-                "org.gnome.Shell.Screenshot",
-                "ScreenshotArea",
-                this._GLib.Variant.new("(iiiibs)", [
-                    target.x,
-                    target.y,
-                    target.width,
-                    target.height,
-                    false,
-                    filename,
-                ]),
-                new this._GLib.VariantType("(bs)"),
-                this._Gio.DBusCallFlags.NONE,
-                -1,
-                null,
-                (_conn, result) => {
-                    try {
-                        const reply = this._Gio.DBus.session.call_finish(result);
-                        const [success] = reply.deepUnpack();
-                        invocation.return_value(this._GLib.Variant.new("(b)", [Boolean(success)]));
-                    } catch (e) {
-                        logError(e, "[apexshot] CaptureWindowById screenshot failed");
-                        invocation.return_value(this._GLib.Variant.new("(b)", [false]));
-                    }
-                }
-            );
+            void windowId;
+            void filename;
+            invocation.return_value(this._GLib.Variant.new("(b)", [false]));
         } catch (e) {
             invocation.return_dbus_error("org.apexshot.WindowList.Error", e.message);
         }
@@ -254,8 +228,7 @@ export class WindowListService {
     ActivateWindowByIdAsync(params, invocation) {
         try {
             const [windowId] = params;
-            const metaWindow = this._listCurrentWindows()
-                .find(window => window?.get_id?.() === windowId) ?? null;
+            const metaWindow = this._findMetaWindowById(windowId);
             const success = activateWindowRecord(metaWindow, this._global.get_current_time());
             invocation.return_value(this._GLib.Variant.new("(b)", [success]));
         } catch (e) {
@@ -264,10 +237,44 @@ export class WindowListService {
     }
 
     _listCurrentWindows() {
-        const workspace = this._global.workspace_manager.get_active_workspace();
-        const windows = this._global.display.get_tab_list(this._Meta.TabList.NORMAL_ALL, workspace);
-        return windows
-            .map(window => extractWindowRecord(window, this._windowTracker))
-            .filter(Boolean);
+        // All workspaces so open windows are not dropped when they sit on
+        // a non-active workspace.
+        const manager = this._global.workspace_manager;
+        const n = typeof manager.get_n_workspaces === "function"
+            ? manager.get_n_workspaces()
+            : 1;
+
+        const seen = new Set();
+        const result = [];
+
+        for (let i = 0; i < n; i++) {
+            const workspace = manager.get_workspace_by_index(i);
+            if (!workspace)
+                continue;
+            const windows = this._global.display.get_tab_list(
+                this._Meta.TabList.NORMAL_ALL,
+                workspace
+            );
+            for (const metaWindow of windows) {
+                const record = extractWindowRecord(metaWindow, this._windowTracker);
+                if (!record || !Number.isFinite(record.id))
+                    continue;
+                if (seen.has(record.id))
+                    continue;
+                seen.add(record.id);
+                result.push(record);
+            }
+        }
+
+        return result;
+    }
+
+    _findMetaWindowById(windowId) {
+        const id = Number(windowId);
+        for (const record of this._listCurrentWindows()) {
+            if (Math.trunc(record.id) === Math.trunc(id))
+                return record._metaWindow ?? null;
+        }
+        return null;
     }
 }

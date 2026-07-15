@@ -57,8 +57,8 @@ use apexshot::{
     },
     capture_overlay::{
         capture_area_via_cpp, capture_crosshair_via_cpp, capture_screen_via_cpp,
-        capture_window_via_cpp, is_launch_blocked_error, open_recording_ui_via_cpp,
-        run_capture_overlay, AreaCapturePathResult, AreaCaptureResult,
+        is_launch_blocked_error, open_recording_ui_via_cpp, run_capture_overlay,
+        AreaCapturePathResult, AreaCaptureResult,
     },
     daemon::{import_web_scroll_capture, trigger_daemon_action},
     hotkeys::{
@@ -1537,13 +1537,11 @@ fn run_daemon_with_gtk_on_main_thread() {
                 let _ = reply.send(result);
             }
             GtkWork::CaptureWindow { reply } => {
-                eprintln!("[gtk] CaptureWindow received — launching window selector");
-                let result =
-                    apexshot::capture_overlay::capture_window_file_via_cpp().map_err(|e| match e {
-                        apexshot::SelectionError::Cancelled => "cancelled".to_string(),
-                        other => other.to_string(),
-                    });
-                let _ = reply.send(result);
+                eprintln!("[gtk] CaptureWindow ignored — window capture discontinued");
+                let _ = reply.send(Err(
+                    "Window capture is temporarily discontinued. Use area or fullscreen capture instead."
+                        .to_string(),
+                ));
             }
             GtkWork::RunRecordingControls { params, stop_tx } => {
                 eprintln!("[gtk] RunRecordingControls received — launching recording controls");
@@ -1960,20 +1958,13 @@ fn run_capture(args: &[String]) {
                 std::process::exit(1);
             }
         },
-        "window" if WaylandBackend::is_supported() => match capture_window_via_cpp() {
-            Ok(capture) => {
-                println!("Captured window...");
-                capture
-            }
-            Err(err) if is_launch_blocked_error(&err) => {
-                eprintln!("{err}");
-                std::process::exit(1);
-            }
-            Err(err) => {
-                eprintln!("[capture] C++ window capture failed: {err}");
-                std::process::exit(1);
-            }
-        },
+        "window" => {
+            eprintln!(
+                "Error: window capture is temporarily discontinued.\n\
+                 Use 'apexshot capture area' or 'apexshot capture screen' instead."
+            );
+            std::process::exit(1);
+        }
         _ if WaylandBackend::is_supported() => {
             eprintln!("Error: unknown capture type '{}'", capture_type);
             print_usage();
@@ -1984,8 +1975,10 @@ fn run_capture(args: &[String]) {
 
             match capture_type {
                 "window" => {
-                    eprintln!("Error: window capture by ID not yet supported via CLI");
-                    eprintln!("Use 'capture screen' and crop manually");
+                    eprintln!(
+                        "Error: window capture is temporarily discontinued.\n\
+                         Use 'capture area' or 'capture screen' instead."
+                    );
                     std::process::exit(1);
                 }
                 _ => {

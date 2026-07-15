@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Multi-monitor picker (metadata UI only — freeze is for the capture overlay).
+// Multi-monitor picker (metadata UI only — freeze happens before this UI).
 
 #pragma once
 

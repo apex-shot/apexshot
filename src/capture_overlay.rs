@@ -9,14 +9,19 @@
 //!   capture mode: exit 0 + `{"path":"/tmp/...png",...}`
 //!   exit 1 → cancelled by user
 //!   exit 2 → error
+//!
+//! Warm helper:
+//!   When possible, jobs are sent to a long-lived `apexshot-capture --worker`
+//!   process over `$XDG_RUNTIME_DIR/apexshot-capture-worker.sock` so Qt cold
+//!   start is paid once. Disable with `APEXSHOT_DISABLE_WARM_CAPTURE=1`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 use std::{
-    io::Write,
+    io::{BufRead, BufReader, Write},
     os::unix::{net::UnixStream, process::ExitStatusExt},
 };
 
@@ -60,6 +65,7 @@ fn desktop_value_contains(desktop: Option<&str>, needle: &str) -> bool {
         .any(|part| part.trim().eq_ignore_ascii_case(needle))
 }
 
+#[cfg(test)]
 fn is_gnome_wayland_session_from_env(
     wayland_display: Option<&str>,
     desktop: Option<&str>,
@@ -69,14 +75,6 @@ fn is_gnome_wayland_session_from_env(
     let is_gnome = desktop_value_contains(desktop, "GNOME")
         || gnome_setup_display.is_some_and(|value| !value.trim().is_empty());
     is_wayland && is_gnome
-}
-
-fn is_gnome_wayland_session() -> bool {
-    is_gnome_wayland_session_from_env(
-        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
-        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
-        std::env::var("GNOME_SETUP_DISPLAY").ok().as_deref(),
-    )
 }
 
 fn should_use_gtk_layer_shell_selector_from_env(
@@ -202,12 +200,13 @@ fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResu
             Ok(AreaCapturePathResult::RecordingRequested(request))
         }
         Err(SelectionError::WindowCaptureRequested) => {
-            eprintln!("[capture] Window capture requested from GTK overlay — using Wayland portal");
+            // Prefer the shared C++/GNOME window-capture path (in-overlay picker
+            // on GNOME; ScreenCast only as a last resort for non-GNOME Wayland).
+            eprintln!(
+                "[capture] Window capture requested from GTK overlay — launching window capture"
+            );
             wait_for_layer_shell_overlay_to_unmap();
-            let capture = backend.capture_window(0).map_err(|err| {
-                SelectionError::InitError(format!("Wayland window capture failed: {err}"))
-            })?;
-            save_capture_to_temp_png(&capture).map(AreaCapturePathResult::Captured)
+            capture_window_file_via_cpp().map(AreaCapturePathResult::Captured)
         }
         Err(SelectionError::OcrRequested(area)) => {
             eprintln!("[capture] OCR requested from GTK overlay — capturing area for OCR");
@@ -585,6 +584,40 @@ fn run_capture_binary(
         ));
     }
 
+    // Prefer the warm worker (Qt already up). Fall back to cold spawn on any
+    // warm-path failure so capture never hard-breaks.
+    #[cfg(unix)]
+    {
+        match run_capture_via_warm_worker(extra_args, background_png) {
+            Ok(output) => {
+                reemit_capture_stderr(&output.stderr);
+                match classify_overlay_exit_code(output.status.code()) {
+                    Ok(Some("forwarded")) => {
+                        return Ok(synthetic_output(
+                            OverlayExitCode::ForwardedToExistingOverlay as i32,
+                        ));
+                    }
+                    Err(reason) => return Err(blocked_selection_error(reason)),
+                    _ => {}
+                }
+                return Ok(output);
+            }
+            Err(warm_err) => {
+                eprintln!(
+                    "[capture_overlay] Warm capture helper unavailable ({warm_err}); \
+                     falling back to cold spawn."
+                );
+            }
+        }
+    }
+
+    run_capture_binary_cold(extra_args, background_png)
+}
+
+fn run_capture_binary_cold(
+    extra_args: &[&str],
+    background_png: Option<&Path>,
+) -> Result<Output, SelectionError> {
     let binary = find_capture_binary().ok_or_else(|| {
         SelectionError::InitError(
             "apexshot-capture binary not found. \
@@ -653,6 +686,255 @@ fn run_capture_binary(
     }
 
     Ok(output)
+}
+
+// ── Warm capture helper ──────────────────────────────────────────────────────
+
+#[cfg(unix)]
+fn warm_capture_disabled() -> bool {
+    std::env::var_os("APEXSHOT_DISABLE_WARM_CAPTURE").is_some()
+}
+
+#[cfg(unix)]
+fn worker_socket_path() -> PathBuf {
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("apexshot-capture-worker.sock")
+}
+
+#[cfg(unix)]
+struct WarmWorkerState {
+    child: Child,
+}
+
+#[cfg(unix)]
+fn warm_worker_state() -> &'static Mutex<Option<WarmWorkerState>> {
+    static STATE: OnceLock<Mutex<Option<WarmWorkerState>>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(None))
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkerJobResponse {
+    exit_code: i32,
+    #[serde(default)]
+    stdout: String,
+    #[serde(default)]
+    stderr: String,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkerJobRequest<'a> {
+    args: Vec<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkerCmdRequest<'a> {
+    cmd: &'a str,
+}
+
+/// Start (or verify) the long-lived `apexshot-capture --worker` process.
+///
+/// Safe to call from the daemon at startup and again before each capture.
+/// No-op when warm capture is disabled or the binary is missing.
+pub fn ensure_warm_capture_helper() {
+    #[cfg(unix)]
+    {
+        if warm_capture_disabled() {
+            return;
+        }
+        match ensure_warm_worker_running() {
+            Ok(()) => {}
+            Err(err) => {
+                eprintln!("[capture_overlay] Warm capture helper not ready: {err}");
+            }
+        }
+    }
+}
+
+/// Ask the warm helper to exit and clear local process bookkeeping.
+pub fn shutdown_warm_capture_helper() {
+    #[cfg(unix)]
+    {
+        if warm_capture_disabled() {
+            return;
+        }
+        let _ = worker_send_cmd("shutdown", Duration::from_millis(800));
+        if let Ok(mut guard) = warm_worker_state().lock() {
+            if let Some(mut state) = guard.take() {
+                let _ = state.child.kill();
+                let _ = state.child.wait();
+            }
+        }
+        let path = worker_socket_path();
+        let _ = std::fs::remove_file(&path);
+        eprintln!("[capture_overlay] Warm capture helper shut down.");
+    }
+}
+
+#[cfg(unix)]
+fn ensure_warm_worker_running() -> Result<(), String> {
+    // Reuse a live worker when possible.
+    if worker_ping(Duration::from_millis(250)).is_ok() {
+        return Ok(());
+    }
+
+    let binary = find_capture_binary()
+        .ok_or_else(|| "apexshot-capture binary not found for warm helper".to_string())?;
+
+    // Clear a stale socket before spawn.
+    let sock = worker_socket_path();
+    let _ = std::fs::remove_file(&sock);
+
+    // Drop any bookkeeping for a dead child.
+    if let Ok(mut guard) = warm_worker_state().lock() {
+        if let Some(mut state) = guard.take() {
+            let _ = state.child.kill();
+            let _ = state.child.wait();
+        }
+    }
+
+    let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
+
+    let mut cmd = Command::new(&binary);
+    cmd.arg("--worker")
+        .env("QT_IM_MODULE", "compose")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        // Worker logs readiness + job stderr to its stderr; inherit so journalctl
+        // still shows freeze timing from the warm path.
+        .stderr(Stdio::inherit());
+
+    let child = cmd.spawn().map_err(|e| {
+        format!(
+            "failed to spawn warm capture worker ({}): {e}",
+            binary.display()
+        )
+    })?;
+    let pid = child.id();
+
+    if let Ok(mut guard) = warm_worker_state().lock() {
+        *guard = Some(WarmWorkerState { child });
+    }
+
+    // Wait until the worker socket accepts pings.
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        if worker_ping(Duration::from_millis(200)).is_ok() {
+            eprintln!("[capture_overlay] Warm capture helper ready (pid={pid}).");
+            return Ok(());
+        }
+        // If the child already died, fail fast.
+        if let Ok(mut guard) = warm_worker_state().lock() {
+            if let Some(state) = guard.as_mut() {
+                if let Ok(Some(status)) = state.child.try_wait() {
+                    *guard = None;
+                    return Err(format!(
+                        "warm capture worker exited during startup: {status}"
+                    ));
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+
+    Err("warm capture worker did not become ready in time".into())
+}
+
+#[cfg(unix)]
+fn worker_ping(timeout: Duration) -> Result<(), String> {
+    worker_send_cmd("ping", timeout)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn worker_send_cmd(cmd: &str, timeout: Duration) -> Result<String, String> {
+    let path = worker_socket_path();
+    let mut stream = UnixStream::connect(&path)
+        .map_err(|e| format!("connect worker socket {}: {e}", path.display()))?;
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+
+    let req = serde_json::to_string(&WorkerCmdRequest { cmd })
+        .map_err(|e| format!("serialize worker cmd: {e}"))?;
+    stream
+        .write_all(req.as_bytes())
+        .and_then(|_| stream.write_all(b"\n"))
+        .map_err(|e| format!("write worker cmd: {e}"))?;
+
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|e| format!("read worker cmd response: {e}"))?;
+    if line.trim().is_empty() {
+        return Err("empty worker cmd response".into());
+    }
+    Ok(line)
+}
+
+#[cfg(unix)]
+fn run_capture_via_warm_worker(
+    extra_args: &[&str],
+    background_png: Option<&Path>,
+) -> Result<Output, String> {
+    if warm_capture_disabled() {
+        return Err("warm capture disabled by env".into());
+    }
+
+    ensure_warm_worker_running()?;
+
+    let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
+    let mut interactive_session = InteractiveOverlaySessionGuard::begin(extra_args);
+
+    // Track the worker pid for GNOME screenshot-lock stacking when available.
+    if let Ok(guard) = warm_worker_state().lock() {
+        if let Some(state) = guard.as_ref() {
+            interactive_session.attach_child_pid(state.child.id());
+        }
+    }
+
+    let path = worker_socket_path();
+    let mut stream =
+        UnixStream::connect(&path).map_err(|e| format!("connect worker for job: {e}"))?;
+
+    // Interactive area selection can take a long time; keep a generous timeout.
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(15 * 60)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+
+    let background = background_png.map(|p| p.to_string_lossy().into_owned());
+    let req = WorkerJobRequest {
+        args: extra_args.to_vec(),
+        background: background.as_deref(),
+    };
+    let payload = serde_json::to_string(&req).map_err(|e| format!("serialize worker job: {e}"))?;
+    stream
+        .write_all(payload.as_bytes())
+        .and_then(|_| stream.write_all(b"\n"))
+        .map_err(|e| format!("write worker job: {e}"))?;
+
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|e| format!("read worker job response: {e}"))?;
+    if line.trim().is_empty() {
+        return Err("empty worker job response".into());
+    }
+
+    let response: WorkerJobResponse = serde_json::from_str(line.trim())
+        .map_err(|e| format!("parse worker job response: {e} ({})", line.trim()))?;
+
+    // Drop guard after job finishes so GNOME lock is released.
+    drop(interactive_session);
+
+    Ok(Output {
+        status: std::process::ExitStatus::from_raw(response.exit_code << 8),
+        stdout: response.stdout.into_bytes(),
+        stderr: response.stderr.into_bytes(),
+    })
 }
 
 /// Write capture-helper stderr to our own stderr so journalctl still shows it.
@@ -1042,8 +1324,12 @@ fn parse_area_capture_output_with_persist(
             Ok(AreaCapturePathResult::Cancelled)
         }
         Some(3) => {
+            // Legacy handoff: older capture binaries exited with code 3 when the
+            // Window toolbar tool was clicked. Current overlays open an in-place
+            // window picker and no longer emit this code. Keep the path for
+            // mixed install/dev binaries.
             eprintln!(
-                "[capture_overlay] Window capture requested from area toolbar — launching portal"
+                "[capture_overlay] Legacy exit 3 from area toolbar — launching window capture"
             );
             capture_window_file_via_cpp().map(AreaCapturePathResult::Captured)
         }
@@ -1135,83 +1421,20 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
     }
 }
 
+/// Window capture is temporarily discontinued (Wayland window listing / picker
+/// maintenance cost). Keep the API so callers compile; return a clear error.
 pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
-    if builtin_screenshot_overlay_active() {
-        return Err(blocked_selection_error(
-            LaunchBlockedReason::BuiltinOverlayActive,
-        ));
-    }
-
-    if should_use_gtk_layer_shell_selector() {
-        eprintln!(
-            "[capture_overlay] capture_window_via_cpp: using Rust area overlay window picker"
-        );
-        force_wayland_gdk_for_layer_shell();
-        let backend = WaylandBackend::new().map_err(|e| {
-            SelectionError::InitError(format!("Failed to initialize Wayland backend: {e}"))
-        })?;
-        let full_capture = backend
-            .capture_screen_for_selection_impl()
-            .or_else(|_| backend.capture_screen())
-            .map_err(|err| {
-                SelectionError::InitError(format!("Wayland background capture failed: {err}"))
-            })?;
-        let area = match crate::overlay::select_window_from_capture_with_gtk(&full_capture)? {
-            OverlaySelection::Area(Some(area)) => area,
-            OverlaySelection::Area(None) => return Err(SelectionError::Cancelled),
-            OverlaySelection::Recording(_) => return Err(SelectionError::Cancelled),
-        };
-        // Crop from the frozen background — avoids the overlay-UI-in-screenshot
-        // race condition entirely since `full_capture` was taken before the
-        // window-picker overlay was shown.
-        let capture = crop_background(&full_capture, area.x, area.y, area.width, area.height)?;
-        return save_capture_to_temp_png(&capture);
-    }
-
-    if !is_gnome_wayland_session() && WaylandBackend::is_supported() {
-        eprintln!(
-            "[capture_overlay] capture_window_via_cpp: using Wayland ScreenCast portal backend"
-        );
-        let backend = WaylandBackend::new().map_err(|e| {
-            SelectionError::InitError(format!("Failed to initialize Wayland backend: {e}"))
-        })?;
-        let capture = backend.capture_window(0).map_err(|e| {
-            SelectionError::InitError(format!("Wayland window capture failed: {e}"))
-        })?;
-        return save_capture_to_temp_png(&capture);
-    }
-
-    // GNOME Wayland and non-Wayland paths use the native C++ picker/capture
-    // flow. GNOME must avoid the generic ScreenCast portal path because
-    // persisted monitor grants can lock users to a single previously approved
-    // display.
-    eprintln!("[capture_overlay] capture_window_via_cpp: launching --window-capture");
-    let output = run_capture_binary(&["--window-capture"], None)?;
-    let exit_code = output.status.code();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    eprintln!(
-        "[capture_overlay] capture_window_via_cpp: exit={:?} stdout={:?} stderr={:?}",
-        exit_code,
-        stdout.trim(),
-        stderr.trim()
-    );
-
-    match exit_code {
-        Some(0) => parse_capture_screen_json(stdout.trim()),
-        Some(1) | None => Err(SelectionError::Cancelled),
-        Some(code) if code == OverlayExitCode::ForwardedToExistingOverlay as i32 => {
-            Err(SelectionError::Cancelled)
-        }
-        Some(code) => Err(overlay_exit_error("--window-capture", code, stderr.trim())),
-    }
+    Err(SelectionError::InitError(
+        "Window capture is temporarily discontinued. Use area or fullscreen capture instead."
+            .into(),
+    ))
 }
 
 pub fn capture_window_via_cpp() -> Result<CaptureData, SelectionError> {
-    let path = capture_window_file_via_cpp()?;
-    let capture = load_capture_data_from_path(&path);
-    let _ = std::fs::remove_file(&path);
-    capture
+    Err(SelectionError::InitError(
+        "Window capture is temporarily discontinued. Use area or fullscreen capture instead."
+            .into(),
+    ))
 }
 
 fn capture_screen_file_via_wlroots() -> Result<PathBuf, SelectionError> {

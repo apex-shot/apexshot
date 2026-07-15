@@ -8,11 +8,14 @@
 #include <QDBusMessage>
 #include <QDBusReply>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageReader>
+#include <QImageWriter>
 #include <QIODevice>
 #include <QMap>
 #include <QPixmap>
@@ -24,6 +27,8 @@
 #include <QUrl>
 #include <QtMath>
 
+#include <cstdio>
+
 namespace {
 
 QString makeTempPngPath()
@@ -33,8 +38,74 @@ QString makeTempPngPath()
       .filePath(QStringLiteral("apexshot_cpp_%1.png").arg(token));
 }
 
+/// Fast PNG write for temp IPC. Default zlib level is slow on multi-monitor
+/// freezes; level 1 keeps lossless quality with much lower encode cost.
+bool savePngFast(const QImage& image, const QString& path, QString& outError)
+{
+    QImageWriter writer(path, "PNG");
+    writer.setCompression(1);
+    if (!writer.write(image)) {
+        // Fallback to QImage::save if the writer rejects the image.
+        if (!image.save(path, "PNG")) {
+            outError = QStringLiteral("Failed to save PNG to %1: %2")
+                         .arg(path, writer.errorString());
+            return false;
+        }
+    }
+    return true;
+}
+
+bool grabDesktopPixmap(QPixmap& outPixmap, QString& outError)
+{
+    QScreen* primary = QGuiApplication::primaryScreen();
+    if (!primary) {
+        outError = QStringLiteral("No primary screen available for fallback capture");
+        return false;
+    }
+
+    QRect desktop;
+    for (QScreen* screen : QGuiApplication::screens()) {
+        desktop = desktop.united(screen->geometry());
+    }
+
+    outPixmap =
+      primary->grabWindow(0, desktop.x(), desktop.y(), desktop.width(), desktop.height());
+    if (outPixmap.isNull()) {
+        outPixmap = primary->grabWindow(0);
+    }
+
+    if (outPixmap.isNull()) {
+        outError = QStringLiteral("Qt screen grab fallback returned an empty image");
+        return false;
+    }
+    return true;
+}
+
 #if defined(Q_OS_LINUX)
 constexpr unsigned long kPortalDialogDismissalDelayMs = 650;
+
+// Large multi-monitor freezes can exceed Qt's default 128MB image allocation
+// cap. allocationLimit APIs exist only on Qt 6+; Qt 5 has no hard limit here.
+struct PortalImageAllocationGuard {
+    PortalImageAllocationGuard()
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        previous = QImageReader::allocationLimit();
+        if (previous > 0 && previous < 1024) {
+            QImageReader::setAllocationLimit(1024);
+        }
+#endif
+    }
+    ~PortalImageAllocationGuard()
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QImageReader::setAllocationLimit(previous);
+#endif
+    }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    int previous = 0;
+#endif
+};
 
 bool captureViaPortal(QString& outPortalPath, QString& outError, bool interactive)
 {
@@ -148,41 +219,57 @@ bool captureViaPortal(QString& outPortalPath, QString& outError, bool interactiv
     outPortalPath = localFilePath;
     return true;
 }
-#endif
 
-bool captureViaQtGrab(QString& outTempPath, QSize& outSize, QString& outError)
+/// Flameshot-style: portal URI → QImage in memory. No re-encode to a second PNG.
+bool captureViaPortalToImage(QImage& outImage, QString& outError, bool interactive)
 {
-    QScreen* primary = QGuiApplication::primaryScreen();
-    if (!primary) {
-        outError = QStringLiteral("No primary screen available for fallback capture");
+    QString portalPath;
+    if (!captureViaPortal(portalPath, outError, interactive)) {
         return false;
     }
 
-    QRect desktop;
-    for (QScreen* screen : QGuiApplication::screens()) {
-        desktop = desktop.united(screen->geometry());
-    }
+    PortalImageAllocationGuard allocationGuard;
+    Q_UNUSED(allocationGuard);
 
-    QPixmap pixmap =
-      primary->grabWindow(0, desktop.x(), desktop.y(), desktop.width(), desktop.height());
-    if (pixmap.isNull()) {
-        pixmap = primary->grabWindow(0);
+    outImage = QImage(portalPath);
+    QFile::remove(portalPath);
+    if (outImage.isNull()) {
+        outError = QStringLiteral("Failed to load portal screenshot file: %1")
+                     .arg(portalPath);
+        return false;
     }
+    return true;
+}
+#endif
 
-    if (pixmap.isNull()) {
-        outError = QStringLiteral("Qt screen grab fallback returned an empty image");
+bool captureViaQtGrabToImage(QImage& outImage, QString& outError)
+{
+    QPixmap pixmap;
+    if (!grabDesktopPixmap(pixmap, outError)) {
+        return false;
+    }
+    outImage = pixmap.toImage();
+    if (outImage.isNull()) {
+        outError = QStringLiteral("Qt screen grab produced an empty image");
+        return false;
+    }
+    return true;
+}
+
+bool captureViaQtGrab(QString& outTempPath, QSize& outSize, QString& outError)
+{
+    QImage image;
+    if (!captureViaQtGrabToImage(image, outError)) {
         return false;
     }
 
     const auto tmpPath = makeTempPngPath();
-    if (!pixmap.save(tmpPath, "PNG")) {
-        outError = QStringLiteral("Failed to save Qt fallback screenshot to %1")
-                     .arg(tmpPath);
+    if (!savePngFast(image, tmpPath, outError)) {
         return false;
     }
 
     outTempPath = tmpPath;
-    outSize = pixmap.size();
+    outSize = image.size();
     return true;
 }
 
@@ -285,8 +372,7 @@ bool saveCroppedToTemp(const QImage& fullImage,
 
     const QImage cropped = fullImage.copy(bounded);
     const auto tmpPath = makeTempPngPath();
-    if (!cropped.save(tmpPath, "PNG")) {
-        outError = QStringLiteral("Failed to save cropped image to %1").arg(tmpPath);
+    if (!savePngFast(cropped, tmpPath, outError)) {
         return false;
     }
 
@@ -682,18 +768,33 @@ bool captureFullscreenToTempPng(QString& outPath, QSize& outSize, QString& outEr
 
 bool captureFullscreenToImage(QImage& outImage, QString& outError)
 {
-    QString path;
-    QSize size;
-    if (!captureFullscreenToTempPng(path, size, outError)) {
-        return false;
-    }
+    QElapsedTimer timer;
+    timer.start();
 
-    outImage = QImage(path);
-    QFile::remove(path);
-    if (outImage.isNull()) {
-        outError = QStringLiteral("Failed to load freeze screenshot image");
+#if defined(Q_OS_LINUX)
+    // Preferred still path: Screenshot portal → QImage (no intermediate PNG write).
+    QString portalError;
+    if (captureViaPortalToImage(outImage, portalError, false)) {
+        fprintf(stderr,
+                "apexshot-capture: freeze via Screenshot portal in %lldms (%dx%d)\n",
+                static_cast<long long>(timer.elapsed()),
+                outImage.width(),
+                outImage.height());
+        return true;
+    }
+    fprintf(stderr,
+            "apexshot-capture: Screenshot portal freeze failed (%s); trying Qt grab\n",
+            portalError.toLocal8Bit().constData());
+#endif
+
+    if (!captureViaQtGrabToImage(outImage, outError)) {
         return false;
     }
+    fprintf(stderr,
+            "apexshot-capture: freeze via Qt grab in %lldms (%dx%d)\n",
+            static_cast<long long>(timer.elapsed()),
+            outImage.width(),
+            outImage.height());
     return true;
 }
 
@@ -763,6 +864,51 @@ bool cropFromDesktopImageToTempPng(const QImage& fullDesktopImage,
       outError);
 }
 
+bool claimPortalFileToTemp(const QString& portalPath,
+                           QString& outPath,
+                           QSize& outSize,
+                           QString& outError)
+{
+    PortalImageAllocationGuard allocationGuard;
+    Q_UNUSED(allocationGuard);
+
+    QImageReader reader(portalPath);
+    QSize size = reader.size();
+    if (!size.isValid()) {
+        const QImage image(portalPath);
+        if (image.isNull()) {
+            outError = QStringLiteral("Failed to load portal screenshot file: %1")
+                         .arg(portalPath);
+            QFile::remove(portalPath);
+            return false;
+        }
+        size = image.size();
+    }
+
+    // Own a temp path under /tmp so Rust can safely delete after load.
+    // Prefer rename (same FS, free) then raw file copy — never decode+re-encode.
+    const QString tmpPath = makeTempPngPath();
+    if (QFile::rename(portalPath, tmpPath)) {
+        outPath = tmpPath;
+        outSize = size;
+        return true;
+    }
+
+    if (QFile::copy(portalPath, tmpPath)) {
+        QFile::remove(portalPath);
+        outPath = tmpPath;
+        outSize = size;
+        return true;
+    }
+
+    // Last resort: return portal path as-is (caller must delete).
+    fprintf(stderr,
+            "apexshot-capture: could not claim portal file into temp; using portal path\n");
+    outPath = portalPath;
+    outSize = size;
+    return true;
+}
+
 bool captureFullscreenToTempPngViaPortal(QString& outPath,
                                          QSize& outSize,
                                          QString& outError)
@@ -771,30 +917,16 @@ bool captureFullscreenToTempPngViaPortal(QString& outPath,
     QString portalPath;
     QString portalError;
     if (!captureViaPortal(portalPath, portalError, false)) {
-        outError = QStringLiteral("Portal fullscreen capture failed (%1)").arg(portalError);
-        return false;
+        // Fall back to in-process grab rather than failing hard on portal glitches.
+        fprintf(stderr,
+                "apexshot-capture: Screenshot portal failed (%s); Qt grab fallback\n",
+                portalError.toLocal8Bit().constData());
+        return captureViaQtGrab(outPath, outSize, outError);
     }
 
-    QImage image(portalPath);
-    if (image.isNull()) {
-        outError = QStringLiteral("Failed to load portal screenshot file: %1")
-                     .arg(portalPath);
-        return false;
-    }
-
-    const auto tmpPath = makeTempPngPath();
-    if (!image.save(tmpPath, "PNG")) {
-        outError = QStringLiteral("Failed to save portal screenshot copy to %1")
-                     .arg(tmpPath);
-        return false;
-    }
-
-    QFile::remove(portalPath);
-    outPath = tmpPath;
-    outSize = image.size();
-    return true;
+    return claimPortalFileToTemp(portalPath, outPath, outSize, outError);
 #else
-    return captureFullscreenToTempPng(outPath, outSize, outError);
+    return captureViaQtGrab(outPath, outSize, outError);
 #endif
 }
 
@@ -873,21 +1005,12 @@ bool captureAreaToTempPngFromOverlayLocal(const QRect& localSelection,
         return false;
     }
 
-    QString fullPath;
-    QSize capturedSize;
-    if (!captureFullscreenToTempPng(fullPath, capturedSize, outError)) {
+    QImage fullImage;
+    if (!captureFullscreenToImage(fullImage, outError)) {
         return false;
     }
-    if (capturedSize.width() <= 0 || capturedSize.height() <= 0) {
+    if (fullImage.width() <= 0 || fullImage.height() <= 0) {
         outError = QStringLiteral("Captured fullscreen image has invalid size");
-        QFile::remove(fullPath);
-        return false;
-    }
-
-    QImage fullImage(fullPath);
-    QFile::remove(fullPath);
-    if (fullImage.isNull()) {
-        outError = QStringLiteral("Failed to load captured fullscreen image");
         return false;
     }
 

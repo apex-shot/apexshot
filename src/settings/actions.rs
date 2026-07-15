@@ -227,7 +227,8 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.shortcut_capture_previous_area =
         button_label_value(&inputs.shortcut_capture_previous_area);
     config.shortcut_capture_fullscreen = button_label_value(&inputs.shortcut_capture_fullscreen);
-    config.shortcut_capture_window = button_label_value(&inputs.shortcut_capture_window);
+    // Window capture discontinued — always persist empty.
+    config.shortcut_capture_window.clear();
     config.shortcut_show_last_preview = button_label_value(&inputs.shortcut_show_last_preview);
     config.shortcut_open_recording_ui = button_label_value(&inputs.shortcut_open_recording_ui);
     config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);

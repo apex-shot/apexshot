@@ -21,11 +21,12 @@
 #include <cmath>
 
 const char* TOOLBAR_LABELS[NUM_TOOLS] = {
-    "Area","Fullscreen","Window","Scroll","Timer","OCR","Recording"
+    "Area", "Fullscreen", "Scroll", "Timer", "OCR", "Recording"
 };
 
+// Icon glyph ids for drawToolbarIcon (Window glyph id 3 intentionally unused)
 const int TOOLBAR_ICON_IDS[NUM_TOOLS] = {
-    1, 2, 3, 4, 5, 6, 7
+    1, 2, 4, 5, 6, 7
 };
 
 namespace {
@@ -526,41 +527,6 @@ QRegion CaptureOverlay::crosshairDirtyRegion(const QPoint& oldPoint,
     return dirty.intersected(widgetRect);
 }
 
-QRegion CaptureOverlay::windowHoverDirtyRegion(int index) const
-{
-    if (index < 0 || index >= m_windows.size()) {
-        return QRegion();
-    }
-
-    const QRect widgetRect = rect();
-    const WindowInfo& win = m_windows[index];
-    if (!widgetRect.intersects(win.rect)) {
-        return QRegion();
-    }
-
-    QRegion dirty(win.rect.adjusted(-4, -4, 4, 4));
-
-    QFont font;
-    font.setPointSizeF(11.5);
-    font.setBold(true);
-    QFontMetricsF metrics(font);
-
-    QString label = win.title.length() > 48 ? win.title.left(45) + QStringLiteral("…")
-                                            : win.title;
-    const double textWidth = metrics.horizontalAdvance(label);
-    const double pillWidth = textWidth + 28.0;
-    const double pillHeight = 32.0;
-    double pillX = win.rect.x() + (win.rect.width() - pillWidth) / 2.0;
-    double pillY = win.rect.y() - pillHeight - 8.0;
-    if (pillY < 8.0) {
-        pillY = win.rect.y() + 8.0;
-    }
-    pillX = std::max(8.0, std::min(pillX, rect().width() - pillWidth - 8.0));
-
-    dirty += QRectF(pillX, pillY, pillWidth, pillHeight).toAlignedRect().adjusted(-4, -4, 4, 4);
-    return dirty.intersected(widgetRect);
-}
-
 void CaptureOverlay::paintEvent(QPaintEvent* event)
 {
     QPainter p(this);
@@ -643,48 +609,9 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
         p.fillRect(widgetRect, QColor(0, 0, 0, 51)); // 0.20 alpha
     }
 
-    // ── Window mode ───────────────────────────────────────────────────────────
+    // ── Window picker mode (in-overlay modal, no separate process) ────────────
     if (m_windowMode) {
-        p.fillRect(widgetRect, QColor(0, 0, 0, 80));
-        // Draw highlight rect over hovered window
-        const QRegion dirtyRegion = p.clipRegion();
-        for (int i = 0; i < m_windows.size(); ++i) {
-            const WindowInfo& win = m_windows[i];
-            if (!widgetRect.intersects(win.rect)) continue;
-            bool hovered = (i == m_hoveredWindow);
-            if (!hovered && !dirtyRegion.intersects(win.rect.adjusted(-4, -4, 4, 4))) continue;
-            if (hovered) {
-                // Bright highlight border
-                p.setPen(QPen(QColor(0, 122, 255, 230), 3.0));
-                p.setBrush(QColor(0, 122, 255, 30));
-                p.drawRect(win.rect);
-                // Title pill above the window
-                QFont f; f.setPointSizeF(11.5); f.setBold(true); p.setFont(f);
-                QFontMetricsF fm(f);
-                QString label = win.title.length() > 48
-                    ? win.title.left(45) + "…" : win.title;
-                double tw = fm.horizontalAdvance(label);
-                double pillW = tw + 28, pillH = 32;
-                double px = win.rect.x() + (win.rect.width() - pillW) / 2.0;
-                double py = win.rect.y() - pillH - 8;
-                if (py < 8) py = win.rect.y() + 8;
-                px = std::max(8.0, std::min(px, sw - pillW - 8));
-                QPainterPath pill; pill.addRoundedRect(QRectF(px, py, pillW, pillH), 10, 10);
-                p.fillPath(pill, QColor(0, 0, 0, 180));
-                p.setPen(QColor(255, 255, 255, 240));
-                p.drawText(QRectF(px, py, pillW, pillH), Qt::AlignCenter, label);
-            }
-        }
-        // Bottom hint
-        QFont hf; hf.setPointSizeF(11.0); p.setFont(hf);
-        QString hint = "Click a window to capture  •  ESC to cancel";
-        QFontMetrics hfm(hf);
-        QRect tr = hfm.boundingRect(hint);
-        tr.moveCenter(widgetRect.center() + QPoint(0, (int)(sh/2) - 48));
-        QPainterPath hpill; hpill.addRoundedRect(tr.adjusted(-14,-8,14,8), 10, 10);
-        p.fillPath(hpill, QColor(0,0,0,140));
-        p.setPen(QColor(255,255,255,200));
-        p.drawText(tr, Qt::AlignCenter, hint);
+        drawWindowPickerMode(p, widgetRect);
         return;
     }
 
@@ -1663,22 +1590,24 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     );
     const QImage* blurPtr = m_blurredBg.isNull() ? nullptr : &m_blurredBg;
 
+    // Indices: 0 Area, 1 Fullscreen, 2 Scroll, 3 Timer, 4 OCR, 5 Recording
     int activeTool = 0;
     if (scrollModeActive) {
-        activeTool = 3;
+        activeTool = 2;
     }
     if (m_fullscreenMode) {
         activeTool = 1;
     }
     if (m_captureIntent == CaptureIntent::Ocr) {
-        activeTool = 5;
+        activeTool = 4;
     }
     if (m_captureIntent == CaptureIntent::Record) {
-        activeTool = 6;
+        activeTool = 5;
     }
 
     const bool timerToolEnabled = m_timerCaptureEnabled && !scrollModeActive;
     const bool timerToolActive = timerToolEnabled && m_timerDelayActive && m_captureDelaySeconds > 0;
+    constexpr int kTimerToolIndex = 3;
 
     drawFrostedPanel(p,
                      layout.leftToolsPanel.x(), layout.leftToolsPanel.y(),
@@ -1731,8 +1660,8 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     };
 
     drawActiveToolCell(activeTool);
-    if (timerToolActive && activeTool != 4) {
-        drawActiveToolCell(4);
+    if (timerToolActive && activeTool != kTimerToolIndex) {
+        drawActiveToolCell(kTimerToolIndex);
     }
 
     // ── Hover highlight on hovered tool ──────────────────────────────────────
@@ -1774,7 +1703,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         QRectF cell = layout.toolCells[i];
         double cx = cell.x() + cell.width() / 2.0;
         bool hovered = (m_hoveredTool == i);
-        bool active = (activeTool == i) || (i == 4 && timerToolActive);
+        bool active = (activeTool == i) || (i == kTimerToolIndex && timerToolActive);
         double iconAlpha = (hovered || active) ? 1.0 : 0.94;
         double shadowAlpha = hovered ? 0.24 : (active ? 0.32 : 0.50);
         double iconY = cell.y() + ((hovered || active) ? 23.5 : 24.0);

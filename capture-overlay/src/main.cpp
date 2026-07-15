@@ -1,7 +1,6 @@
 #include "CaptureOverlay.h"
 #include "MonitorPicker.h"
 #include "RecordingControlsWindow.h"
-#include "WindowPickerOverlay.h"
 #include "ScreenCapture.h"
 
 #include <QApplication>
@@ -15,6 +14,7 @@
 #include <QTemporaryFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QStandardPaths>
@@ -25,8 +25,20 @@
 #include <vector>
 
 #include <QCoreApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <vector>
+
+#if defined(Q_OS_UNIX)
+#include <unistd.h>
+#include <fcntl.h>
+#endif
 
 // Helper QObject to receive the async XDG portal Screenshot response
 class PortalResponse : public QObject
@@ -204,10 +216,274 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
 
 } // namespace
 
+// ── Warm worker (file scope) ────────────────────────────────────────────────
+
+static QString workerSocketPath()
+{
+    const QString runtimeDir = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    const QString baseDir = runtimeDir.isEmpty() ? QDir::tempPath() : runtimeDir;
+    return QDir(baseDir).filePath(QStringLiteral("apexshot-capture-worker.sock"));
+}
+
+int runCaptureJob(QApplication& app, int argc, char* argv[]);
+
+/// Run a capture job while capturing stdout/stderr to byte arrays (Unix).
+static int runCaptureJobCaptured(QApplication& app,
+                                 int argc,
+                                 char* argv[],
+                                 QByteArray& outStdout,
+                                 QByteArray& outStderr)
+{
+#if defined(Q_OS_UNIX)
+    fflush(stdout);
+    fflush(stderr);
+
+    QTemporaryFile outFile;
+    QTemporaryFile errFile;
+    outFile.setAutoRemove(true);
+    errFile.setAutoRemove(true);
+    if (!outFile.open() || !errFile.open()) {
+        return runCaptureJob(app, argc, argv);
+    }
+
+    const int outFd = outFile.handle();
+    const int errFd = errFile.handle();
+    if (outFd < 0 || errFd < 0) {
+        return runCaptureJob(app, argc, argv);
+    }
+
+    const int savedOut = dup(STDOUT_FILENO);
+    const int savedErr = dup(STDERR_FILENO);
+    if (savedOut < 0 || savedErr < 0) {
+        if (savedOut >= 0)
+            close(savedOut);
+        if (savedErr >= 0)
+            close(savedErr);
+        return runCaptureJob(app, argc, argv);
+    }
+
+    dup2(outFd, STDOUT_FILENO);
+    dup2(errFd, STDERR_FILENO);
+
+    const int code = runCaptureJob(app, argc, argv);
+
+    fflush(stdout);
+    fflush(stderr);
+    dup2(savedOut, STDOUT_FILENO);
+    dup2(savedErr, STDERR_FILENO);
+    close(savedOut);
+    close(savedErr);
+
+    outFile.seek(0);
+    errFile.seek(0);
+    outStdout = outFile.readAll();
+    outStderr = errFile.readAll();
+
+    // Mirror job stderr to the real worker stderr for journalctl.
+    if (!outStderr.isEmpty()) {
+        fwrite(outStderr.constData(), 1, static_cast<size_t>(outStderr.size()), stderr);
+        fflush(stderr);
+    }
+    return code;
+#else
+    Q_UNUSED(outStdout);
+    Q_UNUSED(outStderr);
+    return runCaptureJob(app, argc, argv);
+#endif
+}
+
+static QByteArray readSocketLine(QLocalSocket& socket, int timeoutMs)
+{
+    QElapsedTimer timer;
+    timer.start();
+    QByteArray buffer;
+    while (timer.elapsed() < timeoutMs) {
+        if (socket.state() != QLocalSocket::ConnectedState) {
+            break;
+        }
+        while (socket.bytesAvailable() > 0) {
+            const QByteArray chunk = socket.read(1);
+            if (chunk.isEmpty()) {
+                break;
+            }
+            const char ch = chunk.at(0);
+            if (ch == '\n') {
+                return buffer;
+            }
+            buffer.append(ch);
+            if (buffer.size() > 1024 * 1024) {
+                return buffer;
+            }
+        }
+        if (!socket.waitForReadyRead(
+              qMin(200, timeoutMs - static_cast<int>(timer.elapsed())))) {
+            if (socket.state() != QLocalSocket::ConnectedState) {
+                break;
+            }
+        }
+    }
+    return buffer;
+}
+
+static int runWorkerServer(QApplication& app)
+{
+    const QString sockPath = workerSocketPath();
+    QLocalServer::removeServer(sockPath);
+
+    QLocalServer server;
+    server.setSocketOptions(QLocalServer::UserAccessOption);
+    if (!server.listen(sockPath)) {
+        std::fprintf(stderr,
+                     "apexshot-capture: worker failed to listen on %s: %s\n",
+                     sockPath.toLocal8Bit().constData(),
+                     server.errorString().toLocal8Bit().constData());
+        return 2;
+    }
+
+    std::fprintf(stderr,
+                 "apexshot-capture: worker ready (pid=%lld) on %s\n",
+                 static_cast<long long>(QCoreApplication::applicationPid()),
+                 sockPath.toLocal8Bit().constData());
+
+    bool running = true;
+    while (running) {
+        // Pump Qt + wait for the next client without busy-spinning.
+        if (!server.waitForNewConnection(500)) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            continue;
+        }
+
+        while (QLocalSocket* client = server.nextPendingConnection()) {
+            client->setReadBufferSize(2 * 1024 * 1024);
+            if (client->state() != QLocalSocket::ConnectedState) {
+                client->deleteLater();
+                continue;
+            }
+
+            // Request line is small and arrives immediately.
+            const QByteArray requestLine = readSocketLine(*client, 10000);
+            if (requestLine.isEmpty()) {
+                client->disconnectFromServer();
+                client->deleteLater();
+                continue;
+            }
+
+            QJsonParseError parseError;
+            const QJsonDocument doc = QJsonDocument::fromJson(requestLine, &parseError);
+            if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+                const QByteArray err = QByteArray(
+                  "{\"exit_code\":2,\"stdout\":\"\",\"stderr\":\"invalid worker request json\"}");
+                client->write(err);
+                client->write("\n");
+                client->flush();
+                client->disconnectFromServer();
+                client->deleteLater();
+                continue;
+            }
+
+            const QJsonObject obj = doc.object();
+            const QString cmd = obj.value(QStringLiteral("cmd")).toString();
+
+            if (cmd == QLatin1String("ping")) {
+                QJsonObject pong;
+                pong.insert(QStringLiteral("ok"), true);
+                pong.insert(QStringLiteral("pid"),
+                            static_cast<qint64>(QCoreApplication::applicationPid()));
+                const QByteArray payload =
+                  QJsonDocument(pong).toJson(QJsonDocument::Compact);
+                client->write(payload);
+                client->write("\n");
+                client->flush();
+                client->disconnectFromServer();
+                client->deleteLater();
+                continue;
+            }
+
+            if (cmd == QLatin1String("shutdown")) {
+                QJsonObject bye;
+                bye.insert(QStringLiteral("ok"), true);
+                const QByteArray payload =
+                  QJsonDocument(bye).toJson(QJsonDocument::Compact);
+                client->write(payload);
+                client->write("\n");
+                client->flush();
+                if (client->state() == QLocalSocket::ConnectedState) {
+                    client->waitForBytesWritten(500);
+                }
+                client->disconnectFromServer();
+                client->deleteLater();
+                running = false;
+                break;
+            }
+
+            // Default: run a capture job with the provided argv list.
+            const QJsonArray argsJson = obj.value(QStringLiteral("args")).toArray();
+            const QString background = obj.value(QStringLiteral("background")).toString();
+
+            std::vector<QByteArray> storage;
+            storage.reserve(static_cast<size_t>(argsJson.size()) + 4);
+            storage.emplace_back(QByteArray("apexshot-capture"));
+            for (const QJsonValue& v : argsJson) {
+                storage.emplace_back(v.toString().toUtf8());
+            }
+            if (!background.isEmpty()) {
+                storage.emplace_back(QByteArray("--background"));
+                storage.emplace_back(background.toUtf8());
+            }
+
+            std::vector<char*> argvPtrs;
+            argvPtrs.reserve(storage.size());
+            for (QByteArray& s : storage) {
+                argvPtrs.push_back(s.data());
+            }
+
+            QByteArray jobStdout;
+            QByteArray jobStderr;
+            const int exitCode = runCaptureJobCaptured(app,
+                                                       static_cast<int>(argvPtrs.size()),
+                                                       argvPtrs.data(),
+                                                       jobStdout,
+                                                       jobStderr);
+
+            // Drain residual events so the next job's app.exec() starts clean.
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+            QJsonObject response;
+            response.insert(QStringLiteral("exit_code"), exitCode);
+            response.insert(QStringLiteral("stdout"), QString::fromUtf8(jobStdout));
+            response.insert(QStringLiteral("stderr"), QString::fromUtf8(jobStderr));
+            const QByteArray payload =
+              QJsonDocument(response).toJson(QJsonDocument::Compact);
+            client->write(payload);
+            client->write("\n");
+            client->flush();
+            if (client->state() == QLocalSocket::ConnectedState) {
+                client->waitForBytesWritten(2000);
+            }
+            client->disconnectFromServer();
+            client->deleteLater();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        }
+    }
+
+    server.close();
+    QLocalServer::removeServer(sockPath);
+    std::fprintf(stderr, "apexshot-capture: worker shutting down\n");
+    return 0;
+}
+
 int main(int argc, char* argv[])
 {
     qputenv("QT_QPA_PLATFORM", "");
     qputenv("QT_IM_MODULE", "compose");
+
+    bool workerMode = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--worker") == 0) {
+            workerMode = true;
+            break;
+        }
+    }
 
     QApplication app(argc, argv);
     app.setApplicationName("ApexShot Capture");
@@ -215,10 +491,19 @@ int main(int argc, char* argv[])
     app.setWindowIcon(QIcon::fromTheme("io.github.codegoddy.apexshot"));
 
     if (!QDBusConnection::sessionBus().isConnected()) {
-        std::fprintf(stderr, "apexshot-capture: session bus not connected: %s\n", 
+        std::fprintf(stderr, "apexshot-capture: session bus not connected: %s\n",
             QDBusConnection::sessionBus().lastError().message().toLocal8Bit().constData());
     }
 
+    if (workerMode) {
+        return runWorkerServer(app);
+    }
+
+    return runCaptureJob(app, argc, argv);
+}
+
+int runCaptureJob(QApplication& app, int argc, char* argv[])
+{
     bool captureScreenMode = false;
     bool areaInitMode = false;
     bool crosshairCaptureMode = false;
@@ -502,84 +787,9 @@ int main(int argc, char* argv[])
     }
 
     if (windowCaptureMode) {
-        // Show our custom window picker overlay UI
-        WindowPickerOverlay picker;
-        QObject::connect(&sessionServer, &QLocalServer::newConnection, [&sessionServer, &picker, &app]() {
-            while (QLocalSocket* socket = sessionServer.nextPendingConnection()) {
-                QObject::connect(socket, &QLocalSocket::readyRead, [socket, &picker, &app]() {
-                    const QByteArray payload = socket->readAll().trimmed();
-                    handleOverlayControlPayload(
-                        payload,
-                        [&picker]() { picker.focusAndRaiseOverlay(); },
-                        [&picker, &app]() {
-                            picker.hide();
-                            app.exit(1);
-                        });
-                });
-                QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
-                if (socket->bytesAvailable() > 0) {
-                    const QByteArray payload = socket->readAll().trimmed();
-                    handleOverlayControlPayload(
-                        payload,
-                        [&picker]() { picker.focusAndRaiseOverlay(); },
-                        [&picker, &app]() {
-                            picker.hide();
-                            app.exit(1);
-                        });
-                }
-            }
-        });
-        const int ret = app.exec();
-
-        if (ret != 3 || !picker.wasSelected()) {
-            // User cancelled or no selection
-            return 1;
-        }
-
-        // User selected a window. Capture the selected rect from a portal
-        // screenshot instead of using GNOME Shell's private screenshot D-Bus
-        // API, which is sender-restricted on recent GNOME releases.
-        AppWindowInfo selected = picker.selectedWindow();
-        std::fprintf(stderr, "apexshot-capture: capturing window '%s' (xid=%llu)\n",
-            selected.title.toLocal8Bit().constData(),
-            (unsigned long long)selected.xid);
-
-        // Activate the selected window before capture so GNOME Shell captures
-        // that real window surface instead of composited pixels underneath the
-        // picker overlay.
-        {
-            QDBusInterface windowListIface(
-                QStringLiteral("org.apexshot.WindowList"),
-                QStringLiteral("/org/apexshot/WindowList"),
-                QStringLiteral("org.apexshot.WindowList"),
-                QDBusConnection::sessionBus());
-
-            if (windowListIface.isValid()) {
-                QDBusReply<bool> activateReply = windowListIface.call(
-                    QStringLiteral("ActivateWindowById"),
-                    static_cast<quint32>(selected.xid));
-                if (!activateReply.isValid() || !activateReply.value()) {
-                    std::fprintf(stderr,
-                                 "apexshot-capture: failed to activate selected window before capture\n");
-                }
-            }
-        }
-
-        QApplication::processEvents(QEventLoop::AllEvents, 50);
-        QThread::msleep(180);
-        QApplication::processEvents(QEventLoop::AllEvents, 50);
-
-        QString imagePath;
-        QSize imageSize;
-        QString error;
-        if (!ScreenCapture::captureAreaToTempPng(selected.rect, imagePath, imageSize, error)) {
-            std::fprintf(stderr, "apexshot-capture: window rect capture failed: %s\n",
-                error.toLocal8Bit().constData());
-            return 2;
-        }
-
-        printCaptureScreenJson(imagePath, imageSize);
-        return 0;
+        std::fprintf(stderr,
+                     "apexshot-capture: window capture is temporarily discontinued\n");
+        return 2;
     }
 
     QPixmap background;
@@ -597,21 +807,11 @@ int main(int argc, char* argv[])
                            : CaptureOverlay::OverlayMode::StandardArea;
 
     const bool interactiveSelectorMode =
-      areaInitMode || crosshairCaptureMode || openRecordingUiMode;
+      areaInitMode || crosshairCaptureMode || openRecordingUiMode || windowCaptureMode;
 
-    // 1) Pick monitor first (metadata UI only — no freeze/screenshot).
-    QScreen* targetScreen = nullptr;
-    if (interactiveSelectorMode) {
-        targetScreen = MonitorPicker::selectTargetScreen();
-        if (!targetScreen) {
-            return 1; // cancelled
-        }
-        // Picker already waits for its own unmap; one more event-loop drain so
-        // freeze never samples a leftover picker surface on slow Wayland.
-        QApplication::processEvents(QEventLoop::AllEvents, 50);
-    }
-
-    // 2) Freeze only for the capture-area overlay (opaque underlay + crop source).
+    // 1) Freeze first (Flameshot-style): capture at hotkey time into memory so
+    // the monitor picker / overlay never appear in the freeze frame, and so we
+    // avoid waiting on picker unmap before the expensive grab.
     QImage desktopFreezeImage;
     if (interactiveSelectorMode && freezeSelectionBackground && background.isNull()) {
         QString freezeError;
@@ -627,6 +827,17 @@ int main(int argc, char* argv[])
                          freezeError.toLocal8Bit().constData());
             desktopFreezeImage = QImage();
         }
+    }
+
+    // 2) Pick monitor (metadata UI only — freeze already done).
+    QScreen* targetScreen = nullptr;
+    if (interactiveSelectorMode) {
+        targetScreen = MonitorPicker::selectTargetScreen();
+        if (!targetScreen) {
+            return 1; // cancelled
+        }
+        // Short drain so the picker surface is gone before the capture overlay maps.
+        QApplication::processEvents(QEventLoop::AllEvents, 20);
     }
 
     QPixmap overlayBackground = background;
@@ -775,6 +986,14 @@ int main(int argc, char* argv[])
         }
     }
 
+    // Open the in-overlay window picker only after the overlay is mapped and the
+    // freeze is aligned, so window geometry and freeze thumbnails match.
+    if (windowCaptureMode) {
+        for (const auto& overlayWindow : overlayWindows) {
+            overlayWindow->openWindowPickerMode();
+        }
+    }
+
     // Restore last selection only if it intersects the chosen monitor.
     if (!restoreSel.isNull() && restoreSel.isValid()) {
         for (const auto& overlayWindow : overlayWindows) {
@@ -873,6 +1092,25 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    // Window picker may have already captured the real window surface
+    // (Shell.Screenshot.screenshot_window) — prefer that over freeze crop.
+    if (overlay->hasPreCapturedImage()) {
+        const QString path = overlay->preCapturedImagePath();
+        QImage image(path);
+        if (!image.isNull() && QFileInfo::exists(path)) {
+            std::fprintf(stderr,
+                         "apexshot-capture: using pre-captured window surface "
+                         "(%dx%d)\n",
+                         image.width(),
+                         image.height());
+            printCaptureScreenJson(path, image.size());
+            return 0;
+        }
+        std::fprintf(stderr,
+                     "apexshot-capture: pre-captured window path missing/invalid; "
+                     "falling back to selection crop\n");
+    }
+
     const QRect sel = overlay->selection();
     if (sel.isEmpty()) {
         std::fprintf(stderr, "apexshot-capture: empty selection\n");
@@ -921,7 +1159,7 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    if (areaInitMode || crosshairCaptureMode) {
+    if (areaInitMode || crosshairCaptureMode || windowCaptureMode) {
         const bool ocrRequested = overlay->ocrRequested();
         const bool fullscreenRequested = overlay->recordFullscreen();
         const QRect selGlobal = overlay->desktopSelection();

@@ -705,6 +705,7 @@ export default class ApexShotShellSupport {
             Gio,
             GLib,
             Meta,
+            Shell,
             shellGlobal: global,
             windowTracker: Shell.WindowTracker.get_default(),
         });
