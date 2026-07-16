@@ -2635,8 +2635,12 @@ impl EditorState {
         self.locked_highlighter_stroke_size
             .unwrap_or_else(|| match self.highlighter_mode {
                 HighlighterMode::TextAware => self.stroke_size,
-                HighlighterMode::Freehand => self.pen_weight.stroke_width(),
+                HighlighterMode::Freehand => self.pen_weight.highlighter_stroke_width(),
             })
+    }
+
+    fn current_pen_stroke_size(&self) -> f64 {
+        self.pen_weight.pen_stroke_width()
     }
 
     pub fn draft_crop_rect(&self) -> Option<Rect> {
@@ -2773,7 +2777,7 @@ impl EditorState {
                     Some(AnnotationAction::Pen {
                         points,
                         color,
-                        stroke_size: self.pen_weight.stroke_width(),
+                        stroke_size: self.current_pen_stroke_size(),
                     })
                 } else {
                     None
@@ -2867,7 +2871,7 @@ impl EditorState {
             let color = self.selected_color;
             let tool = self.selected_tool;
             let shift_active = self.drag_shift_active;
-            let pen_stroke_size = self.pen_weight.stroke_width();
+            let pen_stroke_size = self.current_pen_stroke_size();
             let highlighter_stroke_size = if tool == Tool::Highlighter {
                 Some(self.current_highlighter_stroke_size())
             } else {
@@ -2895,7 +2899,7 @@ impl EditorState {
                         }
 
                         let stroke_size = highlighter_stroke_size
-                            .unwrap_or_else(|| self.pen_weight.stroke_width());
+                            .unwrap_or_else(|| self.pen_weight.highlighter_stroke_width());
 
                         if points.len() >= 2
                             && ((points[0].x - points[1].x).abs() > 0.1
@@ -3025,7 +3029,11 @@ impl EditorState {
             return points;
         }
 
-        simplify_drag_path(&points, 0.6)
+        // Light simplification only: large epsilons make strokes jump to
+        // angular polylines on mouse-up after a smooth draft. Keep enough
+        // points that midpoint curve smoothing still looks continuous.
+        let epsilon = (self.current_pen_stroke_size() * 0.08).clamp(0.25, 0.55);
+        simplify_drag_path(&points, epsilon)
     }
 
     fn expand_canvas_for_action_if_needed(&mut self, action: &mut AnnotationAction) {

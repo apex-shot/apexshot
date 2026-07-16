@@ -60,12 +60,8 @@ fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight, light: bo
     preview.set_content_width(22);
     preview.set_content_height(16);
     preview.set_draw_func(move |_, context, width, height| {
-        let stroke_width = match weight {
-            PenWeight::Small => 2.0,
-            PenWeight::Medium => 4.0,
-            PenWeight::Large => 7.0,
-            PenWeight::ExtraLarge => 10.0,
-        };
+        // Match the pen stroke scale so inspector previews match drawn ink.
+        let stroke_width = weight.pen_stroke_width();
         if light {
             context.set_source_rgba(29.0 / 255.0, 33.0 / 255.0, 41.0 / 255.0, 0.92);
         } else {
@@ -92,13 +88,11 @@ fn stroke_size_option_index(stroke_size: f64) -> usize {
 }
 
 fn pen_weight_option_index(stroke_size: f64) -> usize {
-    match stroke_size.round() as i32 {
-        8 => 0,
-        16 => 1,
-        24 => 2,
-        32 => 3,
-        _ => 1,
-    }
+    PenWeight::nearest_for_pen_stroke(stroke_size).index()
+}
+
+fn highlighter_weight_option_index(stroke_size: f64) -> usize {
+    PenWeight::nearest_for_highlighter_stroke(stroke_size).index()
 }
 
 fn selected_action_kind(action: &AnnotationAction) -> &'static str {
@@ -1827,7 +1821,17 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
                 .unwrap_or(0);
             let selected_stroke_size = st.selected_action_stroke_size().unwrap_or(st.stroke_size);
             let selected_thickness = stroke_size_option_index(selected_stroke_size);
-            let selected_pen_thickness = pen_weight_option_index(selected_stroke_size);
+            let selected_pen_thickness = match st.selected_tool {
+                Tool::Highlighter => highlighter_weight_option_index(
+                    st.selected_action_stroke_size()
+                        .unwrap_or_else(|| st.pen_weight.highlighter_stroke_width()),
+                ),
+                Tool::Pen => pen_weight_option_index(
+                    st.selected_action_stroke_size()
+                        .unwrap_or_else(|| st.pen_weight.pen_stroke_width()),
+                ),
+                _ => pen_weight_option_index(selected_stroke_size),
+            };
             sync_arrow_option_selection(&pen_inspector_list, selected_pen_thickness);
             sync_arrow_option_selection(&arrow_style_list, selected_style);
             sync_arrow_option_selection(&arrow_thickness_list, selected_thickness);

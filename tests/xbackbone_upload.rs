@@ -74,9 +74,20 @@ fn xb_config(port: u16, token: &str) -> AppConfig {
 }
 
 /// Write a small temp file named `shot.png` and return its path.
+///
+/// Path must be unique per call: cargo runs these tests in parallel in one
+/// process, so a PID-only name races (one test deletes the file while another
+/// is mid-upload / v3 fallback re-read).
 fn write_temp_png() -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut path = std::env::temp_dir();
-    path.push(format!("apexshot-xb-test-{}-shot.png", std::process::id()));
+    path.push(format!(
+        "apexshot-xb-test-{}-{}-shot.png",
+        std::process::id(),
+        seq
+    ));
     // A tiny payload; the mock server validates multipart structure, not image
     // contents, and ApexShot derives the content type from the `.png` suffix.
     std::fs::write(&path, b"fake-png-bytes-for-testing").expect("write temp png");

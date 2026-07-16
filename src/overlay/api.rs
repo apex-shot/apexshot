@@ -1,6 +1,7 @@
 use super::background::{
     background_frame_from_capture, background_frame_from_image, BackgroundFrame,
 };
+use super::monitor_picker::MonitorChoice;
 use super::state::{OverlayMode, SelectorState};
 use super::window::setup_window;
 use crate::backend::CaptureData;
@@ -129,6 +130,14 @@ impl AreaSelector {
     }
 
     fn run_with_background(&self, background: Option<BackgroundFrame>) -> SelectionResult {
+        self.run_with_background_on_monitor(background, None)
+    }
+
+    fn run_with_background_on_monitor(
+        &self,
+        background: Option<BackgroundFrame>,
+        preselected_monitor: Option<MonitorChoice>,
+    ) -> SelectionResult {
         let state = self.state.clone();
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
@@ -154,6 +163,7 @@ impl AreaSelector {
                 state_activate.clone(),
                 result_tx.clone(),
                 background_activate.clone(),
+                preselected_monitor.clone(),
             );
         });
 
@@ -322,15 +332,33 @@ pub fn select_area_from_capture(capture: &CaptureData) -> SelectionResult {
 }
 
 pub fn select_area_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
+    select_area_from_capture_with_gtk_on_monitor(capture, None)
+}
+
+/// GTK area selector on a specific monitor (multi-monitor pick-then-freeze).
+///
+/// When `preselected` is `None`, the overlay shows the same display picker as
+/// the C++ path if more than one monitor is connected.
+pub fn select_area_from_capture_with_gtk_on_monitor(
+    capture: &CaptureData,
+    preselected: Option<MonitorChoice>,
+) -> SelectionResult {
     let selector = AreaSelector::new();
     let background = background_frame_from_capture(capture)?;
-    selector.run_with_background(Some(background))
+    selector.run_with_background_on_monitor(Some(background), preselected)
 }
 
 pub fn select_crosshair_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {
+    select_crosshair_from_capture_with_gtk_on_monitor(capture, None)
+}
+
+pub fn select_crosshair_from_capture_with_gtk_on_monitor(
+    capture: &CaptureData,
+    preselected: Option<MonitorChoice>,
+) -> SelectionResult {
     let selector = AreaSelector::new_with_mode(OverlayMode::CrosshairCapture);
     let background = background_frame_from_capture(capture)?;
-    selector.run_with_background(Some(background))
+    selector.run_with_background_on_monitor(Some(background), preselected)
 }
 
 pub fn select_window_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {

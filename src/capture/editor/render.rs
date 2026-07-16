@@ -327,14 +327,15 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             color,
             stroke_size,
         } => {
-            draw_pen(context, points, color.with_alpha(0.82), *stroke_size);
+            // Full opacity while drafting so release matches the live preview.
+            draw_pen(context, points, *color, *stroke_size);
         }
         AnnotationAction::Highlighter {
             points,
             color,
             stroke_size,
         } => {
-            draw_highlighter(context, points, color.with_alpha(0.72), *stroke_size);
+            draw_highlighter(context, points, *color, *stroke_size);
         }
         AnnotationAction::Circle {
             rect,
@@ -342,13 +343,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             stroke_size,
             shadow,
         } => {
-            draw_circle_with_shadow(
-                context,
-                *rect,
-                color.with_alpha(0.82),
-                *stroke_size,
-                *shadow,
-            );
+            draw_circle_with_shadow(context, *rect, *color, *stroke_size, *shadow);
         }
         AnnotationAction::Line {
             start,
@@ -357,14 +352,8 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             stroke_size,
             shadow,
         } => {
-            draw_line_with_shadow(
-                context,
-                *start,
-                *end,
-                color.with_alpha(0.82),
-                *stroke_size,
-                *shadow,
-            );
+            // Full opacity while drafting so release matches the live preview.
+            draw_line_with_shadow(context, *start, *end, *color, *stroke_size, *shadow);
         }
         AnnotationAction::Arrow {
             start,
@@ -379,7 +368,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
                 context,
                 *start,
                 *end,
-                color.with_alpha(0.82),
+                *color,
                 *stroke_size,
                 *style,
                 control_points.clone(),
@@ -392,13 +381,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             stroke_size,
             shadow,
         } => {
-            draw_box_with_shadow(
-                context,
-                *rect,
-                color.with_alpha(0.82),
-                *stroke_size,
-                *shadow,
-            );
+            draw_box_with_shadow(context, *rect, *color, *stroke_size, *shadow);
         }
         AnnotationAction::Text {
             position,
@@ -927,6 +910,50 @@ pub fn draw_text_edit_handles(
     let _ = context.restore();
 }
 
+/// Build a smooth freehand path from sampled pointer points.
+///
+/// Uses midpoint quadratic segments (expressed as cubics for Cairo) so the
+/// stroke follows the hand without the faceted look of raw polylines, while
+/// still hitting the first and last sample exactly.
+fn append_smoothed_stroke_path(context: &gtk4::cairo::Context, points: &[Point]) {
+    if points.is_empty() {
+        return;
+    }
+    if points.len() == 1 {
+        context.move_to(points[0].x, points[0].y);
+        return;
+    }
+    if points.len() == 2 {
+        context.move_to(points[0].x, points[0].y);
+        context.line_to(points[1].x, points[1].y);
+        return;
+    }
+
+    context.move_to(points[0].x, points[0].y);
+
+    // Midpoint smoothing: each sample is a quadratic control point between
+    // consecutive segment midpoints. Convert Q(P, C, M) → cubic for Cairo.
+    let mut i = 1usize;
+    while i < points.len() - 1 {
+        let control = points[i];
+        let end = Point {
+            x: (points[i].x + points[i + 1].x) * 0.5,
+            y: (points[i].y + points[i + 1].y) * 0.5,
+        };
+        // Current point is the cubic start (implicit).
+        // C1 = P0 + 2/3 (C - P0), C2 = End + 2/3 (C - End)
+        // Cairo curve_to uses absolute coordinates for both controls and end.
+        // We approximate the quadratic with a degenerate cubic (both controls
+        // at the sample) which is stable and looks natural for ink strokes.
+        context.curve_to(control.x, control.y, control.x, control.y, end.x, end.y);
+        i += 1;
+    }
+
+    let last = points[points.len() - 1];
+    let prev = points[points.len() - 2];
+    context.curve_to(prev.x, prev.y, prev.x, prev.y, last.x, last.y);
+}
+
 pub fn draw_pen(
     context: &gtk4::cairo::Context,
     points: &[Point],
@@ -938,17 +965,15 @@ pub fn draw_pen(
     }
 
     let stroke = stroke_size.max(0.5);
+    let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
     context.set_source_rgba(color.r, color.g, color.b, color.a);
-    context.set_line_width(stroke + 0.6);
+    context.set_line_width(stroke);
     context.set_line_cap(gtk4::cairo::LineCap::Round);
     context.set_line_join(gtk4::cairo::LineJoin::Round);
-    context.move_to(points[0].x, points[0].y);
-
-    for point in &points[1..] {
-        context.line_to(point.x, point.y);
-    }
-
+    append_smoothed_stroke_path(context, points);
     let _ = context.stroke();
+    let _ = context.restore();
 }
 
 pub fn draw_highlighter(
@@ -963,6 +988,7 @@ pub fn draw_highlighter(
 
     let stroke = highlighter_stroke_width(stroke_size);
     let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
     context.set_operator(gtk4::cairo::Operator::Multiply);
     context.set_source_rgba(
         color.r,
@@ -973,12 +999,7 @@ pub fn draw_highlighter(
     context.set_line_width(stroke);
     context.set_line_cap(gtk4::cairo::LineCap::Round);
     context.set_line_join(gtk4::cairo::LineJoin::Round);
-    context.move_to(points[0].x, points[0].y);
-
-    for point in &points[1..] {
-        context.line_to(point.x, point.y);
-    }
-
+    append_smoothed_stroke_path(context, points);
     let _ = context.stroke();
     let _ = context.restore();
 }
@@ -1017,6 +1038,7 @@ pub fn draw_circle(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor,
     let min_radius = radius_x.min(radius_y);
 
     let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
     context.set_source_rgba(color.r, color.g, color.b, color.a);
 
     // When one dimension is much smaller than the stroke size, the
@@ -1087,12 +1109,16 @@ pub fn draw_line(
     color: DrawColor,
     stroke_size: f64,
 ) {
+    let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
     context.set_source_rgba(color.r, color.g, color.b, color.a);
-    context.set_line_width(stroke_size.max(0.5) + 0.4);
+    context.set_line_width(stroke_size.max(0.5));
     context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
     context.move_to(start.x, start.y);
     context.line_to(end.x, end.y);
     let _ = context.stroke();
+    let _ = context.restore();
 }
 
 fn draw_line_with_shadow(
@@ -1213,12 +1239,14 @@ pub fn thorn_arrow_outline_points(
     }
 
     let stroke = stroke_size.max(0.5);
-    let w = stroke * 3.0 + 3.0;
-    let h = (stroke * 6.0 + 10.0)
-        .clamp(12.0, 120.0)
-        .min((line_length * 0.75).max(8.0));
-    let w_h = h * 1.15;
-    let s = h * 0.35;
+    // Body / head proportions tuned so Medium (4px) reads cleanly and
+    // Very Thick (12px) stays bold without ballooning into the whole crop.
+    let w = stroke * 2.4 + 2.0;
+    let h = (stroke * 5.0 + 8.0)
+        .clamp(10.0, 96.0)
+        .min((line_length * 0.68).max(8.0));
+    let w_h = h * 1.1;
+    let s = h * 0.32;
 
     let t_neck = if is_curved {
         let mut best_t = 0.0;
@@ -1401,24 +1429,28 @@ fn draw_thorn_arrow(
         return;
     }
     let stroke = stroke_size.max(0.5);
-
-    // Drop shadow
-    let shadow_offset = (stroke * 0.4).clamp(1.5, 4.0);
     let _ = context.save();
-    context.translate(shadow_offset, shadow_offset + 1.0);
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.35 * color.a);
-    let _ = context.fill_preserve();
-    let _ = context.restore();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
 
-    // Fill
+    // Fill only — optional drop shadows are applied by `draw_shadow_layer`
+    // when the user enables object shadows, so arrows stay crisp by default.
     context.set_source_rgba(color.r, color.g, color.b, color.a);
     let _ = context.fill_preserve();
 
-    // Outline
-    context.set_source_rgba(0.1, 0.1, 0.1, color.a);
-    context.set_line_width(stroke * 0.2 + 1.0);
+    // Soft edge outline that darkens the fill slightly instead of a hard
+    // black stroke, which used to make arrows look muddy / outlined.
+    let outline_alpha = (0.28 * color.a).clamp(0.08, 0.35);
+    context.set_source_rgba(
+        (color.r * 0.35).clamp(0.0, 1.0),
+        (color.g * 0.35).clamp(0.0, 1.0),
+        (color.b * 0.35).clamp(0.0, 1.0),
+        outline_alpha,
+    );
+    context.set_line_width((stroke * 0.12 + 0.6).max(0.75));
     context.set_line_join(gtk4::cairo::LineJoin::Round);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
     let _ = context.stroke();
+    let _ = context.restore();
 }
 
 pub fn double_arrow_outline_points(
@@ -1460,12 +1492,12 @@ pub fn double_arrow_outline_points(
     }
 
     let stroke = stroke_size.max(0.5);
-    let w = stroke * 3.0 + 3.0;
-    let h = (stroke * 6.0 + 10.0)
-        .clamp(12.0, 120.0)
-        .min((line_length * 0.4).max(8.0));
-    let w_h = h * 1.15;
-    let s = h * 0.35;
+    let w = stroke * 2.4 + 2.0;
+    let h = (stroke * 5.0 + 8.0)
+        .clamp(10.0, 96.0)
+        .min((line_length * 0.38).max(8.0));
+    let w_h = h * 1.1;
+    let s = h * 0.32;
 
     let (t_neck_start, t_neck_end) = if is_curved {
         let mut t_end = 0.0;
@@ -1665,24 +1697,24 @@ fn draw_double_arrow(
         return;
     }
     let stroke = stroke_size.max(0.5);
-
-    // Drop shadow
-    let shadow_offset = (stroke * 0.4).clamp(1.5, 4.0);
     let _ = context.save();
-    context.translate(shadow_offset, shadow_offset + 1.0);
-    context.set_source_rgba(0.0, 0.0, 0.0, 0.35 * color.a);
-    let _ = context.fill_preserve();
-    let _ = context.restore();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
 
-    // Fill
     context.set_source_rgba(color.r, color.g, color.b, color.a);
     let _ = context.fill_preserve();
 
-    // Outline
-    context.set_source_rgba(0.1, 0.1, 0.1, color.a);
-    context.set_line_width(stroke * 0.2 + 1.0);
+    let outline_alpha = (0.28 * color.a).clamp(0.08, 0.35);
+    context.set_source_rgba(
+        (color.r * 0.35).clamp(0.0, 1.0),
+        (color.g * 0.35).clamp(0.0, 1.0),
+        (color.b * 0.35).clamp(0.0, 1.0),
+        outline_alpha,
+    );
+    context.set_line_width((stroke * 0.12 + 0.6).max(0.75));
     context.set_line_join(gtk4::cairo::LineJoin::Round);
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
     let _ = context.stroke();
+    let _ = context.restore();
 }
 fn build_double_arrow_path(
     context: &gtk4::cairo::Context,
@@ -1932,8 +1964,12 @@ pub fn draw_arrow_control_handles(
 }
 
 pub fn draw_box(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor, stroke_size: f64) {
+    let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::Best);
     context.set_source_rgba(color.r, color.g, color.b, color.a);
     context.set_line_width(stroke_size.max(0.5));
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
     context.rectangle(
         rect.x as f64,
         rect.y as f64,
@@ -1941,6 +1977,7 @@ pub fn draw_box(context: &gtk4::cairo::Context, rect: Rect, color: DrawColor, st
         rect.height as f64,
     );
     let _ = context.stroke();
+    let _ = context.restore();
 }
 
 fn draw_box_with_shadow(

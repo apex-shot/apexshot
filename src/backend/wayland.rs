@@ -230,18 +230,31 @@ impl WaylandBackend {
     }
 
     fn capture_monitor_via_native_screencopy() -> Option<DisplayResult<CaptureData>> {
+        Self::capture_monitor_via_native_screencopy_at(None)
+    }
+
+    /// Capture a specific output when `origin` is `Some((x, y))` (multi-monitor).
+    fn capture_monitor_via_native_screencopy_at(
+        origin: Option<(i32, i32)>,
+    ) -> Option<DisplayResult<CaptureData>> {
         if !Self::should_try_native_screencopy() {
             return None;
         }
 
         let start = std::time::Instant::now();
-        match screencopy::capture() {
+        let result = match origin {
+            Some((x, y)) => screencopy::capture_at(x, y),
+            None => screencopy::capture(),
+        };
+        match result {
             Ok(Some(capture)) => {
                 eprintln!(
-                    "[capture] Native wlr-screencopy succeeded in {:.0}ms ({}x{}).",
+                    "[capture] Native wlr-screencopy succeeded in {:.0}ms ({}x{} origin={},{}).",
                     start.elapsed().as_millis(),
                     capture.width,
-                    capture.height
+                    capture.height,
+                    capture.output_origin_x,
+                    capture.output_origin_y
                 );
                 Some(Ok(capture))
             }
@@ -694,6 +707,15 @@ impl WaylandBackend {
     /// Order: KDE native → wlr-screencopy (~50 ms) → Screenshot portal
     /// (Flameshot-style) → ScreenCast last resort.
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
+        self.capture_screen_for_selection_at(None)
+    }
+
+    /// Like [`capture_screen_for_selection_impl`], but prefer the output at
+    /// logical origin `(x, y)` when native screencopy is used (multi-monitor).
+    pub fn capture_screen_for_selection_at(
+        &self,
+        origin: Option<(i32, i32)>,
+    ) -> DisplayResult<CaptureData> {
         if Self::should_force_screenshot_portal_first() {
             match Self::capture_still_via_screenshot_portal() {
                 Ok(data) => return Ok(data),
@@ -707,7 +729,7 @@ impl WaylandBackend {
             return result;
         }
 
-        if let Some(result) = Self::capture_monitor_via_native_screencopy() {
+        if let Some(result) = Self::capture_monitor_via_native_screencopy_at(origin) {
             return result;
         }
 

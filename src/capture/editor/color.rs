@@ -1,7 +1,9 @@
 use super::types::{DrawColor, PersistedCustomColor, PersistedCustomColorSlots};
 use std::path::PathBuf;
 
-pub const STROKE_WIDTH: f64 = 12.0;
+/// Default stroke width for shape tools (line, arrow, box, circle).
+/// Matches the "Medium" thickness option in the inspector.
+pub const STROKE_WIDTH: f64 = 4.0;
 pub const HIGHLIGHTER_ALPHA_SCALE: f64 = 0.42;
 pub const MIN_STROKE_SIZE: f64 = 1.0;
 pub const MAX_STROKE_SIZE: f64 = 24.0;

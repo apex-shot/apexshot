@@ -17,6 +17,7 @@ use super::layout::{
     RectF, ToolbarHit, DEFAULT_SELECTION_HEIGHT, DEFAULT_SELECTION_WIDTH, MIN_SELECTION_HEIGHT,
     MIN_SELECTION_WIDTH,
 };
+use super::monitor_picker::{find_monitor_at, select_target_monitor, MonitorChoice};
 use super::recording::hit_testing::{
     recording_crop_menu_contains, recording_crop_menu_hit_item, recording_tile_at,
     settings_menu_contains, settings_menu_hit_item,
@@ -596,11 +597,28 @@ fn apply_aspect_to_selection(
     st.completed = true;
 }
 
+fn resolve_target_monitor(
+    display: &gdk::Display,
+    preselected: Option<MonitorChoice>,
+) -> Result<gdk::Monitor, SelectionError> {
+    if let Some(choice) = preselected {
+        if let Some(monitor) = find_monitor_at(display, choice.x, choice.y) {
+            return Ok(monitor);
+        }
+        eprintln!(
+            "[overlay] preselected monitor at ({}, {}) not found; re-running picker",
+            choice.x, choice.y
+        );
+    }
+    select_target_monitor().map(|(monitor, _)| monitor)
+}
+
 pub(crate) fn setup_window(
     app: &Application,
     state: Arc<Mutex<SelectorState>>,
     result_tx: std::sync::mpsc::Sender<SelectionResult>,
     background: Option<BackgroundFrame>,
+    preselected_monitor: Option<MonitorChoice>,
 ) {
     // Suppress GTK-side animations so the overlay appears/disappears instantly.
     install_overlay_css();
@@ -614,37 +632,32 @@ pub(crate) fn setup_window(
         }
     };
 
-    // Get screen dimensions from the first monitor
-    let monitor = {
-        let monitors = display.monitors();
-        let n = monitors.n_items();
-        if n == 0 {
-            let _ = result_tx.send(Err(SelectionError::InitError("No monitor found".into())));
+    // Multi-monitor: use preselected choice (pick-then-freeze path) or show the
+    // same floating display picker as the C++ overlay.
+    let monitor = match resolve_target_monitor(&display, preselected_monitor) {
+        Ok(m) => m,
+        Err(SelectionError::Cancelled) => {
+            let _ = result_tx.send(Err(SelectionError::Cancelled));
+            app.quit();
             return;
         }
-        // Get the first monitor from the list model
-        match monitors.item(0) {
-            Some(obj) => match obj.downcast::<gdk::Monitor>() {
-                Ok(m) => m,
-                Err(_) => {
-                    let _ = result_tx.send(Err(SelectionError::InitError(
-                        "Failed to get monitor".into(),
-                    )));
-                    return;
-                }
-            },
-            None => {
-                let _ = result_tx.send(Err(SelectionError::InitError(
-                    "No monitor at index 0".into(),
-                )));
-                return;
-            }
+        Err(e) => {
+            let _ = result_tx.send(Err(e));
+            app.quit();
+            return;
         }
     };
 
     let geometry = monitor.geometry();
     let screen_width = geometry.width();
     let screen_height = geometry.height();
+    eprintln!(
+        "[overlay] target monitor geom={}x{}+{}+{}",
+        screen_width,
+        screen_height,
+        geometry.x(),
+        geometry.y()
+    );
 
     // Create the window
     let window = ApplicationWindow::builder()
@@ -692,9 +705,9 @@ pub(crate) fn setup_window(
         window.set_exclusive_zone(-1);
     } else {
         // X11 or Wayland-without-layer-shell (e.g. GNOME Wayland):
-        // Use a regular fullscreen window. The compositor will grant it
-        // focus via the XDG activation token embedded in DESKTOP_STARTUP_ID.
-        window.set_fullscreened(true);
+        // Fullscreen on the chosen monitor so dual/multi-monitor setups
+        // open the selector on the display the user picked.
+        window.fullscreen_on_monitor(&monitor);
         window.set_decorated(false);
     }
 

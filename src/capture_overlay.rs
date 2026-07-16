@@ -30,6 +30,7 @@ use crate::{
     gnome_integration::{emit_tracked_window_closed, emit_tracked_window_opened},
     overlay::{OverlaySelection, SelectionArea, SelectionError, SelectionResult},
 };
+use gtk4::gdk;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,15 +181,30 @@ fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResu
 {
     force_wayland_gdk_for_layer_shell();
 
+    // Multi-monitor (C++-style): pick a display first, then freeze that output
+    // so the picker never appears in the freeze frame.
+    if let Err(err) = gtk4::init() {
+        // Already initialized is fine; only hard-fail when no display is usable.
+        if gdk::Display::default().is_none() {
+            return Err(SelectionError::InitError(format!(
+                "GTK init failed for monitor picker: {err}"
+            )));
+        }
+    }
+    let monitor_choice = crate::overlay::select_target_monitor_choice()?;
+
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
     let full_capture = backend
-        .capture_screen_for_selection_impl()
+        .capture_screen_for_selection_at(Some((monitor_choice.x, monitor_choice.y)))
         .or_else(|_| backend.capture_screen())
         .map_err(|err| {
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
         })?;
-    match crate::overlay::select_area_from_capture_with_gtk(&full_capture) {
+    match crate::overlay::select_area_from_capture_with_gtk_on_monitor(
+        &full_capture,
+        Some(monitor_choice),
+    ) {
         Ok(crate::overlay::OverlaySelection::Area(Some(area))) => {
             // Crop from the frozen background instead of capturing from the
             // live screen — avoids capturing our own overlay UI.
@@ -245,15 +261,27 @@ fn capture_area_via_gtk_layer_shell_wlroots() -> Result<AreaCaptureResult, Selec
 fn capture_crosshair_file_via_gtk_layer_shell_wlroots() -> Result<PathBuf, SelectionError> {
     force_wayland_gdk_for_layer_shell();
 
+    if let Err(err) = gtk4::init() {
+        if gdk::Display::default().is_none() {
+            return Err(SelectionError::InitError(format!(
+                "GTK init failed for monitor picker: {err}"
+            )));
+        }
+    }
+    let monitor_choice = crate::overlay::select_target_monitor_choice()?;
+
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
     let full_capture = backend
-        .capture_screen_for_selection_impl()
+        .capture_screen_for_selection_at(Some((monitor_choice.x, monitor_choice.y)))
         .or_else(|_| backend.capture_screen())
         .map_err(|err| {
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
         })?;
-    let area = match crate::overlay::select_crosshair_from_capture_with_gtk(&full_capture)? {
+    let area = match crate::overlay::select_crosshair_from_capture_with_gtk_on_monitor(
+        &full_capture,
+        Some(monitor_choice),
+    )? {
         OverlaySelection::Area(Some(area)) => area,
         OverlaySelection::Area(None) => return Err(SelectionError::Cancelled),
         OverlaySelection::Recording(_) => return Err(SelectionError::Cancelled),

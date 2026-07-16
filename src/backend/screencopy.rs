@@ -26,11 +26,25 @@ use super::{CaptureData, DisplayError, DisplayResult, PixelFormat};
 // Public entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Attempt a direct wlr-screencopy capture of the first available output.
+/// Attempt a direct wlr-screencopy capture of the preferred output.
+///
+/// Without a preference, captures the output with the smallest logical origin
+/// (legacy behaviour for single-monitor and left-most multi-monitor layouts).
 ///
 /// Returns `Ok(Some(data))` on success, `Ok(None)` if the compositor does
 /// not support `zwlr_screencopy_manager_v1`, or `Err(_)` on a hard failure.
 pub fn capture() -> DisplayResult<Option<CaptureData>> {
+    capture_preferred(None)
+}
+
+/// Capture the Wayland output whose logical origin is closest to `(x, y)`.
+///
+/// Used by the multi-monitor picker so freeze matches the selected display.
+pub fn capture_at(x: i32, y: i32) -> DisplayResult<Option<CaptureData>> {
+    capture_preferred(Some((x, y)))
+}
+
+fn capture_preferred(prefer_origin: Option<(i32, i32)>) -> DisplayResult<Option<CaptureData>> {
     // Connect to the running Wayland compositor.
     let conn = Connection::connect_to_env().map_err(|e| {
         DisplayError::InitializationError(format!("Could not connect to Wayland display: {e}"))
@@ -49,6 +63,11 @@ pub fn capture() -> DisplayResult<Option<CaptureData>> {
         .roundtrip(&mut state)
         .map_err(|e| DisplayError::InitializationError(format!("Wayland roundtrip failed: {e}")))?;
 
+    // Need geometry events before we can rank outputs by origin.
+    event_queue
+        .roundtrip(&mut state)
+        .map_err(|e| DisplayError::InitializationError(format!("Wayland roundtrip failed: {e}")))?;
+
     // If screencopy is not available, signal the caller to try the next tier.
     let manager = match state.screencopy_manager.take() {
         Some(m) => m,
@@ -61,19 +80,27 @@ pub fn capture() -> DisplayResult<Option<CaptureData>> {
         ));
     }
 
-    // TODO: compose all advertised outputs. For now capture the output with the
-    // smallest logical origin so multi-monitor crops at least start from the
-    // same logical desktop origin used by the overlay.
+    // Prefer the output nearest the requested origin (multi-monitor picker).
+    // Fall back to smallest logical origin so multi-monitor crops at least
+    // start from a stable desktop origin used by the overlay.
     let output = state
         .outputs
         .iter()
         .min_by_key(|o| {
-            state
+            let origin = state
                 .output_infos
                 .iter()
                 .find(|info| info.id == o.id().protocol_id())
                 .map(|info| (info.x, info.y))
-                .unwrap_or((0, 0))
+                .unwrap_or((0, 0));
+            match prefer_origin {
+                Some((px, py)) => {
+                    let dx = (origin.0 - px) as i64;
+                    let dy = (origin.1 - py) as i64;
+                    (dx * dx + dy * dy, origin.0 as i64, origin.1 as i64)
+                }
+                None => (0, origin.0 as i64, origin.1 as i64),
+            }
         })
         .cloned()
         .expect("checked non-empty");
@@ -100,6 +127,13 @@ pub fn capture() -> DisplayResult<Option<CaptureData>> {
         .find(|info| info.id == output.id().protocol_id())
         .map(|info| info.scale)
         .unwrap_or(1);
+
+    if let Some((px, py)) = prefer_origin {
+        eprintln!(
+            "[screencopy] preferred origin=({}, {}) → output origin=({}, {}) scale={}",
+            px, py, output_origin_x, output_origin_y, output_scale
+        );
+    }
 
     let shm = state
         .shm

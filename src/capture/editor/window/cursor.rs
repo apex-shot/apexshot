@@ -372,7 +372,7 @@ pub fn update_pen_cursor(window: &gtk4::ApplicationWindow, state: &EditorState) 
         1.0,
     );
 
-    set_pen_cursor(window, state.pen_weight.stroke_width(), color)
+    set_pen_cursor(window, state.pen_weight.pen_stroke_width(), color)
 }
 
 /// Set custom highlighter cursor on window
@@ -458,7 +458,7 @@ pub fn update_cursor_for_position(
             set_highlighter_cursor(window, DEFAULT_HIGHLIGHTER_CURSOR_SIZE, color);
         }
         HighlighterMode::Freehand => {
-            set_highlighter_cursor(window, state.pen_weight.stroke_width(), color);
+            set_highlighter_cursor(window, state.pen_weight.highlighter_stroke_width(), color);
         }
     }
 }

@@ -1,18 +1,18 @@
-//! Pen weight types for highlighter freehand mode
+//! Pen weight types for pen and highlighter freehand modes.
 
 use serde::{Deserialize, Serialize};
 
-/// Preset highlighter thickness levels for freehand highlighting
+/// Preset thickness levels for freehand pen / highlighter strokes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PenWeight {
-    /// Thin highlighter stroke (8px)
+    /// Thin stroke
     Small,
-    /// Medium highlighter stroke (16px)
+    /// Medium stroke
     #[default]
     Medium,
-    /// Thick highlighter stroke (24px)
+    /// Thick stroke
     Large,
-    /// Very thick highlighter stroke (32px)
+    /// Very thick stroke
     ExtraLarge,
 }
 
@@ -20,14 +20,37 @@ impl PenWeight {
     /// All available pen weights
     pub const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::ExtraLarge];
 
-    /// Get the stroke width in pixels
-    pub fn stroke_width(self) -> f64 {
+    /// Stroke width used by the pen tool (image pixels).
+    ///
+    /// Kept intentionally moderate so freehand ink matches the thickness
+    /// previews and feels natural next to shape tools. Highlighter uses a
+    /// separate, thicker scale via [`Self::highlighter_stroke_width`].
+    pub fn pen_stroke_width(self) -> f64 {
         match self {
-            Self::Small => 8.0,
+            Self::Small => 3.0,
+            Self::Medium => 5.0,
+            Self::Large => 8.0,
+            Self::ExtraLarge => 12.0,
+        }
+    }
+
+    /// Stroke width used by freehand highlighter (image pixels).
+    ///
+    /// Markers need more body than ink, so this scale stays thicker than
+    /// [`Self::pen_stroke_width`].
+    pub fn highlighter_stroke_width(self) -> f64 {
+        match self {
+            Self::Small => 10.0,
             Self::Medium => 16.0,
             Self::Large => 24.0,
             Self::ExtraLarge => 32.0,
         }
+    }
+
+    /// Back-compat alias: previous callers treated this as the freehand width.
+    /// Prefer [`Self::pen_stroke_width`] or [`Self::highlighter_stroke_width`].
+    pub fn stroke_width(self) -> f64 {
+        self.pen_stroke_width()
     }
 
     /// Get display label
@@ -75,6 +98,30 @@ impl PenWeight {
             _ => Self::Medium, // Default
         }
     }
+
+    /// Nearest weight for a stored pen stroke size (supports legacy widths).
+    pub fn nearest_for_pen_stroke(stroke_size: f64) -> Self {
+        Self::ALL
+            .into_iter()
+            .min_by(|a, b| {
+                (a.pen_stroke_width() - stroke_size)
+                    .abs()
+                    .total_cmp(&(b.pen_stroke_width() - stroke_size).abs())
+            })
+            .unwrap_or_default()
+    }
+
+    /// Nearest weight for a stored highlighter stroke size (supports legacy widths).
+    pub fn nearest_for_highlighter_stroke(stroke_size: f64) -> Self {
+        Self::ALL
+            .into_iter()
+            .min_by(|a, b| {
+                (a.highlighter_stroke_width() - stroke_size)
+                    .abs()
+                    .total_cmp(&(b.highlighter_stroke_width() - stroke_size).abs())
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// Highlighter mode selection
@@ -85,4 +132,41 @@ pub enum HighlighterMode {
     TextAware,
     /// Freehand: draw with selected pen weight
     Freehand,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pen_widths_are_thinner_than_highlighter_widths() {
+        for weight in PenWeight::ALL {
+            assert!(
+                weight.pen_stroke_width() < weight.highlighter_stroke_width(),
+                "{weight:?}: pen should be thinner than highlighter"
+            );
+        }
+    }
+
+    #[test]
+    fn nearest_pen_maps_legacy_medium_width() {
+        // Legacy Medium was 16px; nearest new pen width is ExtraLarge (12).
+        assert_eq!(
+            PenWeight::nearest_for_pen_stroke(16.0),
+            PenWeight::ExtraLarge
+        );
+        assert_eq!(PenWeight::nearest_for_pen_stroke(5.0), PenWeight::Medium);
+    }
+
+    #[test]
+    fn nearest_highlighter_keeps_legacy_scale() {
+        assert_eq!(
+            PenWeight::nearest_for_highlighter_stroke(16.0),
+            PenWeight::Medium
+        );
+        assert_eq!(
+            PenWeight::nearest_for_highlighter_stroke(32.0),
+            PenWeight::ExtraLarge
+        );
+    }
 }
