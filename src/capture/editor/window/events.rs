@@ -735,6 +735,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
     });
 
     let path_upload = path.clone();
+    let state_upload = state.clone();
     // Prevent concurrent uploads from double-clicks. Worker signals completion
     // back to the GTK main loop so we can re-enable the button (widgets are !Send).
     let uploading = Rc::new(Cell::new(false));
@@ -765,6 +766,21 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
             let (title, body) = crate::cloud::upload::not_configured_notification(&config);
             crate::utils::notify::desktop_notification_important(title, body);
             return;
+        }
+
+        // Persist canvas edits before uploading. Without this, the original
+        // capture file is uploaded and annotations only appear after Done saves.
+        // Same pattern as the video editor: export first, then upload.
+        {
+            let st = state_upload.lock().unwrap();
+            if let Err(e) = save_edited_image(&path_upload, &st) {
+                eprintln!("[editor] Failed to save edits before upload: {e}");
+                crate::utils::notify::desktop_notification_important(
+                    "Upload failed",
+                    &format!("Could not save edits: {e}"),
+                );
+                return;
+            }
         }
 
         uploading_click.set(true);
@@ -3477,6 +3493,27 @@ mod tests {
             !production_source.contains("if keyval == gdk::Key::Return || keyval == gdk::Key::KP_Enter {")
                 && production_source.contains("gdk::Key::Return | gdk::Key::KP_Enter => st.add_text_input_char('\\n'),"),
             "Enter should insert a newline character in the text input, not commit or be cancelled by the legacy text-bounds handler",
+        );
+    }
+
+    #[test]
+    fn editor_upload_saves_edits_before_uploading() {
+        // Regression: upload from the image editor used to post the original
+        // capture file; edits only appeared after Done wrote the canvas to disk.
+        let source = include_str!("events.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let upload_start = production_source
+            .find("upload_btn.connect_clicked(move |_| {")
+            .expect("upload button click handler");
+        let after_upload = &production_source[upload_start..];
+        let upload_end = after_upload
+            .find("box_btn.connect_clicked")
+            .expect("handler after upload");
+        let upload_handler = &after_upload[..upload_end];
+        assert!(
+            upload_handler.contains("save_edited_image")
+                && upload_handler.contains("upload_file_with_notifications"),
+            "Image editor Upload must persist canvas edits before uploading the file",
         );
     }
 }
