@@ -1,5 +1,5 @@
 Name:           apexshot
-Version:        0.2.31
+Version:        0.2.32
 Release:        1%{?dist}
 Summary:        Linux screenshot, annotation, OCR, and screen recording tool
 License:        GPL-3.0-only
@@ -129,6 +129,9 @@ fi
 %{_datadir}/apexshot/
 
 %changelog
+* Fri Jul 17 2026 codegoddy <codegoddy@gmail.com> - 0.2.32-1
+- Fix image editor upload to persist canvas edits before uploading
+
 * Sun Jul 12 2026 codegoddy <codegoddy@gmail.com> - 0.2.31-1
 - KDE/Fedora capture UX, KWin-native screencast, and recording support notes
 
