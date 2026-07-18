@@ -586,6 +586,9 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
         return Ok(());
     }
 
+    // Anonymous daily heartbeat (opt-out via Settings / APEXSHOT_TELEMETRY=0).
+    crate::usage_telemetry::spawn_daemon_telemetry_worker();
+
     // Main action channel — both tray and hotkeys send here.
     let (action_tx, action_rx) = std::sync::mpsc::channel::<DaemonAction>();
 
@@ -2393,6 +2396,7 @@ fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonSt
         Ok(path) => {
             let path: std::path::PathBuf = path;
             eprintln!("[daemon] Saved: {}", path.display());
+            crate::usage_telemetry::record_screenshot();
             play_shutter_sound_if_enabled();
             apply_screenshot_after_capture_actions(path, state);
             true
@@ -2423,6 +2427,7 @@ fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mutex<DaemonS
     match save_existing_png(&path, &screenshot_save_config()) {
         Ok(saved_path) => {
             eprintln!("[daemon] Saved: {}", saved_path.display());
+            crate::usage_telemetry::record_screenshot();
             apply_screenshot_after_capture_actions(saved_path, state);
         }
         Err(e) => {
@@ -2486,6 +2491,7 @@ fn run_ocr_and_report(capture: crate::backend::CaptureData) {
         Ok(result) => match &result.source {
             crate::ocr::ContentSource::QrCode => {
                 eprintln!("[daemon] QR code decoded");
+                crate::usage_telemetry::record_ocr();
                 if result.copied_to_clipboard {
                     send_desktop_notification("QR code decoded", "URL copied to clipboard");
                 } else {
@@ -2497,6 +2503,7 @@ fn run_ocr_and_report(capture: crate::backend::CaptureData) {
             }
             crate::ocr::ContentSource::Ocr { confidence } => {
                 eprintln!("[daemon] OCR successful (confidence: {}%)", confidence);
+                crate::usage_telemetry::record_ocr();
                 if result.copied_to_clipboard {
                     send_desktop_notification("OCR complete", "Text copied to clipboard");
                 } else {
@@ -2972,7 +2979,8 @@ async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
             eprintln!("[daemon] Recording discarded.");
         }
         Ok((path, StopAction::Save)) => {
-            eprintln!("[daemon] Recording saved: {}", path.display())
+            eprintln!("[daemon] Recording saved: {}", path.display());
+            crate::usage_telemetry::record_recording();
         }
         Err(e) => eprintln!("[daemon] Recording error: {e}"),
     }
@@ -3090,7 +3098,8 @@ async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
             eprintln!("[daemon] Recording discarded.");
         }
         Ok((path, StopAction::Save)) => {
-            eprintln!("[daemon] Recording saved: {}", path.display())
+            eprintln!("[daemon] Recording saved: {}", path.display());
+            crate::usage_telemetry::record_recording();
         }
         Err(e) => eprintln!("[daemon] Recording error: {e}"),
     }

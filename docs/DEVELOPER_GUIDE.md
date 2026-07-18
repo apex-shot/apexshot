@@ -202,6 +202,8 @@ cargo run --release -- logout
 - `APEXSHOT_APP_ID=your.app.id` — Override default portal app ID
 - `APEXSHOT_CLOUD_BACKEND_URL` — Override ApexShot Cloud API base URL (see `.env.example`)
 - `APEXSHOT_XBACKBONE_URL` / `APEXSHOT_XBACKBONE_TOKEN` — Override XBackBone destination
+- `APEXSHOT_TELEMETRY=0` — Disable install-script download telemetry and app usage heartbeats
+- `APEXSHOT_USAGE_TELEMETRY_URL` — Override usage heartbeat endpoint (default `https://apexshot.org/api/usage-telemetry`)
 
 ## Development Workflow
 

@@ -7,6 +7,7 @@ pub struct AdvancedSettingsWidgets {
     pub retina_suffix_check: CheckButton,
     pub ocr_lang_input: ComboBoxText,
     pub ocr_line_breaks_check: CheckButton,
+    pub telemetry_enabled_check: CheckButton,
 }
 
 pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
@@ -125,10 +126,44 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
 
     section.append(&ocr_frame);
 
+    // --- Privacy Group ---
+    let privacy_title = Label::new(Some("Privacy"));
+    privacy_title.add_css_class("settings-group-title");
+    privacy_title.set_xalign(0.0);
+    privacy_title.set_halign(Align::Start);
+    privacy_title.set_margin_bottom(8);
+    section.append(&privacy_title);
+
+    let privacy_frame = build_frame();
+
+    let telemetry_enabled_check = CheckButton::new();
+    telemetry_enabled_check.set_active(config.telemetry_enabled);
+    let telemetry_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    telemetry_hbox.set_hexpand(true);
+    let telemetry_vbox = GtkBox::new(Orientation::Vertical, 4);
+    telemetry_vbox.set_hexpand(true);
+    let lbl_telemetry = Label::new(Some("Share anonymous usage statistics"));
+    lbl_telemetry.set_xalign(0.0);
+    let telemetry_hint = Label::new(Some(
+        "Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0.",
+    ));
+    telemetry_hint.add_css_class("settings-sub-option");
+    telemetry_hint.set_xalign(0.0);
+    telemetry_hint.set_wrap(true);
+    telemetry_hint.set_max_width_chars(48);
+    telemetry_vbox.append(&lbl_telemetry);
+    telemetry_vbox.append(&telemetry_hint);
+    telemetry_hbox.append(&telemetry_vbox);
+    telemetry_hbox.append(&telemetry_enabled_check);
+    privacy_frame.append(&build_row!(&telemetry_hbox, false));
+
+    section.append(&privacy_frame);
+
     AdvancedSettingsWidgets {
         section,
         retina_suffix_check,
         ocr_lang_input,
         ocr_line_breaks_check,
+        telemetry_enabled_check,
     }
 }

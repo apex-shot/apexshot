@@ -27,6 +27,7 @@ pub mod qr;
 pub mod recording;
 pub mod settings;
 pub mod tray;
+pub mod usage_telemetry;
 pub mod utils;
 
 // Re-export commonly used types

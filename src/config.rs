@@ -152,6 +152,9 @@ pub struct AppConfig {
     pub adv_ocr_language: String,
     pub adv_ocr_keep_line_breaks: bool,
     pub adv_filename_use_utc: bool,
+    /// Anonymous usage heartbeat (daemon). Opt out in Settings or via
+    /// `APEXSHOT_TELEMETRY=0`. Default on to match install-script telemetry.
+    pub telemetry_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -271,6 +274,7 @@ impl Default for AppConfig {
             adv_ocr_language: "eng".to_string(),
             adv_ocr_keep_line_breaks: true,
             adv_filename_use_utc: false,
+            telemetry_enabled: true,
         }
     }
 }

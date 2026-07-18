@@ -55,6 +55,9 @@ security perspective and warrant extra scrutiny:
   from its sandboxing is high impact.
 - `native-host/` and `web-scroll-extension/` — Chrome / Chromium native
   messaging entry points.
+- `src/usage_telemetry.rs` and install-script download telemetry — anonymous
+  `install_id` heartbeats (version, distro, desktop, coarse counters only).
+  Must never include capture content, paths, or account data.
 
 ## Out of scope
 

@@ -90,6 +90,7 @@ pub struct SaveInputs {
     pub adv_clipboard_mode: ComboBoxText,
     pub adv_ocr_language: ComboBoxText,
     pub adv_ocr_keep_line_breaks: CheckButton,
+    pub telemetry_enabled: CheckButton,
     pub cloud_apexshot: CheckButton,
     pub cloud_xbackbone: CheckButton,
     pub cloud_auto_upload: CheckButton,
@@ -243,6 +244,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
 
     config.adv_ocr_language = combo_value(&inputs.adv_ocr_language, "eng");
     config.adv_ocr_keep_line_breaks = inputs.adv_ocr_keep_line_breaks.is_active();
+    config.telemetry_enabled = inputs.telemetry_enabled.is_active();
 
     config.cloud_destination = if inputs.cloud_xbackbone.is_active() {
         "xbackbone".to_string()
