@@ -228,6 +228,53 @@ const SETTINGS_CSS: &str = r#"
                 box-shadow: none;
             }
 
+            /* Settings sidebar Save: grey until there are unsaved changes, then orange */
+            .editor-root button.settings-save-btn {
+                background-image: none;
+                background-color: alpha(white, 0.10);
+                border: none;
+                border-radius: 6px;
+                padding: 4px 16px;
+                font-size: 12px;
+                font-weight: 600;
+                color: alpha(white, 0.42);
+                min-height: 24px;
+                box-shadow: none;
+                transition: background-color 140ms ease, color 140ms ease;
+            }
+
+            .editor-root button.settings-save-btn:hover {
+                background-image: none;
+                background-color: alpha(white, 0.12);
+                color: alpha(white, 0.50);
+                box-shadow: none;
+            }
+
+            .editor-root button.settings-save-btn.settings-save-btn-ready {
+                background-color: #b05c38;
+                color: white;
+            }
+
+            .editor-root button.settings-save-btn.settings-save-btn-ready:hover {
+                background-color: #c06540;
+                color: white;
+            }
+
+            .editor-root button.settings-save-btn:disabled,
+            .editor-root button.settings-save-btn:disabled:hover {
+                background-image: none;
+                background-color: alpha(white, 0.08);
+                color: alpha(white, 0.32);
+                opacity: 1;
+                box-shadow: none;
+            }
+
+            .editor-root button.settings-save-btn.settings-save-btn-ready:disabled,
+            .editor-root button.settings-save-btn.settings-save-btn-ready:disabled:hover {
+                background-color: alpha(white, 0.08);
+                color: alpha(white, 0.32);
+            }
+
             .editor-root.editor-theme-light .settings-sidebar-wrapper {
                 border-right-color: alpha(#111827, 0.06);
                 background-color: alpha(#111827, 0.04);
@@ -281,6 +328,35 @@ const SETTINGS_CSS: &str = r#"
 
             .editor-root.editor-theme-light button.settings-primary-btn:hover {
                 background-color: #c06540;
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn {
+                background-color: alpha(#111827, 0.08);
+                color: alpha(#1d2129, 0.38);
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn:hover {
+                background-color: alpha(#111827, 0.12);
+                color: alpha(#1d2129, 0.48);
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready {
+                background-color: #b05c38;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready:hover {
+                background-color: #c06540;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn:disabled,
+            .editor-root.editor-theme-light button.settings-save-btn:disabled:hover,
+            .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready:disabled,
+            .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready:disabled:hover {
+                background-color: alpha(#111827, 0.06);
+                color: alpha(#1d2129, 0.28);
+                opacity: 1;
             }
 
             .settings-toast {

@@ -16,7 +16,9 @@ pub use preview_overlay::{show_capture_preview_overlay, CapturePreviewError};
 
 use crate::backend::{CaptureData, CursorData, PixelFormat};
 use image::buffer::ConvertBuffer;
+use image::codecs::jpeg::JpegEncoder;
 use image::{ImageBuffer, RgbImage, Rgba, RgbaImage};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -356,6 +358,25 @@ fn generate_filename(config: &SaveConfig) -> String {
     format!("{}-{}.{}", prefix, timestamp, config.format.extension())
 }
 
+/// Encode an RGB image as JPEG with an explicit quality (1–100).
+///
+/// `image::save_with_format` ignores quality; this uses `JpegEncoder` so the
+/// configured quality actually affects the output.
+fn encode_jpeg_rgb_to_path(rgb_image: &RgbImage, path: &Path, quality: u8) -> SaveResult<()> {
+    ImageFormat::validate_jpeg_quality(quality)?;
+    let file = std::fs::File::create(path)?;
+    let mut writer = BufWriter::new(file);
+    let mut encoder = JpegEncoder::new_with_quality(&mut writer, quality);
+    encoder.encode(
+        rgb_image.as_raw(),
+        rgb_image.width(),
+        rgb_image.height(),
+        image::ColorType::Rgb8,
+    )?;
+    writer.flush()?;
+    Ok(())
+}
+
 pub fn save_existing_png(source_path: &Path, config: &SaveConfig) -> SaveResult<PathBuf> {
     let filename = generate_filename(config);
     let output_dir = config.get_output_dir()?;
@@ -376,10 +397,9 @@ pub fn save_existing_png(source_path: &Path, config: &SaveConfig) -> SaveResult<
             }
         },
         ImageFormat::Jpeg { quality } => {
-            ImageFormat::validate_jpeg_quality(quality)?;
             let image = image::open(source_path)?;
             let rgb_image: RgbImage = image.into_rgb8();
-            rgb_image.save_with_format(&output_path, image::ImageFormat::Jpeg)?;
+            encode_jpeg_rgb_to_path(&rgb_image, &output_path, quality)?;
             let _ = std::fs::remove_file(source_path);
             Ok(output_path)
         }
@@ -418,10 +438,9 @@ pub fn save_capture(capture: &CaptureData, config: &SaveConfig) -> SaveResult<Pa
             image.save(&output_path)?;
         }
         ImageFormat::Jpeg { quality } => {
-            ImageFormat::validate_jpeg_quality(quality)?;
             // Convert to RGB for JPEG (no alpha)
             let rgb_image: RgbImage = image.convert();
-            rgb_image.save_with_format(&output_path, image::ImageFormat::Jpeg)?;
+            encode_jpeg_rgb_to_path(&rgb_image, &output_path, quality)?;
         }
         ImageFormat::WebP => {
             image.save_with_format(&output_path, image::ImageFormat::WebP)?;
@@ -442,7 +461,7 @@ pub fn quick_save(capture: &CaptureData) -> SaveResult<PathBuf> {
 mod tests {
     use super::*;
     use crate::backend::PixelFormat;
-    use image::Rgb;
+    use image::{GenericImageView, Rgb};
 
     #[test]
     fn test_image_format_extension() {
@@ -647,5 +666,175 @@ mod tests {
         // Should not panic, should only draw within bounds
         // Pixel at (9, 9) should be red (cursor extends to 10,10)
         assert_eq!(image.get_pixel(9, 9), &Rgba([255, 0, 0, 255]));
+    }
+
+    /// Small non-uniform RGB capture so JPEG quality differences show up in size.
+    fn sample_capture(width: u32, height: u32) -> CaptureData {
+        let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                pixels.push(((x * 7 + y * 3) % 256) as u8);
+                pixels.push(((x * 11 + y * 5) % 256) as u8);
+                pixels.push(((x * 13 + y * 17) % 256) as u8);
+            }
+        }
+        CaptureData::new(pixels, width, height, PixelFormat::RGB24)
+    }
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "apexshot-save-test-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn save_capture_png_round_trip() {
+        let dir = unique_temp_dir("png");
+        let capture = sample_capture(16, 12);
+        let path = save_capture(
+            &capture,
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_format(ImageFormat::Png)
+                .with_cursor(false)
+                .with_prefix("roundtrip-png"),
+        )
+        .expect("png save");
+
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+        let loaded = image::open(&path).expect("open png");
+        assert_eq!(loaded.dimensions(), (16, 12));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_capture_jpeg_round_trip() {
+        let dir = unique_temp_dir("jpeg");
+        let capture = sample_capture(16, 12);
+        let path = save_capture(
+            &capture,
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_format(ImageFormat::Jpeg { quality: 85 })
+                .with_cursor(false)
+                .with_prefix("roundtrip-jpeg"),
+        )
+        .expect("jpeg save");
+
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("jpg"));
+        let loaded = image::open(&path).expect("open jpeg");
+        assert_eq!(loaded.dimensions(), (16, 12));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_capture_webp_round_trip() {
+        let dir = unique_temp_dir("webp");
+        let capture = sample_capture(16, 12);
+        let path = save_capture(
+            &capture,
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_format(ImageFormat::WebP)
+                .with_cursor(false)
+                .with_prefix("roundtrip-webp"),
+        )
+        .expect("webp save");
+
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("webp"));
+        let loaded = image::open(&path).expect("open webp");
+        assert_eq!(loaded.dimensions(), (16, 12));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn jpeg_quality_affects_file_size() {
+        let dir = unique_temp_dir("jpeg-quality");
+        let capture = sample_capture(64, 64);
+
+        let low = save_capture(
+            &capture,
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_format(ImageFormat::Jpeg { quality: 10 })
+                .with_cursor(false)
+                .with_prefix("jpeg-q10"),
+        )
+        .expect("low quality jpeg");
+        let high = save_capture(
+            &capture,
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_format(ImageFormat::Jpeg { quality: 95 })
+                .with_cursor(false)
+                .with_prefix("jpeg-q95"),
+        )
+        .expect("high quality jpeg");
+
+        let low_size = std::fs::metadata(&low).expect("meta low").len();
+        let high_size = std::fs::metadata(&high).expect("meta high").len();
+        assert!(
+            high_size > low_size,
+            "expected quality 95 ({high_size} bytes) > quality 10 ({low_size} bytes)"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_existing_png_converts_to_jpeg_and_webp() {
+        let dir = unique_temp_dir("from-png");
+        let capture = sample_capture(20, 14);
+        let png_path = save_capture(
+            &capture,
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_format(ImageFormat::Png)
+                .with_cursor(false)
+                .with_prefix("source"),
+        )
+        .expect("source png");
+
+        // Keep a second PNG source for the WebP conversion (JPEG path deletes source).
+        let png_for_webp = dir.join("source-for-webp.png");
+        std::fs::copy(&png_path, &png_for_webp).expect("copy png");
+
+        let jpeg_path = save_existing_png(
+            &png_path,
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_format(ImageFormat::Jpeg { quality: 80 })
+                .with_prefix("converted-jpeg"),
+        )
+        .expect("png→jpeg");
+        assert_eq!(jpeg_path.extension().and_then(|e| e.to_str()), Some("jpg"));
+        assert!(
+            !png_path.exists(),
+            "source png should be removed after convert"
+        );
+        let jpeg_img = image::open(&jpeg_path).expect("open converted jpeg");
+        assert_eq!(jpeg_img.dimensions(), (20, 14));
+
+        let webp_path = save_existing_png(
+            &png_for_webp,
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_format(ImageFormat::WebP)
+                .with_prefix("converted-webp"),
+        )
+        .expect("png→webp");
+        assert_eq!(webp_path.extension().and_then(|e| e.to_str()), Some("webp"));
+        let webp_img = image::open(&webp_path).expect("open converted webp");
+        assert_eq!(webp_img.dimensions(), (20, 14));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

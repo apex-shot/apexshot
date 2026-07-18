@@ -4,7 +4,9 @@ use gtk4::{
     FileChooserNative, Image, Label, Orientation, Overlay as GtkOverlay, ResponseType,
     ScrolledWindow, Separator,
 };
+use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 mod about;
 mod actions;
@@ -48,6 +50,55 @@ fn format_save_error(err: &anyhow::Error) -> String {
     } else {
         let truncated: String = compact.chars().take(MAX_LEN.saturating_sub(1)).collect();
         format!("{truncated}…")
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SettingsToastKind {
+    Neutral,
+    Success,
+    Error,
+}
+
+/// Show the in-window settings toast.
+///
+/// The label stays mapped (`visible=true`) and is toggled via opacity so the first
+/// reveal always has a real allocation — `set_visible(false)` on a GtkOverlay child
+/// often needed a second toggle before the pill painted.
+///
+/// `auto_hide` schedules a hide only for this generation, so a later show cancels
+/// any in-flight hide from a previous save.
+fn show_settings_toast(
+    toast: &Label,
+    generation: &Rc<Cell<u32>>,
+    text: &str,
+    kind: SettingsToastKind,
+    auto_hide: Option<Duration>,
+) {
+    toast.remove_css_class("settings-toast-success");
+    toast.remove_css_class("settings-toast-error");
+    match kind {
+        SettingsToastKind::Neutral => {}
+        SettingsToastKind::Success => toast.add_css_class("settings-toast-success"),
+        SettingsToastKind::Error => toast.add_css_class("settings-toast-error"),
+    }
+    toast.set_text(text);
+    toast.set_opacity(1.0);
+    toast.queue_draw();
+
+    let gen = generation.get().wrapping_add(1);
+    generation.set(gen);
+
+    if let Some(delay) = auto_hide {
+        let toast = toast.clone();
+        let generation = Rc::clone(generation);
+        gtk4::glib::timeout_add_local_once(delay, move || {
+            if generation.get() == gen {
+                toast.set_opacity(0.0);
+                toast.remove_css_class("settings-toast-success");
+                toast.remove_css_class("settings-toast-error");
+            }
+        });
     }
 }
 
@@ -159,15 +210,21 @@ fn build_settings_window(app: &Application) {
     right_box.append(&close_btn);
     toolbar.append(&right_box);
 
+    // Grey until the user changes something; orange when there are unsaved edits.
     let save_btn = Button::with_label("Save");
-    save_btn.add_css_class("settings-primary-btn");
+    save_btn.add_css_class("settings-save-btn");
+    save_btn.set_sensitive(false);
 
-    let toast = Label::new(None);
+    // Keep mapped at opacity 0 so the first "Settings saved" reveal allocates correctly.
+    let toast = Label::new(Some(""));
     toast.add_css_class("settings-toast");
     toast.set_halign(Align::Center);
     toast.set_valign(Align::Start);
     toast.set_margin_top(18);
-    toast.set_visible(false);
+    toast.set_opacity(0.0);
+    toast.set_visible(true);
+    toast.set_can_target(false);
+    let toast_generation = Rc::new(Cell::new(0u32));
 
     let window_overlay = GtkOverlay::new();
     if !prefers_dark {
@@ -504,32 +561,105 @@ fn build_settings_window(app: &Application) {
         xbackbone_api_token: cloud.xb_token_entry.clone(),
     });
 
+    // Dirty flag: grey (not clickable) until a control changes, then orange + enabled.
+    let save_dirty = Rc::new(Cell::new(false));
+    let save_busy = Rc::new(Cell::new(false));
+    let apply_save_button_state: Rc<dyn Fn()> = {
+        let save_btn = save_btn.clone();
+        let save_dirty = Rc::clone(&save_dirty);
+        let save_busy = Rc::clone(&save_busy);
+        Rc::new(move || {
+            if save_busy.get() {
+                save_btn.set_label("Saving…");
+                save_btn.remove_css_class("settings-save-btn-ready");
+                save_btn.set_sensitive(false);
+                return;
+            }
+            save_btn.set_label("Save");
+            if save_dirty.get() {
+                save_btn.add_css_class("settings-save-btn-ready");
+                save_btn.set_sensitive(true);
+            } else {
+                save_btn.remove_css_class("settings-save-btn-ready");
+                save_btn.set_sensitive(false);
+            }
+        })
+    };
+    apply_save_button_state();
+
+    let mark_save_dirty: Rc<dyn Fn()> = {
+        let save_dirty = Rc::clone(&save_dirty);
+        let save_busy = Rc::clone(&save_busy);
+        let apply_save_button_state = Rc::clone(&apply_save_button_state);
+        Rc::new(move || {
+            if save_busy.get() {
+                return;
+            }
+            if !save_dirty.get() {
+                save_dirty.set(true);
+                apply_save_button_state();
+            }
+        })
+    };
+    install_save_dirty_tracking(&save_inputs, Rc::clone(&mark_save_dirty));
+
+    // Save runs config + hotkey/autostart sync on the UI thread. Show immediate
+    // "Saving…" feedback on the next idle tick so the first click always paints
+    // a toast before that work freezes the main loop.
     let trigger_save: Rc<dyn Fn()> = {
         let save_inputs = Rc::clone(&save_inputs);
         let toast = toast.clone();
+        let toast_generation = Rc::clone(&toast_generation);
+        let save_dirty = Rc::clone(&save_dirty);
+        let save_busy = Rc::clone(&save_busy);
+        let apply_save_button_state = Rc::clone(&apply_save_button_state);
         Rc::new(move || {
-            toast.remove_css_class("settings-toast-success");
-            toast.remove_css_class("settings-toast-error");
-
-            match save_settings(&save_inputs) {
-                Ok(_) => {
-                    toast.set_text("Settings saved");
-                    toast.add_css_class("settings-toast-success");
-                }
-                Err(e) => {
-                    // Keep the toast readable; long D-Bus / IO chains overflow the UI.
-                    let message = format_save_error(&e);
-                    eprintln!("[settings] Save failed: {e:#}");
-                    toast.set_text(&format!("Save failed: {message}"));
-                    toast.add_css_class("settings-toast-error");
-                }
+            if save_busy.get() || !save_dirty.get() {
+                return;
             }
-            toast.set_visible(true);
+            save_busy.set(true);
+            apply_save_button_state();
+            show_settings_toast(
+                &toast,
+                &toast_generation,
+                "Saving…",
+                SettingsToastKind::Neutral,
+                None,
+            );
+
+            let save_inputs = Rc::clone(&save_inputs);
             let toast = toast.clone();
-            gtk4::glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
-                toast.set_visible(false);
-                toast.remove_css_class("settings-toast-success");
-                toast.remove_css_class("settings-toast-error");
+            let toast_generation = Rc::clone(&toast_generation);
+            let save_dirty = Rc::clone(&save_dirty);
+            let save_busy = Rc::clone(&save_busy);
+            let apply_save_button_state = Rc::clone(&apply_save_button_state);
+            gtk4::glib::idle_add_local_once(move || {
+                match save_settings(&save_inputs) {
+                    Ok(_) => {
+                        save_dirty.set(false);
+                        show_settings_toast(
+                            &toast,
+                            &toast_generation,
+                            "Settings saved",
+                            SettingsToastKind::Success,
+                            Some(Duration::from_secs(2)),
+                        );
+                    }
+                    Err(e) => {
+                        // Keep dirty so the user can fix and retry (stays orange).
+                        let message = format_save_error(&e);
+                        eprintln!("[settings] Save failed: {e:#}");
+                        show_settings_toast(
+                            &toast,
+                            &toast_generation,
+                            &format!("Save failed: {message}"),
+                            SettingsToastKind::Error,
+                            Some(Duration::from_secs(4)),
+                        );
+                    }
+                }
+                save_busy.set(false);
+                apply_save_button_state();
             });
         })
     };
@@ -551,4 +681,89 @@ fn build_settings_window(app: &Application) {
     );
 
     window.present();
+}
+
+/// Wire every settings control so any edit flips Save from grey → orange (ready).
+fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>) {
+    let wire_check = |check: &gtk4::CheckButton| {
+        let mark_dirty = Rc::clone(&mark_dirty);
+        check.connect_toggled(move |_| mark_dirty());
+    };
+    let wire_combo = |combo: &gtk4::ComboBoxText| {
+        let mark_dirty = Rc::clone(&mark_dirty);
+        combo.connect_changed(move |_| mark_dirty());
+    };
+    let wire_entry = |entry: &gtk4::Entry| {
+        let mark_dirty = Rc::clone(&mark_dirty);
+        entry.connect_changed(move |_| mark_dirty());
+    };
+    let wire_scale = |scale: &gtk4::Scale| {
+        let mark_dirty = Rc::clone(&mark_dirty);
+        scale.connect_value_changed(move |_| mark_dirty());
+    };
+    // Shortcut rows store the binding on the button label.
+    let wire_shortcut_btn = |button: &Button| {
+        let mark_dirty = Rc::clone(&mark_dirty);
+        button.connect_notify_local(Some("label"), move |_, _| mark_dirty());
+    };
+
+    wire_check(&inputs.start_at_login);
+    wire_check(&inputs.play_sounds);
+    wire_combo(&inputs.shutter_sound);
+    wire_check(&inputs.show_menu_bar_icon);
+    wire_entry(&inputs.screenshot_export_location);
+    wire_combo(&inputs.screenshot_format);
+    wire_entry(&inputs.video_export_location);
+    wire_entry(&inputs.rec_filename_pattern);
+    wire_check(&inputs.screenshot_quick_access);
+    wire_check(&inputs.screenshot_copy_to_clipboard);
+    wire_check(&inputs.screenshot_save);
+    wire_check(&inputs.screenshot_open_annotate);
+    wire_check(&inputs.rec_copy_to_clipboard);
+    wire_check(&inputs.rec_save);
+    wire_check(&inputs.rec_open_video_editor);
+    wire_combo(&inputs.quick_access_position);
+    wire_check(&inputs.quick_access_multi_display);
+    wire_scale(&inputs.quick_access_overlay_size);
+    wire_check(&inputs.quick_access_auto_close_enabled);
+    wire_combo(&inputs.quick_access_auto_close_action);
+    wire_combo(&inputs.quick_access_auto_close_interval);
+    wire_check(&inputs.quick_access_close_after_dragging);
+    wire_check(&inputs.quick_access_close_after_uploading);
+    wire_combo(&inputs.screenshot_timer_interval);
+    wire_check(&inputs.screenshot_capture_cursor);
+    wire_check(&inputs.annotate_inverse_arrow);
+    wire_check(&inputs.annotate_smooth_drawing);
+    wire_check(&inputs.annotate_draw_shadow);
+    wire_check(&inputs.annotate_auto_expand);
+    wire_check(&inputs.annotate_show_color_names);
+    wire_check(&inputs.annotate_always_on_top);
+    wire_check(&inputs.rec_notifications);
+    wire_check(&inputs.rec_countdown);
+    wire_check(&inputs.rec_remember_selection);
+    wire_shortcut_btn(&inputs.shortcut_open_file);
+    wire_shortcut_btn(&inputs.shortcut_open_from_clipboard);
+    wire_shortcut_btn(&inputs.shortcut_restore_recently_closed);
+    wire_shortcut_btn(&inputs.shortcut_toggle_overlays);
+    wire_shortcut_btn(&inputs.shortcut_capture_area);
+    wire_shortcut_btn(&inputs.shortcut_capture_crosshair);
+    wire_shortcut_btn(&inputs.shortcut_capture_previous_area);
+    wire_shortcut_btn(&inputs.shortcut_capture_fullscreen);
+    wire_shortcut_btn(&inputs.shortcut_capture_window);
+    wire_shortcut_btn(&inputs.shortcut_show_last_preview);
+    wire_shortcut_btn(&inputs.shortcut_open_recording_ui);
+    wire_shortcut_btn(&inputs.shortcut_record_screen);
+    wire_shortcut_btn(&inputs.shortcut_recording_pause_resume);
+    wire_shortcut_btn(&inputs.shortcut_recording_stop_save);
+    wire_shortcut_btn(&inputs.shortcut_recording_restart);
+    wire_shortcut_btn(&inputs.shortcut_recording_discard);
+    wire_check(&inputs.adv_retina_suffix);
+    wire_combo(&inputs.adv_clipboard_mode);
+    wire_combo(&inputs.adv_ocr_language);
+    wire_check(&inputs.adv_ocr_keep_line_breaks);
+    wire_check(&inputs.cloud_apexshot);
+    wire_check(&inputs.cloud_xbackbone);
+    wire_check(&inputs.cloud_auto_upload);
+    wire_entry(&inputs.xbackbone_url);
+    wire_entry(&inputs.xbackbone_api_token);
 }
