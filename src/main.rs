@@ -91,8 +91,11 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        // No arguments - just open settings or onboarding
-        // The tray daemon runs independently based on settings
+        // No arguments - open settings or onboarding, and ensure the tray/hotkey
+        // daemon is up so first-run is not a dead UI with no capture path.
+        std::thread::spawn(|| {
+            let _ = apexshot::daemon::ensure_daemon_running();
+        });
         if !is_onboarding_complete() {
             let _ = show_onboarding_window();
             return;

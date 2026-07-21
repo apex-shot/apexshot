@@ -313,13 +313,105 @@ install_from_source() {
     exit 1
 }
 
+installed_apexshot_version() {
+    if ! command -v apexshot >/dev/null 2>&1 && [[ ! -x /usr/bin/apexshot ]]; then
+        return 0
+    fi
+    local bin="apexshot"
+    [[ -x /usr/bin/apexshot ]] && bin="/usr/bin/apexshot"
+    "$bin" --version 2>/dev/null | awk '/^apexshot / { print $2; exit }'
+}
+
+run_as_desktop_user() {
+    if [[ $EUID -ne 0 ]]; then
+        "$@"
+        return $?
+    fi
+    local user="${SUDO_USER:-}"
+    if [[ -z "$user" || "$user" == "root" ]]; then
+        return 1
+    fi
+    local target_uid runtime_dir bus_address
+    target_uid=$(id -u "$user" 2>/dev/null || true)
+    runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${target_uid}}"
+    bus_address="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${runtime_dir}/bus}"
+    if command -v sudo >/dev/null 2>&1; then
+        sudo -u "$user" \
+            env \
+            DISPLAY="${DISPLAY:-}" \
+            WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+            XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-}" \
+            XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-}" \
+            XDG_RUNTIME_DIR="${runtime_dir}" \
+            DBUS_SESSION_BUS_ADDRESS="${bus_address}" \
+            "$@"
+    elif command -v runuser >/dev/null 2>&1; then
+        runuser -u "$user" -- \
+            env \
+            DISPLAY="${DISPLAY:-}" \
+            WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+            XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-}" \
+            XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-}" \
+            XDG_RUNTIME_DIR="${runtime_dir}" \
+            DBUS_SESSION_BUS_ADDRESS="${bus_address}" \
+            "$@"
+    else
+        return 1
+    fi
+}
+
+post_install_launch() {
+    step "Starting ApexShot"
+
+    if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+        info "No graphical session detected. Open ApexShot from the app menu after login."
+        return 0
+    fi
+
+    local bin="/usr/bin/apexshot"
+    if [[ ! -x "$bin" ]]; then
+        if command -v apexshot >/dev/null 2>&1; then
+            bin="$(command -v apexshot)"
+        else
+            warn "apexshot binary not found; open it from the app menu after install."
+            return 0
+        fi
+    fi
+
+    if ! run_as_desktop_user bash -c "
+        '${bin}' daemon >/dev/null 2>&1 &
+        sleep 0.6
+        '${bin}' >/dev/null 2>&1 &
+        true
+    "; then
+        if [[ $EUID -ne 0 ]]; then
+            nohup "$bin" daemon >/dev/null 2>&1 &
+            disown 2>/dev/null || true
+            sleep 0.6
+            nohup "$bin" >/dev/null 2>&1 &
+            disown 2>/dev/null || true
+            ok "Opened ApexShot (tray daemon + setup window)"
+        else
+            info "Could not launch GUI as a desktop user. Open ApexShot from the app menu."
+        fi
+        return 0
+    fi
+
+    ok "Opened ApexShot (tray daemon + setup window)"
+    info "Look for the tray icon, or finish setup in the window that opened."
+}
+
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is installed for openSUSE${RESET}\n"
     echo -e "  Version:   ${BOLD}${VERSION}${RESET}"
     echo -e "  Binary:    ${BOLD}/usr/bin/apexshot${RESET}"
+    echo -e "\n  ${BOLD}How to use:${RESET}"
+    echo -e "    Open ${BOLD}ApexShot${RESET} from the app menu (Settings / first-run setup)"
+    echo -e "    Tray icon + hotkeys handle day-to-day capture"
     echo -e "  Update:    ${DIM}curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/opensuse-update.sh | bash${RESET}"
     echo -e "  Remove:    ${DIM}sudo zypper remove apexshot${RESET}"
+    echo -e "  ${DIM}Re-run this installer with --force to re-download the package.${RESET}"
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}\n"
 }
 
@@ -345,6 +437,18 @@ main() {
     header
     check_prereqs
     fetch_version
+
+    local latest_ver="${VERSION#v}"
+    local current_ver
+    current_ver="$(installed_apexshot_version || true)"
+    if [[ $FORCE_REINSTALL -eq 0 && $FROM_SOURCE -eq 0 && -n "$current_ver" && "$current_ver" == "$latest_ver" ]]; then
+        ok "ApexShot ${BOLD}${current_ver}${RESET} is already installed"
+        info "Skipping re-download. Use --force to reinstall the package."
+        post_install_launch
+        summary
+        return 0
+    fi
+
     install_runtime_dependencies
 
     if [[ $FROM_SOURCE -eq 1 ]]; then
@@ -353,6 +457,7 @@ main() {
 
     download_rpm
     install_rpm
+    post_install_launch
     summary
 }
 

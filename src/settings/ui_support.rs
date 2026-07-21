@@ -1233,6 +1233,49 @@ const SETTINGS_CSS: &str = r#"
                 background-color: #b05c38;
             }
 
+            .onboarding-card-list {
+                margin-top: 8px;
+            }
+
+            .onboarding-feature-row {
+                padding: 12px 16px;
+            }
+
+            .onboarding-icon-badge {
+                background-color: alpha(#e8764a, 0.16);
+                color: #e8764a;
+                border-radius: 10px;
+                font-size: 16px;
+                font-weight: 600;
+                min-width: 40px;
+                min-height: 40px;
+            }
+
+            .editor-root.editor-theme-light .onboarding-icon-badge {
+                background-color: alpha(#b05c38, 0.12);
+                color: #9a4c2c;
+            }
+
+            .onboarding-option-card {
+                padding: 14px 16px;
+                margin: 0;
+            }
+
+            .onboarding-status-pill {
+                background-color: alpha(#e8764a, 0.14);
+                color: #e8764a;
+                border-radius: 999px;
+                padding: 3px 12px;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+            }
+
+            .editor-root.editor-theme-light .onboarding-status-pill {
+                background-color: alpha(#b05c38, 0.12);
+                color: #9a4c2c;
+            }
+
             .cloud-avatar {
                 background-color: #bb6d7a;
                 color: white;

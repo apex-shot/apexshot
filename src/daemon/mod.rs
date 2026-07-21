@@ -382,6 +382,44 @@ pub fn start_daemon_subprocess() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Whether a daemon is reachable on the session bus.
+pub fn is_daemon_running() -> bool {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    zbus::blocking::Proxy::new(&conn, DAEMON_BUS_NAME, DAEMON_OBJECT_PATH, DAEMON_INTERFACE).is_ok()
+}
+
+/// Start the tray/hotkey daemon if needed and wait briefly for D-Bus readiness.
+///
+/// Returns `true` when a daemon is reachable (already running or freshly started).
+/// Fail-open: never panics; returns `false` if spawn/connect fails.
+pub fn ensure_daemon_running() -> bool {
+    if is_daemon_running() {
+        return true;
+    }
+
+    if let Err(e) = start_daemon_subprocess() {
+        eprintln!("[daemon] Failed to start daemon: {e}");
+        return false;
+    }
+
+    // D-Bus name claim + tray setup usually finishes within a few hundred ms.
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        if is_daemon_running() {
+            return true;
+        }
+    }
+
+    is_daemon_running()
+}
+
+/// Blocking D-Bus Trigger for use outside async contexts (onboarding, settings).
+pub fn trigger_daemon_action_sync(action: &str) -> bool {
+    trigger_daemon_action_blocking(action)
+}
+
 fn spawn_daemon_tray(
     action_tx: &std::sync::mpsc::Sender<DaemonAction>,
 ) -> anyhow::Result<ksni::Handle<ApexShotTray>> {

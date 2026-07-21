@@ -1,6 +1,8 @@
 use gtk4::{prelude::*, Align, Button, Label};
 use std::process::Command;
 
+use super::ui::feature_card_list;
+
 // TODO: Update these URLs when extensions are published
 const GNOME_EXTENSION_URL: &str =
     "https://github.com/apex-shot/apexshot/releases/tag/gnome-extension-v2";
@@ -162,33 +164,34 @@ pub fn build_gnome(content: &gtk4::Box) {
 
     // Description
     let desc = Label::new(Some(
-        "ApexShot requires the GNOME Shell extension for full functionality:",
+        "On GNOME Wayland, the shell extension unlocks the polished capture experience:",
     ));
     desc.set_halign(Align::Center);
     desc.set_wrap(true);
+    desc.set_justify(gtk4::Justification::Center);
     desc.set_width_request(500);
     desc.add_css_class("settings-sub-option");
     content.append(&desc);
 
-    // Features
-    let features_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    features_box.set_margin_top(32);
-    features_box.set_halign(Align::Center);
-
-    let features = [
-        "Floating preview windows",
-        "Quick access overlay",
-        "Recording status indicator",
-    ];
-
-    for feature in features {
-        let label = Label::new(Some(feature));
-        label.set_halign(Align::Start);
-        label.set_margin_start(40);
-        label.set_margin_end(40);
-        features_box.append(&label);
-    }
-    content.append(&features_box);
+    let features = feature_card_list(&[
+        (
+            "▣",
+            "Floating preview windows",
+            "Always-on-top previews that stay out of your way",
+        ),
+        (
+            "◇",
+            "Quick access overlay",
+            "Post-capture actions without hunting through menus",
+        ),
+        (
+            "●",
+            "Recording status indicator",
+            "Shell-managed controls while a recording is live",
+        ),
+    ]);
+    features.set_margin_top(18);
+    content.append(&features);
 
     // Check if extension is already installed
     let is_installed = is_extension_installed();
@@ -248,37 +251,52 @@ pub fn build_chrome(content: &gtk4::Box) {
 
     // Description
     let desc = Label::new(Some(
-        "Capture full-page screenshots from any website with our Chrome/Chromium extension:",
+        "Optional Chrome/Chromium add-on for full-page web captures that open straight in ApexShot.",
     ));
     desc.set_halign(Align::Center);
     desc.set_wrap(true);
+    desc.set_justify(gtk4::Justification::Center);
     desc.set_width_request(500);
     desc.add_css_class("settings-sub-option");
     content.append(&desc);
 
-    // Features
-    let features_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    features_box.set_margin_top(32);
-    features_box.set_halign(Align::Center);
-
-    let features = ["Full-page scroll capture", "Sends directly to ApexShot"];
-
-    for feature in features {
-        let label = Label::new(Some(feature));
-        label.set_halign(Align::Start);
-        label.set_margin_start(40);
-        label.set_margin_end(40);
-        features_box.append(&label);
-    }
-    content.append(&features_box);
+    let features = feature_card_list(&[
+        (
+            "↓",
+            "Full-page scroll capture",
+            "Stitch long pages that a normal screenshot can't fit",
+        ),
+        (
+            "→",
+            "Sends directly to ApexShot",
+            "Opens in the editor so you can annotate and share immediately",
+        ),
+        (
+            "◎",
+            "Works with your desktop app",
+            "Native messaging keeps the browser and ApexShot in sync",
+        ),
+    ]);
+    features.set_margin_top(18);
+    content.append(&features);
 
     // Install button
     let install_btn = Button::with_label("Get Chrome Extension");
     install_btn.add_css_class("settings-primary-btn");
     install_btn.set_halign(Align::Center);
-    install_btn.set_margin_top(32);
+    install_btn.set_margin_top(28);
     install_btn.connect_clicked(|_| {
         open_url(CHROME_EXTENSION_URL);
     });
     content.append(&install_btn);
+
+    let skip_hint = Label::new(Some(
+        "Optional. You can install this later from Settings or the Chrome Web Store.",
+    ));
+    skip_hint.set_halign(Align::Center);
+    skip_hint.set_wrap(true);
+    skip_hint.set_width_request(480);
+    skip_hint.add_css_class("settings-sub-option");
+    skip_hint.set_margin_top(12);
+    content.append(&skip_hint);
 }

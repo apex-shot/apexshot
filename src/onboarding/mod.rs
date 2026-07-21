@@ -5,6 +5,8 @@ use std::path::PathBuf;
 mod cloud;
 mod complete;
 pub mod extensions;
+mod howto;
+mod ui;
 mod welcome;
 
 use crate::settings::ui_support::{install_settings_css, traffic_light_button};
@@ -33,6 +35,7 @@ pub fn mark_onboarding_complete() -> std::io::Result<()> {
 #[derive(Clone, Copy, PartialEq)]
 pub enum OnboardingStep {
     Welcome,
+    HowToUse,
     ChromeExtension,
     Cloud,
     Complete,
@@ -41,7 +44,8 @@ pub enum OnboardingStep {
 impl OnboardingStep {
     fn next(self) -> Option<Self> {
         match self {
-            Self::Welcome => Some(Self::ChromeExtension),
+            Self::Welcome => Some(Self::HowToUse),
+            Self::HowToUse => Some(Self::ChromeExtension),
             Self::ChromeExtension => Some(Self::Cloud),
             Self::Cloud => Some(Self::Complete),
             Self::Complete => None,
@@ -51,7 +55,8 @@ impl OnboardingStep {
     fn prev(self) -> Option<Self> {
         match self {
             Self::Welcome => None,
-            Self::ChromeExtension => Some(Self::Welcome),
+            Self::HowToUse => Some(Self::Welcome),
+            Self::ChromeExtension => Some(Self::HowToUse),
             Self::Cloud => Some(Self::ChromeExtension),
             Self::Complete => Some(Self::Cloud),
         }
@@ -214,6 +219,9 @@ fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
         OnboardingStep::Welcome => {
             welcome::build(&widgets.content_box);
         }
+        OnboardingStep::HowToUse => {
+            howto::build(&widgets.content_box);
+        }
         OnboardingStep::ChromeExtension => {
             extensions::build_chrome(&widgets.content_box);
         }
@@ -233,6 +241,7 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
     // Build progress dots
     let steps = [
         OnboardingStep::Welcome,
+        OnboardingStep::HowToUse,
         OnboardingStep::ChromeExtension,
         OnboardingStep::Cloud,
         OnboardingStep::Complete,
@@ -298,6 +307,10 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
         let window = widgets.window.clone();
         finish_btn.connect_clicked(move |_| {
             let _ = mark_onboarding_complete();
+            // Tray + hotkeys live in the daemon; Settings alone is not enough.
+            std::thread::spawn(|| {
+                let _ = crate::daemon::ensure_daemon_running();
+            });
             // Spawn the main app (settings UI) now that onboarding is complete
             let exe =
                 std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
