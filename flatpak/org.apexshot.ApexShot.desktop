@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=ApexShot
+Comment=Open-source Linux screenshot, annotation, and screen recording tool
+Exec=apexshot
+Icon=org.apexshot.ApexShot
+Type=Application
+Categories=Graphics;Photography;
+Keywords=screenshot;capture;recording;screen;video;sharex;alternative;linux;ocr;qr;annotation;
+StartupNotify=true
+StartupWMClass=org.apexshot.ApexShot
+Terminal=false
+X-GNOME-UsesNotifications=true

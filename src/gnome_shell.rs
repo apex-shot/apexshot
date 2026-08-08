@@ -58,6 +58,10 @@ impl Drop for MaskHandle {
 }
 
 pub fn should_use_gnome_shell_mask(wayland_display: Option<&str>, desktop: Option<&str>) -> bool {
+    // Flatpak v1: no dbus-send host shell-outs; typed zbus IPC is a later slice.
+    if crate::app_identity::portal_only() {
+        return false;
+    }
     let is_wayland = wayland_display.is_some_and(|value| !value.trim().is_empty());
     let is_gnome = desktop.is_some_and(|value| {
         value
@@ -82,6 +86,9 @@ pub fn current_session_supports_gnome_shell_mask() -> bool {
 /// (`org.apexshot.ShellOverlay`). Used to prefer panel timer / shell stop UI
 /// over the desktop-notification recording indicator (Ubuntu GNOME path).
 pub fn is_shell_overlay_service_available() -> bool {
+    if crate::app_identity::portal_only() {
+        return false;
+    }
     let output = Command::new("dbus-send")
         .args([
             "--session",
@@ -116,6 +123,9 @@ pub struct MutterMonitorInfo {
 }
 
 pub fn query_mutter_monitor_configs() -> Result<Vec<MutterMonitorInfo>, String> {
+    if let Some(msg) = crate::app_identity::host_escape_blocked("gdbus") {
+        return Err(msg);
+    }
     let output = Command::new("gdbus")
         .args([
             "call",
@@ -495,6 +505,9 @@ fn show_countdown_args(geometry: RecordingMaskGeometry, seconds: u32) -> Vec<Str
 }
 
 fn run_shell_overlay_method(method: &str, args: Vec<String>) -> anyhow::Result<()> {
+    if let Some(msg) = crate::app_identity::host_escape_blocked("dbus-send") {
+        anyhow::bail!(msg);
+    }
     let mut command = Command::new("dbus-send");
     command.args([
         "--session",

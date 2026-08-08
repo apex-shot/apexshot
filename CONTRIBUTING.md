@@ -457,7 +457,7 @@ If you need help:
 
 ## License
 
-By contributing to ApexShot, you agree that your contributions will be licensed under the GPL-3.0 license.
+By contributing to ApexShot, you agree that your contributions will be licensed under the GPL-3.0-or-later license.
 
 ## Recognition
 

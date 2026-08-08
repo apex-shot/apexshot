@@ -3,7 +3,7 @@ fn window_tool_removed_from_toolbars() {
     let cpp_drawing = include_str!("../capture-overlay/src/CaptureOverlay_Drawing.cpp");
     let cpp_events = include_str!("../capture-overlay/src/CaptureOverlay_Events.cpp");
     let rust_icons = include_str!("../src/overlay/icons.rs");
-    let rust_window = include_str!("../src/overlay/window.rs");
+    let rust_window = include_str!("../src/overlay/window/mod.rs");
 
     assert!(
         cpp_drawing.contains("\"Area\", \"Fullscreen\", \"Scroll\"")

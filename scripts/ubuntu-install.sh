@@ -303,6 +303,15 @@ prime_sudo() {
 check_prereqs() {
     step "Checking prerequisites"
 
+    local arch
+    arch="$(uname -m)"
+    if [[ "$arch" != "x86_64" ]]; then
+        err "Prebuilt packages are x86_64 only (this machine: ${arch})."
+        err "Build from source on other architectures, or open an issue: https://github.com/${REPO}/issues"
+        exit 1
+    fi
+    ok "Architecture: x86_64"
+
     if command -v apt >/dev/null 2>&1; then
         ok "apt package manager found"
     else

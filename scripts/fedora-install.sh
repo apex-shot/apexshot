@@ -180,9 +180,17 @@ download_file() {
 check_prereqs() {
     step "Checking prerequisites"
 
+    local arch
+    arch="$(uname -m)"
+    if [[ "$arch" != "x86_64" ]]; then
+        err "Prebuilt packages are x86_64 only (this machine: ${arch})."
+        exit 1
+    fi
+    ok "Architecture: x86_64"
+
     if ! command -v dnf >/dev/null 2>&1; then
         err "This installer is for Fedora systems with dnf."
-        err "Use scripts/install.sh on Ubuntu/Debian, Arch, or openSUSE."
+        err "Use scripts/install.sh on Ubuntu/Debian or Arch."
         exit 1
     fi
 

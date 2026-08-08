@@ -44,9 +44,16 @@ pub fn desktop_notification_with_options(
         return None;
     }
 
-    if prefer_dbus_primary() {
+    // Flatpak: D-Bus Notifications only — never shell out to notify-send.
+    let force_dbus = crate::app_identity::portal_only() || prefer_dbus_primary();
+
+    if force_dbus {
         match notify_via_dbus(summary, body, urgency, replaces_id) {
             Ok(id) => return Some(id),
+            Err(dbus_err) if crate::app_identity::portal_only() => {
+                eprintln!("[notify] Failed via D-Bus ({dbus_err})");
+                return None;
+            }
             Err(dbus_err) => match notify_via_notify_send(summary, body, urgency) {
                 Ok(()) => return None,
                 Err(cli_err) => {
@@ -154,6 +161,9 @@ fn notify_via_dbus(
 }
 
 fn notify_via_notify_send(summary: &str, body: &str, urgency: Urgency) -> Result<(), String> {
+    if let Some(msg) = crate::app_identity::host_escape_blocked("notify-send") {
+        return Err(msg);
+    }
     let mut cmd = Command::new("notify-send");
     cmd.arg("-a")
         .arg(app_name())

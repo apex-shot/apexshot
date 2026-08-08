@@ -246,13 +246,7 @@ fn format_user_code(code: &str) -> String {
 }
 
 fn open_browser(url: &str) -> Result<(), String> {
-    let commands = ["xdg-open", "gio", "sensible-browser"];
-    for cmd in &commands {
-        if std::process::Command::new(cmd).arg(url).spawn().is_ok() {
-            return Ok(());
-        }
-    }
-    Err("No browser launcher found".to_string())
+    crate::utils::open::open_url(url)
 }
 
 fn hostname() -> Option<String> {

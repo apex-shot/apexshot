@@ -1107,15 +1107,6 @@ fn copy_uri_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> {
     })
 }
 
-#[allow(dead_code)]
-fn open_target(path: &Path) -> Result<(), CapturePreviewError> {
-    Command::new("xdg-open")
-        .arg(path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| CapturePreviewError::OpenTargetError(e.to_string()))
-}
-
 /// Compute the card's input region in surface-local coordinates.
 ///
 /// `Widget::allocation()` is parent-relative and can miss window chrome / overlay

@@ -647,11 +647,15 @@ fn run_capture_binary_cold(
     background_png: Option<&Path>,
 ) -> Result<Output, SelectionError> {
     let binary = find_capture_binary().ok_or_else(|| {
-        SelectionError::InitError(
+        SelectionError::InitError(if crate::app_identity::portal_only() {
+            "apexshot-capture is not shipped in Flatpak/portal-only builds; \
+             still capture must use the XDG Screenshot portal path."
+                .into()
+        } else {
             "apexshot-capture binary not found. \
              Re-run `cargo build --release` to compile it, or check your PATH."
-                .into(),
-        )
+                .into()
+        })
     })?;
 
     // Capture requests often originate from the autostart daemon, which uses a
@@ -1449,6 +1453,42 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
     }
 }
 
+/// Map portal/backend errors into selection errors, treating user dismissals
+/// as cancellation rather than hard failures.
+fn portal_display_error_to_selection(err: crate::backend::DisplayError) -> SelectionError {
+    let msg = err.to_string();
+    let lower = msg.to_ascii_lowercase();
+    if lower.contains("cancel") {
+        SelectionError::Cancelled
+    } else {
+        SelectionError::InitError(msg)
+    }
+}
+
+/// Still-image capture for Flatpak / portal-only builds.
+///
+/// `interactive=true` opens the desktop Screenshot portal selector (area /
+/// region / window UI owned by the portal). `interactive=false` requests a
+/// non-interactive fullscreen still via the Screenshot portal first.
+pub fn capture_still_via_portal(interactive: bool) -> Result<CaptureData, SelectionError> {
+    let backend = WaylandBackend::new()
+        .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
+    let capture = if interactive {
+        eprintln!("[capture_overlay] portal-only: interactive Screenshot portal");
+        backend.capture_area_via_portal_interactive_impl()
+    } else {
+        eprintln!("[capture_overlay] portal-only: non-interactive Screenshot portal fullscreen");
+        backend.capture_screen_impl()
+    }
+    .map_err(portal_display_error_to_selection)?;
+    Ok(capture)
+}
+
+fn capture_still_file_via_portal(interactive: bool) -> Result<PathBuf, SelectionError> {
+    let capture = capture_still_via_portal(interactive)?;
+    save_capture_to_temp_png(&capture)
+}
+
 /// Window capture is temporarily discontinued (Wayland window listing / picker
 /// maintenance cost). Keep the API so callers compile; return a clear error.
 pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
@@ -1478,6 +1518,11 @@ fn capture_screen_file_via_wlroots() -> Result<PathBuf, SelectionError> {
 }
 
 pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
+    // Flatpak builds omit apexshot-capture; use the XDG Screenshot portal.
+    if crate::app_identity::portal_only() {
+        return capture_still_file_via_portal(false);
+    }
+
     if should_use_gtk_layer_shell_selector() {
         eprintln!("[capture_overlay] Using native wlroots fullscreen capture");
         return capture_screen_file_via_wlroots();
@@ -1503,6 +1548,10 @@ pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
 }
 
 pub fn capture_screen_via_cpp() -> Result<CaptureData, SelectionError> {
+    if crate::app_identity::portal_only() {
+        return capture_still_via_portal(false);
+    }
+
     let path = capture_screen_file_via_cpp()?;
     let capture = load_capture_data_from_path(&path);
     let _ = std::fs::remove_file(&path);
@@ -1642,6 +1691,11 @@ pub fn open_recording_ui_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
 }
 
 pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
+    // Flatpak builds omit apexshot-capture; use the interactive Screenshot portal.
+    if crate::app_identity::portal_only() {
+        return capture_still_file_via_portal(true).map(AreaCapturePathResult::Captured);
+    }
+
     if should_use_gtk_layer_shell_selector() {
         eprintln!(
             "[capture_overlay] Using ApexShot GTK layer-shell selector on wlroots compositor"
@@ -1675,6 +1729,10 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
 }
 
 pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
+    if crate::app_identity::portal_only() {
+        return capture_still_via_portal(true).map(AreaCaptureResult::Captured);
+    }
+
     if should_use_gtk_layer_shell_selector() {
         eprintln!(
             "[capture_overlay] Using ApexShot GTK layer-shell selector on wlroots compositor"
@@ -1711,6 +1769,11 @@ fn build_crosshair_args(config: &crate::config::AppConfig) -> Vec<String> {
 }
 
 pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
+    // No custom crosshair overlay in portal-only builds — interactive portal UI.
+    if crate::app_identity::portal_only() {
+        return capture_still_file_via_portal(true);
+    }
+
     if should_use_gtk_layer_shell_selector() {
         eprintln!(
             "[capture_overlay] Using ApexShot GTK layer-shell crosshair selector on wlroots compositor"
@@ -1738,6 +1801,10 @@ pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
 }
 
 pub fn capture_crosshair_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
+    if crate::app_identity::portal_only() {
+        return capture_still_via_portal(true).map(AreaCaptureResult::Captured);
+    }
+
     if should_use_gtk_layer_shell_selector() {
         eprintln!(
             "[capture_overlay] Using ApexShot GTK layer-shell crosshair selector on wlroots compositor"

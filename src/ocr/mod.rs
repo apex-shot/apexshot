@@ -16,6 +16,7 @@ pub mod deskew;
 pub mod ocrs_engine;
 
 /// Tesseract OCR Engine Mode — LSTM only (best accuracy for most text)
+#[cfg(feature = "tesseract-ocr")]
 const TESS_OEM: &str = "1";
 
 /// Page Segmentation Modes tried in order. The result with the highest
@@ -136,6 +137,7 @@ pub struct OcrOutput {
 }
 
 /// OCR preprocessing settings
+#[cfg(feature = "tesseract-ocr")]
 #[derive(Debug, Clone)]
 struct PreprocessConfig {
     /// Scale factor for upscaling (2.0-4.0 recommended)
@@ -149,6 +151,7 @@ struct PreprocessConfig {
     threshold: bool,
 }
 
+#[cfg(feature = "tesseract-ocr")]
 impl Default for PreprocessConfig {
     fn default() -> Self {
         Self {
@@ -171,6 +174,7 @@ impl Default for PreprocessConfig {
 ///
 /// Samples pixels and checks if the median luminance is below 100.
 /// Dark-mode UIs typically have median luminance < 100.
+#[cfg(any(test, feature = "tesseract-ocr"))]
 fn is_dark_mode(image: &RgbaImage) -> bool {
     let mut samples = Vec::new();
     let step = (image.width() * image.height()).max(1000) / 1000;
@@ -204,6 +208,7 @@ fn is_dark_mode(image: &RgbaImage) -> bool {
 /// 3. Auto-detect dark/light mode and invert only if dark-mode
 /// 4. Optional contrast enhancement
 /// 5. Optional adaptive thresholding
+#[cfg(feature = "tesseract-ocr")]
 fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
     use image::imageops::{resize, FilterType};
 
@@ -280,6 +285,7 @@ fn rgba_to_luma(image: &RgbaImage) -> Vec<u8> {
 ///
 /// Finds the threshold that minimizes intra-class variance between
 /// foreground (text) and background pixels. O(n) single-pass algorithm.
+#[cfg(any(test, feature = "tesseract-ocr"))]
 fn apply_otsu_threshold(data: &mut [u8]) {
     let mut histogram = [0u32; 256];
     let total = data.len() as u32;
@@ -333,6 +339,7 @@ fn apply_otsu_threshold(data: &mut [u8]) {
 /// on a separate ML model. Tesseract initialisation itself is cheap (a few
 /// milliseconds) compared to recognition, so re-initialising per attempt
 /// keeps the code straightforward without measurable overhead.
+#[cfg(feature = "tesseract-ocr")]
 fn run_tesseract_with_psm(
     datapath: Option<&str>,
     language: &str,
@@ -397,8 +404,9 @@ fn run_tesseract_with_psm(
 
 /// Run OCR on an RGBA image.
 ///
-/// Uses Tesseract as the primary engine. Falls back to the neural
-/// OCR engine if Tesseract fails. QR codes are decoded directly.
+/// Uses Tesseract as the primary engine when built with `tesseract-ocr`.
+/// Falls back to (or uses solely) the neural OCR engine otherwise.
+/// QR codes are decoded directly.
 fn run_ocr_pipeline(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOutput> {
     // Try QR code detection first
     if let Some(decoded) = qr::detect_and_decode(rgba_image) {
@@ -417,38 +425,52 @@ fn run_ocr_pipeline(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<Ocr
         });
     }
 
-    // Primary: Tesseract with optimized settings
-    match run_tesseract_engine(rgba_image, config) {
-        Ok(result) => Ok(result),
-        Err(tess_err) => {
-            // Fallback: neural OCR engine if Tesseract fails
-            if let Some((text, confidence)) = ocrs_engine::run_apexshot_ocr(rgba_image) {
-                let final_text = postprocess_code(&text);
-
-                if confidence >= config.min_confidence {
-                    let mut copied_to_clipboard = false;
-                    if config.clipboard_output {
-                        if let Err(e) = copy_to_clipboard(&final_text) {
-                            eprintln!("Warning: Failed to copy to clipboard: {}", e);
-                        } else {
-                            copied_to_clipboard = true;
-                        }
-                    }
-
-                    return Ok(OcrOutput {
-                        text: final_text,
-                        source: ContentSource::Ocr { confidence },
-                        copied_to_clipboard,
-                    });
+    #[cfg(feature = "tesseract-ocr")]
+    {
+        match run_tesseract_engine(rgba_image, config) {
+            Ok(result) => Ok(result),
+            Err(tess_err) => {
+                if let Some(out) = run_ocrs_fallback(rgba_image, config) {
+                    Ok(out)
+                } else {
+                    Err(tess_err)
                 }
             }
-
-            Err(tess_err)
         }
+    }
+
+    #[cfg(not(feature = "tesseract-ocr"))]
+    {
+        if let Some(out) = run_ocrs_fallback(rgba_image, config) {
+            return Ok(out);
+        }
+        Err(OcrError::TesseractNotFound)
     }
 }
 
+fn run_ocrs_fallback(rgba_image: &RgbaImage, config: &OcrConfig) -> Option<OcrOutput> {
+    let (text, confidence) = ocrs_engine::run_apexshot_ocr(rgba_image)?;
+    let final_text = postprocess_code(&text);
+    if confidence < config.min_confidence {
+        return None;
+    }
+    let mut copied_to_clipboard = false;
+    if config.clipboard_output {
+        if let Err(e) = copy_to_clipboard(&final_text) {
+            eprintln!("Warning: Failed to copy to clipboard: {}", e);
+        } else {
+            copied_to_clipboard = true;
+        }
+    }
+    Some(OcrOutput {
+        text: final_text,
+        source: ContentSource::Ocr { confidence },
+        copied_to_clipboard,
+    })
+}
+
 /// Run Tesseract OCR with optimized settings for code and UI text.
+#[cfg(feature = "tesseract-ocr")]
 fn run_tesseract_engine(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOutput> {
     // Optimized preprocessing: higher upscale for symbols, no contrast boost
     let preprocess_config = PreprocessConfig {
@@ -766,6 +788,7 @@ pub struct DetectedTextRegion {
     pub confidence: i32,
 }
 
+#[cfg(any(test, feature = "tesseract-ocr"))]
 #[derive(Debug)]
 struct TsvWord {
     line_key: (i32, i32, i32, i32),
@@ -774,6 +797,7 @@ struct TsvWord {
     confidence: i32,
 }
 
+#[cfg(any(test, feature = "tesseract-ocr"))]
 #[derive(Debug)]
 struct TsvLineAccumulator {
     bounds: BoundingBox,
@@ -782,6 +806,7 @@ struct TsvLineAccumulator {
     word_count: i32,
 }
 
+#[cfg(any(test, feature = "tesseract-ocr"))]
 impl TsvLineAccumulator {
     fn new(word: &TsvWord) -> Self {
         Self {
@@ -822,11 +847,13 @@ impl TsvLineAccumulator {
     }
 }
 
+#[cfg(any(test, feature = "tesseract-ocr"))]
 fn scaled_i32(value: &str, inv_scale: f32) -> Option<i32> {
     let parsed = value.parse::<f32>().ok()?;
     Some((parsed * inv_scale).round() as i32)
 }
 
+#[cfg(any(test, feature = "tesseract-ocr"))]
 fn parse_tesseract_tsv_regions(tsv: &str, inv_scale: f32) -> Vec<DetectedTextRegion> {
     use std::collections::BTreeMap;
 
@@ -915,12 +942,22 @@ fn parse_tesseract_tsv_regions(tsv: &str, inv_scale: f32) -> Vec<DetectedTextReg
 
 /// Extract text with bounding boxes from an image
 pub fn extract_text_regions(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>, OcrError> {
-    extract_text_regions_tesseract(image)
+    #[cfg(feature = "tesseract-ocr")]
+    {
+        extract_text_regions_tesseract(image)
+    }
+    #[cfg(not(feature = "tesseract-ocr"))]
+    {
+        let _ = image;
+        // Flatpak: region highlighter uses empty list until ocrs boxes are wired.
+        Ok(Vec::new())
+    }
 }
 
 /// Extract line-level text regions from Tesseract TSV output.
 /// TSV carries recognized text, bounding boxes, and confidence in one pass,
 /// avoiding placeholder text and fragile line-box/text-index matching.
+#[cfg(feature = "tesseract-ocr")]
 fn extract_text_regions_tesseract(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>, OcrError> {
     use std::ffi::CString;
 
@@ -968,6 +1005,7 @@ fn extract_text_regions_tesseract(image: &RgbaImage) -> Result<Vec<DetectedTextR
 
 /// Fast preprocessing config optimized for text region detection (highlighter cursor sizing)
 /// Uses higher upscaling to catch small text (11-12px view counts) and mild contrast
+#[cfg(feature = "tesseract-ocr")]
 fn fast_region_preprocess_config() -> PreprocessConfig {
     PreprocessConfig {
         scale_factor: 2.5, // Higher upscale for small text detection (view counts, channel names)

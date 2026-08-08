@@ -1,11 +1,24 @@
 use std::path::{Path, PathBuf};
 
+// Flatpak ships the permanent Flathub ID; native packages keep the legacy ID
+// until the coordinated rename (plan §10.1).
+#[cfg(feature = "flatpak")]
+pub const OFFICIAL_APP_ID: &str = "org.apexshot.ApexShot";
+#[cfg(not(feature = "flatpak"))]
 pub const OFFICIAL_APP_ID: &str = "io.github.codegoddy.apexshot";
+
+#[cfg(feature = "flatpak")]
+pub const DEV_APP_ID: &str = "org.apexshot.ApexShot.Dev";
+#[cfg(not(feature = "flatpak"))]
 pub const DEV_APP_ID: &str = "io.github.codegoddy.apexshot.dev";
 
 pub const OFFICIAL_BINARY: &str = "/usr/bin/apexshot";
 pub const DEV_WRAPPER: &str = "/usr/local/bin/apexshot-dev";
 
+// Flatpak installs under /app/share; native packages use /usr/share.
+#[cfg(feature = "flatpak")]
+pub const OFFICIAL_DESKTOP_FILE: &str = "/app/share/applications/org.apexshot.ApexShot.desktop";
+#[cfg(not(feature = "flatpak"))]
 pub const OFFICIAL_DESKTOP_FILE: &str =
     "/usr/share/applications/io.github.codegoddy.apexshot.desktop";
 
@@ -19,6 +32,17 @@ fn path_looks_like_dev(path: &Path) -> bool {
                 .to_str()
                 .is_some_and(|part| part == "apexshot-dev")
         })
+}
+
+/// True when running as a portal-only / sandboxed build.
+/// Compile-time (`--features flatpak`) or runtime (Flatpak sets `FLATPAK_ID`).
+pub fn portal_only() -> bool {
+    cfg!(feature = "flatpak") || std::env::var_os("FLATPAK_ID").is_some()
+}
+
+/// Error string when a host-escape path is attempted under portal-only.
+pub fn host_escape_blocked(what: &str) -> Option<String> {
+    portal_only().then(|| format!("{what} is unavailable in Flatpak/portal-only builds"))
 }
 
 pub fn is_dev() -> bool {
@@ -105,4 +129,17 @@ pub fn desktop_file_for_portal() -> Option<PathBuf> {
         }
     }
     local_desktop_file_path().filter(|path| path.exists())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn portal_only_matches_flatpak_feature() {
+        assert_eq!(
+            portal_only(),
+            cfg!(feature = "flatpak") || std::env::var_os("FLATPAK_ID").is_some()
+        );
+    }
 }

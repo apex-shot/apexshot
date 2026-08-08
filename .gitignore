@@ -98,6 +98,5 @@ Kooha/
 spectacle/
 .antigravitycli/
 reinstall-dev-deb.sh
-
 # Agent local memory
 .agents/

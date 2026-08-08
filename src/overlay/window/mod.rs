@@ -31,24 +31,22 @@ use gtk4::{
     gdk,
     glib::{self, clone},
     prelude::*,
-    Application, ApplicationWindow, CssProvider, EventControllerKey, EventControllerMotion,
-    GestureClick, GestureDrag,
+    Application, ApplicationWindow, EventControllerKey, EventControllerMotion, GestureClick,
+    GestureDrag,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::sync::{Arc, Mutex};
-use x11rb::wrapper::ConnectionExt;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+mod audio;
+mod platform;
 
-/// When the daemon is not running, the overlay starts its own PipeWire audio
-/// level monitoring and stores the results here.
-static OVERLAY_MIC_LEVEL: AtomicU64 = AtomicU64::new(0);
-static OVERLAY_SPEAKER_LEVEL: AtomicU64 = AtomicU64::new(0);
-static LOCAL_MONITOR_RUNNING: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-static LOCAL_MONITOR_STOP: std::sync::Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
-    std::sync::Mutex::new(None);
+pub(crate) use platform::{install_overlay_css, suppress_x11_compositor_animation};
 
+use audio::{
+    poll_daemon_audio_levels, set_mic_volume, set_speaker_volume, start_local_audio_monitoring,
+    stop_local_audio_monitoring, OVERLAY_MIC_LEVEL, OVERLAY_SPEAKER_LEVEL,
+};
+use std::sync::atomic::Ordering;
 fn recording_request_from_state(
     st: &SelectorState,
     record_type: RecordingType,
@@ -82,286 +80,6 @@ fn recording_request_from_state(
         ..RecordingRequest::default()
     }
 }
-
-fn poll_daemon_audio_levels() -> Option<(f64, f64)> {
-    let conn = zbus::blocking::Connection::session().ok()?;
-    let proxy = zbus::blocking::Proxy::new(
-        &conn,
-        crate::daemon::DAEMON_BUS_NAME,
-        crate::daemon::DAEMON_OBJECT_PATH,
-        crate::daemon::DAEMON_INTERFACE,
-    )
-    .ok()?;
-    let mic = proxy.call::<_, _, f64>("GetMicLevel", &()).ok()?;
-    let speaker = proxy.call::<_, _, f64>("GetSpeakerLevel", &()).ok()?;
-    Some((mic.clamp(0.0, 1.0), speaker.clamp(0.0, 1.0)))
-}
-
-/// Start local PipeWire audio-level monitoring for the overlay.
-///
-/// Used when the daemon is not running (standalone capture mode on
-/// compositors like Hyprland). Spawns two PipeWire capture streams
-/// (mic + system audio) only while the recording panel needs meters so we
-/// do not force Bluetooth headsets into HSP/HFP mode (issue #41).
-fn start_local_audio_monitoring() {
-    use std::sync::atomic::Ordering;
-    if LOCAL_MONITOR_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return;
-    }
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    if let Ok(mut guard) = LOCAL_MONITOR_STOP.lock() {
-        *guard = Some(stop.clone());
-    }
-    let mic_target = crate::daemon::find_physical_input_device();
-    // Two streams share one stop flag; clear RUNNING when both threads exit
-    // via a simple join counter.
-    let remaining = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(2));
-    spawn_overlay_pw_stream(
-        "mic",
-        "apexshot-overlay-mic",
-        mic_target.as_deref(),
-        false,
-        &OVERLAY_MIC_LEVEL,
-        stop.clone(),
-        remaining.clone(),
-    );
-    spawn_overlay_pw_stream(
-        "speaker",
-        "apexshot-overlay-speaker",
-        None,
-        true,
-        &OVERLAY_SPEAKER_LEVEL,
-        stop,
-        remaining,
-    );
-}
-
-fn stop_local_audio_monitoring() {
-    if let Ok(mut guard) = LOCAL_MONITOR_STOP.lock() {
-        if let Some(stop) = guard.take() {
-            eprintln!("[overlay] PipeWire: releasing local audio meters");
-            stop.store(true, Ordering::Release);
-        }
-    }
-    OVERLAY_MIC_LEVEL.store(0.0f64.to_bits(), Ordering::Relaxed);
-    OVERLAY_SPEAKER_LEVEL.store(0.0f64.to_bits(), Ordering::Relaxed);
-}
-
-/// Spawn a single PipeWire capture stream for the overlay's audio meter.
-fn spawn_overlay_pw_stream(
-    label: &'static str,
-    stream_name: &'static str,
-    target: Option<&str>,
-    capture_sink: bool,
-    level: &'static AtomicU64,
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    remaining: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-) {
-    let target_owned = target.map(String::from);
-    std::thread::spawn(move || {
-        struct ClearRunning {
-            remaining: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-            level: &'static AtomicU64,
-            label: &'static str,
-        }
-        impl Drop for ClearRunning {
-            fn drop(&mut self) {
-                self.level.store(0.0f64.to_bits(), Ordering::Relaxed);
-                if self.remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
-                    LOCAL_MONITOR_RUNNING.store(false, Ordering::Release);
-                }
-                eprintln!("[overlay] PipeWire ({}) monitoring stopped.", self.label);
-            }
-        }
-        let _clear = ClearRunning {
-            remaining,
-            level,
-            label,
-        };
-
-        if stop.load(Ordering::Acquire) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        if stop.load(Ordering::Acquire) {
-            return;
-        }
-
-        use pipewire as pw;
-        use pw::{properties::properties, spa};
-        use spa::param::format::{MediaSubtype, MediaType};
-        use spa::param::format_utils;
-
-        pw::init();
-
-        let mainloop = match pw::main_loop::MainLoopRc::new(None) {
-            Ok(ml) => ml,
-            Err(e) => {
-                eprintln!("[overlay] PipeWire ({label}): main loop: {e}");
-                return;
-            }
-        };
-        let context = match pw::context::ContextRc::new(&mainloop, None) {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("[overlay] PipeWire ({label}): context: {e}");
-                return;
-            }
-        };
-        let core = match context.connect_rc(None) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[overlay] PipeWire ({label}): core: {e}");
-                return;
-            }
-        };
-
-        let mut props = properties! {
-            *pw::keys::MEDIA_TYPE => "Audio",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Production",
-        };
-        if let Some(ref target_name) = target_owned {
-            props.insert("target.object", target_name.as_str());
-        }
-        if capture_sink {
-            props.insert("stream.capture.sink", "true");
-        }
-
-        let stream = match pw::stream::StreamBox::new(&core, stream_name, props) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[overlay] PipeWire ({label}): stream: {e}");
-                return;
-            }
-        };
-
-        let _listener = stream
-            .add_local_listener_with_user_data(spa::param::audio::AudioInfoRaw::default())
-            .param_changed(move |_, user_data, id, param| {
-                let Some(param) = param else { return };
-                if id != spa::param::ParamType::Format.as_raw() {
-                    return;
-                }
-                let (media_type, media_subtype) = match format_utils::parse_format(param) {
-                    Ok(v) => v,
-                    Err(_) => return,
-                };
-                if media_type != MediaType::Audio || media_subtype != MediaSubtype::Raw {
-                    return;
-                }
-                user_data.parse(param).ok();
-            })
-            .process(move |stream, _user_data| {
-                let mut buf = match stream.dequeue_buffer() {
-                    Some(b) => b,
-                    None => return,
-                };
-                let datas = buf.datas_mut();
-                if datas.is_empty() {
-                    return;
-                }
-
-                let mut sum_sq: f64 = 0.0;
-                let mut count: u64 = 0;
-                for data in datas.iter_mut() {
-                    let n_bytes = data.chunk().size() as usize;
-                    if let Some(slice) = data.data() {
-                        let ptr = slice.as_ptr() as *const f32;
-                        if n_bytes >= std::mem::size_of::<f32>() {
-                            let n_samples = n_bytes / std::mem::size_of::<f32>();
-                            for j in 0..n_samples {
-                                let s = unsafe { *ptr.add(j) };
-                                sum_sq += (s * s) as f64;
-                                count += 1;
-                            }
-                        }
-                    }
-                }
-
-                let rms = if count > 0 {
-                    (sum_sq / count as f64).sqrt()
-                } else {
-                    0.0
-                };
-                let raw_level = (rms * 3.0).clamp(0.0, 1.0);
-
-                let gated = if !capture_sink && raw_level < 0.15 {
-                    0.0
-                } else {
-                    raw_level
-                };
-
-                level.store(gated.to_bits(), Ordering::Relaxed);
-            })
-            .register();
-
-        // Build F32LE mono format
-        let mut params: Vec<Vec<u8>> = Vec::new();
-        {
-            let mut audio_info = spa::param::audio::AudioInfoRaw::new();
-            audio_info.set_format(spa::param::audio::AudioFormat::F32LE);
-            audio_info.set_rate(44100);
-            audio_info.set_channels(1);
-
-            let obj = spa::pod::Object {
-                type_: spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
-                id: spa::param::ParamType::EnumFormat.as_raw(),
-                properties: audio_info.into(),
-            };
-
-            let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
-                std::io::Cursor::new(Vec::new()),
-                &spa::pod::Value::Object(obj),
-            )
-            .unwrap()
-            .0
-            .into_inner();
-
-            if spa::pod::Pod::from_bytes(&values).is_some() {
-                params.push(values);
-            }
-        }
-
-        let mut param_refs: Vec<&spa::pod::Pod> = params
-            .iter()
-            .filter_map(|bytes| spa::pod::Pod::from_bytes(bytes))
-            .collect();
-
-        match stream.connect(
-            spa::utils::Direction::Input,
-            None,
-            pw::stream::StreamFlags::AUTOCONNECT
-                | pw::stream::StreamFlags::MAP_BUFFERS
-                | pw::stream::StreamFlags::RT_PROCESS,
-            &mut param_refs,
-        ) {
-            Ok(_) => eprintln!("[overlay] PipeWire ({label}) monitoring started."),
-            Err(e) => {
-                eprintln!("[overlay] PipeWire ({label}): connect: {e}");
-                return;
-            }
-        }
-
-        let stop_for_timer = stop.clone();
-        let mainloop_for_timer = mainloop.clone();
-        let stop_timer = mainloop.loop_().add_timer(move |_| {
-            if stop_for_timer.load(Ordering::Acquire) {
-                mainloop_for_timer.quit();
-            }
-        });
-        let _ = stop_timer.update_timer(
-            Some(std::time::Duration::from_millis(250)),
-            Some(std::time::Duration::from_millis(250)),
-        );
-
-        mainloop.run();
-    });
-}
-
 pub(crate) fn send_selection_result(
     state: &Arc<Mutex<SelectorState>>,
     result_tx: &std::sync::mpsc::Sender<SelectionResult>,
@@ -404,121 +122,6 @@ pub(crate) fn send_selection_result(
     drop(st);
     let _ = result_tx.send(result);
     window.close();
-}
-
-pub(crate) fn install_overlay_css() {
-    if let Some(display) = gdk::Display::default() {
-        let provider = CssProvider::new();
-        provider.load_from_data(
-            "
-            window.overlay {
-                background-color: transparent;
-                transition: none;
-                transition-duration: 0s;
-                animation: none;
-                animation-duration: 0s;
-            }
-
-            window.overlay > * {
-                background-color: transparent;
-            }
-
-            drawingarea {
-                background-color: transparent;
-            }
-            ",
-        );
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_USER,
-        );
-    }
-}
-
-/// On X11, tell the compositor to treat this window as a transient system
-/// overlay (no open/close animation, no taskbar entry, no pager entry).
-///
-/// This is called from `connect_realize` — i.e. the XID exists but the
-/// window has not been mapped yet — so the compositor sees all hints on
-/// the very first MapNotify and never starts an animation.
-pub(crate) fn suppress_x11_compositor_animation(window: &ApplicationWindow) {
-    use gdk4x11::X11Surface;
-    use x11rb::{
-        connection::Connection,
-        protocol::xproto::{self, ConnectionExt as _},
-    };
-
-    let Some(surface) = window.surface() else {
-        return;
-    };
-    let Ok(x11_surface) = surface.downcast::<X11Surface>() else {
-        return; // Wayland – nothing to do
-    };
-    let Ok(xid) = u32::try_from(x11_surface.xid()) else {
-        return;
-    };
-    let Ok((conn, _)) = x11rb::connect(None) else {
-        return;
-    };
-
-    // _NET_WM_BYPASS_COMPOSITOR = 1
-    // Asks the compositor to skip compositing this window entirely, which
-    // also disables any open/close transition effects.
-    if let Ok(cookie) = conn.intern_atom(false, b"_NET_WM_BYPASS_COMPOSITOR") {
-        if let Ok(reply) = cookie.reply() {
-            let _ = conn.change_property32(
-                xproto::PropMode::REPLACE,
-                xid,
-                reply.atom,
-                xproto::AtomEnum::CARDINAL,
-                &[1u32],
-            );
-        }
-    }
-
-    // _NET_WM_WINDOW_TYPE = _NET_WM_WINDOW_TYPE_UTILITY
-    // UTILITY windows are never animated by compositors (Mutter, KWin, Picom).
-    // We prefer UTILITY over SPLASH because SPLASH can cause focus/stacking
-    // issues on some window managers.
-    if let (Ok(type_cookie), Ok(util_cookie)) = (
-        conn.intern_atom(false, b"_NET_WM_WINDOW_TYPE"),
-        conn.intern_atom(false, b"_NET_WM_WINDOW_TYPE_UTILITY"),
-    ) {
-        if let (Ok(type_reply), Ok(util_reply)) = (type_cookie.reply(), util_cookie.reply()) {
-            let _ = conn.change_property32(
-                xproto::PropMode::REPLACE,
-                xid,
-                type_reply.atom,
-                xproto::AtomEnum::ATOM,
-                &[util_reply.atom],
-            );
-        }
-    }
-
-    // _NET_WM_STATE: add SKIP_TASKBAR + SKIP_PAGER so the overlay never
-    // appears in the taskbar or workspace switcher.
-    if let (Ok(state_cookie), Ok(skip_taskbar_cookie), Ok(skip_pager_cookie)) = (
-        conn.intern_atom(false, b"_NET_WM_STATE"),
-        conn.intern_atom(false, b"_NET_WM_STATE_SKIP_TASKBAR"),
-        conn.intern_atom(false, b"_NET_WM_STATE_SKIP_PAGER"),
-    ) {
-        if let (Ok(state_reply), Ok(skip_taskbar_reply), Ok(skip_pager_reply)) = (
-            state_cookie.reply(),
-            skip_taskbar_cookie.reply(),
-            skip_pager_cookie.reply(),
-        ) {
-            let _ = conn.change_property32(
-                xproto::PropMode::REPLACE,
-                xid,
-                state_reply.atom,
-                xproto::AtomEnum::ATOM,
-                &[skip_taskbar_reply.atom, skip_pager_reply.atom],
-            );
-        }
-    }
-
-    let _ = conn.flush();
 }
 
 fn aspect_ratio_for_index(index: usize) -> f64 {
@@ -612,7 +215,6 @@ fn resolve_target_monitor(
     }
     select_target_monitor().map(|(monitor, _)| monitor)
 }
-
 pub(crate) fn setup_window(
     app: &Application,
     state: Arc<Mutex<SelectorState>>,
@@ -1598,7 +1200,7 @@ pub(crate) fn setup_window(
             if x >= btn_x && x <= btn_x + btn_w && y >= btn_y && y <= btn_y + btn_h {
                 let url = crate::onboarding::extensions::CHROME_EXTENSION_URL.to_string();
                 std::thread::spawn(move || {
-                    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                    let _ = crate::utils::open::open_url(&url);
                 });
                 st.scroll_popup_open = false;
                 st.hovered_scroll_popup_close = false;
@@ -2458,26 +2060,4 @@ pub(crate) fn setup_window(
     // Show the window
     let _ = window.grab_focus();
     window.present();
-}
-
-fn set_mic_volume(vol: f64) {
-    let pct = (vol.clamp(0.0, 1.0) * 100.0).round() as u32;
-    std::thread::spawn(move || {
-        let _ = std::process::Command::new("pactl")
-            .args([
-                "set-source-volume",
-                "@DEFAULT_SOURCE@",
-                &format!("{}%", pct),
-            ])
-            .output();
-    });
-}
-
-fn set_speaker_volume(vol: f64) {
-    let pct = (vol.clamp(0.0, 1.0) * 100.0).round() as u32;
-    std::thread::spawn(move || {
-        let _ = std::process::Command::new("pactl")
-            .args(["set-sink-volume", "@DEFAULT_SINK@", &format!("{}%", pct)])
-            .output();
-    });
 }

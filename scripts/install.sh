@@ -80,10 +80,9 @@ case "$(detect_distro_family)" in
         exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-install.sh)"
         ;;
     opensuse)
-        if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/opensuse-install.sh" ]]; then
-            exec bash "${SCRIPT_DIR}/opensuse-install.sh" "$@"
-        fi
-        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-install.sh)"
+        echo "openSUSE binary packages are not published yet." >&2
+        echo "Build locally: scripts/build-opensuse-rpm.sh && sudo zypper install target/opensuse-rpmbuild/RPMS/*/apexshot-*.rpm" >&2
+        exit 1
         ;;
  esac
 

@@ -11,11 +11,13 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Pin mutable build inputs (release hardening).
+  GTK4_LAYER_SHELL_TAG: v1.1.1
+  CARGO_DEB_VERSION: "3.7.0"
 
 jobs:
   lint:
-    name: Lint (rustfmt + clippy + JS)
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    name: Lint (rustfmt + clippy + JS + metadata)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -55,7 +57,8 @@ jobs:
               libwayland-dev \
               libdbus-1-dev \
               meson ninja-build gobject-introspection valac \
-              qtbase5-dev libqt5x11extras5-dev pkg-config && break
+              qtbase5-dev libqt5x11extras5-dev pkg-config \
+              appstream desktop-file-utils && break
             echo "apt-get install attempt $i failed, retrying..."
             sleep 10
             sudo apt-get update
@@ -63,7 +66,8 @@ jobs:
 
       - name: Build gtk4-layer-shell from source
         run: |
-          git clone https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
+          git clone --depth 1 --branch "${GTK4_LAYER_SHELL_TAG}" \
+            https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
           cd /tmp/gtk4-layer-shell
           meson setup build --prefix=/usr
           sudo ninja -C build install
@@ -92,9 +96,11 @@ jobs:
             node --check "$f"
           done
 
+      - name: Validate desktop + AppStream metadata
+        run: scripts/validate-metadata.sh
+
   ci:
     name: Build & Test
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     needs: [lint]
     steps:
@@ -150,7 +156,8 @@ jobs:
 
       - name: Build gtk4-layer-shell from source
         run: |
-          git clone https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
+          git clone --depth 1 --branch "${GTK4_LAYER_SHELL_TAG}" \
+            https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
           cd /tmp/gtk4-layer-shell
           meson setup build --prefix=/usr
           sudo ninja -C build install
@@ -165,13 +172,17 @@ jobs:
   release:
     name: Build .deb & Release
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [lint, ci]
     if: startsWith(github.ref, 'refs/tags/')
+    # Oldest practical LTS baseline for shipped .debs (glibc/deps).
+    # 22.04 is claimed on Pop but current GTK4 crate stack targets 24.04+.
     container:
-      image: ubuntu:25.10
+      image: ubuntu:24.04
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_API_URL: ${{ github.api_url }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
+        DEBIAN_FRONTEND: noninteractive
     permissions:
       contents: write
     steps:
@@ -238,14 +249,15 @@ jobs:
 
       - name: Build gtk4-layer-shell from source
         run: |
-          git clone https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
+          git clone --depth 1 --branch "${GTK4_LAYER_SHELL_TAG}" \
+            https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
           cd /tmp/gtk4-layer-shell
           meson setup build --prefix=/usr
           ninja -C build install
           ldconfig
 
       - name: Install cargo-deb
-        run: cargo install cargo-deb
+        run: cargo install cargo-deb --version "${CARGO_DEB_VERSION}"
 
       - name: Build release binaries
         run: cargo build --release --verbose
@@ -287,7 +299,7 @@ jobs:
     name: Build Fedora RPM package
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [release]
+    needs: [lint, ci, release]
     container:
       image: fedora:42
       env:
@@ -348,6 +360,7 @@ jobs:
     name: Build Arch Linux package
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: startsWith(github.ref, 'refs/tags/')
+    needs: [lint, ci]
     container:
       image: archlinux:latest
     permissions:
@@ -438,6 +451,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  checksums:
+    name: Publish SHA256SUMS
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [release, fedora, arch]
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets and publish SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/apexshot-assets
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${{ github.repository }}" \
+            --dir /tmp/apexshot-assets \
+            --pattern '*'
+          cd /tmp/apexshot-assets
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS \
+            --repo "${{ github.repository }}" \
+            --clobber
+
   aur:
     name: Publish AUR package
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -455,13 +494,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Skip when AUR SSH key is not configured
+      - name: Fail when AUR SSH key is not configured
         if: env.AUR_SSH_PRIVATE_KEY == ''
         run: |
-          echo "AUR_SSH_PRIVATE_KEY is not configured; skipping AUR publish."
+          echo "::error title=AUR not published::AUR_SSH_PRIVATE_KEY secret is not configured. Arch package built, but AUR was NOT updated. Add the secret (see docs/AUR_PUBLISHING.md) or remove this job if AUR publish is intentionally disabled."
+          exit 1
 
       - name: Install AUR publish tools
-        if: env.AUR_SSH_PRIVATE_KEY != ''
         run: |
           pacman-key --init
           pacman-key --populate archlinux
@@ -471,13 +510,11 @@ jobs:
           chown -R builduser:builduser "$GITHUB_WORKSPACE"
 
       - name: Prepare AUR metadata
-        if: env.AUR_SSH_PRIVATE_KEY != ''
         run: |
           sudo -u builduser bash -lc "cd '$GITHUB_WORKSPACE' && scripts/aur-prepare.sh '${GITHUB_REF_NAME}'"
           sudo -u builduser bash -lc "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --verifysource --nobuild"
 
       - name: Configure SSH
-        if: env.AUR_SSH_PRIVATE_KEY != ''
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" > ~/.ssh/aur
@@ -497,7 +534,6 @@ jobs:
           EOF
 
       - name: Publish to AUR
-        if: env.AUR_SSH_PRIVATE_KEY != ''
         run: |
           set -euo pipefail
           git config --global --add safe.directory "$GITHUB_WORKSPACE"

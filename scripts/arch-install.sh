@@ -327,6 +327,14 @@ fetch_version() {
 check_prereqs() {
     step "Checking prerequisites"
 
+    local arch
+    arch="$(uname -m)"
+    if [[ "$arch" != "x86_64" ]]; then
+        err "Prebuilt packages are x86_64 only (this machine: ${arch})."
+        exit 1
+    fi
+    ok "Architecture: x86_64"
+
     # Arch-specific: Check for pacman
     if command -v pacman >/dev/null 2>&1; then
         ok "pacman package manager found"

@@ -76,10 +76,7 @@ pub fn open_in_browser(url: &str) -> Result<String, String> {
     if url.is_empty() {
         return Err("This upload has no link to open".to_string());
     }
-    std::process::Command::new("xdg-open")
-        .arg(url)
-        .spawn()
-        .map_err(|e| format!("Could not open your browser: {e}"))?;
+    crate::utils::open::open_url(url)?;
     Ok("Opened in your browser".to_string())
 }
 
@@ -94,28 +91,28 @@ pub fn reveal_in_file_manager(entry: &CaptureEntry) -> Result<String, String> {
         .map(|parent| parent.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
 
-    let selecting: [(&str, &[&str]); 4] = [
-        ("nautilus", &["--select"]),
-        ("dolphin", &["--select"]),
-        ("nemo", &[]),
-        ("caja", &[]),
-    ];
-    for (program, args) in selecting {
-        let spawned = std::process::Command::new(program)
-            .args(args)
-            .arg(path)
-            .spawn()
-            .is_ok();
-        if spawned {
-            return Ok(format!("Showing {} in your files", entry.display_name));
+    // Flatpak: no host file-manager binaries — open the folder via portal.
+    if !crate::app_identity::portal_only() {
+        let selecting: [(&str, &[&str]); 4] = [
+            ("nautilus", &["--select"]),
+            ("dolphin", &["--select"]),
+            ("nemo", &[]),
+            ("caja", &[]),
+        ];
+        for (program, args) in selecting {
+            let spawned = std::process::Command::new(program)
+                .args(args)
+                .arg(path)
+                .spawn()
+                .is_ok();
+            if spawned {
+                return Ok(format!("Showing {} in your files", entry.display_name));
+            }
         }
     }
 
-    // No known file manager: open the folder with whatever handles directories.
-    std::process::Command::new("xdg-open")
-        .arg(&folder)
-        .spawn()
-        .map_err(|e| format!("Could not open the folder: {e}"))?;
+    // Open the folder with the desktop default handler (portal-aware).
+    crate::utils::open::open_path(&folder)?;
     Ok(format!("Opened {}", folder.display()))
 }
 

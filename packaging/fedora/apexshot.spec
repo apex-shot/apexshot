@@ -2,7 +2,7 @@ Name:           apexshot
 Version:        0.2.34
 Release:        1%{?dist}
 Summary:        Linux screenshot, annotation, OCR, and screen recording tool
-License:        GPL-3.0-only
+License:        GPL-3.0-or-later
 URL:            https://github.com/apex-shot/apexshot
 Source0:        https://github.com/apex-shot/apexshot/archive/v%{version}/%{name}-%{version}.tar.gz
 

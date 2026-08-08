@@ -405,9 +405,7 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     {
         docs_btn.connect_clicked(|_| {
             std::thread::spawn(move || {
-                let _ = Command::new("xdg-open")
-                    .arg("https://xbackbone.app/clients/api")
-                    .spawn();
+                let _ = crate::utils::open::open_url("https://xbackbone.app/clients/api");
             });
         });
     }

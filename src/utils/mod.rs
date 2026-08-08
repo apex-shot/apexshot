@@ -4,3 +4,4 @@
 pub mod clipboard;
 pub mod desktop_env;
 pub mod notify;
+pub mod open;

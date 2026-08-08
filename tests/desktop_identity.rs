@@ -6,7 +6,7 @@ fn packaged_desktop_identity_matches_primary_ui_application_id() {
     let onboarding_source = include_str!("../src/onboarding/mod.rs");
     let packaged_desktop = include_str!("../packaging/io.github.codegoddy.apexshot.desktop");
     let packaged_daemon_desktop = include_str!("../packaging/apexshot-daemon.desktop");
-    let main_source = include_str!("../src/main.rs");
+    let install_source = include_str!("../src/cli/install.rs");
     let windowing_source = include_str!("../src/settings/windowing.rs");
 
     assert!(
@@ -54,12 +54,12 @@ fn packaged_desktop_identity_matches_primary_ui_application_id() {
     );
 
     assert!(
-        main_source.contains("X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2"),
+        install_source.contains("X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2"),
         "dev-generated desktop entries should declare KWin screenshot authorization"
     );
 
     assert!(
-        main_source.contains("X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1"),
+        install_source.contains("X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1"),
         "dev-generated desktop entries should declare KWin native screencast"
     );
 

@@ -80,10 +80,9 @@ case "$(detect_distro_family)" in
         exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-update.sh)"
         ;;
     opensuse)
-        if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/opensuse-update.sh" ]]; then
-            exec bash "${SCRIPT_DIR}/opensuse-update.sh" "$@"
-        fi
-        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-update.sh)"
+        echo "openSUSE binary packages are not published yet; no update channel." >&2
+        echo "Rebuild from source with scripts/build-opensuse-rpm.sh when you need a newer build." >&2
+        exit 1
         ;;
  esac
 

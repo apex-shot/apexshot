@@ -52,6 +52,7 @@ struct HeartbeatPayload {
 /// Whether telemetry is allowed for this process.
 ///
 /// Order: env `APEXSHOT_TELEMETRY` (off wins) → config `telemetry_enabled`.
+/// Flatpak defaults `telemetry_enabled` to false (opt-in only).
 pub fn telemetry_enabled(config: &AppConfig) -> bool {
     if env_telemetry_disabled() {
         return false;
@@ -354,6 +355,15 @@ mod tests {
         let _g = env_lock().lock().unwrap();
         std::env::remove_var("APEXSHOT_TELEMETRY");
         assert!(telemetry_enabled(&cfg));
+    }
+
+    #[test]
+    fn flatpak_default_config_has_telemetry_off() {
+        // Default must be opt-in under the flatpak feature (plan §10.3).
+        assert_eq!(
+            AppConfig::default().telemetry_enabled,
+            !cfg!(feature = "flatpak")
+        );
     }
 
     #[test]

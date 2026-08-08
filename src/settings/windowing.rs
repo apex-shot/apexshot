@@ -1,9 +1,5 @@
 use gtk4::{gdk, prelude::*, EventControllerMotion, GestureClick};
 
-#[allow(dead_code)]
-pub const SETTINGS_WINDOW_MIN_WIDTH: i32 = 920;
-#[allow(dead_code)]
-pub const SETTINGS_WINDOW_MIN_HEIGHT: i32 = 760;
 const SETTINGS_WINDOW_EDGE_RESIZE_MARGIN: f64 = 8.0;
 
 fn parse_env_bool(name: &str) -> Option<bool> {
@@ -104,7 +100,6 @@ pub fn prefers_reduced_transparency() -> bool {
     false
 }
 
-#[allow(dead_code)]
 fn autostart_dir() -> anyhow::Result<std::path::PathBuf> {
     let config_home = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
@@ -115,42 +110,58 @@ fn autostart_dir() -> anyhow::Result<std::path::PathBuf> {
     Ok(config_home.join("autostart"))
 }
 
-#[allow(dead_code)]
-pub fn install_autostart_entry_for_current_exe() -> anyhow::Result<std::path::PathBuf> {
-    let autostart_dir = autostart_dir()?;
-    std::fs::create_dir_all(&autostart_dir)?;
+/// Flatpak autostart via XDG Background portal (no ~/.config/autostart write).
+fn request_background_autostart(enable: bool) -> anyhow::Result<std::path::PathBuf> {
+    let reason = if enable {
+        "Start ApexShot on login for tray icon and global hotkeys"
+    } else {
+        "Disable ApexShot login autostart"
+    };
 
-    let binary_path = crate::app_identity::preferred_command_path()
-        .display()
-        .to_string();
+    let result = block_on_async(async {
+        ashpd::desktop::background::Background::request()
+            .reason(reason)
+            .auto_start(enable)
+            .command(&["apexshot", "daemon"])
+            .dbus_activatable(false)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Background portal request failed: {e}"))?
+            .response()
+            .map_err(|e| anyhow::anyhow!("Background portal response failed: {e}"))
+    })?;
 
-    let desktop_content = format!(
-        "[Desktop Entry]\n\
-         Type=Application\n\
-         Name={}\n\
-         Comment=ApexShot screenshot daemon - tray icon and hotkey listener\n\
-         Exec={binary_path} daemon\n\
-         Icon={}\n\
-         Categories=Utility;\n\
-         Keywords=screenshot;capture;record;\n\
-         StartupNotify=false\n\
-         X-GNOME-Autostart-enabled=true\n\
-         X-GNOME-Autostart-Delay=2\n\
-         Hidden=false\n\
-         NoDisplay=true\n\
-         X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n\
-         X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1\n",
-        crate::app_identity::daemon_name(),
-        crate::app_identity::icon_name(),
-    );
+    if enable && !result.auto_start() {
+        anyhow::bail!("Background portal did not grant autostart");
+    }
 
-    let desktop_path = autostart_dir.join("apexshot-daemon.desktop");
-    std::fs::write(&desktop_path, desktop_content)?;
-    Ok(desktop_path)
+    // No desktop file is written; return a marker path for callers that log it.
+    Ok(std::path::PathBuf::from(if enable {
+        "portal:background-autostart"
+    } else {
+        "portal:background-autostart-disabled"
+    }))
 }
 
-#[allow(dead_code)]
+fn block_on_async<F, T>(future: F) -> anyhow::Result<T>
+where
+    F: std::future::Future<Output = anyhow::Result<T>>,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
+        Err(_) => {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            rt.block_on(future)
+        }
+    }
+}
+
 pub fn install_autostart_entry_smart() -> anyhow::Result<std::path::PathBuf> {
+    if crate::app_identity::portal_only() {
+        return request_background_autostart(true);
+    }
     let autostart_dir = autostart_dir()?;
     std::fs::create_dir_all(&autostart_dir)?;
 
@@ -185,8 +196,11 @@ pub fn install_autostart_entry_smart() -> anyhow::Result<std::path::PathBuf> {
     Ok(desktop_path)
 }
 
-#[allow(dead_code)]
 pub fn uninstall_autostart_entry() -> anyhow::Result<()> {
+    if crate::app_identity::portal_only() {
+        let _ = request_background_autostart(false);
+        return Ok(());
+    }
     let autostart_dir = autostart_dir()?;
     // Remove both possible autostart files
     for name in ["apexshot-daemon.desktop", "apexshot.desktop"] {

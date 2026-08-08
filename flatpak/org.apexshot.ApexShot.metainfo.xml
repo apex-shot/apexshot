@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>org.apexshot.ApexShot</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>ApexShot</name>
+  <summary>Capture and annotate your screen</summary>
+  <developer id="org.apexshot">
+    <name>codegoddy</name>
+  </developer>
+  <description>
+    <p>ApexShot captures screenshots and screen recordings on Linux with Wayland portals and PipeWire support.</p>
+    <p>Annotate captures, extract text with OCR, scan QR codes, and share results from one desktop application.</p>
+    <p>This Flatpak build is portal-only: capture and recording use XDG desktop portals, telemetry is off by default, and host package tools are not used.</p>
+  </description>
+  <categories>
+    <category>Graphics</category>
+    <category>Photography</category>
+  </categories>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-info">mild</content_attribute>
+  </content_rating>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.34/media/capture-area.png</image>
+      <caption>Select a screen area to capture</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.34/media/video-recording.png</image>
+      <caption>Configure a screen recording</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.34/media/video-editor.png</image>
+      <caption>Edit a recorded video</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.34/media/setting-tray.png</image>
+      <caption>Configure capture settings and tray actions</caption>
+    </screenshot>
+  </screenshots>
+  <url type="homepage">https://apexshot.org/</url>
+  <url type="bugtracker">https://github.com/apex-shot/apexshot/issues</url>
+  <url type="vcs-browser">https://github.com/apex-shot/apexshot</url>
+  <url type="donation">https://apexshot.org/pricing</url>
+  <launchable type="desktop-id">org.apexshot.ApexShot.desktop</launchable>
+  <provides>
+    <binary>apexshot</binary>
+  </provides>
+  <releases>
+    <release version="0.2.34" date="2026-08-03">
+      <description>
+        <p>Initial portal-only Flatpak packaging work: Flatpak feature flag, host-escape gates, Screenshot/ScreenCast portals, telemetry opt-in.</p>
+      </description>
+    </release>
+  </releases>
+</component>

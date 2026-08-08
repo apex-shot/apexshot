@@ -180,30 +180,17 @@ download_file() {
 check_prereqs() {
     step "Checking prerequisites"
 
-    if ! command -v zypper >/dev/null 2>&1; then
-        err "This installer is for openSUSE systems with zypper."
-        err "Use scripts/install.sh on Ubuntu/Debian, Arch, or Fedora."
+    local arch
+    arch="$(uname -m)"
+    if [[ "$arch" != "x86_64" ]]; then
+        err "Prebuilt packages are x86_64 only (this machine: ${arch})."
         exit 1
     fi
 
-    if [[ $EUID -eq 0 ]]; then
-        SUDO=""
-    elif command -v sudo >/dev/null 2>&1; then
-        SUDO="sudo"
-    else
-        err "Root or sudo access is required to install ApexShot."
-        exit 1
-    fi
-
-    if command -v curl >/dev/null 2>&1; then
-        ok "curl found"
-    else
-        err "curl is required but not installed."
-        err "Install it with: sudo zypper install curl"
-        exit 1
-    fi
-
-    ok "zypper found"
+    # Binary openSUSE RPMs are not on GitHub Releases yet (spec + build script only).
+    err "openSUSE binary packages are not published on GitHub Releases yet."
+    err "Build locally: scripts/build-opensuse-rpm.sh"
+    exit 1
 }
 
 prime_sudo() {

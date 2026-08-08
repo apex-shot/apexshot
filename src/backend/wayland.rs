@@ -179,8 +179,10 @@ fn crop_capture(
 impl WaylandBackend {
     /// When set, try the Screenshot portal before compositor-native paths.
     /// Useful for debugging / matching Flameshot exactly on a given desktop.
+    /// Always true under portal-only / Flatpak builds.
     fn should_force_screenshot_portal_first() -> bool {
-        std::env::var_os("APEXSHOT_WAYLAND_SCREENSHOT_PORTAL").is_some()
+        crate::app_identity::portal_only()
+            || std::env::var_os("APEXSHOT_WAYLAND_SCREENSHOT_PORTAL").is_some()
     }
 
     /// Preferred still-image path after native compositors fail.
@@ -206,6 +208,10 @@ impl WaylandBackend {
     }
 
     fn should_try_native_screencopy() -> bool {
+        // Flatpak cannot talk to compositor-private protocols.
+        if crate::app_identity::portal_only() {
+            return false;
+        }
         if std::env::var_os("APEXSHOT_DISABLE_WLR_SCREENCOPY").is_some() {
             return false;
         }
@@ -538,6 +544,9 @@ impl WaylandBackend {
     }
 
     fn should_try_kde_native_screenshot() -> bool {
+        if crate::app_identity::portal_only() {
+            return false;
+        }
         kde_screenshot::is_kde_wayland_session() && kde_screenshot::is_kwin_screenshot_available()
     }
 

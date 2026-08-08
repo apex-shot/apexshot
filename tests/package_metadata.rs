@@ -41,8 +41,8 @@ fn deb_package_includes_capture_helper_binary() {
     );
 
     assert!(
-        release_section.contains("image: ubuntu:25.10"),
-        "release workflow must build release artifacts in an Ubuntu 25.10 container to match the target OCR ABI"
+        release_section.contains("image: ubuntu:24.04"),
+        "release workflow must build release artifacts in an Ubuntu 24.04 container to match the target OCR ABI"
     );
 
     assert!(
@@ -185,13 +185,15 @@ fn opensuse_installer_contains_reported_dependency_set() {
     );
     assert!(
         generic_install.contains("command -v zypper")
-            && generic_install.contains("opensuse-install.sh"),
-        "generic installer should dispatch to the openSUSE installer"
+            && generic_install.contains("opensuse")
+            && generic_install.contains("build-opensuse-rpm.sh"),
+        "generic installer should detect openSUSE via zypper and point at the local RPM build path"
     );
     assert!(
         generic_update.contains("command -v zypper")
-            && generic_update.contains("opensuse-update.sh"),
-        "generic updater should dispatch to the openSUSE updater"
+            && generic_update.contains("opensuse")
+            && generic_update.contains("build-opensuse-rpm.sh"),
+        "generic updater should detect openSUSE via zypper and point at the local RPM build path"
     );
 }
 
@@ -200,7 +202,7 @@ fn opensuse_rpm_spec_matches_project_packaging_contract() {
     let cargo_toml = include_str!("../Cargo.toml");
     let spec = include_str!("../packaging/opensuse/apexshot.spec");
     let build_script = include_str!("../scripts/build-opensuse-rpm.sh");
-    let main_rs = include_str!("../src/main.rs");
+    let install_rs = include_str!("../src/cli/install.rs");
 
     let cargo_version = cargo_toml
         .lines()
@@ -261,10 +263,10 @@ fn opensuse_rpm_spec_matches_project_packaging_contract() {
     );
 
     assert!(
-        main_rs.contains("rpm_has_apexshot_package")
-            && main_rs.contains("\"zypper\"")
-            && main_rs.contains("\"--non-interactive\"")
-            && main_rs.contains("\"remove\""),
+        install_rs.contains("rpm_has_apexshot_package")
+            && install_rs.contains("\"zypper\"")
+            && install_rs.contains("\"--non-interactive\"")
+            && install_rs.contains("\"remove\""),
         "RPM package-managed installs should uninstall through zypper"
     );
 }

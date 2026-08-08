@@ -9,41 +9,33 @@
 //! The daemon keeps hotkeys, tray actions, previews, and recording controls
 //! warm so user-triggered actions avoid repeated process setup work.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
-use anyhow::Context;
-use ashpd::desktop::{
-    remote_desktop::{Axis, DeviceType, KeyState, RemoteDesktop},
-    screencast::{CursorMode, Screencast, SourceType},
-    PersistMode, Session,
-};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::{
-    capture::{copy_capture_uri_to_clipboard, save_capture, save_existing_png, SaveConfig},
     capture_overlay::{
-        begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
-        capture_screen_file_via_cpp, ensure_warm_capture_helper, is_launch_blocked_error,
-        open_recording_ui_via_cpp, request_existing_overlay_focus, shutdown_warm_capture_helper,
-        user_facing_capture_failure_message, AreaCapturePathResult, CaptureOverlayGuard,
-        LaunchBlockedReason,
+        ensure_warm_capture_helper, shutdown_warm_capture_helper, AreaCapturePathResult,
     },
     config::load_config,
-    hotkeys::{
-        accel_to_gnome, ensure_desktop_entry_pub, load_hotkey_config,
-        sync_gnome_hotkeys_for_current_desktop, sync_hotkeys_from_app_config, HotkeyBinding,
-    },
-    ocr::{extract_text, OcrConfig},
-    recording::run_overlay_recording_request_with_gtk,
+    hotkeys::{sync_gnome_hotkeys_for_current_desktop, sync_hotkeys_from_app_config},
     tray::{spawn_tray, ApexShotTray, TrayAction},
 };
+use anyhow::Context;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Daemon action
-// ─────────────────────────────────────────────────────────────────────────────
+mod audio;
+mod capture_handlers;
+mod dispatch;
+mod hotkey_listener;
+mod recording_handlers;
+mod scroll;
+
+pub(crate) use audio::find_physical_input_device;
+pub use capture_handlers::{copy_screenshot_to_clipboard, open_file};
+pub use recording_handlers::{
+    notify_daemon_recording_ended, notify_daemon_recording_paused,
+    notify_daemon_recording_restarted, notify_daemon_recording_resumed,
+    notify_daemon_recording_started,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DaemonAction {
@@ -97,72 +89,26 @@ impl From<TrayAction> for DaemonAction {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared state
-// ─────────────────────────────────────────────────────────────────────────────
-
-struct DaemonState {
-    last_capture_path: Option<std::path::PathBuf>,
-    preview_child: Option<std::process::Child>,
+pub(super) struct DaemonState {
+    pub(super) last_capture_path: Option<std::path::PathBuf>,
+    pub(super) preview_child: Option<std::process::Child>,
     /// Channel to send GTK work to the main OS thread. `None` when the daemon
     /// owns the main thread itself (legacy / test mode).
-    gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
+    pub(super) gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
 }
-
-#[derive(Debug, Clone)]
-struct RecordingTrayState;
-
-impl RecordingTrayState {
-    fn started() -> Self {
-        Self
-    }
-
-    fn pause(&mut self) {}
-
-    fn resume(&mut self) {}
-
-    fn restart(&mut self) {}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main daemon entry point
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Well-known D-Bus name that the daemon registers.
 pub const DAEMON_BUS_NAME: &str = "org.apexshot.Daemon";
+
 /// D-Bus object path.
 pub const DAEMON_OBJECT_PATH: &str = "/org/apexshot/Daemon";
+
 /// D-Bus interface.
 pub const DAEMON_INTERFACE: &str = "org.apexshot.Daemon";
 
-/// Current mic level (f64 bits stored as u64), updated by mic monitoring thread.
-static MIC_LEVEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); // 0.0f64.to_bits()
-/// Current system audio level (f64 bits stored as u64), updated by speaker monitoring thread.
-static SPEAKER_LEVEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// When true, hotkey activations are suppressed (e.g. during shortcut editing).
-static HOTKEY_SUPPRESSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-// ── Lazy audio level monitors ───────────────────────────────────────────────
-// Mic/speaker PipeWire capture streams are NOT opened at daemon startup.
-// Holding a mic capture stream forces Bluetooth headsets into HSP/HFP
-// ("headset mode") and degrades music quality (GitHub issue #41). Streams are
-// started on demand when the recording UI polls GetMicLevel/GetSpeakerLevel,
-// and stopped after a short idle period so the tray can sit quietly.
-
-/// How long after the last level poll before mic/speaker capture streams stop.
-const AUDIO_MONITOR_IDLE: Duration = Duration::from_secs(3);
-
-static MIC_MONITOR_RUNNING: std::sync::atomic::AtomicBool =
+pub(super) static HOTKEY_SUPPRESSED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
-static SPEAKER_MONITOR_RUNNING: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-static MIC_LAST_POLL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static SPEAKER_LAST_POLL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static MIC_MONITOR_STOP: Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
-    Mutex::new(None);
-static SPEAKER_MONITOR_STOP: Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
-    Mutex::new(None);
-static AUDIO_IDLE_REAPER: std::sync::Once = std::sync::Once::new();
 
 /// Returns true if hotkey activations are currently suppressed.
 pub fn is_hotkey_suppressed() -> bool {
@@ -250,7 +196,7 @@ pub fn set_daemon_tray_visibility(visible: bool) -> bool {
         .is_ok()
 }
 
-fn trigger_daemon_action_blocking(action: &str) -> bool {
+pub(super) fn trigger_daemon_action_blocking(action: &str) -> bool {
     if tokio::runtime::Handle::try_current().is_ok() {
         let action = action.to_string();
         return std::thread::spawn(move || trigger_daemon_action_blocking(&action))
@@ -276,26 +222,6 @@ fn trigger_daemon_action_blocking(action: &str) -> bool {
         .is_ok()
 }
 
-pub fn notify_daemon_recording_started() -> bool {
-    trigger_daemon_action_blocking("recording_session_started")
-}
-
-pub fn notify_daemon_recording_paused() -> bool {
-    trigger_daemon_action_blocking("recording_session_paused")
-}
-
-pub fn notify_daemon_recording_resumed() -> bool {
-    trigger_daemon_action_blocking("recording_session_resumed")
-}
-
-pub fn notify_daemon_recording_restarted() -> bool {
-    trigger_daemon_action_blocking("recording_session_restarted")
-}
-
-pub fn notify_daemon_recording_ended() -> bool {
-    trigger_daemon_action_blocking("recording_session_ended")
-}
-
 /// Tell the daemon to show preview for a specific path.
 /// This ensures single-instance behavior (daemon will close existing preview first).
 /// Returns true if the daemon was successfully notified.
@@ -315,7 +241,7 @@ pub fn show_preview_via_daemon(path: &std::path::Path) -> bool {
 
     let path_str = path.to_string_lossy().to_string();
     proxy
-        .call::<_, _, ()>("show_preview_for_path", &(path_str,))
+        .call::<_, _, ()>(SHOW_PREVIEW_FOR_PATH_MEMBER, &(path_str,))
         .is_ok()
 }
 
@@ -388,7 +314,7 @@ pub fn trigger_daemon_action_sync(action: &str) -> bool {
     trigger_daemon_action_blocking(action)
 }
 
-fn spawn_daemon_tray(
+pub(super) fn spawn_daemon_tray(
     action_tx: &std::sync::mpsc::Sender<DaemonAction>,
 ) -> anyhow::Result<ksni::Handle<ApexShotTray>> {
     let (tray_tx, tray_rx) = std::sync::mpsc::channel();
@@ -399,22 +325,6 @@ fn spawn_daemon_tray(
         }
     });
     spawn_tray(tray_tx).context("Failed to spawn tray icon")
-}
-
-fn update_tray_recording_state(
-    tray: &Option<ksni::Handle<ApexShotTray>>,
-    recording_state: Option<&RecordingTrayState>,
-) {
-    if let Some(handle) = tray {
-        handle.update(|tray| tray.set_recording(recording_state.is_some()));
-    }
-}
-
-fn update_recording_tray(
-    tray: &Option<ksni::Handle<ApexShotTray>>,
-    recording_state: Option<&RecordingTrayState>,
-) {
-    update_tray_recording_state(tray, recording_state);
 }
 
 /// A request for GTK work that must run on the main OS thread.
@@ -460,19 +370,25 @@ pub async fn run_daemon() -> anyhow::Result<()> {
     run_daemon_inner(None).await
 }
 
-fn should_quit_on_sigint(recording_active: bool) -> bool {
+pub(super) fn should_quit_on_sigint(recording_active: bool) -> bool {
     !recording_active
 }
 
-async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> anyhow::Result<()> {
+pub(super) async fn run_daemon_inner(
+    gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
+) -> anyhow::Result<()> {
     eprintln!("[daemon] ApexShot daemon starting…");
 
     // Ensure XDG portal permissions are persisted so the user doesn't have
     // to re-approve screenshot/screencast access after reboot.
+    // (no-op in portal_only / Flatpak — never mutates PermissionStore)
     crate::backend::portal_permissions::ensure_portal_permissions();
 
     // Pre-warm apexshot-capture so the first hotkey doesn't pay Qt cold start.
-    ensure_warm_capture_helper();
+    // Flatpak builds do not ship the Qt helper.
+    if !crate::app_identity::portal_only() {
+        ensure_warm_capture_helper();
+    }
 
     // ── SINGLE-INSTANCE CHECK ─────────────────────────────────────────────────
     // Try to register D-Bus name BEFORE any other initialization.
@@ -527,7 +443,7 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     let (action_tx, action_rx) = std::sync::mpsc::channel::<DaemonAction>();
 
     // ── Tray icon ────────────────────────────────────────────────────────────
-    let mut recording_tray_state: Option<RecordingTrayState> = None;
+    let mut recording_tray_state: Option<recording_handlers::RecordingTrayState> = None;
     let mut tray_handle = if initial_config.show_menu_bar_icon {
         let handle = spawn_daemon_tray(&action_tx)?;
         eprintln!("[daemon] Tray icon active.");
@@ -601,7 +517,7 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     } else {
         let hotkey_tx = action_tx.clone();
         tokio::spawn(async move {
-            if let Err(e) = run_hotkey_listener(hotkey_tx).await {
+            if let Err(e) = hotkey_listener::run_hotkey_listener(hotkey_tx).await {
                 eprintln!("[daemon] Hotkey listener error: {e}");
             }
         });
@@ -614,185 +530,16 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     }
 
     // ── Action loop ──────────────────────────────────────────────────────────
+    // ── Action loop ──────────────────────────────────────────────────────────
     while let Ok(action) = action_rx.recv() {
-        let state_clone = state.clone();
-        let action_tx_clone = action_tx.clone();
-        match action {
-            DaemonAction::CaptureArea => {
-                tokio::task::spawn_blocking(move || handle_capture_area(state_clone));
-            }
-            DaemonAction::CaptureCrosshair => {
-                tokio::task::spawn_blocking(move || handle_capture_crosshair(state_clone));
-            }
-            DaemonAction::CaptureScreen => {
-                tokio::task::spawn_blocking(move || handle_capture_screen(state_clone));
-            }
-            DaemonAction::CaptureWindow => {
-                tokio::task::spawn_blocking(move || handle_capture_window(state_clone));
-            }
-            DaemonAction::OpenFile => {
-                if let Some(path) = last_capture_target(last_capture_path(&state_clone).as_deref())
-                {
-                    tokio::task::spawn_blocking(move || {
-                        if let Err(e) = open_file(path) {
-                            eprintln!("[daemon] {e}");
-                        }
-                    });
-                } else {
-                    eprintln!("[daemon] No capture yet.");
-                }
-            }
-            DaemonAction::OpenFromClipboard => {
-                tokio::task::spawn_blocking(move || match import_clipboard_image_to_temp_png() {
-                    Ok(path) => save_existing_png_and_open(path, state_clone),
-                    Err(err) => {
-                        eprintln!("[daemon] Clipboard import failed: {err}");
-                        let (summary, body) = clipboard_missing_image_notification();
-                        send_desktop_notification(summary, body);
-                    }
-                });
-            }
-            DaemonAction::RestoreRecentlyClosed => {
-                if let Some(path) =
-                    restore_recently_closed_target(last_capture_path(&state_clone).as_deref())
-                {
-                    tokio::task::spawn_blocking(move || {
-                        let _ = show_preview_for_path(path, &state_clone);
-                    });
-                } else {
-                    eprintln!("[daemon] No capture available to restore.");
-                }
-            }
-            DaemonAction::ToggleOverlays => {
-                tokio::task::spawn_blocking(move || {
-                    if !toggle_preview_overlay(&state_clone) {
-                        eprintln!("[daemon] No preview overlay available to toggle.");
-                    }
-                });
-            }
-            DaemonAction::RecordScreen => {
-                tokio::spawn(handle_record_screen(action_tx_clone));
-            }
-            DaemonAction::RecordArea => {
-                tokio::spawn(handle_record_area(action_tx_clone));
-            }
-            DaemonAction::OpenRecordingUi => {
-                tokio::spawn(handle_open_recording_ui(action_tx_clone));
-            }
-            DaemonAction::OpenVideoEditor => {
-                tokio::task::spawn_blocking(spawn_empty_video_editor_subprocess);
-            }
-            DaemonAction::OpenImageEditor => {
-                tokio::task::spawn_blocking(spawn_empty_image_editor_subprocess);
-            }
-            DaemonAction::StopRecordingSave => {
-                crate::gnome_shell::hide_recording_mask_best_effort();
-                if !crate::recording::send_active_recording_command(
-                    crate::recording::RecordingControlCommand::StopSave,
-                ) {
-                    eprintln!("[daemon] No active recording available for stop/save.");
-                }
-            }
-
-            DaemonAction::ShowLastPreview => {
-                let path = state.lock().unwrap().last_capture_path.clone();
-                if let Some(p) = path {
-                    tokio::task::spawn_blocking(move || {
-                        let _ = show_preview_for_path(p, &state_clone);
-                    });
-                } else {
-                    eprintln!("[daemon] No capture yet.");
-                }
-            }
-            DaemonAction::ShowPreviewForPath(path) => {
-                tokio::task::spawn_blocking(move || {
-                    let _ = show_preview_for_path(path, &state_clone);
-                });
-            }
-            DaemonAction::OpenLastCapture => {
-                let path = state.lock().unwrap().last_capture_path.clone();
-                if let Some(p) = path {
-                    tokio::task::spawn_blocking(move || {
-                        if let Err(e) = open_file(p) {
-                            eprintln!("[daemon] {e}");
-                        }
-                    });
-                } else {
-                    eprintln!("[daemon] No capture yet.");
-                }
-            }
-            DaemonAction::OpenHistory => {
-                tokio::task::spawn_blocking(spawn_history_subprocess);
-            }
-            DaemonAction::OpenSettings => {
-                tokio::task::spawn_blocking(show_settings_subprocess);
-            }
-            DaemonAction::SetTrayVisible(visible) => {
-                if visible {
-                    if tray_handle.is_none() {
-                        match spawn_daemon_tray(&action_tx) {
-                            Ok(handle) => {
-                                tray_handle = Some(handle);
-                                update_tray_recording_state(
-                                    &tray_handle,
-                                    recording_tray_state.as_ref(),
-                                );
-                                eprintln!("[daemon] Tray icon enabled live.");
-                            }
-                            Err(e) => {
-                                eprintln!("[daemon] Failed to enable tray icon live: {e}");
-                            }
-                        }
-                    }
-                } else if recording_tray_state.is_none() {
-                    if let Some(handle) = tray_handle.take() {
-                        handle.shutdown();
-                        eprintln!("[daemon] Tray icon disabled live.");
-                    }
-                }
-            }
-            DaemonAction::RecordingSessionStarted => {
-                recording_tray_state = Some(RecordingTrayState::started());
-                if tray_handle.is_none() {
-                    match spawn_daemon_tray(&action_tx) {
-                        Ok(handle) => tray_handle = Some(handle),
-                        Err(e) => {
-                            eprintln!("[daemon] Failed to show recording tray: {e}");
-                        }
-                    }
-                }
-                update_recording_tray(&tray_handle, recording_tray_state.as_ref());
-            }
-            DaemonAction::RecordingSessionPaused => {
-                if recording_tray_state.as_mut().map(|s| s.pause()).is_some() {
-                    update_recording_tray(&tray_handle, recording_tray_state.as_ref());
-                }
-            }
-            DaemonAction::RecordingSessionResumed => {
-                if recording_tray_state.as_mut().map(|s| s.resume()).is_some() {
-                    update_recording_tray(&tray_handle, recording_tray_state.as_ref());
-                }
-            }
-            DaemonAction::RecordingSessionRestarted => {
-                if recording_tray_state.as_mut().map(|s| s.restart()).is_some() {
-                    update_recording_tray(&tray_handle, recording_tray_state.as_ref());
-                }
-            }
-            DaemonAction::RecordingSessionEnded => {
-                recording_tray_state = None;
-                update_tray_recording_state(&tray_handle, None);
-            }
-            DaemonAction::SetHotkeySuppressed(suppressed) => {
-                HOTKEY_SUPPRESSED.store(suppressed, std::sync::atomic::Ordering::Relaxed);
-                eprintln!(
-                    "[daemon] Hotkey suppression {}.",
-                    if suppressed { "enabled" } else { "disabled" }
-                );
-            }
-            DaemonAction::Quit => {
-                eprintln!("[daemon] Quit requested.");
-                break;
-            }
+        if !dispatch::dispatch_daemon_action(
+            action,
+            &state,
+            &action_tx,
+            &mut tray_handle,
+            &mut recording_tray_state,
+        ) {
+            break;
         }
     }
 
@@ -801,264 +548,20 @@ async fn run_daemon_inner(gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>) -> a
     Ok(())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// D-Bus IPC server — exposes org.apexshot.Daemon with Trigger(action) method
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// The D-Bus interface object. Holds a channel sender to forward actions to
-/// the daemon's main loop.
-struct PortalScrollSession {
-    remote: RemoteDesktop<'static>,
-    session: Session<'static, RemoteDesktop<'static>>,
-    stream_node_id: Option<u32>,
-    stream_pos: (i32, i32),
-    stream_size: Option<(i32, i32)>,
-}
-
-#[derive(Default)]
-struct ScrollInjector {
-    portal: Option<PortalScrollSession>,
-    focused: bool,
-}
-
-impl ScrollInjector {
-    async fn begin(&mut self) -> Result<bool, String> {
-        if self.portal.is_some() {
-            return Ok(true);
-        }
-
-        let remote: RemoteDesktop<'static> = RemoteDesktop::new()
-            .await
-            .map_err(|e| format!("RemoteDesktop proxy init failed: {e}"))?;
-
-        let screencast = Screencast::new()
-            .await
-            .map_err(|e| format!("Screencast proxy init failed: {e}"))?;
-
-        let session: Session<'static, RemoteDesktop<'static>> = remote
-            .create_session()
-            .await
-            .map_err(|e| format!("RemoteDesktop create_session failed: {e}"))?;
-
-        remote
-            .select_devices(
-                &session,
-                DeviceType::Pointer | DeviceType::Keyboard,
-                None,
-                PersistMode::DoNot,
-            )
-            .await
-            .map_err(|e| format!("RemoteDesktop select_devices failed: {e}"))?;
-
-        screencast
-            .select_sources(
-                &session,
-                CursorMode::Hidden,
-                SourceType::Monitor.into(),
-                false,
-                None,
-                PersistMode::DoNot,
-            )
-            .await
-            .map_err(|e| format!("Screencast select_sources failed: {e}"))?;
-
-        let selected = remote
-            .start(&session, None)
-            .await
-            .map_err(|e| format!("RemoteDesktop start request failed: {e}"))?
-            .response()
-            .map_err(|e| format!("RemoteDesktop start denied: {e}"))?;
-
-        let (stream_node_id, stream_pos, stream_size) =
-            if let Some(stream) = selected.streams().and_then(|streams| streams.first()) {
-                (
-                    Some(stream.pipe_wire_node_id()),
-                    stream.position().unwrap_or((0, 0)),
-                    stream.size(),
-                )
-            } else {
-                (None, (0, 0), None)
-            };
-
-        self.portal = Some(PortalScrollSession {
-            remote,
-            session,
-            stream_node_id,
-            stream_pos,
-            stream_size,
-        });
-        self.focused = false;
-        eprintln!(
-            "[daemon] RemoteDesktop scroll session started (stream={:?})",
-            stream_node_id
-        );
-        Ok(true)
-    }
-
-    async fn step(&mut self, target_x: i32, target_y: i32, steps: i32) -> bool {
-        if self.begin().await != Ok(true) {
-            return false;
-        }
-
-        let Some(portal) = self.portal.as_ref() else {
-            return false;
-        };
-
-        let mut ok = false;
-
-        if let Some(stream_id) = portal.stream_node_id {
-            let (sx, sy) = portal.stream_pos;
-            let mut local_x = (target_x - sx).max(0) as f64;
-            let mut local_y = (target_y - sy).max(0) as f64;
-            if let Some((w, h)) = portal.stream_size {
-                local_x = local_x.min((w.saturating_sub(1)) as f64);
-                local_y = local_y.min((h.saturating_sub(1)) as f64);
-            }
-
-            if portal
-                .remote
-                .notify_pointer_motion_absolute(&portal.session, stream_id, local_x, local_y)
-                .await
-                .is_ok()
-            {
-                ok = true;
-                let press_ok = portal
-                    .remote
-                    .notify_pointer_button(&portal.session, 272, KeyState::Pressed)
-                    .await
-                    .is_ok();
-                let release_ok = portal
-                    .remote
-                    .notify_pointer_button(&portal.session, 272, KeyState::Released)
-                    .await
-                    .is_ok();
-                self.focused = press_ok && release_ok;
-                ok = ok || self.focused;
-            }
-        }
-
-        let count = std::cmp::max(1, steps);
-        for _ in 0..count {
-            let axis_ok = portal
-                .remote
-                .notify_pointer_axis_discrete(&portal.session, Axis::Vertical, -1)
-                .await
-                .is_ok();
-
-            let smooth_axis_ok = portal
-                .remote
-                .notify_pointer_axis(&portal.session, 0.0, 36.0, true)
-                .await
-                .is_ok();
-
-            let keysym_ok = portal
-                .remote
-                .notify_keyboard_keysym(&portal.session, 0xFF56, KeyState::Pressed)
-                .await
-                .is_ok()
-                && portal
-                    .remote
-                    .notify_keyboard_keysym(&portal.session, 0xFF56, KeyState::Released)
-                    .await
-                    .is_ok();
-
-            let keycode_ok = portal
-                .remote
-                .notify_keyboard_keycode(&portal.session, 109, KeyState::Pressed)
-                .await
-                .is_ok()
-                && portal
-                    .remote
-                    .notify_keyboard_keycode(&portal.session, 109, KeyState::Released)
-                    .await
-                    .is_ok();
-
-            let down_keycode_ok = portal
-                .remote
-                .notify_keyboard_keycode(&portal.session, 108, KeyState::Pressed)
-                .await
-                .is_ok()
-                && portal
-                    .remote
-                    .notify_keyboard_keycode(&portal.session, 108, KeyState::Released)
-                    .await
-                    .is_ok();
-
-            eprintln!(
-                "[daemon] portal scroll step: axis_ok={}, smooth_axis_ok={}, keysym_ok={}, keycode_ok={}, down_keycode_ok={}, focused={}, target=({}, {})",
-                axis_ok,
-                smooth_axis_ok,
-                keysym_ok,
-                keycode_ok,
-                down_keycode_ok,
-                self.focused,
-                target_x,
-                target_y
-            );
-
-            ok = ok || axis_ok || smooth_axis_ok || keysym_ok || keycode_ok || down_keycode_ok;
-        }
-
-        if !ok {
-            self.end().await;
-        }
-
-        ok
-    }
-
-    async fn end(&mut self) {
-        if let Some(portal) = self.portal.take() {
-            let _ = portal.session.close().await;
-            eprintln!("[daemon] RemoteDesktop scroll session ended");
-        }
-        self.focused = false;
-    }
-}
-
-struct DaemonIpc {
+pub(super) struct DaemonIpc {
     tx: std::sync::mpsc::Sender<DaemonAction>,
     state: Arc<Mutex<DaemonState>>,
-    scroll_injector: tokio::sync::Mutex<ScrollInjector>,
+    scroll_injector: tokio::sync::Mutex<scroll::ScrollInjector>,
 }
+
 #[zbus::interface(name = "org.apexshot.Daemon")]
 impl DaemonIpc {
     fn trigger(&self, action: String) -> zbus::fdo::Result<()> {
         eprintln!("[daemon] D-Bus Trigger: {action}");
-        let daemon_action = match action.as_str() {
-            "capture_area" => DaemonAction::CaptureArea,
-            "capture_crosshair" => DaemonAction::CaptureCrosshair,
-            "capture_screen" => DaemonAction::CaptureScreen,
-            "capture_window" => DaemonAction::CaptureWindow,
-            "record_screen" => DaemonAction::RecordScreen,
-            "record_area" => DaemonAction::RecordArea,
-            "open_recording_ui" => DaemonAction::OpenRecordingUi,
-            "open_video_editor" => DaemonAction::OpenVideoEditor,
-            "open_image_editor" => DaemonAction::OpenImageEditor,
-            // Canonical control action names (used by CLI + settings shortcuts).
-            "recording_stop_save" | "stop_recording" | "stop_recording_save" => {
-                DaemonAction::StopRecordingSave
-            }
-            "recording_session_started" => DaemonAction::RecordingSessionStarted,
-            "recording_session_paused" => DaemonAction::RecordingSessionPaused,
-            "recording_session_resumed" => DaemonAction::RecordingSessionResumed,
-            "recording_session_restarted" => DaemonAction::RecordingSessionRestarted,
-            "recording_session_ended" => DaemonAction::RecordingSessionEnded,
-            "open_file" => DaemonAction::OpenFile,
-            "open_from_clipboard" => DaemonAction::OpenFromClipboard,
-            "restore_recently_closed" => DaemonAction::RestoreRecentlyClosed,
-            "toggle_overlays" => DaemonAction::ToggleOverlays,
-            "show_last_preview" => DaemonAction::ShowLastPreview,
-            "open_last" => DaemonAction::OpenLastCapture,
-            "history" => DaemonAction::OpenHistory,
-            "settings" => DaemonAction::OpenSettings,
-            "quit" => DaemonAction::Quit,
-            other => {
-                eprintln!("[daemon] D-Bus Trigger: unknown action '{other}'");
-                return Err(zbus::fdo::Error::InvalidArgs(format!(
-                    "Unknown action: {other}"
-                )));
-            }
-        };
+        let daemon_action = parse_trigger_action(&action).ok_or_else(|| {
+            eprintln!("[daemon] D-Bus Trigger: unknown action '{action}'");
+            zbus::fdo::Error::InvalidArgs(format!("Unknown action: {action}"))
+        })?;
         self.tx.send(daemon_action).map_err(|e| {
             zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
         })?;
@@ -1068,11 +571,11 @@ impl DaemonIpc {
     /// Returns the current mic level as a normalized f64 (0.0 to 1.0).
     ///
     /// Lazily starts the mic capture stream used for the recording UI meter.
-    /// The stream is released after [`AUDIO_MONITOR_IDLE`] without polls so a
+    /// The stream is released after [`audio::AUDIO_MONITOR_IDLE`] without polls so a
     /// tray-only daemon does not keep Bluetooth headsets in HSP/HFP mode.
     fn get_mic_level(&self) -> f64 {
-        touch_mic_monitor();
-        f64::from_bits(MIC_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
+        audio::touch_mic_monitor();
+        f64::from_bits(audio::MIC_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// Returns the current system audio level as a normalized f64 (0.0 to 1.0).
@@ -1080,8 +583,8 @@ impl DaemonIpc {
     /// Lazily starts the speaker (sink-monitor) capture stream for the recording
     /// UI meter; released after idle like the mic stream.
     fn get_speaker_level(&self) -> f64 {
-        touch_speaker_monitor();
-        f64::from_bits(SPEAKER_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
+        audio::touch_speaker_monitor();
+        f64::from_bits(audio::SPEAKER_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     async fn scroll_begin_gnome(&self) -> zbus::fdo::Result<bool> {
@@ -1134,7 +637,9 @@ impl DaemonIpc {
         );
         let state = self.state.clone();
         tokio::task::spawn_blocking(move || {
-            handle_import_web_scroll_capture(png_base64, page_url, page_title, state)
+            capture_handlers::handle_import_web_scroll_capture(
+                png_base64, page_url, page_title, state,
+            )
         })
         .await
         .map_err(|e| zbus::fdo::Error::Failed(format!("Web capture import task failed: {e}")))
@@ -1142,7 +647,7 @@ impl DaemonIpc {
 
     /// Show preview for a specific path (used by editor to coordinate single-instance)
     fn show_preview_for_path(&self, path: String) -> zbus::fdo::Result<()> {
-        eprintln!("[daemon] D-Bus show_preview_for_path: {}", path);
+        eprintln!("[daemon] D-Bus ShowPreviewForPath: {}", path);
         let path = std::path::PathBuf::from(path);
         self.tx
             .send(DaemonAction::ShowPreviewForPath(path))
@@ -1153,387 +658,47 @@ impl DaemonIpc {
     }
 }
 
-fn monitor_now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-/// Returns true when `last_poll_ms` is older than `idle` relative to `now_ms`.
-fn audio_monitor_is_idle(last_poll_ms: u64, now_ms: u64, idle: Duration) -> bool {
-    if last_poll_ms == 0 {
-        return true;
+/// Parse a stable D-Bus/CLI trigger action string into a [`DaemonAction`].
+///
+/// These strings are part of the external IPC protocol and must not track Rust
+/// module paths. Keep names stable across internal refactors.
+pub(super) fn parse_trigger_action(action: &str) -> Option<DaemonAction> {
+    match action {
+        "capture_area" => Some(DaemonAction::CaptureArea),
+        "capture_crosshair" => Some(DaemonAction::CaptureCrosshair),
+        "capture_screen" => Some(DaemonAction::CaptureScreen),
+        "capture_window" => Some(DaemonAction::CaptureWindow),
+        "record_screen" => Some(DaemonAction::RecordScreen),
+        "record_area" => Some(DaemonAction::RecordArea),
+        "open_recording_ui" => Some(DaemonAction::OpenRecordingUi),
+        "open_video_editor" => Some(DaemonAction::OpenVideoEditor),
+        "open_image_editor" => Some(DaemonAction::OpenImageEditor),
+        // Canonical control action names (used by CLI + settings shortcuts).
+        "recording_stop_save" | "stop_recording" | "stop_recording_save" => {
+            Some(DaemonAction::StopRecordingSave)
+        }
+        "recording_session_started" => Some(DaemonAction::RecordingSessionStarted),
+        "recording_session_paused" => Some(DaemonAction::RecordingSessionPaused),
+        "recording_session_resumed" => Some(DaemonAction::RecordingSessionResumed),
+        "recording_session_restarted" => Some(DaemonAction::RecordingSessionRestarted),
+        "recording_session_ended" => Some(DaemonAction::RecordingSessionEnded),
+        "open_file" => Some(DaemonAction::OpenFile),
+        "open_from_clipboard" => Some(DaemonAction::OpenFromClipboard),
+        "restore_recently_closed" => Some(DaemonAction::RestoreRecentlyClosed),
+        "toggle_overlays" => Some(DaemonAction::ToggleOverlays),
+        "show_last_preview" => Some(DaemonAction::ShowLastPreview),
+        "open_last" => Some(DaemonAction::OpenLastCapture),
+        "history" => Some(DaemonAction::OpenHistory),
+        "settings" => Some(DaemonAction::OpenSettings),
+        "quit" => Some(DaemonAction::Quit),
+        _ => None,
     }
-    now_ms.saturating_sub(last_poll_ms) >= idle.as_millis() as u64
 }
 
-fn ensure_audio_idle_reaper() {
-    AUDIO_IDLE_REAPER.call_once(|| {
-        std::thread::spawn(|| loop {
-            std::thread::sleep(Duration::from_millis(500));
-            let now = monitor_now_ms();
-            if MIC_MONITOR_RUNNING.load(std::sync::atomic::Ordering::Acquire)
-                && audio_monitor_is_idle(
-                    MIC_LAST_POLL_MS.load(std::sync::atomic::Ordering::Relaxed),
-                    now,
-                    AUDIO_MONITOR_IDLE,
-                )
-            {
-                stop_mic_monitor();
-            }
-            if SPEAKER_MONITOR_RUNNING.load(std::sync::atomic::Ordering::Acquire)
-                && audio_monitor_is_idle(
-                    SPEAKER_LAST_POLL_MS.load(std::sync::atomic::Ordering::Relaxed),
-                    now,
-                    AUDIO_MONITOR_IDLE,
-                )
-            {
-                stop_speaker_monitor();
-            }
-        });
-    });
-}
+/// Stable D-Bus member used by editor/clients to request a path-backed preview.
+pub(super) const SHOW_PREVIEW_FOR_PATH_MEMBER: &str = "show_preview_for_path";
 
-fn touch_mic_monitor() {
-    MIC_LAST_POLL_MS.store(monitor_now_ms(), std::sync::atomic::Ordering::Relaxed);
-    ensure_audio_idle_reaper();
-    ensure_mic_monitor();
-}
-
-fn touch_speaker_monitor() {
-    SPEAKER_LAST_POLL_MS.store(monitor_now_ms(), std::sync::atomic::Ordering::Relaxed);
-    ensure_audio_idle_reaper();
-    ensure_speaker_monitor();
-}
-
-fn ensure_mic_monitor() {
-    use std::sync::atomic::Ordering;
-    if MIC_MONITOR_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return;
-    }
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    if let Ok(mut guard) = MIC_MONITOR_STOP.lock() {
-        *guard = Some(stop.clone());
-    }
-    let mic_target = find_physical_input_device();
-    start_audio_level_stream(
-        "mic",
-        "apexshot-mic-monitor",
-        mic_target.as_deref(),
-        false,
-        &MIC_LEVEL,
-        stop,
-        &MIC_MONITOR_RUNNING,
-    );
-}
-
-fn ensure_speaker_monitor() {
-    use std::sync::atomic::Ordering;
-    if SPEAKER_MONITOR_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return;
-    }
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    if let Ok(mut guard) = SPEAKER_MONITOR_STOP.lock() {
-        *guard = Some(stop.clone());
-    }
-    start_audio_level_stream(
-        "speaker",
-        "apexshot-speaker-monitor",
-        None,
-        true,
-        &SPEAKER_LEVEL,
-        stop,
-        &SPEAKER_MONITOR_RUNNING,
-    );
-}
-
-fn stop_mic_monitor() {
-    if let Ok(mut guard) = MIC_MONITOR_STOP.lock() {
-        if let Some(stop) = guard.take() {
-            eprintln!("[daemon] PipeWire (mic): releasing capture (idle / not needed)");
-            stop.store(true, std::sync::atomic::Ordering::Release);
-        }
-    }
-    MIC_LEVEL.store(0.0f64.to_bits(), std::sync::atomic::Ordering::Relaxed);
-}
-
-fn stop_speaker_monitor() {
-    if let Ok(mut guard) = SPEAKER_MONITOR_STOP.lock() {
-        if let Some(stop) = guard.take() {
-            eprintln!("[daemon] PipeWire (speaker): releasing capture (idle / not needed)");
-            stop.store(true, std::sync::atomic::Ordering::Release);
-        }
-    }
-    SPEAKER_LEVEL.store(0.0f64.to_bits(), std::sync::atomic::Ordering::Relaxed);
-}
-
-fn start_audio_level_stream(
-    label: &'static str,
-    stream_name: &'static str,
-    target: Option<&str>,
-    capture_sink: bool,
-    level: &'static std::sync::atomic::AtomicU64,
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    running: &'static std::sync::atomic::AtomicBool,
-) {
-    let target_owned = target.map(String::from);
-    std::thread::spawn(move || {
-        struct ClearRunning {
-            running: &'static std::sync::atomic::AtomicBool,
-            level: &'static std::sync::atomic::AtomicU64,
-            label: &'static str,
-        }
-        impl Drop for ClearRunning {
-            fn drop(&mut self) {
-                self.level
-                    .store(0.0f64.to_bits(), std::sync::atomic::Ordering::Relaxed);
-                self.running
-                    .store(false, std::sync::atomic::Ordering::Release);
-                eprintln!("[daemon] PipeWire ({}): monitoring stopped.", self.label);
-            }
-        }
-        let _clear = ClearRunning {
-            running,
-            level,
-            label,
-        };
-
-        if stop.load(std::sync::atomic::Ordering::Acquire) {
-            return;
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        if stop.load(std::sync::atomic::Ordering::Acquire) {
-            return;
-        }
-
-        use pipewire as pw;
-        use pw::{properties::properties, spa};
-        use spa::param::format::{MediaSubtype, MediaType};
-        use spa::param::format_utils;
-
-        struct UserData {
-            format: spa::param::audio::AudioInfoRaw,
-        }
-
-        pw::init();
-
-        let mainloop = match pw::main_loop::MainLoopRc::new(None) {
-            Ok(ml) => ml,
-            Err(e) => {
-                eprintln!("[daemon] PipeWire ({label}): failed to create main loop: {e}");
-                return;
-            }
-        };
-
-        let context = match pw::context::ContextRc::new(&mainloop, None) {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("[daemon] PipeWire ({label}): failed to create context: {e}");
-                return;
-            }
-        };
-
-        let core = match context.connect_rc(None) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[daemon] PipeWire ({label}): failed to connect core: {e}");
-                return;
-            }
-        };
-
-        let data = UserData {
-            format: Default::default(),
-        };
-
-        let mut props = properties! {
-            *pw::keys::MEDIA_TYPE => "Audio",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Production",
-        };
-        if let Some(ref target_name) = target_owned {
-            props.insert("target.object", target_name.as_str());
-        }
-        if capture_sink {
-            props.insert("stream.capture.sink", "true");
-        }
-
-        let stream = match pw::stream::StreamBox::new(&core, stream_name, props) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[daemon] PipeWire ({label}): failed to create stream: {e}");
-                return;
-            }
-        };
-
-        let _listener = stream
-            .add_local_listener_with_user_data(data)
-            .param_changed(move |_, user_data, id, param| {
-                let Some(param) = param else { return };
-                if id != spa::param::ParamType::Format.as_raw() {
-                    return;
-                }
-                let (media_type, media_subtype) = match format_utils::parse_format(param) {
-                    Ok(v) => v,
-                    Err(_) => return,
-                };
-                if media_type != MediaType::Audio || media_subtype != MediaSubtype::Raw {
-                    return;
-                }
-                user_data.format.parse(param).ok();
-                eprintln!(
-                    "[daemon] PipeWire ({label}): capturing rate={} channels={}",
-                    user_data.format.rate(),
-                    user_data.format.channels(),
-                );
-            })
-            .process(move |stream, _user_data| {
-                let mut buf = match stream.dequeue_buffer() {
-                    Some(b) => b,
-                    None => return,
-                };
-                let datas = buf.datas_mut();
-                if datas.is_empty() {
-                    return;
-                }
-
-                let mut sum_sq: f64 = 0.0;
-                let mut count: u64 = 0;
-                for data in datas.iter_mut() {
-                    let n_bytes = data.chunk().size() as usize;
-                    if let Some(slice) = data.data() {
-                        let ptr = slice.as_ptr() as *const f32;
-                        if n_bytes >= std::mem::size_of::<f32>() {
-                            let n_samples = n_bytes / std::mem::size_of::<f32>();
-                            for j in 0..n_samples {
-                                let s = unsafe { *ptr.add(j) };
-                                sum_sq += (s * s) as f64;
-                                count += 1;
-                            }
-                        }
-                    }
-                }
-
-                // RMS gives natural, varied levels for both mic and speaker
-                let rms = if count > 0 {
-                    (sum_sq / count as f64).sqrt()
-                } else {
-                    0.0
-                };
-                let raw_level = (rms * 3.0).clamp(0.0, 1.0);
-
-                // Noise gate for mic: ignore quiet audio to avoid picking up
-                // ambient noise or speaker bleed
-                let gated = if !capture_sink && raw_level < 0.15 {
-                    0.0
-                } else {
-                    raw_level
-                };
-
-                level.store(gated.to_bits(), std::sync::atomic::Ordering::Relaxed);
-            })
-            .register();
-
-        // Build audio format pod: F32LE, 44100Hz, mono
-        let mut params: Vec<Vec<u8>> = Vec::new();
-        {
-            let mut audio_info = spa::param::audio::AudioInfoRaw::new();
-            audio_info.set_format(spa::param::audio::AudioFormat::F32LE);
-            audio_info.set_rate(44100);
-            audio_info.set_channels(1);
-
-            let obj = spa::pod::Object {
-                type_: spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
-                id: spa::param::ParamType::EnumFormat.as_raw(),
-                properties: audio_info.into(),
-            };
-
-            let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
-                std::io::Cursor::new(Vec::new()),
-                &spa::pod::Value::Object(obj),
-            )
-            .unwrap()
-            .0
-            .into_inner();
-
-            if spa::pod::Pod::from_bytes(&values).is_some() {
-                params.push(values);
-            }
-        }
-
-        let mut param_refs: Vec<&spa::pod::Pod> = params
-            .iter()
-            .filter_map(|bytes| spa::pod::Pod::from_bytes(bytes))
-            .collect();
-
-        match stream.connect(
-            spa::utils::Direction::Input,
-            None,
-            pw::stream::StreamFlags::AUTOCONNECT
-                | pw::stream::StreamFlags::MAP_BUFFERS
-                | pw::stream::StreamFlags::RT_PROCESS,
-            &mut param_refs,
-        ) {
-            Ok(_) => eprintln!("[daemon] PipeWire ({label}) monitoring started."),
-            Err(e) => {
-                eprintln!("[daemon] PipeWire ({label}): failed to connect stream: {e}");
-                return;
-            }
-        }
-
-        // Poll stop flag on the PipeWire thread (MainLoopRc is !Send).
-        let stop_for_timer = stop.clone();
-        let mainloop_for_timer = mainloop.clone();
-        let stop_timer = mainloop.loop_().add_timer(move |_| {
-            if stop_for_timer.load(std::sync::atomic::Ordering::Acquire) {
-                mainloop_for_timer.quit();
-            }
-        });
-        let _ = stop_timer.update_timer(
-            Some(Duration::from_millis(250)),
-            Some(Duration::from_millis(250)),
-        );
-
-        mainloop.run();
-    });
-}
-
-/// Detect the first physical (non-monitor) audio input device via pactl.
-/// Returns `None` if no suitable device is found, letting PipeWire fall back
-/// to the default input.
-pub(crate) fn find_physical_input_device() -> Option<String> {
-    let output = std::process::Command::new("pactl")
-        .args(["list", "sources", "short"])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8(output.stdout).ok()?;
-
-    for line in stdout.lines() {
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 2 {
-            continue;
-        }
-        let name = fields[1].trim();
-        // Monitor sources end with `.monitor` — skip them to avoid picking up
-        // system audio loopback (which the speaker stream already captures).
-        if name.ends_with(".monitor") {
-            continue;
-        }
-        eprintln!("[daemon] PipeWire (mic): detected physical input device '{name}'");
-        return Some(name.to_string());
-    }
-    eprintln!("[daemon] PipeWire (mic): no physical input device found; falling back to default");
-    None
-}
-
-async fn run_dbus_server(
+pub(super) async fn run_dbus_server(
     conn: zbus::Connection,
     tx: std::sync::mpsc::Sender<DaemonAction>,
     state: Arc<Mutex<DaemonState>>,
@@ -1541,7 +706,7 @@ async fn run_dbus_server(
     let ipc = DaemonIpc {
         tx,
         state,
-        scroll_injector: tokio::sync::Mutex::new(ScrollInjector::default()),
+        scroll_injector: tokio::sync::Mutex::new(scroll::ScrollInjector::default()),
     };
 
     // Serve the IPC object on the existing connection (name already registered)
@@ -1550,1426 +715,23 @@ async fn run_dbus_server(
     // Do NOT open mic/speaker capture streams here. Holding a mic capture open
     // keeps Bluetooth headsets in low-quality HSP/HFP mode for the whole tray
     // lifetime (issue #41). Streams start lazily when GetMicLevel/GetSpeakerLevel
-    // are polled by the recording UI, and stop after AUDIO_MONITOR_IDLE.
+    // are polled by the recording UI, and stop after audio::AUDIO_MONITOR_IDLE.
 
     eprintln!("[daemon] D-Bus IPC ready on {DAEMON_BUS_NAME}");
     std::future::pending::<()>().await;
     Ok(())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Hotkey listener — tries GNOME Shell GrabAccelerators, then portal fallback
-// ─────────────────────────────────────────────────────────────────────────────
-
-async fn run_hotkey_listener(tx: std::sync::mpsc::Sender<DaemonAction>) -> anyhow::Result<()> {
-    let (_config_path, cfg) = load_hotkey_config(None)?;
-    if cfg.bindings.is_empty() {
-        eprintln!("[daemon] No hotkey bindings configured.");
-        return Ok(());
-    }
-
-    // Ensure GIO_LAUNCHED_DESKTOP_FILE is set so GNOME trusts us even when
-    // launched from a terminal. The hotkeys module's ensure_desktop_entry()
-    // writes the file; we just need to export the env vars.
-    ensure_gio_desktop_env();
-
-    // Tier 1: GNOME Shell GrabAccelerators (fast, no dialog, works on GNOME).
-    match run_hotkey_listener_gnome_shell(&cfg, tx.clone()).await {
-        Ok(()) => return Ok(()),
-        Err(e) => {
-            eprintln!("[daemon] GNOME Shell hotkeys unavailable ({e}), trying portal…");
-        }
-    }
-
-    // Tier 2: XDG GlobalShortcuts portal (works on KDE, GNOME with portal, etc.)
-    run_hotkey_listener_portal(&cfg, tx).await
-}
-
-/// Set GIO_LAUNCHED_DESKTOP_FILE env vars so the portal can identify us.
-///
-/// We point to the main app's desktop file so that xdg-desktop-portal
-/// associates the daemon with `io.github.codegoddy.apexshot` — the same
-/// app ID used in the PermissionStore by `ensure_portal_permissions()`.
-/// Without this, the portal derives the app ID from the autostart desktop
-/// file name (`apexshot`) which never matches, so permissions are never
-/// found and the user is asked to approve every time.
-///
-/// The autostart desktop file has NoDisplay=true, so GNOME Shell won't
-/// show a duplicate dock entry regardless of which desktop file we point to.
-fn ensure_gio_desktop_env() {
-    let desktop_path = if let Some(desktop_path) = crate::app_identity::desktop_file_for_portal() {
-        desktop_path
-    } else {
-        let app_id = crate::app_identity::app_id();
-        match ensure_desktop_entry_pub(app_id) {
-            Ok(path) => path,
-            Err(_) => return,
-        }
-    };
-
-    if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE").is_none() {
-        std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", &desktop_path);
-    }
-    if std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE_PID").is_none() {
-        std::env::set_var(
-            "GIO_LAUNCHED_DESKTOP_FILE_PID",
-            std::process::id().to_string(),
-        );
-    }
-    eprintln!("[daemon] GIO desktop env set ({})", desktop_path.display());
-}
-
-fn hotkey_debug_enabled() -> bool {
-    std::env::var_os("APEXSHOT_HOTKEY_DEBUG").is_some()
-}
-
-/// Tier 1: GNOME Shell `GrabAccelerators` / `AcceleratorActivated`.
-async fn run_hotkey_listener_gnome_shell(
-    cfg: &crate::hotkeys::HotkeyConfig,
-    tx: std::sync::mpsc::Sender<DaemonAction>,
-) -> anyhow::Result<()> {
-    use futures_util::StreamExt;
-    use std::collections::HashMap;
-    use zbus::zvariant::OwnedValue;
-
-    let conn = zbus::Connection::session().await?;
-
-    let shell = zbus::Proxy::new(
-        &conn,
-        "org.gnome.Shell",
-        "/org/gnome/Shell",
-        "org.gnome.Shell",
-    )
-    .await?;
-
-    let grab_args: Vec<(String, u32, u32)> = cfg
-        .bindings
-        .iter()
-        .map(|b| (accel_to_gnome(&b.accelerator), 15u32, 0u32))
-        .collect();
-
-    let action_ids: Vec<u32> = shell
-        .call("GrabAccelerators", &(grab_args,))
-        .await
-        .context("GrabAccelerators call failed")?;
-
-    let mut action_map: HashMap<u32, HotkeyBinding> = HashMap::new();
-    for (idx, action_id) in action_ids.into_iter().enumerate() {
-        if action_id != 0 {
-            if let Some(binding) = cfg.bindings.get(idx) {
-                action_map.insert(action_id, binding.clone());
-            }
-        }
-    }
-
-    if action_map.is_empty() {
-        anyhow::bail!("GrabAccelerators returned no valid action IDs (all conflicts or refused)");
-    }
-
-    eprintln!(
-        "[daemon] {} hotkey(s) registered via GNOME Shell.",
-        action_map.len()
-    );
-
-    let match_rule = "type='signal',interface='org.gnome.Shell',member='AcceleratorActivated',path='/org/gnome/Shell'";
-    let rule: zbus::MatchRule = match_rule.try_into()?;
-    let mut stream = zbus::MessageStream::for_match_rule(rule, &conn, None).await?;
-
-    while let Some(Ok(msg)) = stream.next().await {
-        let Ok((action_id, _params)) = msg
-            .body()
-            .deserialize::<(u32, HashMap<String, OwnedValue>)>()
-        else {
-            continue;
-        };
-
-        if is_hotkey_suppressed() {
-            eprintln!("[daemon] Hotkey suppressed (shortcut edit active)");
-            continue;
-        }
-
-        if let Some(binding) = action_map.get(&action_id) {
-            if let Some(act) = binding_to_daemon_action(binding) {
-                eprintln!("[daemon] Hotkey fired: {:?}", act);
-                let _ = tx.send(act);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Tier 2: XDG GlobalShortcuts portal.
-/// Mirrors the working `run_portal_hotkey_daemon` in src/hotkeys/mod.rs exactly.
-async fn run_hotkey_listener_portal(
-    cfg: &crate::hotkeys::HotkeyConfig,
-    tx: std::sync::mpsc::Sender<DaemonAction>,
-) -> anyhow::Result<()> {
-    use crate::hotkeys::{accel_to_portal, ensure_desktop_entry_pub};
-    use futures_util::StreamExt;
-    use std::collections::HashMap;
-    use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
-
-    let app_id = std::env::var("APEXSHOT_APP_ID")
-        .unwrap_or_else(|_| crate::app_identity::app_id().to_string());
-
-    let conn = zbus::Connection::session()
-        .await
-        .context("Failed to connect to session D-Bus")?;
-
-    // Register app_id with the portal so it can associate us with our .desktop file.
-    let _ = ensure_desktop_entry_pub(&app_id);
-    if let Err(e) = portal_register_app_id(&conn, &app_id).await {
-        eprintln!("[daemon] Portal Registry.Register failed (continuing): {e}");
-    }
-
-    let portal = zbus::Proxy::new(
-        &conn,
-        "org.freedesktop.portal.Desktop",
-        "/org/freedesktop/portal/desktop",
-        "org.freedesktop.portal.GlobalShortcuts",
-    )
-    .await
-    .context("GlobalShortcuts portal not available")?;
-
-    // Helpers shared with hotkeys/mod.rs pattern.
-    let sender_id = conn
-        .unique_name()
-        .ok_or_else(|| anyhow::anyhow!("No D-Bus unique name"))?
-        .as_str()
-        .trim_start_matches(':')
-        .replace('.', "_")
-        .to_string();
-
-    let mk_token = || {
-        let pid = std::process::id();
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        // Portal token charset: [A-Za-z0-9_] only.
-        format!("apexshot_{pid}_{nanos}")
-    };
-
-    let mk_request_path = |tok: &str| -> anyhow::Result<OwnedObjectPath> {
-        format!("/org/freedesktop/portal/desktop/request/{sender_id}/{tok}")
-            .try_into()
-            .context("Invalid portal request path")
-    };
-
-    // ── CreateSession ─────────────────────────────────────────────────────────
-    let create_tok = mk_token();
-    let session_tok = mk_token();
-    let mut create_opts: HashMap<String, Value> = HashMap::new();
-    create_opts.insert("handle_token".into(), Value::from(create_tok.clone()));
-    create_opts.insert("session_handle_token".into(), Value::from(session_tok));
-
-    let create_req_path = mk_request_path(&create_tok)?;
-    // Subscribe BEFORE the call to avoid a race condition.
-    let create_rule_str = format!(
-        "type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
-        create_req_path.as_str()
-    );
-    let create_rule: zbus::MatchRule = create_rule_str.as_str().try_into()?;
-    let mut create_stream =
-        zbus::MessageStream::for_match_rule(create_rule, &conn, Some(1)).await?;
-
-    let _req: OwnedObjectPath = portal
-        .call("CreateSession", &(create_opts))
-        .await
-        .context("GlobalShortcuts.CreateSession failed")?;
-
-    let (create_status, create_results) = {
-        let msg = create_stream
-            .next()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("No CreateSession response"))??;
-        msg.body()
-            .deserialize::<(u32, HashMap<String, OwnedValue>)>()
-            .context("Failed to deserialize CreateSession response")?
-    };
-    if create_status != 0 {
-        anyhow::bail!("CreateSession response={create_status}");
-    }
-
-    let session_handle_str: String = create_results
-        .get("session_handle")
-        .ok_or_else(|| anyhow::anyhow!("Missing session_handle in CreateSession response"))?
-        .try_clone()
-        .context("clone session_handle")?
-        .try_into()
-        .context("session_handle not a string")?;
-
-    let session_handle: OwnedObjectPath = session_handle_str
-        .try_into()
-        .context("Invalid session_handle object path")?;
-
-    eprintln!("[daemon] Portal session created.");
-
-    // ── BindShortcuts ─────────────────────────────────────────────────────────
-    let mut id_to_binding: HashMap<String, HotkeyBinding> = HashMap::new();
-    let mut shortcuts: Vec<(String, HashMap<String, Value>)> = Vec::new();
-
-    for (idx, binding) in cfg.bindings.iter().enumerate() {
-        let id = binding
-            .name
-            .clone()
-            .unwrap_or_else(|| format!("binding_{idx}"));
-        let preferred_trigger = accel_to_portal(&binding.accelerator);
-        let mut props: HashMap<String, Value> = HashMap::new();
-        props.insert("description".into(), Value::from(id.replace('_', " ")));
-        // Skip Print-based triggers — they're often reserved on desktops.
-        if !preferred_trigger.to_ascii_uppercase().ends_with("PRINT") {
-            props.insert("preferred_trigger".into(), Value::from(preferred_trigger));
-        }
-        shortcuts.push((id.clone(), props));
-        id_to_binding.insert(id, binding.clone());
-    }
-
-    let bind_tok = mk_token();
-    let mut bind_opts: HashMap<String, Value> = HashMap::new();
-    bind_opts.insert("handle_token".into(), Value::from(bind_tok.clone()));
-
-    let bind_req_path = mk_request_path(&bind_tok)?;
-    let bind_rule_str = format!(
-        "type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
-        bind_req_path.as_str()
-    );
-    let bind_rule: zbus::MatchRule = bind_rule_str.as_str().try_into()?;
-    let mut bind_stream = zbus::MessageStream::for_match_rule(bind_rule, &conn, Some(1)).await?;
-
-    let _bind_req: OwnedObjectPath = portal
-        .call(
-            "BindShortcuts",
-            &(session_handle.clone(), shortcuts, "".to_string(), bind_opts),
-        )
-        .await
-        .context("GlobalShortcuts.BindShortcuts failed")?;
-
-    eprintln!("[daemon] Registering shortcuts with portal…");
-
-    let (bind_status, _bind_results) = {
-        let msg = bind_stream
-            .next()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("No BindShortcuts response"))??;
-        msg.body()
-            .deserialize::<(u32, HashMap<String, OwnedValue>)>()
-            .context("Failed to deserialize BindShortcuts response")?
-    };
-    match bind_status {
-        0 => eprintln!(
-            "[daemon] Portal shortcuts bound ({} shortcut(s)).",
-            id_to_binding.len()
-        ),
-        1 => anyhow::bail!("BindShortcuts cancelled by user"),
-        s => {
-            // Status 2 can mean "shortcuts set but user may need to confirm in Settings".
-            // This is non-fatal — activations will still be delivered.
-            eprintln!("[daemon] BindShortcuts response={s} (non-fatal, continuing to listen).");
-        }
-    }
-
-    // ── Listen for Activated signals ─────────────────────────────────────────
-    // Different portal backends may emit GlobalShortcuts signals on different
-    // object paths, so don't restrict the match rule by path; filter by the
-    // session_handle carried in the signal payload instead.
-    let debug = hotkey_debug_enabled();
-    let activated_rule = if debug {
-        "type='signal',interface='org.freedesktop.portal.GlobalShortcuts'"
-    } else {
-        "type='signal',interface='org.freedesktop.portal.GlobalShortcuts',member='Activated'"
-    };
-    let rule: zbus::MatchRule = activated_rule.try_into()?;
-    let mut activated_stream = zbus::MessageStream::for_match_rule(rule, &conn, None).await?;
-
-    eprintln!("[daemon] Listening for portal hotkey activations…");
-
-    while let Some(Ok(msg)) = activated_stream.next().await {
-        // Signal body: (o session_handle, s shortcut_id, t timestamp, a{sv} options)
-        let parsed: Result<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>), _> =
-            msg.body().deserialize();
-
-        let (signal_session, shortcut_id, _ts, _opts) = match parsed {
-            Ok(v) => v,
-            Err(e) => {
-                if debug {
-                    eprintln!(
-                        "[daemon] Hotkey debug: received non-Activated or unexpected GlobalShortcuts signal: {e}"
-                    );
-                    eprintln!("[daemon] Hotkey debug: raw message: {msg:?}");
-                }
-                continue;
-            }
-        };
-
-        if signal_session != session_handle {
-            if debug {
-                eprintln!(
-                    "[daemon] Hotkey debug: ignoring activation for other session {} (expected {})",
-                    signal_session.as_str(),
-                    session_handle.as_str()
-                );
-            }
-            continue;
-        }
-
-        if is_hotkey_suppressed() {
-            eprintln!("[daemon] Hotkey suppressed (shortcut edit active)");
-            continue;
-        }
-        if let Some(binding) = id_to_binding.get(&shortcut_id) {
-            if let Some(act) = binding_to_daemon_action(binding) {
-                eprintln!("[daemon] Portal hotkey fired: {:?}", act);
-                let _ = tx.send(act);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Register this process's D-Bus peer with the portal's host Registry so it can
-/// be associated with our app_id / .desktop file.
-async fn portal_register_app_id(conn: &zbus::Connection, app_id: &str) -> anyhow::Result<()> {
-    use std::collections::HashMap;
-    use zbus::zvariant::Value;
-
-    let registry = zbus::Proxy::new(
-        conn,
-        "org.freedesktop.portal.Desktop",
-        "/org/freedesktop/portal/desktop",
-        "org.freedesktop.host.portal.Registry",
-    )
-    .await
-    .context("Failed to create host Registry proxy")?;
-
-    let opts: HashMap<String, Value> = HashMap::new();
-    for attempt in 0..2u8 {
-        let call: Result<(), zbus::Error> = registry
-            .call("Register", &(app_id.to_string(), opts.clone()))
-            .await;
-        match call {
-            Ok(()) => {
-                eprintln!("[daemon] Portal: registered app_id={app_id}");
-                return Ok(());
-            }
-            Err(e) if attempt == 0 && e.to_string().contains("App info not found") => {
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            }
-            Err(e) => return Err(anyhow::anyhow!("Registry.Register failed: {e}")),
-        }
-    }
-    anyhow::bail!("Registry.Register failed after retries")
-}
-
-fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<DaemonAction> {
-    // First try matching by the binding's name field.
-    if let Some(name) = binding.name.as_deref() {
-        match name {
-            "capture_area" | "capture-area" => return Some(DaemonAction::CaptureArea),
-            "capture_crosshair" | "capture-crosshair" => {
-                return Some(DaemonAction::CaptureCrosshair);
-            }
-            "capture_screen" | "capture-screen" => return Some(DaemonAction::CaptureScreen),
-            "capture_window" | "capture-window" => return Some(DaemonAction::CaptureWindow),
-            "open_file" | "open-file" => return Some(DaemonAction::OpenFile),
-            "open_from_clipboard" | "open-from-clipboard" => {
-                return Some(DaemonAction::OpenFromClipboard);
-            }
-            "restore_recently_closed" | "restore-recently-closed" => {
-                return Some(DaemonAction::RestoreRecentlyClosed);
-            }
-            "toggle_overlays" | "toggle-overlays" => {
-                return Some(DaemonAction::ToggleOverlays);
-            }
-            "show_last_preview" | "show-last-preview" => {
-                return Some(DaemonAction::ShowLastPreview);
-            }
-            "record_screen" | "record-screen" => return Some(DaemonAction::RecordScreen),
-            "record_area" | "record-area" => return Some(DaemonAction::RecordArea),
-            "open_recording_ui" | "open-recording-ui" => {
-                return Some(DaemonAction::OpenRecordingUi);
-            }
-            "open_video_editor" | "open-video-editor" => {
-                return Some(DaemonAction::OpenVideoEditor);
-            }
-            "recording_stop_save"
-            | "recording-stop-save"
-            | "stop_recording"
-            | "stop-recording"
-            | "stop_recording_save" => {
-                return Some(DaemonAction::StopRecordingSave);
-            }
-            _ => {}
-        }
-    }
-
-    // Fallback: derive action from the args list.
-    match binding.args.first().map(|s| s.as_str()) {
-        Some("capture") => match binding.args.get(1).map(|s| s.as_str()) {
-            Some("area") => Some(DaemonAction::CaptureArea),
-            Some("crosshair") => Some(DaemonAction::CaptureCrosshair),
-            Some("screen") => Some(DaemonAction::CaptureScreen),
-            Some("window") => Some(DaemonAction::CaptureWindow),
-            _ => None,
-        },
-        Some("open-file") => Some(DaemonAction::OpenFile),
-        Some("open-from-clipboard") => Some(DaemonAction::OpenFromClipboard),
-        Some("restore-recently-closed") => Some(DaemonAction::RestoreRecentlyClosed),
-        Some("toggle-overlays") => Some(DaemonAction::ToggleOverlays),
-        Some("show-last-preview") => Some(DaemonAction::ShowLastPreview),
-        Some("record") => match binding.args.get(1).map(|s| s.as_str()) {
-            Some("ui") => Some(DaemonAction::OpenRecordingUi),
-            Some("screen") => Some(DaemonAction::RecordScreen),
-            Some("area") => Some(DaemonAction::RecordArea),
-            Some("stop") => Some(DaemonAction::StopRecordingSave),
-            _ => None,
-        },
-        Some("recording-control") => match binding.args.get(1).map(|s| s.as_str()) {
-            Some("stop-save") => Some(DaemonAction::StopRecordingSave),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn screenshot_image_format(value: &str) -> crate::capture::ImageFormat {
-    match value {
-        "JPEG" => crate::capture::ImageFormat::Jpeg { quality: 85 },
-        "WebP" => crate::capture::ImageFormat::WebP,
-        _ => crate::capture::ImageFormat::Png,
-    }
-}
-
-fn screenshot_save_config_from(app_config: &crate::config::AppConfig) -> SaveConfig {
-    let mut save_config = SaveConfig::default()
-        .with_format(screenshot_image_format(&app_config.screenshot_format))
-        .with_cursor(app_config.screenshot_show_cursor);
-
-    if !app_config.screenshot_export_location.is_empty() {
-        save_config = save_config.with_output_dir(&app_config.screenshot_export_location);
-    }
-
-    save_config
-}
-
-fn screenshot_save_config() -> SaveConfig {
-    let app_config = load_config().sanitized();
-    screenshot_save_config_from(&app_config)
-}
-
-fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
-    let file_name = match sound_name {
-        "Camera" => "camera.ogg",
-        "Classic" => "classic.ogg",
-        "Pop" => "pop.ogg",
-        "None" => return None,
-        _ => return None,
-    };
-
-    let asset_paths = [
-        // Development: relative to the current project directory.
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join("assets/sounds")
-            .join(file_name),
-        // Installed: relative to binary location
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| {
-                exe.parent()
-                    .map(|dir| dir.join("assets/sounds").join(file_name))
-            })
-            .unwrap_or_default(),
-        // System-wide install
-        PathBuf::from("/usr/share/apexshot/sounds").join(file_name),
-        PathBuf::from("/usr/local/share/apexshot/sounds").join(file_name),
-    ];
-
-    asset_paths
-        .into_iter()
-        .find(|path| !path.as_os_str().is_empty() && path.exists())
-}
-
-fn play_shutter_sound_if_enabled() {
-    let config = load_config().sanitized();
-    if !config.play_sounds || config.shutter_sound == "None" {
-        return;
-    }
-
-    let Some(sound_path) = shutter_sound_asset_path(&config.shutter_sound) else {
-        eprintln!(
-            "[daemon] Shutter sound '{}' selected but asset file is not available yet",
-            config.shutter_sound
-        );
-        return;
-    };
-
-    let playback = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(
-            "if command -v pw-play >/dev/null 2>&1; then pw-play \"$1\"; \
-             elif command -v paplay >/dev/null 2>&1; then paplay \"$1\"; \
-             elif command -v aplay >/dev/null 2>&1; then aplay \"$1\"; \
-             else exit 127; fi",
-        )
-        .arg("sh")
-        .arg(&sound_path)
-        .spawn();
-
-    if let Err(e) = playback {
-        eprintln!(
-            "[daemon] Failed to start shutter sound playback for {}: {e}",
-            sound_path.display()
-        );
-    }
-}
-
-fn apply_screenshot_after_capture_actions(
-    saved_path: std::path::PathBuf,
-    state: Arc<Mutex<DaemonState>>,
-) {
-    let config = load_config().sanitized();
-    state.lock().unwrap().last_capture_path = Some(saved_path.clone());
-
-    let open_annotate = config.after_capture_open_annotate;
-    let show_quick_access = config.after_capture_show_quick_access;
-
-    // When auto-upload will put a share URL on the text clipboard, only copy the
-    // image (not file:// URI). Otherwise the URI wins for a few seconds and
-    // looks like "upload did nothing" when the user pastes.
-    let defer_text_clipboard =
-        crate::cloud::upload::should_defer_text_clipboard_to_share_url(&config);
-    let clip_path = saved_path.clone();
-    let clip_config = config.clone();
-    std::thread::spawn(move || {
-        if defer_text_clipboard {
-            if !clip_config.after_capture_copy_file_to_clipboard {
-                return;
-            }
-            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(&clip_path) {
-                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
-            }
-        } else {
-            copy_screenshot_to_clipboard(&clip_path, &clip_config);
-        }
-    });
-
-    // Upload when Cloud is configured and auto-upload is enabled (manual
-    // Upload button on Quick Access still works for re-uploads).
-    crate::cloud::upload::spawn_auto_upload_after_capture(saved_path.clone());
-
-    if open_annotate {
-        // Spawn editor as subprocess to avoid tokio runtime conflicts
-        // The editor runs its own GTK main loop which doesn't work inside tokio
-        spawn_editor_subprocess(saved_path.clone());
-    }
-
-    if show_quick_access {
-        let child = show_preview_subprocess(saved_path);
-        replace_preview_child(&state, child);
-    }
-}
-
-pub fn copy_screenshot_to_clipboard(path: &std::path::Path, config: &crate::config::AppConfig) {
-    if !config.after_capture_copy_file_to_clipboard {
-        return;
-    }
-    match config.adv_clipboard_mode.as_str() {
-        "Image Only" => {
-            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
-                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
-            }
-        }
-        "File Path Only" => {
-            if let Err(e) = copy_capture_uri_to_clipboard(path) {
-                eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
-            }
-        }
-        _ => {
-            // "File & Image (default)" — copy both image and URI
-            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
-                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
-            }
-            if let Err(e) = copy_capture_uri_to_clipboard(path) {
-                eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
-            }
-        }
-    }
-}
-
-fn save_and_open(capture: crate::backend::CaptureData, state: Arc<Mutex<DaemonState>>) -> bool {
-    let config = load_config().sanitized();
-
-    if !config.after_capture_save {
-        // Even if not saving, copy to clipboard if enabled (using temp capture data)
-        if config.after_capture_copy_file_to_clipboard {
-            // Save to a temp file first for clipboard copy
-            if let Ok(temp_path) = save_capture(&capture, &screenshot_save_config()) {
-                copy_screenshot_to_clipboard(&temp_path, &config);
-                let _ = std::fs::remove_file(&temp_path);
-            }
-        }
-
-        eprintln!(
-            "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
-        );
-        send_desktop_notification(
-            "Screenshot not saved",
-            "Save is disabled in After capture settings",
-        );
-        return true;
-    }
-
-    match save_capture(&capture, &screenshot_save_config()) {
-        Ok(path) => {
-            let path: std::path::PathBuf = path;
-            eprintln!("[daemon] Saved: {}", path.display());
-            crate::usage_telemetry::record_screenshot();
-            play_shutter_sound_if_enabled();
-            apply_screenshot_after_capture_actions(path, state);
-            true
-        }
-        Err(e) => {
-            eprintln!("[daemon] Save error: {e}");
-            false
-        }
-    }
-}
-
-fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mutex<DaemonState>>) {
-    let config = load_config().sanitized();
-    if !config.after_capture_save {
-        // Even if not saving, copy to clipboard if enabled
-        copy_screenshot_to_clipboard(&path, &config);
-        let _ = std::fs::remove_file(&path);
-        eprintln!(
-            "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
-        );
-        send_desktop_notification(
-            "Screenshot not saved",
-            "Save is disabled in After capture settings",
-        );
-        return;
-    }
-
-    match save_existing_png(&path, &screenshot_save_config()) {
-        Ok(saved_path) => {
-            eprintln!("[daemon] Saved: {}", saved_path.display());
-            crate::usage_telemetry::record_screenshot();
-            apply_screenshot_after_capture_actions(saved_path, state);
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&path);
-            eprintln!("[daemon] Save error: {e}");
-        }
-    }
-}
-
-fn handle_import_web_scroll_capture(
-    png_base64: String,
-    page_url: String,
-    page_title: String,
-    state: Arc<Mutex<DaemonState>>,
-) -> bool {
-    use crate::backend::{CaptureData, PixelFormat};
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
-
-    let decoded = match STANDARD.decode(png_base64.as_bytes()) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("[daemon] Web scroll import failed: invalid base64 payload: {e}");
-            return false;
-        }
-    };
-
-    let dyn_image = match image::load_from_memory(&decoded) {
-        Ok(img) => img,
-        Err(e) => {
-            eprintln!("[daemon] Web scroll import failed: invalid image payload: {e}");
-            return false;
-        }
-    };
-
-    let rgba = dyn_image.to_rgba8();
-    let width = rgba.width();
-    let height = rgba.height();
-    let pixels = rgba.into_raw();
-
-    if width == 0 || height == 0 {
-        eprintln!("[daemon] Web scroll import failed: empty image");
-        return false;
-    }
-
-    eprintln!(
-        "[daemon] Importing web scroll capture ({}x{}, url={}, title={})",
-        width, height, page_url, page_title
-    );
-
-    let capture = CaptureData::new(pixels, width, height, PixelFormat::RGBA32);
-    save_and_open(capture, state)
-}
-
-fn run_ocr_and_report(capture: crate::backend::CaptureData) {
-    eprintln!("[daemon] OCR tool selected — extracting text from selected area...");
-
-    let config = load_config().sanitized();
-    let ocr_config = OcrConfig::default().with_language(&config.adv_ocr_language);
-
-    match extract_text(&capture, &ocr_config) {
-        Ok(result) => match &result.source {
-            crate::ocr::ContentSource::QrCode => {
-                eprintln!("[daemon] QR code decoded");
-                crate::usage_telemetry::record_ocr();
-                if result.copied_to_clipboard {
-                    send_desktop_notification("QR code decoded", "URL copied to clipboard");
-                } else {
-                    send_desktop_notification(
-                        "QR code decoded",
-                        "Content extracted, but clipboard copy was unavailable",
-                    );
-                }
-            }
-            crate::ocr::ContentSource::Ocr { confidence } => {
-                eprintln!("[daemon] OCR successful (confidence: {}%)", confidence);
-                crate::usage_telemetry::record_ocr();
-                if result.copied_to_clipboard {
-                    send_desktop_notification("OCR complete", "Text copied to clipboard");
-                } else {
-                    send_desktop_notification(
-                        "OCR complete",
-                        "Text extracted, but clipboard copy was unavailable",
-                    );
-                }
-            }
-        },
-        Err(err) => {
-            eprintln!("[daemon] OCR failed: {err}");
-            send_desktop_notification("OCR failed", &err.to_string());
-        }
-    }
-}
-
-fn last_capture_target(path: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-    path.map(std::path::Path::to_path_buf)
-}
-
-fn clipboard_missing_image_notification() -> (&'static str, &'static str) {
-    (
-        "Clipboard image unavailable",
-        "Clipboard does not contain an image to open",
-    )
-}
-
-fn restore_recently_closed_target(path: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-    last_capture_target(path)
-}
-
-fn should_show_preview_after_toggle(preview_visible: bool, has_last_capture: bool) -> bool {
-    !preview_visible && has_last_capture
-}
-
-fn refresh_preview_child_state(state: &mut DaemonState) -> bool {
-    match state.preview_child.as_mut() {
-        Some(child) => match child.try_wait() {
-            Ok(Some(_)) => {
-                state.preview_child = None;
-                false
-            }
-            Ok(None) => true,
-            Err(_) => {
-                state.preview_child = None;
-                false
-            }
-        },
-        None => false,
-    }
-}
-
-fn replace_preview_child(state: &Arc<Mutex<DaemonState>>, child: Option<std::process::Child>) {
-    if let Ok(mut guard) = state.lock() {
-        if let Some(mut existing) = guard.preview_child.take() {
-            let _ = existing.kill();
-            let _ = existing.wait();
-        }
-        guard.preview_child = child;
-    }
-}
-
-fn preview_visible(state: &Arc<Mutex<DaemonState>>) -> bool {
-    state
-        .lock()
-        .map(|mut guard| refresh_preview_child_state(&mut guard))
-        .unwrap_or(false)
-}
-
-fn last_capture_path(state: &Arc<Mutex<DaemonState>>) -> Option<std::path::PathBuf> {
-    state
-        .lock()
-        .ok()
-        .and_then(|guard| guard.last_capture_path.clone())
-}
-
-fn stop_preview_overlay(state: &Arc<Mutex<DaemonState>>) -> bool {
-    let mut guard = match state.lock() {
-        Ok(guard) => guard,
-        Err(_) => return false,
-    };
-
-    if !refresh_preview_child_state(&mut guard) {
-        return false;
-    }
-
-    if let Some(mut child) = guard.preview_child.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-        return true;
-    }
-
-    false
-}
-
-fn show_preview_for_path(path: std::path::PathBuf, state: &Arc<Mutex<DaemonState>>) -> bool {
-    let child = show_preview_subprocess(path);
-    let shown = child.is_some();
-    replace_preview_child(state, child);
-    shown
-}
-
-fn toggle_preview_overlay(state: &Arc<Mutex<DaemonState>>) -> bool {
-    let visible = preview_visible(state);
-    let target = last_capture_path(state);
-
-    if !should_show_preview_after_toggle(visible, target.is_some()) {
-        return stop_preview_overlay(state);
-    }
-
-    target
-        .map(|path| show_preview_for_path(path, state))
-        .unwrap_or(false)
-}
-
-fn import_clipboard_image_to_temp_png() -> anyhow::Result<std::path::PathBuf> {
-    let mut clipboard = arboard::Clipboard::new().context("Failed to access clipboard")?;
-    let image = clipboard
-        .get_image()
-        .context("Clipboard does not contain an image")?;
-
-    let width = u32::try_from(image.width).context("Clipboard image width out of range")?;
-    let height = u32::try_from(image.height).context("Clipboard image height out of range")?;
-    let bytes = image.bytes.into_owned();
-    let rgba = image::RgbaImage::from_raw(width, height, bytes)
-        .context("Clipboard image has invalid RGBA data")?;
-
-    let path = std::env::temp_dir().join(format!(
-        "apexshot_clipboard_{}.png",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
-    ));
-    rgba.save(&path)
-        .with_context(|| format!("Failed to save clipboard image to {}", path.display()))?;
-    Ok(path)
-}
-
-fn send_desktop_notification(summary: &str, body: &str) {
-    crate::utils::notify::desktop_notification(summary, body);
-}
-
-/// Surface a capture failure to the user (Spectacle-style: failures are never silent).
-/// Cancel / launch-blocked paths should not call this.
-fn notify_screenshot_capture_failed(context: &str, err: &impl std::fmt::Display) {
-    let technical = err.to_string();
-    eprintln!("[daemon] {context} capture failed: {technical}");
-    let body = user_facing_capture_failure_message(&technical);
-    send_desktop_notification("Screenshot failed", &body);
-}
-
-/// Spawn `apexshot preview <path>` as a subprocess so it gets its own GTK context.
-fn show_preview_subprocess(path: std::path::PathBuf) -> Option<std::process::Child> {
-    match crate::preview_launch::spawn_preview_subprocess(&path) {
-        Ok(child) => Some(child),
-        Err(e) => {
-            eprintln!(
-                "[daemon] Failed to spawn preview subprocess: {e}, falling back to in-app preview"
-            );
-            crate::preview_launch::show_preview_direct(path);
-            None
-        }
-    }
-}
-
-fn show_settings_subprocess() {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-
-    if let Err(e) = std::process::Command::new(&exe).arg("settings").spawn() {
-        eprintln!("[daemon] Failed to spawn settings window: {e}");
-    }
-}
-
-fn spawn_history_subprocess() {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-
-    if let Err(e) = std::process::Command::new(&exe).arg("history").spawn() {
-        eprintln!("[daemon] Failed to spawn history window: {e}");
-    }
-}
-
-/// Spawn the recording editor without an initial video.
-fn spawn_empty_video_editor_subprocess() {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-
-    if let Err(e) = std::process::Command::new(&exe).arg("video-editor").spawn() {
-        eprintln!("[daemon] Failed to spawn video editor: {e}");
-    }
-}
-
-fn spawn_empty_image_editor_subprocess() {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-
-    if let Err(e) = std::process::Command::new(&exe).arg("image-editor").spawn() {
-        eprintln!("[daemon] Failed to spawn image editor: {e}");
-    }
-}
-
-/// Spawn `apexshot edit <path>` as a subprocess on desktops that need process
-/// isolation. KDE Wayland opens the editor directly to avoid extra taskbar /
-/// loading artifacts in Plasma.
-fn spawn_editor_subprocess(path: std::path::PathBuf) {
-    if crate::preview_launch::should_use_direct_editor_launch() {
-        if let Err(e) = crate::capture::open_image_editor(path) {
-            eprintln!("[daemon] Failed to open editor directly: {e}");
-        }
-        return;
-    }
-
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-
-    if let Err(e) = std::process::Command::new(&exe)
-        .arg("edit")
-        .arg(&path)
-        .spawn()
-    {
-        eprintln!("[daemon] Failed to spawn editor subprocess: {e}");
-    }
-}
-
-/// Hand a file to the desktop's default application.
-///
-/// Shared with the History window so "open in default app" behaves identically
-/// whether it comes from the tray or from a history card.
-pub fn open_file(path: std::path::PathBuf) -> Result<(), String> {
-    std::process::Command::new("xdg-open")
-        .arg(&path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("Could not open this file: {e}"))
-}
-
-fn screenshot_timer_delay_duration(seconds: u32) -> Option<std::time::Duration> {
-    if seconds == 0 {
-        None
-    } else {
-        Some(std::time::Duration::from_secs(seconds as u64))
-    }
-}
-
-fn screenshot_timer_supported(action: &str) -> bool {
-    matches!(action, "screen" | "window")
-}
-
-fn apply_screenshot_timer_if_needed(action: &str, app_config: &crate::config::AppConfig) {
-    if !screenshot_timer_supported(action) {
-        return;
-    }
-    if let Some(delay) = screenshot_timer_delay_duration(app_config.screenshot_timer_interval) {
-        std::thread::sleep(delay);
-    }
-}
-
-fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
-    let Some(_session_guard) = acquire_capture_session_guard("area") else {
-        return;
-    };
-    // Close any existing preview before starting capture (single-instance behavior)
-    let _ = stop_preview_overlay(&state);
-    handle_capture_area_with_active_session(state);
-}
-
-fn handle_capture_crosshair(state: Arc<Mutex<DaemonState>>) {
-    let Some(_session_guard) = acquire_capture_session_guard("crosshair") else {
-        return;
-    };
-    // Close any existing preview before starting capture
-    let _ = stop_preview_overlay(&state);
-    handle_capture_crosshair_with_active_session(state);
-}
-
-fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
-    let app_config = load_config().sanitized();
-    apply_screenshot_timer_if_needed("area", &app_config);
-
-    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
-
-    let cpp_area_init = if let Some(gtk_tx) = gtk_tx.clone() {
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
-        match gtk_tx.send(GtkWork::CaptureAreaInit { reply: reply_tx }) {
-            Ok(()) => match reply_rx.recv() {
-                Ok(result) => result.map_err(anyhow::Error::msg),
-                Err(err) => Err(anyhow::anyhow!(
-                    "GTK main-thread area-init reply failed: {err}"
-                )),
-            },
-            Err(err) => Err(anyhow::anyhow!(
-                "GTK main-thread area-init dispatch failed: {err}"
-            )),
-        }
-    } else {
-        capture_area_file_via_cpp().map_err(anyhow::Error::from)
-    };
-
-    match cpp_area_init {
-        Ok(AreaCapturePathResult::Captured(path)) => {
-            save_existing_png_and_open(path, state);
-        }
-        Ok(AreaCapturePathResult::ScrollCaptured(path)) => {
-            save_existing_png_and_open(path, state);
-        }
-        Ok(AreaCapturePathResult::OcrRequested(capture)) => {
-            run_ocr_and_report(capture);
-        }
-        Ok(AreaCapturePathResult::Cancelled) => {
-            eprintln!("[daemon] Area selection cancelled.");
-        }
-        Ok(AreaCapturePathResult::RecordingConfigUpdated) => {
-            eprintln!("[daemon] Recording overlay state updated.");
-        }
-        Ok(AreaCapturePathResult::RecordingRequested(request)) => {
-            if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
-                eprintln!("[daemon] Recording failed: {err}");
-                // Show notification for GNOME extension not installed
-                if err
-                    .to_string()
-                    .contains("GNOME Shell extension is not installed")
-                {
-                    send_desktop_notification(
-                        "Recording failed",
-                        "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
-                    );
-                }
-            }
-        }
-        Err(err) => {
-            if err
-                .downcast_ref::<crate::overlay::SelectionError>()
-                .is_some_and(is_launch_blocked_error)
-            {
-                eprintln!("[daemon] Area capture blocked: {err}");
-                return;
-            }
-            notify_screenshot_capture_failed("Area", &err);
-        }
-    }
-}
-
-fn handle_capture_crosshair_with_active_session(state: Arc<Mutex<DaemonState>>) {
-    let app_config = load_config().sanitized();
-    apply_screenshot_timer_if_needed("crosshair", &app_config);
-
-    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
-
-    let crosshair = if let Some(gtk_tx) = gtk_tx {
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
-        match gtk_tx.send(GtkWork::CaptureCrosshair { reply: reply_tx }) {
-            Ok(()) => match reply_rx.recv() {
-                Ok(result) => result.map_err(|err| match err.as_str() {
-                    "cancelled" => crate::overlay::SelectionError::Cancelled,
-                    other => crate::overlay::SelectionError::InitError(other.to_string()),
-                }),
-                Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
-                    "GTK main-thread crosshair reply failed: {err}"
-                ))),
-            },
-            Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
-                "GTK main-thread crosshair dispatch failed: {err}"
-            ))),
-        }
-    } else {
-        capture_crosshair_file_via_cpp()
-    };
-
-    match crosshair {
-        Ok(path) => {
-            save_existing_png_and_open(path, state);
-        }
-        Err(err) if is_launch_blocked_error(&err) => {
-            eprintln!("[daemon] Crosshair capture blocked: {err}");
-        }
-        Err(crate::overlay::SelectionError::Cancelled) => {
-            eprintln!("[daemon] Crosshair capture cancelled.");
-        }
-        Err(err) => {
-            notify_screenshot_capture_failed("Crosshair", &err);
-        }
-    }
-}
-
-fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
-    let Some(_session_guard) = acquire_capture_session_guard("screen") else {
-        return;
-    };
-    // Close any existing preview before starting capture
-    let _ = stop_preview_overlay(&state);
-    handle_capture_screen_with_active_session(state);
-}
-
-fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonState>>) {
-    let app_config = load_config().sanitized();
-    apply_screenshot_timer_if_needed("screen", &app_config);
-
-    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
-
-    let screen = if let Some(gtk_tx) = gtk_tx {
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
-        match gtk_tx.send(GtkWork::CaptureScreen { reply: reply_tx }) {
-            Ok(()) => match reply_rx.recv() {
-                Ok(result) => result.map_err(|err| match err.as_str() {
-                    "cancelled" => crate::overlay::SelectionError::Cancelled,
-                    other => crate::overlay::SelectionError::InitError(other.to_string()),
-                }),
-                Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
-                    "GTK main-thread screen reply failed: {err}"
-                ))),
-            },
-            Err(err) => Err(crate::overlay::SelectionError::InitError(format!(
-                "GTK main-thread screen dispatch failed: {err}"
-            ))),
-        }
-    } else {
-        capture_screen_file_via_cpp()
-    };
-
-    match screen {
-        Ok(path) => {
-            save_existing_png_and_open(path, state);
-        }
-        Err(err) if is_launch_blocked_error(&err) => {
-            eprintln!("[daemon] Fullscreen capture blocked: {err}");
-        }
-        Err(crate::overlay::SelectionError::Cancelled) => {
-            eprintln!("[daemon] Fullscreen capture cancelled.");
-        }
-        Err(err) => {
-            notify_screenshot_capture_failed("Fullscreen", &err);
-        }
-    }
-}
-
-fn handle_capture_window(_state: Arc<Mutex<DaemonState>>) {
-    // Window capture is temporarily discontinued — do not fall back to area
-    // capture, which surprises users who pressed a leftover window shortcut.
-    eprintln!(
-        "[daemon] Window capture is temporarily discontinued. Use area or fullscreen capture."
-    );
-}
-
-fn acquire_capture_session_guard(context: &str) -> Option<CaptureOverlayGuard<'static>> {
-    match begin_capture_session() {
-        Ok(guard) => Some(guard),
-        Err(LaunchBlockedReason::ApexOverlayAlreadyActive) => {
-            let refocused = request_existing_overlay_focus();
-            eprintln!(
-                "[daemon] Ignoring duplicate {context} request while ApexShot overlay is active (refocused={refocused})."
-            );
-            None
-        }
-        Err(LaunchBlockedReason::BuiltinOverlayActive) => {
-            eprintln!(
-                "[daemon] Refusing {context} request because the GNOME screenshot UI is active."
-            );
-            None
-        }
-    }
-}
-
-async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
-    use crate::recording::{
-        run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
-    };
-
-    // Fedora: video recording intentionally unsupported.
-    if crate::recording::is_fedora_recording_unsupported() {
-        let _ = crate::recording::refuse_fedora_recording();
-        return;
-    }
-
-    eprintln!("[daemon] Starting screen recording…");
-
-    let app_config = load_config().sanitized();
-    let config = RecordingConfig::from_app_config(&app_config, "mp4");
-    eprintln!(
-        "[daemon] Recording output path: {}",
-        config.output_path.display()
-    );
-    let params = RecordingControlsParams {
-        capture_x: 0,
-        capture_y: 0,
-        capture_w: 0,
-        capture_h: 0,
-        is_fullscreen: true,
-        show_timer: true,
-        use_shell_mask: false,
-        dim_screen: false,
-        countdown_enabled: false,
-        countdown_seconds: 3,
-        session_id: None,
-    };
-
-    match run_recording_with_controls(config, params).await {
-        Ok((path, StopAction::Discard)) => {
-            let _ = std::fs::remove_file(&path);
-            eprintln!("[daemon] Recording discarded.");
-        }
-        Ok((path, StopAction::Save)) => {
-            eprintln!("[daemon] Recording saved: {}", path.display());
-            crate::usage_telemetry::record_recording();
-        }
-        Err(e) => eprintln!("[daemon] Recording error: {e}"),
-    }
-}
-
-async fn handle_open_recording_ui(_tx: std::sync::mpsc::Sender<DaemonAction>) {
-    // Fedora: video recording intentionally unsupported.
-    if crate::recording::is_fedora_recording_unsupported() {
-        let _ = crate::recording::refuse_fedora_recording();
-        return;
-    }
-
-    match tokio::task::spawn_blocking(open_recording_ui_via_cpp).await {
-        Ok(Ok(AreaCapturePathResult::RecordingRequested(request))) => {
-            if let Err(err) = run_overlay_recording_request_with_gtk(request, None) {
-                eprintln!("[daemon] Recording UI failed: {err}");
-                // Show notification for GNOME extension not installed
-                if err
-                    .to_string()
-                    .contains("GNOME Shell extension is not installed")
-                {
-                    send_desktop_notification(
-                        "Recording failed",
-                        "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
-                    );
-                }
-            }
-        }
-        Ok(Ok(AreaCapturePathResult::RecordingConfigUpdated)) => {
-            eprintln!("[daemon] Recording UI updated settings only.");
-        }
-        Ok(Ok(AreaCapturePathResult::Cancelled)) => {
-            eprintln!("[daemon] Recording UI cancelled.");
-        }
-        Ok(Ok(other)) => {
-            eprintln!("[daemon] Unexpected recording UI result: {:?}", other);
-        }
-        Ok(Err(err)) => eprintln!("[daemon] Failed to open recording UI: {err}"),
-        Err(err) => eprintln!("[daemon] Recording UI task panicked: {err}"),
-    }
-}
-
-async fn handle_record_area(_tx: std::sync::mpsc::Sender<DaemonAction>) {
-    use crate::capture_overlay::run_capture_overlay;
-    use crate::overlay::OverlaySelection;
-    use crate::recording::{
-        run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
-    };
-
-    // Fedora: video recording intentionally unsupported.
-    if crate::recording::is_fedora_recording_unsupported() {
-        let _ = crate::recording::refuse_fedora_recording();
-        return;
-    }
-
-    eprintln!("[daemon] Selecting area for recording…");
-
-    // Show C++ overlay on a blocking thread.
-    let selection = tokio::task::spawn_blocking(|| run_capture_overlay(None)).await;
-
-    let cpp_area = match selection {
-        Ok(Ok(OverlaySelection::Area(Some(a)))) => a,
-        Ok(Ok(OverlaySelection::Area(None))) | Ok(Ok(OverlaySelection::Recording(_))) => {
-            eprintln!("[daemon] Area selection cancelled.");
-            return;
-        }
-        Ok(Err(e)) => {
-            eprintln!("[daemon] Area selection error: {e}");
-            return;
-        }
-        Err(e) => {
-            eprintln!("[daemon] Area selection task panicked: {e}");
-            return;
-        }
-    };
-    let area = crate::overlay::SelectionArea {
-        x: cpp_area.x,
-        y: cpp_area.y,
-        width: cpp_area.width,
-        height: cpp_area.height,
-    };
-
-    let app_config = load_config().sanitized();
-    let mut config = RecordingConfig::from_app_config(&app_config, "mp4");
-    config.x = Some(area.x);
-    config.y = Some(area.y);
-    config.width = Some(area.width as u32);
-    config.height = Some(area.height as u32);
-
-    eprintln!(
-        "[daemon] Starting area recording ({},{} {}x{}) → {}…",
-        area.x,
-        area.y,
-        area.width,
-        area.height,
-        config.output_path.display()
-    );
-
-    let params = RecordingControlsParams {
-        capture_x: area.x,
-        capture_y: area.y,
-        capture_w: area.width,
-        capture_h: area.height,
-        is_fullscreen: false,
-        show_timer: true,
-        use_shell_mask: false,
-        dim_screen: true,
-        countdown_enabled: false,
-        countdown_seconds: 3,
-        session_id: None,
-    };
-    match run_recording_with_controls(config, params).await {
-        Ok((path, StopAction::Discard)) => {
-            let _ = std::fs::remove_file(&path);
-            eprintln!("[daemon] Recording discarded.");
-        }
-        Ok((path, StopAction::Save)) => {
-            eprintln!("[daemon] Recording saved: {}", path.display());
-            crate::usage_telemetry::record_recording();
-        }
-        Err(e) => eprintln!("[daemon] Recording error: {e}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        clipboard_missing_image_notification, last_capture_target, restore_recently_closed_target,
-        should_quit_on_sigint, should_show_preview_after_toggle,
-    };
+    use super::audio::*;
+    use super::capture_handlers::*;
+    use super::hotkey_listener::*;
+    use super::*;
     use std::{path::Path, time::Duration};
 
     #[test]
     fn audio_monitor_idle_detection() {
-        use super::audio_monitor_is_idle;
         let idle = Duration::from_secs(3);
         assert!(audio_monitor_is_idle(0, 10_000, idle));
         assert!(!audio_monitor_is_idle(10_000, 10_500, idle));
@@ -2988,7 +750,7 @@ mod tests {
         }
         .sanitized();
 
-        let save_config = super::screenshot_save_config_from(&app_config);
+        let save_config = screenshot_save_config_from(&app_config);
 
         assert_eq!(
             save_config.output_dir.as_deref(),
@@ -3003,20 +765,20 @@ mod tests {
 
     #[test]
     fn screenshot_timer_delay_duration_respects_config() {
-        assert_eq!(super::screenshot_timer_delay_duration(0), None);
+        assert_eq!(screenshot_timer_delay_duration(0), None);
         assert_eq!(
-            super::screenshot_timer_delay_duration(3),
+            screenshot_timer_delay_duration(3),
             Some(std::time::Duration::from_secs(3))
         );
     }
 
     #[test]
     fn screenshot_timer_only_delays_non_interactive_capture_actions() {
-        assert!(!super::screenshot_timer_supported("area"));
-        assert!(!super::screenshot_timer_supported("crosshair"));
-        assert!(super::screenshot_timer_supported("screen"));
-        assert!(super::screenshot_timer_supported("window"));
-        assert!(!super::screenshot_timer_supported("import_web_scroll"));
+        assert!(!screenshot_timer_supported("area"));
+        assert!(!screenshot_timer_supported("crosshair"));
+        assert!(screenshot_timer_supported("screen"));
+        assert!(screenshot_timer_supported("window"));
+        assert!(!screenshot_timer_supported("import_web_scroll"));
     }
 
     #[test]
@@ -3051,7 +813,7 @@ mod tests {
         };
 
         assert_eq!(
-            super::binding_to_daemon_action(&open_recording_ui),
+            binding_to_daemon_action(&open_recording_ui),
             Some(super::DaemonAction::OpenRecordingUi)
         );
     }
@@ -3064,7 +826,7 @@ mod tests {
             name: Some("recording_stop_save".into()),
         };
         assert!(matches!(
-            super::binding_to_daemon_action(&stop_save),
+            binding_to_daemon_action(&stop_save),
             Some(super::DaemonAction::StopRecordingSave)
         ));
 
@@ -3075,7 +837,7 @@ mod tests {
             name: Some("stop_recording".into()),
         };
         assert!(matches!(
-            super::binding_to_daemon_action(&legacy_stop),
+            binding_to_daemon_action(&legacy_stop),
             Some(super::DaemonAction::StopRecordingSave)
         ));
         let stop_by_args_only = crate::hotkeys::HotkeyBinding {
@@ -3084,7 +846,7 @@ mod tests {
             name: None,
         };
         assert!(matches!(
-            super::binding_to_daemon_action(&stop_by_args_only),
+            binding_to_daemon_action(&stop_by_args_only),
             Some(super::DaemonAction::StopRecordingSave)
         ));
     }
@@ -3148,21 +910,60 @@ mod tests {
         };
 
         assert!(matches!(
-            super::binding_to_daemon_action(&open_file),
+            binding_to_daemon_action(&open_file),
             Some(super::DaemonAction::OpenFile)
         ));
         assert!(matches!(
-            super::binding_to_daemon_action(&open_from_clipboard),
+            binding_to_daemon_action(&open_from_clipboard),
             Some(super::DaemonAction::OpenFromClipboard)
         ));
         assert!(matches!(
-            super::binding_to_daemon_action(&restore_recently_closed),
+            binding_to_daemon_action(&restore_recently_closed),
             Some(super::DaemonAction::RestoreRecentlyClosed)
         ));
         assert!(matches!(
-            super::binding_to_daemon_action(&toggle_overlays),
+            binding_to_daemon_action(&toggle_overlays),
             Some(super::DaemonAction::ToggleOverlays)
         ));
+    }
+
+    #[test]
+    fn binding_to_daemon_action_maps_open_file_by_name_without_args() {
+        // Name-only bindings must resolve without relying on CLI args fallback.
+        let open_file = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+O".into(),
+            args: vec![],
+            name: Some("open_file".into()),
+        };
+        assert_eq!(
+            binding_to_daemon_action(&open_file),
+            Some(super::DaemonAction::OpenFile)
+        );
+    }
+
+    #[test]
+    fn parse_trigger_action_accepts_stable_open_file_protocol_name() {
+        assert_eq!(
+            parse_trigger_action("open_file"),
+            Some(super::DaemonAction::OpenFile)
+        );
+        // Rust module paths must never become the external IPC protocol.
+        assert_eq!(parse_trigger_action("capture_handlers::open_file"), None);
+        assert_eq!(
+            parse_trigger_action("super::capture_handlers::open_file"),
+            None
+        );
+    }
+
+    #[test]
+    fn preview_dbus_member_is_stable_method_name() {
+        // Client D-Bus member and zbus server method name must stay aligned and path-free.
+        assert_eq!(SHOW_PREVIEW_FOR_PATH_MEMBER, "show_preview_for_path");
+        assert!(!SHOW_PREVIEW_FOR_PATH_MEMBER.contains("::"));
+        assert!(
+            include_str!("mod.rs").contains("fn show_preview_for_path("),
+            "D-Bus server method must remain show_preview_for_path"
+        );
     }
 
     #[test]
@@ -3174,7 +975,7 @@ mod tests {
         };
 
         assert!(matches!(
-            super::binding_to_daemon_action(&crosshair),
+            binding_to_daemon_action(&crosshair),
             Some(super::DaemonAction::CaptureCrosshair)
         ));
     }

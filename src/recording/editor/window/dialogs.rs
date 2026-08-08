@@ -62,9 +62,7 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
     let path_open = path.clone();
     open_folder.connect_clicked(move |_| {
         if let Some(parent_dir) = path_open.parent() {
-            let _ = std::process::Command::new("xdg-open")
-                .arg(parent_dir)
-                .spawn();
+            let _ = crate::utils::open::open_path(parent_dir);
         }
         dialog_open.close();
     });

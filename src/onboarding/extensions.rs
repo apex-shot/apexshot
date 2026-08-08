@@ -13,7 +13,7 @@ const OLD_EXTENSION_UUID: &str = "apexshot-preview-helper@apexshot.github.io";
 fn open_url(url: &str) {
     let url = url.to_string();
     std::thread::spawn(move || {
-        let _ = Command::new("xdg-open").arg(&url).spawn();
+        let _ = crate::utils::open::open_url(&url);
     });
 }
 
@@ -25,6 +25,9 @@ fn is_gnome() -> bool {
 }
 
 fn is_extension_installed() -> bool {
+    if crate::app_identity::portal_only() {
+        return false;
+    }
     Command::new("gnome-extensions")
         .args(["list"])
         .output()
@@ -33,6 +36,9 @@ fn is_extension_installed() -> bool {
 }
 
 fn is_old_extension_installed() -> bool {
+    if crate::app_identity::portal_only() {
+        return false;
+    }
     Command::new("gnome-extensions")
         .args(["list"])
         .output()
@@ -54,6 +60,11 @@ fn remove_old_extension() {
 }
 
 fn install_extension(button: gtk4::glib::SendWeakRef<Button>) {
+    // Flatpak: never install host GNOME extensions; open the listing URL instead.
+    if crate::app_identity::portal_only() {
+        open_url(GNOME_EXTENSION_URL);
+        return;
+    }
     std::thread::spawn(move || {
         // Dynamically find the latest release that actually contains the zip file
         // This handles cases where recent releases (e.g., .deb only) don't have the zip

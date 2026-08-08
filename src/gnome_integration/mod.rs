@@ -21,6 +21,10 @@ pub fn emit_tracked_window_opened(
     let role = role.to_owned();
     let namespace = namespace.to_owned();
 
+    if crate::app_identity::portal_only() {
+        return;
+    }
+
     std::thread::spawn(move || {
         let _ = Command::new("dbus-send")
             .args([
@@ -41,6 +45,9 @@ pub fn emit_tracked_window_opened(
 
 /// Emit `TrackedWindowClosed(tracked_id)` on the session D-Bus.
 pub fn emit_tracked_window_closed(tracked_id: &str) {
+    if crate::app_identity::portal_only() {
+        return;
+    }
     let tracked_id = tracked_id.to_owned();
 
     std::thread::spawn(move || {

@@ -21,7 +21,7 @@ CleanShot X.
 [Releases](https://github.com/apex-shot/apexshot/releases) ·
 [Report a bug](https://github.com/apex-shot/apexshot/issues/new/choose)
 
-![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
+![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
 ![Version](https://img.shields.io/github/v/release/apex-shot/apexshot?label=version&color=orange)
 ![Status](https://img.shields.io/badge/status-Public%20Beta-green.svg)
@@ -51,7 +51,7 @@ support.
 | Video editing | Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings |
 | Text and code extraction | OCR plus automatic QR code detection from captured regions |
 | Linux desktop integration | GNOME Wayland support, portal-backed capture paths, tray, daemon mode, and global hotkeys |
-| Open-source project | GPL-3.0 source code, GitHub releases, issues, and discussions at https://github.com/apex-shot/apexshot |
+| Open-source project | GPL-3.0-or-later source code, GitHub releases, issues, and discussions at https://github.com/apex-shot/apexshot |
 
 ## Built for common Linux screenshot workflows
 
@@ -73,9 +73,9 @@ ApexShot does, without turning the README into generic comparison copy.
 ApexShot is already usable as a daily screenshot tool on the configurations
 that have been personally tested: Ubuntu GNOME Wayland, Arch Linux GNOME
 Wayland, Hyprland Wayland, and Fedora KDE Plasma Wayland (screenshots). The
-recommended installer detects Ubuntu/Debian, Arch Linux, Fedora, or openSUSE
-and selects the matching install path. **Video recording is not supported on
-Fedora**; openSUSE remains development-stage for full runtime coverage:
+recommended installer detects Ubuntu/Debian, Arch Linux, or Fedora and selects
+the matching install path (openSUSE is development-stage and refused until a
+binary ships). **Video recording is not supported on Fedora**:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
@@ -93,7 +93,7 @@ Works best today on:
 | Sway / wlroots-like compositors (Wayland) | Implementation exists through GTK4 layer-shell, `wlr-screencopy`, and `wf-recorder`, but needs more manual validation |
 | KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet personally tested |
 | Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). **Video recording is not supported** — use Spectacle or Kooha for screen recording |
-| openSUSE Tumbleweed / Leap (Wayland) | Development stage: source installer and initial RPM spec exist; runtime testing pending |
+| openSUSE Tumbleweed / Leap (Wayland) | Development stage: RPM spec + `scripts/build-opensuse-rpm.sh` exist; **no published binary** yet (generic installer will refuse) |
 | NixOS / Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; packaging/testing pending |
 | X11 on any distro | Experimental |
 
@@ -246,19 +246,9 @@ For local development reinstalls on Fedora:
 
 ### openSUSE Tumbleweed / Leap
 
-openSUSE support is in development. The generic installer above will select
-this automatically when `zypper` is available, but this path has not yet been
-personally runtime-tested on openSUSE Tumbleweed or Leap. Direct command:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/opensuse-install.sh | bash
-```
-
-The direct openSUSE installer now downloads the latest published GitHub Release
-RPM and installs it with `zypper`, after ensuring the required runtime packages
-are present.
-
-A local RPM build path is still available for packaging work:
+openSUSE support is in development. **No binary openSUSE RPM is published on
+GitHub Releases yet** — the generic installer refuses openSUSE rather than
+installing a Fedora RPM by mistake. Build locally for packaging work:
 
 ```bash
 git clone https://github.com/apex-shot/apexshot.git
@@ -659,4 +649,4 @@ desktop environment, display server, and the workflow you want to improve.
 
 ## License
 
-GPL-3.0 — See [LICENSE](LICENSE) for details.
+GPL-3.0-or-later — See [LICENSE](LICENSE) for details.

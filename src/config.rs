@@ -273,7 +273,8 @@ impl Default for AppConfig {
             adv_ocr_language: "eng".to_string(),
             adv_ocr_keep_line_breaks: true,
             adv_filename_use_utc: false,
-            telemetry_enabled: true,
+            // Flatpak: off until the user explicitly opts in (plan §10.3 / §9.4).
+            telemetry_enabled: !cfg!(feature = "flatpak"),
         }
     }
 }

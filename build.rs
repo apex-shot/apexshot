@@ -96,7 +96,12 @@ fn build_capture_overlay() {
 }
 
 fn main() {
-    build_capture_overlay();
+    // Flatpak builds are portal-only: skip the Qt5/X11 C++ helper entirely.
+    if std::env::var_os("CARGO_FEATURE_FLATPAK").is_none() {
+        build_capture_overlay();
+    } else {
+        println!("cargo:warning=flatpak feature: skipping Qt capture-overlay build");
+    }
 
     // Rebuild whenever a custom SVG is added/modified in data/icons.
     println!("cargo:rerun-if-changed=data/icons");

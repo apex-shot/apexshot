@@ -1,5 +1,4 @@
 use gtk4::{prelude::*, Align, Box as GtkBox, Button, Label, Orientation, Separator};
-use std::process::Command;
 
 pub struct AboutSettingsWidgets {
     pub section: GtkBox,
@@ -65,9 +64,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     check_btn.set_halign(Align::Center);
     check_btn.connect_clicked(|_| {
         std::thread::spawn(move || {
-            let _ = Command::new("xdg-open")
-                .arg("https://github.com/apex-shot/apexshot/releases")
-                .spawn();
+            let _ = crate::utils::open::open_url("https://github.com/apex-shot/apexshot/releases");
         });
     });
 
@@ -77,9 +74,9 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     whats_new_btn.set_halign(Align::Center);
     whats_new_btn.connect_clicked(|_| {
         std::thread::spawn(move || {
-            let _ = Command::new("xdg-open")
-                .arg("https://github.com/apex-shot/apexshot/releases/latest")
-                .spawn();
+            let _ = crate::utils::open::open_url(
+                "https://github.com/apex-shot/apexshot/releases/latest",
+            );
         });
     });
 
@@ -99,9 +96,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         btn.add_css_class("about-link-button");
         btn.connect_clicked(|_| {
             std::thread::spawn(move || {
-                let _ = Command::new("xdg-open")
-                    .arg("https://apexshot.org/")
-                    .spawn();
+                let _ = crate::utils::open::open_url("https://apexshot.org/");
             });
         });
         btn

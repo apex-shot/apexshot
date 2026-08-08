@@ -330,11 +330,6 @@ fn combo_value(combo: &ComboBoxText, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-#[allow(dead_code)]
-pub fn close_window(window: &gtk4::ApplicationWindow) {
-    window.close();
-}
-
 #[cfg(test)]
 mod tests {
     use super::{

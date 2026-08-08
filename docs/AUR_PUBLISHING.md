@@ -20,8 +20,11 @@ This repository publishes the `apexshot` AUR package from tagged releases.
    ssh-keyscan -t rsa,ed25519 aur.archlinux.org
    ```
 
-If `AUR_SSH_PRIVATE_KEY` is not configured, release CI builds the Arch package
-but skips the AUR publish step.
+If `AUR_SSH_PRIVATE_KEY` is not configured, release CI still builds the Arch
+package artifact, but the **Publish AUR package** job fails with an explicit
+error so a green workflow never means “AUR is live” when it is not. Add the
+secret before the next tagged release, or disable the `aur` job if you are
+intentionally not publishing.
 
 ## Release Flow
 
