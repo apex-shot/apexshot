@@ -63,6 +63,20 @@ pub(super) fn sync_kde_hotkeys_if_applicable(
         return Ok(());
     }
 
+    // zbus::blocking builds its own multi-thread runtime. Calling it on a
+    // tokio worker (daemon startup) panics: "Cannot start a runtime from
+    // within a runtime" (GitHub #49). Hop to a thread with no runtime.
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let cfg = cfg.clone();
+        return std::thread::spawn(move || sync_kde_hotkeys_blocking(&cfg))
+            .join()
+            .unwrap_or(Ok(()));
+    }
+
+    sync_kde_hotkeys_blocking(cfg)
+}
+
+fn sync_kde_hotkeys_blocking(cfg: &super::config::HotkeyConfig) -> anyhow::Result<()> {
     let bus = match zbus::blocking::Connection::session() {
         Ok(conn) => conn,
         Err(e) => {

@@ -775,6 +775,24 @@ mod tests {
     }
 
     #[test]
+    fn kde_hotkey_sync_does_not_panic_inside_tokio_runtime() {
+        let cfg = sample_hotkey_config();
+        let previous_desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+        std::env::set_var("XDG_CURRENT_DESKTOP", "KDE");
+        let result = std::panic::catch_unwind(|| {
+            tokio::runtime::Runtime::new()
+                .expect("runtime")
+                .block_on(async { sync_kde_hotkeys_if_applicable(&cfg) })
+        });
+        match previous_desktop {
+            Some(value) => std::env::set_var("XDG_CURRENT_DESKTOP", value),
+            None => std::env::remove_var("XDG_CURRENT_DESKTOP"),
+        }
+        let result = result.expect("KDE hotkey sync panicked inside a tokio runtime");
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn kde_component_action_is_string_array_of_four() {
         // Must be Vec (D-Bus `as`), not a fixed array (which zbus encodes as struct).
         let binding = HotkeyBinding {
