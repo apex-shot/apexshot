@@ -37,10 +37,8 @@ fn normalize_shortcut_key_name(key_name: &str) -> Option<String> {
         _ if trimmed.len() == 1 => trimmed.to_ascii_uppercase(),
         _ => {
             let mut chars = lower.chars();
-            match chars.next() {
-                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-                None => return None,
-            }
+            let first = chars.next()?;
+            first.to_ascii_uppercase().to_string() + chars.as_str()
         }
     };
 

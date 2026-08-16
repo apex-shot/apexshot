@@ -376,12 +376,10 @@ pub(crate) fn settings_menu_hit_item(
                 .contains(x, y)
             };
             let mut cy = menu_y + 106.0;
-            let mut idx = 3;
-            for _ in 0..6 {
+            for idx in 3..9 {
                 if check_area_at(cy) {
                     return Some(idx);
                 }
-                idx += 1;
                 cy += 44.0;
             }
         }
