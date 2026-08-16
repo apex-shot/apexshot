@@ -1,7 +1,9 @@
 use super::footer;
 use super::panels::{self, EditorControls};
 use super::toolbar;
-use crate::recording::editor::model::{VideoBackground, VideoEditState, MAX_ZOOM_SCALE, MIN_ZOOM_SCALE};
+use crate::recording::editor::model::{
+    VideoBackground, VideoEditState, MAX_ZOOM_SCALE, MIN_ZOOM_SCALE,
+};
 use gtk4::{
     prelude::*, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Scale, ScrolledWindow,
 };
@@ -50,18 +52,16 @@ pub(super) fn build_inspector(
 
     let (panels_widget, controls) = panels::build_panels(state.clone(), estimate_label.clone());
     content.append(&panels_widget);
-    content.append(&build_background_section(state.clone(), estimate_label.clone()));
+    content.append(&build_background_section(
+        state.clone(),
+        estimate_label.clone(),
+    ));
     content.append(&build_zoom_section(state.clone(), estimate_label.clone()));
     scroll.set_child(Some(&content));
     root.append(&scroll);
 
-    let actions = footer::build_inspector_actions(
-        window,
-        state,
-        estimate_label,
-        controls.clone(),
-        exporting,
-    );
+    let actions =
+        footer::build_inspector_actions(window, state, estimate_label, controls.clone(), exporting);
     root.append(&actions);
 
     InspectorParts {
@@ -70,10 +70,7 @@ pub(super) fn build_inspector(
     }
 }
 
-fn build_background_section(
-    state: Arc<Mutex<VideoEditState>>,
-    estimate_label: Label,
-) -> GtkBox {
+fn build_background_section(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) -> GtkBox {
     let section = GtkBox::new(Orientation::Vertical, 8);
     section.add_css_class("editor-inspector-section");
 
@@ -107,30 +104,20 @@ fn build_background_section(
         }
     };
 
-    wire_exclusive_choice(
-        &none,
-        &[&plain, &gradient],
-        updating.clone(),
-        {
-            let apply = apply.clone();
-            move || apply(VideoBackground::None)
-        },
-    );
-    wire_exclusive_choice(
-        &plain,
-        &[&none, &gradient],
-        updating.clone(),
-        {
-            let apply = apply.clone();
-            move || {
-                apply(VideoBackground::Plain {
-                    r: 18,
-                    g: 18,
-                    b: 22,
-                })
-            }
-        },
-    );
+    wire_exclusive_choice(&none, &[&plain, &gradient], updating.clone(), {
+        let apply = apply.clone();
+        move || apply(VideoBackground::None)
+    });
+    wire_exclusive_choice(&plain, &[&none, &gradient], updating.clone(), {
+        let apply = apply.clone();
+        move || {
+            apply(VideoBackground::Plain {
+                r: 18,
+                g: 18,
+                b: 22,
+            })
+        }
+    });
     wire_exclusive_choice(&gradient, &[&none, &plain], updating, {
         let apply = apply.clone();
         move || apply(VideoBackground::Gradient(0))

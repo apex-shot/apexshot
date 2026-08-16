@@ -602,7 +602,9 @@ pub fn print_pointer_debug() -> anyhow::Result<()> {
         anyhow::bail!("pointer debug requires GNOME Wayland");
     }
     if !is_shell_overlay_service_available() {
-        anyhow::bail!("org.apexshot.ShellOverlay is not on the bus — enable the ApexShot GNOME extension");
+        anyhow::bail!(
+            "org.apexshot.ShellOverlay is not on the bus — enable the ApexShot GNOME extension"
+        );
     }
     let (x, y, kind, valid) = get_pointer_snapshot()?;
     println!("pointer snapshot x={x} y={y} kind={kind} valid={valid}");

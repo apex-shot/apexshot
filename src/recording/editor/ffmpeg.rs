@@ -487,7 +487,12 @@ fn build_composite_convert_args(
         state.metadata.path.to_string_lossy().into_owned(),
     ];
     if draw_cursor {
-        args.extend(["-loop".into(), "1".into(), "-i".into(), cursor_path.to_string_lossy().into_owned()]);
+        args.extend([
+            "-loop".into(),
+            "1".into(),
+            "-i".into(),
+            cursor_path.to_string_lossy().into_owned(),
+        ]);
     }
     args.extend(["-filter_complex".into(), filter]);
     args.extend([
@@ -648,7 +653,9 @@ fn format_seconds(value: f64) -> String {
 }
 
 fn escape_filter_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "\\\\").replace(':', "\\:")
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace(':', "\\:")
 }
 
 #[cfg(test)]
@@ -723,13 +730,15 @@ mod tests {
     #[test]
     fn convert_with_zoom_uses_sendcmd_crop_graph() {
         let mut state = state();
-        state.zoom_clips.push(crate::recording::editor::model::ZoomClip {
-            start: 1.5,
-            end: 3.3,
-            scale: 1.8,
-            center: (960.0, 540.0),
-            ease_ms: 200,
-        });
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 1.5,
+                end: 3.3,
+                scale: 1.8,
+                center: (960.0, 540.0),
+                ease_ms: 200,
+            });
         assert!(state.needs_reencode());
         let args = build_single_convert_args(
             &state,
@@ -738,7 +747,9 @@ mod tests {
             Path::new("/tmp/output.mp4"),
         );
         assert!(args.iter().any(|arg| arg == "-filter_complex"));
-        assert!(args.iter().any(|arg| arg.contains("sendcmd") && arg.contains("crop@z")));
+        assert!(args
+            .iter()
+            .any(|arg| arg.contains("sendcmd") && arg.contains("crop@z")));
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
     }
 

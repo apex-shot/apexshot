@@ -470,7 +470,11 @@ fn build_empty_timeline() -> GtkBox {
     transport.add_css_class("recording-editor-transport");
     let left = GtkBox::new(Orientation::Horizontal, 4);
     left.set_hexpand(true);
-    for icon_name in ["edit-undo-symbolic", "edit-redo-symbolic", "edit-cut-symbolic"] {
+    for icon_name in [
+        "edit-undo-symbolic",
+        "edit-redo-symbolic",
+        "edit-cut-symbolic",
+    ] {
         left.append(&disabled_transport_button(icon_name));
     }
     let center = GtkBox::new(Orientation::Horizontal, 6);
@@ -791,5 +795,3 @@ fn is_supported_video_path(path: &std::path::Path) -> bool {
         .map(|e| e.eq_ignore_ascii_case("mp4"))
         .unwrap_or(false)
 }
-
-

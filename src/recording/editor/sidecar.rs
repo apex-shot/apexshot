@@ -257,10 +257,8 @@ mod tests {
 
     #[test]
     fn roundtrip_preserves_clock_and_samples() {
-        let dir = std::env::temp_dir().join(format!(
-            "apexshot-sidecar-roundtrip-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-sidecar-roundtrip-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let video = dir.join("clip.mp4");
@@ -336,7 +334,8 @@ mod tests {
 
     #[test]
     fn fullscreen_region_does_not_subtract() {
-        let mut sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         sidecar.pointer.push(PointerSample {
             t: 0.0,
             x: 250.0,
@@ -350,7 +349,8 @@ mod tests {
 
     #[test]
     fn interpolated_sample_lerps_between_neighbors() {
-        let mut sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         sidecar.pointer.push(PointerSample {
             t: 0.0,
             x: 0.0,
@@ -371,7 +371,8 @@ mod tests {
 
     #[test]
     fn click_pulse_peaks_at_click_time() {
-        let mut sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         sidecar.clicks.push(ClickSample {
             t: 1.0,
             x: 0.0,

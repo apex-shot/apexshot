@@ -543,7 +543,9 @@ pub(super) fn build_timeline(
                 let layout = compute_visual_layout(&state, width);
                 match hit_segment_drag(&state, &layout, x, handle_threshold, move_mode.get()) {
                     Some(TrimDragKind::Start) | Some(TrimDragKind::Cut(_))
-                        if layout.iter().any(|(_, vx, _)| (x - vx).abs() <= handle_threshold) =>
+                        if layout
+                            .iter()
+                            .any(|(_, vx, _)| (x - vx).abs() <= handle_threshold) =>
                     {
                         Some("w-resize")
                     }
@@ -781,7 +783,12 @@ pub(super) fn build_timeline(
             let Some((start_x, _)) = gesture.start_point() else {
                 return;
             };
-            seek_from_x(&state, &media, gesture.widget().as_ref(), start_x + offset_x);
+            seek_from_x(
+                &state,
+                &media,
+                gesture.widget().as_ref(),
+                start_x + offset_x,
+            );
         }
     });
     ruler_drag.connect_drag_end({
@@ -819,7 +826,11 @@ pub(super) fn build_timeline(
     let audio_add = icon_tool_button("list-add-symbolic", "Audio stays as recorded");
     audio_add.add_css_class("recording-editor-track-add");
     audio_add.set_sensitive(false);
-    let audio_row = track_row("audio-volume-high-symbolic", &waveform_body, Some(&audio_add));
+    let audio_row = track_row(
+        "audio-volume-high-symbolic",
+        &waveform_body,
+        Some(&audio_add),
+    );
 
     let zoom_body = build_zoom_track(state.clone(), estimate_label.clone());
     let zoom_row = track_row("zoom-in-symbolic", &zoom_body, Some(&add_zoom));
@@ -976,9 +987,10 @@ fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) ->
                 state.playhead_seconds = seconds;
                 state.add_zoom_at_playhead();
             } else {
-                let selected = state.zoom_clips.iter().position(|clip| {
-                    seconds >= clip.start && seconds <= clip.end
-                });
+                let selected = state
+                    .zoom_clips
+                    .iter()
+                    .position(|clip| seconds >= clip.start && seconds <= clip.end);
                 state.selected_zoom = selected;
             }
             drop(state);
@@ -1001,15 +1013,19 @@ fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) ->
             let state = state.lock().unwrap();
             let duration = state.metadata.duration_seconds.max(0.001);
             let seconds = (x.clamp(0.0, width) / width) * duration;
-            let edge = state.zoom_clips.iter().enumerate().find_map(|(index, clip)| {
-                if (clip.start - seconds).abs() < 0.12 {
-                    Some((index, true))
-                } else if (clip.end - seconds).abs() < 0.12 {
-                    Some((index, false))
-                } else {
-                    None
-                }
-            });
+            let edge = state
+                .zoom_clips
+                .iter()
+                .enumerate()
+                .find_map(|(index, clip)| {
+                    if (clip.start - seconds).abs() < 0.12 {
+                        Some((index, true))
+                    } else if (clip.end - seconds).abs() < 0.12 {
+                        Some((index, false))
+                    } else {
+                        None
+                    }
+                });
             drag_edge.set(edge);
         }
     });
@@ -1347,7 +1363,13 @@ fn draw_trim_capsule(cr: &gtk4::cairo::Context, start_x: f64, end_x: f64, w: f64
     draw_capsule_frame(cr, start_x, end_x, h, false);
 }
 
-fn draw_capsule_frame(cr: &gtk4::cairo::Context, start_x: f64, end_x: f64, h: f64, emphasize: bool) {
+fn draw_capsule_frame(
+    cr: &gtk4::cairo::Context,
+    start_x: f64,
+    end_x: f64,
+    h: f64,
+    emphasize: bool,
+) {
     let range_width = (end_x - start_x).max(36.0);
     let end_x = start_x + range_width;
     let r = (h / 2.0).min(18.0);
@@ -1357,7 +1379,14 @@ fn draw_capsule_frame(cr: &gtk4::cairo::Context, start_x: f64, end_x: f64, h: f6
 
     cr.set_source_rgb(0.69, 0.36, 0.22);
     cr.set_line_width(stroke);
-    rounded_rect(cr, start_x + pad, pad, range_width - pad * 2.0, h - pad * 2.0, r);
+    rounded_rect(
+        cr,
+        start_x + pad,
+        pad,
+        range_width - pad * 2.0,
+        h - pad * 2.0,
+        r,
+    );
     let _ = cr.stroke();
 
     draw_trim_handle(cr, start_x + pad, pad, handle_w, h - pad * 2.0, r, true);
@@ -1372,22 +1401,26 @@ fn draw_capsule_frame(cr: &gtk4::cairo::Context, start_x: f64, end_x: f64, h: f6
     );
 }
 
-fn draw_trim_handle(
-    cr: &gtk4::cairo::Context,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    r: f64,
-    left: bool,
-) {
+fn draw_trim_handle(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64, left: bool) {
     cr.set_source_rgb(0.69, 0.36, 0.22);
     cr.new_sub_path();
     if left {
-        cr.arc(x + r, y + r, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
+        cr.arc(
+            x + r,
+            y + r,
+            r,
+            std::f64::consts::PI,
+            1.5 * std::f64::consts::PI,
+        );
         cr.line_to(x + w, y);
         cr.line_to(x + w, y + h);
-        cr.arc(x + r, y + h - r, r, 0.5 * std::f64::consts::PI, std::f64::consts::PI);
+        cr.arc(
+            x + r,
+            y + h - r,
+            r,
+            0.5 * std::f64::consts::PI,
+            std::f64::consts::PI,
+        );
     } else {
         cr.move_to(x, y);
         cr.arc(x + w - r, y + r, r, -0.5 * std::f64::consts::PI, 0.0);
@@ -1441,8 +1474,20 @@ fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f6
     cr.new_sub_path();
     cr.arc(x + w - r, y + r, r, -0.5 * std::f64::consts::PI, 0.0);
     cr.arc(x + w - r, y + h - r, r, 0.0, 0.5 * std::f64::consts::PI);
-    cr.arc(x + r, y + h - r, r, 0.5 * std::f64::consts::PI, std::f64::consts::PI);
-    cr.arc(x + r, y + r, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
+    cr.arc(
+        x + r,
+        y + h - r,
+        r,
+        0.5 * std::f64::consts::PI,
+        std::f64::consts::PI,
+    );
+    cr.arc(
+        x + r,
+        y + r,
+        r,
+        std::f64::consts::PI,
+        1.5 * std::f64::consts::PI,
+    );
     cr.close_path();
 }
 

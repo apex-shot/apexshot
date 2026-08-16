@@ -420,7 +420,9 @@ impl VideoEditState {
     }
 
     pub fn add_zoom_at_playhead(&mut self) -> Option<usize> {
-        let start = self.playhead_seconds.clamp(self.trim_start_seconds, self.trim_end_seconds);
+        let start = self
+            .playhead_seconds
+            .clamp(self.trim_start_seconds, self.trim_end_seconds);
         let end = (start + DEFAULT_ZOOM_DURATION_SECONDS).min(self.trim_end_seconds);
         if end - start < 0.2 {
             return None;
@@ -440,8 +442,7 @@ impl VideoEditState {
             center,
             ease_ms: DEFAULT_ZOOM_EASE_MS,
         });
-        self.zoom_clips
-            .sort_by(|a, b| a.start.total_cmp(&b.start));
+        self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
         let index = self
             .zoom_clips
             .iter()
@@ -590,7 +591,12 @@ pub fn even_crop_rect(
     let max_y = src_h.saturating_sub(crop_h);
     let x = ((center.0 - crop_w as f64 / 2.0).round() as i32).clamp(0, max_x as i32) as u32;
     let y = ((center.1 - crop_h as f64 / 2.0).round() as i32).clamp(0, max_y as i32) as u32;
-    (even_dimension(x.min(max_x)), even_dimension(y.min(max_y)), crop_w, crop_h)
+    (
+        even_dimension(x.min(max_x)),
+        even_dimension(y.min(max_y)),
+        crop_w,
+        crop_h,
+    )
 }
 
 /// Fit `src` inside `box` without upscaling or stretching (aspect preserved).

@@ -2,8 +2,8 @@ use crate::history::scan::{CaptureEntry, MediaKind};
 use crate::history::thumbnails;
 use crate::recording::editor::model::{ProjectMedia, ProjectMediaKind, VideoEditState};
 use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, Button, CheckButton, Entry, FlowBox, Label, Orientation,
-    Image, Picture, Revealer, RevealerTransitionType, ScrolledWindow,
+    glib, prelude::*, Align, Box as GtkBox, Button, CheckButton, Entry, FlowBox, Image, Label,
+    Orientation, Picture, Revealer, RevealerTransitionType, ScrolledWindow,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -304,11 +304,7 @@ fn load_thumbnail(picture: &Picture, item: &ProjectMedia) {
     });
 }
 
-fn import_into_project(
-    button: &Button,
-    state: Arc<Mutex<VideoEditState>>,
-    reload: Rc<dyn Fn()>,
-) {
+fn import_into_project(button: &Button, state: Arc<Mutex<VideoEditState>>, reload: Rc<dyn Fn()>) {
     let Some(root) = button.root() else {
         return;
     };

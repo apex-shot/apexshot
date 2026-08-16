@@ -2,7 +2,10 @@ use super::*;
 use crate::{
     capture_overlay::{RecordingRequest, RecordingType},
     config::{save_config, AppConfig},
-    recording::editor::sidecar::{delete_recording_outputs, CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar, MAX_CLICKS},
+    recording::editor::sidecar::{
+        delete_recording_outputs, CaptureRegion, ClickSample, CursorKind, PointerSample,
+        PointerSidecar, MAX_CLICKS,
+    },
 };
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
@@ -30,7 +33,9 @@ impl PointerTrackSession {
                 }
             }
             Err(err) => {
-                eprintln!("[recording] StartPointerTrack failed ({err}); continuing without sidecar");
+                eprintln!(
+                    "[recording] StartPointerTrack failed ({err}); continuing without sidecar"
+                );
                 crate::utils::notify::desktop_notification(
                     "Pointer track unavailable",
                     "Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor.",
@@ -779,7 +784,7 @@ mod tests {
         assert_eq!(prepared.recording_config.height, Some(480));
         assert_eq!(prepared.recording_config.x, Some(10));
         assert_eq!(prepared.recording_config.y, Some(20));
-         assert_eq!(prepared.recording_config.cursor, true);
+        assert_eq!(prepared.recording_config.cursor, true);
         assert_eq!(
             prepared.recording_config.pointer_track,
             crate::gnome_shell::should_use_pointer_track()

@@ -33,9 +33,7 @@ pub(super) fn build_inspector_actions(
     let upload = Button::with_label("Upload");
     upload.set_has_frame(false);
     upload.add_css_class("recording-editor-secondary-button");
-    upload.set_tooltip_text(Some(
-        "Export with your current settings, then upload",
-    ));
+    upload.set_tooltip_text(Some("Export with your current settings, then upload"));
     let done = Button::with_label("Done");
     done.set_has_frame(false);
     done.add_css_class("recording-editor-primary-button");
@@ -227,40 +225,42 @@ fn wire_export_button(
         let spinner = spinner.clone();
         let exporting = exporting.clone();
         let window = window.clone();
-        glib::timeout_add_local(Duration::from_millis(100), move || match receiver.try_recv() {
-            Ok(result) => {
-                exporting.set(false);
-                spinner.stop();
-                spinner.set_visible(false);
-                for control in &controls {
-                    control.set_sensitive(true);
-                }
+        glib::timeout_add_local(Duration::from_millis(100), move || {
+            match receiver.try_recv() {
+                Ok(result) => {
+                    exporting.set(false);
+                    spinner.stop();
+                    spinner.set_visible(false);
+                    for control in &controls {
+                        control.set_sensitive(true);
+                    }
                     match result {
-                    Ok(path) => dialogs::show_success(&window, path),
-                    Err(err) => dialogs::show_error(
+                        Ok(path) => dialogs::show_success(&window, path),
+                        Err(err) => dialogs::show_error(
+                            &window,
+                            "Export failed",
+                            "ApexShot could not export this recording.",
+                            Some(&err),
+                        ),
+                    }
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    exporting.set(false);
+                    spinner.stop();
+                    spinner.set_visible(false);
+                    for control in &controls {
+                        control.set_sensitive(true);
+                    }
+                    dialogs::show_error(
                         &window,
                         "Export failed",
-                        "ApexShot could not export this recording.",
-                        Some(&err),
-                    ),
+                        "ApexShot lost contact with the export worker.",
+                        None,
+                    );
+                    glib::ControlFlow::Break
                 }
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                exporting.set(false);
-                spinner.stop();
-                spinner.set_visible(false);
-                for control in &controls {
-                    control.set_sensitive(true);
-                }
-                dialogs::show_error(
-                    &window,
-                    "Export failed",
-                    "ApexShot lost contact with the export worker.",
-                    None,
-                );
-                glib::ControlFlow::Break
             }
         });
     });

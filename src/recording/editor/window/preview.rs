@@ -1,7 +1,7 @@
 use crate::recording::editor::model::{even_crop_rect, VideoBackground, VideoEditState};
 use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, DrawingArea, GestureDrag, Label, MediaFile, Orientation,
-    Overlay, Picture,
+    glib, prelude::*, Align, Box as GtkBox, DrawingArea, GestureDrag, Label, MediaFile,
+    Orientation, Overlay, Picture,
 };
 use std::sync::{Arc, Mutex};
 
