@@ -89,6 +89,13 @@ fn main() {
             }
             return;
         }
+        "pointer-debug" => {
+            if let Err(e) = apexshot::gnome_shell::print_pointer_debug() {
+                eprintln!("Pointer debug failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "video-editor" => {
             let result = if args.len() < 3 {
                 open_empty_recording_editor()

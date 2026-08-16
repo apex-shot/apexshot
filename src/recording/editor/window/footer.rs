@@ -11,45 +11,42 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub(super) fn build_footer(
+pub(super) fn build_inspector_actions(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     estimate_label: Label,
     controls: EditorControls,
     exporting: Rc<Cell<bool>>,
 ) -> GtkBox {
-    let footer = GtkBox::new(Orientation::Horizontal, 10);
+    let footer = GtkBox::new(Orientation::Vertical, 8);
     footer.add_css_class("recording-editor-footer");
+    footer.add_css_class("editor-sidebar-actions");
     footer.set_hexpand(true);
+    footer.set_margin_start(12);
+    footer.set_margin_end(12);
+    footer.set_margin_bottom(12);
 
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-
+    let copy = Button::with_label("Copy");
+    copy.set_has_frame(false);
+    copy.add_css_class("recording-editor-secondary-button");
+    copy.set_tooltip_text(Some("Copy the recording path to the clipboard"));
     let upload = Button::with_label("Upload");
     upload.set_has_frame(false);
     upload.add_css_class("recording-editor-secondary-button");
     upload.set_tooltip_text(Some(
-        "Export with your current settings (trim, cuts, audio, quality, dimensions), then upload",
+        "Export with your current settings, then upload",
     ));
-    let trim_only = Button::with_label("Save Trim");
-    trim_only.set_has_frame(false);
-    trim_only.add_css_class("recording-editor-secondary-button");
-    trim_only.set_tooltip_text(Some(
-        "Fast export: applies trim, cuts, and audio only. Quality and dimensions are not applied — use Save & Convert for those.",
-    ));
-    let convert = Button::with_label("Save & Convert");
-    convert.set_has_frame(false);
-    convert.add_css_class("recording-editor-primary-button");
-    convert.set_tooltip_text(Some(
-        "Re-encode with quality, dimensions, audio, trim, and cuts applied",
-    ));
+    let done = Button::with_label("Done");
+    done.set_has_frame(false);
+    done.add_css_class("recording-editor-primary-button");
+    done.set_tooltip_text(Some("Export the edited MP4"));
     let spinner = Spinner::new();
     spinner.set_visible(false);
 
     let export_controls = vec![
+        copy.clone().upcast::<gtk4::Widget>(),
         upload.clone().upcast::<gtk4::Widget>(),
-        trim_only.clone().upcast::<gtk4::Widget>(),
-        convert.clone().upcast::<gtk4::Widget>(),
+        done.clone().upcast::<gtk4::Widget>(),
         controls.dimension_button.clone().upcast::<gtk4::Widget>(),
         controls.width_entry.clone().upcast::<gtk4::Widget>(),
         controls.height_entry.clone().upcast::<gtk4::Widget>(),
@@ -59,6 +56,18 @@ pub(super) fn build_footer(
         controls.audio_muted.clone().upcast::<gtk4::Widget>(),
     ];
 
+    copy.connect_clicked({
+        let state = state.clone();
+        move |_| {
+            let path = state.lock().unwrap().metadata.path.clone();
+            if let Err(err) = crate::utils::clipboard::copy_uri_to_clipboard(&path) {
+                crate::utils::notify::desktop_notification("Copy failed", &err.to_string());
+            } else {
+                crate::utils::notify::desktop_notification("Copied", "Recording path copied");
+            }
+        }
+    });
+
     wire_upload_button(
         &upload,
         state.clone(),
@@ -66,45 +75,31 @@ pub(super) fn build_footer(
         spinner.clone(),
         exporting.clone(),
     );
-
     wire_export_button(
-        &trim_only,
-        window,
-        state.clone(),
-        false,
-        export_controls.clone(),
-        spinner.clone(),
-        exporting.clone(),
-    );
-    wire_export_button(
-        &convert,
+        &done,
         window,
         state,
-        true,
         export_controls,
         spinner.clone(),
         exporting,
     );
 
-    footer.append(&upload);
-    footer.append(&spacer);
     footer.append(&estimate_label);
     footer.append(&spinner);
-    footer.append(&trim_only);
-    footer.append(&convert);
+    footer.append(&copy);
+    footer.append(&upload);
+    footer.append(&done);
     footer
 }
 
 pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, _trim_only: bool) {
     let state = state.lock().unwrap();
+    let trim_only = !state.needs_reencode();
     label.set_text(&format!(
-        "Trim ~{} · Convert ~{}",
-        format_size(state.estimated_size_bytes(true)),
-        format_size(state.estimated_size_bytes(false)),
+        "~{}",
+        format_size(state.estimated_size_bytes(trim_only)),
     ));
-    label.set_tooltip_text(Some(
-        "Trim = stream-copy size (timeline + audio only). Convert = re-encode with quality and dimensions.",
-    ));
+    label.set_tooltip_text(Some("Estimated export size"));
 }
 
 fn wire_upload_button(
@@ -205,7 +200,6 @@ fn wire_export_button(
     button: &Button,
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
-    convert: bool,
     controls: Vec<gtk4::Widget>,
     spinner: Spinner,
     exporting: Rc<Cell<bool>>,
@@ -225,11 +219,7 @@ fn wire_export_button(
         let state_snapshot = state.lock().unwrap().clone();
         let (sender, receiver) = std::sync::mpsc::channel::<Result<PathBuf, String>>();
         std::thread::spawn(move || {
-            let result = if convert {
-                ffmpeg::run_convert(&state_snapshot)
-            } else {
-                ffmpeg::run_trim_only(&state_snapshot)
-            };
+            let result = ffmpeg::export_edited(&state_snapshot);
             let _ = sender.send(result.map_err(|err| err.to_string()));
         });
 
@@ -245,14 +235,8 @@ fn wire_export_button(
                 for control in &controls {
                     control.set_sensitive(true);
                 }
-                match result {
+                    match result {
                     Ok(path) => dialogs::show_success(&window, path),
-                    Err(err) if !convert => dialogs::show_error(
-                        &window,
-                        "Trim failed",
-                        "ApexShot could not trim this recording without conversion. Try Save & Convert.",
-                        Some(&err),
-                    ),
                     Err(err) => dialogs::show_error(
                         &window,
                         "Export failed",

@@ -1,5 +1,6 @@
 use super::model::{
-    edited_output_path, even_dimension, quality_to_crf, AudioMode, VideoEditState, VideoMetadata,
+    edited_output_path, even_crop_rect, even_dimension, quality_to_crf, AudioMode, VideoBackground,
+    VideoEditState, VideoMetadata,
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
@@ -197,6 +198,37 @@ pub fn generate_thumbnails(metadata: &VideoMetadata) -> anyhow::Result<Vec<PathB
     Ok(paths)
 }
 
+pub fn generate_waveform(metadata: &VideoMetadata) -> anyhow::Result<PathBuf> {
+    if !metadata.has_audio {
+        anyhow::bail!("no audio stream");
+    }
+    let dir = thumbnail_cache_dir(&metadata.path);
+    std::fs::create_dir_all(&dir)?;
+    let output_path = dir.join("waveform.png");
+    let filter = "showwavespic=s=1200x64:colors=0xb05c38";
+    let output = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i",
+            &metadata.path.to_string_lossy(),
+            "-filter_complex",
+            filter,
+            "-frames:v",
+            "1",
+            "-an",
+        ])
+        .arg(&output_path)
+        .output()
+        .context("failed to generate waveform")?;
+    if !output.status.success() || !output_path.is_file() {
+        anyhow::bail!(
+            "ffmpeg waveform failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(output_path)
+}
+
 /// Extract one frame from `input` into `output` as a poster image.
 ///
 /// Same invocation shape as `generate_thumbnails` (fast input seek, single
@@ -372,6 +404,9 @@ fn build_single_convert_args(
     end: f64,
     output_path: &Path,
 ) -> Vec<String> {
+    if state.needs_composite() {
+        return build_composite_convert_args(state, start, end, output_path);
+    }
     let mut args = vec![
         "-y".into(),
         "-ss".into(),
@@ -396,6 +431,135 @@ fn build_single_convert_args(
     args.extend(audio_args(state.audio_mode, state.metadata.has_audio));
     args.push(output_path.to_string_lossy().into_owned());
     args
+}
+
+fn build_composite_convert_args(
+    state: &VideoEditState,
+    start: f64,
+    end: f64,
+    output_path: &Path,
+) -> Vec<String> {
+    let work_dir = std::env::temp_dir().join(format!(
+        "apexshot-export-{}-{}",
+        std::process::id(),
+        (start * 1000.0) as u64
+    ));
+    let _ = std::fs::create_dir_all(&work_dir);
+    let cmd_path = work_dir.join("zoom.cmd");
+    let cursor_path = work_dir.join("cursor.png");
+    let _ = write_cursor_png(&cursor_path);
+    let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end));
+
+    let (base_w, base_h) = state.target_dimensions();
+    let (out_w, out_h) = state.padded_output_dimensions();
+    let pad_x = ((out_w.saturating_sub(base_w)) / 2) & !1;
+    let pad_y = ((out_h.saturating_sub(base_h)) / 2) & !1;
+    let bg = match state.background {
+        VideoBackground::Plain { r, g, b } => format!("0x{r:02X}{g:02X}{b:02X}"),
+        VideoBackground::Gradient(_) => "0x2C2438".to_string(),
+        VideoBackground::None => "0x111111".to_string(),
+    };
+
+    let mut filter = format!(
+        "[0:v]sendcmd=f={},crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={base_w}:{base_h}",
+        escape_filter_path(&cmd_path),
+        src_w = state.metadata.width.max(2),
+        src_h = state.metadata.height.max(2),
+    );
+    if out_w != base_w || out_h != base_h {
+        filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
+    }
+    let draw_cursor = state
+        .sidecar
+        .as_ref()
+        .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+    if draw_cursor {
+        filter.push_str("[v];[v][1:v]overlay@c=x=0:y=0:eof_action=pass");
+    }
+
+    let mut args = vec![
+        "-y".into(),
+        "-ss".into(),
+        format_seconds(start),
+        "-to".into(),
+        format_seconds(end),
+        "-i".into(),
+        state.metadata.path.to_string_lossy().into_owned(),
+    ];
+    if draw_cursor {
+        args.extend(["-loop".into(), "1".into(), "-i".into(), cursor_path.to_string_lossy().into_owned()]);
+    }
+    args.extend(["-filter_complex".into(), filter]);
+    args.extend([
+        "-c:v".into(),
+        "libx264".into(),
+        "-preset".into(),
+        "veryfast".into(),
+        "-crf".into(),
+        quality_to_crf(state.quality).to_string(),
+    ]);
+    args.extend(audio_args(state.audio_mode, state.metadata.has_audio));
+    if draw_cursor {
+        args.push("-shortest".into());
+    }
+    args.push(output_path.to_string_lossy().into_owned());
+    args
+}
+
+fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
+    let fps = 30.0;
+    let duration = (end - start).max(0.0);
+    let frames = ((duration * fps).ceil() as usize).max(1);
+    let src_w = state.metadata.width.max(2);
+    let src_h = state.metadata.height.max(2);
+    let (base_w, base_h) = state.target_dimensions();
+    let (out_w, out_h) = state.padded_output_dimensions();
+    let pad_x = ((out_w.saturating_sub(base_w)) / 2) as f64;
+    let pad_y = ((out_h.saturating_sub(base_h)) / 2) as f64;
+    let mut lines = String::new();
+    for index in 0..frames {
+        let local_t = index as f64 / fps;
+        let source_t = start + local_t;
+        let (scale, center) = state.eval_zoom(source_t);
+        let (x, y, w, h) = even_crop_rect(scale, center, src_w, src_h);
+        lines.push_str(&format!(
+            "{local_t:.3} crop@z w {w};\n{local_t:.3} crop@z h {h};\n{local_t:.3} crop@z x {x};\n{local_t:.3} crop@z y {y};\n"
+        ));
+        if let Some(sidecar) = &state.sidecar {
+            if let Some((cx, cy, _)) = sidecar.interpolated_at(source_t) {
+                let pulse = sidecar.click_pulse_at(source_t);
+                let rel_x = ((cx - x as f64) / w as f64) * base_w as f64 + pad_x;
+                let rel_y = ((cy - y as f64) / h as f64) * base_h as f64 + pad_y;
+                let size = (16.0 * pulse).round();
+                lines.push_str(&format!(
+                    "{local_t:.3} overlay@c x {:.0};\n{local_t:.3} overlay@c y {:.0};\n",
+                    (rel_x - size * 0.1).round(),
+                    (rel_y - size * 0.1).round()
+                ));
+            }
+        }
+    }
+    lines
+}
+
+fn write_cursor_png(path: &Path) -> anyhow::Result<()> {
+    let mut img = image::RgbaImage::new(32, 32);
+    for y in 0..28 {
+        let width = (y / 2).min(10) as u32;
+        for x in 0..=width {
+            let edge = x == 0 || x == width || y == 0 || y == 27;
+            let pixel = if edge {
+                image::Rgba([20, 20, 24, 255])
+            } else {
+                image::Rgba([255, 255, 255, 255])
+            };
+            if x < 32 {
+                img.put_pixel(x, y as u32, pixel);
+            }
+        }
+    }
+    img.save(path)?;
+    Ok(())
 }
 
 /// Build an aspect-preserving scale filter, or `None` when output matches source.
@@ -483,6 +647,10 @@ fn format_seconds(value: f64) -> String {
     format!("{:.3}", value.max(0.0))
 }
 
+fn escape_filter_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "\\\\").replace(':', "\\:")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,6 +718,28 @@ mod tests {
         }));
         assert!(args.iter().any(|arg| arg == "-an"));
         assert_eq!(args.last().map(String::as_str), Some("/tmp/output.mp4"));
+    }
+
+    #[test]
+    fn convert_with_zoom_uses_sendcmd_crop_graph() {
+        let mut state = state();
+        state.zoom_clips.push(crate::recording::editor::model::ZoomClip {
+            start: 1.5,
+            end: 3.3,
+            scale: 1.8,
+            center: (960.0, 540.0),
+            ease_ms: 200,
+        });
+        assert!(state.needs_reencode());
+        let args = build_single_convert_args(
+            &state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        assert!(args.iter().any(|arg| arg == "-filter_complex"));
+        assert!(args.iter().any(|arg| arg.contains("sendcmd") && arg.contains("crop@z")));
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
     }
 
     #[test]

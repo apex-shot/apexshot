@@ -1,5 +1,5 @@
 mod color;
-mod composition;
+pub(crate) mod composition;
 mod io_ops;
 #[allow(dead_code)]
 pub mod numbering_style;

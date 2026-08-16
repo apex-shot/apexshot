@@ -341,15 +341,28 @@ pub fn install_recording_editor_css() {
             /* ── Timeline ── */
             .recording-editor-timeline {
                 min-height: 48px;
-                padding: 6px 14px;
+                padding: 8px 16px 14px 16px;
                 background: transparent;
             }
 
+            .recording-editor-timeline-shell,
             .recording-editor-timeline-card {
-                border-radius: 8px;
-                background: alpha(white, 0.04);
+                border-radius: 0;
+                background: transparent;
                 border: none;
-                padding: 4px 8px;
+                padding: 4px 4px 8px 4px;
+            }
+
+            .recording-editor-transport {
+                padding: 2px 4px 10px 4px;
+            }
+
+            .recording-editor-track-row {
+                min-height: 36px;
+            }
+
+            .recording-editor-track-icon {
+                color: alpha(white, 0.55);
             }
 
             .recording-editor-play-button,
@@ -358,13 +371,24 @@ pub fn install_recording_editor_css() {
                 min-width: 32px;
                 min-height: 32px;
                 border-radius: 999px;
-                background: alpha(white, 0.08);
+                background: alpha(white, 0.07);
                 color: white;
                 border: none;
             }
 
-            .recording-editor-play-button {
-                margin-right: 8px;
+            .recording-editor-play-button-hero {
+                min-width: 40px;
+                min-height: 40px;
+                background: #b05c38;
+                color: #ffffff;
+            }
+
+            .recording-editor-play-button-hero image {
+                color: #ffffff;
+            }
+
+            .recording-editor-play-button-hero:hover {
+                background: #c06540;
             }
 
             .recording-editor-timeline-tools {
@@ -393,18 +417,41 @@ pub fn install_recording_editor_css() {
             }
 
             .recording-editor-thumbnail-strip {
-                background: alpha(white, 0.06);
-                border-radius: 4px;
+                background: alpha(white, 0.04);
+                border-radius: 18px;
                 border: none;
-                min-height: 36px;
-                padding: 2px;
+                min-height: 52px;
+                padding: 0;
             }
 
             .recording-editor-thumbnail {
                 min-width: 48px;
+                min-height: 52px;
+                background: alpha(white, 0.18);
+                border-right: 1px solid alpha(black, 0.18);
+            }
+
+            .recording-editor-thumbnail:first-child {
+                border-top-left-radius: 18px;
+                border-bottom-left-radius: 18px;
+            }
+
+            .recording-editor-thumbnail:last-child {
+                border-top-right-radius: 18px;
+                border-bottom-right-radius: 18px;
+                border-right: none;
+            }
+
+            .recording-editor-waveform,
+            .recording-editor-zoom-track {
+                padding: 0;
+                background: alpha(white, 0.04);
+                border-radius: 12px;
                 min-height: 32px;
-                background: alpha(white, 0.60);
-                border-right: 1px solid alpha(black, 0.12);
+            }
+
+            .recording-editor-waveform-image {
+                border-radius: 12px;
             }
 
             .recording-editor-trim-area {
@@ -430,8 +477,14 @@ pub fn install_recording_editor_css() {
             }
 
             /* ── Panels ── */
+            .recording-editor-inspector .recording-editor-panels {
+                padding: 0;
+                background: transparent;
+                border: none;
+            }
+
             .recording-editor-panels {
-                padding: 10px 14px 6px 14px;
+                padding: 0;
                 background: transparent;
                 border: none;
             }
@@ -538,11 +591,20 @@ pub fn install_recording_editor_css() {
             }
 
             /* ── Footer ── */
+            .recording-editor-inspector .recording-editor-footer {
+                padding: 0;
+            }
+
             .recording-editor-footer {
-                padding: 6px 14px 8px 14px;
+                padding: 0;
                 background: transparent;
                 border: none;
                 border-radius: 0;
+            }
+
+            .recording-editor-inspector .recording-editor-primary-button,
+            .recording-editor-inspector .recording-editor-secondary-button {
+                min-width: 0;
             }
 
             .recording-editor-estimate {
@@ -872,8 +934,23 @@ pub fn install_recording_editor_css() {
                 background-color: #f0f1f4;
             }
 
+            .editor-theme-light .recording-editor-timeline-shell,
             .editor-theme-light .recording-editor-timeline-card {
-                background: alpha(#111827, 0.04);
+                background: transparent;
+                border: none;
+            }
+
+            .editor-theme-light .recording-editor-play-button-hero {
+                background: #b05c38;
+                color: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-play-button-hero image {
+                color: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-play-button-hero:hover {
+                background: #c06540;
             }
 
             .editor-theme-light .recording-editor-play-button,
@@ -1049,6 +1126,176 @@ pub fn install_recording_editor_css() {
 
             .editor-theme-light .recording-editor-dialog-body {
                 color: alpha(#1d2129, 0.55);
+            }
+
+            .recording-editor-workspace {
+                min-height: 0;
+            }
+
+            .recording-editor-tool-rail {
+                min-width: 48px;
+                padding: 14px 8px 12px 8px;
+                border-left: none;
+                border-right: none;
+            }
+
+            .recording-editor-tool-rail-group {
+                padding: 0;
+                background: transparent;
+            }
+
+            button.recording-editor-tool-rail-button {
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
+                border-radius: 0;
+                border: none;
+                background: transparent;
+                color: alpha(white, 0.55);
+            }
+
+            button.recording-editor-tool-rail-button:hover {
+                background: transparent;
+                color: alpha(white, 0.88);
+            }
+
+            button.recording-editor-tool-rail-add {
+                background: transparent;
+                color: alpha(white, 0.88);
+            }
+
+            button.recording-editor-tool-rail-active {
+                color: #b05c38;
+            }
+
+            button.recording-editor-tool-rail-active image {
+                color: #b05c38;
+            }
+
+            .recording-editor-media-shell {
+                padding: 0;
+                border-left: none;
+            }
+
+            .recording-editor-media-library {
+                min-width: 268px;
+                max-width: 280px;
+                padding: 14px 12px 12px 12px;
+                background: transparent;
+                border: none;
+                border-radius: 0;
+            }
+
+            .recording-editor-media-title-heading {
+                color: #F1F1F3;
+                font-size: 14px;
+                font-weight: 600;
+            }
+
+            button.recording-editor-media-close {
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                border: none;
+                background: transparent;
+                color: alpha(white, 0.55);
+            }
+
+            button.recording-editor-media-close:hover {
+                color: #F1F1F3;
+            }
+
+            .recording-editor-media-tabs {
+                background: alpha(white, 0.04);
+                border-radius: 10px;
+                padding: 3px;
+            }
+
+            .recording-editor-media-tab {
+                color: alpha(white, 0.50);
+                font-size: 11px;
+                padding: 4px 8px;
+                border-radius: 8px;
+            }
+
+            .recording-editor-media-tab check,
+            .recording-editor-media-tab radio {
+                min-width: 0;
+                min-height: 0;
+                padding: 0;
+                margin: 0;
+                opacity: 0;
+            }
+
+            .recording-editor-media-tab:checked {
+                color: #F1F1F3;
+                background: alpha(white, 0.08);
+            }
+
+            .recording-editor-media-search {
+                min-height: 34px;
+                border-radius: 10px;
+                background: alpha(white, 0.05);
+                color: #F1F1F3;
+                border: none;
+                padding: 0 10px;
+            }
+
+            button.recording-editor-media-upload {
+                min-height: 36px;
+                border-radius: 10px;
+                background: alpha(white, 0.04);
+                color: alpha(white, 0.72);
+                border: 1px dashed alpha(white, 0.14);
+            }
+
+            button.recording-editor-media-upload:hover {
+                background: alpha(white, 0.08);
+            }
+
+            .recording-editor-media-card {
+                min-width: 112px;
+            }
+
+            .recording-editor-media-thumb {
+                border-radius: 10px;
+                background: #141414;
+            }
+
+            .recording-editor-media-title {
+                color: alpha(white, 0.78);
+                font-size: 11px;
+            }
+
+            .recording-editor-media-badge {
+                background: alpha(black, 0.62);
+                color: white;
+                font-size: 10px;
+                padding: 1px 6px;
+                border-radius: 6px;
+            }
+
+            popover.recording-editor-tool-rail-popover,
+            popover.recording-editor-tool-rail-popover > contents {
+                background: #1a1a1a;
+                border: 1px solid alpha(white, 0.08);
+                border-radius: 10px;
+                padding: 6px;
+            }
+
+            .recording-editor-inspector {
+                min-width: 210px;
+                max-width: 210px;
+                background: alpha(white, 0.03);
+                border-left: 1px solid alpha(white, 0.06);
+            }
+
+            .recording-editor-preview-clip {
+                background: #0c0c0c;
+            }
+
+            .recording-editor-ruler {
+                min-height: 18px;
             }
             ",
         );

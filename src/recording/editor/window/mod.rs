@@ -1,7 +1,10 @@
 mod dialogs;
 mod footer;
+mod inspector;
+mod media_library;
 mod panels;
 mod preview;
+mod rail;
 mod timeline;
 mod toolbar;
 
@@ -260,6 +263,7 @@ fn populate_loaded_root(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     thumbnails: Vec<PathBuf>,
+    waveform: Option<PathBuf>,
     exporting: Rc<Cell<bool>>,
 ) {
     // Remove all existing children
@@ -271,27 +275,32 @@ fn populate_loaded_root(
     estimate_label.add_css_class("recording-editor-estimate");
     footer::update_estimate(&estimate_label, &state, false);
 
-    let file_stem = {
-        let state = state.lock().unwrap();
-        state
-            .metadata
-            .path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Recording")
-            .to_string()
-    };
+    let workspace = GtkBox::new(Orientation::Horizontal, 0);
+    workspace.add_css_class("recording-editor-workspace");
+    workspace.set_hexpand(true);
+    workspace.set_vexpand(true);
 
-    let top_controls = toolbar::build_toolbar(window, &file_stem);
-    root.append(&top_controls);
+    let chrome = rail::build_tool_chrome(Some(state.clone()), Some(estimate_label.clone()));
+    workspace.append(&chrome.rail);
+    workspace.append(&chrome.library);
 
-    let preview_widget = preview::build_preview(state.clone(), estimate_label.clone(), thumbnails);
-    root.append(&preview_widget);
+    let (preview_widget, media) = preview::build_preview(state.clone(), estimate_label.clone());
+    workspace.append(&preview_widget);
 
-    let bottom_tools = build_bottom_tools(window, state.clone(), estimate_label, exporting.clone());
-    root.append(&bottom_tools);
+    let inspector = inspector::build_inspector(
+        window,
+        state.clone(),
+        estimate_label.clone(),
+        exporting.clone(),
+    );
+    workspace.append(&inspector.root);
+    root.append(&workspace);
 
-    crate::capture::editor::ui_support::install_window_drag(&top_controls, window);
+    let timeline_widget =
+        timeline::build_timeline(state, estimate_label, thumbnails, waveform, media);
+    root.append(&timeline_widget);
+
+    crate::capture::editor::ui_support::install_window_drag(&inspector.root, window);
 }
 
 fn populate_empty_root(
@@ -307,8 +316,14 @@ fn populate_empty_root(
         root.remove(&child);
     }
 
-    let top_controls = toolbar::build_toolbar(window, "Video Editor");
-    root.append(&top_controls);
+    let workspace = GtkBox::new(Orientation::Horizontal, 0);
+    workspace.add_css_class("recording-editor-workspace");
+    workspace.set_hexpand(true);
+    workspace.set_vexpand(true);
+
+    let chrome = rail::build_tool_chrome(None, None);
+    workspace.append(&chrome.rail);
+    workspace.append(&chrome.library);
 
     let empty_preview = build_empty_preview_area(
         root,
@@ -319,12 +334,14 @@ fn populate_empty_root(
         open_button_slot.clone(),
         loading.clone(),
     );
-    root.append(&empty_preview);
+    workspace.append(&empty_preview);
 
-    let empty_bottom_tools = build_empty_bottom_tools();
-    root.append(&empty_bottom_tools);
+    let inspector = build_empty_inspector(window);
+    workspace.append(&inspector);
+    root.append(&workspace);
+    root.append(&build_empty_timeline());
 
-    crate::capture::editor::ui_support::install_window_drag(&top_controls, window);
+    crate::capture::editor::ui_support::install_window_drag(&inspector, window);
 }
 
 fn build_empty_preview_area(
@@ -410,14 +427,33 @@ fn build_empty_preview_area(
     frame
 }
 
-fn build_empty_bottom_tools() -> GtkBox {
-    let root = GtkBox::new(Orientation::Vertical, 0);
-    root.add_css_class("recording-editor-bottom-tools");
+fn build_empty_inspector(window: &ApplicationWindow) -> GtkBox {
+    let inspector = GtkBox::new(Orientation::Vertical, 0);
+    inspector.add_css_class("editor-right-inspector");
+    inspector.add_css_class("recording-editor-inspector");
+    inspector.set_width_request(inspector::INSPECTOR_WIDTH);
+    inspector.set_hexpand(false);
+    inspector.set_vexpand(true);
 
-    root.append(&build_empty_timeline());
-    root.append(&build_empty_panels());
-    root.append(&build_empty_footer());
-    root
+    let lights = toolbar::build_traffic_lights(window);
+    lights.set_halign(Align::End);
+    lights.set_margin_top(8);
+    lights.set_margin_end(8);
+    lights.set_margin_start(8);
+    inspector.append(&lights);
+
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    let content = GtkBox::new(Orientation::Vertical, 12);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_margin_top(8);
+    content.append(&build_empty_panels());
+    scroll.set_child(Some(&content));
+    inspector.append(&scroll);
+    inspector.append(&build_empty_footer());
+    inspector
 }
 
 fn build_empty_timeline() -> GtkBox {
@@ -425,75 +461,60 @@ fn build_empty_timeline() -> GtkBox {
     timeline.add_css_class("recording-editor-timeline");
     timeline.set_hexpand(true);
     timeline.set_vexpand(false);
-    timeline.set_size_request(-1, 64);
 
-    let card = GtkBox::new(Orientation::Horizontal, 0);
-    card.add_css_class("recording-editor-timeline-card");
+    let card = GtkBox::new(Orientation::Vertical, 8);
+    card.add_css_class("recording-editor-timeline-shell");
     card.set_hexpand(true);
-    card.set_vexpand(false);
 
-    let play_button = Button::new();
-    play_button.add_css_class("recording-editor-play-button");
-    play_button.set_sensitive(false);
-    let play_icon = Image::from_icon_name("media-playback-start-symbolic");
-    play_icon.set_pixel_size(22);
-    play_button.set_child(Some(&play_icon));
-    play_button.set_valign(Align::Center);
-    card.append(&play_button);
-
-    let timeline_vbox = GtkBox::new(Orientation::Vertical, 4);
-    timeline_vbox.set_hexpand(true);
-    timeline_vbox.set_vexpand(false);
+    let transport = GtkBox::new(Orientation::Horizontal, 0);
+    transport.add_css_class("recording-editor-transport");
+    let left = GtkBox::new(Orientation::Horizontal, 4);
+    left.set_hexpand(true);
+    for icon_name in ["edit-undo-symbolic", "edit-redo-symbolic", "edit-cut-symbolic"] {
+        left.append(&disabled_transport_button(icon_name));
+    }
+    let center = GtkBox::new(Orientation::Horizontal, 6);
+    center.set_hexpand(true);
+    center.set_halign(Align::Center);
+    center.append(&disabled_transport_button("media-skip-backward-symbolic"));
+    let play = disabled_transport_button("media-playback-start-symbolic");
+    play.add_css_class("recording-editor-play-button");
+    play.add_css_class("recording-editor-play-button-hero");
+    center.append(&play);
+    center.append(&disabled_transport_button("media-skip-forward-symbolic"));
+    let right = GtkBox::new(Orientation::Horizontal, 4);
+    right.set_hexpand(true);
+    right.set_halign(Align::End);
+    right.append(&disabled_transport_button("edit-delete-symbolic"));
+    transport.append(&left);
+    transport.append(&center);
+    transport.append(&right);
+    card.append(&transport);
 
     let strip = GtkBox::new(Orientation::Horizontal, 0);
     strip.add_css_class("recording-editor-thumbnail-strip");
     strip.add_css_class("recording-editor-empty-thumbnail-strip");
     strip.set_hexpand(true);
-    strip.set_vexpand(false);
-    strip.set_halign(Align::Fill);
-    strip.set_valign(Align::Center);
     strip.set_size_request(-1, 48);
-
-    let time_row = GtkBox::new(Orientation::Horizontal, 0);
-    time_row.set_hexpand(true);
-    let start = Label::new(Some("Start 0:00.0"));
-    start.add_css_class("recording-editor-time-label");
-    start.set_xalign(0.0);
-    let end = Label::new(Some("End 0:00.0"));
-    end.add_css_class("recording-editor-time-label");
-    end.set_xalign(1.0);
-    end.set_hexpand(true);
-    time_row.append(&start);
-    time_row.append(&end);
-
-    timeline_vbox.append(&strip);
-    timeline_vbox.append(&time_row);
-    card.append(&timeline_vbox);
-
-    let tools = GtkBox::new(Orientation::Horizontal, 6);
-    tools.add_css_class("recording-editor-timeline-tools");
-    for icon_name in [
-        "edit-cut-symbolic",
-        "view-sort-ascending-symbolic",
-        "edit-undo-symbolic",
-    ] {
-        let button = Button::new();
-        button.add_css_class("recording-editor-cut-button");
-        button.set_sensitive(false);
-        let icon = Image::from_icon_name(icon_name);
-        icon.set_pixel_size(18);
-        button.set_child(Some(&icon));
-        button.set_valign(Align::Center);
-        tools.append(&button);
-    }
-    card.append(&tools);
+    card.append(&strip);
 
     timeline.append(&card);
     timeline
 }
 
+fn disabled_transport_button(icon_name: &str) -> Button {
+    let button = Button::new();
+    button.add_css_class("recording-editor-cut-button");
+    button.set_sensitive(false);
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(18);
+    button.set_child(Some(&icon));
+    button.set_valign(Align::Center);
+    button
+}
+
 fn build_empty_panels() -> GtkBox {
-    let panels = GtkBox::new(Orientation::Horizontal, 12);
+    let panels = GtkBox::new(Orientation::Vertical, 12);
     panels.add_css_class("recording-editor-panels");
     panels.set_hexpand(true);
 
@@ -592,30 +613,36 @@ fn empty_field_row(label: &str, entry: &Entry) -> GtkBox {
 }
 
 fn build_empty_footer() -> GtkBox {
-    let footer = GtkBox::new(Orientation::Horizontal, 10);
+    let footer = GtkBox::new(Orientation::Vertical, 8);
     footer.add_css_class("recording-editor-footer");
+    footer.add_css_class("editor-sidebar-actions");
     footer.set_hexpand(true);
+    footer.set_margin_start(12);
+    footer.set_margin_end(12);
+    footer.set_margin_bottom(12);
 
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-
-    let estimate = Label::new(Some("Estimated file size: --"));
+    let estimate = Label::new(Some("~--"));
     estimate.add_css_class("recording-editor-estimate");
 
-    let trim_only = Button::with_label("Save Trim");
-    trim_only.set_has_frame(false);
-    trim_only.add_css_class("recording-editor-secondary-button");
-    trim_only.set_sensitive(false);
+    let copy = Button::with_label("Copy");
+    copy.set_has_frame(false);
+    copy.add_css_class("recording-editor-secondary-button");
+    copy.set_sensitive(false);
 
-    let convert = Button::with_label("Save & Convert");
-    convert.set_has_frame(false);
-    convert.add_css_class("recording-editor-primary-button");
-    convert.set_sensitive(false);
+    let upload = Button::with_label("Upload");
+    upload.set_has_frame(false);
+    upload.add_css_class("recording-editor-secondary-button");
+    upload.set_sensitive(false);
 
-    footer.append(&spacer);
+    let done = Button::with_label("Done");
+    done.set_has_frame(false);
+    done.add_css_class("recording-editor-primary-button");
+    done.set_sensitive(false);
+
     footer.append(&estimate);
-    footer.append(&trim_only);
-    footer.append(&convert);
+    footer.append(&copy);
+    footer.append(&upload);
+    footer.append(&done);
     footer
 }
 
@@ -690,13 +717,15 @@ fn load_video_async(
         btn.set_sensitive(false);
     }
 
-    let (sender, receiver) = mpsc::channel::<Result<(VideoMetadata, Vec<PathBuf>), String>>();
+    let (sender, receiver) =
+        mpsc::channel::<Result<(VideoMetadata, Vec<PathBuf>, Option<PathBuf>), String>>();
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<_> {
             ffmpeg::ensure_tools_available()?;
             let metadata = ffmpeg::probe_metadata(&path)?;
             let thumbnails = ffmpeg::generate_thumbnails(&metadata)?;
-            Ok((metadata, thumbnails))
+            let waveform = ffmpeg::generate_waveform(&metadata).ok();
+            Ok((metadata, thumbnails, waveform))
         })();
         let _ = sender.send(result.map_err(|e| e.to_string()));
     });
@@ -718,7 +747,7 @@ fn load_video_async(
             }
         };
         match receiver.try_recv() {
-            Ok(Ok((metadata, thumbnails))) => {
+            Ok(Ok((metadata, thumbnails, waveform))) => {
                 stop_loading();
 
                 let state = Arc::new(Mutex::new(VideoEditState::new(metadata)));
@@ -727,7 +756,14 @@ fn load_video_async(
                     state.quality = 70;
                     state.audio_mode = AudioMode::Unchanged;
                 }
-                populate_loaded_root(&root, &window, state, thumbnails, exporting.clone());
+                populate_loaded_root(
+                    &root,
+                    &window,
+                    state,
+                    thumbnails,
+                    waveform,
+                    exporting.clone(),
+                );
                 glib::ControlFlow::Break
             }
             Ok(Err(err)) => {
@@ -756,25 +792,4 @@ fn is_supported_video_path(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-fn build_bottom_tools(
-    window: &ApplicationWindow,
-    state: Arc<Mutex<VideoEditState>>,
-    estimate_label: Label,
-    exporting: Rc<Cell<bool>>,
-) -> GtkBox {
-    let root = GtkBox::new(Orientation::Vertical, 0);
-    root.add_css_class("recording-editor-bottom-tools");
 
-    let (panels_widget, controls) = panels::build_panels(state.clone(), estimate_label.clone());
-    root.append(&panels_widget);
-
-    let footer_widget = footer::build_footer(
-        window,
-        state.clone(),
-        estimate_label,
-        controls,
-        exporting.clone(),
-    );
-    root.append(&footer_widget);
-    root
-}

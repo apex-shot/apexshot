@@ -1,9 +1,9 @@
 {
   "name": "ApexShot",
-  "description": "Support for the ApexShot screenshot and screen recording app: dims the area outside a recording, lets ApexShot list and focus windows for its window picker, and keeps ApexShot's own preview windows above other windows.\n\nApexShot must be installed for this extension to do anything.",
+  "description": "Support for the ApexShot screenshot and screen recording app: dims the area outside a recording, tracks the pointer for the recording editor, lets ApexShot list and focus windows for its window picker, and keeps ApexShot's own preview windows above other windows.\n\nApexShot must be installed for this extension to do anything.",
   "uuid": "apexshot-gnome-integration@apexshot.github.io",
   "shell-version": ["48", "49", "50"],
   "url": "https://github.com/apex-shot/apexshot",
-  "version-name": "4",
-  "version": 4
+  "version-name": "5",
+  "version": 5
 }

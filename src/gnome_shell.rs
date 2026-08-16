@@ -541,6 +541,74 @@ fn hide_recording_countdown() -> anyhow::Result<()> {
     run_shell_overlay_method("HideCountdown", Vec::new())
 }
 
+#[derive(Debug, Clone)]
+pub struct PointerTrackResult {
+    pub t0_monotonic_us: i64,
+    pub samples: Vec<(f64, i32, i32, String)>,
+    pub clicks: Vec<(f64, i32, i32, i32)>,
+}
+
+pub fn should_use_pointer_track() -> bool {
+    current_session_supports_gnome_shell_overlay() && is_shell_overlay_service_available()
+}
+
+fn with_shell_overlay_proxy<T>(
+    f: impl FnOnce(&zbus::blocking::Proxy<'_>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    if let Some(msg) = crate::app_identity::host_escape_blocked("zbus") {
+        anyhow::bail!(msg);
+    }
+    let conn = zbus::blocking::Connection::session()
+        .context("failed to connect to session bus for ShellOverlay")?;
+    let proxy = zbus::blocking::Proxy::new(&conn, MASK_DBUS_DEST, MASK_DBUS_PATH, MASK_DBUS_IFACE)
+        .context("failed to create ShellOverlay proxy")?;
+    f(&proxy)
+}
+
+pub fn start_pointer_track() -> anyhow::Result<()> {
+    with_shell_overlay_proxy(|proxy| {
+        proxy
+            .call::<_, _, ()>("StartPointerTrack", &())
+            .context("StartPointerTrack failed")
+    })
+}
+
+pub fn stop_pointer_track() -> anyhow::Result<PointerTrackResult> {
+    with_shell_overlay_proxy(|proxy| {
+        let (t0_monotonic_us, samples, clicks) = proxy
+            .call::<_, _, (i64, Vec<(f64, i32, i32, String)>, Vec<(f64, i32, i32, i32)>)>(
+                "StopPointerTrack",
+                &(),
+            )
+            .context("StopPointerTrack failed")?;
+        Ok(PointerTrackResult {
+            t0_monotonic_us,
+            samples,
+            clicks,
+        })
+    })
+}
+
+pub fn get_pointer_snapshot() -> anyhow::Result<(i32, i32, String, bool)> {
+    with_shell_overlay_proxy(|proxy| {
+        proxy
+            .call::<_, _, (i32, i32, String, bool)>("GetPointerSnapshot", &())
+            .context("GetPointerSnapshot failed")
+    })
+}
+
+pub fn print_pointer_debug() -> anyhow::Result<()> {
+    if !current_session_supports_gnome_shell_overlay() {
+        anyhow::bail!("pointer debug requires GNOME Wayland");
+    }
+    if !is_shell_overlay_service_available() {
+        anyhow::bail!("org.apexshot.ShellOverlay is not on the bus — enable the ApexShot GNOME extension");
+    }
+    let (x, y, kind, valid) = get_pointer_snapshot()?;
+    println!("pointer snapshot x={x} y={y} kind={kind} valid={valid}");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

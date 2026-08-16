@@ -22,27 +22,18 @@ pub(super) fn build_panels(
     state: Arc<Mutex<VideoEditState>>,
     estimate_label: Label,
 ) -> (GtkBox, EditorControls) {
-    let panels = GtkBox::new(Orientation::Horizontal, 12);
+    let panels = GtkBox::new(Orientation::Vertical, 12);
     panels.add_css_class("recording-editor-panels");
     panels.set_hexpand(true);
 
     let dimensions = GtkBox::new(Orientation::Vertical, 0);
     dimensions.add_css_class("recording-editor-panel");
-    dimensions.add_css_class("recording-editor-convert-only");
     dimensions.set_hexpand(true);
-    dimensions.set_tooltip_text(Some(
-        "Dimensions are applied by Save & Convert and Upload. Save Trim keeps the original resolution.",
-    ));
 
     let dimensions_title = Label::new(Some("Dimensions"));
     dimensions_title.add_css_class("recording-editor-panel-title");
     dimensions_title.set_xalign(0.0);
     dimensions.append(&dimensions_title);
-
-    let dimensions_hint = Label::new(Some("Save & Convert / Upload only"));
-    dimensions_hint.add_css_class("recording-editor-convert-hint");
-    dimensions_hint.set_xalign(0.0);
-    dimensions.append(&dimensions_hint);
 
     let dimensions_body = GtkBox::new(Orientation::Vertical, 8);
     dimensions_body.add_css_class("recording-editor-panel-body");
@@ -134,17 +125,8 @@ pub(super) fn build_panels(
     quality_label.set_xalign(0.0);
     settings.append(&quality_label);
 
-    let quality_hint = Label::new(Some("Save & Convert / Upload only"));
-    quality_hint.add_css_class("recording-editor-convert-hint");
-    quality_hint.set_xalign(0.0);
-    settings.append(&quality_hint);
-
     let quality_body = GtkBox::new(Orientation::Vertical, 8);
     quality_body.add_css_class("recording-editor-panel-body");
-    quality_body.add_css_class("recording-editor-convert-only");
-    quality_body.set_tooltip_text(Some(
-        "Quality is applied by Save & Convert and Upload. Save Trim keeps the original encode.",
-    ));
 
     let quality_row = GtkBox::new(Orientation::Horizontal, 8);
     let low = Label::new(Some("Low"));

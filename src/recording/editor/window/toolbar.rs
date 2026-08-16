@@ -1,5 +1,6 @@
 use gtk4::{prelude::*, Align, ApplicationWindow, Box as GtkBox, CenterBox, Label, Orientation};
 
+#[allow(dead_code)]
 pub(super) fn build_toolbar(window: &ApplicationWindow, file_stem: &str) -> CenterBox {
     let controls = CenterBox::new();
     controls.add_css_class("recording-editor-window-controls");
@@ -15,6 +16,13 @@ pub(super) fn build_toolbar(window: &ApplicationWindow, file_stem: &str) -> Cent
     title.set_size_request(-1, 30);
     controls.set_center_widget(Some(&title));
 
+    let right_box = build_traffic_lights(window);
+    controls.set_end_widget(Some(&right_box));
+
+    controls
+}
+
+pub(super) fn build_traffic_lights(window: &ApplicationWindow) -> GtkBox {
     let close =
         crate::capture::editor::ui_support::traffic_light_button("traffic-light-red", "Close");
     close.remove_css_class("recent-captures-wm-btn");
@@ -42,7 +50,6 @@ pub(super) fn build_toolbar(window: &ApplicationWindow, file_stem: &str) -> Cent
     right_box.append(&minimize);
     right_box.append(&zoom);
     right_box.append(&close);
-    controls.set_end_widget(Some(&right_box));
 
     let window_close = window.clone();
     close.connect_clicked(move |_| window_close.close());
@@ -59,5 +66,5 @@ pub(super) fn build_toolbar(window: &ApplicationWindow, file_stem: &str) -> Cent
         }
     });
 
-    controls
+    right_box
 }

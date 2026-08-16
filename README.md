@@ -1,9 +1,6 @@
-# ApexShot: Open-Source Linux Screenshot and Screen Recording Tool
+# ApexShot: the Linux app that records a demo and makes it look edited
 
-**ApexShot is an open-source Linux screenshot tool with annotation, OCR, QR
-code detection, and screen recording built in.** It brings fast captures,
-editing, browser scroll capture, hotkeys, and copy/share workflows to GNOME
-Wayland and other Linux desktops.
+**ApexShot is the Linux app that records a demo and makes it look edited — and it also does screenshots properly.** Screenshots stay the daily habit: annotation, OCR, QR detection, and copy/share workflows on GNOME Wayland and other Linux desktops.
 
 If you are looking for a Linux screenshot tool, a Flameshot alternative, or a
 ShareX alternative for Linux, ApexShot is built to cover screenshots,

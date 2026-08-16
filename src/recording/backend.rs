@@ -1111,7 +1111,12 @@ pub(super) async fn get_wayland_source(
     } else {
         RecordingScreenCastTarget::Screen
     };
-    let cursor_mode = if config.cursor {
+    let cursor_mode = if config.pointer_track {
+        // GNOME pointer sidecar path: hide the OS cursor and draw ApexShot's
+        // pointer in the editor. Do not switch to Metadata — GNOME ScreenCast
+        // often sends no usable SPA_META_Cursor bitmap.
+        CursorMode::Hidden
+    } else if config.cursor {
         // Ask the portal/compositor to embed the cursor in the video stream.
         // Metadata mode is optional and GNOME often does not provide usable
         // cursor bitmap metadata for ScreenCast streams, which made the
@@ -1750,6 +1755,7 @@ mod tests {
             x: Some(120),
             y: Some(80),
             cursor: true,
+            pointer_track: false,
             hidpi: false,
             max_resolution: None,
             fps: 30,

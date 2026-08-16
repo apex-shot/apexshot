@@ -1,5 +1,6 @@
 pub mod ffmpeg;
 pub mod model;
+pub mod sidecar;
 pub mod ui_support;
 mod window;
 

@@ -1,16 +1,15 @@
-use super::timeline;
-use crate::recording::editor::model::VideoEditState;
+use crate::recording::editor::model::{even_crop_rect, VideoBackground, VideoEditState};
 use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, Label, MediaFile, Orientation, Overlay, Picture,
+    glib, prelude::*, Align, Box as GtkBox, DrawingArea, GestureDrag, Label, MediaFile, Orientation,
+    Overlay, Picture,
 };
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub(super) fn build_preview(
     state: Arc<Mutex<VideoEditState>>,
     estimate_label: Label,
-    thumbnails: Vec<PathBuf>,
-) -> GtkBox {
+) -> (GtkBox, MediaFile) {
+    let _ = estimate_label;
     let path = {
         let state = state.lock().unwrap();
         state.metadata.path.clone()
@@ -40,10 +39,32 @@ pub(super) fn build_preview(
     picture.set_keep_aspect_ratio(true);
     picture.set_can_shrink(true);
 
+    let clip = gtk4::Box::new(Orientation::Vertical, 0);
+    clip.add_css_class("recording-editor-preview-clip");
+    clip.set_overflow(gtk4::Overflow::Hidden);
+    clip.set_hexpand(true);
+    clip.set_vexpand(true);
+    clip.set_halign(Align::Fill);
+    clip.set_valign(Align::Fill);
+    clip.append(&picture);
+
     let overlay = Overlay::new();
     overlay.set_hexpand(true);
     overlay.set_vexpand(true);
-    overlay.set_child(Some(&picture));
+    overlay.set_child(Some(&clip));
+
+    let cursor_layer = DrawingArea::new();
+    cursor_layer.set_hexpand(true);
+    cursor_layer.set_vexpand(true);
+    cursor_layer.set_can_target(true);
+    cursor_layer.set_draw_func({
+        let state = state.clone();
+        let picture = picture.clone();
+        move |_, cr, width, height| {
+            draw_preview_overlays(&state, &picture, cr, width, height);
+        }
+    });
+    overlay.add_overlay(&cursor_layer);
 
     let dim_badge = Label::new(None);
     dim_badge.add_css_class("recording-editor-dim-badge");
@@ -54,25 +75,189 @@ pub(super) fn build_preview(
     dim_badge.set_can_target(false);
     overlay.add_overlay(&dim_badge);
 
-    // Update badge live
+    let zoom_badge = Label::new(None);
+    zoom_badge.add_css_class("recording-editor-dim-badge");
+    zoom_badge.set_halign(Align::End);
+    zoom_badge.set_valign(Align::End);
+    zoom_badge.set_margin_end(12);
+    zoom_badge.set_margin_bottom(12);
+    zoom_badge.set_can_target(false);
+    overlay.add_overlay(&zoom_badge);
+
     {
         let state = state.clone();
         let dim_badge = dim_badge.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
-            let (w, h) = {
+        let zoom_badge = zoom_badge.clone();
+        let cursor_layer = cursor_layer.clone();
+        let picture = picture.clone();
+        let clip = clip.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            let (dims, zoom, pad, playhead) = {
                 let s = state.lock().unwrap();
-                s.target_dimensions()
+                let (scale, _) = s.eval_zoom(s.playhead_seconds);
+                (
+                    s.padded_output_dimensions(),
+                    scale,
+                    !s.background.is_none(),
+                    s.playhead_seconds,
+                )
             };
-            dim_badge.set_text(&format!("{w} × {h}"));
+            dim_badge.set_text(&format!("{} × {}", dims.0, dims.1));
+            if zoom > 1.01 {
+                zoom_badge.set_text(&format!("{:.0}%", zoom * 100.0));
+                zoom_badge.set_visible(true);
+            } else {
+                zoom_badge.set_visible(false);
+            }
+            apply_preview_crop(&state, &clip, &picture, playhead);
+            apply_preview_pad(&clip, pad);
+            cursor_layer.queue_draw();
             glib::ControlFlow::Continue
         });
     }
 
+    let drag = GestureDrag::new();
+    drag.set_button(1);
+    drag.connect_drag_update({
+        let state = state.clone();
+        let picture = picture.clone();
+        move |gesture, offset_x, offset_y| {
+            let Some((start_x, start_y)) = gesture.start_point() else {
+                return;
+            };
+            let width = picture.allocated_width().max(1) as f64;
+            let height = picture.allocated_height().max(1) as f64;
+            let x = (start_x + offset_x).clamp(0.0, width);
+            let y = (start_y + offset_y).clamp(0.0, height);
+            let mut state = state.lock().unwrap();
+            let Some(index) = state.selected_zoom else {
+                return;
+            };
+            let src_w = state.metadata.width.max(1) as f64;
+            let src_h = state.metadata.height.max(1) as f64;
+            if let Some(clip) = state.zoom_clips.get_mut(index) {
+                clip.center = ((x / width) * src_w, (y / height) * src_h);
+            }
+        }
+    });
+    cursor_layer.add_controller(drag);
+
     workspace.append(&overlay);
     root.append(&workspace);
+    (root, media)
+}
 
-    let timeline_widget = timeline::build_timeline(state, estimate_label, thumbnails, media);
-    root.append(&timeline_widget);
+fn apply_preview_pad(clip: &gtk4::Box, padded: bool) {
+    let pad = if padded { 18 } else { 0 };
+    clip.set_margin_start(pad);
+    clip.set_margin_end(pad);
+    clip.set_margin_top(pad);
+    clip.set_margin_bottom(pad);
+}
 
-    root
+fn apply_preview_crop(
+    state: &Arc<Mutex<VideoEditState>>,
+    clip: &gtk4::Box,
+    picture: &Picture,
+    playhead: f64,
+) {
+    let state = state.lock().unwrap();
+    let (scale, center) = state.eval_zoom(playhead);
+    let parent_w = clip.allocated_width().max(1);
+    let parent_h = clip.allocated_height().max(1);
+    if scale <= 1.01 {
+        picture.set_hexpand(true);
+        picture.set_vexpand(true);
+        picture.set_size_request(-1, -1);
+        picture.set_margin_start(0);
+        picture.set_margin_top(0);
+        return;
+    }
+    let src_w = state.metadata.width.max(1) as f64;
+    let src_h = state.metadata.height.max(1) as f64;
+    let scaled_w = ((parent_w as f64) * scale).round() as i32;
+    let scaled_h = ((parent_h as f64) * scale).round() as i32;
+    let off_x = (parent_w as f64 / 2.0 - (center.0 / src_w) * scaled_w as f64).round() as i32;
+    let off_y = (parent_h as f64 / 2.0 - (center.1 / src_h) * scaled_h as f64).round() as i32;
+    picture.set_hexpand(false);
+    picture.set_vexpand(false);
+    picture.set_size_request(scaled_w, scaled_h);
+    picture.set_margin_start(off_x);
+    picture.set_margin_top(off_y);
+}
+
+fn draw_preview_overlays(
+    state: &Arc<Mutex<VideoEditState>>,
+    picture: &Picture,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let state = state.lock().unwrap();
+    let w = width as f64;
+    let h = height as f64;
+    if matches!(state.background, VideoBackground::Plain { .. }) {
+        if let VideoBackground::Plain { r, g, b } = state.background {
+            cr.set_source_rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
+            cr.rectangle(0.0, 0.0, w, h);
+            let _ = cr.fill();
+        }
+    } else if matches!(state.background, VideoBackground::Gradient(_)) {
+        let gradient = gtk4::cairo::LinearGradient::new(0.0, 0.0, w, h);
+        gradient.add_color_stop_rgb(0.0, 0.18, 0.22, 0.42);
+        gradient.add_color_stop_rgb(1.0, 0.42, 0.18, 0.28);
+        let _ = cr.set_source(&gradient);
+        cr.rectangle(0.0, 0.0, w, h);
+        let _ = cr.fill();
+    }
+
+    let (scale, center) = state.eval_zoom(state.playhead_seconds);
+    let src_w = state.metadata.width.max(1);
+    let src_h = state.metadata.height.max(1);
+    let (_cx, _cy, crop_w, crop_h) = even_crop_rect(scale, center, src_w, src_h);
+    let _ = (picture, crop_w, crop_h);
+
+    if let Some(sidecar) = &state.sidecar {
+        if let Some((x, y, kind)) = sidecar.interpolated_at(state.playhead_seconds) {
+            let pulse = sidecar.click_pulse_at(state.playhead_seconds);
+            let px = (x / src_w as f64) * w;
+            let py = (y / src_h as f64) * h;
+            draw_apexshot_cursor(cr, px, py, pulse, kind.as_str());
+        }
+    }
+}
+
+fn draw_apexshot_cursor(cr: &gtk4::cairo::Context, x: f64, y: f64, pulse: f64, kind: &str) {
+    let size = 16.0 * pulse;
+    if pulse > 1.02 {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.28);
+        cr.arc(x, y, size + 6.0, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    }
+    cr.set_source_rgb(1.0, 1.0, 1.0);
+    cr.set_line_width(1.4);
+    match kind {
+        "text" => {
+            cr.move_to(x, y - size * 0.6);
+            cr.line_to(x, y + size * 0.6);
+            let _ = cr.stroke();
+        }
+        "hand" => {
+            cr.arc(x, y, size * 0.35, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+        }
+        _ => {
+            cr.move_to(x, y);
+            cr.line_to(x + size * 0.15, y + size * 0.85);
+            cr.line_to(x + size * 0.38, y + size * 0.62);
+            cr.close_path();
+            let _ = cr.fill();
+            cr.set_source_rgb(0.12, 0.12, 0.14);
+            cr.move_to(x, y);
+            cr.line_to(x + size * 0.15, y + size * 0.85);
+            cr.line_to(x + size * 0.38, y + size * 0.62);
+            cr.close_path();
+            let _ = cr.stroke();
+        }
+    }
 }

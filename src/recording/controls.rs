@@ -2,9 +2,124 @@ use super::*;
 use crate::{
     capture_overlay::{RecordingRequest, RecordingType},
     config::{save_config, AppConfig},
+    recording::editor::sidecar::{delete_recording_outputs, CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar, MAX_CLICKS},
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
+
+struct PointerTrackSession {
+    started: bool,
+    region: CaptureRegion,
+}
+
+impl PointerTrackSession {
+    fn start(config: &super::RecordingConfig) -> Self {
+        let region = CaptureRegion::from_capture(config.x, config.y, config.width, config.height);
+        if !config.pointer_track {
+            return Self {
+                started: false,
+                region,
+            };
+        }
+        match crate::gnome_shell::start_pointer_track() {
+            Ok(()) => {
+                eprintln!("[recording] pointer track started (OS cursor hidden)");
+                Self {
+                    started: true,
+                    region,
+                }
+            }
+            Err(err) => {
+                eprintln!("[recording] StartPointerTrack failed ({err}); continuing without sidecar");
+                crate::utils::notify::desktop_notification(
+                    "Pointer track unavailable",
+                    "Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor.",
+                );
+                Self {
+                    started: false,
+                    region,
+                }
+            }
+        }
+    }
+
+    fn finish_save(&self, output_path: &Path) -> bool {
+        if !self.started {
+            PointerSidecar::delete_next_to_video(output_path);
+            return false;
+        }
+        match crate::gnome_shell::stop_pointer_track() {
+            Ok(result) => {
+                if result.samples.is_empty() {
+                    eprintln!("[recording] StopPointerTrack returned no pointer samples");
+                    crate::utils::notify::desktop_notification(
+                        "Pointer track missing",
+                        "No cursor samples were captured. Zoom centers will use the frame center.",
+                    );
+                }
+                let mut sidecar = PointerSidecar::new(result.t0_monotonic_us, self.region);
+                sidecar.pointer = result
+                    .samples
+                    .into_iter()
+                    .map(|(t, x, y, kind)| PointerSample {
+                        t,
+                        x: x as f64,
+                        y: y as f64,
+                        kind: CursorKind::parse(&kind),
+                    })
+                    .collect();
+                sidecar.clicks = result
+                    .clicks
+                    .into_iter()
+                    .take(MAX_CLICKS)
+                    .map(|(t, x, y, button)| ClickSample {
+                        t,
+                        x: x as f64,
+                        y: y as f64,
+                        button,
+                    })
+                    .collect();
+                sidecar.subtract_region();
+                match sidecar.write_next_to_video(output_path) {
+                    Ok(path) => {
+                        eprintln!("[recording] wrote pointer sidecar {}", path.display());
+                        true
+                    }
+                    Err(err) => {
+                        eprintln!("[recording] failed to write pointer sidecar: {err}");
+                        PointerSidecar::delete_next_to_video(output_path);
+                        false
+                    }
+                }
+            }
+            Err(err) => {
+                eprintln!("[recording] StopPointerTrack failed ({err}); deleting partial sidecar");
+                PointerSidecar::delete_next_to_video(output_path);
+                false
+            }
+        }
+    }
+
+    fn finish_discard(&self, output_path: &Path) {
+        if self.started {
+            if let Err(err) = crate::gnome_shell::stop_pointer_track() {
+                eprintln!("[recording] StopPointerTrack on discard failed: {err}");
+            }
+        }
+        delete_recording_outputs(output_path);
+    }
+}
+
+fn maybe_prompt_gnome_extension() {
+    if crate::gnome_shell::current_session_supports_gnome_shell_overlay()
+        && !crate::gnome_shell::is_shell_overlay_service_available()
+    {
+        crate::utils::notify::desktop_notification(
+            "Enable the ApexShot GNOME extension",
+            "Pointer tracking and area dim need the ApexShot GNOME extension.",
+        );
+    }
+}
 
 #[derive(Debug)]
 pub struct PreparedOverlayRecordingRequest {
@@ -125,6 +240,8 @@ pub fn prepare_overlay_recording_request(
         x: capture_x,
         y: capture_y,
         cursor: true,
+        pointer_track: matches!(request.record_type, RecordingType::Video)
+            && crate::gnome_shell::should_use_pointer_track(),
         hidpi: request.hidpi,
         max_resolution,
         fps,
@@ -365,7 +482,7 @@ pub async fn run_recording_with_native_controls(
             {
                 super::notify_daemon_event(event);
             }
-            let _ = std::fs::remove_file(&path);
+            delete_recording_outputs(&path);
             Box::pin(run_recording_with_native_controls(config, params)).await
         }
         (path, super::RecordingTerminalAction::Save) => {
@@ -427,6 +544,7 @@ async fn run_recording_with_shell_mask(
 
     super::notify_daemon_event("recording_session_started");
     let final_outcome = loop {
+        let pointer_track = PointerTrackSession::start(&config);
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         control_server.set_command_sender(command_tx);
         let outcome =
@@ -435,6 +553,7 @@ async fn run_recording_with_shell_mask(
         let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(err) => {
+                pointer_track.finish_discard(&config.output_path);
                 drop(control_server);
                 super::notify_recording_session_ended_best_effort();
                 return Err(err.into());
@@ -446,7 +565,7 @@ async fn run_recording_with_shell_mask(
                 if let Some(event) = super::daemon_event_for_terminal_action(action) {
                     super::notify_daemon_event(event);
                 }
-                let _ = std::fs::remove_file(&path);
+                pointer_track.finish_discard(&path);
                 prepared_backend = prepare_shell_recording(config.clone()).await?;
                 continue;
             }
@@ -454,12 +573,14 @@ async fn run_recording_with_shell_mask(
                 if let Some(event) = super::daemon_event_for_terminal_action(action) {
                     super::notify_daemon_event(event);
                 }
+                pointer_track.finish_save(&path);
                 break (path, StopAction::Save);
             }
             (path, action @ super::RecordingTerminalAction::Discard) => {
                 if let Some(event) = super::daemon_event_for_terminal_action(action) {
                     super::notify_daemon_event(event);
                 }
+                pointer_track.finish_discard(&path);
                 break (path, StopAction::Discard);
             }
         }
@@ -490,6 +611,7 @@ pub fn run_overlay_recording_request_with_gtk(
 ) -> anyhow::Result<PathBuf> {
     // Fedora: video recording is not supported.
     super::refuse_fedora_recording()?;
+    maybe_prompt_gnome_extension();
 
     let prepared = prepare_overlay_recording_request(
         crate::config::load_config(),
@@ -533,7 +655,7 @@ pub fn run_overlay_recording_request_with_gtk(
     match outcome {
         Ok((path, StopAction::Discard)) => {
             eprintln!("Recording discarded — deleting {:?}", path);
-            let _ = std::fs::remove_file(&path);
+            delete_recording_outputs(&path);
             Ok(path)
         }
         Ok((path, StopAction::Save)) => {
@@ -547,7 +669,7 @@ pub fn run_overlay_recording_request_with_gtk(
             }
 
             if !config.rec_after_capture_save {
-                let _ = std::fs::remove_file(&path);
+                delete_recording_outputs(&path);
                 eprintln!(
                     "[recording] Recording discarded because Save is disabled in after-capture settings"
                 );
@@ -564,7 +686,8 @@ pub fn run_overlay_recording_request_with_gtk(
                 .unwrap_or("recording");
             crate::utils::notify::desktop_notification("Recording saved", file_name);
 
-            if open_editor {
+            let sidecar_exists = PointerSidecar::sidecar_path(&path).is_file();
+            if sidecar_exists || open_editor {
                 spawn_recording_editor_subprocess(path.clone());
             }
             Ok(path)
@@ -656,7 +779,11 @@ mod tests {
         assert_eq!(prepared.recording_config.height, Some(480));
         assert_eq!(prepared.recording_config.x, Some(10));
         assert_eq!(prepared.recording_config.y, Some(20));
-        assert_eq!(prepared.recording_config.cursor, true);
+         assert_eq!(prepared.recording_config.cursor, true);
+        assert_eq!(
+            prepared.recording_config.pointer_track,
+            crate::gnome_shell::should_use_pointer_track()
+        );
         assert_eq!(prepared.recording_config.hidpi, true);
         assert_eq!(prepared.recording_config.max_resolution, Some((1280, 720)));
         assert_eq!(prepared.recording_config.fps, 60);

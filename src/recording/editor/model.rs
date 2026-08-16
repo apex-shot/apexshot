@@ -1,7 +1,13 @@
+use super::sidecar::PointerSidecar;
 use std::path::{Path, PathBuf};
 
 pub const MIN_TRIM_DURATION_SECONDS: f64 = 0.25;
 const MIN_DIMENSION: u32 = 64;
+pub const DEFAULT_ZOOM_DURATION_SECONDS: f64 = 1.8;
+pub const DEFAULT_ZOOM_SCALE: f64 = 1.8;
+pub const DEFAULT_ZOOM_EASE_MS: u32 = 200;
+pub const MIN_ZOOM_SCALE: f64 = 1.2;
+pub const MAX_ZOOM_SCALE: f64 = 3.0;
 
 #[derive(Debug, Clone)]
 pub struct VideoMetadata {
@@ -41,6 +47,49 @@ pub enum AudioMode {
     Muted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VideoBackground {
+    None,
+    Plain { r: u8, g: u8, b: u8 },
+    Gradient(usize),
+}
+
+impl VideoBackground {
+    pub fn is_none(self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZoomClip {
+    pub start: f64,
+    pub end: f64,
+    pub scale: f64,
+    pub center: (f64, f64),
+    pub ease_ms: u32,
+}
+
+impl ZoomClip {
+    pub fn duration(&self) -> f64 {
+        (self.end - self.start).max(0.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectMediaKind {
+    Video,
+    Audio,
+    Image,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectMedia {
+    pub path: PathBuf,
+    pub display_name: String,
+    pub kind: ProjectMediaKind,
+    pub duration_seconds: Option<f64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoEditState {
     pub metadata: VideoMetadata,
@@ -60,10 +109,44 @@ pub struct VideoEditState {
     /// Output order of segments (indices into segment_boundaries()).
     /// Length is always cuts.len() + 1.
     pub segment_order: Vec<usize>,
+    pub zoom_clips: Vec<ZoomClip>,
+    pub selected_zoom: Option<usize>,
+    pub background: VideoBackground,
+    pub background_padding: f64,
+    pub background_corner_radius: f64,
+    pub background_shadow: f64,
+    pub sidecar: Option<PointerSidecar>,
+    pub project_media: Vec<ProjectMedia>,
+}
+
+fn seed_project_media(metadata: &VideoMetadata) -> Vec<ProjectMedia> {
+    let name = metadata
+        .path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("Recording")
+        .to_string();
+    let mut items = vec![ProjectMedia {
+        path: metadata.path.clone(),
+        display_name: name.clone(),
+        kind: ProjectMediaKind::Video,
+        duration_seconds: Some(metadata.duration_seconds),
+    }];
+    if metadata.has_audio {
+        items.push(ProjectMedia {
+            path: metadata.path.clone(),
+            display_name: format!("{name} audio"),
+            kind: ProjectMediaKind::Audio,
+            duration_seconds: Some(metadata.duration_seconds),
+        });
+    }
+    items
 }
 
 impl VideoEditState {
     pub fn new(metadata: VideoMetadata) -> Self {
+        let sidecar = PointerSidecar::load_next_to_video(&metadata.path);
+        let project_media = seed_project_media(&metadata);
         Self {
             trim_start_seconds: 0.0,
             trim_end_seconds: metadata.duration_seconds,
@@ -77,7 +160,26 @@ impl VideoEditState {
             cuts: Vec::new(),
             segments_kept: vec![true],
             segment_order: vec![0],
+            zoom_clips: Vec::new(),
+            selected_zoom: None,
+            background: VideoBackground::None,
+            background_padding: 24.0,
+            background_corner_radius: 18.0,
+            background_shadow: 15.0,
+            sidecar,
+            project_media,
         }
+    }
+
+    pub fn add_project_media(&mut self, item: ProjectMedia) {
+        if self
+            .project_media
+            .iter()
+            .any(|existing| existing.path == item.path && existing.kind == item.kind)
+        {
+            return;
+        }
+        self.project_media.push(item);
     }
 
     pub fn set_trim_start(&mut self, value: f64) {
@@ -88,6 +190,25 @@ impl VideoEditState {
             self.trim_end_seconds
         };
         self.trim_start_seconds = value.clamp(0.0, max_start.max(0.0));
+    }
+
+    pub fn shift_trim(&mut self, delta: f64) {
+        let duration = self.metadata.duration_seconds.max(0.0);
+        let span = self.trim_duration();
+        if span <= 0.0 || duration <= 0.0 {
+            return;
+        }
+        let max_start = (duration - span).max(0.0);
+        let new_start = (self.trim_start_seconds + delta).clamp(0.0, max_start);
+        let shift = new_start - self.trim_start_seconds;
+        if shift.abs() < f64::EPSILON {
+            return;
+        }
+        self.trim_start_seconds = new_start;
+        self.trim_end_seconds = new_start + span;
+        for cut in &mut self.cuts {
+            *cut += shift;
+        }
     }
 
     pub fn set_trim_end(&mut self, value: f64) {
@@ -260,8 +381,11 @@ impl VideoEditState {
         }
     }
 
-    /// True when quality/dimensions require a re-encode (stream-copy cannot apply them).
+    /// True when quality/dimensions/zoom/pad require a re-encode (stream-copy cannot apply them).
     pub fn needs_reencode(&self) -> bool {
+        if self.needs_composite() {
+            return true;
+        }
         let (tw, th) = self.target_dimensions();
         let (sw, sh) = (
             even_dimension(self.metadata.width.max(1)),
@@ -274,9 +398,199 @@ impl VideoEditState {
         self.quality != 70
     }
 
+    pub fn needs_composite(&self) -> bool {
+        !self.zoom_clips.is_empty()
+            || !self.background.is_none()
+            || self
+                .sidecar
+                .as_ref()
+                .is_some_and(|sidecar| !sidecar.pointer.is_empty())
+    }
+
+    pub fn default_zoom_center(&self, at_seconds: f64) -> (f64, f64) {
+        if let Some(sidecar) = &self.sidecar {
+            if let Some((x, y, _)) = sidecar.interpolated_at(at_seconds) {
+                return (x, y);
+            }
+        }
+        (
+            self.metadata.width as f64 / 2.0,
+            self.metadata.height as f64 / 2.0,
+        )
+    }
+
+    pub fn add_zoom_at_playhead(&mut self) -> Option<usize> {
+        let start = self.playhead_seconds.clamp(self.trim_start_seconds, self.trim_end_seconds);
+        let end = (start + DEFAULT_ZOOM_DURATION_SECONDS).min(self.trim_end_seconds);
+        if end - start < 0.2 {
+            return None;
+        }
+        if self
+            .zoom_clips
+            .iter()
+            .any(|clip| ranges_overlap(start, end, clip.start, clip.end))
+        {
+            return None;
+        }
+        let center = self.default_zoom_center(start);
+        self.zoom_clips.push(ZoomClip {
+            start,
+            end,
+            scale: DEFAULT_ZOOM_SCALE,
+            center,
+            ease_ms: DEFAULT_ZOOM_EASE_MS,
+        });
+        self.zoom_clips
+            .sort_by(|a, b| a.start.total_cmp(&b.start));
+        let index = self
+            .zoom_clips
+            .iter()
+            .position(|clip| (clip.start - start).abs() < 1e-6)?;
+        self.selected_zoom = Some(index);
+        Some(index)
+    }
+
+    pub fn remove_selected_zoom(&mut self) {
+        if let Some(index) = self.selected_zoom.take() {
+            if index < self.zoom_clips.len() {
+                self.zoom_clips.remove(index);
+            }
+        }
+    }
+
+    pub fn set_zoom_range(&mut self, index: usize, start: f64, end: f64) {
+        if self.zoom_clips.get(index).is_none() {
+            return;
+        }
+        let min_start = self.trim_start_seconds;
+        let max_end = self.trim_end_seconds;
+        let mut start = start.clamp(min_start, max_end);
+        let mut end = end.clamp(min_start, max_end);
+        if end - start < 0.2 {
+            end = (start + 0.2).min(max_end);
+            start = (end - 0.2).max(min_start);
+        }
+        if self.zoom_clips.iter().enumerate().any(|(other, existing)| {
+            other != index && ranges_overlap(start, end, existing.start, existing.end)
+        }) {
+            return;
+        }
+        if let Some(clip) = self.zoom_clips.get_mut(index) {
+            clip.start = start;
+            clip.end = end;
+        }
+    }
+
+    pub fn eval_zoom(&self, t: f64) -> (f64, (f64, f64)) {
+        eval_zoom(
+            &self.zoom_clips,
+            t,
+            self.metadata.width as f64,
+            self.metadata.height as f64,
+        )
+    }
+
+    pub fn padded_output_dimensions(&self) -> (u32, u32) {
+        let (base_w, base_h) = self.target_dimensions();
+        if self.background.is_none() {
+            return (base_w, base_h);
+        }
+        let layout = crate::capture::editor::composition::BackgroundComposition::new(
+            base_w as f64,
+            base_h as f64,
+        )
+        .with_style(match self.background {
+            VideoBackground::None => crate::capture::editor::types::BackgroundStyle::None,
+            VideoBackground::Plain { r, g, b } => {
+                crate::capture::editor::types::BackgroundStyle::PlainColor(
+                    crate::capture::editor::types::DrawColor::new(
+                        r as f64 / 255.0,
+                        g as f64 / 255.0,
+                        b as f64 / 255.0,
+                        1.0,
+                    ),
+                )
+            }
+            VideoBackground::Gradient(index) => {
+                crate::capture::editor::types::BackgroundStyle::Gradient(index)
+            }
+        })
+        .with_padding(self.background_padding)
+        .with_shadow(self.background_shadow)
+        .with_corner_radius(self.background_corner_radius)
+        .compute();
+        (
+            even_dimension(layout.canvas_width.round().max(2.0) as u32),
+            even_dimension(layout.canvas_height.round().max(2.0) as u32),
+        )
+    }
+
     pub fn estimated_size_bytes(&self, trim_only: bool) -> u64 {
         estimate_size_bytes(self, trim_only)
     }
+}
+
+fn ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
+    a0 < b1 && b0 < a1
+}
+
+pub fn eval_zoom(
+    clips: &[ZoomClip],
+    t: f64,
+    frame_width: f64,
+    frame_height: f64,
+) -> (f64, (f64, f64)) {
+    let frame_center = (frame_width / 2.0, frame_height / 2.0);
+    let Some(clip) = clips.iter().find(|clip| t >= clip.start && t <= clip.end) else {
+        return (1.0, frame_center);
+    };
+    let ease = (clip.ease_ms as f64 / 1000.0).clamp(0.0, clip.duration() / 2.0);
+    let scale = eased_value(t, clip.start, clip.end, ease, 1.0, clip.scale.max(1.0));
+    let center_x = eased_value(t, clip.start, clip.end, ease, frame_center.0, clip.center.0);
+    let center_y = eased_value(t, clip.start, clip.end, ease, frame_center.1, clip.center.1);
+    (scale, (center_x, center_y))
+}
+
+fn eased_value(t: f64, start: f64, end: f64, ease: f64, from: f64, to: f64) -> f64 {
+    if ease <= f64::EPSILON {
+        return to;
+    }
+    if t < start + ease {
+        let alpha = ((t - start) / ease).clamp(0.0, 1.0);
+        return lerp(from, to, smoothstep(alpha));
+    }
+    if t > end - ease {
+        let alpha = ((end - t) / ease).clamp(0.0, 1.0);
+        return lerp(from, to, smoothstep(alpha));
+    }
+    to
+}
+
+fn lerp(from: f64, to: f64, alpha: f64) -> f64 {
+    from + (to - from) * alpha
+}
+
+fn smoothstep(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+pub fn even_crop_rect(
+    scale: f64,
+    center: (f64, f64),
+    src_w: u32,
+    src_h: u32,
+) -> (u32, u32, u32, u32) {
+    let src_w = src_w.max(2);
+    let src_h = src_h.max(2);
+    let scale = scale.max(1.0);
+    let crop_w = even_dimension(((src_w as f64 / scale).round() as u32).max(2).min(src_w));
+    let crop_h = even_dimension(((src_h as f64 / scale).round() as u32).max(2).min(src_h));
+    let max_x = src_w.saturating_sub(crop_w);
+    let max_y = src_h.saturating_sub(crop_h);
+    let x = ((center.0 - crop_w as f64 / 2.0).round() as i32).clamp(0, max_x as i32) as u32;
+    let y = ((center.1 - crop_h as f64 / 2.0).round() as i32).clamp(0, max_y as i32) as u32;
+    (even_dimension(x.min(max_x)), even_dimension(y.min(max_y)), crop_w, crop_h)
 }
 
 /// Fit `src` inside `box` without upscaling or stretching (aspect preserved).
@@ -506,6 +820,61 @@ mod tests {
         state.quality = 70;
         state.dimension_preset = DimensionPreset::P720;
         assert!(state.needs_reencode());
+    }
+
+    #[test]
+    fn needs_reencode_when_zoom_or_background_present() {
+        let mut state = VideoEditState::new(metadata());
+        assert!(!state.needs_reencode());
+        state.zoom_clips.push(ZoomClip {
+            start: 1.0,
+            end: 2.8,
+            scale: 1.8,
+            center: (960.0, 540.0),
+            ease_ms: 200,
+        });
+        assert!(state.needs_reencode());
+
+        let mut padded = VideoEditState::new(metadata());
+        padded.background = VideoBackground::Plain {
+            r: 20,
+            g: 20,
+            b: 24,
+        };
+        assert!(padded.needs_reencode());
+    }
+
+    #[test]
+    fn eval_zoom_eases_in_and_out() {
+        let clips = [ZoomClip {
+            start: 1.0,
+            end: 2.8,
+            scale: 2.0,
+            center: (200.0, 100.0),
+            ease_ms: 200,
+        }];
+        let (outside, _) = eval_zoom(&clips, 0.5, 1920.0, 1080.0);
+        assert!((outside - 1.0).abs() < 1e-9);
+
+        let (hold, center) = eval_zoom(&clips, 1.9, 1920.0, 1080.0);
+        assert!((hold - 2.0).abs() < 1e-9);
+        assert!((center.0 - 200.0).abs() < 1e-9);
+        assert!((center.1 - 100.0).abs() < 1e-9);
+
+        let (ease_in, _) = eval_zoom(&clips, 1.1, 1920.0, 1080.0);
+        assert!(ease_in > 1.0 && ease_in < 2.0);
+
+        let (ease_out, _) = eval_zoom(&clips, 2.7, 1920.0, 1080.0);
+        assert!(ease_out > 1.0 && ease_out < 2.0);
+    }
+
+    #[test]
+    fn even_crop_stays_inside_frame() {
+        let (x, y, w, h) = even_crop_rect(1.8, (10.0, 10.0), 1920, 1080);
+        assert!(w.is_multiple_of(2) && h.is_multiple_of(2));
+        assert!(x + w <= 1920);
+        assert!(y + h <= 1080);
+        assert!(w < 1920 && h < 1080);
     }
 
     #[test]

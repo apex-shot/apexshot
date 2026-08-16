@@ -128,6 +128,7 @@ pub struct RecordingConfig {
     pub x: Option<i32>,
     pub y: Option<i32>,
     pub cursor: bool,
+    pub pointer_track: bool,
     pub hidpi: bool,
     // Video tab settings
     pub max_resolution: Option<(u32, u32)>,
@@ -198,6 +199,7 @@ impl Default for RecordingConfig {
             x: None,
             y: None,
             cursor: true,
+            pointer_track: false,
             hidpi: true,
             max_resolution: None,
             fps: 30,
@@ -250,6 +252,7 @@ impl RecordingConfig {
             x: None,
             y: None,
             cursor: app_config.rec_cursor,
+            pointer_track: extension != "gif" && crate::gnome_shell::should_use_pointer_track(),
             hidpi: app_config.rec_hidpi,
             max_resolution,
             fps,
