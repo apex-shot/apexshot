@@ -1,14 +1,10 @@
-# ApexShot: the Linux app that records a demo and makes it look edited
+# ApexShot
 
-**ApexShot is the Linux app that records a demo and makes it look edited — and it also does screenshots properly.** Screenshots stay the daily habit: annotation, OCR, QR detection, and copy/share workflows on GNOME Wayland and other Linux desktops.
+A native Linux screenshot app for Wayland. Capture a region, annotate it, pull
+text or a QR code out of it, and copy or upload the result.
 
-If you are looking for a Linux screenshot tool, a Flameshot alternative, or a
-ShareX alternative for Linux, ApexShot is built to cover screenshots,
-annotation, recording, OCR, and quick sharing in one native app. This is the
-official ApexShot GitHub repository.
-
-ApexShot is independent and is not affiliated with ShareX, Flameshot, or
-CleanShot X.
+Screen recording and a video editor exist in the app today, but the polished
+"record a demo and make it look edited" workflow is still being built.
 
 ![ApexShot Linux screenshot editor and annotation workflow](media/image-editor-tutorial.gif)
 
@@ -49,21 +45,6 @@ support.
 | Text and code extraction | OCR plus automatic QR code detection from captured regions |
 | Linux desktop integration | GNOME Wayland support, portal-backed capture paths, tray, daemon mode, and global hotkeys |
 | Open-source project | GPL-3.0-or-later source code, GitHub releases, issues, and discussions at https://github.com/apex-shot/apexshot |
-
-## Built for common Linux screenshot workflows
-
-People usually search for terms like `linux screenshot tool`, `linux screen recorder`,
-`flameshot alternative`, `sharex alternative for linux`, or `wayland screenshot
-tool`. ApexShot is built for those workflows because it combines:
-
-- screenshots for full screen, region, window, and crosshair capture
-- built-in annotation tools for arrows, text, blur, pixelate, and markup
-- OCR and QR code detection for extracting information from screenshots
-- Wayland-focused Linux support with portal-backed and compositor-specific paths
-- screen recording, GIF export, audio capture, and quick clipboard workflows
-
-The goal is simple: make it obvious to GitHub visitors and search engines what
-ApexShot does, without turning the README into generic comparison copy.
 
 ## Install
 
