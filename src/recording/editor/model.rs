@@ -127,6 +127,13 @@ pub struct VideoEditState {
     pub zoom_hidden: bool,
     /// 0 = fit the whole clip, 100 = 8× time-axis zoom (WebCut scaler).
     pub timeline_scale: f64,
+    /// Seconds of empty timeline before the clip. Dragging the clip body
+    /// later on the ruler increases this; it is exported as leading black.
+    /// Not tied to the source duration — the ruler stays open on the right.
+    pub timeline_offset_seconds: f64,
+    /// Horizontal pan at fit zoom, in composition seconds. Does not change
+    /// pixels-per-second; the clip stays the same size and the track scrolls.
+    pub timeline_scroll_seconds: f64,
 }
 
 fn seed_project_media(metadata: &VideoMetadata) -> Vec<ProjectMedia> {
@@ -187,25 +194,106 @@ impl VideoEditState {
             zoom_locked: false,
             zoom_hidden: false,
             timeline_scale: 0.0,
+            timeline_offset_seconds: 0.0,
+            timeline_scroll_seconds: 0.0,
         }
+    }
+
+    pub fn composition_duration(&self) -> f64 {
+        (self.timeline_offset_seconds + self.metadata.duration_seconds).max(0.001)
+    }
+
+    pub fn source_duration(&self) -> f64 {
+        self.metadata.duration_seconds.max(0.001)
+    }
+
+    pub fn visible_span_seconds(&self) -> f64 {
+        let factor = 1.0 + (self.timeline_scale.clamp(0.0, 100.0) / 100.0) * 7.0;
+        self.source_duration() / factor
+    }
+
+    /// Scrollable / drawable length. Always keeps a full viewport of empty
+    /// time after the last frame so the ruler never stops at the clip.
+    pub fn timeline_canvas_seconds(&self) -> f64 {
+        self.composition_duration() + self.visible_span_seconds()
+    }
+
+    pub fn max_timeline_scroll(&self) -> f64 {
+        (self.timeline_canvas_seconds() - self.visible_span_seconds()).max(0.0)
+    }
+
+    pub fn source_to_timeline(&self, source_t: f64) -> f64 {
+        self.timeline_offset_seconds + source_t
+    }
+
+    pub fn timeline_to_source(&self, timeline_t: f64) -> f64 {
+        timeline_t - self.timeline_offset_seconds
+    }
+
+    pub fn source_to_x(&self, source_t: f64, width: f64) -> f64 {
+        self.time_to_x(self.source_to_timeline(source_t), width)
+    }
+
+    pub fn set_timeline_offset(&mut self, value: f64) {
+        if self.video_locked {
+            return;
+        }
+        self.timeline_offset_seconds = if value.is_finite() {
+            value.max(0.0)
+        } else {
+            0.0
+        };
+        self.clamp_timeline_scroll();
+    }
+
+    pub fn set_timeline_scroll(&mut self, value: f64) {
+        self.timeline_scroll_seconds = value;
+        self.clamp_timeline_scroll();
+    }
+
+    fn clamp_timeline_scroll(&mut self) {
+        let max_scroll = self.max_timeline_scroll();
+        self.timeline_scroll_seconds = self.timeline_scroll_seconds.clamp(0.0, max_scroll);
+    }
+
+    /// Keep a moving clip inside the fit-zoom window by panning, without
+    /// changing pixels-per-second.
+    pub fn follow_clip_on_timeline(&mut self) {
+        if self.timeline_scale > 0.001 {
+            return;
+        }
+        let start = self.source_to_timeline(self.trim_start_seconds);
+        let end = self.source_to_timeline(self.trim_end_seconds);
+        let visible = self.visible_span_seconds();
+        if end > self.timeline_scroll_seconds + visible {
+            self.timeline_scroll_seconds = end - visible;
+        }
+        if start < self.timeline_scroll_seconds {
+            self.timeline_scroll_seconds = start;
+        }
+        self.clamp_timeline_scroll();
     }
 
     pub fn timeline_view(&self) -> (f64, f64) {
         let factor = 1.0 + (self.timeline_scale.clamp(0.0, 100.0) / 100.0) * 7.0;
         let span = 1.0 / factor;
-        let duration = self.metadata.duration_seconds.max(0.001);
-        let playhead_frac = (self.playhead_seconds / duration).clamp(0.0, 1.0);
-        let start = (playhead_frac - span * 0.4).clamp(0.0, (1.0 - span).max(0.0));
+        let duration = self.source_duration();
+        if self.timeline_scale <= 0.001 {
+            let start = (self.timeline_scroll_seconds / duration).max(0.0);
+            return (start, span);
+        }
+        let playhead_frac = (self.source_to_timeline(self.playhead_seconds) / duration).max(0.0);
+        let start = (playhead_frac - span * 0.4).max(0.0);
         (start, span)
     }
 
     pub fn time_to_x(&self, seconds: f64, width: f64) -> f64 {
-        let duration = self.metadata.duration_seconds.max(0.001);
+        let duration = self.source_duration();
         self.frac_to_x(seconds / duration, width)
     }
 
     pub fn x_to_time(&self, x: f64, width: f64) -> f64 {
-        let duration = self.metadata.duration_seconds.max(0.001);
+        let duration = self.source_duration();
         self.x_to_frac(x, width) * duration
     }
 
@@ -252,6 +340,7 @@ impl VideoEditState {
     pub fn video_has_edits(&self) -> bool {
         self.trim_start_seconds > f64::EPSILON
             || (self.trim_end_seconds - self.metadata.duration_seconds).abs() > 0.001
+            || self.timeline_offset_seconds > f64::EPSILON
             || !self.cuts.is_empty()
     }
 
@@ -276,6 +365,8 @@ impl VideoEditState {
         }
         self.trim_start_seconds = 0.0;
         self.trim_end_seconds = self.metadata.duration_seconds;
+        self.timeline_offset_seconds = 0.0;
+        self.timeline_scroll_seconds = 0.0;
         self.clear_cuts();
     }
 
@@ -546,20 +637,30 @@ impl VideoEditState {
             .any(|(pos, &seg)| pos != seg)
     }
 
+    /// Output frame size. Aspect-ratio picks (WebCut) set this canvas; the
+    /// source is letterboxed inside it instead of shrinking the frame.
+    pub fn canvas_dimensions(&self) -> (u32, u32) {
+        let src_w = even_dimension(self.metadata.width.max(1));
+        let src_h = even_dimension(self.metadata.height.max(1));
+        match self.dimension_preset {
+            DimensionPreset::Original => (src_w, src_h),
+            DimensionPreset::P1080 => (1920, 1080),
+            DimensionPreset::P720 => (1280, 720),
+            DimensionPreset::P480 => (854, 480),
+            DimensionPreset::Custom => (
+                even_dimension(self.custom_width.max(MIN_DIMENSION)),
+                even_dimension(self.custom_height.max(MIN_DIMENSION)),
+            ),
+        }
+    }
+
     pub fn target_dimensions(&self) -> (u32, u32) {
         let src_w = self.metadata.width.max(1);
         let src_h = self.metadata.height.max(1);
+        let (box_w, box_h) = self.canvas_dimensions();
         match self.dimension_preset {
-            DimensionPreset::Original => (even_dimension(src_w), even_dimension(src_h)),
-            DimensionPreset::P1080 => fit_dimensions(src_w, src_h, 1920, 1080),
-            DimensionPreset::P720 => fit_dimensions(src_w, src_h, 1280, 720),
-            DimensionPreset::P480 => fit_dimensions(src_w, src_h, 854, 480),
-            DimensionPreset::Custom => fit_dimensions(
-                src_w,
-                src_h,
-                self.custom_width.max(MIN_DIMENSION),
-                self.custom_height.max(MIN_DIMENSION),
-            ),
+            DimensionPreset::Original => (box_w, box_h),
+            _ => fit_dimensions(src_w, src_h, box_w, box_h),
         }
     }
 
@@ -568,12 +669,15 @@ impl VideoEditState {
         if self.needs_composite() {
             return true;
         }
-        let (tw, th) = self.target_dimensions();
+        let (tw, th) = self.canvas_dimensions();
         let (sw, sh) = (
             even_dimension(self.metadata.width.max(1)),
             even_dimension(self.metadata.height.max(1)),
         );
         if tw != sw || th != sh {
+            return true;
+        }
+        if self.timeline_offset_seconds > 0.001 {
             return true;
         }
         // Quality only takes effect when re-encoding.
@@ -697,8 +801,23 @@ impl VideoEditState {
         self.custom_height = height.max(MIN_DIMENSION);
     }
 
+    pub fn reset_aspect_ratio(&mut self) {
+        self.dimension_preset = DimensionPreset::Original;
+        self.custom_width = self.metadata.width;
+        self.custom_height = self.metadata.height;
+    }
+
+    pub fn canvas_label(&self) -> &'static str {
+        if self.dimension_preset == DimensionPreset::Original {
+            "Original"
+        } else {
+            let (width, height) = self.padded_output_dimensions();
+            closest_aspect_ratio(width, height)
+        }
+    }
+
     pub fn padded_output_dimensions(&self) -> (u32, u32) {
-        let (base_w, base_h) = self.target_dimensions();
+        let (base_w, base_h) = self.canvas_dimensions();
         if self.background.is_none() {
             return (base_w, base_h);
         }
@@ -840,7 +959,8 @@ pub fn estimate_size_bytes(state: &VideoEditState, trim_only: bool) -> u64 {
         return 0;
     }
 
-    let selected_duration_ratio = (state.kept_duration() / duration).clamp(0.0, 1.0);
+    let selected_duration_ratio =
+        ((state.kept_duration() + state.timeline_offset_seconds) / duration).max(0.0);
     let base_size = state.metadata.file_size_bytes as f64 * selected_duration_ratio;
 
     if trim_only {
@@ -848,7 +968,7 @@ pub fn estimate_size_bytes(state: &VideoEditState, trim_only: bool) -> u64 {
     }
 
     let quality_factor = 0.55 + (state.quality.min(100) as f64 / 100.0) * 0.9;
-    let (target_width, target_height) = state.target_dimensions();
+    let (target_width, target_height) = state.padded_output_dimensions();
     let original_pixels = (state.metadata.width as f64 * state.metadata.height as f64).max(1.0);
     let target_pixels = target_width as f64 * target_height as f64;
     let dimension_factor = (target_pixels / original_pixels).max(0.0);
@@ -1167,6 +1287,57 @@ mod tests {
     }
 
     #[test]
+    fn timeline_offset_shifts_clip_and_extends_composition() {
+        let mut state = VideoEditState::new(metadata());
+        assert_eq!(state.composition_duration(), 10.0);
+        state.set_timeline_offset(5.0);
+        assert!((state.composition_duration() - 15.0).abs() < 1e-9);
+        // Fit zoom keeps source pixels-per-second; the clip does not shrink.
+        assert!((state.source_to_x(0.0, 1000.0) - 500.0).abs() < 0.01);
+        assert!((state.source_to_x(10.0, 1000.0) - 1500.0).abs() < 0.01);
+        assert!(
+            ((state.source_to_x(10.0, 1000.0) - state.source_to_x(0.0, 1000.0)) - 1000.0).abs()
+                < 0.01
+        );
+        assert!((state.timeline_to_source(7.0) - 2.0).abs() < 1e-9);
+        state.follow_clip_on_timeline();
+        assert!((state.timeline_scroll_seconds - 5.0).abs() < 1e-9);
+        assert!((state.source_to_x(0.0, 1000.0) - 0.0).abs() < 0.01);
+        assert!((state.timeline_canvas_seconds() - 25.0).abs() < 1e-9);
+        assert!((state.max_timeline_scroll() - 15.0).abs() < 1e-9);
+        state.set_timeline_offset(-3.0);
+        assert_eq!(state.timeline_offset_seconds, 0.0);
+        state.set_timeline_offset(999.0);
+        assert!((state.timeline_offset_seconds - 999.0).abs() < 1e-9);
+        assert!(state.composition_duration() > state.source_duration());
+        state.video_locked = true;
+        state.set_timeline_offset(1.0);
+        assert!((state.timeline_offset_seconds - 999.0).abs() < 1e-9);
+        state.video_locked = false;
+        state.reset_video_edits();
+        assert_eq!(state.timeline_offset_seconds, 0.0);
+        assert!(!state.video_has_edits());
+        state.set_timeline_offset(2.0);
+        assert!(state.video_has_edits());
+        assert!(state.needs_reencode());
+    }
+
+    #[test]
+    fn timeline_stays_open_past_the_clip() {
+        let mut state = VideoEditState::new(metadata());
+        assert!((state.timeline_canvas_seconds() - 20.0).abs() < 1e-9);
+        assert!((state.max_timeline_scroll() - 10.0).abs() < 1e-9);
+        state.set_timeline_scroll(10.0);
+        assert!((state.x_to_time(0.0, 1000.0) - 10.0).abs() < 0.01);
+        assert!((state.x_to_time(1000.0, 1000.0) - 20.0).abs() < 0.01);
+        state.set_timeline_offset(240.0);
+        state.follow_clip_on_timeline();
+        assert!((state.timeline_offset_seconds - 240.0).abs() < 1e-9);
+        assert!(state.timeline_canvas_seconds() > state.composition_duration());
+        assert!(state.timeline_scroll_seconds > 0.0);
+    }
+
+    #[test]
     fn format_webcut_time_matches_reference() {
         assert_eq!(format_webcut_time(0.0), "00:00:00.000");
         assert_eq!(format_webcut_time(84.56), "00:01:24.560");
@@ -1186,6 +1357,16 @@ mod tests {
         state.apply_aspect_ratio(1080, 1080);
         assert_eq!(state.dimension_preset, DimensionPreset::Custom);
         assert_eq!((state.custom_width, state.custom_height), (1080, 1080));
+        assert_eq!(state.canvas_dimensions(), (1080, 1080));
+        assert_eq!(state.target_dimensions(), (1080, 608));
+        assert_eq!(state.padded_output_dimensions(), (1080, 1080));
+        assert!(state.needs_reencode());
+        assert_eq!(state.canvas_label(), "1:1");
+        state.reset_aspect_ratio();
+        assert_eq!(state.dimension_preset, DimensionPreset::Original);
+        assert_eq!(state.canvas_dimensions(), (1920, 1080));
+        assert_eq!(state.canvas_label(), "Original");
+        assert!(!state.needs_reencode());
     }
 
     #[test]

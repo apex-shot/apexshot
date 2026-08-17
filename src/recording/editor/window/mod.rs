@@ -2,7 +2,6 @@ mod dialogs;
 mod footer;
 mod inspector;
 mod media_library;
-mod panels;
 mod preview;
 mod rail;
 mod timeline;
@@ -16,8 +15,8 @@ use gtk4::gio;
 use gtk4::glib;
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
-    DropTarget, Entry, FileChooserAction, FileChooserNative, FileFilter, Image, Label, MenuButton,
-    Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
+    DropTarget, FileChooserAction, FileChooserNative, FileFilter, Image, Label, Orientation,
+    Overlay, ResponseType, Revealer, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -294,22 +293,14 @@ fn populate_loaded_root(
     workspace.set_hexpand(true);
     workspace.set_vexpand(true);
 
-    let chrome = rail::build_tool_chrome(Some(state.clone()), Some(estimate_label.clone()), None);
+    let chrome = rail::build_tool_chrome(Some(state.clone()), None);
     workspace.append(&chrome.panel);
 
-    let inspector = inspector::build_inspector(
-        window,
-        state.clone(),
-        estimate_label.clone(),
-        exporting.clone(),
-    );
-    let (preview_widget, media, play_button) = preview::build_preview(
-        state.clone(),
-        estimate_label.clone(),
-        inspector._controls.clone(),
-    );
+    let inspector = inspector::build_inspector(window, state.clone(), exporting.clone());
+    let (preview_widget, media, play_button) =
+        preview::build_preview(state.clone(), estimate_label.clone());
     workspace.append(&preview_widget);
-    workspace.append(&inspector.root);
+    workspace.append(&inspector);
     root.append(&workspace);
 
     let timeline_widget = timeline::build_timeline(
@@ -345,7 +336,6 @@ fn populate_empty_root(
     workspace.set_vexpand(true);
 
     let chrome = rail::build_tool_chrome(
-        None,
         None,
         Some(media_library::EmptyOpenHooks {
             on_click: {
@@ -430,21 +420,7 @@ fn build_empty_inspector() -> GtkBox {
     inspector.set_width_request(inspector::INSPECTOR_WIDTH);
     inspector.set_hexpand(false);
     inspector.set_vexpand(true);
-
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroll.set_vexpand(true);
-    let content = GtkBox::new(Orientation::Vertical, 12);
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    content.set_margin_top(8);
-    let estimate = Label::new(Some("~--"));
-    estimate.add_css_class("recording-editor-estimate");
-    content.append(&estimate);
-    content.append(&build_empty_panels());
-    scroll.set_child(Some(&content));
     inspector.append(&build_empty_footer());
-    inspector.append(&scroll);
     inspector
 }
 
@@ -648,9 +624,10 @@ fn draw_empty_ruler(cr: &gtk4::cairo::Context, width: i32, height: i32, scale: f
     );
     cr.set_font_size(10.0);
     cr.set_line_width(1.0);
+    let inner = (w - 16.0).max(1.0);
+    let view_end = (visible * (inner + 40.0) / inner.max(1.0)).max(visible);
     let mut t = 0.0;
-    while t <= duration + 0.001 {
-        let inner = (w - 16.0).max(1.0);
+    while t <= view_end + 0.001 {
         let x = (16.0 + ((t / duration) / span) * inner).floor() + 0.5;
         if x < -20.0 || x > w + 20.0 {
             t += minor;
@@ -709,105 +686,6 @@ fn disabled_transport_button(icon_name: &str) -> Button {
     button.set_child(Some(&icon));
     button.set_valign(Align::Center);
     button
-}
-
-fn build_empty_panels() -> GtkBox {
-    let panels = GtkBox::new(Orientation::Vertical, 12);
-    panels.add_css_class("recording-editor-panels");
-    panels.set_hexpand(true);
-
-    let dimensions = GtkBox::new(Orientation::Vertical, 0);
-    dimensions.add_css_class("recording-editor-panel");
-    dimensions.set_hexpand(true);
-
-    let dimensions_title = Label::new(Some("Dimensions"));
-    dimensions_title.add_css_class("recording-editor-panel-title");
-    dimensions_title.set_xalign(0.0);
-    dimensions.append(&dimensions_title);
-
-    let dimensions_body = GtkBox::new(Orientation::Vertical, 8);
-    dimensions_body.add_css_class("recording-editor-panel-body");
-
-    let dimension_button = MenuButton::new();
-    dimension_button.set_has_frame(false);
-    dimension_button.add_css_class("recording-editor-dropdown");
-    dimension_button.set_hexpand(true);
-    dimension_button.set_label("No video selected");
-    dimension_button.set_sensitive(false);
-    dimensions_body.append(&dimension_button);
-
-    let width_entry = Entry::new();
-    width_entry.add_css_class("recording-editor-size-entry");
-    width_entry.set_text("");
-    width_entry.set_sensitive(false);
-    let height_entry = Entry::new();
-    height_entry.add_css_class("recording-editor-size-entry");
-    height_entry.set_text("");
-    height_entry.set_sensitive(false);
-    dimensions_body.append(&empty_field_row("Width", &width_entry));
-    dimensions_body.append(&empty_field_row("Height", &height_entry));
-    dimensions.append(&dimensions_body);
-
-    let settings = GtkBox::new(Orientation::Vertical, 0);
-    settings.add_css_class("recording-editor-panel");
-    settings.set_hexpand(true);
-
-    let quality_label = Label::new(Some("Quality"));
-    quality_label.add_css_class("recording-editor-panel-title");
-    quality_label.set_xalign(0.0);
-    settings.append(&quality_label);
-
-    let quality_body = GtkBox::new(Orientation::Vertical, 8);
-    quality_body.add_css_class("recording-editor-panel-body");
-    let quality_row = GtkBox::new(Orientation::Horizontal, 8);
-    let low = Label::new(Some("Low"));
-    low.add_css_class("recording-editor-label");
-    let high = Label::new(Some("High"));
-    high.add_css_class("recording-editor-label");
-    let quality_scale = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
-    quality_scale.add_css_class("recording-editor-quality-slider");
-    quality_scale.set_value(70.0);
-    quality_scale.set_hexpand(true);
-    quality_scale.set_draw_value(false);
-    quality_scale.set_sensitive(false);
-    quality_row.append(&low);
-    quality_row.append(&quality_scale);
-    quality_row.append(&high);
-    quality_body.append(&quality_row);
-
-    let audio_label = Label::new(Some("Audio"));
-    audio_label.add_css_class("recording-editor-panel-title");
-    audio_label.set_xalign(0.0);
-    settings.append(&audio_label);
-
-    let audio_body = GtkBox::new(Orientation::Vertical, 4);
-    audio_body.add_css_class("recording-editor-panel-body");
-    let audio_unchanged = gtk4::CheckButton::with_label("Don't change");
-    let audio_mono = gtk4::CheckButton::with_label("Convert to mono");
-    let audio_muted = gtk4::CheckButton::with_label("Mute");
-    audio_unchanged.set_active(true);
-    for button in [&audio_unchanged, &audio_mono, &audio_muted] {
-        button.add_css_class("recording-editor-audio-choice");
-        button.set_sensitive(false);
-        audio_body.append(button);
-    }
-    settings.append(&quality_body);
-    settings.append(&audio_body);
-
-    panels.append(&dimensions);
-    panels.append(&settings);
-    panels
-}
-
-fn empty_field_row(label: &str, entry: &Entry) -> GtkBox {
-    let row = GtkBox::new(Orientation::Horizontal, 10);
-    let label = Label::new(Some(label));
-    label.add_css_class("recording-editor-label");
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    row.append(&label);
-    row.append(entry);
-    row
 }
 
 fn build_empty_footer() -> GtkBox {

@@ -3,9 +3,9 @@ use crate::recording::editor::model::{ProjectMedia, ProjectMediaKind, VideoEditS
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::{
-    gdk::prelude::GdkCairoContextExt, prelude::*, Align, Box as GtkBox, Button, DrawingArea,
-    EventControllerMotion, GestureClick, GestureDrag, Image, Label, MediaFile, Orientation,
-    Overlay,
+    gdk::prelude::GdkCairoContextExt, prelude::*, Adjustment, Align, Box as GtkBox, Button,
+    DrawingArea, EventControllerMotion, EventControllerScroll, EventControllerScrollFlags,
+    GestureClick, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Scrollbar,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -61,6 +61,7 @@ pub(super) fn build_timeline(
 
     // Track which chronological segment index is being dragged (for visual feedback)
     let dragging_segment: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+    let clip_hovered = Rc::new(Cell::new(false));
 
     // Wire cut button
     cut_button.connect_clicked({
@@ -200,8 +201,16 @@ pub(super) fn build_timeline(
     selection.set_draw_func({
         let state = state.clone();
         let dragging_segment = dragging_segment.clone();
+        let clip_hovered = clip_hovered.clone();
         move |_, cr, width, height| {
-            draw_trim_overlay(&state, cr, width, height, dragging_segment.get());
+            draw_trim_overlay(
+                &state,
+                cr,
+                width,
+                height,
+                dragging_segment.get(),
+                clip_hovered.get(),
+            );
         }
     });
     overlay.add_overlay(&selection);
@@ -221,6 +230,43 @@ pub(super) fn build_timeline(
             cut_button.remove_css_class("recording-editor-tool-icon-active");
             selection.queue_draw();
             footer::update_estimate(&estimate_label, &state, false);
+        }
+    });
+
+    let scroll_adj = Adjustment::new(0.0, 0.0, 1.0, 0.1, 1.0, 1.0);
+    let scroll_syncing = Rc::new(Cell::new(false));
+    sync_timeline_scroll_adj(&scroll_adj, &state.lock().unwrap(), &scroll_syncing);
+    let playhead_layer = DrawingArea::new();
+    playhead_layer.add_css_class("recording-editor-playhead-layer");
+    playhead_layer.set_hexpand(true);
+    playhead_layer.set_vexpand(true);
+    playhead_layer.set_can_target(false);
+    playhead_layer.set_draw_func({
+        let state = state.clone();
+        move |_, cr, width, height| draw_spanning_playhead(&state, cr, width, height)
+    });
+
+    scroll_adj.connect_value_changed({
+        let state = state.clone();
+        let selection = selection.clone();
+        let filmstrip = filmstrip.clone();
+        let playhead_layer = playhead_layer.clone();
+        let scroll_syncing = scroll_syncing.clone();
+        move |adj| {
+            if scroll_syncing.get() {
+                return;
+            }
+            let Ok(mut guard) = state.try_lock() else {
+                return;
+            };
+            if (guard.timeline_scroll_seconds - adj.value()).abs() < 1e-4 {
+                return;
+            }
+            guard.set_timeline_scroll(adj.value());
+            drop(guard);
+            selection.queue_draw();
+            filmstrip.queue_draw();
+            playhead_layer.queue_draw();
         }
     });
 
@@ -252,10 +298,10 @@ pub(super) fn build_timeline(
                 .map(|area| area.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut state_guard = state.lock().unwrap();
-            let start_x = state_guard.time_to_x(state_guard.trim_start_seconds, width);
-            let end_x = state_guard.time_to_x(state_guard.trim_end_seconds, width);
+            let start_x = state_guard.source_to_x(state_guard.trim_start_seconds, width);
+            let end_x = state_guard.source_to_x(state_guard.trim_end_seconds, width);
             let handle_threshold = 18.0;
-            let seconds = state_guard.x_to_time(x.clamp(0.0, width), width);
+            let seconds = composition_x_to_source(&state_guard, width, x);
 
             if state_guard.video_locked {
                 pause_playback(&media, &playing, &play_button);
@@ -308,9 +354,7 @@ pub(super) fn build_timeline(
                 TrimDragKind::End
             } else if x > start_x && x < end_x {
                 TrimDragKind::Range {
-                    origin_start: state_guard.trim_start_seconds,
-                    origin_end: state_guard.trim_end_seconds,
-                    origin_seconds: seconds,
+                    origin_offset: state_guard.timeline_offset_seconds,
                 }
             } else {
                 pause_playback(&media, &playing, &play_button);
@@ -349,6 +393,9 @@ pub(super) fn build_timeline(
         let media = media.clone();
         let dragging_segment = dragging_segment.clone();
         let drag_origin_time = drag_origin_time.clone();
+        let filmstrip = filmstrip.clone();
+        let scroll_adj = scroll_adj.clone();
+        let scroll_syncing = scroll_syncing.clone();
         move |gesture, offset_x, _| {
             let Some(kind) = *drag_kind.borrow() else {
                 return;
@@ -366,9 +413,8 @@ pub(super) fn build_timeline(
             if state_guard.video_locked && !matches!(kind, TrimDragKind::Playhead) {
                 return;
             }
-            let duration = state_guard.metadata.duration_seconds.max(0.001);
             let scale = if state_guard.cuts.is_empty() {
-                duration
+                state_guard.source_duration()
             } else {
                 state_guard.kept_duration().max(0.001)
             };
@@ -404,23 +450,22 @@ pub(super) fn build_timeline(
                         return;
                     }
                 }
-                TrimDragKind::Range {
-                    origin_start,
-                    origin_end,
-                    origin_seconds,
-                } => {
-                    let delta = seconds - origin_seconds;
-                    state_guard.trim_start_seconds = origin_start;
-                    state_guard.trim_end_seconds = origin_end;
-                    state_guard.shift_trim(delta);
+                TrimDragKind::Range { origin_offset } => {
+                    let move_delta = (offset_x / width) * state_guard.source_duration() * span;
+                    state_guard.set_timeline_offset(origin_offset + move_delta);
+                    state_guard.follow_clip_on_timeline();
                 }
                 TrimDragKind::Playhead => {
                     state_guard.playhead_seconds = seconds;
                     media.seek((seconds * 1_000_000.0) as i64);
                 }
             }
+            if matches!(kind, TrimDragKind::Range { .. }) {
+                sync_timeline_scroll_adj(&scroll_adj, &state_guard, &scroll_syncing);
+            }
             drop(state_guard);
             selection.queue_draw();
+            filmstrip.queue_draw();
             if !matches!(kind, TrimDragKind::Playhead) {
                 footer::update_estimate(&estimate_label, &state, false);
             }
@@ -436,6 +481,7 @@ pub(super) fn build_timeline(
         let drag_kind = drag_kind.clone();
         let dragging_segment = dragging_segment.clone();
         let selection = selection.clone();
+        let filmstrip = filmstrip.clone();
         let scrubbing = scrubbing.clone();
         let pending_seek = pending_seek.clone();
         let state = state.clone();
@@ -447,6 +493,7 @@ pub(super) fn build_timeline(
             dragging_segment.set(None);
             scrubbing.set(false);
             selection.queue_draw();
+            filmstrip.queue_draw();
         }
     });
     selection.add_controller(drag);
@@ -468,7 +515,7 @@ pub(super) fn build_timeline(
             .unwrap_or(1.0);
         let seconds = {
             let s = state_for_dbl.lock().unwrap();
-            s.x_to_time(x.clamp(0.0, width), width)
+            composition_x_to_source(&s, width, x)
         };
         {
             let mut s = state_for_dbl.lock().unwrap();
@@ -492,7 +539,7 @@ pub(super) fn build_timeline(
             .map(|area| area.allocated_width().max(1) as f64)
             .unwrap_or(1.0);
         let mut s = state_for_rc.lock().unwrap();
-        let seconds = s.x_to_time(x.clamp(0.0, width), width);
+        let seconds = composition_x_to_source(&s, width, x);
 
         // Check if near a cut line (remove it)
         let cut_threshold_seconds = {
@@ -524,66 +571,90 @@ pub(super) fn build_timeline(
     });
     selection.add_controller(right_click);
 
-    // Cursor hints
+    // Cursor hints + reveal trim/move handles while the pointer is on the clip
     let motion = EventControllerMotion::new();
     motion.connect_motion({
         let state = state.clone();
         let cut_mode = cut_mode.clone();
         let move_mode = move_mode.clone();
+        let clip_hovered = clip_hovered.clone();
+        let selection = selection.clone();
         move |controller, x, _| {
             let Some(widget) = controller.widget() else {
                 return;
             };
             let width = widget.allocated_width().max(1) as f64;
-            let state = state.lock().unwrap();
-            let start_x = state.time_to_x(state.trim_start_seconds, width);
-            let end_x = state.time_to_x(state.trim_end_seconds, width);
-            let handle_threshold = 18.0;
-            let cursor_name = if !state.cuts.is_empty() {
-                let layout = compute_visual_layout(&state, width);
-                match hit_segment_drag(&state, &layout, x, handle_threshold, move_mode.get()) {
-                    Some(TrimDragKind::Start) | Some(TrimDragKind::Cut(_))
-                        if layout
-                            .iter()
-                            .any(|(_, vx, _)| (x - vx).abs() <= handle_threshold) =>
-                    {
-                        Some("w-resize")
-                    }
-                    Some(TrimDragKind::End) => Some("e-resize"),
-                    Some(TrimDragKind::Cut(_)) => Some("col-resize"),
-                    Some(TrimDragKind::Segment(_)) => Some("grab"),
-                    _ => None,
-                }
-            } else if cut_mode.get()
-                && (x - start_x).abs() > handle_threshold
-                && (x - end_x).abs() > handle_threshold
-            {
-                Some("crosshair")
-            } else if (x - start_x).abs() <= handle_threshold {
-                Some("w-resize")
-            } else if (x - end_x).abs() <= handle_threshold {
-                Some("e-resize")
-            } else if x > start_x && x < end_x {
-                Some("grab")
-            } else {
-                let cut_threshold = 8.0;
-                let near_cut = state.cuts.iter().any(|&c| {
-                    let cx = state.time_to_x(c, width);
-                    (x - cx).abs() <= cut_threshold
-                });
-                if near_cut {
-                    Some("crosshair")
+            let (cursor_name, hovered) = {
+                let state = state.lock().unwrap();
+                let start_x = state.source_to_x(state.trim_start_seconds, width);
+                let end_x = state.source_to_x(state.trim_end_seconds, width);
+                let handle_threshold = 18.0;
+                let hovered = if !state.cuts.is_empty() {
+                    compute_visual_layout(&state, width)
+                        .iter()
+                        .any(|(_, start, end)| x >= *start && x <= *end)
                 } else {
-                    None
-                }
+                    x >= start_x && x <= end_x
+                };
+                let cursor_name = if !state.cuts.is_empty() {
+                    let layout = compute_visual_layout(&state, width);
+                    match hit_segment_drag(&state, &layout, x, handle_threshold, move_mode.get()) {
+                        Some(TrimDragKind::Start) | Some(TrimDragKind::Cut(_))
+                            if layout
+                                .iter()
+                                .any(|(_, vx, _)| (x - vx).abs() <= handle_threshold) =>
+                        {
+                            Some("w-resize")
+                        }
+                        Some(TrimDragKind::End) => Some("e-resize"),
+                        Some(TrimDragKind::Cut(_)) => Some("col-resize"),
+                        Some(TrimDragKind::Segment(_)) => Some("grab"),
+                        _ => None,
+                    }
+                } else if cut_mode.get()
+                    && (x - start_x).abs() > handle_threshold
+                    && (x - end_x).abs() > handle_threshold
+                {
+                    Some("crosshair")
+                } else if (x - start_x).abs() <= handle_threshold {
+                    Some("w-resize")
+                } else if (x - end_x).abs() <= handle_threshold {
+                    Some("e-resize")
+                } else if x > start_x && x < end_x {
+                    Some("grab")
+                } else {
+                    let cut_threshold = 8.0;
+                    let near_cut = state.cuts.iter().any(|&c| {
+                        let cx = state.source_to_x(c, width);
+                        (x - cx).abs() <= cut_threshold
+                    });
+                    if near_cut {
+                        Some("crosshair")
+                    } else {
+                        None
+                    }
+                };
+                (cursor_name, hovered)
             };
+            if clip_hovered.get() != hovered {
+                clip_hovered.set(hovered);
+                selection.queue_draw();
+            }
             let cursor = cursor_name.and_then(|name| gdk::Cursor::from_name(name, None));
             widget.set_cursor(cursor.as_ref());
         }
     });
-    motion.connect_leave(|controller| {
-        if let Some(widget) = controller.widget() {
-            widget.set_cursor(None);
+    motion.connect_leave({
+        let clip_hovered = clip_hovered.clone();
+        let selection = selection.clone();
+        move |controller| {
+            if clip_hovered.get() {
+                clip_hovered.set(false);
+                selection.queue_draw();
+            }
+            if let Some(widget) = controller.widget() {
+                widget.set_cursor(None);
+            }
         }
     });
     selection.add_controller(motion);
@@ -982,16 +1053,6 @@ pub(super) fn build_timeline(
     let tracks_overlay = Overlay::new();
     tracks_overlay.set_hexpand(true);
     tracks_overlay.set_child(Some(&tracks));
-
-    let playhead_layer = DrawingArea::new();
-    playhead_layer.add_css_class("recording-editor-playhead-layer");
-    playhead_layer.set_hexpand(true);
-    playhead_layer.set_vexpand(true);
-    playhead_layer.set_can_target(false);
-    playhead_layer.set_draw_func({
-        let state = state.clone();
-        move |_, cr, width, height| draw_spanning_playhead(&state, cr, width, height)
-    });
     tracks_overlay.add_overlay(&playhead_layer);
 
     {
@@ -1000,7 +1061,11 @@ pub(super) fn build_timeline(
         let filmstrip = filmstrip.clone();
         let waveform_body = waveform_body.clone();
         let extra_video_tracks = extra_video_tracks.clone();
+        let scroll_adj = scroll_adj.clone();
+        let scroll_syncing = scroll_syncing.clone();
+        let state = state.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            sync_timeline_scroll_adj(&scroll_adj, &state.lock().unwrap(), &scroll_syncing);
             ruler.queue_draw();
             playhead_layer.queue_draw();
             filmstrip.queue_draw();
@@ -1020,7 +1085,44 @@ pub(super) fn build_timeline(
     let well = GtkBox::new(Orientation::Vertical, 0);
     well.add_css_class("recording-editor-timeline-well");
     well.set_hexpand(true);
+    let hbar = Scrollbar::new(Orientation::Horizontal, Some(&scroll_adj));
+    hbar.add_css_class("recording-editor-timeline-scroll");
+    hbar.set_hexpand(true);
+    hbar.set_margin_start(RAIL_HEADER_WIDTH + TRACK_GAP as i32);
+    well.append(&hbar);
     board_inner.append(&well);
+
+    let wheel = EventControllerScroll::new(
+        EventControllerScrollFlags::VERTICAL | EventControllerScrollFlags::HORIZONTAL,
+    );
+    wheel.connect_scroll({
+        let state = state.clone();
+        let scroll_adj = scroll_adj.clone();
+        let scroll_syncing = scroll_syncing.clone();
+        let selection = selection.clone();
+        let filmstrip = filmstrip.clone();
+        let playhead_layer = playhead_layer.clone();
+        move |_, dx, dy| {
+            let delta = if dx.abs() > f64::EPSILON { dx } else { dy };
+            if delta.abs() < f64::EPSILON {
+                return glib::Propagation::Proceed;
+            }
+            let mut guard = state.lock().unwrap();
+            if guard.timeline_scale > 0.001 {
+                return glib::Propagation::Proceed;
+            }
+            let step = guard.visible_span_seconds() * 0.08 * delta;
+            let next = guard.timeline_scroll_seconds + step;
+            guard.set_timeline_scroll(next);
+            sync_timeline_scroll_adj(&scroll_adj, &guard, &scroll_syncing);
+            drop(guard);
+            selection.queue_draw();
+            filmstrip.queue_draw();
+            playhead_layer.queue_draw();
+            glib::Propagation::Stop
+        }
+    });
+    tracks_overlay.add_controller(wheel);
     board.set_child(Some(&board_inner));
     board.add_overlay(&rail_divider());
 
@@ -1043,8 +1145,15 @@ pub(super) fn build_timeline(
     timeline_scale.connect_value_changed({
         let state = state.clone();
         let redraw_timeline = redraw_timeline.clone();
+        let scroll_adj = scroll_adj.clone();
+        let scroll_syncing = scroll_syncing.clone();
         move |scale| {
-            state.lock().unwrap().timeline_scale = scale.value().clamp(0.0, 100.0);
+            let mut guard = state.lock().unwrap();
+            guard.timeline_scale = scale.value().clamp(0.0, 100.0);
+            let scroll = guard.timeline_scroll_seconds;
+            guard.set_timeline_scroll(scroll);
+            sync_timeline_scroll_adj(&scroll_adj, &guard, &scroll_syncing);
+            drop(guard);
             redraw_timeline();
         }
     });
@@ -1473,7 +1582,7 @@ fn seek_from_x(
         .map(|widget| widget.allocated_width().max(1) as f64)
         .unwrap_or(1.0);
     let mut state = state.lock().unwrap();
-    let seconds = state.x_to_time(x.clamp(0.0, width), width);
+    let seconds = composition_x_to_source(&state, width, x);
     state.playhead_seconds = seconds;
     media.seek((seconds * 1_000_000.0) as i64);
 }
@@ -1561,13 +1670,25 @@ fn draw_filmstrip(
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
+    let (clip_x0, clip_x1) = trim_span_x(&state, w);
+    let clip_w = (clip_x1 - clip_x0).max(1.0);
+
+    // Frames stay locked to the ruler. Only the kept range is painted, so
+    // dragging a trim handle shrinks the clip instead of sliding the strip.
+    cr.save().ok();
+    rounded_rect(cr, clip_x0, 0.0, clip_w, h, 10.0);
+    cr.clip();
+    cr.set_source_rgb(0.12, 0.12, 0.12);
+    cr.rectangle(clip_x0, 0.0, clip_w, h);
+    let _ = cr.fill();
+
     let duration = state.metadata.duration_seconds.max(0.001);
     let count = pixbufs.len().max(12);
     let slice = duration / count as f64;
     for index in 0..count {
-        let x0 = state.time_to_x(index as f64 * slice, w);
-        let x1 = state.time_to_x((index + 1) as f64 * slice, w);
-        if x1 < 0.0 || x0 > w {
+        let x0 = state.source_to_x(index as f64 * slice, w);
+        let x1 = state.source_to_x((index + 1) as f64 * slice, w);
+        if x1 < clip_x0 || x0 > clip_x1 {
             continue;
         }
         let dest_w = (x1 - x0).max(1.0);
@@ -1582,6 +1703,7 @@ fn draw_filmstrip(
             let _ = cr.stroke();
         }
     }
+    cr.restore().ok();
 }
 
 fn draw_waveform_image(
@@ -1598,14 +1720,20 @@ fn draw_waveform_image(
     cr.set_source_rgb(0.08, 0.08, 0.08);
     cr.rectangle(0.0, 0.0, w, h);
     let _ = cr.fill();
+    let (clip_x0, clip_x1) = trim_span_x(&state, w);
     let duration = state.metadata.duration_seconds.max(0.001);
-    let x0 = state.time_to_x(0.0, w);
-    let x1 = state.time_to_x(duration, w);
+    let x0 = state.source_to_x(0.0, w);
+    let x1 = state.source_to_x(duration, w);
     let dest_w = (x1 - x0).max(1.0);
+    cr.save().ok();
+    rounded_rect(cr, clip_x0, 0.0, (clip_x1 - clip_x0).max(1.0), h, 8.0);
+    cr.clip();
     if let Some(pixbuf) = pixbuf {
         paint_pixbuf(cr, pixbuf, x0, 0.0, dest_w, h);
+        cr.restore().ok();
         return;
     }
+    cr.restore().ok();
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.38);
     cr.select_font_face(
         "sans-serif",
@@ -1645,7 +1773,7 @@ fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) ->
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut state = state.lock().unwrap();
-            let seconds = state.x_to_time(x.clamp(0.0, width), width);
+            let seconds = composition_x_to_source(&state, width, x);
             if n_press >= 2 {
                 state.playhead_seconds = seconds;
                 state.add_zoom_at_playhead();
@@ -1674,7 +1802,7 @@ fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) ->
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let state = state.lock().unwrap();
-            let seconds = state.x_to_time(x.clamp(0.0, width), width);
+            let seconds = composition_x_to_source(&state, width, x);
             let edge = state
                 .zoom_clips
                 .iter()
@@ -1709,7 +1837,7 @@ fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) ->
                 .unwrap_or(1.0);
             let seconds = {
                 let state = state.lock().unwrap();
-                state.x_to_time((start_x + offset_x).clamp(0.0, width), width)
+                composition_x_to_source(&state, width, start_x + offset_x)
             };
             {
                 let mut state = state.lock().unwrap();
@@ -1747,9 +1875,9 @@ fn draw_ruler(
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
-    let duration = state.metadata.duration_seconds.max(0.001);
-    let (_, span) = state.timeline_view();
-    let visible = (duration * span).max(0.001);
+    // Tick density follows the zoom slider, not clip offset. Sliding the
+    // clip must not change how many seconds sit on screen.
+    let visible = state.visible_span_seconds();
     let major: f64 = if visible > 180.0 {
         30.0
     } else if visible > 90.0 {
@@ -1769,9 +1897,16 @@ fn draw_ruler(
     );
     cr.set_font_size(10.0);
     cr.set_line_width(1.0);
-    let mut t = 0.0;
-    while t <= duration + 0.001 {
-        let inner = (w - ZERO_INSET).max(1.0);
+    let inner = (w - ZERO_INSET).max(1.0);
+    // Paint ticks across the whole visible strip, not just up to the clip
+    // or playhead. The axis stays open so the track can start later.
+    let view_start = state.x_to_time(-ZERO_INSET, inner).max(0.0);
+    let view_end = state.x_to_time(inner + 40.0, inner);
+    let mut t = (view_start / minor).floor() * minor;
+    if t < 0.0 {
+        t = 0.0;
+    }
+    while t <= view_end + 0.001 {
         let x = (ZERO_INSET + state.time_to_x(t, inner)).floor() + 0.5;
         if x < -20.0 || x > w + 20.0 {
             t += minor;
@@ -1803,9 +1938,19 @@ fn draw_spanning_playhead(
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
-    let inset_left = f64::from(RAIL_HEADER_WIDTH) + TRACK_GAP + ZERO_INSET;
+    // The overlay spans the rail headers too. Clip to the track canvas so
+    // scrolling the playhead off the left never paints over lock/eye icons.
+    let clip_left = f64::from(RAIL_HEADER_WIDTH);
+    if w <= clip_left {
+        return;
+    }
+    cr.save().ok();
+    cr.rectangle(clip_left, 0.0, w - clip_left, h);
+    cr.clip();
+
+    let inset_left = clip_left + TRACK_GAP + ZERO_INSET;
     let usable = (w - inset_left).max(1.0);
-    let x = (inset_left + state.time_to_x(state.playhead_seconds, usable)).floor() + 0.5;
+    let x = (inset_left + state.source_to_x(state.playhead_seconds, usable)).floor() + 0.5;
 
     // Home-plate head: standing rectangle with a downward triangle tip.
     let head_w = 10.0;
@@ -1828,6 +1973,7 @@ fn draw_spanning_playhead(
     cr.move_to(x, body_h + tip_h);
     cr.line_to(x, h);
     let _ = cr.stroke();
+    cr.restore().ok();
 }
 
 fn draw_zoom_track(
@@ -1843,8 +1989,8 @@ fn draw_zoom_track(
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.04);
     let _ = cr.fill();
     for (index, clip) in state.zoom_clips.iter().enumerate() {
-        let x0 = state.time_to_x(clip.start, w);
-        let x1 = state.time_to_x(clip.end, w);
+        let x0 = state.source_to_x(clip.start, w);
+        let x1 = state.source_to_x(clip.end, w);
         let selected = state.selected_zoom == Some(index);
         rounded_rect(cr, x0, 4.0, (x1 - x0).max(18.0), h - 8.0, 9.0);
         cr.set_source_rgba(0.69, 0.36, 0.22, if selected { 0.92 } else { 0.55 });
@@ -1871,11 +2017,7 @@ enum TrimDragKind {
     Playhead,
     Cut(usize),
     Segment(usize),
-    Range {
-        origin_start: f64,
-        origin_end: f64,
-        origin_seconds: f64,
-    },
+    Range { origin_offset: f64 },
 }
 
 const SEGMENT_GAP: f64 = 8.0;
@@ -1893,7 +2035,41 @@ fn visual_capsules(layout: &[(usize, f64, f64)]) -> Vec<(usize, usize, f64, f64)
         .collect()
 }
 
+fn sync_timeline_scroll_adj(adj: &Adjustment, state: &VideoEditState, syncing: &Cell<bool>) {
+    let visible = state.visible_span_seconds();
+    let upper = state.timeline_canvas_seconds().max(visible);
+    let value = state.timeline_scroll_seconds;
+    if (adj.page_size() - visible).abs() < 1e-6
+        && (adj.upper() - upper).abs() < 1e-6
+        && (adj.value() - value).abs() < 1e-4
+    {
+        return;
+    }
+    // GTK emits value-changed from set_upper/set_value. The caller often
+    // already holds `state`, so the callback must not lock again.
+    syncing.set(true);
+    adj.set_lower(0.0);
+    adj.set_page_size(visible);
+    adj.set_upper(upper);
+    adj.set_step_increment((visible * 0.05).max(0.05));
+    adj.set_page_increment((visible * 0.8).max(0.1));
+    if (adj.value() - value).abs() > 1e-4 {
+        adj.set_value(value);
+    }
+    syncing.set(false);
+}
+
+fn composition_x_to_source(state: &VideoEditState, width: f64, x: f64) -> f64 {
+    let timeline_t = state.x_to_time(x.clamp(0.0, width), width);
+    state
+        .timeline_to_source(timeline_t)
+        .clamp(0.0, state.metadata.duration_seconds.max(0.0))
+}
+
 fn visual_x_to_source_seconds(state: &VideoEditState, width: f64, x: f64) -> f64 {
+    if state.cuts.is_empty() {
+        return composition_x_to_source(state, width, x);
+    }
     let layout = compute_visual_layout(state, width);
     let capsules = visual_capsules(&layout);
     let boundaries = state.segment_boundaries();
@@ -2004,6 +2180,7 @@ fn draw_trim_overlay(
     width: i32,
     height: i32,
     dragging_seg_idx: Option<usize>,
+    show_handles: bool,
 ) {
     let state = state.lock().unwrap();
     let w = width as f64;
@@ -2035,9 +2212,8 @@ fn draw_trim_overlay(
             }
         }
     } else {
-        let start_x = state.time_to_x(state.trim_start_seconds, w);
-        let end_x = state.time_to_x(state.trim_end_seconds, w);
-        draw_trim_capsule(cr, start_x, end_x, w, h);
+        let (start_x, end_x) = trim_span_x(&state, w);
+        draw_trim_capsule(cr, start_x, end_x, w, h, show_handles);
     }
 }
 
@@ -2057,22 +2233,28 @@ fn draw_clip_frame(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64) {
     let _ = cr.stroke();
 }
 
-fn draw_trim_capsule(cr: &gtk4::cairo::Context, start_x: f64, end_x: f64, w: f64, h: f64) {
-    let range_width = (end_x - start_x).max(36.0);
-    let end_x = start_x + range_width;
+fn trim_span_x(state: &VideoEditState, width: f64) -> (f64, f64) {
+    let start = state.source_to_x(state.trim_start_seconds, width);
+    let end = state.source_to_x(state.trim_end_seconds, width);
+    (start, start + (end - start).max(36.0))
+}
+
+fn draw_trim_capsule(
+    cr: &gtk4::cairo::Context,
+    start_x: f64,
+    end_x: f64,
+    w: f64,
+    h: f64,
+    show_handles: bool,
+) {
+    let range_width = (end_x - start_x).max(1.0);
     let is_full_clip = start_x <= 1.0 && end_x >= w - 1.0;
 
-    if is_full_clip {
-        draw_clip_frame(cr, 0.0, 0.0, w, h);
-        return;
+    if show_handles || !is_full_clip {
+        draw_capsule_frame(cr, start_x, end_x, h, false);
+    } else {
+        draw_clip_frame(cr, start_x, 0.0, range_width, h);
     }
-
-    cr.set_source_rgba(0.0, 0.0, 0.0, 0.48);
-    cr.rectangle(0.0, 0.0, start_x.max(0.0), h);
-    let _ = cr.fill();
-    cr.rectangle(end_x.min(w), 0.0, (w - end_x).max(0.0), h);
-    let _ = cr.fill();
-    draw_capsule_frame(cr, start_x, end_x, h, false);
 }
 
 fn draw_capsule_frame(

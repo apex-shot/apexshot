@@ -1,12 +1,11 @@
-use super::footer;
 use crate::history::scan::{CaptureEntry, MediaKind};
 use crate::history::thumbnails;
 use crate::recording::editor::model::{ProjectMedia, ProjectMediaKind, VideoEditState, ZoomClip};
 use gtk4::gdk;
 use gtk4::gio;
 use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, Button, DropTarget, Entry, Image, Label, Orientation,
-    Picture, ScrolledWindow,
+    glib, prelude::*, Align, Box as GtkBox, Button, DropTarget, Image, Label, Orientation, Picture,
+    ScrolledWindow,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -34,7 +33,6 @@ enum LibraryFilter {
 
 pub(super) fn build_media_library(
     state: Option<Arc<Mutex<VideoEditState>>>,
-    estimate_label: Option<Label>,
     empty_open: Option<EmptyOpenHooks>,
 ) -> GtkBox {
     let root = GtkBox::new(Orientation::Vertical, 8);
@@ -56,19 +54,6 @@ pub(super) fn build_media_library(
     tabs.append(&zoom);
     root.append(&tabs);
     let tab_buttons = [video.clone(), audio.clone(), image.clone(), zoom.clone()];
-
-    let tools = GtkBox::new(Orientation::Horizontal, 6);
-    let search = Entry::new();
-    search.add_css_class("recording-editor-media-search");
-    search.set_placeholder_text(Some("Search"));
-    search.set_hexpand(true);
-    tools.append(&search);
-
-    let add = icon_button("list-add-symbolic", "Add media");
-    add.add_css_class("recording-editor-media-add");
-    add.set_sensitive(state.is_some());
-    tools.append(&add);
-    root.append(&tools);
 
     let upload = build_upload_dropzone();
     root.append(&upload);
@@ -98,13 +83,11 @@ pub(super) fn build_media_library(
     root.append(&scroller);
 
     let filter = Rc::new(Cell::new(LibraryFilter::Video));
-    let query = Rc::new(RefCell::new(String::new()));
 
     let reload: Rc<dyn Fn()> = {
         let list = list.clone();
         let empty = empty.clone();
         let filter = filter.clone();
-        let query = query.clone();
         let state = state.clone();
         Rc::new(move || {
             let (items, zooms) = state
@@ -114,7 +97,7 @@ pub(super) fn build_media_library(
                     (guard.project_media.clone(), guard.zoom_clips.clone())
                 })
                 .unwrap_or_default();
-            populate_list(&list, &empty, &items, &zooms, filter.get(), &query.borrow());
+            populate_list(&list, &empty, &items, &zooms, filter.get());
         })
     };
     reload();
@@ -125,7 +108,6 @@ pub(super) fn build_media_library(
         &filter,
         &reload,
         &tab_buttons,
-        &add,
         &upload,
     );
     bind_tab(
@@ -134,7 +116,6 @@ pub(super) fn build_media_library(
         &filter,
         &reload,
         &tab_buttons,
-        &add,
         &upload,
     );
     bind_tab(
@@ -143,7 +124,6 @@ pub(super) fn build_media_library(
         &filter,
         &reload,
         &tab_buttons,
-        &add,
         &upload,
     );
     bind_tab(
@@ -152,44 +132,8 @@ pub(super) fn build_media_library(
         &filter,
         &reload,
         &tab_buttons,
-        &add,
         &upload,
     );
-
-    search.connect_changed({
-        let query = query.clone();
-        let reload = reload.clone();
-        move |entry| {
-            *query.borrow_mut() = entry.text().to_ascii_lowercase();
-            reload();
-        }
-    });
-
-    add.connect_clicked({
-        let state = state.clone();
-        let reload = reload.clone();
-        let filter = filter.clone();
-        let estimate_label = estimate_label.clone();
-        let empty_open = empty_open.clone();
-        move |button| match filter.get() {
-            LibraryFilter::Zoom => {
-                if let (Some(state), Some(estimate_label)) = (&state, &estimate_label) {
-                    state.lock().unwrap().add_zoom_at_playhead();
-                    footer::update_estimate(estimate_label, state, false);
-                    reload();
-                }
-            }
-            kind => {
-                if let Some(state) = &state {
-                    import_into_project(button, state.clone(), reload.clone(), kind);
-                } else if let Some(empty_open) = &empty_open {
-                    if kind == LibraryFilter::Video {
-                        (empty_open.on_click)();
-                    }
-                }
-            }
-        }
-    });
 
     wire_upload_dropzone(
         &upload,
@@ -253,13 +197,11 @@ fn bind_tab(
     filter: &Rc<Cell<LibraryFilter>>,
     reload: &Rc<dyn Fn()>,
     tabs: &[Button; 4],
-    add: &Button,
     upload: &Button,
 ) {
     let filter = filter.clone();
     let reload = reload.clone();
     let tabs = tabs.clone();
-    let add = add.clone();
     let upload = upload.clone();
     button.connect_clicked(move |_| {
         if filter.get() == value {
@@ -275,10 +217,6 @@ fn bind_tab(
             LibraryFilter::Image => tabs[2].add_css_class("recording-editor-media-tab-active"),
             LibraryFilter::Zoom => tabs[3].add_css_class("recording-editor-media-tab-active"),
         }
-        add.set_tooltip_text(Some(match value {
-            LibraryFilter::Zoom => "Add zoom at playhead",
-            _ => "Add media",
-        }));
         upload.set_visible(!matches!(value, LibraryFilter::Zoom));
         reload();
     });
@@ -389,18 +327,6 @@ fn wire_upload_dropzone(
     upload.add_controller(drop_target);
 }
 
-fn icon_button(icon_name: &str, tooltip: &str) -> Button {
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_tooltip_text(Some(tooltip));
-    button.set_halign(Align::Center);
-    button.set_valign(Align::Center);
-    let icon = Image::from_icon_name(icon_name);
-    icon.set_pixel_size(14);
-    button.set_child(Some(&icon));
-    button
-}
-
 fn kind_tab(icon_name: &str, label: &str) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
@@ -425,24 +351,14 @@ fn populate_list(
     items: &[ProjectMedia],
     zooms: &[ZoomClip],
     filter: LibraryFilter,
-    query: &str,
 ) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
     if filter == LibraryFilter::Zoom {
-        let filtered: Vec<(usize, &ZoomClip)> = zooms
-            .iter()
-            .enumerate()
-            .filter(|(_, clip)| {
-                query.is_empty()
-                    || format!("{:.1}x", clip.scale).contains(query)
-                    || "zoom".contains(query)
-            })
-            .collect();
-        empty.set_visible(filtered.is_empty());
+        empty.set_visible(zooms.is_empty());
         empty.set_text("No zooms");
-        for (index, clip) in filtered {
+        for (index, clip) in zooms.iter().enumerate() {
             list.append(&build_zoom_row(index, clip));
         }
         return;
@@ -457,7 +373,6 @@ fn populate_list(
             LibraryFilter::Image => item.kind == ProjectMediaKind::Image,
             LibraryFilter::Zoom => false,
         })
-        .filter(|item| query.is_empty() || item.display_name.to_ascii_lowercase().contains(query))
         .collect();
     for item in filtered {
         list.append(&build_row(item));

@@ -416,9 +416,9 @@ fn build_single_convert_args(
         "-i".into(),
         state.metadata.path.to_string_lossy().into_owned(),
     ];
-    if let Some(scale) = convert_scale_filter(state) {
+    if let Some(filter) = convert_video_filter(state) {
         args.push("-vf".into());
-        args.push(scale);
+        args.push(filter);
     }
     args.extend([
         "-c:v".into(),
@@ -428,7 +428,7 @@ fn build_single_convert_args(
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
     ]);
-    args.extend(audio_args(state.audio_mode, state.metadata.has_audio));
+    args.extend(convert_audio_args(state));
     args.push(output_path.to_string_lossy().into_owned());
     args
 }
@@ -450,7 +450,7 @@ fn build_composite_convert_args(
     let _ = write_cursor_png(&cursor_path);
     let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end));
 
-    let (base_w, base_h) = state.target_dimensions();
+    let (base_w, base_h) = state.canvas_dimensions();
     let (out_w, out_h) = state.padded_output_dimensions();
     let pad_x = ((out_w.saturating_sub(base_w)) / 2) & !1;
     let pad_y = ((out_h.saturating_sub(base_h)) / 2) & !1;
@@ -461,13 +461,17 @@ fn build_composite_convert_args(
     };
 
     let mut filter = format!(
-        "[0:v]sendcmd=f={},crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={base_w}:{base_h}",
+        "[0:v]sendcmd=f={},crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={base_w}:{base_h}:force_original_aspect_ratio=decrease,pad={base_w}:{base_h}:(ow-iw)/2:(oh-ih)/2:0x000000",
         escape_filter_path(&cmd_path),
         src_w = state.metadata.width.max(2),
         src_h = state.metadata.height.max(2),
     );
     if out_w != base_w || out_h != base_h {
         filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
+    }
+    if let Some(pad) = lead_in_tpad(state) {
+        filter.push(',');
+        filter.push_str(&pad);
     }
     let draw_cursor = state
         .sidecar
@@ -503,7 +507,7 @@ fn build_composite_convert_args(
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
     ]);
-    args.extend(audio_args(state.audio_mode, state.metadata.has_audio));
+    args.extend(convert_audio_args(state));
     if draw_cursor {
         args.push("-shortest".into());
     }
@@ -517,7 +521,7 @@ fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
     let frames = ((duration * fps).ceil() as usize).max(1);
     let src_w = state.metadata.width.max(2);
     let src_h = state.metadata.height.max(2);
-    let (base_w, base_h) = state.target_dimensions();
+    let (base_w, base_h) = state.canvas_dimensions();
     let (out_w, out_h) = state.padded_output_dimensions();
     let pad_x = ((out_w.saturating_sub(base_w)) / 2) as f64;
     let pad_y = ((out_h.saturating_sub(base_h)) / 2) as f64;
@@ -567,17 +571,63 @@ fn write_cursor_png(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Build an aspect-preserving scale filter, or `None` when output matches source.
+fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
+    if state.timeline_offset_seconds <= 0.001 {
+        return None;
+    }
+    Some(format!(
+        "tpad=start_duration={}:color=black",
+        format_seconds(state.timeline_offset_seconds)
+    ))
+}
+
+fn convert_video_filter(state: &VideoEditState) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(scale) = convert_scale_filter(state) {
+        parts.push(scale);
+    }
+    if let Some(pad) = lead_in_tpad(state) {
+        parts.push(pad);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(","))
+    }
+}
+
+fn convert_audio_args(state: &VideoEditState) -> Vec<String> {
+    let offset = state.timeline_offset_seconds;
+    if offset > 0.001 && state.metadata.has_audio && state.audio_mode != AudioMode::Muted {
+        let ms = (offset * 1000.0).round().max(1.0) as u64;
+        let mut args = match state.audio_mode {
+            AudioMode::Mono => vec![
+                "-ac".into(),
+                "1".into(),
+                "-c:a".into(),
+                "aac".into(),
+                "-b:a".into(),
+                "128k".into(),
+            ],
+            _ => vec!["-c:a".into(), "aac".into(), "-b:a".into(), "192k".into()],
+        };
+        args.extend(["-af".into(), format!("adelay={ms}:all=1")]);
+        args
+    } else {
+        audio_args(state.audio_mode, state.metadata.has_audio)
+    }
+}
+
+/// Scale the source into the output canvas and letterbox leftover space.
 fn convert_scale_filter(state: &VideoEditState) -> Option<String> {
-    let (width, height) = state.target_dimensions();
+    let (width, height) = state.canvas_dimensions();
     let src_w = even_dimension(state.metadata.width.max(1));
     let src_h = even_dimension(state.metadata.height.max(1));
     if width == src_w && height == src_h {
         return None;
     }
-    // force_original_aspect_ratio=decrease is belt-and-suspenders with fit_dimensions.
     Some(format!(
-        "scale={width}:{height}:force_original_aspect_ratio=decrease"
+        "scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black"
     ))
 }
 
@@ -593,10 +643,14 @@ fn run_multi_segment_trim(
     let mut segment_files = Vec::new();
     for (i, &(start, end)) in segments.iter().enumerate() {
         let seg_path = tmp_dir.join(format!("seg_{i:04}.mp4"));
+        let mut segment_state = state.clone();
+        if i > 0 {
+            segment_state.timeline_offset_seconds = 0.0;
+        }
         let args = if convert {
-            build_single_convert_args(state, start, end, &seg_path)
+            build_single_convert_args(&segment_state, start, end, &seg_path)
         } else {
-            build_single_trim_args(state, start, end, &seg_path)
+            build_single_trim_args(&segment_state, start, end, &seg_path)
         };
         run_ffmpeg(args, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
         segment_files.push(seg_path);
@@ -721,7 +775,8 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["-crf", "22"]));
         assert!(args.windows(2).any(|pair| {
             pair[0] == "-vf"
-                && pair[1].starts_with("scale=1280:720:force_original_aspect_ratio=decrease")
+                && pair[1]
+                    .starts_with("scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720")
         }));
         assert!(args.iter().any(|arg| arg == "-an"));
         assert_eq!(args.last().map(String::as_str), Some("/tmp/output.mp4"));
@@ -764,6 +819,25 @@ mod tests {
             Path::new("/tmp/output.mp4"),
         );
         assert!(!args.iter().any(|arg| arg == "-vf"));
+    }
+
+    #[test]
+    fn convert_with_timeline_offset_pads_black_and_delays_audio() {
+        let mut state = state();
+        state.timeline_offset_seconds = 2.0;
+        assert!(state.needs_reencode());
+        let args = build_single_convert_args(
+            &state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        assert!(args
+            .iter()
+            .any(|arg| arg.contains("tpad=start_duration=2.000")));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "-af" && pair[1] == "adelay=2000:all=1"));
     }
 
     #[test]

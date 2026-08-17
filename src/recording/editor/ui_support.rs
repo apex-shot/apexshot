@@ -289,13 +289,25 @@ pub fn install_recording_editor_css() {
             .recording-editor-preview-workspace {
                 padding: 0;
                 margin: 0;
-                background: #000000;
+                background: #111111;
             }
 
-            .recording-editor-preview-stage {
-                background: #0c0c0c;
+            .recording-editor-preview-stage,
+            .recording-editor-preview-stage > border {
+                background: none;
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+                margin: 0;
+                min-width: 0;
+                min-height: 0;
+            }
+
+            .recording-editor-preview-canvas {
+                background: #000000;
                 border-radius: 4px;
-                border: 1px solid alpha(white, 0.06);
+                border: 1px solid alpha(white, 0.14);
             }
 
             .recording-editor-preview-clip {
@@ -427,7 +439,12 @@ pub fn install_recording_editor_css() {
             }
 
             .recording-editor-timeline-well {
-                min-height: 48px;
+                min-height: 14px;
+                padding: 2px 8px 6px 0;
+            }
+
+            .recording-editor-timeline-scroll {
+                min-height: 10px;
             }
 
             .recording-editor-timeline-shell,
@@ -1145,12 +1162,20 @@ pub fn install_recording_editor_css() {
             }
 
             .editor-theme-light .recording-editor-preview-workspace {
-                background: #111111;
+                background: #ffffff;
             }
 
-            .editor-theme-light .recording-editor-preview-stage {
-                background: #ffffff;
-                border-color: alpha(#111827, 0.08);
+            .editor-theme-light .recording-editor-preview-stage,
+            .editor-theme-light .recording-editor-preview-stage > border {
+                background: none;
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-theme-light .recording-editor-preview-canvas {
+                background: #111111;
+                border-color: alpha(#111827, 0.16);
             }
 
             .editor-theme-light .recording-editor-preview-clip {
@@ -1546,7 +1571,6 @@ pub fn install_recording_editor_css() {
                 min-height: 20px;
             }
 
-            button.recording-editor-media-add,
             button.recording-editor-media-close {
                 min-width: 20px;
                 min-height: 20px;
@@ -1556,7 +1580,6 @@ pub fn install_recording_editor_css() {
                 color: alpha(white, 0.45);
             }
 
-            button.recording-editor-media-add:hover,
             button.recording-editor-media-close:hover {
                 color: #F1F1F3;
                 background: transparent;
@@ -1565,7 +1588,8 @@ pub fn install_recording_editor_css() {
             .recording-editor-media-tabs {
                 background: transparent;
                 border-radius: 0;
-                padding: 0 0 8px 0;
+                margin: 0 -8px;
+                padding: 0 8px 8px 8px;
                 border-bottom: 1px solid alpha(white, 0.06);
             }
 
@@ -1601,15 +1625,6 @@ pub fn install_recording_editor_css() {
             button.recording-editor-media-tab-active image {
                 color: #b05c38;
                 background: transparent;
-            }
-
-            .recording-editor-media-search {
-                min-height: 28px;
-                border-radius: 6px;
-                background: alpha(white, 0.06);
-                color: #F1F1F3;
-                border: none;
-                padding: 0 8px;
             }
 
             button.recording-editor-media-upload {
@@ -1717,12 +1732,10 @@ pub fn install_recording_editor_css() {
                 color: #1d2129;
             }
 
-            .editor-theme-light button.recording-editor-media-add,
             .editor-theme-light button.recording-editor-media-close {
                 color: alpha(#1d2129, 0.45);
             }
 
-            .editor-theme-light button.recording-editor-media-add:hover,
             .editor-theme-light button.recording-editor-media-close:hover {
                 color: #1d2129;
             }
@@ -1747,11 +1760,6 @@ pub fn install_recording_editor_css() {
             .editor-theme-light button.recording-editor-media-tab-active label,
             .editor-theme-light button.recording-editor-media-tab-active image {
                 color: #b05c38;
-            }
-
-            .editor-theme-light .recording-editor-media-search {
-                background: alpha(#111827, 0.04);
-                color: #1d2129;
             }
 
             .editor-theme-light button.recording-editor-media-upload {

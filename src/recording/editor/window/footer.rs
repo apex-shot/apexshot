@@ -1,5 +1,4 @@
 use super::dialogs;
-use super::panels::EditorControls;
 use crate::recording::editor::ffmpeg;
 use crate::recording::editor::model::{format_size, VideoEditState};
 use gtk4::{
@@ -15,8 +14,6 @@ use std::time::Duration;
 pub(super) fn build_inspector_actions(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
-    _estimate_label: Label,
-    controls: EditorControls,
     exporting: Rc<Cell<bool>>,
 ) -> GtkBox {
     let footer = GtkBox::new(Orientation::Horizontal, 6);
@@ -45,13 +42,6 @@ pub(super) fn build_inspector_actions(
         copy.clone().upcast::<gtk4::Widget>(),
         upload.clone().upcast::<gtk4::Widget>(),
         done.clone().upcast::<gtk4::Widget>(),
-        controls.dimension_button.clone().upcast::<gtk4::Widget>(),
-        controls.width_entry.clone().upcast::<gtk4::Widget>(),
-        controls.height_entry.clone().upcast::<gtk4::Widget>(),
-        controls.quality_scale.clone().upcast::<gtk4::Widget>(),
-        controls.audio_unchanged.clone().upcast::<gtk4::Widget>(),
-        controls.audio_mono.clone().upcast::<gtk4::Widget>(),
-        controls.audio_muted.clone().upcast::<gtk4::Widget>(),
     ];
 
     copy.connect_clicked({

@@ -9,10 +9,9 @@ pub(super) struct ToolChrome {
 
 pub(super) fn build_tool_chrome(
     state: Option<Arc<Mutex<VideoEditState>>>,
-    estimate_label: Option<gtk4::Label>,
     empty_open: Option<media_library::EmptyOpenHooks>,
 ) -> ToolChrome {
     ToolChrome {
-        panel: media_library::build_media_library(state, estimate_label, empty_open),
+        panel: media_library::build_media_library(state, empty_open),
     }
 }
