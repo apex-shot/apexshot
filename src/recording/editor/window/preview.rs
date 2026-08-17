@@ -1,15 +1,20 @@
-use crate::recording::editor::model::{even_crop_rect, VideoBackground, VideoEditState};
+use super::footer;
+use super::panels::EditorControls;
+use crate::recording::editor::model::{
+    closest_aspect_ratio, even_crop_rect, format_webcut_time, VideoBackground, VideoEditState,
+    WEBCUT_ASPECT_RATIOS,
+};
 use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, DrawingArea, GestureDrag, Label, MediaFile,
-    Orientation, Overlay, Picture,
+    glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, GestureDrag, Image, Label,
+    MediaFile, Orientation, Overlay, Picture, Popover,
 };
 use std::sync::{Arc, Mutex};
 
 pub(super) fn build_preview(
     state: Arc<Mutex<VideoEditState>>,
     estimate_label: Label,
-) -> (GtkBox, MediaFile) {
-    let _ = estimate_label;
+    controls: EditorControls,
+) -> (GtkBox, MediaFile, Button) {
     let path = {
         let state = state.lock().unwrap();
         state.metadata.path.clone()
@@ -66,15 +71,6 @@ pub(super) fn build_preview(
     });
     overlay.add_overlay(&cursor_layer);
 
-    let dim_badge = Label::new(None);
-    dim_badge.add_css_class("recording-editor-dim-badge");
-    dim_badge.set_halign(Align::Start);
-    dim_badge.set_valign(Align::Start);
-    dim_badge.set_margin_start(12);
-    dim_badge.set_margin_top(12);
-    dim_badge.set_can_target(false);
-    overlay.add_overlay(&dim_badge);
-
     let zoom_badge = Label::new(None);
     zoom_badge.add_css_class("recording-editor-dim-badge");
     zoom_badge.set_halign(Align::End);
@@ -84,15 +80,33 @@ pub(super) fn build_preview(
     zoom_badge.set_can_target(false);
     overlay.add_overlay(&zoom_badge);
 
+    let player = build_player_bar(true);
+    wire_aspect_menu(
+        &player.list,
+        &player.popover,
+        &player.aspect_label,
+        &player.aspect_icon,
+        state.clone(),
+        estimate_label,
+        controls,
+    );
+    let play_button = player.play_button.clone();
+    let clock = player.clock.clone();
+    let aspect_label = player.aspect_label.clone();
+    let aspect_icon = player.aspect_icon.clone();
+    let player_bar = player.bar;
+
     {
         let state = state.clone();
-        let dim_badge = dim_badge.clone();
         let zoom_badge = zoom_badge.clone();
         let cursor_layer = cursor_layer.clone();
         let picture = picture.clone();
         let clip = clip.clone();
+        let clock = clock.clone();
+        let aspect_label = aspect_label.clone();
+        let aspect_icon = aspect_icon.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            let (dims, zoom, pad, playhead) = {
+            let (dims, zoom, pad, playhead, duration, hidden) = {
                 let s = state.lock().unwrap();
                 let (scale, _) = s.eval_zoom(s.playhead_seconds);
                 (
@@ -100,10 +114,20 @@ pub(super) fn build_preview(
                     scale,
                     !s.background.is_none(),
                     s.playhead_seconds,
+                    s.metadata.duration_seconds,
+                    s.video_hidden,
                 )
             };
-            dim_badge.set_text(&format!("{} × {}", dims.0, dims.1));
-            if zoom > 1.01 {
+            picture.set_opacity(if hidden { 0.0 } else { 1.0 });
+            clock.set_text(&format!(
+                "{} / {}",
+                format_webcut_time(playhead),
+                format_webcut_time(duration)
+            ));
+            let ratio = closest_aspect_ratio(dims.0, dims.1);
+            aspect_label.set_text(ratio);
+            aspect_icon.set_icon_name(Some(aspect_ratio_icon(ratio)));
+            if zoom > 1.01 && !hidden {
                 zoom_badge.set_text(&format!("{:.0}%", zoom * 100.0));
                 zoom_badge.set_visible(true);
             } else {
@@ -144,7 +168,168 @@ pub(super) fn build_preview(
 
     workspace.append(&overlay);
     root.append(&workspace);
-    (root, media)
+    root.append(&player_bar);
+    (root, media, play_button)
+}
+
+pub(super) fn build_empty_player_bar() -> GtkBox {
+    let player = build_player_bar(false);
+    player.clock.set_text("00:00:00.000 / 00:00:00.000");
+    player.aspect_label.set_text("16:9");
+    player.bar
+}
+
+struct PlayerBar {
+    bar: GtkBox,
+    play_button: Button,
+    clock: Label,
+    aspect_label: Label,
+    aspect_icon: Image,
+    list: GtkBox,
+    popover: Popover,
+}
+
+fn build_player_bar(enabled: bool) -> PlayerBar {
+    let bar = GtkBox::new(Orientation::Horizontal, 0);
+    bar.add_css_class("recording-editor-player-bar");
+    bar.set_hexpand(true);
+    bar.set_vexpand(false);
+
+    let left = GtkBox::new(Orientation::Horizontal, 0);
+    left.set_halign(Align::Start);
+    left.set_hexpand(true);
+    left.set_valign(Align::Center);
+    let clock = Label::new(Some("00:00:00.000 / 00:00:00.000"));
+    clock.add_css_class("recording-editor-player-clock");
+    clock.set_xalign(0.0);
+    left.append(&clock);
+
+    let play_button = Button::new();
+    play_button.add_css_class("recording-editor-play-button");
+    play_button.add_css_class("recording-editor-player-play");
+    let play_icon = Image::from_icon_name("media-playback-start-symbolic");
+    play_icon.set_pixel_size(18);
+    play_button.set_child(Some(&play_icon));
+    play_button.set_valign(Align::Center);
+    play_button.set_halign(Align::Center);
+    play_button.set_tooltip_text(Some("Play"));
+    play_button.set_sensitive(enabled);
+
+    let right = GtkBox::new(Orientation::Horizontal, 0);
+    right.set_halign(Align::End);
+    right.set_hexpand(true);
+    right.set_valign(Align::Center);
+
+    let aspect_button = Button::new();
+    aspect_button.set_has_frame(false);
+    aspect_button.add_css_class("recording-editor-aspect-button");
+    aspect_button.set_sensitive(enabled);
+    aspect_button.set_tooltip_text(Some("Change video size"));
+
+    let aspect_row = GtkBox::new(Orientation::Horizontal, 4);
+    let aspect_icon = Image::from_icon_name(aspect_ratio_icon("16:9"));
+    aspect_icon.set_pixel_size(14);
+    aspect_icon.add_css_class("recording-editor-aspect-item-icon");
+    let aspect_label = Label::new(Some("16:9"));
+    aspect_label.add_css_class("recording-editor-aspect-label");
+    aspect_row.append(&aspect_icon);
+    aspect_row.append(&aspect_label);
+    aspect_button.set_child(Some(&aspect_row));
+
+    let popover = Popover::new();
+    popover.set_has_arrow(false);
+    popover.set_position(gtk4::PositionType::Top);
+    popover.add_css_class("recording-editor-dropdown-popover");
+    popover.add_css_class("recording-editor-aspect-popover");
+    let list = GtkBox::new(Orientation::Vertical, 0);
+    list.add_css_class("recording-editor-dropdown-list");
+    list.add_css_class("recording-editor-aspect-list");
+    popover.set_child(Some(&list));
+    popover.set_parent(&aspect_button);
+    aspect_button.connect_clicked({
+        let popover = popover.clone();
+        move |_| {
+            popover.popup();
+        }
+    });
+    right.append(&aspect_button);
+
+    bar.append(&left);
+    bar.append(&play_button);
+    bar.append(&right);
+    PlayerBar {
+        bar,
+        play_button,
+        clock,
+        aspect_label,
+        aspect_icon,
+        list,
+        popover,
+    }
+}
+
+fn aspect_ratio_icon(label: &str) -> &'static str {
+    match label {
+        "21:9" => "tv-symbolic",
+        "16:9" => "video-display-symbolic",
+        "4:3" => "tablet-symbolic",
+        "9:16" => "phone-symbolic",
+        "3:4" => "computer-apple-ipad-symbolic",
+        "1:1" => "view-grid-symbolic",
+        _ => "video-display-symbolic",
+    }
+}
+
+fn wire_aspect_menu(
+    list: &GtkBox,
+    popover: &Popover,
+    aspect_label: &Label,
+    aspect_icon: &Image,
+    state: Arc<Mutex<VideoEditState>>,
+    estimate_label: Label,
+    controls: EditorControls,
+) {
+    for &(label, width, height) in &WEBCUT_ASPECT_RATIOS {
+        let item = Button::new();
+        item.set_has_frame(false);
+        item.add_css_class("recording-editor-dropdown-item");
+        item.add_css_class("recording-editor-aspect-item");
+        item.set_hexpand(true);
+
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        row.set_halign(Align::Start);
+        let icon = Image::from_icon_name(aspect_ratio_icon(label));
+        icon.set_pixel_size(14);
+        icon.add_css_class("recording-editor-aspect-item-icon");
+        let text = Label::new(Some(label));
+        text.set_xalign(0.0);
+        row.append(&icon);
+        row.append(&text);
+        item.set_child(Some(&row));
+
+        let state = state.clone();
+        let estimate_label = estimate_label.clone();
+        let controls = controls.clone();
+        let aspect_label = aspect_label.clone();
+        let aspect_icon = aspect_icon.clone();
+        let popover = popover.clone();
+        item.connect_clicked(move |_| {
+            {
+                let mut guard = state.lock().unwrap();
+                guard.apply_aspect_ratio(width, height);
+            }
+            aspect_label.set_text(label);
+            aspect_icon.set_icon_name(Some(aspect_ratio_icon(label)));
+            controls.width_entry.set_sensitive(true);
+            controls.height_entry.set_sensitive(true);
+            controls.width_entry.set_text(&width.to_string());
+            controls.height_entry.set_text(&height.to_string());
+            controls.dimension_button.set_label("Custom");
+            popover.popdown();
+            footer::update_estimate(&estimate_label, &state, false);
+        });
+        list.append(&item);
+    }
 }
 
 fn apply_preview_pad(clip: &gtk4::Box, padded: bool) {

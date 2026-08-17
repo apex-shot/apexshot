@@ -15,9 +15,9 @@ use gtk4::gdk;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::{
-    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, DropTarget, Entry,
-    FileChooserAction, FileChooserNative, FileFilter, Image, Label, MenuButton, Orientation,
-    Overlay, ResponseType, Revealer, Scale, Spinner,
+    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
+    DropTarget, Entry, FileChooserAction, FileChooserNative, FileFilter, Image, Label, MenuButton,
+    Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -34,6 +34,7 @@ pub fn open_empty() -> anyhow::Result<()> {
 
     let initial = InitialVideo::None;
     app.connect_activate(move |application| {
+        install_recording_editor_icons();
         crate::capture::editor::ui_support::install_editor_css();
         install_recording_editor_css();
         build_window(application, initial.clone());
@@ -41,6 +42,15 @@ pub fn open_empty() -> anyhow::Result<()> {
 
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
+}
+
+fn install_recording_editor_icons() {
+    use crate::capture::editor::window::icon_names;
+    use std::sync::Once;
+    static INIT_ICONS: Once = Once::new();
+    INIT_ICONS.call_once(|| {
+        relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
+    });
 }
 
 /// Open the editor with an empty window and load the video asynchronously,
@@ -62,6 +72,7 @@ pub fn open_with_path(path: PathBuf) -> anyhow::Result<()> {
 
     let initial = InitialVideo::AsyncLoad(path);
     app.connect_activate(move |application| {
+        install_recording_editor_icons();
         crate::capture::editor::ui_support::install_editor_css();
         install_recording_editor_css();
         build_window(application, initial.clone());
@@ -275,17 +286,16 @@ fn populate_loaded_root(
     estimate_label.add_css_class("recording-editor-estimate");
     footer::update_estimate(&estimate_label, &state, false);
 
+    let titlebar = toolbar::build_titlebar(window, Some(state.clone()));
+    root.append(&titlebar);
+
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.add_css_class("recording-editor-workspace");
     workspace.set_hexpand(true);
     workspace.set_vexpand(true);
 
-    let chrome = rail::build_tool_chrome(Some(state.clone()), Some(estimate_label.clone()));
-    workspace.append(&chrome.rail);
-    workspace.append(&chrome.library);
-
-    let (preview_widget, media) = preview::build_preview(state.clone(), estimate_label.clone());
-    workspace.append(&preview_widget);
+    let chrome = rail::build_tool_chrome(Some(state.clone()), Some(estimate_label.clone()), None);
+    workspace.append(&chrome.panel);
 
     let inspector = inspector::build_inspector(
         window,
@@ -293,14 +303,24 @@ fn populate_loaded_root(
         estimate_label.clone(),
         exporting.clone(),
     );
+    let (preview_widget, media, play_button) = preview::build_preview(
+        state.clone(),
+        estimate_label.clone(),
+        inspector._controls.clone(),
+    );
+    workspace.append(&preview_widget);
     workspace.append(&inspector.root);
     root.append(&workspace);
 
-    let timeline_widget =
-        timeline::build_timeline(state, estimate_label, thumbnails, waveform, media);
+    let timeline_widget = timeline::build_timeline(
+        state,
+        estimate_label,
+        thumbnails,
+        waveform,
+        media,
+        play_button,
+    );
     root.append(&timeline_widget);
-
-    crate::capture::editor::ui_support::install_window_drag(&inspector.root, window);
 }
 
 fn populate_empty_root(
@@ -316,43 +336,74 @@ fn populate_empty_root(
         root.remove(&child);
     }
 
+    let titlebar = toolbar::build_titlebar(window, None);
+    root.append(&titlebar);
+
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.add_css_class("recording-editor-workspace");
     workspace.set_hexpand(true);
     workspace.set_vexpand(true);
 
-    let chrome = rail::build_tool_chrome(None, None);
-    workspace.append(&chrome.rail);
-    workspace.append(&chrome.library);
-
-    let empty_preview = build_empty_preview_area(
-        root,
-        window,
-        exporting.clone(),
-        loading_revealer,
-        loading_spinner,
-        open_button_slot.clone(),
-        loading.clone(),
+    let chrome = rail::build_tool_chrome(
+        None,
+        None,
+        Some(media_library::EmptyOpenHooks {
+            on_click: {
+                let root = root.clone();
+                let window = window.clone();
+                let exporting = exporting.clone();
+                let loading_revealer = loading_revealer.clone();
+                let loading_spinner = loading_spinner.clone();
+                let open_button_slot = open_button_slot.clone();
+                let loading = loading.clone();
+                Rc::new(move || {
+                    show_open_video_dialog(
+                        &root,
+                        &window,
+                        exporting.clone(),
+                        &loading_revealer,
+                        &loading_spinner,
+                        open_button_slot.clone(),
+                        loading.clone(),
+                    );
+                })
+            },
+            on_drop_video: {
+                let root = root.clone();
+                let window = window.clone();
+                let exporting = exporting.clone();
+                let loading_revealer = loading_revealer.clone();
+                let loading_spinner = loading_spinner.clone();
+                let open_button_slot = open_button_slot.clone();
+                let loading = loading.clone();
+                Rc::new(move |path: PathBuf| {
+                    load_video_async(
+                        path,
+                        &root,
+                        &window,
+                        exporting.clone(),
+                        &loading_revealer,
+                        &loading_spinner,
+                        open_button_slot.clone(),
+                        loading.clone(),
+                    );
+                })
+            },
+            open_button_slot: open_button_slot.clone(),
+        }),
     );
+    workspace.append(&chrome.panel);
+
+    let empty_preview = build_empty_preview_area();
     workspace.append(&empty_preview);
 
-    let inspector = build_empty_inspector(window);
+    let inspector = build_empty_inspector();
     workspace.append(&inspector);
     root.append(&workspace);
     root.append(&build_empty_timeline());
-
-    crate::capture::editor::ui_support::install_window_drag(&inspector, window);
 }
 
-fn build_empty_preview_area(
-    root: &GtkBox,
-    window: &ApplicationWindow,
-    exporting: Rc<Cell<bool>>,
-    loading_revealer: &Revealer,
-    loading_spinner: &Spinner,
-    open_button_slot: Rc<RefCell<Option<Button>>>,
-    loading: Rc<Cell<bool>>,
-) -> GtkBox {
+fn build_empty_preview_area() -> GtkBox {
     let frame = GtkBox::new(Orientation::Vertical, 0);
     frame.add_css_class("recording-editor-preview-frame");
     frame.set_hexpand(true);
@@ -368,79 +419,17 @@ fn build_empty_preview_area(
     workspace.set_halign(Align::Fill);
     workspace.set_valign(Align::Fill);
 
-    let center = GtkBox::new(Orientation::Vertical, 14);
-    center.add_css_class("recording-editor-empty-dropzone");
-    center.set_halign(Align::Center);
-    center.set_valign(Align::Center);
-
-    let icon = Image::from_icon_name("video-x-generic-symbolic");
-    icon.add_css_class("recording-editor-empty-icon");
-    icon.set_pixel_size(42);
-
-    let title = Label::new(Some("Drop a video here"));
-    title.add_css_class("recording-editor-empty-title");
-
-    let hint = Label::new(Some("MP4 files"));
-    hint.add_css_class("recording-editor-empty-hint");
-    hint.set_wrap(true);
-    hint.set_justify(gtk4::Justification::Center);
-
-    let open_button = Button::with_label("Open Folder");
-    open_button.set_has_frame(false);
-    open_button.add_css_class("recording-editor-primary-button");
-    open_button.add_css_class("recording-editor-empty-open-button");
-
-    let root_for_open = root.clone();
-    let window_for_open = window.clone();
-    let loading_revealer_for_open = loading_revealer.clone();
-    let loading_spinner_for_open = loading_spinner.clone();
-    let open_button_slot_for_open = open_button_slot.clone();
-    let loading_for_open = loading.clone();
-    open_button.connect_clicked(move |_| {
-        show_open_video_dialog(
-            &root_for_open,
-            &window_for_open,
-            exporting.clone(),
-            &loading_revealer_for_open,
-            &loading_spinner_for_open,
-            open_button_slot_for_open.clone(),
-            loading_for_open.clone(),
-        );
-    });
-
-    *open_button_slot.borrow_mut() = Some(open_button.clone());
-
-    center.append(&icon);
-    center.append(&title);
-    center.append(&hint);
-    center.append(&open_button);
-
-    let top_spacer = GtkBox::new(Orientation::Vertical, 0);
-    top_spacer.set_vexpand(true);
-    let bottom_spacer = GtkBox::new(Orientation::Vertical, 0);
-    bottom_spacer.set_vexpand(true);
-
-    workspace.append(&top_spacer);
-    workspace.append(&center);
-    workspace.append(&bottom_spacer);
     frame.append(&workspace);
+    frame.append(&preview::build_empty_player_bar());
     frame
 }
 
-fn build_empty_inspector(window: &ApplicationWindow) -> GtkBox {
+fn build_empty_inspector() -> GtkBox {
     let inspector = GtkBox::new(Orientation::Vertical, 0);
-    inspector.add_css_class("editor-right-inspector");
     inspector.add_css_class("recording-editor-inspector");
     inspector.set_width_request(inspector::INSPECTOR_WIDTH);
     inspector.set_hexpand(false);
     inspector.set_vexpand(true);
-
-    let lights = toolbar::build_traffic_lights(window);
-    lights.set_halign(Align::End);
-    lights.set_margin_top(8);
-    lights.set_margin_end(8);
-    lights.set_margin_start(8);
-    inspector.append(&lights);
 
     let scroll = gtk4::ScrolledWindow::new();
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
@@ -449,10 +438,13 @@ fn build_empty_inspector(window: &ApplicationWindow) -> GtkBox {
     content.set_margin_start(12);
     content.set_margin_end(12);
     content.set_margin_top(8);
+    let estimate = Label::new(Some("~--"));
+    estimate.add_css_class("recording-editor-estimate");
+    content.append(&estimate);
     content.append(&build_empty_panels());
     scroll.set_child(Some(&content));
-    inspector.append(&scroll);
     inspector.append(&build_empty_footer());
+    inspector.append(&scroll);
     inspector
 }
 
@@ -462,56 +454,258 @@ fn build_empty_timeline() -> GtkBox {
     timeline.set_hexpand(true);
     timeline.set_vexpand(false);
 
-    let card = GtkBox::new(Orientation::Vertical, 8);
+    let card = GtkBox::new(Orientation::Vertical, 0);
     card.add_css_class("recording-editor-timeline-shell");
     card.set_hexpand(true);
 
-    let transport = GtkBox::new(Orientation::Horizontal, 0);
+    let transport = GtkBox::new(Orientation::Horizontal, 8);
     transport.add_css_class("recording-editor-transport");
-    let left = GtkBox::new(Orientation::Horizontal, 4);
-    left.set_hexpand(true);
+    let gutter = GtkBox::new(Orientation::Horizontal, 0);
+    gutter.add_css_class("recording-editor-track-header");
+    gutter.add_css_class("recording-editor-transport-gutter");
+    gutter.set_size_request(120, -1);
+    gutter.set_hexpand(false);
+    let tools = GtkBox::new(Orientation::Horizontal, 8);
+    tools.set_hexpand(true);
+    tools.set_halign(Align::Start);
     for icon_name in [
         "edit-undo-symbolic",
         "edit-redo-symbolic",
+        "edit-delete-symbolic",
         "edit-cut-symbolic",
+        "view-sort-ascending-symbolic",
+        "zoom-in-symbolic",
     ] {
-        left.append(&disabled_transport_button(icon_name));
+        tools.append(&disabled_transport_button(icon_name));
     }
-    let center = GtkBox::new(Orientation::Horizontal, 6);
-    center.set_hexpand(true);
-    center.set_halign(Align::Center);
-    center.append(&disabled_transport_button("media-skip-backward-symbolic"));
-    let play = disabled_transport_button("media-playback-start-symbolic");
-    play.add_css_class("recording-editor-play-button");
-    play.add_css_class("recording-editor-play-button-hero");
-    center.append(&play);
-    center.append(&disabled_transport_button("media-skip-forward-symbolic"));
-    let right = GtkBox::new(Orientation::Horizontal, 4);
-    right.set_hexpand(true);
-    right.set_halign(Align::End);
-    right.append(&disabled_transport_button("edit-delete-symbolic"));
-    transport.append(&left);
-    transport.append(&center);
-    transport.append(&right);
-    card.append(&transport);
+    let scale_row = GtkBox::new(Orientation::Horizontal, 6);
+    scale_row.add_css_class("recording-editor-timeline-scale-control");
+    scale_row.set_hexpand(false);
+    let zoom_out = empty_tool_button("zoom-out-symbolic", "Zoom out timeline");
+    let zoom_in = empty_tool_button("zoom-in-symbolic", "Zoom in timeline");
+    let scale = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 10.0);
+    scale.add_css_class("recording-editor-timeline-scale");
+    scale.set_draw_value(false);
+    scale.set_value(0.0);
+    scale.set_size_request(72, 12);
+    scale.set_valign(Align::Center);
+    scale_row.append(&zoom_out);
+    scale_row.append(&scale);
+    scale_row.append(&zoom_in);
+    transport.append(&gutter);
+    transport.append(&tools);
+    transport.append(&scale_row);
 
-    let strip = GtkBox::new(Orientation::Horizontal, 0);
+    let empty_scale = Rc::new(Cell::new(0.0_f64));
+    let ruler = DrawingArea::new();
+    ruler.add_css_class("recording-editor-ruler");
+    ruler.set_hexpand(true);
+    ruler.set_size_request(-1, 28);
+    ruler.set_draw_func({
+        let empty_scale = empty_scale.clone();
+        move |_, cr, width, height| draw_empty_ruler(cr, width, height, empty_scale.get())
+    });
+    scale.connect_value_changed({
+        let empty_scale = empty_scale.clone();
+        let ruler = ruler.clone();
+        move |scale| {
+            empty_scale.set(scale.value().clamp(0.0, 100.0));
+            ruler.queue_draw();
+        }
+    });
+    zoom_out.connect_clicked({
+        let scale = scale.clone();
+        move |_| {
+            scale.set_value((scale.value() - 10.0).max(0.0));
+        }
+    });
+    zoom_in.connect_clicked({
+        let scale = scale.clone();
+        move |_| {
+            scale.set_value((scale.value() + 10.0).min(100.0));
+        }
+    });
+    let (ruler_row, _) = empty_track_row(None, &ruler);
+
+    let strip = Overlay::new();
     strip.add_css_class("recording-editor-thumbnail-strip");
     strip.add_css_class("recording-editor-empty-thumbnail-strip");
     strip.set_hexpand(true);
-    strip.set_size_request(-1, 48);
-    card.append(&strip);
+    strip.set_size_request(-1, 64);
+    let prompt = GtkBox::new(Orientation::Horizontal, 8);
+    prompt.set_halign(Align::Start);
+    prompt.set_valign(Align::Center);
+    prompt.set_margin_start(12);
+    prompt.set_can_target(false);
+    let prompt_icon = Image::from_icon_name("video-x-generic-symbolic");
+    prompt_icon.set_pixel_size(14);
+    prompt_icon.add_css_class("recording-editor-empty-track-prompt");
+    let prompt_label = Label::new(Some("Select a video, begin your creation."));
+    prompt_label.add_css_class("recording-editor-empty-track-prompt");
+    prompt.append(&prompt_icon);
+    prompt.append(&prompt_label);
+    strip.add_overlay(&prompt);
+    let (video_row, _) = empty_track_row(Some("camera-video-symbolic"), &strip);
+    video_row.add_css_class("recording-editor-empty-track-row");
+
+    let tracks = GtkBox::new(Orientation::Vertical, 0);
+    tracks.set_hexpand(true);
+    tracks.append(&ruler_row);
+    tracks.append(&video_row);
+    let tracks_overlay = Overlay::new();
+    tracks_overlay.set_hexpand(true);
+    tracks_overlay.set_child(Some(&tracks));
+    let playhead = DrawingArea::new();
+    playhead.set_hexpand(true);
+    playhead.set_vexpand(true);
+    playhead.set_can_target(false);
+    playhead.set_draw_func(|_, cr, width, height| draw_empty_playhead(cr, width, height));
+    tracks_overlay.add_overlay(&playhead);
+
+    let board = Overlay::new();
+    board.add_css_class("recording-editor-timeline-board");
+    board.set_hexpand(true);
+    let board_inner = GtkBox::new(Orientation::Vertical, 0);
+    board_inner.append(&transport);
+    board_inner.append(&tracks_overlay);
+    let well = GtkBox::new(Orientation::Vertical, 0);
+    well.add_css_class("recording-editor-timeline-well");
+    well.set_hexpand(true);
+    board_inner.append(&well);
+    board.set_child(Some(&board_inner));
+    let divider = GtkBox::new(Orientation::Vertical, 0);
+    divider.add_css_class("recording-editor-rail-divider");
+    divider.set_halign(Align::Start);
+    divider.set_valign(Align::Fill);
+    divider.set_vexpand(true);
+    divider.set_can_target(false);
+    divider.set_size_request(1, -1);
+    divider.set_margin_start(120);
+    board.add_overlay(&divider);
+    card.append(&board);
 
     timeline.append(&card);
     timeline
 }
 
+fn empty_track_row(header_icon: Option<&str>, body: &impl IsA<gtk4::Widget>) -> (GtkBox, GtkBox) {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    row.add_css_class("recording-editor-track-row");
+    row.set_hexpand(true);
+    let header = GtkBox::new(Orientation::Horizontal, 4);
+    header.add_css_class("recording-editor-track-header");
+    header.set_size_request(120, -1);
+    header.set_hexpand(false);
+    if let Some(icon_name) = header_icon {
+        let icon = Image::from_icon_name(icon_name);
+        icon.add_css_class("recording-editor-track-icon");
+        icon.set_pixel_size(14);
+        header.append(&icon);
+        header.append(&disabled_transport_button("changes-allow-symbolic"));
+        header.append(&disabled_transport_button("view-reveal-symbolic"));
+    }
+    row.append(&header);
+    let body_wrap = GtkBox::new(Orientation::Horizontal, 0);
+    body_wrap.add_css_class("recording-editor-track-body");
+    body_wrap.set_hexpand(true);
+    body_wrap.set_size_request(0, -1);
+    body_wrap.append(body);
+    row.append(&body_wrap);
+    (row, body_wrap)
+}
+
+fn empty_tool_button(icon_name: &str, tooltip: &str) -> Button {
+    let button = Button::new();
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-tool-icon");
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(16);
+    button.set_child(Some(&icon));
+    button.set_valign(Align::Center);
+    button.set_tooltip_text(Some(tooltip));
+    button
+}
+
+fn draw_empty_ruler(cr: &gtk4::cairo::Context, width: i32, height: i32, scale: f64) {
+    let w = width as f64;
+    let h = height as f64;
+    let duration = 10.0;
+    let factor = 1.0 + (scale.clamp(0.0, 100.0) / 100.0) * 7.0;
+    let span = 1.0 / factor;
+    let visible = (duration * span).max(0.001);
+    let major: f64 = if visible > 8.0 {
+        2.0
+    } else if visible > 3.0 {
+        1.0
+    } else {
+        0.5
+    };
+    let minor = (major / 5.0).max(0.1);
+    cr.select_font_face(
+        "sans-serif",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    cr.set_font_size(10.0);
+    cr.set_line_width(1.0);
+    let mut t = 0.0;
+    while t <= duration + 0.001 {
+        let inner = (w - 16.0).max(1.0);
+        let x = (16.0 + ((t / duration) / span) * inner).floor() + 0.5;
+        if x < -20.0 || x > w + 20.0 {
+            t += minor;
+            continue;
+        }
+        let is_major = (t / major).fract().abs() < 0.02 || (1.0 - (t / major).fract()).abs() < 0.02;
+        cr.set_source_rgba(1.0, 1.0, 1.0, if is_major { 0.28 } else { 0.12 });
+        cr.move_to(x, if is_major { h - 8.0 } else { h - 4.0 });
+        cr.line_to(x, h);
+        let _ = cr.stroke();
+        if is_major {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.48);
+            let mins = (t as i64) / 60;
+            let secs = (t as i64) % 60;
+            let label = format!("{mins:02}:{secs:02}");
+            if let Ok(ext) = cr.text_extents(&label) {
+                cr.move_to(x - ext.width() / 2.0, 11.0);
+                let _ = cr.show_text(&label);
+            }
+        }
+        t += minor;
+    }
+}
+
+fn draw_empty_playhead(cr: &gtk4::cairo::Context, width: i32, height: i32) {
+    let _ = width;
+    let h = height as f64;
+    let x = 144.5;
+    let head_w = 10.0;
+    let body_h = 7.0;
+    let tip_h = 5.0;
+    let left = x - head_w / 2.0;
+    let right = x + head_w / 2.0;
+    cr.set_source_rgb(1.0, 1.0, 1.0);
+    cr.move_to(left, 0.0);
+    cr.line_to(right, 0.0);
+    cr.line_to(right, body_h);
+    cr.line_to(x, body_h + tip_h);
+    cr.line_to(left, body_h);
+    cr.close_path();
+    let _ = cr.fill();
+    cr.set_line_width(1.0);
+    cr.set_line_cap(gtk4::cairo::LineCap::Butt);
+    cr.move_to(x, body_h + tip_h);
+    cr.line_to(x, h);
+    let _ = cr.stroke();
+}
+
 fn disabled_transport_button(icon_name: &str) -> Button {
     let button = Button::new();
-    button.add_css_class("recording-editor-cut-button");
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-tool-icon");
     button.set_sensitive(false);
     let icon = Image::from_icon_name(icon_name);
-    icon.set_pixel_size(18);
+    icon.set_pixel_size(16);
     button.set_child(Some(&icon));
     button.set_valign(Align::Center);
     button
@@ -617,35 +811,30 @@ fn empty_field_row(label: &str, entry: &Entry) -> GtkBox {
 }
 
 fn build_empty_footer() -> GtkBox {
-    let footer = GtkBox::new(Orientation::Vertical, 8);
+    let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-footer");
+    footer.add_css_class("recording-editor-inspector-toolbar");
     footer.add_css_class("editor-sidebar-actions");
     footer.set_hexpand(true);
-    footer.set_margin_start(12);
-    footer.set_margin_end(12);
-    footer.set_margin_bottom(12);
 
-    let estimate = Label::new(Some("~--"));
-    estimate.add_css_class("recording-editor-estimate");
-
-    let copy = Button::with_label("Copy");
-    copy.set_has_frame(false);
-    copy.add_css_class("recording-editor-secondary-button");
-    copy.set_sensitive(false);
-
-    let upload = Button::with_label("Upload");
-    upload.set_has_frame(false);
-    upload.add_css_class("recording-editor-secondary-button");
-    upload.set_sensitive(false);
-
+    let copy = disabled_transport_button(
+        crate::capture::editor::window::icon_names::custom::COPY_SYMBOLIC,
+    );
+    copy.add_css_class("recording-editor-inspector-icon");
+    let upload = disabled_transport_button(
+        crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
+    );
+    upload.add_css_class("recording-editor-inspector-icon");
     let done = Button::with_label("Done");
     done.set_has_frame(false);
     done.add_css_class("recording-editor-primary-button");
     done.set_sensitive(false);
-
-    footer.append(&estimate);
+    done.set_halign(gtk4::Align::End);
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
     footer.append(&copy);
     footer.append(&upload);
+    footer.append(&spacer);
     footer.append(&done);
     footer
 }

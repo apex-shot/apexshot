@@ -1,6 +1,6 @@
 use super::model::{
-    edited_output_path, even_crop_rect, even_dimension, quality_to_crf, AudioMode, VideoBackground,
-    VideoEditState, VideoMetadata,
+    even_crop_rect, even_dimension, quality_to_crf, AudioMode, VideoBackground, VideoEditState,
+    VideoMetadata,
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
@@ -311,7 +311,7 @@ pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
 }
 
 pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
-    let output_path = edited_output_path(&state.metadata.path);
+    let output_path = state.export_path();
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -327,7 +327,7 @@ pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
 }
 
 pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
-    let output_path = edited_output_path(&state.metadata.path);
+    let output_path = state.export_path();
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");

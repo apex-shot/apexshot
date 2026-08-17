@@ -1,15 +1,27 @@
 use super::footer;
-use crate::recording::editor::model::VideoEditState;
+use crate::recording::editor::model::{ProjectMedia, ProjectMediaKind, VideoEditState};
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion, GestureClick,
-    GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture,
+    gdk::prelude::GdkCairoContextExt, prelude::*, Align, Box as GtkBox, Button, DrawingArea,
+    EventControllerMotion, GestureClick, GestureDrag, Image, Label, MediaFile, Orientation,
+    Overlay,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+
+const RAIL_HEADER_WIDTH: i32 = 120;
+const TRACK_GAP: f64 = 8.0;
+const ZERO_INSET: f64 = 16.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RailKind {
+    Video,
+    Audio,
+    Zoom,
+}
 
 pub(super) fn build_timeline(
     state: Arc<Mutex<VideoEditState>>,
@@ -17,8 +29,14 @@ pub(super) fn build_timeline(
     thumbnails: Vec<PathBuf>,
     waveform: Option<PathBuf>,
     media: MediaFile,
+    play_button: Button,
 ) -> GtkBox {
-    let root = GtkBox::new(Orientation::Vertical, 6);
+    {
+        let mut guard = state.lock().unwrap();
+        guard.playhead_seconds = 0.0;
+    }
+    media.seek(0);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-timeline");
     root.set_hexpand(true);
     root.set_vexpand(false);
@@ -28,31 +46,17 @@ pub(super) fn build_timeline(
     card.set_hexpand(true);
     card.set_vexpand(false);
 
-    let play_button = Button::new();
-    play_button.add_css_class("recording-editor-play-button");
-    let play_icon = Image::from_icon_name("media-playback-start-symbolic");
-    play_icon.set_pixel_size(22);
-    play_button.set_child(Some(&play_icon));
-    play_button.set_valign(Align::Center);
-    play_button.set_tooltip_text(Some("Play"));
-
     // Create buttons and modes first
-    let cut_button = Button::new();
-    cut_button.add_css_class("recording-editor-cut-button");
-    let cut_icon = Image::from_icon_name("edit-cut-symbolic");
-    cut_icon.set_pixel_size(18);
-    cut_button.set_child(Some(&cut_icon));
-    cut_button.set_valign(Align::Center);
-    cut_button.set_tooltip_text(Some("Cut mode — click timeline to place cuts"));
+    let cut_button = icon_tool_button(
+        "edit-cut-symbolic",
+        "Cut mode — click timeline to place cuts",
+    );
     let cut_mode = Rc::new(Cell::new(false));
 
-    let move_button = Button::new();
-    move_button.add_css_class("recording-editor-cut-button");
-    let move_icon = Image::from_icon_name("view-sort-ascending-symbolic");
-    move_icon.set_pixel_size(18);
-    move_button.set_child(Some(&move_icon));
-    move_button.set_valign(Align::Center);
-    move_button.set_tooltip_text(Some("Move mode — drag a segment to reorder it"));
+    let move_button = icon_tool_button(
+        "view-sort-ascending-symbolic",
+        "Move mode — drag a segment to reorder it",
+    );
     let move_mode = Rc::new(Cell::new(false));
 
     // Track which chronological segment index is being dragged (for visual feedback)
@@ -68,11 +72,11 @@ pub(super) fn build_timeline(
             let enabled = !cut_mode.get();
             cut_mode.set(enabled);
             if enabled {
-                cut_button.add_css_class("recording-editor-cut-button-active");
+                cut_button.add_css_class("recording-editor-tool-icon-active");
                 move_mode.set(false);
-                move_button.remove_css_class("recording-editor-cut-button-active");
+                move_button.remove_css_class("recording-editor-tool-icon-active");
             } else {
-                cut_button.remove_css_class("recording-editor-cut-button-active");
+                cut_button.remove_css_class("recording-editor-tool-icon-active");
             }
         }
     });
@@ -88,21 +92,15 @@ pub(super) fn build_timeline(
             move_mode.set(enabled);
             if enabled {
                 cut_mode.set(false);
-                cut_button.remove_css_class("recording-editor-cut-button-active");
-                move_button.add_css_class("recording-editor-cut-button-active");
+                cut_button.remove_css_class("recording-editor-tool-icon-active");
+                move_button.add_css_class("recording-editor-tool-icon-active");
             } else {
-                move_button.remove_css_class("recording-editor-cut-button-active");
+                move_button.remove_css_class("recording-editor-tool-icon-active");
             }
         }
     });
 
-    let revert_button = Button::new();
-    revert_button.add_css_class("recording-editor-revert-button");
-    let revert_icon = Image::from_icon_name("edit-undo-symbolic");
-    revert_icon.set_pixel_size(18);
-    revert_button.set_child(Some(&revert_icon));
-    revert_button.set_valign(Align::Center);
-    revert_button.set_tooltip_text(Some("Revert cuts"));
+    let revert_button = icon_tool_button("edit-undo-symbolic", "Revert cuts");
 
     let media_play = media.clone();
     let play_button_ref = play_button.clone();
@@ -122,7 +120,7 @@ pub(super) fn build_timeline(
                 media_play.pause();
                 playing.set(false);
                 let icon = Image::from_icon_name("media-playback-start-symbolic");
-                icon.set_pixel_size(22);
+                icon.set_pixel_size(18);
                 play_button_ref.set_child(Some(&icon));
             } else {
                 let s = state_for_play.lock().unwrap();
@@ -147,7 +145,7 @@ pub(super) fn build_timeline(
                     media_play.play();
                     playing.set(true);
                     let icon = Image::from_icon_name("media-playback-pause-symbolic");
-                    icon.set_pixel_size(22);
+                    icon.set_pixel_size(18);
                     play_button_ref.set_child(Some(&icon));
                     return;
                 }
@@ -172,7 +170,7 @@ pub(super) fn build_timeline(
                 media_play.play();
                 playing.set(true);
                 let icon = Image::from_icon_name("media-playback-pause-symbolic");
-                icon.set_pixel_size(22);
+                icon.set_pixel_size(18);
                 play_button_ref.set_child(Some(&icon));
             }
         }
@@ -182,34 +180,19 @@ pub(super) fn build_timeline(
     overlay.add_css_class("recording-editor-trim-area");
     overlay.set_hexpand(true);
     overlay.set_vexpand(false);
-    overlay.set_size_request(-1, 52);
+    overlay.set_overflow(gtk4::Overflow::Hidden);
+    overlay.set_size_request(0, 64);
 
-    let strip = GtkBox::new(Orientation::Horizontal, 2);
-    strip.add_css_class("recording-editor-thumbnail-strip");
-    strip.set_hexpand(true);
-    strip.set_vexpand(false);
-    strip.set_halign(Align::Fill);
-    strip.set_valign(Align::Center);
-    strip.set_size_request(-1, 52);
-    if thumbnails.is_empty() {
-        for _ in 0..12 {
-            let placeholder = GtkBox::new(Orientation::Vertical, 0);
-            placeholder.add_css_class("recording-editor-thumbnail");
-            placeholder.set_hexpand(true);
-            strip.append(&placeholder);
-        }
-    } else {
-        for path in thumbnails {
-            let picture = Picture::for_filename(path);
-            picture.add_css_class("recording-editor-thumbnail");
-            picture.set_hexpand(true);
-            picture.set_vexpand(false);
-            picture.set_can_shrink(true);
-            picture.set_size_request(-1, 48);
-            strip.append(&picture);
-        }
-    }
-    overlay.set_child(Some(&strip));
+    let filmstrip = DrawingArea::new();
+    filmstrip.add_css_class("recording-editor-thumbnail-strip");
+    filmstrip.set_hexpand(true);
+    filmstrip.set_vexpand(true);
+    let film_pixbufs = load_track_pixbufs(&thumbnails);
+    filmstrip.set_draw_func({
+        let state = state.clone();
+        move |_, cr, width, height| draw_filmstrip(&state, &film_pixbufs, cr, width, height)
+    });
+    overlay.set_child(Some(&filmstrip));
 
     let selection = DrawingArea::new();
     selection.set_hexpand(true);
@@ -235,7 +218,7 @@ pub(super) fn build_timeline(
                 state.clear_cuts();
             }
             cut_mode.set(false);
-            cut_button.remove_css_class("recording-editor-cut-button-active");
+            cut_button.remove_css_class("recording-editor-tool-icon-active");
             selection.queue_draw();
             footer::update_estimate(&estimate_label, &state, false);
         }
@@ -259,6 +242,8 @@ pub(super) fn build_timeline(
         let dragging_segment = dragging_segment.clone();
         let scrubbing = scrubbing.clone();
         let drag_origin_time = drag_origin_time.clone();
+        let playing = playing.clone();
+        let play_button = play_button.clone();
         move |gesture, x, _| {
             scrubbing.set(true);
             let width = gesture
@@ -267,11 +252,20 @@ pub(super) fn build_timeline(
                 .map(|area| area.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut state_guard = state.lock().unwrap();
-            let duration = state_guard.metadata.duration_seconds.max(0.001);
-            let start_x = (state_guard.trim_start_seconds / duration) * width;
-            let end_x = (state_guard.trim_end_seconds / duration) * width;
+            let start_x = state_guard.time_to_x(state_guard.trim_start_seconds, width);
+            let end_x = state_guard.time_to_x(state_guard.trim_end_seconds, width);
             let handle_threshold = 18.0;
-            let seconds = (x.clamp(0.0, width) / width) * duration;
+            let seconds = state_guard.x_to_time(x.clamp(0.0, width), width);
+
+            if state_guard.video_locked {
+                pause_playback(&media, &playing, &play_button);
+                state_guard.playhead_seconds = seconds;
+                media.seek((seconds * 1_000_000.0) as i64);
+                selection.queue_draw();
+                drag_origin_time.set(seconds);
+                *drag_kind.borrow_mut() = Some(TrimDragKind::Playhead);
+                return;
+            }
 
             let kind = if !state_guard.cuts.is_empty() {
                 let layout = compute_visual_layout(&state_guard, width);
@@ -290,6 +284,7 @@ pub(super) fn build_timeline(
                     footer::update_estimate(&estimate_label, &state, false);
                     return;
                 } else {
+                    pause_playback(&media, &playing, &play_button);
                     state_guard.playhead_seconds = seconds;
                     media.seek((seconds * 1_000_000.0) as i64);
                     selection.queue_draw();
@@ -318,6 +313,7 @@ pub(super) fn build_timeline(
                     origin_seconds: seconds,
                 }
             } else {
+                pause_playback(&media, &playing, &play_button);
                 state_guard.playhead_seconds = seconds;
                 media.seek((seconds * 1_000_000.0) as i64);
                 selection.queue_draw();
@@ -367,13 +363,17 @@ pub(super) fn build_timeline(
                 .unwrap_or(1.0);
             let value_x = (start_x + offset_x).clamp(0.0, width);
             let mut state_guard = state.lock().unwrap();
+            if state_guard.video_locked && !matches!(kind, TrimDragKind::Playhead) {
+                return;
+            }
             let duration = state_guard.metadata.duration_seconds.max(0.001);
             let scale = if state_guard.cuts.is_empty() {
                 duration
             } else {
                 state_guard.kept_duration().max(0.001)
             };
-            let delta_t = (offset_x / width) * scale;
+            let (_, span) = state_guard.timeline_view();
+            let delta_t = (offset_x / width) * scale * span;
             let origin = drag_origin_time.get();
             let seconds = visual_x_to_source_seconds(&state_guard, width, value_x);
             match kind {
@@ -466,11 +466,10 @@ pub(super) fn build_timeline(
             .and_then(|widget| widget.downcast::<DrawingArea>().ok())
             .map(|area| area.allocated_width().max(1) as f64)
             .unwrap_or(1.0);
-        let duration = {
+        let seconds = {
             let s = state_for_dbl.lock().unwrap();
-            s.metadata.duration_seconds.max(0.001)
+            s.x_to_time(x.clamp(0.0, width), width)
         };
-        let seconds = (x.clamp(0.0, width) / width) * duration;
         {
             let mut s = state_for_dbl.lock().unwrap();
             s.add_cut(seconds);
@@ -493,11 +492,13 @@ pub(super) fn build_timeline(
             .map(|area| area.allocated_width().max(1) as f64)
             .unwrap_or(1.0);
         let mut s = state_for_rc.lock().unwrap();
-        let duration = s.metadata.duration_seconds.max(0.001);
-        let seconds = (x.clamp(0.0, width) / width) * duration;
+        let seconds = s.x_to_time(x.clamp(0.0, width), width);
 
         // Check if near a cut line (remove it)
-        let cut_threshold_seconds = (12.0 / width) * duration;
+        let cut_threshold_seconds = {
+            let (_, span) = s.timeline_view();
+            (12.0 / width) * s.metadata.duration_seconds.max(0.001) * span
+        };
         let mut removed_cut = false;
         for i in 0..s.cuts.len() {
             if (s.cuts[i] - seconds).abs() < cut_threshold_seconds {
@@ -535,9 +536,8 @@ pub(super) fn build_timeline(
             };
             let width = widget.allocated_width().max(1) as f64;
             let state = state.lock().unwrap();
-            let duration = state.metadata.duration_seconds.max(0.001);
-            let start_x = (state.trim_start_seconds / duration) * width;
-            let end_x = (state.trim_end_seconds / duration) * width;
+            let start_x = state.time_to_x(state.trim_start_seconds, width);
+            let end_x = state.time_to_x(state.trim_end_seconds, width);
             let handle_threshold = 18.0;
             let cursor_name = if !state.cuts.is_empty() {
                 let layout = compute_visual_layout(&state, width);
@@ -568,7 +568,7 @@ pub(super) fn build_timeline(
             } else {
                 let cut_threshold = 8.0;
                 let near_cut = state.cuts.iter().any(|&c| {
-                    let cx = (c / duration) * width;
+                    let cx = state.time_to_x(c, width);
                     (x - cx).abs() <= cut_threshold
                 });
                 if near_cut {
@@ -658,7 +658,7 @@ pub(super) fn build_timeline(
                     finished_timer.set(true);
                     playing_timer.set(false);
                     let icon = Image::from_icon_name("media-playlist-repeat-symbolic");
-                    icon.set_pixel_size(22);
+                    icon.set_pixel_size(18);
                     play_button_timer.set_child(Some(&icon));
                 }
                 selection_playhead.queue_draw();
@@ -667,32 +667,6 @@ pub(super) fn build_timeline(
         glib::ControlFlow::Continue
     });
 
-    let skip_back = icon_tool_button("media-skip-backward-symbolic", "Skip back");
-    skip_back.connect_clicked({
-        let state = state.clone();
-        let media = media.clone();
-        let selection = selection.clone();
-        move |_| {
-            let mut state = state.lock().unwrap();
-            state.playhead_seconds = (state.playhead_seconds - 5.0).max(state.trim_start_seconds);
-            media.seek((state.playhead_seconds * 1_000_000.0) as i64);
-            drop(state);
-            selection.queue_draw();
-        }
-    });
-    let skip_forward = icon_tool_button("media-skip-forward-symbolic", "Skip forward");
-    skip_forward.connect_clicked({
-        let state = state.clone();
-        let media = media.clone();
-        let selection = selection.clone();
-        move |_| {
-            let mut state = state.lock().unwrap();
-            state.playhead_seconds = (state.playhead_seconds + 5.0).min(state.trim_end_seconds);
-            media.seek((state.playhead_seconds * 1_000_000.0) as i64);
-            drop(state);
-            selection.queue_draw();
-        }
-    });
     let delete_button = icon_tool_button("edit-delete-symbolic", "Delete zoom or cut");
     delete_button.connect_clicked({
         let state = state.clone();
@@ -727,40 +701,56 @@ pub(super) fn build_timeline(
     let redo_button = icon_tool_button("edit-redo-symbolic", "Redo");
     redo_button.set_sensitive(false);
 
-    let transport = GtkBox::new(Orientation::Horizontal, 0);
+    let transport = GtkBox::new(Orientation::Horizontal, 4);
     transport.add_css_class("recording-editor-transport");
     transport.set_hexpand(true);
+    transport.set_valign(Align::Center);
 
-    let transport_left = GtkBox::new(Orientation::Horizontal, 4);
-    transport_left.set_halign(Align::Start);
-    transport_left.set_hexpand(true);
-    transport_left.append(&revert_button);
-    transport_left.append(&redo_button);
-    transport_left.append(&cut_button);
+    let transport_gutter = GtkBox::new(Orientation::Horizontal, 0);
+    transport_gutter.add_css_class("recording-editor-track-header");
+    transport_gutter.add_css_class("recording-editor-transport-gutter");
+    transport_gutter.set_size_request(RAIL_HEADER_WIDTH, -1);
+    transport_gutter.set_hexpand(false);
+    transport_gutter.set_halign(Align::Start);
 
-    let transport_center = GtkBox::new(Orientation::Horizontal, 6);
-    transport_center.set_halign(Align::Center);
-    transport_center.set_hexpand(true);
-    transport_center.append(&skip_back);
-    play_button.add_css_class("recording-editor-play-button-hero");
-    transport_center.append(&play_button);
-    transport_center.append(&skip_forward);
-    transport_center.append(&move_button);
+    let transport_tools = GtkBox::new(Orientation::Horizontal, 8);
+    transport_tools.add_css_class("recording-editor-transport-tools");
+    transport_tools.set_halign(Align::Start);
+    transport_tools.set_hexpand(true);
+    transport_tools.append(&revert_button);
+    transport_tools.append(&redo_button);
+    transport_tools.append(&delete_button);
+    transport_tools.append(&cut_button);
+    transport_tools.append(&move_button);
+    transport_tools.append(&add_zoom);
 
-    let transport_right = GtkBox::new(Orientation::Horizontal, 4);
-    transport_right.set_halign(Align::End);
-    transport_right.set_hexpand(true);
-    transport_right.append(&delete_button);
+    let zoom_out = icon_tool_button("zoom-out-symbolic", "Zoom out timeline");
+    let zoom_in = icon_tool_button("zoom-in-symbolic", "Zoom in timeline");
+    let timeline_scale = gtk4::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 10.0);
+    timeline_scale.add_css_class("recording-editor-timeline-scale");
+    timeline_scale.set_draw_value(false);
+    timeline_scale.set_hexpand(true);
+    timeline_scale.set_value(0.0);
+    timeline_scale.set_size_request(72, 12);
+    timeline_scale.set_valign(Align::Center);
+    timeline_scale.set_vexpand(false);
 
-    transport.append(&transport_left);
-    transport.append(&transport_center);
-    transport.append(&transport_right);
-    card.append(&transport);
+    let transport_scale = GtkBox::new(Orientation::Horizontal, 6);
+    transport_scale.add_css_class("recording-editor-timeline-scale-control");
+    transport_scale.set_halign(Align::End);
+    transport_scale.set_hexpand(false);
+    transport_scale.append(&zoom_out);
+    transport_scale.append(&timeline_scale);
+    transport_scale.append(&zoom_in);
+
+    transport.append(&transport_gutter);
+    transport.append(&transport_tools);
+    transport.append(&transport_scale);
 
     let ruler = DrawingArea::new();
     ruler.add_css_class("recording-editor-ruler");
     ruler.set_hexpand(true);
-    ruler.set_size_request(-1, 20);
+    ruler.set_size_request(-1, 28);
     ruler.set_draw_func({
         let state = state.clone();
         move |_, cr, width, height| draw_ruler(&state, cr, width, height)
@@ -771,7 +761,10 @@ pub(super) fn build_timeline(
         let state = state.clone();
         let media = media.clone();
         let scrubbing = scrubbing.clone();
+        let playing = playing.clone();
+        let play_button = play_button.clone();
         move |gesture, x, _| {
+            pause_playback(&media, &playing, &play_button);
             scrubbing.set(true);
             seek_from_x(&state, &media, gesture.widget().as_ref(), x);
         }
@@ -802,46 +795,192 @@ pub(super) fn build_timeline(
     });
     ruler.add_controller(ruler_drag);
 
-    let video_add = icon_tool_button("list-add-symbolic", "Cut at playhead");
-    video_add.add_css_class("recording-editor-track-add");
-    video_add.connect_clicked({
-        let state = state.clone();
-        let selection = selection.clone();
-        let estimate_label = estimate_label.clone();
-        move |_| {
-            {
-                let mut guard = state.lock().unwrap();
-                let playhead = guard.playhead_seconds;
-                guard.add_cut(playhead);
-            }
-            selection.queue_draw();
-            footer::update_estimate(&estimate_label, &state, false);
-        }
-    });
+    let video_header = build_rail_header(RailKind::Video);
+    let (video_row, video_body) = track_row(Some(&video_header), &overlay);
+    video_row.add_css_class("recording-editor-empty-track-row");
 
-    let video_row = track_row("camera-video-symbolic", &overlay, Some(&video_add));
-
-    add_zoom.add_css_class("recording-editor-track-add");
     let waveform_body = build_waveform_body(&state, waveform);
-    let audio_add = icon_tool_button("list-add-symbolic", "Audio stays as recorded");
-    audio_add.add_css_class("recording-editor-track-add");
-    audio_add.set_sensitive(false);
-    let audio_row = track_row(
-        "audio-volume-high-symbolic",
-        &waveform_body,
-        Some(&audio_add),
-    );
+    let audio_header = build_rail_header(RailKind::Audio);
+    let (audio_row, audio_body) = track_row(Some(&audio_header), &waveform_body);
 
     let zoom_body = build_zoom_track(state.clone(), estimate_label.clone());
-    let zoom_row = track_row("zoom-in-symbolic", &zoom_body, Some(&add_zoom));
+    let zoom_header = build_rail_header(RailKind::Zoom);
+    let (zoom_row, zoom_track_body) = track_row(Some(&zoom_header), &zoom_body);
 
     let tracks = GtkBox::new(Orientation::Vertical, 6);
     tracks.add_css_class("recording-editor-tracks");
     tracks.set_hexpand(true);
-    tracks.append(&track_row("", &ruler, None));
+    let (ruler_row, _) = track_row(None, &ruler);
+    let extra_video_tracks = GtkBox::new(Orientation::Vertical, 6);
+    extra_video_tracks.add_css_class("recording-editor-extra-video-tracks");
+    extra_video_tracks.set_hexpand(true);
+
+    tracks.append(&ruler_row);
     tracks.append(&video_row);
+    tracks.append(&extra_video_tracks);
     tracks.append(&audio_row);
     tracks.append(&zoom_row);
+
+    let refresh_rails = {
+        let state = state.clone();
+        let media = media.clone();
+        let video_header = video_header.clone();
+        let audio_header = audio_header.clone();
+        let zoom_header = zoom_header.clone();
+        let audio_row = audio_row.clone();
+        let zoom_row = zoom_row.clone();
+        let extra_video_tracks = extra_video_tracks.clone();
+        let video_body = video_body.clone();
+        let audio_body = audio_body.clone();
+        let zoom_track_body = zoom_track_body.clone();
+        let selection = selection.clone();
+        let estimate_label = estimate_label.clone();
+        Rc::new(move || {
+            let guard = state.lock().unwrap();
+            apply_rail_state(
+                &guard,
+                &media,
+                &video_header,
+                &audio_header,
+                &zoom_header,
+                &audio_row,
+                &zoom_row,
+                &video_body,
+                &audio_body,
+                &zoom_track_body,
+            );
+            let extras: Vec<ProjectMedia> = guard
+                .extra_video_tracks()
+                .into_iter()
+                .cloned()
+                .collect();
+            drop(guard);
+            rebuild_extra_video_tracks(&extra_video_tracks, &extras, &state, &estimate_label);
+            selection.queue_draw();
+            footer::update_estimate(&estimate_label, &state, false);
+        })
+    };
+    refresh_rails();
+
+    let last_video_sig = Rc::new(Cell::new(video_track_signature(&state)));
+    glib::timeout_add_local(std::time::Duration::from_millis(400), {
+        let state = state.clone();
+        let refresh_rails = refresh_rails.clone();
+        move || {
+            let sig = video_track_signature(&state);
+            if sig != last_video_sig.get() {
+                last_video_sig.set(sig);
+                refresh_rails();
+            }
+            glib::ControlFlow::Continue
+        }
+    });
+
+    video_header.lock.connect_clicked({
+        let state = state.clone();
+        let refresh_rails = refresh_rails.clone();
+        move |_| {
+            let mut guard = state.lock().unwrap();
+            guard.video_locked = !guard.video_locked;
+            drop(guard);
+            refresh_rails();
+        }
+    });
+    if let Some(hide) = video_header.hide.clone() {
+        hide.connect_clicked({
+            let state = state.clone();
+            let refresh_rails = refresh_rails.clone();
+            move |_| {
+                let mut guard = state.lock().unwrap();
+                guard.video_hidden = !guard.video_hidden;
+                drop(guard);
+                refresh_rails();
+            }
+        });
+    }
+    if let Some(mute) = video_header.mute.clone() {
+        mute.connect_clicked({
+            let state = state.clone();
+            let refresh_rails = refresh_rails.clone();
+            move |_| {
+                state.lock().unwrap().toggle_mute();
+                refresh_rails();
+            }
+        });
+    }
+    video_header.delete.connect_clicked({
+        let state = state.clone();
+        let refresh_rails = refresh_rails.clone();
+        move |_| {
+            state.lock().unwrap().reset_video_edits();
+            refresh_rails();
+        }
+    });
+
+    audio_header.lock.connect_clicked({
+        let state = state.clone();
+        let refresh_rails = refresh_rails.clone();
+        move |_| {
+            let mut guard = state.lock().unwrap();
+            guard.audio_locked = !guard.audio_locked;
+            drop(guard);
+            refresh_rails();
+        }
+    });
+    if let Some(mute) = audio_header.mute.clone() {
+        mute.connect_clicked({
+            let state = state.clone();
+            let refresh_rails = refresh_rails.clone();
+            move |_| {
+                state.lock().unwrap().toggle_mute();
+                refresh_rails();
+            }
+        });
+    }
+    audio_header.delete.connect_clicked({
+        let state = state.clone();
+        let refresh_rails = refresh_rails.clone();
+        move |_| {
+            state.lock().unwrap().remove_audio_track();
+            refresh_rails();
+        }
+    });
+
+    zoom_header.lock.connect_clicked({
+        let state = state.clone();
+        let refresh_rails = refresh_rails.clone();
+        move |_| {
+            let mut guard = state.lock().unwrap();
+            guard.zoom_locked = !guard.zoom_locked;
+            drop(guard);
+            refresh_rails();
+        }
+    });
+    if let Some(hide) = zoom_header.hide.clone() {
+        hide.connect_clicked({
+            let state = state.clone();
+            let refresh_rails = refresh_rails.clone();
+            move |_| {
+                let mut guard = state.lock().unwrap();
+                guard.zoom_hidden = !guard.zoom_hidden;
+                drop(guard);
+                refresh_rails();
+            }
+        });
+    }
+    zoom_header.delete.connect_clicked({
+        let state = state.clone();
+        let refresh_rails = refresh_rails.clone();
+        move |_| {
+            state.lock().unwrap().clear_zoom_clips();
+            refresh_rails();
+        }
+    });
+
+    add_zoom.connect_clicked({
+        let refresh_rails = refresh_rails.clone();
+        move |_| refresh_rails()
+    });
 
     let tracks_overlay = Overlay::new();
     tracks_overlay.set_hexpand(true);
@@ -861,50 +1000,470 @@ pub(super) fn build_timeline(
     {
         let ruler = ruler.clone();
         let playhead_layer = playhead_layer.clone();
+        let filmstrip = filmstrip.clone();
+        let waveform_body = waveform_body.clone();
+        let extra_video_tracks = extra_video_tracks.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
             ruler.queue_draw();
             playhead_layer.queue_draw();
+            filmstrip.queue_draw();
+            waveform_body.queue_draw();
+            queue_draw_tree(&extra_video_tracks);
             glib::ControlFlow::Continue
         });
     }
 
-    card.append(&tracks_overlay);
+    let board = Overlay::new();
+    board.add_css_class("recording-editor-timeline-board");
+    board.set_hexpand(true);
+    board.set_vexpand(false);
+    let board_inner = GtkBox::new(Orientation::Vertical, 0);
+    board_inner.append(&transport);
+    board_inner.append(&tracks_overlay);
+    let well = GtkBox::new(Orientation::Vertical, 0);
+    well.add_css_class("recording-editor-timeline-well");
+    well.set_hexpand(true);
+    board_inner.append(&well);
+    board.set_child(Some(&board_inner));
+    board.add_overlay(&rail_divider());
+
+    let redraw_timeline = {
+        let selection = selection.clone();
+        let ruler = ruler.clone();
+        let playhead_layer = playhead_layer.clone();
+        let filmstrip = filmstrip.clone();
+        let waveform_body = waveform_body.clone();
+        let extra_video_tracks = extra_video_tracks.clone();
+        Rc::new(move || {
+            selection.queue_draw();
+            ruler.queue_draw();
+            playhead_layer.queue_draw();
+            filmstrip.queue_draw();
+            waveform_body.queue_draw();
+            queue_draw_tree(&extra_video_tracks);
+        })
+    };
+    timeline_scale.connect_value_changed({
+        let state = state.clone();
+        let redraw_timeline = redraw_timeline.clone();
+        move |scale| {
+            state.lock().unwrap().timeline_scale = scale.value().clamp(0.0, 100.0);
+            redraw_timeline();
+        }
+    });
+    zoom_out.connect_clicked({
+        let timeline_scale = timeline_scale.clone();
+        move |_| {
+            timeline_scale.set_value((timeline_scale.value() - 10.0).max(0.0));
+        }
+    });
+    zoom_in.connect_clicked({
+        let timeline_scale = timeline_scale.clone();
+        move |_| {
+            timeline_scale.set_value((timeline_scale.value() + 10.0).min(100.0));
+        }
+    });
+
+    card.append(&board);
     root.append(&card);
     root
 }
 
-fn track_row(icon_name: &str, body: &impl IsA<gtk4::Widget>, add: Option<&Button>) -> GtkBox {
+fn rail_divider() -> GtkBox {
+    let divider = GtkBox::new(Orientation::Vertical, 0);
+    divider.add_css_class("recording-editor-rail-divider");
+    divider.set_halign(Align::Start);
+    divider.set_valign(Align::Fill);
+    divider.set_hexpand(false);
+    divider.set_vexpand(true);
+    divider.set_can_target(false);
+    divider.set_size_request(1, -1);
+    divider.set_margin_start(RAIL_HEADER_WIDTH);
+    divider
+}
+
+#[derive(Clone)]
+struct RailChrome {
+    row: GtkBox,
+    lock: Button,
+    hide: Option<Button>,
+    mute: Option<Button>,
+    delete: Button,
+}
+
+fn track_row(header: Option<&RailChrome>, body: &impl IsA<gtk4::Widget>) -> (GtkBox, GtkBox) {
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-track-row");
     row.set_hexpand(true);
 
-    let icon = if icon_name.is_empty() {
-        let spacer = GtkBox::new(Orientation::Horizontal, 0);
-        spacer.set_size_request(16, 16);
-        spacer.upcast::<gtk4::Widget>()
+    let header_box = if let Some(chrome) = header {
+        chrome.row.clone()
     } else {
-        let icon = Image::from_icon_name(icon_name);
-        icon.add_css_class("recording-editor-track-icon");
-        icon.set_pixel_size(16);
-        icon.set_valign(Align::Center);
-        icon.upcast::<gtk4::Widget>()
+        let spacer = GtkBox::new(Orientation::Horizontal, 0);
+        spacer.add_css_class("recording-editor-track-header");
+        spacer.set_size_request(RAIL_HEADER_WIDTH, 16);
+        spacer
     };
-    row.append(&icon);
+    header_box.set_hexpand(false);
+    header_box.set_halign(Align::Start);
+    header_box.set_valign(Align::Center);
+    header_box.set_size_request(RAIL_HEADER_WIDTH, -1);
+    row.append(&header_box);
 
     let body_wrap = GtkBox::new(Orientation::Horizontal, 0);
+    body_wrap.add_css_class("recording-editor-track-body");
     body_wrap.set_hexpand(true);
+    body_wrap.set_size_request(0, -1);
+    body_wrap.set_overflow(gtk4::Overflow::Hidden);
     body_wrap.append(body);
     row.append(&body_wrap);
+    (row, body_wrap)
+}
 
-    if let Some(add) = add {
-        add.set_valign(Align::Center);
-        row.append(add);
-    } else {
-        let spacer = GtkBox::new(Orientation::Horizontal, 0);
-        spacer.set_size_request(32, 32);
-        row.append(&spacer);
+fn queue_draw_tree(widget: &impl IsA<gtk4::Widget>) {
+    widget.queue_draw();
+    let mut child = widget.first_child();
+    while let Some(next) = child {
+        queue_draw_tree(&next);
+        child = next.next_sibling();
     }
-    row
+}
+
+fn video_track_signature(state: &Arc<Mutex<VideoEditState>>) -> u64 {
+    let guard = state.lock().unwrap();
+    let mut hash = guard.video_tracks().len() as u64;
+    for item in guard.video_tracks() {
+        hash = hash
+            .wrapping_mul(33)
+            .wrapping_add(item.path.as_os_str().len() as u64);
+    }
+    hash
+}
+
+fn rebuild_extra_video_tracks(
+    host: &GtkBox,
+    extras: &[ProjectMedia],
+    state: &Arc<Mutex<VideoEditState>>,
+    estimate_label: &Label,
+) {
+    while let Some(child) = host.first_child() {
+        host.remove(&child);
+    }
+    for item in extras {
+        let header = build_rail_header(RailKind::Video);
+        let strip = extra_video_strip(state, item);
+        let (row, _) = track_row(Some(&header), &strip);
+        row.add_css_class("recording-editor-empty-track-row");
+        header.delete.set_sensitive(true);
+        header.delete.set_tooltip_text(Some("Remove video track"));
+        header.delete.connect_clicked({
+            let state = state.clone();
+            let estimate_label = estimate_label.clone();
+            let path = item.path.clone();
+            let host = host.clone();
+            move |_| {
+                state
+                    .lock()
+                    .unwrap()
+                    .remove_project_media(&path, ProjectMediaKind::Video);
+                let extras: Vec<ProjectMedia> = state
+                    .lock()
+                    .unwrap()
+                    .extra_video_tracks()
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                rebuild_extra_video_tracks(&host, &extras, &state, &estimate_label);
+                footer::update_estimate(&estimate_label, &state, false);
+            }
+        });
+        if let Some(hide) = &header.hide {
+            hide.set_sensitive(false);
+        }
+        if let Some(mute) = &header.mute {
+            mute.set_sensitive(false);
+        }
+        header.lock.set_sensitive(false);
+        host.append(&row);
+    }
+}
+
+fn extra_video_strip(state: &Arc<Mutex<VideoEditState>>, item: &ProjectMedia) -> Overlay {
+    let strip = Overlay::new();
+    strip.add_css_class("recording-editor-thumbnail-strip");
+    strip.add_css_class("recording-editor-empty-thumbnail-strip");
+    strip.set_hexpand(true);
+    strip.set_size_request(-1, 64);
+    let clip = DrawingArea::new();
+    clip.set_hexpand(true);
+    clip.set_vexpand(true);
+    let title = if item.display_name.trim().is_empty() {
+        "Video".to_string()
+    } else {
+        item.display_name.clone()
+    };
+    let duration = item.duration_seconds.unwrap_or(0.0);
+    clip.set_draw_func({
+        let state = state.clone();
+        move |_, cr, width, height| {
+            draw_extra_video_clip(&state, cr, width, height, duration, &title);
+        }
+    });
+    strip.set_child(Some(&clip));
+    strip
+}
+
+fn draw_extra_video_clip(
+    state: &Arc<Mutex<VideoEditState>>,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+    duration: f64,
+    title: &str,
+) {
+    let state = state.lock().unwrap();
+    let w = width as f64;
+    let h = height as f64;
+    let end = if duration > 0.0 {
+        duration
+    } else {
+        state.metadata.duration_seconds.max(0.001)
+    };
+    let x0 = state.time_to_x(0.0, w);
+    let x1 = state.time_to_x(end, w);
+    let clip_w = (x1 - x0).abs().max(72.0).min(w);
+    cr.set_source_rgb(0.22, 0.22, 0.22);
+    cr.rectangle(x0.max(0.0), 0.0, clip_w, h);
+    let _ = cr.fill();
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+    cr.select_font_face(
+        "sans-serif",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    cr.set_font_size(11.0);
+    if let Ok(ext) = cr.text_extents(title) {
+        cr.move_to(x0.max(0.0) + 12.0, h / 2.0 + ext.height() / 2.0);
+        let _ = cr.show_text(title);
+    }
+}
+
+fn set_track_body_look(body: &GtkBox, faded: bool, locked: bool) {
+    body.set_opacity(if faded { 0.3 } else { 1.0 });
+    if faded {
+        body.add_css_class("recording-editor-track-faded");
+    } else {
+        body.remove_css_class("recording-editor-track-faded");
+    }
+    if locked {
+        body.add_css_class("recording-editor-track-locked");
+    } else {
+        body.remove_css_class("recording-editor-track-locked");
+    }
+}
+
+fn rail_icon_button(icon_name: &str, tooltip: &str) -> Button {
+    let button = Button::new();
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-rail-action");
+    button.set_tooltip_text(Some(tooltip));
+    button.set_halign(Align::Center);
+    button.set_valign(Align::Center);
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(14);
+    button.set_child(Some(&icon));
+    button
+}
+
+fn set_rail_icon(button: &Button, icon_name: &str) {
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(14);
+    button.set_child(Some(&icon));
+}
+
+fn build_rail_header(kind: RailKind) -> RailChrome {
+    let row = GtkBox::new(Orientation::Horizontal, 4);
+    row.add_css_class("recording-editor-track-header");
+    row.set_hexpand(false);
+    row.set_halign(Align::Start);
+    row.set_valign(Align::Center);
+    row.set_size_request(RAIL_HEADER_WIDTH, -1);
+
+    let type_name = match kind {
+        RailKind::Video => "camera-video-symbolic",
+        RailKind::Audio => "audio-volume-high-symbolic",
+        RailKind::Zoom => "zoom-in-symbolic",
+    };
+    let type_icon = Image::from_icon_name(type_name);
+    type_icon.add_css_class("recording-editor-track-icon");
+    type_icon.set_pixel_size(14);
+    type_icon.set_halign(Align::Start);
+    type_icon.set_valign(Align::Center);
+    row.append(&type_icon);
+
+    let lock = rail_icon_button("changes-allow-symbolic", "Lock track");
+    row.append(&lock);
+
+    let hide = if matches!(kind, RailKind::Video | RailKind::Zoom) {
+        let hide = rail_icon_button("view-reveal-symbolic", "Hide track");
+        row.append(&hide);
+        Some(hide)
+    } else {
+        None
+    };
+
+    let mute = if matches!(kind, RailKind::Video | RailKind::Audio) {
+        let mute = rail_icon_button("audio-volume-high-symbolic", "Mute");
+        row.append(&mute);
+        Some(mute)
+    } else {
+        None
+    };
+
+    let delete = rail_icon_button("user-trash-symbolic", "Remove track");
+    row.append(&delete);
+
+    RailChrome {
+        row,
+        lock,
+        hide,
+        mute,
+        delete,
+    }
+}
+
+fn apply_rail_state(
+    state: &VideoEditState,
+    media: &MediaFile,
+    video: &RailChrome,
+    audio: &RailChrome,
+    zoom: &RailChrome,
+    audio_row: &GtkBox,
+    zoom_row: &GtkBox,
+    video_body: &GtkBox,
+    audio_body: &GtkBox,
+    zoom_body: &GtkBox,
+) {
+    set_rail_icon(
+        &video.lock,
+        if state.video_locked {
+            "changes-prevent-symbolic"
+        } else {
+            "changes-allow-symbolic"
+        },
+    );
+    video.lock.set_tooltip_text(Some(if state.video_locked {
+        "Unlock video"
+    } else {
+        "Lock video"
+    }));
+    if let Some(hide) = &video.hide {
+        set_rail_icon(
+            hide,
+            if state.video_hidden {
+                "view-conceal-symbolic"
+            } else {
+                "view-reveal-symbolic"
+            },
+        );
+        hide.set_tooltip_text(Some(if state.video_hidden {
+            "Show video"
+        } else {
+            "Hide video"
+        }));
+    }
+    if let Some(mute) = &video.mute {
+        let muted = state.is_muted();
+        set_rail_icon(
+            mute,
+            if muted {
+                "audio-volume-muted-symbolic"
+            } else {
+                "audio-volume-high-symbolic"
+            },
+        );
+        mute.set_sensitive(state.has_audio_track() && !state.audio_locked);
+        mute.set_tooltip_text(Some(if muted { "Unmute" } else { "Mute" }));
+    }
+    video
+        .delete
+        .set_sensitive(!state.video_locked && state.video_has_edits());
+    video
+        .delete
+        .set_tooltip_text(Some(if state.video_has_edits() {
+            "Reset video edits"
+        } else {
+            "No video edits to remove"
+        }));
+
+    audio_row.set_visible(state.has_audio_track());
+    set_rail_icon(
+        &audio.lock,
+        if state.audio_locked {
+            "changes-prevent-symbolic"
+        } else {
+            "changes-allow-symbolic"
+        },
+    );
+    audio.lock.set_tooltip_text(Some(if state.audio_locked {
+        "Unlock audio"
+    } else {
+        "Lock audio"
+    }));
+    if let Some(mute) = &audio.mute {
+        let muted = state.is_muted();
+        set_rail_icon(
+            mute,
+            if muted {
+                "audio-volume-muted-symbolic"
+            } else {
+                "audio-volume-high-symbolic"
+            },
+        );
+        mute.set_sensitive(!state.audio_locked);
+        mute.set_tooltip_text(Some(if muted { "Unmute" } else { "Mute" }));
+    }
+    audio.delete.set_sensitive(!state.audio_locked);
+    audio.delete.set_tooltip_text(Some("Remove audio track"));
+
+    zoom_row.set_visible(state.has_zoom_track());
+    set_rail_icon(
+        &zoom.lock,
+        if state.zoom_locked {
+            "changes-prevent-symbolic"
+        } else {
+            "changes-allow-symbolic"
+        },
+    );
+    zoom.lock.set_tooltip_text(Some(if state.zoom_locked {
+        "Unlock zoom"
+    } else {
+        "Lock zoom"
+    }));
+    if let Some(hide) = &zoom.hide {
+        set_rail_icon(
+            hide,
+            if state.zoom_hidden {
+                "view-conceal-symbolic"
+            } else {
+                "view-reveal-symbolic"
+            },
+        );
+        hide.set_tooltip_text(Some(if state.zoom_hidden {
+            "Show zoom"
+        } else {
+            "Hide zoom"
+        }));
+    }
+    zoom.delete
+        .set_sensitive(!state.zoom_locked && state.has_zoom_track());
+    zoom.delete.set_tooltip_text(Some("Remove zoom track"));
+
+    set_track_body_look(video_body, state.video_hidden, state.video_locked);
+    set_track_body_look(audio_body, state.is_muted(), state.audio_locked);
+    set_track_body_look(zoom_body, state.zoom_hidden, state.zoom_locked);
+
+    media.set_muted(state.is_muted() || !state.has_audio_track());
 }
 
 fn seek_from_x(
@@ -917,45 +1476,153 @@ fn seek_from_x(
         .map(|widget| widget.allocated_width().max(1) as f64)
         .unwrap_or(1.0);
     let mut state = state.lock().unwrap();
-    let duration = state.metadata.duration_seconds.max(0.001);
-    let seconds = (x.clamp(0.0, width) / width) * duration;
+    let seconds = state.x_to_time(x.clamp(0.0, width), width);
     state.playhead_seconds = seconds;
     media.seek((seconds * 1_000_000.0) as i64);
 }
 
+fn pause_playback(media: &MediaFile, playing: &Cell<bool>, play_button: &Button) {
+    if !playing.get() && !media.is_playing() {
+        return;
+    }
+    media.pause();
+    playing.set(false);
+    let icon = Image::from_icon_name("media-playback-start-symbolic");
+    icon.set_pixel_size(18);
+    play_button.set_child(Some(&icon));
+}
+
 fn icon_tool_button(icon_name: &str, tooltip: &str) -> Button {
     let button = Button::new();
-    button.add_css_class("recording-editor-cut-button");
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-tool-icon");
     let icon = Image::from_icon_name(icon_name);
-    icon.set_pixel_size(18);
+    icon.set_pixel_size(16);
     button.set_child(Some(&icon));
     button.set_valign(Align::Center);
     button.set_tooltip_text(Some(tooltip));
     button
 }
 
-fn build_waveform_body(state: &Arc<Mutex<VideoEditState>>, waveform: Option<PathBuf>) -> GtkBox {
-    let row = GtkBox::new(Orientation::Horizontal, 0);
-    row.add_css_class("recording-editor-waveform");
-    row.set_hexpand(true);
-    if let Some(path) = waveform {
-        let picture = Picture::for_filename(path);
-        picture.add_css_class("recording-editor-waveform-image");
-        picture.set_hexpand(true);
-        picture.set_can_shrink(true);
-        picture.set_size_request(-1, 36);
-        row.append(&picture);
+fn build_waveform_body(
+    state: &Arc<Mutex<VideoEditState>>,
+    waveform: Option<PathBuf>,
+) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.add_css_class("recording-editor-waveform");
+    area.set_hexpand(true);
+    area.set_size_request(0, 36);
+    let pixbuf = waveform.and_then(|path| gtk4::gdk_pixbuf::Pixbuf::from_file(path).ok());
+    let empty_label = if state.lock().unwrap().metadata.has_audio {
+        "Waveform unavailable"
     } else {
-        let empty = Label::new(Some(if state.lock().unwrap().metadata.has_audio {
-            "Waveform unavailable"
+        "No audio"
+    };
+    area.set_draw_func({
+        let state = state.clone();
+        move |_, cr, width, height| {
+            draw_waveform_image(&state, pixbuf.as_ref(), empty_label, cr, width, height);
+        }
+    });
+    area
+}
+
+fn load_track_pixbufs(paths: &[PathBuf]) -> Vec<gtk4::gdk_pixbuf::Pixbuf> {
+    paths
+        .iter()
+        .filter_map(|path| gtk4::gdk_pixbuf::Pixbuf::from_file(path).ok())
+        .collect()
+}
+
+fn paint_pixbuf(
+    cr: &gtk4::cairo::Context,
+    pixbuf: &gtk4::gdk_pixbuf::Pixbuf,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) {
+    let src_w = f64::from(pixbuf.width()).max(1.0);
+    let src_h = f64::from(pixbuf.height()).max(1.0);
+    cr.save().ok();
+    cr.rectangle(x, y, width, height);
+    cr.clip();
+    cr.translate(x, y);
+    cr.scale(width / src_w, height / src_h);
+    cr.set_source_pixbuf(pixbuf, 0.0, 0.0);
+    let _ = cr.paint();
+    cr.restore().ok();
+}
+
+fn draw_filmstrip(
+    state: &Arc<Mutex<VideoEditState>>,
+    pixbufs: &[gtk4::gdk_pixbuf::Pixbuf],
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let state = state.lock().unwrap();
+    let w = width as f64;
+    let h = height as f64;
+    let duration = state.metadata.duration_seconds.max(0.001);
+    let count = pixbufs.len().max(12);
+    let slice = duration / count as f64;
+    for index in 0..count {
+        let x0 = state.time_to_x(index as f64 * slice, w);
+        let x1 = state.time_to_x((index + 1) as f64 * slice, w);
+        if x1 < 0.0 || x0 > w {
+            continue;
+        }
+        let dest_w = (x1 - x0).max(1.0);
+        if let Some(pixbuf) = pixbufs.get(index) {
+            paint_pixbuf(cr, pixbuf, x0, 0.0, dest_w, h);
         } else {
-            "No audio"
-        }));
-        empty.add_css_class("recording-editor-time-label");
-        empty.set_hexpand(true);
-        row.append(&empty);
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.04);
+            cr.rectangle(x0, 0.0, dest_w, h);
+            let _ = cr.fill();
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.06);
+            cr.rectangle(x0 + 0.5, 0.5, dest_w - 1.0, h - 1.0);
+            let _ = cr.stroke();
+        }
     }
-    row
+}
+
+fn draw_waveform_image(
+    state: &Arc<Mutex<VideoEditState>>,
+    pixbuf: Option<&gtk4::gdk_pixbuf::Pixbuf>,
+    empty_label: &str,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let state = state.lock().unwrap();
+    let w = width as f64;
+    let h = height as f64;
+    cr.set_source_rgb(0.08, 0.08, 0.08);
+    cr.rectangle(0.0, 0.0, w, h);
+    let _ = cr.fill();
+    let duration = state.metadata.duration_seconds.max(0.001);
+    let x0 = state.time_to_x(0.0, w);
+    let x1 = state.time_to_x(duration, w);
+    let dest_w = (x1 - x0).max(1.0);
+    if let Some(pixbuf) = pixbuf {
+        paint_pixbuf(cr, pixbuf, x0, 0.0, dest_w, h);
+        return;
+    }
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.38);
+    cr.select_font_face(
+        "sans-serif",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    cr.set_font_size(10.0);
+    if let Ok(ext) = cr.text_extents(empty_label) {
+        cr.move_to(
+            ((w - ext.width()) / 2.0).max(4.0),
+            h / 2.0 + ext.height() / 2.0,
+        );
+        let _ = cr.show_text(empty_label);
+    }
 }
 
 fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) -> DrawingArea {
@@ -981,8 +1648,7 @@ fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) ->
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut state = state.lock().unwrap();
-            let duration = state.metadata.duration_seconds.max(0.001);
-            let seconds = (x.clamp(0.0, width) / width) * duration;
+            let seconds = state.x_to_time(x.clamp(0.0, width), width);
             if n_press >= 2 {
                 state.playhead_seconds = seconds;
                 state.add_zoom_at_playhead();
@@ -1011,8 +1677,7 @@ fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) ->
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let state = state.lock().unwrap();
-            let duration = state.metadata.duration_seconds.max(0.001);
-            let seconds = (x.clamp(0.0, width) / width) * duration;
+            let seconds = state.x_to_time(x.clamp(0.0, width), width);
             let edge = state
                 .zoom_clips
                 .iter()
@@ -1045,11 +1710,10 @@ fn build_zoom_track(state: Arc<Mutex<VideoEditState>>, estimate_label: Label) ->
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
-            let duration = {
+            let seconds = {
                 let state = state.lock().unwrap();
-                state.metadata.duration_seconds.max(0.001)
+                state.x_to_time((start_x + offset_x).clamp(0.0, width), width)
             };
-            let seconds = ((start_x + offset_x).clamp(0.0, width) / width) * duration;
             {
                 let mut state = state.lock().unwrap();
                 if let Some(clip) = state.zoom_clips.get(index).cloned() {
@@ -1087,14 +1751,20 @@ fn draw_ruler(
     let w = width as f64;
     let h = height as f64;
     let duration = state.metadata.duration_seconds.max(0.001);
-    let step = if duration > 90.0 {
+    let (_, span) = state.timeline_view();
+    let visible = (duration * span).max(0.001);
+    let major: f64 = if visible > 180.0 {
+        30.0
+    } else if visible > 90.0 {
         10.0
-    } else if duration > 40.0 {
+    } else if visible > 40.0 {
         5.0
-    } else {
+    } else if visible > 12.0 {
         2.0
+    } else {
+        1.0
     };
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.38);
+    let minor = (major / 5.0).max(0.2);
     cr.select_font_face(
         "sans-serif",
         gtk4::cairo::FontSlant::Normal,
@@ -1104,18 +1774,26 @@ fn draw_ruler(
     cr.set_line_width(1.0);
     let mut t = 0.0;
     while t <= duration + 0.001 {
-        let x = (t / duration) * w;
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.18);
-        cr.move_to(x, h - 4.0);
+        let inner = (w - ZERO_INSET).max(1.0);
+        let x = (ZERO_INSET + state.time_to_x(t, inner)).floor() + 0.5;
+        if x < -20.0 || x > w + 20.0 {
+            t += minor;
+            continue;
+        }
+        let is_major = (t / major).fract().abs() < 0.02 || (1.0 - (t / major).fract()).abs() < 0.02;
+        cr.set_source_rgba(1.0, 1.0, 1.0, if is_major { 0.28 } else { 0.12 });
+        cr.move_to(x, if is_major { h - 8.0 } else { h - 4.0 });
         cr.line_to(x, h);
         let _ = cr.stroke();
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
-        let label = format!("{:.0}s", t);
-        if let Ok(ext) = cr.text_extents(&label) {
-            cr.move_to((x - ext.width() / 2.0).max(0.0), 11.0);
-            let _ = cr.show_text(&label);
+        if is_major {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.48);
+            let label = format_timecode(t);
+            if let Ok(ext) = cr.text_extents(&label) {
+                cr.move_to(x - ext.width() / 2.0, 11.0);
+                let _ = cr.show_text(&label);
+            }
         }
-        t += step;
+        t += minor;
     }
 }
 
@@ -1128,18 +1806,31 @@ fn draw_spanning_playhead(
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
-    let inset_left = 24.0;
-    let inset_right = 40.0;
-    let usable = (w - inset_left - inset_right).max(1.0);
-    let duration = state.metadata.duration_seconds.max(0.001);
-    let x = inset_left + (state.playhead_seconds / duration) * usable;
-    cr.set_source_rgba(0.69, 0.36, 0.22, 0.95);
-    cr.set_line_width(1.5);
-    cr.move_to(x, 18.0);
-    cr.line_to(x, h - 2.0);
-    let _ = cr.stroke();
-    cr.arc(x, 14.0, 5.0, 0.0, std::f64::consts::TAU);
+    let inset_left = f64::from(RAIL_HEADER_WIDTH) + TRACK_GAP + ZERO_INSET;
+    let usable = (w - inset_left).max(1.0);
+    let x = (inset_left + state.time_to_x(state.playhead_seconds, usable)).floor() + 0.5;
+
+    // Home-plate head: standing rectangle with a downward triangle tip.
+    let head_w = 10.0;
+    let body_h = 7.0;
+    let tip_h = 5.0;
+    let left = x - head_w / 2.0;
+    let right = x + head_w / 2.0;
+
+    cr.set_source_rgb(1.0, 1.0, 1.0);
+    cr.move_to(left, 0.0);
+    cr.line_to(right, 0.0);
+    cr.line_to(right, body_h);
+    cr.line_to(x, body_h + tip_h);
+    cr.line_to(left, body_h);
+    cr.close_path();
     let _ = cr.fill();
+
+    cr.set_line_width(1.0);
+    cr.set_line_cap(gtk4::cairo::LineCap::Butt);
+    cr.move_to(x, body_h + tip_h);
+    cr.line_to(x, h);
+    let _ = cr.stroke();
 }
 
 fn draw_zoom_track(
@@ -1151,13 +1842,12 @@ fn draw_zoom_track(
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
-    let duration = state.metadata.duration_seconds.max(0.001);
     rounded_rect(cr, 0.0, 2.0, w, h - 4.0, 10.0);
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.04);
     let _ = cr.fill();
     for (index, clip) in state.zoom_clips.iter().enumerate() {
-        let x0 = (clip.start / duration) * w;
-        let x1 = (clip.end / duration) * w;
+        let x0 = state.time_to_x(clip.start, w);
+        let x1 = state.time_to_x(clip.end, w);
         let selected = state.selected_zoom == Some(index);
         rounded_rect(cr, x0, 4.0, (x1 - x0).max(18.0), h - 8.0, 9.0);
         cr.set_source_rgba(0.69, 0.36, 0.22, if selected { 0.92 } else { 0.55 });
@@ -1300,7 +1990,11 @@ fn compute_visual_layout(state: &VideoEditState, total_width: f64) -> Vec<(usize
         if let Some(&(seg_start, seg_end)) = boundaries.get(seg_idx) {
             let seg_dur = (seg_end - seg_start).max(0.0);
             let seg_w = (seg_dur / total_dur) * total_width;
-            layout.push((seg_idx, x, x + seg_w));
+            layout.push((
+                seg_idx,
+                state.frac_to_x(x / total_width, total_width),
+                state.frac_to_x((x + seg_w) / total_width, total_width),
+            ));
             x += seg_w;
         }
     }
@@ -1315,7 +2009,6 @@ fn draw_trim_overlay(
     dragging_seg_idx: Option<usize>,
 ) {
     let state = state.lock().unwrap();
-    let duration = state.metadata.duration_seconds.max(0.001);
     let w = width as f64;
     let h = height as f64;
     let has_cuts = !state.cuts.is_empty();
@@ -1345,15 +2038,37 @@ fn draw_trim_overlay(
             }
         }
     } else {
-        let start_x = (state.trim_start_seconds / duration) * w;
-        let end_x = (state.trim_end_seconds / duration) * w;
+        let start_x = state.time_to_x(state.trim_start_seconds, w);
+        let end_x = state.time_to_x(state.trim_end_seconds, w);
         draw_trim_capsule(cr, start_x, end_x, w, h);
     }
+}
+
+fn draw_clip_frame(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64) {
+    let stroke = 2.5;
+    let inset = stroke / 2.0;
+    cr.set_source_rgb(0.69, 0.36, 0.22);
+    cr.set_line_width(stroke);
+    rounded_rect(
+        cr,
+        x + inset,
+        y + inset,
+        (w - stroke).max(1.0),
+        (h - stroke).max(1.0),
+        10.0,
+    );
+    let _ = cr.stroke();
 }
 
 fn draw_trim_capsule(cr: &gtk4::cairo::Context, start_x: f64, end_x: f64, w: f64, h: f64) {
     let range_width = (end_x - start_x).max(36.0);
     let end_x = start_x + range_width;
+    let is_full_clip = start_x <= 1.0 && end_x >= w - 1.0;
+
+    if is_full_clip {
+        draw_clip_frame(cr, 0.0, 0.0, w, h);
+        return;
+    }
 
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.48);
     cr.rectangle(0.0, 0.0, start_x.max(0.0), h);
@@ -1372,10 +2087,10 @@ fn draw_capsule_frame(
 ) {
     let range_width = (end_x - start_x).max(36.0);
     let end_x = start_x + range_width;
-    let r = (h / 2.0).min(18.0);
-    let handle_w = 18.0;
+    let r = 10.0;
+    let handle_w = 8.0;
     let pad = 1.5;
-    let stroke = if emphasize { 5.0 } else { 4.0 };
+    let stroke = if emphasize { 3.0 } else { 2.5 };
 
     cr.set_source_rgb(0.69, 0.36, 0.22);
     cr.set_line_width(stroke);
@@ -1496,4 +2211,11 @@ fn format_duration(seconds: f64) -> String {
     let minutes = (seconds / 60.0).floor() as u64;
     let seconds = seconds - (minutes as f64 * 60.0);
     format!("{minutes}:{seconds:04.1}")
+}
+
+fn format_timecode(seconds: f64) -> String {
+    let seconds = seconds.max(0.0);
+    let minutes = (seconds / 60.0).floor() as u64;
+    let secs = (seconds - minutes as f64 * 60.0).floor() as u64;
+    format!("{minutes:02}:{secs:02}")
 }

@@ -117,6 +117,16 @@ pub struct VideoEditState {
     pub background_shadow: f64,
     pub sidecar: Option<PointerSidecar>,
     pub project_media: Vec<ProjectMedia>,
+    /// Display / export name (file stem, without extension).
+    pub title: String,
+    pub video_locked: bool,
+    pub video_hidden: bool,
+    pub audio_locked: bool,
+    pub audio_removed: bool,
+    pub zoom_locked: bool,
+    pub zoom_hidden: bool,
+    /// 0 = fit the whole clip, 100 = 8× time-axis zoom (WebCut scaler).
+    pub timeline_scale: f64,
 }
 
 fn seed_project_media(metadata: &VideoMetadata) -> Vec<ProjectMedia> {
@@ -147,6 +157,7 @@ impl VideoEditState {
     pub fn new(metadata: VideoMetadata) -> Self {
         let sidecar = PointerSidecar::load_next_to_video(&metadata.path);
         let project_media = seed_project_media(&metadata);
+        let title = title_from_path(&metadata.path);
         Self {
             trim_start_seconds: 0.0,
             trim_end_seconds: metadata.duration_seconds,
@@ -168,7 +179,151 @@ impl VideoEditState {
             background_shadow: 15.0,
             sidecar,
             project_media,
+            title,
+            video_locked: false,
+            video_hidden: false,
+            audio_locked: false,
+            audio_removed: false,
+            zoom_locked: false,
+            zoom_hidden: false,
+            timeline_scale: 0.0,
         }
+    }
+
+    pub fn timeline_view(&self) -> (f64, f64) {
+        let factor = 1.0 + (self.timeline_scale.clamp(0.0, 100.0) / 100.0) * 7.0;
+        let span = 1.0 / factor;
+        let duration = self.metadata.duration_seconds.max(0.001);
+        let playhead_frac = (self.playhead_seconds / duration).clamp(0.0, 1.0);
+        let start = (playhead_frac - span * 0.4).clamp(0.0, (1.0 - span).max(0.0));
+        (start, span)
+    }
+
+    pub fn time_to_x(&self, seconds: f64, width: f64) -> f64 {
+        let duration = self.metadata.duration_seconds.max(0.001);
+        self.frac_to_x(seconds / duration, width)
+    }
+
+    pub fn x_to_time(&self, x: f64, width: f64) -> f64 {
+        let duration = self.metadata.duration_seconds.max(0.001);
+        self.x_to_frac(x, width) * duration
+    }
+
+    pub fn frac_to_x(&self, frac: f64, width: f64) -> f64 {
+        let (start, span) = self.timeline_view();
+        ((frac - start) / span.max(1e-6)) * width
+    }
+
+    pub fn x_to_frac(&self, x: f64, width: f64) -> f64 {
+        let (start, span) = self.timeline_view();
+        start + (x / width.max(1.0)) * span
+    }
+
+    pub fn has_audio_track(&self) -> bool {
+        self.metadata.has_audio && !self.audio_removed
+    }
+
+    pub fn has_zoom_track(&self) -> bool {
+        !self.zoom_clips.is_empty()
+    }
+
+    pub fn video_tracks(&self) -> Vec<&ProjectMedia> {
+        self.project_media
+            .iter()
+            .filter(|item| item.kind == ProjectMediaKind::Video)
+            .collect()
+    }
+
+    pub fn extra_video_tracks(&self) -> Vec<&ProjectMedia> {
+        self.video_tracks()
+            .into_iter()
+            .filter(|item| item.path != self.metadata.path)
+            .collect()
+    }
+
+    pub fn remove_project_media(&mut self, path: &Path, kind: ProjectMediaKind) {
+        if path == self.metadata.path && kind == ProjectMediaKind::Video {
+            return;
+        }
+        self.project_media
+            .retain(|item| !(item.path == path && item.kind == kind));
+    }
+
+    pub fn video_has_edits(&self) -> bool {
+        self.trim_start_seconds > f64::EPSILON
+            || (self.trim_end_seconds - self.metadata.duration_seconds).abs() > 0.001
+            || !self.cuts.is_empty()
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.audio_mode == AudioMode::Muted
+    }
+
+    pub fn toggle_mute(&mut self) {
+        if self.audio_locked {
+            return;
+        }
+        self.audio_mode = if self.is_muted() {
+            AudioMode::Unchanged
+        } else {
+            AudioMode::Muted
+        };
+    }
+
+    pub fn reset_video_edits(&mut self) {
+        if self.video_locked {
+            return;
+        }
+        self.trim_start_seconds = 0.0;
+        self.trim_end_seconds = self.metadata.duration_seconds;
+        self.clear_cuts();
+    }
+
+    pub fn remove_audio_track(&mut self) {
+        if self.audio_locked || !self.metadata.has_audio {
+            return;
+        }
+        self.audio_removed = true;
+        self.audio_mode = AudioMode::Muted;
+    }
+
+    pub fn clear_zoom_clips(&mut self) {
+        if self.zoom_locked {
+            return;
+        }
+        self.zoom_clips.clear();
+        self.selected_zoom = None;
+        self.zoom_hidden = false;
+    }
+
+    pub fn set_title(&mut self, raw: &str) {
+        let title = sanitize_title(raw);
+        if self.title == title {
+            return;
+        }
+        let old = self.title.clone();
+        self.title = title.clone();
+        for item in &mut self.project_media {
+            if item.path != self.metadata.path {
+                continue;
+            }
+            match item.kind {
+                ProjectMediaKind::Video if item.display_name == old => {
+                    item.display_name = title.clone();
+                }
+                ProjectMediaKind::Audio if item.display_name == format!("{old} audio") => {
+                    item.display_name = format!("{title} audio");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn export_path(&self) -> PathBuf {
+        unique_edited_path(
+            self.metadata.path.parent().unwrap_or_else(|| Path::new("")),
+            &self.title,
+        )
     }
 
     pub fn add_project_media(&mut self, item: ProjectMedia) {
@@ -183,6 +338,9 @@ impl VideoEditState {
     }
 
     pub fn set_trim_start(&mut self, value: f64) {
+        if self.video_locked {
+            return;
+        }
         let duration = self.metadata.duration_seconds.max(0.0);
         let max_start = if duration > MIN_TRIM_DURATION_SECONDS {
             self.trim_end_seconds - MIN_TRIM_DURATION_SECONDS
@@ -193,6 +351,9 @@ impl VideoEditState {
     }
 
     pub fn shift_trim(&mut self, delta: f64) {
+        if self.video_locked {
+            return;
+        }
         let duration = self.metadata.duration_seconds.max(0.0);
         let span = self.trim_duration();
         if span <= 0.0 || duration <= 0.0 {
@@ -212,6 +373,9 @@ impl VideoEditState {
     }
 
     pub fn set_trim_end(&mut self, value: f64) {
+        if self.video_locked {
+            return;
+        }
         let duration = self.metadata.duration_seconds.max(0.0);
         let min_end = if duration > MIN_TRIM_DURATION_SECONDS {
             self.trim_start_seconds + MIN_TRIM_DURATION_SECONDS
@@ -247,6 +411,9 @@ impl VideoEditState {
 
     /// Add a cut at the given time.
     pub fn add_cut(&mut self, seconds: f64) {
+        if self.video_locked {
+            return;
+        }
         if seconds <= self.trim_start_seconds + 0.1 || seconds >= self.trim_end_seconds - 0.1 {
             return;
         }
@@ -276,6 +443,9 @@ impl VideoEditState {
 
     /// Remove a cut point by index.
     pub fn remove_cut(&mut self, cut_index: usize) {
+        if self.video_locked {
+            return;
+        }
         if cut_index >= self.cuts.len() {
             return;
         }
@@ -300,6 +470,9 @@ impl VideoEditState {
 
     /// Move a cut point without crossing its neighboring cuts.
     pub fn move_cut(&mut self, cut_index: usize, seconds: f64) {
+        if self.video_locked {
+            return;
+        }
         if cut_index >= self.cuts.len() {
             return;
         }
@@ -322,6 +495,9 @@ impl VideoEditState {
 
     /// Toggle keep/remove for a segment.
     pub fn toggle_segment(&mut self, segment_index: usize) {
+        if self.video_locked {
+            return;
+        }
         if let Some(kept) = self.segments_kept.get_mut(segment_index) {
             *kept = !*kept;
         }
@@ -329,6 +505,9 @@ impl VideoEditState {
 
     /// Clear all cuts.
     pub fn clear_cuts(&mut self) {
+        if self.video_locked {
+            return;
+        }
         self.cuts.clear();
         self.segments_kept = vec![true];
         self.segment_order = vec![0];
@@ -336,6 +515,9 @@ impl VideoEditState {
 
     /// Move a segment from one position in the output order to another.
     pub fn move_segment(&mut self, from_order_pos: usize, to_order_pos: usize) {
+        if self.video_locked {
+            return;
+        }
         if from_order_pos >= self.segment_order.len()
             || to_order_pos >= self.segment_order.len()
             || from_order_pos == to_order_pos
@@ -399,7 +581,7 @@ impl VideoEditState {
     }
 
     pub fn needs_composite(&self) -> bool {
-        !self.zoom_clips.is_empty()
+        (!self.zoom_clips.is_empty() && !self.zoom_hidden)
             || !self.background.is_none()
             || self
                 .sidecar
@@ -420,6 +602,9 @@ impl VideoEditState {
     }
 
     pub fn add_zoom_at_playhead(&mut self) -> Option<usize> {
+        if self.zoom_locked {
+            return None;
+        }
         let start = self
             .playhead_seconds
             .clamp(self.trim_start_seconds, self.trim_end_seconds);
@@ -452,6 +637,9 @@ impl VideoEditState {
     }
 
     pub fn remove_selected_zoom(&mut self) {
+        if self.zoom_locked {
+            return;
+        }
         if let Some(index) = self.selected_zoom.take() {
             if index < self.zoom_clips.len() {
                 self.zoom_clips.remove(index);
@@ -460,6 +648,9 @@ impl VideoEditState {
     }
 
     pub fn set_zoom_range(&mut self, index: usize, start: f64, end: f64) {
+        if self.zoom_locked {
+            return;
+        }
         if self.zoom_clips.get(index).is_none() {
             return;
         }
@@ -483,12 +674,27 @@ impl VideoEditState {
     }
 
     pub fn eval_zoom(&self, t: f64) -> (f64, (f64, f64)) {
+        if self.zoom_hidden {
+            return (
+                1.0,
+                (
+                    self.metadata.width as f64 / 2.0,
+                    self.metadata.height as f64 / 2.0,
+                ),
+            );
+        }
         eval_zoom(
             &self.zoom_clips,
             t,
             self.metadata.width as f64,
             self.metadata.height as f64,
         )
+    }
+
+    pub fn apply_aspect_ratio(&mut self, width: u32, height: u32) {
+        self.dimension_preset = DimensionPreset::Custom;
+        self.custom_width = width.max(MIN_DIMENSION);
+        self.custom_height = height.max(MIN_DIMENSION);
     }
 
     pub fn padded_output_dimensions(&self) -> (u32, u32) {
@@ -666,13 +872,81 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-pub fn edited_output_path(input: &Path) -> PathBuf {
-    let parent = input.parent().unwrap_or_else(|| Path::new(""));
-    let stem = input
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("recording");
+pub const WEBCUT_ASPECT_RATIOS: [(&str, u32, u32); 6] = [
+    ("21:9", 1792, 768),
+    ("16:9", 1920, 1080),
+    ("4:3", 1440, 1080),
+    ("9:16", 608, 1080),
+    ("3:4", 810, 1080),
+    ("1:1", 1080, 1080),
+];
 
+pub fn format_webcut_time(seconds: f64) -> String {
+    let total_ms = (seconds.max(0.0) * 1000.0).round() as u64;
+    let ms = total_ms % 1000;
+    let total_sec = total_ms / 1000;
+    let sec = total_sec % 60;
+    let min = (total_sec / 60) % 60;
+    let hour = total_sec / 3600;
+    format!("{hour:02}:{min:02}:{sec:02}.{ms:03}")
+}
+
+pub fn closest_aspect_ratio(width: u32, height: u32) -> &'static str {
+    let aspect = width as f64 / height.max(1) as f64;
+    WEBCUT_ASPECT_RATIOS
+        .iter()
+        .min_by(|(_, aw, ah), (_, bw, bh)| {
+            let da = ((*aw as f64 / *ah as f64) - aspect).abs();
+            let db = ((*bw as f64 / *bh as f64) - aspect).abs();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(label, _, _)| *label)
+        .unwrap_or("16:9")
+}
+
+pub fn title_from_path(path: &Path) -> String {
+    sanitize_title(
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("Untitled"),
+    )
+}
+
+pub fn sanitize_title(raw: &str) -> String {
+    let mut title = String::with_capacity(raw.len());
+    let mut last_was_space = false;
+    for ch in raw.chars() {
+        let invalid = matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|');
+        if invalid || ch.is_control() {
+            continue;
+        }
+        if ch.is_whitespace() {
+            if !title.is_empty() && !last_was_space {
+                title.push(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+        last_was_space = false;
+        title.push(ch);
+    }
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        "Untitled".to_string()
+    } else {
+        title
+    }
+}
+
+pub fn edited_output_path(input: &Path) -> PathBuf {
+    unique_edited_path(
+        input.parent().unwrap_or_else(|| Path::new("")),
+        &title_from_path(input),
+    )
+}
+
+fn unique_edited_path(parent: &Path, stem: &str) -> PathBuf {
+    let stem = sanitize_title(stem);
     let mut candidate = parent.join(format!("{stem}-edited.mp4"));
     if !candidate.exists() {
         return candidate;
@@ -711,6 +985,88 @@ mod tests {
             edited_output_path(&path),
             PathBuf::from("/tmp/ApexShot Recording-edited.mp4")
         );
+    }
+
+    #[test]
+    fn sanitize_title_strips_illegal_chars_and_empty_becomes_untitled() {
+        assert_eq!(sanitize_title("  My / Clip?  "), "My Clip");
+        assert_eq!(sanitize_title(":::"), "Untitled");
+        assert_eq!(
+            title_from_path(Path::new("/tmp/ApexShot Recording.mp4")),
+            "ApexShot Recording"
+        );
+    }
+
+    #[test]
+    fn set_title_updates_state_and_export_path() {
+        let mut state = VideoEditState::new(metadata());
+        assert_eq!(state.title, "input");
+        state.set_title("  Demo / Take 1  ");
+        assert_eq!(state.title, "Demo Take 1");
+        assert_eq!(state.project_media[0].display_name, "Demo Take 1");
+        assert_eq!(state.project_media[1].display_name, "Demo Take 1 audio");
+        assert_eq!(
+            state.export_path(),
+            PathBuf::from("/tmp/Demo Take 1-edited.mp4")
+        );
+    }
+
+    #[test]
+    fn rail_lock_blocks_video_edits_and_zoom() {
+        let mut state = VideoEditState::new(metadata());
+        state.video_locked = true;
+        state.set_trim_start(1.0);
+        state.add_cut(3.0);
+        assert_eq!(state.trim_start_seconds, 0.0);
+        assert!(state.cuts.is_empty());
+
+        state.video_locked = false;
+        state.add_cut(3.0);
+        assert_eq!(state.cuts, vec![3.0]);
+        state.video_locked = true;
+        state.reset_video_edits();
+        assert_eq!(state.cuts, vec![3.0]);
+
+        state.zoom_locked = true;
+        assert!(state.add_zoom_at_playhead().is_none());
+        assert!(state.zoom_clips.is_empty());
+    }
+
+    #[test]
+    fn toggle_mute_and_remove_audio_track() {
+        let mut state = VideoEditState::new(metadata());
+        assert!(state.has_audio_track());
+        assert!(!state.is_muted());
+        state.toggle_mute();
+        assert!(state.is_muted());
+        assert_eq!(state.audio_mode, AudioMode::Muted);
+
+        state.audio_locked = true;
+        state.toggle_mute();
+        assert!(state.is_muted());
+        state.remove_audio_track();
+        assert!(state.has_audio_track());
+
+        state.audio_locked = false;
+        state.remove_audio_track();
+        assert!(!state.has_audio_track());
+        assert!(state.is_muted());
+    }
+
+    #[test]
+    fn hidden_zoom_skips_eval_and_clear_zoom_clips() {
+        let mut state = VideoEditState::new(metadata());
+        assert!(state.add_zoom_at_playhead().is_some());
+        assert!(state.has_zoom_track());
+        state.zoom_hidden = true;
+        let (scale, center) = state.eval_zoom(0.5);
+        assert_eq!(scale, 1.0);
+        assert_eq!(center, (960.0, 540.0));
+        assert!(!state.needs_composite());
+
+        state.clear_zoom_clips();
+        assert!(!state.has_zoom_track());
+        assert!(!state.zoom_hidden);
     }
 
     #[test]
@@ -774,6 +1130,62 @@ mod tests {
         assert_eq!(quality_to_crf(100), 18);
         assert_eq!(quality_to_crf(70), 22);
         assert_eq!(quality_to_crf(0), 32);
+    }
+
+    #[test]
+    fn extra_videos_get_their_own_tracks() {
+        let mut state = VideoEditState::new(metadata());
+        assert_eq!(state.video_tracks().len(), 1);
+        assert!(state.extra_video_tracks().is_empty());
+
+        state.add_project_media(ProjectMedia {
+            path: PathBuf::from("/tmp/second.mp4"),
+            display_name: "second".into(),
+            kind: ProjectMediaKind::Video,
+            duration_seconds: Some(4.0),
+        });
+        assert_eq!(state.video_tracks().len(), 2);
+        assert_eq!(state.extra_video_tracks().len(), 1);
+        assert_eq!(
+            state.extra_video_tracks()[0].path,
+            PathBuf::from("/tmp/second.mp4")
+        );
+
+        state.remove_project_media(Path::new("/tmp/input.mp4"), ProjectMediaKind::Video);
+        assert_eq!(state.video_tracks().len(), 2);
+        state.remove_project_media(Path::new("/tmp/second.mp4"), ProjectMediaKind::Video);
+        assert_eq!(state.video_tracks().len(), 1);
+        assert!(state.extra_video_tracks().is_empty());
+    }
+
+    #[test]
+    fn timeline_scale_zero_is_identity_mapping() {
+        let state = VideoEditState::new(metadata());
+        assert_eq!(state.time_to_x(0.0, 1000.0), 0.0);
+        assert!((state.time_to_x(5.0, 1000.0) - 500.0).abs() < 0.01);
+        assert!((state.x_to_time(250.0, 1000.0) - 2.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn format_webcut_time_matches_reference() {
+        assert_eq!(format_webcut_time(0.0), "00:00:00.000");
+        assert_eq!(format_webcut_time(84.56), "00:01:24.560");
+        assert_eq!(format_webcut_time(3661.005), "01:01:01.005");
+    }
+
+    #[test]
+    fn closest_aspect_ratio_picks_nearest() {
+        assert_eq!(closest_aspect_ratio(1920, 1080), "16:9");
+        assert_eq!(closest_aspect_ratio(1080, 1080), "1:1");
+        assert_eq!(closest_aspect_ratio(608, 1080), "9:16");
+    }
+
+    #[test]
+    fn apply_aspect_ratio_sets_custom_box() {
+        let mut state = VideoEditState::new(metadata());
+        state.apply_aspect_ratio(1080, 1080);
+        assert_eq!(state.dimension_preset, DimensionPreset::Custom);
+        assert_eq!((state.custom_width, state.custom_height), (1080, 1080));
     }
 
     #[test]

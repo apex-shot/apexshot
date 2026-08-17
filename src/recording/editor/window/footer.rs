@@ -3,7 +3,8 @@ use super::panels::EditorControls;
 use crate::recording::editor::ffmpeg;
 use crate::recording::editor::model::{format_size, VideoEditState};
 use gtk4::{
-    glib, prelude::*, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Spinner,
+    glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Image, Label, Orientation,
+    Spinner,
 };
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -14,29 +15,28 @@ use std::time::Duration;
 pub(super) fn build_inspector_actions(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
-    estimate_label: Label,
+    _estimate_label: Label,
     controls: EditorControls,
     exporting: Rc<Cell<bool>>,
 ) -> GtkBox {
-    let footer = GtkBox::new(Orientation::Vertical, 8);
+    let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-footer");
+    footer.add_css_class("recording-editor-inspector-toolbar");
     footer.add_css_class("editor-sidebar-actions");
     footer.set_hexpand(true);
-    footer.set_margin_start(12);
-    footer.set_margin_end(12);
-    footer.set_margin_bottom(12);
 
-    let copy = Button::with_label("Copy");
-    copy.set_has_frame(false);
-    copy.add_css_class("recording-editor-secondary-button");
-    copy.set_tooltip_text(Some("Copy the recording path to the clipboard"));
-    let upload = Button::with_label("Upload");
-    upload.set_has_frame(false);
-    upload.add_css_class("recording-editor-secondary-button");
-    upload.set_tooltip_text(Some("Export with your current settings, then upload"));
+    let copy = icon_action_button(
+        crate::capture::editor::window::icon_names::custom::COPY_SYMBOLIC,
+        "Copy the recording path to the clipboard",
+    );
+    let upload = icon_action_button(
+        crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
+        "Export with your current settings, then upload",
+    );
     let done = Button::with_label("Done");
     done.set_has_frame(false);
     done.add_css_class("recording-editor-primary-button");
+    done.set_halign(Align::End);
     done.set_tooltip_text(Some("Export the edited MP4"));
     let spinner = Spinner::new();
     spinner.set_visible(false);
@@ -82,12 +82,25 @@ pub(super) fn build_inspector_actions(
         exporting,
     );
 
-    footer.append(&estimate_label);
-    footer.append(&spinner);
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
     footer.append(&copy);
     footer.append(&upload);
+    footer.append(&spinner);
+    footer.append(&spacer);
     footer.append(&done);
     footer
+}
+
+fn icon_action_button(icon_name: &str, tooltip: &str) -> Button {
+    let button = Button::new();
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-inspector-icon");
+    button.set_tooltip_text(Some(tooltip));
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(16);
+    button.set_child(Some(&icon));
+    button
 }
 
 pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, _trim_only: bool) {

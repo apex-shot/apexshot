@@ -1,6 +1,6 @@
 use super::footer;
 use super::panels::{self, EditorControls};
-use super::toolbar;
+
 use crate::recording::editor::model::{
     VideoBackground, VideoEditState, MAX_ZOOM_SCALE, MIN_ZOOM_SCALE,
 };
@@ -11,7 +11,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-pub(super) const INSPECTOR_WIDTH: i32 = 210;
+pub(super) const INSPECTOR_WIDTH: i32 = 240;
 
 pub(super) struct InspectorParts {
     pub root: GtkBox,
@@ -25,19 +25,10 @@ pub(super) fn build_inspector(
     exporting: Rc<Cell<bool>>,
 ) -> InspectorParts {
     let root = GtkBox::new(Orientation::Vertical, 0);
-    root.add_css_class("editor-right-inspector");
     root.add_css_class("recording-editor-inspector");
     root.set_width_request(INSPECTOR_WIDTH);
     root.set_hexpand(false);
     root.set_vexpand(true);
-
-    let lights = toolbar::build_traffic_lights(window);
-    lights.set_halign(gtk4::Align::End);
-    lights.set_margin_top(8);
-    lights.set_margin_end(8);
-    lights.set_margin_start(8);
-    root.append(&lights);
-    crate::capture::editor::ui_support::install_window_drag(&lights, window);
 
     let scroll = ScrolledWindow::new();
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
@@ -51,18 +42,23 @@ pub(super) fn build_inspector(
     content.set_margin_bottom(12);
 
     let (panels_widget, controls) = panels::build_panels(state.clone(), estimate_label.clone());
+    let actions = footer::build_inspector_actions(
+        window,
+        state.clone(),
+        estimate_label.clone(),
+        controls.clone(),
+        exporting,
+    );
+    root.append(&actions);
+    content.append(&estimate_label);
     content.append(&panels_widget);
     content.append(&build_background_section(
         state.clone(),
         estimate_label.clone(),
     ));
-    content.append(&build_zoom_section(state.clone(), estimate_label.clone()));
+    content.append(&build_zoom_section(state, estimate_label));
     scroll.set_child(Some(&content));
     root.append(&scroll);
-
-    let actions =
-        footer::build_inspector_actions(window, state, estimate_label, controls.clone(), exporting);
-    root.append(&actions);
 
     InspectorParts {
         root,
