@@ -849,11 +849,8 @@ pub(super) fn build_timeline(
                 &audio_body,
                 &zoom_track_body,
             );
-            let extras: Vec<ProjectMedia> = guard
-                .extra_video_tracks()
-                .into_iter()
-                .cloned()
-                .collect();
+            let extras: Vec<ProjectMedia> =
+                guard.extra_video_tracks().into_iter().cloned().collect();
             drop(guard);
             rebuild_extra_video_tracks(&extra_video_tracks, &extras, &state, &estimate_label);
             selection.queue_draw();
