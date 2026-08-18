@@ -473,6 +473,10 @@ fn build_composite_convert_args(
         filter.push(',');
         filter.push_str(&pad);
     }
+    if let Some(blur) = zoom_blur_filter(state) {
+        filter.push(',');
+        filter.push_str(&blur);
+    }
     let draw_cursor = state
         .sidecar
         .as_ref()
@@ -571,6 +575,14 @@ fn write_cursor_png(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn zoom_blur_filter(state: &VideoEditState) -> Option<String> {
+    let frames = state.zoom_blur_mix_frames();
+    if frames <= 1 {
+        return None;
+    }
+    Some(format!("tmix=frames={frames}"))
+}
+
 fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
     if state.timeline_offset_seconds <= 0.001 {
         return None;
@@ -633,20 +645,21 @@ fn convert_scale_filter(state: &VideoEditState) -> Option<String> {
 
 fn run_multi_segment_trim(
     state: &VideoEditState,
-    segments: &[(f64, f64)],
+    _segments: &[(f64, f64)],
     output_path: &Path,
     convert: bool,
 ) -> anyhow::Result<()> {
     let tmp_dir = std::env::temp_dir().join(format!("apexshot-segments-{}", std::process::id()));
     std::fs::create_dir_all(&tmp_dir)?;
 
+    let placed = state.ordered_placed_segments();
     let mut segment_files = Vec::new();
-    for (i, &(start, end)) in segments.iter().enumerate() {
+    let mut cursor = 0.0;
+    for (i, &(comp, start, end)) in placed.iter().enumerate() {
         let seg_path = tmp_dir.join(format!("seg_{i:04}.mp4"));
         let mut segment_state = state.clone();
-        if i > 0 {
-            segment_state.timeline_offset_seconds = 0.0;
-        }
+        segment_state.timeline_offset_seconds = (comp - cursor).max(0.0);
+        cursor = comp + (end - start).max(0.0);
         let args = if convert {
             build_single_convert_args(&segment_state, start, end, &seg_path)
         } else {
@@ -793,6 +806,7 @@ mod tests {
                 scale: 1.8,
                 center: (960.0, 540.0),
                 ease_ms: 200,
+                mode: crate::recording::editor::model::ZoomMode::Auto,
             });
         assert!(state.needs_reencode());
         let args = build_single_convert_args(
@@ -805,7 +819,30 @@ mod tests {
         assert!(args
             .iter()
             .any(|arg| arg.contains("sendcmd") && arg.contains("crop@z")));
+        assert!(args.iter().any(|arg| arg.contains("tmix=frames=12")));
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
+    }
+
+    #[test]
+    fn convert_skips_tmix_when_blur_is_off() {
+        let mut state = state();
+        state.zoom_clips.push(crate::recording::editor::model::ZoomClip {
+            start: 1.5,
+            end: 3.3,
+            scale: 1.8,
+            center: (960.0, 540.0),
+            ease_ms: 200,
+            mode: crate::recording::editor::model::ZoomMode::Auto,
+        });
+        state.set_zoom_blur_samples(1);
+        state.set_zoom_blur_shutter(0.0);
+        let args = build_single_convert_args(
+            &state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        assert!(!args.iter().any(|arg| arg.contains("tmix")));
     }
 
     #[test]

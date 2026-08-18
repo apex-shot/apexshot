@@ -1,6 +1,7 @@
 use super::footer;
 use crate::recording::editor::model::{
-    even_crop_rect, format_webcut_time, VideoBackground, VideoEditState, WEBCUT_ASPECT_RATIOS,
+    even_crop_rect, format_webcut_time, VideoBackground, VideoEditState, ZoomMode,
+    WEBCUT_ASPECT_RATIOS,
 };
 use gtk4::{
     glib, prelude::*, Align, AspectFrame, Box as GtkBox, Button, DrawingArea, GestureDrag, Image,
@@ -122,12 +123,13 @@ pub(super) fn build_preview(
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
             let (dims, zoom, pad, playhead, duration, hidden, label) = {
                 let s = state.lock().unwrap();
-                let (scale, _) = s.eval_zoom(s.playhead_seconds);
+                let source_t = s.source_playhead();
+                let (scale, _) = s.eval_zoom(source_t);
                 (
                     s.padded_output_dimensions(),
                     scale,
                     !s.background.is_none(),
-                    s.playhead_seconds,
+                    source_t,
                     s.metadata.duration_seconds,
                     s.video_hidden,
                     s.canvas_label(),
@@ -175,6 +177,9 @@ pub(super) fn build_preview(
             let Some(index) = state.selected_zoom else {
                 return;
             };
+            if state.zoom_clips.get(index).map(|clip| clip.mode) != Some(ZoomMode::Manual) {
+                return;
+            }
             let src_w = state.metadata.width.max(1) as f64;
             let src_h = state.metadata.height.max(1) as f64;
             if let Some(clip) = state.zoom_clips.get_mut(index) {
@@ -445,15 +450,16 @@ fn draw_preview_overlays(
         let _ = cr.fill();
     }
 
-    let (scale, center) = state.eval_zoom(state.playhead_seconds);
+    let source_t = state.source_playhead();
+    let (scale, center) = state.eval_zoom(source_t);
     let src_w = state.metadata.width.max(1);
     let src_h = state.metadata.height.max(1);
     let (_cx, _cy, crop_w, crop_h) = even_crop_rect(scale, center, src_w, src_h);
     let _ = (picture, crop_w, crop_h);
 
     if let Some(sidecar) = &state.sidecar {
-        if let Some((x, y, kind)) = sidecar.interpolated_at(state.playhead_seconds) {
-            let pulse = sidecar.click_pulse_at(state.playhead_seconds);
+        if let Some((x, y, kind)) = sidecar.interpolated_at(source_t) {
+            let pulse = sidecar.click_pulse_at(source_t);
             let px = (x / src_w as f64) * w;
             let py = (y / src_h as f64) * h;
             draw_apexshot_cursor(cr, px, py, pulse, kind.as_str());

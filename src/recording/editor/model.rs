@@ -7,7 +7,19 @@ pub const DEFAULT_ZOOM_DURATION_SECONDS: f64 = 1.8;
 pub const DEFAULT_ZOOM_SCALE: f64 = 1.8;
 pub const DEFAULT_ZOOM_EASE_MS: u32 = 200;
 pub const MIN_ZOOM_SCALE: f64 = 1.2;
-pub const MAX_ZOOM_SCALE: f64 = 3.0;
+pub const MAX_ZOOM_SCALE: f64 = 5.0;
+pub const DEFAULT_ZOOM_BLUR_SAMPLES: u32 = 13;
+pub const DEFAULT_ZOOM_BLUR_SHUTTER: f64 = 0.94;
+pub const MIN_ZOOM_BLUR_SAMPLES: u32 = 1;
+pub const MAX_ZOOM_BLUR_SAMPLES: u32 = 21;
+pub const ZOOM_SCALE_PRESETS: [(&str, f64); 6] = [
+    ("1.25×", 1.25),
+    ("1.5×", 1.5),
+    ("1.8×", 1.8),
+    ("2.2×", 2.2),
+    ("3.5×", 3.5),
+    ("5×", 5.0),
+];
 
 #[derive(Debug, Clone)]
 pub struct VideoMetadata {
@@ -60,6 +72,13 @@ impl VideoBackground {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ZoomMode {
+    #[default]
+    Auto,
+    Manual,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZoomClip {
     pub start: f64,
@@ -67,12 +86,34 @@ pub struct ZoomClip {
     pub scale: f64,
     pub center: (f64, f64),
     pub ease_ms: u32,
+    pub mode: ZoomMode,
 }
 
 impl ZoomClip {
     pub fn duration(&self) -> f64 {
         (self.end - self.start).max(0.0)
     }
+}
+
+pub fn format_zoom_scale(scale: f64) -> String {
+    for &(label, preset) in &ZOOM_SCALE_PRESETS {
+        if (scale - preset).abs() < 0.04 {
+            return label.to_string();
+        }
+    }
+    if (scale - scale.round()).abs() < 0.05 {
+        format!("{:.0}×", scale.round())
+    } else {
+        format!("{scale:.1}×")
+    }
+}
+
+pub fn nearest_zoom_preset(scale: f64) -> f64 {
+    ZOOM_SCALE_PRESETS
+        .iter()
+        .min_by(|(_, a), (_, b)| (a - scale).abs().total_cmp(&(b - scale).abs()))
+        .map(|(_, value)| *value)
+        .unwrap_or(DEFAULT_ZOOM_SCALE)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +136,7 @@ pub struct VideoEditState {
     pub metadata: VideoMetadata,
     pub trim_start_seconds: f64,
     pub trim_end_seconds: f64,
+    /// Playhead on the composition ruler. Dragging a clip must not move this.
     pub playhead_seconds: f64,
     pub dimension_preset: DimensionPreset,
     pub custom_width: u32,
@@ -109,8 +151,12 @@ pub struct VideoEditState {
     /// Output order of segments (indices into segment_boundaries()).
     /// Length is always cuts.len() + 1.
     pub segment_order: Vec<usize>,
+    /// Composition start of each chronological segment. Dragging a cut piece
+    /// changes only its start so a gap can open between neighbors.
+    pub segment_starts: Vec<f64>,
     pub zoom_clips: Vec<ZoomClip>,
     pub selected_zoom: Option<usize>,
+    pub selected_segment: Option<usize>,
     pub background: VideoBackground,
     pub background_padding: f64,
     pub background_corner_radius: f64,
@@ -125,6 +171,10 @@ pub struct VideoEditState {
     pub audio_removed: bool,
     pub zoom_locked: bool,
     pub zoom_hidden: bool,
+    /// Classic animation keeps a fixed focus point even when the clip is Auto.
+    pub zoom_classic: bool,
+    pub zoom_blur_samples: u32,
+    pub zoom_blur_shutter: f64,
     /// 0 = fit the whole clip, 100 = 8× time-axis zoom (WebCut scaler).
     pub timeline_scale: f64,
     /// Seconds of empty timeline before the clip. Dragging the clip body
@@ -178,8 +228,10 @@ impl VideoEditState {
             cuts: Vec::new(),
             segments_kept: vec![true],
             segment_order: vec![0],
+            segment_starts: vec![0.0],
             zoom_clips: Vec::new(),
             selected_zoom: None,
+            selected_segment: None,
             background: VideoBackground::None,
             background_padding: 24.0,
             background_corner_radius: 18.0,
@@ -193,6 +245,9 @@ impl VideoEditState {
             audio_removed: false,
             zoom_locked: false,
             zoom_hidden: false,
+            zoom_classic: false,
+            zoom_blur_samples: DEFAULT_ZOOM_BLUR_SAMPLES,
+            zoom_blur_shutter: DEFAULT_ZOOM_BLUR_SHUTTER,
             timeline_scale: 0.0,
             timeline_offset_seconds: 0.0,
             timeline_scroll_seconds: 0.0,
@@ -200,11 +255,36 @@ impl VideoEditState {
     }
 
     pub fn composition_duration(&self) -> f64 {
-        (self.timeline_offset_seconds + self.metadata.duration_seconds).max(0.001)
+        self.video_end_seconds().max(0.001)
     }
 
     pub fn source_duration(&self) -> f64 {
         self.metadata.duration_seconds.max(0.001)
+    }
+
+    pub fn content_end_seconds(&self) -> f64 {
+        let zoom_end = self
+            .zoom_clips
+            .iter()
+            .map(|clip| clip.end)
+            .fold(0.0_f64, f64::max);
+        self.video_end_seconds()
+            .max(zoom_end)
+            .max(self.source_duration())
+    }
+
+    fn video_end_seconds(&self) -> f64 {
+        let bounds = self.segment_boundaries();
+        self.segment_order
+            .iter()
+            .filter(|&&i| self.segments_kept.get(i).copied().unwrap_or(true))
+            .filter_map(|&i| {
+                bounds
+                    .get(i)
+                    .map(|(start, end)| self.segment_start(i) + (end - start).max(0.0))
+            })
+            .fold(0.0_f64, f64::max)
+            .max(self.source_duration())
     }
 
     pub fn visible_span_seconds(&self) -> f64 {
@@ -223,11 +303,91 @@ impl VideoEditState {
     }
 
     pub fn source_to_timeline(&self, source_t: f64) -> f64 {
-        self.timeline_offset_seconds + source_t
+        let bounds = self.segment_boundaries();
+        for (index, &(start, end)) in bounds.iter().enumerate() {
+            if source_t + 1e-9 >= start && source_t <= end + 1e-9 {
+                return self.segment_start(index) + (source_t - start);
+            }
+        }
+        if let Some(&(start, _)) = bounds.first() {
+            if source_t < start {
+                return self.segment_start(0) + (source_t - start);
+            }
+        }
+        if let Some((index, &(start, _))) = bounds.iter().enumerate().last() {
+            return self.segment_start(index) + (source_t - start);
+        }
+        source_t.max(0.0)
     }
 
     pub fn timeline_to_source(&self, timeline_t: f64) -> f64 {
+        let bounds = self.segment_boundaries();
+        for (index, &(start, end)) in bounds.iter().enumerate() {
+            let comp = self.segment_start(index);
+            let comp_end = comp + (end - start).max(0.0);
+            if timeline_t + 1e-9 >= comp && timeline_t <= comp_end + 1e-9 {
+                return start + (timeline_t - comp);
+            }
+        }
         timeline_t - self.timeline_offset_seconds
+    }
+
+    pub fn segment_start(&self, index: usize) -> f64 {
+        self.segment_starts.get(index).copied().unwrap_or(0.0).max(0.0)
+    }
+
+    pub fn set_segment_start(&mut self, index: usize, start: f64) {
+        if self.video_locked || index >= self.segment_starts.len() {
+            return;
+        }
+        self.segment_starts[index] = if start.is_finite() { start.max(0.0) } else { 0.0 };
+        self.sync_offset_from_segments();
+        self.clamp_timeline_scroll();
+    }
+
+    pub fn settle_segment_start(&mut self, index: usize) {
+        if self.video_locked || index >= self.segment_starts.len() {
+            return;
+        }
+        self.segment_starts[index] = self.unoverlap_segment_start(index, self.segment_start(index));
+        self.sync_offset_from_segments();
+        self.clamp_timeline_scroll();
+    }
+
+    fn unoverlap_segment_start(&self, index: usize, start: f64) -> f64 {
+        let bounds = self.segment_boundaries();
+        let Some(&(src_start, src_end)) = bounds.get(index) else {
+            return start.max(0.0);
+        };
+        let duration = (src_end - src_start).max(0.0);
+        let mut start = if start.is_finite() { start.max(0.0) } else { 0.0 };
+        for _ in 0..self.segment_starts.len() {
+            let end = start + duration;
+            let Some((other_start, other_end)) = bounds.iter().enumerate().find_map(|(other, &(s0, s1))| {
+                if other == index || !self.segments_kept.get(other).copied().unwrap_or(true) {
+                    return None;
+                }
+                let other_start = self.segment_start(other);
+                let other_end = other_start + (s1 - s0).max(0.0);
+                ranges_overlap(start, end, other_start, other_end).then_some((other_start, other_end))
+            }) else {
+                break;
+            };
+            let left = (other_start - duration).max(0.0);
+            let right = other_end;
+            let prefer_right = start + duration * 0.5 >= (other_start + other_end) * 0.5;
+            start = if prefer_right || left + duration > other_start + 1e-9 {
+                right
+            } else {
+                left
+            };
+        }
+        start
+    }
+
+    pub fn source_playhead(&self) -> f64 {
+        self.timeline_to_source(self.playhead_seconds)
+            .clamp(0.0, self.source_duration())
     }
 
     pub fn source_to_x(&self, source_t: f64, width: f64) -> f64 {
@@ -238,12 +398,25 @@ impl VideoEditState {
         if self.video_locked {
             return;
         }
-        self.timeline_offset_seconds = if value.is_finite() {
-            value.max(0.0)
+        let next = if value.is_finite() { value.max(0.0) } else { 0.0 };
+        let delta = next - self.timeline_offset_seconds;
+        self.timeline_offset_seconds = next;
+        if self.segment_starts.len() <= 1 {
+            if let Some(start) = self.segment_starts.get_mut(0) {
+                *start = next;
+            }
         } else {
-            0.0
-        };
+            for start in &mut self.segment_starts {
+                *start = (*start + delta).max(0.0);
+            }
+        }
         self.clamp_timeline_scroll();
+    }
+
+    fn sync_offset_from_segments(&mut self) {
+        if let Some(min) = self.segment_starts.iter().copied().reduce(f64::min) {
+            self.timeline_offset_seconds = min.max(0.0);
+        }
     }
 
     pub fn set_timeline_scroll(&mut self, value: f64) {
@@ -275,36 +448,27 @@ impl VideoEditState {
     }
 
     pub fn timeline_view(&self) -> (f64, f64) {
-        let factor = 1.0 + (self.timeline_scale.clamp(0.0, 100.0) / 100.0) * 7.0;
-        let span = 1.0 / factor;
-        let duration = self.source_duration();
-        if self.timeline_scale <= 0.001 {
-            let start = (self.timeline_scroll_seconds / duration).max(0.0);
-            return (start, span);
-        }
-        let playhead_frac = (self.source_to_timeline(self.playhead_seconds) / duration).max(0.0);
-        let start = (playhead_frac - span * 0.4).max(0.0);
-        (start, span)
+        let visible = self.visible_span_seconds().max(0.001);
+        let start = self.timeline_scroll_seconds.max(0.0);
+        (start, visible)
     }
 
     pub fn time_to_x(&self, seconds: f64, width: f64) -> f64 {
-        let duration = self.source_duration();
-        self.frac_to_x(seconds / duration, width)
+        let (start, span) = self.timeline_view();
+        ((seconds - start) / span.max(1e-6)) * width.max(1.0)
     }
 
     pub fn x_to_time(&self, x: f64, width: f64) -> f64 {
-        let duration = self.source_duration();
-        self.x_to_frac(x, width) * duration
+        let (start, span) = self.timeline_view();
+        start + (x / width.max(1.0)) * span
     }
 
     pub fn frac_to_x(&self, frac: f64, width: f64) -> f64 {
-        let (start, span) = self.timeline_view();
-        ((frac - start) / span.max(1e-6)) * width
+        self.time_to_x(frac * self.source_duration(), width)
     }
 
     pub fn x_to_frac(&self, x: f64, width: f64) -> f64 {
-        let (start, span) = self.timeline_view();
-        start + (x / width.max(1.0)) * span
+        self.x_to_time(x, width) / self.source_duration()
     }
 
     pub fn has_audio_track(&self) -> bool {
@@ -530,6 +694,19 @@ impl VideoEditState {
             .position(|&i| i == insert_pos)
             .unwrap_or(self.segment_order.len());
         self.segment_order.insert(order_pos + 1, insert_pos + 1);
+        let left_start = self.segment_start(insert_pos);
+        let left_src = self
+            .segment_boundaries()
+            .get(insert_pos)
+            .map(|(start, _)| *start)
+            .unwrap_or(0.0);
+        let right_start = (left_start + (seconds - left_src)).max(0.0);
+        if insert_pos + 1 > self.segment_starts.len() {
+            self.segment_starts.resize(insert_pos + 1, left_start);
+        }
+        self.segment_starts.insert(insert_pos + 1, right_start);
+        self.selected_segment = Some(insert_pos);
+        self.selected_zoom = None;
     }
 
     /// Remove a cut point by index.
@@ -556,6 +733,18 @@ impl VideoEditState {
             if *idx > removed_seg {
                 *idx -= 1;
             }
+        }
+        if removed_seg < self.segment_starts.len() {
+            self.segment_starts.remove(removed_seg);
+        }
+        if let Some(sel) = self.selected_segment {
+            self.selected_segment = if sel == removed_seg {
+                Some(merged_seg)
+            } else if sel > removed_seg {
+                Some(sel - 1)
+            } else {
+                Some(sel)
+            };
         }
     }
 
@@ -602,6 +791,8 @@ impl VideoEditState {
         self.cuts.clear();
         self.segments_kept = vec![true];
         self.segment_order = vec![0];
+        self.segment_starts = vec![self.timeline_offset_seconds.max(0.0)];
+        self.selected_segment = None;
     }
 
     /// Move a segment from one position in the output order to another.
@@ -619,14 +810,38 @@ impl VideoEditState {
         self.segment_order.insert(to_order_pos, seg);
     }
 
-    /// Returns kept segments in the user-defined output order (for export).
-    pub fn ordered_kept_segments(&self) -> Vec<(f64, f64)> {
+    /// Kept segments as (composition_start, source_start, source_end), left-to-right.
+    pub fn ordered_placed_segments(&self) -> Vec<(f64, f64, f64)> {
         let boundaries = self.segment_boundaries();
-        self.segment_order
+        let mut placed: Vec<(f64, f64, f64)> = self
+            .segment_order
             .iter()
             .filter(|&&i| self.segments_kept.get(i).copied().unwrap_or(true))
-            .filter_map(|&i| boundaries.get(i).copied())
+            .filter_map(|&i| {
+                boundaries
+                    .get(i)
+                    .map(|(start, end)| (self.segment_start(i), *start, *end))
+            })
+            .collect();
+        placed.sort_by(|a, b| a.0.total_cmp(&b.0));
+        placed
+    }
+
+    /// Returns kept segments in composition order (for export).
+    pub fn ordered_kept_segments(&self) -> Vec<(f64, f64)> {
+        self.ordered_placed_segments()
+            .into_iter()
+            .map(|(_, start, end)| (start, end))
             .collect()
+    }
+
+    pub fn has_segment_gaps(&self) -> bool {
+        let placed = self.ordered_placed_segments();
+        placed.windows(2).any(|pair| {
+            let (left_comp, left_src, left_end) = pair[0];
+            let (right_comp, _, _) = pair[1];
+            right_comp > left_comp + (left_end - left_src).max(0.0) + 0.001
+        })
     }
 
     /// Returns whether segments have been reordered from their default.
@@ -677,7 +892,7 @@ impl VideoEditState {
         if tw != sw || th != sh {
             return true;
         }
-        if self.timeline_offset_seconds > 0.001 {
+        if self.timeline_offset_seconds > 0.001 || self.has_segment_gaps() {
             return true;
         }
         // Quality only takes effect when re-encoding.
@@ -709,10 +924,8 @@ impl VideoEditState {
         if self.zoom_locked {
             return None;
         }
-        let start = self
-            .playhead_seconds
-            .clamp(self.trim_start_seconds, self.trim_end_seconds);
-        let end = (start + DEFAULT_ZOOM_DURATION_SECONDS).min(self.trim_end_seconds);
+        let start = self.playhead_seconds.max(0.0);
+        let end = start + DEFAULT_ZOOM_DURATION_SECONDS;
         if end - start < 0.2 {
             return None;
         }
@@ -730,6 +943,7 @@ impl VideoEditState {
             scale: DEFAULT_ZOOM_SCALE,
             center,
             ease_ms: DEFAULT_ZOOM_EASE_MS,
+            mode: ZoomMode::Auto,
         });
         self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
         let index = self
@@ -737,6 +951,7 @@ impl VideoEditState {
             .iter()
             .position(|clip| (clip.start - start).abs() < 1e-6)?;
         self.selected_zoom = Some(index);
+        self.selected_segment = None;
         Some(index)
     }
 
@@ -751,6 +966,76 @@ impl VideoEditState {
         }
     }
 
+    pub fn selected_zoom_clip(&self) -> Option<&ZoomClip> {
+        self.selected_zoom
+            .and_then(|index| self.zoom_clips.get(index))
+    }
+
+    pub fn set_selected_zoom_mode(&mut self, mode: ZoomMode) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.mode = mode;
+        }
+    }
+
+    pub fn set_selected_zoom_scale(&mut self, scale: f64) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+        }
+    }
+
+    pub fn reset_zoom_animation(&mut self) {
+        self.zoom_classic = false;
+        self.zoom_blur_samples = DEFAULT_ZOOM_BLUR_SAMPLES;
+        self.zoom_blur_shutter = DEFAULT_ZOOM_BLUR_SHUTTER;
+    }
+
+    pub fn set_zoom_blur_samples(&mut self, samples: u32) {
+        self.zoom_blur_samples = samples.clamp(MIN_ZOOM_BLUR_SAMPLES, MAX_ZOOM_BLUR_SAMPLES);
+    }
+
+    pub fn set_zoom_blur_shutter(&mut self, shutter: f64) {
+        self.zoom_blur_shutter = shutter.clamp(0.0, 1.0);
+    }
+
+    pub fn zoom_blur_mix_frames(&self) -> u32 {
+        // ponytail: tmix averages output frames, not crop-path samples. Multi-crop blend if it looks wrong.
+        let frames = (self.zoom_blur_samples as f64 * self.zoom_blur_shutter).round() as u32;
+        frames.clamp(1, MAX_ZOOM_BLUR_SAMPLES)
+    }
+
+    pub fn move_zoom_clip(&mut self, index: usize, start: f64) {
+        if self.zoom_locked {
+            return;
+        }
+        let Some(clip) = self.zoom_clips.get(index).cloned() else {
+            return;
+        };
+        let duration = clip.duration().max(0.2);
+        let start = start.max(0.0);
+        let end = start + duration;
+        if self.zoom_clips.iter().enumerate().any(|(other, existing)| {
+            other != index && ranges_overlap(start, end, existing.start, existing.end)
+        }) {
+            return;
+        }
+        if let Some(clip) = self.zoom_clips.get_mut(index) {
+            clip.start = start;
+            clip.end = end;
+        }
+    }
+
     pub fn set_zoom_range(&mut self, index: usize, start: f64, end: f64) {
         if self.zoom_locked {
             return;
@@ -758,13 +1043,13 @@ impl VideoEditState {
         if self.zoom_clips.get(index).is_none() {
             return;
         }
-        let min_start = self.trim_start_seconds;
-        let max_end = self.trim_end_seconds;
-        let mut start = start.clamp(min_start, max_end);
-        let mut end = end.clamp(min_start, max_end);
+        let mut start = start.max(0.0);
+        let mut end = end.max(0.0);
+        if end < start {
+            std::mem::swap(&mut start, &mut end);
+        }
         if end - start < 0.2 {
-            end = (start + 0.2).min(max_end);
-            start = (end - 0.2).max(min_start);
+            end = start + 0.2;
         }
         if self.zoom_clips.iter().enumerate().any(|(other, existing)| {
             other != index && ranges_overlap(start, end, existing.start, existing.end)
@@ -778,20 +1063,36 @@ impl VideoEditState {
     }
 
     pub fn eval_zoom(&self, t: f64) -> (f64, (f64, f64)) {
+        let frame_w = self.metadata.width as f64;
+        let frame_h = self.metadata.height as f64;
         if self.zoom_hidden {
-            return (
-                1.0,
-                (
-                    self.metadata.width as f64 / 2.0,
-                    self.metadata.height as f64 / 2.0,
-                ),
-            );
+            return (1.0, (frame_w / 2.0, frame_h / 2.0));
         }
-        eval_zoom(
-            &self.zoom_clips,
-            t,
-            self.metadata.width as f64,
-            self.metadata.height as f64,
+        let timeline_t = self.source_to_timeline(t);
+        let (scale, center) = eval_zoom(&self.zoom_clips, timeline_t, frame_w, frame_h);
+        if self.zoom_classic || scale <= 1.01 {
+            return (scale, center);
+        }
+        let Some(clip) = self
+            .zoom_clips
+            .iter()
+            .find(|clip| timeline_t >= clip.start && timeline_t <= clip.end)
+        else {
+            return (scale, center);
+        };
+        if clip.mode != ZoomMode::Auto {
+            return (scale, center);
+        }
+        let Some((cursor_x, cursor_y, _)) = self
+            .sidecar
+            .as_ref()
+            .and_then(|sidecar| sidecar.interpolated_at(t))
+        else {
+            return (scale, center);
+        };
+        (
+            scale,
+            recenter_if_near_edge(center, (cursor_x, cursor_y), scale, frame_w, frame_h),
         )
     }
 
@@ -875,6 +1176,42 @@ pub fn eval_zoom(
     let center_x = eased_value(t, clip.start, clip.end, ease, frame_center.0, clip.center.0);
     let center_y = eased_value(t, clip.start, clip.end, ease, frame_center.1, clip.center.1);
     (scale, (center_x, center_y))
+}
+
+fn recenter_if_near_edge(
+    view_center: (f64, f64),
+    cursor: (f64, f64),
+    scale: f64,
+    frame_w: f64,
+    frame_h: f64,
+) -> (f64, f64) {
+    let crop_w = (frame_w / scale.max(1.0)).min(frame_w);
+    let crop_h = (frame_h / scale.max(1.0)).min(frame_h);
+    let half_w = crop_w / 2.0;
+    let half_h = crop_h / 2.0;
+    let margin_x = crop_w * 0.22;
+    let margin_y = crop_h * 0.22;
+    let left = view_center.0 - half_w;
+    let right = view_center.0 + half_w;
+    let top = view_center.1 - half_h;
+    let bottom = view_center.1 + half_h;
+
+    let mut cx = view_center.0;
+    let mut cy = view_center.1;
+    if cursor.0 < left + margin_x {
+        cx = cursor.0 - margin_x + half_w;
+    } else if cursor.0 > right - margin_x {
+        cx = cursor.0 + margin_x - half_w;
+    }
+    if cursor.1 < top + margin_y {
+        cy = cursor.1 - margin_y + half_h;
+    } else if cursor.1 > bottom - margin_y {
+        cy = cursor.1 + margin_y - half_h;
+    }
+    (
+        cx.clamp(half_w, (frame_w - half_w).max(half_w)),
+        cy.clamp(half_h, (frame_h - half_h).max(half_h)),
+    )
 }
 
 fn eased_value(t: f64, start: f64, end: f64, ease: f64, from: f64, to: f64) -> f64 {
@@ -1279,6 +1616,46 @@ mod tests {
     }
 
     #[test]
+    fn split_selects_left_segment_and_reorder_keeps_it() {
+        let mut state = VideoEditState::new(metadata());
+        state.add_cut(4.0);
+        assert_eq!(state.cuts, vec![4.0]);
+        assert_eq!(state.selected_segment, Some(0));
+        assert_eq!(state.segment_order, vec![0, 1]);
+        state.move_segment(1, 0);
+        assert_eq!(state.segment_order, vec![1, 0]);
+        assert_eq!(state.selected_segment, Some(0));
+        state.clear_cuts();
+        assert!(state.selected_segment.is_none());
+    }
+
+    #[test]
+    fn dragging_cut_segment_opens_a_gap() {
+        let mut state = VideoEditState::new(metadata());
+        state.add_cut(4.0);
+        assert!((state.segment_start(0) - 0.0).abs() < 1e-9);
+        assert!((state.segment_start(1) - 4.0).abs() < 1e-9);
+        assert!(!state.has_segment_gaps());
+        state.set_segment_start(1, 8.0);
+        assert!((state.segment_start(0) - 0.0).abs() < 1e-9);
+        assert!((state.segment_start(1) - 8.0).abs() < 1e-9);
+        assert!(state.has_segment_gaps());
+        assert!((state.composition_duration() - 14.0).abs() < 1e-9);
+        assert!((state.source_to_timeline(5.0) - 9.0).abs() < 1e-9);
+        state.set_segment_start(1, 3.0);
+        assert!((state.segment_start(1) - 3.0).abs() < 1e-9);
+        state.settle_segment_start(1);
+        assert!((state.segment_start(1) - 4.0).abs() < 1e-9);
+        state.set_segment_start(0, 4.5);
+        state.settle_segment_start(0);
+        assert!((state.segment_start(0) - 0.0).abs() < 1e-9);
+        state.set_segment_start(0, 6.0);
+        state.settle_segment_start(0);
+        assert!((state.segment_start(0) - 10.0).abs() < 1e-9);
+        assert!((state.segment_start(1) - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn timeline_scale_zero_is_identity_mapping() {
         let state = VideoEditState::new(metadata());
         assert_eq!(state.time_to_x(0.0, 1000.0), 0.0);
@@ -1290,21 +1667,16 @@ mod tests {
     fn timeline_offset_shifts_clip_and_extends_composition() {
         let mut state = VideoEditState::new(metadata());
         assert_eq!(state.composition_duration(), 10.0);
+        state.playhead_seconds = 2.0;
         state.set_timeline_offset(5.0);
         assert!((state.composition_duration() - 15.0).abs() < 1e-9);
-        // Fit zoom keeps source pixels-per-second; the clip does not shrink.
+        // Moving a clip pans it on a fixed ruler. Zoom and playhead stay put.
+        assert!((state.visible_span_seconds() - 10.0).abs() < 1e-9);
+        assert!((state.playhead_seconds - 2.0).abs() < 1e-9);
         assert!((state.source_to_x(0.0, 1000.0) - 500.0).abs() < 0.01);
         assert!((state.source_to_x(10.0, 1000.0) - 1500.0).abs() < 0.01);
-        assert!(
-            ((state.source_to_x(10.0, 1000.0) - state.source_to_x(0.0, 1000.0)) - 1000.0).abs()
-                < 0.01
-        );
         assert!((state.timeline_to_source(7.0) - 2.0).abs() < 1e-9);
-        state.follow_clip_on_timeline();
-        assert!((state.timeline_scroll_seconds - 5.0).abs() < 1e-9);
-        assert!((state.source_to_x(0.0, 1000.0) - 0.0).abs() < 0.01);
-        assert!((state.timeline_canvas_seconds() - 25.0).abs() < 1e-9);
-        assert!((state.max_timeline_scroll() - 15.0).abs() < 1e-9);
+        assert_eq!(state.timeline_scroll_seconds, 0.0);
         state.set_timeline_offset(-3.0);
         assert_eq!(state.timeline_offset_seconds, 0.0);
         state.set_timeline_offset(999.0);
@@ -1325,11 +1697,10 @@ mod tests {
     #[test]
     fn timeline_stays_open_past_the_clip() {
         let mut state = VideoEditState::new(metadata());
-        assert!((state.timeline_canvas_seconds() - 20.0).abs() < 1e-9);
-        assert!((state.max_timeline_scroll() - 10.0).abs() < 1e-9);
+        assert!((state.visible_span_seconds() - 10.0).abs() < 1e-9);
+        state.timeline_scale = 100.0 / 7.0;
         state.set_timeline_scroll(10.0);
         assert!((state.x_to_time(0.0, 1000.0) - 10.0).abs() < 0.01);
-        assert!((state.x_to_time(1000.0, 1000.0) - 20.0).abs() < 0.01);
         state.set_timeline_offset(240.0);
         state.follow_clip_on_timeline();
         assert!((state.timeline_offset_seconds - 240.0).abs() < 1e-9);
@@ -1431,6 +1802,7 @@ mod tests {
             scale: 1.8,
             center: (960.0, 540.0),
             ease_ms: 200,
+            mode: ZoomMode::Auto,
         });
         assert!(state.needs_reencode());
 
@@ -1451,6 +1823,7 @@ mod tests {
             scale: 2.0,
             center: (200.0, 100.0),
             ease_ms: 200,
+            mode: ZoomMode::Manual,
         }];
         let (outside, _) = eval_zoom(&clips, 0.5, 1920.0, 1080.0);
         assert!((outside - 1.0).abs() < 1e-9);
@@ -1465,6 +1838,77 @@ mod tests {
 
         let (ease_out, _) = eval_zoom(&clips, 2.7, 1920.0, 1080.0);
         assert!(ease_out > 1.0 && ease_out < 2.0);
+    }
+
+    #[test]
+    fn selected_zoom_mode_and_scale_update_clip() {
+        let mut state = VideoEditState::new(metadata());
+        assert!(state.add_zoom_at_playhead().is_some());
+        assert_eq!(state.selected_zoom_clip().unwrap().mode, ZoomMode::Auto);
+        assert!((state.selected_zoom_clip().unwrap().scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
+
+        state.set_selected_zoom_mode(ZoomMode::Manual);
+        state.set_selected_zoom_scale(1.5);
+        let clip = state.selected_zoom_clip().unwrap();
+        assert_eq!(clip.mode, ZoomMode::Manual);
+        assert!((clip.scale - 1.5).abs() < 1e-9);
+        assert_eq!(format_zoom_scale(clip.scale), "1.5×");
+    }
+
+    #[test]
+    fn auto_zoom_recenters_when_cursor_nears_edge() {
+        let mut state = VideoEditState::new(metadata());
+        let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 1920,
+                h: 1080,
+            },
+        );
+        sidecar.pointer.push(crate::recording::editor::sidecar::PointerSample {
+            t: 0.0,
+            x: 1800.0,
+            y: 540.0,
+            kind: crate::recording::editor::sidecar::CursorKind::Default,
+        });
+        state.sidecar = Some(sidecar);
+        state.playhead_seconds = 0.5;
+        let index = state.add_zoom_at_playhead().unwrap();
+        state.zoom_clips[index].start = 0.0;
+        state.zoom_clips[index].end = 2.0;
+        state.zoom_clips[index].center = (960.0, 540.0);
+        state.zoom_clips[index].scale = 2.0;
+        state.zoom_clips[index].mode = ZoomMode::Auto;
+        state.zoom_clips[index].ease_ms = 0;
+
+        let (_, auto_center) = state.eval_zoom(0.5);
+        assert!(
+            auto_center.0 > 960.0,
+            "auto zoom should follow a cursor near the right edge, got {}",
+            auto_center.0
+        );
+
+        state.zoom_clips[index].mode = ZoomMode::Manual;
+        let (_, manual_center) = state.eval_zoom(0.5);
+        assert!((manual_center.0 - 960.0).abs() < 1e-6);
+
+        state.zoom_clips[index].mode = ZoomMode::Auto;
+        state.zoom_classic = true;
+        let (_, classic_center) = state.eval_zoom(0.5);
+        assert!((classic_center.0 - 960.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn zoom_blur_mix_frames_scales_samples_by_shutter() {
+        let mut state = VideoEditState::new(metadata());
+        assert_eq!(state.zoom_blur_mix_frames(), 12);
+        state.set_zoom_blur_samples(1);
+        assert_eq!(state.zoom_blur_mix_frames(), 1);
+        state.set_zoom_blur_samples(21);
+        state.set_zoom_blur_shutter(1.0);
+        assert_eq!(state.zoom_blur_mix_frames(), 21);
     }
 
     #[test]

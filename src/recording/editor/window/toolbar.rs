@@ -8,6 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+#[allow(dead_code)]
 pub(super) fn build_titlebar(
     window: &ApplicationWindow,
     state: Option<Arc<Mutex<VideoEditState>>>,

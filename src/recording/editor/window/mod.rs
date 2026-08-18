@@ -1,21 +1,28 @@
+#[allow(dead_code)]
 mod dialogs;
+#[allow(dead_code)]
 mod footer;
+#[allow(dead_code)]
 mod inspector;
+#[allow(dead_code)]
 mod media_library;
+#[allow(dead_code)]
 mod preview;
+#[allow(dead_code)]
 mod rail;
+#[allow(dead_code)]
 mod timeline;
+mod timeline_card;
+mod tool_sidebar;
 mod toolbar;
 
 use super::ffmpeg;
 use super::model::{AudioMode, VideoEditState, VideoMetadata};
 use super::ui_support::install_recording_editor_css;
-use gtk4::gdk;
-use gtk4::gio;
 use gtk4::glib;
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
-    DropTarget, FileChooserAction, FileChooserNative, FileFilter, Image, Label, Orientation,
+    FileChooserAction, FileChooserNative, FileFilter, Image, Label, MediaFile, Orientation,
     Overlay, ResponseType, Revealer, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
@@ -111,163 +118,110 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         root.add_css_class("editor-reduced-transparency");
     }
 
-    let overlay = Overlay::new();
-    if prefers_dark {
-        overlay.add_css_class("editor-theme-dark");
-    } else {
-        overlay.add_css_class("editor-theme-light");
-    }
-    if crate::capture::editor::ui_support::prefers_reduced_transparency() {
-        overlay.add_css_class("editor-reduced-transparency");
-    }
-    overlay.set_child(Some(&root));
+    root.append(&build_window_controls(&window));
 
-    let exporting = Rc::new(Cell::new(false));
-
-    // Drop feedback banner
-    let drop_banner = GtkBox::new(Orientation::Vertical, 0);
-    drop_banner.add_css_class("recording-editor-drop-banner");
-    drop_banner.set_can_target(false);
-    let drop_label = Label::new(Some("Drop video file to open"));
-    drop_label.add_css_class("recording-editor-drop-label");
-    drop_label.set_can_target(false);
-    drop_banner.append(&drop_label);
-    let drop_revealer = Revealer::new();
-    drop_revealer.set_can_target(false);
-    drop_revealer.set_halign(Align::Center);
-    drop_revealer.set_valign(Align::Start);
-    drop_revealer.set_child(Some(&drop_banner));
-    drop_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
-    drop_revealer.set_reveal_child(false);
-    overlay.add_overlay(&drop_revealer);
-
-    // Loading banner for async drop handling
-    let loading_box = GtkBox::new(Orientation::Horizontal, 8);
-    loading_box.add_css_class("recording-editor-drop-banner");
-    loading_box.set_can_target(false);
-    loading_box.set_halign(Align::Center);
-    let loading_spinner = Spinner::new();
-    loading_spinner.set_size_request(16, 16);
-    loading_spinner.set_can_target(false);
-    let loading_label = Label::new(Some("Loading video…"));
-    loading_label.add_css_class("recording-editor-drop-label");
-    loading_label.set_can_target(false);
-    loading_box.append(&loading_spinner);
-    loading_box.append(&loading_label);
-    let loading_revealer = Revealer::new();
-    loading_revealer.set_can_target(false);
-    loading_revealer.set_halign(Align::Center);
-    loading_revealer.set_valign(Align::Start);
-    loading_revealer.set_child(Some(&loading_box));
-    loading_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
-    loading_revealer.set_reveal_child(false);
-    overlay.add_overlay(&loading_revealer);
-
-    let loading = Rc::new(Cell::new(false));
-    let open_button_slot = Rc::new(RefCell::new(None::<Button>));
-
-    match initial_video {
-        InitialVideo::None => {
-            populate_empty_root(
-                &root,
-                &window,
-                exporting.clone(),
-                &loading_revealer,
-                &loading_spinner,
-                open_button_slot.clone(),
-                loading.clone(),
-            );
-        }
-        InitialVideo::AsyncLoad(path) => {
-            populate_empty_root(
-                &root,
-                &window,
-                exporting.clone(),
-                &loading_revealer,
-                &loading_spinner,
-                open_button_slot.clone(),
-                loading.clone(),
-            );
-            if let Some(btn) = open_button_slot.borrow().as_ref() {
-                btn.set_sensitive(false);
+    let state = match &initial_video {
+        InitialVideo::AsyncLoad(path) => match ffmpeg::probe_metadata(path) {
+            Ok(metadata) => Some(Arc::new(Mutex::new(VideoEditState::new(metadata)))),
+            Err(err) => {
+                eprintln!(
+                    "[recording-editor] failed to probe {}: {err}",
+                    path.display()
+                );
+                None
             }
-            load_video_async(
-                path,
-                &root,
-                &window,
-                exporting.clone(),
-                &loading_revealer,
-                &loading_spinner,
-                open_button_slot.clone(),
-                loading.clone(),
-            );
-        }
-    }
+        },
+        InitialVideo::None => None,
+    };
+    let state = state.unwrap_or_else(|| Arc::new(Mutex::new(placeholder_edit_state())));
+    let media = Rc::new(RefCell::new(
+        match &initial_video {
+            InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
+            InitialVideo::None => None,
+        },
+    ));
+
+    let paint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let refresh_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let ping = {
+        let paint_slot = paint_slot.clone();
+        let refresh_slot = refresh_slot.clone();
+        Rc::new(move || {
+            if let Some(paint) = paint_slot.borrow().clone() {
+                paint();
+            }
+            if let Some(refresh) = refresh_slot.borrow().clone() {
+                refresh();
+            }
+        }) as Rc<dyn Fn()>
+    };
+
+    let workspace = GtkBox::new(Orientation::Horizontal, 0);
+    workspace.add_css_class("recording-editor-workspace");
+    workspace.set_hexpand(true);
+    workspace.set_vexpand(true);
+
+    let stage = GtkBox::new(Orientation::Vertical, 0);
+    stage.add_css_class("recording-editor-stage");
+    stage.set_hexpand(true);
+    stage.set_vexpand(true);
+    workspace.append(&stage);
+
+    let sidebar = tool_sidebar::build_tool_sidebar(state.clone(), ping.clone());
+    workspace.append(&sidebar.widget);
+    root.append(&workspace);
+
+    let (timeline, paint) = timeline_card::build_timeline_card(state, media, ping.clone());
+    root.append(&timeline);
+    *paint_slot.borrow_mut() = Some(paint);
+    *refresh_slot.borrow_mut() = Some(sidebar.refresh);
+    ping();
+
     crate::capture::editor::ui_support::install_edge_resize(&root, &window);
-
-    // Drag-and-drop target for video files — attach to window so it doesn't eat events from root
-    let drop_target = DropTarget::new(gio::File::static_type(), gdk::DragAction::COPY);
-    let drop_revealer_enter = drop_revealer.clone();
-    let drop_revealer_leave = drop_revealer.clone();
-    let root_ref = root.clone();
-    let window_ref = window.clone();
-    let exporting_for_drop = exporting.clone();
-    let loading_revealer_drop = loading_revealer.clone();
-    let loading_spinner_drop = loading_spinner.clone();
-    let open_button_slot_drop = open_button_slot.clone();
-    let loading_drop = loading.clone();
-    let loading_drop_enter = loading.clone();
-    drop_target.connect_enter(move |_, _x, _y| {
-        if loading_drop_enter.get() {
-            return gdk::DragAction::empty();
-        }
-        drop_revealer_enter.set_reveal_child(true);
-        gdk::DragAction::COPY
-    });
-    drop_target.connect_leave(move |_| {
-        drop_revealer_leave.set_reveal_child(false);
-    });
-    drop_target.connect_drop(move |_, value, _x, _y| {
-        drop_revealer.set_reveal_child(false);
-        if loading_drop.get() {
-            return false;
-        }
-        let Ok(file) = value.get::<gio::File>() else {
-            return false;
-        };
-        let Some(path) = file.path() else {
-            return false;
-        };
-        if !is_supported_video_path(&path) {
-            return false;
-        }
-        load_video_async(
-            path.to_path_buf(),
-            &root_ref,
-            &window_ref,
-            exporting_for_drop.clone(),
-            &loading_revealer_drop,
-            &loading_spinner_drop,
-            open_button_slot_drop.clone(),
-            loading_drop.clone(),
-        );
-        true
-    });
-    window.add_controller(drop_target);
-
-    let exporting_for_close = exporting.clone();
-    window.connect_close_request(move |_| {
-        if exporting_for_close.get() {
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-
-    window.set_child(Some(&overlay));
+    window.set_child(Some(&root));
     window.present();
 }
 
+fn placeholder_edit_state() -> VideoEditState {
+    let mut state = VideoEditState::new(VideoMetadata {
+        path: PathBuf::from("Screen Recording.mp4"),
+        duration_seconds: 8.0,
+        width: 1920,
+        height: 1080,
+        file_size_bytes: 0,
+        has_audio: false,
+    });
+    state.title = "Screen Recording".into();
+    state.playhead_seconds = 0.0;
+    let _ = state.add_zoom_at_playhead();
+    if let Some(clip) = state.zoom_clips.first_mut() {
+        clip.start = 3.2;
+        clip.end = 8.0;
+    }
+    state
+}
+
+fn build_window_controls(window: &ApplicationWindow) -> GtkBox {
+    let bar = GtkBox::new(Orientation::Horizontal, 8);
+    bar.add_css_class("recording-editor-window-controls");
+    bar.set_hexpand(true);
+    bar.set_vexpand(false);
+    bar.set_valign(Align::Start);
+
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    bar.append(&spacer);
+
+    let lights = toolbar::build_traffic_lights(window);
+    lights.set_halign(Align::End);
+    lights.set_valign(Align::Center);
+    bar.append(&lights);
+
+    crate::capture::editor::ui_support::install_window_drag(&bar, window);
+    bar
+}
+
+#[allow(dead_code)]
 fn populate_loaded_root(
     root: &GtkBox,
     window: &ApplicationWindow,
@@ -314,6 +268,7 @@ fn populate_loaded_root(
     root.append(&timeline_widget);
 }
 
+#[allow(dead_code)]
 fn populate_empty_root(
     root: &GtkBox,
     window: &ApplicationWindow,
@@ -393,6 +348,7 @@ fn populate_empty_root(
     root.append(&build_empty_timeline());
 }
 
+#[allow(dead_code)]
 fn build_empty_preview_area() -> GtkBox {
     let frame = GtkBox::new(Orientation::Vertical, 0);
     frame.add_css_class("recording-editor-preview-frame");
@@ -414,6 +370,7 @@ fn build_empty_preview_area() -> GtkBox {
     frame
 }
 
+#[allow(dead_code)]
 fn build_empty_inspector() -> GtkBox {
     let inspector = GtkBox::new(Orientation::Vertical, 0);
     inspector.add_css_class("recording-editor-inspector");
@@ -424,6 +381,7 @@ fn build_empty_inspector() -> GtkBox {
     inspector
 }
 
+#[allow(dead_code)]
 fn build_empty_timeline() -> GtkBox {
     let timeline = GtkBox::new(Orientation::Vertical, 0);
     timeline.add_css_class("recording-editor-timeline");
@@ -564,6 +522,7 @@ fn build_empty_timeline() -> GtkBox {
     timeline
 }
 
+#[allow(dead_code)]
 fn empty_track_row(header_icon: Option<&str>, body: &impl IsA<gtk4::Widget>) -> (GtkBox, GtkBox) {
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-track-row");
@@ -590,6 +549,7 @@ fn empty_track_row(header_icon: Option<&str>, body: &impl IsA<gtk4::Widget>) -> 
     (row, body_wrap)
 }
 
+#[allow(dead_code)]
 fn empty_tool_button(icon_name: &str, tooltip: &str) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
@@ -602,6 +562,7 @@ fn empty_tool_button(icon_name: &str, tooltip: &str) -> Button {
     button
 }
 
+#[allow(dead_code)]
 fn draw_empty_ruler(cr: &gtk4::cairo::Context, width: i32, height: i32, scale: f64) {
     let w = width as f64;
     let h = height as f64;
@@ -652,6 +613,7 @@ fn draw_empty_ruler(cr: &gtk4::cairo::Context, width: i32, height: i32, scale: f
     }
 }
 
+#[allow(dead_code)]
 fn draw_empty_playhead(cr: &gtk4::cairo::Context, width: i32, height: i32) {
     let _ = width;
     let h = height as f64;
@@ -676,6 +638,7 @@ fn draw_empty_playhead(cr: &gtk4::cairo::Context, width: i32, height: i32) {
     let _ = cr.stroke();
 }
 
+#[allow(dead_code)]
 fn disabled_transport_button(icon_name: &str) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
@@ -688,6 +651,7 @@ fn disabled_transport_button(icon_name: &str) -> Button {
     button
 }
 
+#[allow(dead_code)]
 fn build_empty_footer() -> GtkBox {
     let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-footer");
@@ -717,6 +681,7 @@ fn build_empty_footer() -> GtkBox {
     footer
 }
 
+#[allow(dead_code)]
 fn show_open_video_dialog(
     root: &GtkBox,
     window: &ApplicationWindow,
@@ -770,6 +735,7 @@ fn show_open_video_dialog(
     chooser.show();
 }
 
+#[allow(dead_code)]
 fn load_video_async(
     path: PathBuf,
     root: &GtkBox,
@@ -856,6 +822,7 @@ fn load_video_async(
     });
 }
 
+#[allow(dead_code)]
 fn is_supported_video_path(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())

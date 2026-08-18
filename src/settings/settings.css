@@ -21,11 +21,19 @@
             }
 
             /* ── Scrollbar ── */
+            .editor-root scrollbar.vertical {
+                min-width: 6px;
+            }
+
+            .editor-root scrollbar.horizontal {
+                min-height: 6px;
+            }
+
             .editor-root scrollbar slider {
                 background-color: alpha(white, 0.18);
                 border-radius: 999px;
-                min-width: 12px;
-                min-height: 12px;
+                min-width: 5px;
+                min-height: 5px;
                 border: none;
             }
 

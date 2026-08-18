@@ -1856,6 +1856,509 @@ pub fn install_recording_editor_css() {
             .recording-editor-ruler {
                 min-height: 18px;
             }
+
+            .recording-editor-stage {
+                min-height: 0;
+                background: #111111;
+            }
+
+            .recording-editor-timeline-dock {
+                padding: 2px 12px 8px 12px;
+                background: #111111;
+                border-top: 1px solid alpha(white, 0.08);
+            }
+
+            .recording-editor-timeline-card {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                padding: 0;
+            }
+
+            .recording-editor-timeline-toolbar {
+                min-height: 32px;
+                padding: 2px 0 0 0;
+            }
+
+            button.recording-editor-timeline-tool {
+                min-height: 24px;
+                padding: 0 8px;
+                border: none;
+                border-radius: 0;
+                background: transparent;
+                color: alpha(white, 0.62);
+                font-size: 12px;
+            }
+
+            button.recording-editor-timeline-tool label,
+            button.recording-editor-timeline-tool image {
+                color: inherit;
+            }
+
+            button.recording-editor-timeline-tool:hover,
+            button.recording-editor-timeline-tool-active {
+                background: transparent;
+                color: alpha(white, 0.92);
+            }
+
+            button.recording-editor-timeline-icon {
+                min-width: 22px;
+                min-height: 22px;
+                padding: 0;
+                border: none;
+                background: transparent;
+                color: alpha(white, 0.62);
+            }
+
+            button.recording-editor-timeline-icon:hover,
+            button.recording-editor-timeline-play:hover {
+                background: transparent;
+                color: alpha(white, 0.94);
+            }
+
+            .recording-editor-timeline-clock {
+                color: alpha(white, 0.78);
+                font-size: 12px;
+                font-weight: 500;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .recording-editor-timeline-zoom-row {
+                min-width: 132px;
+            }
+
+            .recording-editor-root scale.recording-editor-timeline-zoom {
+                min-width: 88px;
+                min-height: 14px;
+                padding: 0;
+            }
+
+            .recording-editor-root scale.recording-editor-timeline-zoom trough {
+                min-height: 3px;
+                background: alpha(white, 0.10);
+            }
+
+            .recording-editor-root scale.recording-editor-timeline-zoom highlight {
+                background: #b05c38;
+            }
+
+            .recording-editor-root scale.recording-editor-timeline-zoom slider {
+                min-width: 10px;
+                min-height: 10px;
+                background: #b05c38;
+                border: none;
+            }
+
+            .recording-editor-card-board {
+                min-height: 192px;
+                padding: 0 0 10px 0;
+            }
+
+            .recording-editor-card-ruler {
+                min-height: 36px;
+            }
+
+            .recording-editor-card-video-track {
+                min-height: 80px;
+            }
+
+            .recording-editor-card-zoom-track {
+                min-height: 56px;
+            }
+
+            .recording-editor-tool-sidebar {
+                min-width: 288px;
+                max-width: 288px;
+                background: #111111;
+                border-left: 1px solid alpha(white, 0.08);
+            }
+
+            .recording-editor-zoom-panel {
+                min-width: 0;
+                background: #111111;
+            }
+
+            .recording-editor-zoom-header {
+                padding: 10px 14px 4px 14px;
+            }
+
+            .recording-editor-zoom-title {
+                color: alpha(white, 0.92);
+                font-size: 16px;
+                font-weight: 600;
+            }
+
+            .recording-editor-zoom-kicker {
+                color: alpha(white, 0.45);
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.3px;
+            }
+
+            .recording-editor-zoom-scroll,
+            .recording-editor-zoom-scroll > viewport,
+            .recording-editor-zoom-scroll scrollbar {
+                background: #111111;
+                border: none;
+            }
+
+            .recording-editor-zoom-body {
+                padding: 0 14px 8px 14px;
+            }
+
+            .recording-editor-zoom-mode {
+                padding: 0;
+                background: transparent;
+                border: none;
+            }
+
+            button.recording-editor-zoom-mode-btn {
+                min-height: 24px;
+                padding: 0 8px 0 0;
+                border: none;
+                border-radius: 0;
+                background: transparent;
+                color: alpha(white, 0.52);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-zoom-mode-btn label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-zoom-mode-btn:hover {
+                color: alpha(white, 0.92);
+                background: transparent;
+            }
+
+            button.recording-editor-zoom-mode-btn:checked,
+            button.recording-editor-zoom-mode-btn:checked:hover {
+                background: transparent;
+                color: #b05c38;
+            }
+
+            button.recording-editor-zoom-mode-btn:checked label,
+            button.recording-editor-zoom-mode-btn:checked:hover label {
+                color: #b05c38;
+            }
+
+            button.recording-editor-zoom-mode-btn:disabled {
+                opacity: 0.35;
+            }
+
+            .recording-editor-zoom-hint {
+                margin-top: 4px;
+                color: alpha(white, 0.38);
+                font-size: 11px;
+                line-height: 1.4;
+            }
+
+            .recording-editor-zoom-chips {
+                margin-top: 12px;
+            }
+
+            button.recording-editor-zoom-chip {
+                min-width: 0;
+                min-height: 26px;
+                padding: 0 4px;
+                border-radius: 6px;
+                border: none;
+                background: alpha(white, 0.06);
+                color: alpha(white, 0.62);
+                font-size: 12px;
+                font-weight: 500;
+                font-variant-numeric: tabular-nums;
+            }
+
+            button.recording-editor-zoom-chip label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-zoom-chip:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.92);
+            }
+
+            button.recording-editor-zoom-chip:active {
+                background: alpha(white, 0.08);
+            }
+
+            button.recording-editor-zoom-chip-active,
+            button.recording-editor-zoom-chip-active:hover {
+                background: alpha(#b05c38, 0.18);
+                color: #f0a07a;
+            }
+
+            button.recording-editor-zoom-chip-active label,
+            button.recording-editor-zoom-chip-active:hover label {
+                color: #f0a07a;
+            }
+
+            button.recording-editor-zoom-chip:disabled {
+                opacity: 0.35;
+            }
+
+            .recording-editor-zoom-section-row {
+                margin-top: 16px;
+            }
+
+            button.recording-editor-zoom-reset {
+                min-height: 18px;
+                padding: 0;
+                background: transparent;
+                color: #b05c38;
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-zoom-reset label {
+                color: #b05c38;
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-zoom-reset:hover,
+            button.recording-editor-zoom-reset:hover label {
+                color: #f0a07a;
+                background: transparent;
+            }
+
+            button.recording-editor-zoom-reset:disabled,
+            button.recording-editor-zoom-reset:disabled label {
+                opacity: 0.35;
+            }
+
+            .recording-editor-zoom-classic {
+                margin-top: 8px;
+                padding: 0;
+                background: transparent;
+            }
+
+            .recording-editor-zoom-classic-label {
+                color: alpha(white, 0.72);
+                font-size: 12px;
+            }
+
+            switch.recording-editor-zoom-switch {
+                min-width: 32px;
+                min-height: 18px;
+                background: alpha(white, 0.12);
+                border: none;
+                border-radius: 999px;
+            }
+
+            switch.recording-editor-zoom-switch slider {
+                min-width: 14px;
+                min-height: 14px;
+                margin: 2px;
+                background: #e8e4e0;
+                border: none;
+                box-shadow: none;
+            }
+
+            switch.recording-editor-zoom-switch:checked {
+                background: #b05c38;
+            }
+
+            switch.recording-editor-zoom-switch:checked slider {
+                background: #f4ece6;
+            }
+
+            switch.recording-editor-zoom-switch:disabled {
+                opacity: 0.35;
+            }
+
+            .recording-editor-zoom-blur {
+                margin-top: 16px;
+                padding: 0;
+                background: transparent;
+                border: none;
+            }
+
+            .recording-editor-zoom-blur-value {
+                color: alpha(white, 0.78);
+                font-size: 12px;
+                font-weight: 500;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .recording-editor-root scale.recording-editor-zoom-slider {
+                min-height: 16px;
+                padding: 0;
+                margin: 0;
+            }
+
+            .recording-editor-root scale.recording-editor-zoom-slider trough {
+                min-height: 3px;
+                background: alpha(white, 0.10);
+            }
+
+            .recording-editor-root scale.recording-editor-zoom-slider highlight {
+                background: #b05c38;
+            }
+
+            .recording-editor-root scale.recording-editor-zoom-slider slider {
+                min-width: 10px;
+                min-height: 10px;
+                background: #b05c38;
+                border: none;
+            }
+
+            button.recording-editor-zoom-delete {
+                min-height: 24px;
+                padding: 0;
+                border: none;
+                background: transparent;
+                color: #F87171;
+            }
+
+            button.recording-editor-zoom-delete label,
+            button.recording-editor-zoom-delete image {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-zoom-delete:hover {
+                background: transparent;
+                color: #FCA5A5;
+            }
+
+            button.recording-editor-zoom-delete:disabled {
+                opacity: 0.35;
+            }
+
+            .recording-editor-zoom-footer {
+                padding: 6px 14px 12px 14px;
+                border-top: 1px solid alpha(white, 0.06);
+            }
+
+            .editor-theme-light .recording-editor-stage,
+            .editor-theme-light .recording-editor-timeline-dock {
+                background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-timeline-dock {
+                border-top-color: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-timeline-card {
+                background: transparent;
+                border: none;
+            }
+
+            .editor-theme-light button.recording-editor-timeline-tool,
+            .editor-theme-light button.recording-editor-timeline-icon {
+                color: alpha(#1d2129, 0.58);
+            }
+
+            .editor-theme-light button.recording-editor-timeline-tool:hover,
+            .editor-theme-light button.recording-editor-timeline-tool-active,
+            .editor-theme-light button.recording-editor-timeline-icon:hover {
+                color: alpha(#1d2129, 0.88);
+            }
+
+            .editor-theme-light .recording-editor-timeline-clock {
+                color: alpha(#1d2129, 0.72);
+            }
+
+            .editor-theme-light .recording-editor-tool-sidebar,
+            .editor-theme-light .recording-editor-zoom-panel,
+            .editor-theme-light .recording-editor-zoom-scroll,
+            .editor-theme-light .recording-editor-zoom-scroll > viewport {
+                background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-tool-sidebar {
+                border-left-color: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-zoom-title {
+                color: alpha(#1d2129, 0.92);
+            }
+
+            .editor-theme-light .recording-editor-zoom-kicker {
+                color: alpha(#1d2129, 0.45);
+            }
+
+            .editor-theme-light .recording-editor-zoom-mode {
+                background: transparent;
+                border: none;
+            }
+
+            .editor-theme-light button.recording-editor-zoom-mode-btn {
+                color: alpha(#1d2129, 0.52);
+            }
+
+            .editor-theme-light button.recording-editor-zoom-mode-btn:checked,
+            .editor-theme-light button.recording-editor-zoom-mode-btn:checked:hover {
+                background: transparent;
+                color: #b05c38;
+            }
+
+            .editor-theme-light button.recording-editor-zoom-mode-btn:checked label,
+            .editor-theme-light button.recording-editor-zoom-mode-btn:checked:hover label {
+                color: #b05c38;
+            }
+
+            .editor-theme-light .recording-editor-zoom-hint {
+                color: alpha(#1d2129, 0.42);
+            }
+
+            .editor-theme-light button.recording-editor-zoom-chip {
+                background: alpha(#111827, 0.05);
+                color: alpha(#1d2129, 0.62);
+            }
+
+            .editor-theme-light button.recording-editor-zoom-chip-active,
+            .editor-theme-light button.recording-editor-zoom-chip-active:hover {
+                background: alpha(#b05c38, 0.14);
+                color: #b05c38;
+            }
+
+            .editor-theme-light button.recording-editor-zoom-chip-active label,
+            .editor-theme-light button.recording-editor-zoom-chip-active:hover label {
+                color: #b05c38;
+            }
+
+            .editor-theme-light button.recording-editor-zoom-reset,
+            .editor-theme-light button.recording-editor-zoom-reset label {
+                color: #b05c38;
+            }
+
+            .editor-theme-light .recording-editor-zoom-classic {
+                background: transparent;
+            }
+
+            .editor-theme-light .recording-editor-zoom-classic-label {
+                color: alpha(#1d2129, 0.72);
+            }
+
+            .editor-theme-light switch.recording-editor-zoom-switch {
+                background: alpha(#111827, 0.16);
+            }
+
+            .editor-theme-light .recording-editor-zoom-blur {
+                background: transparent;
+                border: none;
+            }
+
+            .editor-theme-light .recording-editor-zoom-blur-value {
+                color: alpha(#1d2129, 0.78);
+            }
+
+            .editor-theme-light .recording-editor-zoom-footer {
+                border-top-color: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light button.recording-editor-zoom-delete {
+                color: #DC2626;
+            }
             ",
         );
         gtk4::style_context_add_provider_for_display(

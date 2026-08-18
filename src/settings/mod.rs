@@ -159,8 +159,8 @@ fn build_settings_window(app: &Application) {
         .application(app)
         .title("ApexShot Settings")
         .icon_name(crate::app_identity::icon_name())
-        .default_width(1020)
-        .default_height(840)
+        .default_width(900)
+        .default_height(635)
         .build();
 
     window.set_decorated(false);
