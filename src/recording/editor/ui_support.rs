@@ -988,6 +988,54 @@ pub fn install_recording_editor_css() {
                 font-size: 12px;
             }
 
+            .recording-editor-crop-dialog {
+                default_width: 900px;
+            }
+
+            /* Crop modal shares the timeline section's deeper background. */
+            .recording-editor-dialog.recording-editor-crop-dialog {
+                background: #0c0c0c;
+            }
+
+            .recording-editor-dialog.recording-editor-crop-dialog .recording-editor-dialog-bg {
+                background: #0c0c0c;
+            }
+
+            .recording-editor-crop-close {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 4px;
+                border-radius: 6px;
+                background: transparent;
+                color: alpha(white, 0.55);
+            }
+
+            .recording-editor-crop-close:hover {
+                background: alpha(white, 0.08);
+                color: white;
+            }
+
+            /* No frame behind the video itself — the picture is the surface. */
+            .recording-editor-crop-stage {
+                background: transparent;
+                border: none;
+                padding: 0;
+                margin-top: 6px;
+            }
+
+            .recording-editor-crop-clip {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+            }
+
+            .recording-editor-crop-size {
+                color: alpha(white, 0.62);
+                font-size: 11px;
+                font-weight: 600;
+                margin-top: 8px;
+            }
+
             /* ── Light theme overrides ── */
             .editor-theme-light.recording-editor-root {
                 color: #1d2129;
@@ -1501,6 +1549,34 @@ pub fn install_recording_editor_css() {
                 color: alpha(#1d2129, 0.55);
             }
 
+            .editor-theme-light .recording-editor-crop-stage {
+                background: transparent;
+                border-color: transparent;
+            }
+
+            .editor-theme-light .recording-editor-dialog.recording-editor-crop-dialog {
+                background: #f0f1f4;
+            }
+
+            .editor-theme-light
+                .recording-editor-dialog.recording-editor-crop-dialog
+                .recording-editor-dialog-bg {
+                background: #f0f1f4;
+            }
+
+            .editor-theme-light .recording-editor-crop-close {
+                color: alpha(#1d2129, 0.55);
+            }
+
+            .editor-theme-light .recording-editor-crop-close:hover {
+                background: alpha(#111827, 0.08);
+                color: #1d2129;
+            }
+
+            .editor-theme-light .recording-editor-crop-size {
+                color: alpha(#1d2129, 0.62);
+            }
+
             .recording-editor-workspace {
                 min-height: 0;
             }
@@ -1860,6 +1936,76 @@ pub fn install_recording_editor_css() {
             .recording-editor-stage {
                 min-height: 0;
                 background: #111111;
+            }
+
+            .recording-editor-stage-tools {
+                padding: 0 16px 14px 16px;
+            }
+
+            button.recording-editor-stage-chip {
+                min-height: 28px;
+                padding: 0 10px;
+                border: none;
+                border-radius: 8px;
+                background: transparent;
+                color: alpha(white, 0.72);
+            }
+
+            button.recording-editor-stage-chip:hover {
+                background: alpha(white, 0.06);
+                color: alpha(white, 0.94);
+            }
+
+            .recording-editor-stage-chip-label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            .recording-editor-stage-rule {
+                min-width: 1px;
+                min-height: 14px;
+                background: alpha(white, 0.14);
+            }
+
+            popover.recording-editor-stage-aspect,
+            popover.recording-editor-stage-aspect contents,
+            popover.recording-editor-stage-aspect > contents,
+            popover.recording-editor-stage-aspect > arrow {
+                padding: 0;
+                margin: 0;
+                min-width: 0;
+                min-height: 0;
+                background: #1c1c1c;
+                border: none;
+                outline: none;
+                box-shadow: none;
+                border-radius: 4px;
+            }
+
+            .recording-editor-stage-aspect-list {
+                min-width: 88px;
+                padding: 4px;
+                border-radius: 4px;
+                border: none;
+                outline: none;
+                background: #1c1c1c;
+                box-shadow: none;
+            }
+
+            button.recording-editor-stage-aspect-item {
+                min-height: 26px;
+                padding: 0 10px;
+                border: none;
+                border-radius: 4px;
+                background: transparent;
+                color: alpha(white, 0.78);
+                font-size: 12px;
+            }
+
+            button.recording-editor-stage-aspect-item:hover {
+                background: alpha(white, 0.08);
+                color: alpha(white, 0.96);
             }
 
             .recording-editor-timeline-dock {

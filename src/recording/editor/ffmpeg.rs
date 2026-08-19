@@ -1,6 +1,5 @@
 use super::model::{
-    even_crop_rect, even_dimension, quality_to_crf, AudioMode, VideoBackground, VideoEditState,
-    VideoMetadata,
+    even_crop_rect, quality_to_crf, AudioMode, VideoBackground, VideoEditState, VideoMetadata,
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
@@ -416,7 +415,8 @@ fn build_single_convert_args(
         "-i".into(),
         state.metadata.path.to_string_lossy().into_owned(),
     ];
-    if let Some(filter) = convert_video_filter(state) {
+    let speed = state.speed_for_source(start);
+    if let Some(filter) = convert_video_filter(state, speed) {
         args.push("-vf".into());
         args.push(filter);
     }
@@ -428,7 +428,7 @@ fn build_single_convert_args(
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
     ]);
-    args.extend(convert_audio_args(state));
+    args.extend(convert_audio_args(state, speed));
     args.push(output_path.to_string_lossy().into_owned());
     args
 }
@@ -460,11 +460,13 @@ fn build_composite_convert_args(
         VideoBackground::None => "0x111111".to_string(),
     };
 
+    let (eff_w, eff_h) = state.effective_source_dimensions();
     let mut filter = format!(
-        "[0:v]sendcmd=f={},crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={base_w}:{base_h}:force_original_aspect_ratio=decrease,pad={base_w}:{base_h}:(ow-iw)/2:(oh-ih)/2:0x000000",
+        "[0:v]sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={base_w}:{base_h}:force_original_aspect_ratio=decrease,pad={base_w}:{base_h}:(ow-iw)/2:(oh-ih)/2:0x000000",
         escape_filter_path(&cmd_path),
-        src_w = state.metadata.width.max(2),
-        src_h = state.metadata.height.max(2),
+        static_crop_prefix(state),
+        src_w = eff_w.max(2),
+        src_h = eff_h.max(2),
     );
     if out_w != base_w || out_h != base_h {
         filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
@@ -476,6 +478,10 @@ fn build_composite_convert_args(
     if let Some(blur) = zoom_blur_filter(state) {
         filter.push(',');
         filter.push_str(&blur);
+    }
+    let speed = state.speed_for_source(start);
+    if (speed - 1.0).abs() > 1e-6 {
+        filter.push_str(&format!(",setpts=PTS/{speed}"));
     }
     let draw_cursor = state
         .sidecar
@@ -511,7 +517,7 @@ fn build_composite_convert_args(
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
     ]);
-    args.extend(convert_audio_args(state));
+    args.extend(convert_audio_args(state, speed));
     if draw_cursor {
         args.push("-shortest".into());
     }
@@ -519,12 +525,21 @@ fn build_composite_convert_args(
     args
 }
 
+/// `crop=w:h:x:y,` prepended before zoom cropping, or empty when uncropped.
+fn static_crop_prefix(state: &VideoEditState) -> String {
+    match state.crop {
+        Some(c) => format!("crop={}:{}:{}:{},", c.width, c.height, c.x, c.y),
+        None => String::new(),
+    }
+}
+
 fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
     let fps = 30.0;
     let duration = (end - start).max(0.0);
     let frames = ((duration * fps).ceil() as usize).max(1);
-    let src_w = state.metadata.width.max(2);
-    let src_h = state.metadata.height.max(2);
+    let (crop_x, crop_y, eff_w, eff_h) = state.crop_or_full();
+    let src_w = eff_w.max(2.0) as u32;
+    let src_h = eff_h.max(2.0) as u32;
     let (base_w, base_h) = state.canvas_dimensions();
     let (out_w, out_h) = state.padded_output_dimensions();
     let pad_x = ((out_w.saturating_sub(base_w)) / 2) as f64;
@@ -534,6 +549,7 @@ fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
         let local_t = index as f64 / fps;
         let source_t = start + local_t;
         let (scale, center) = state.eval_zoom(source_t);
+        let center = (center.0 - crop_x, center.1 - crop_y);
         let (x, y, w, h) = even_crop_rect(scale, center, src_w, src_h);
         lines.push_str(&format!(
             "{local_t:.3} crop@z w {w};\n{local_t:.3} crop@z h {h};\n{local_t:.3} crop@z x {x};\n{local_t:.3} crop@z y {y};\n"
@@ -541,8 +557,8 @@ fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
         if let Some(sidecar) = &state.sidecar {
             if let Some((cx, cy, _)) = sidecar.interpolated_at(source_t) {
                 let pulse = sidecar.click_pulse_at(source_t);
-                let rel_x = ((cx - x as f64) / w as f64) * base_w as f64 + pad_x;
-                let rel_y = ((cy - y as f64) / h as f64) * base_h as f64 + pad_y;
+                let rel_x = ((cx - crop_x - x as f64) / w as f64) * base_w as f64 + pad_x;
+                let rel_y = ((cy - crop_y - y as f64) / h as f64) * base_h as f64 + pad_y;
                 let size = (16.0 * pulse).round();
                 lines.push_str(&format!(
                     "{local_t:.3} overlay@c x {:.0};\n{local_t:.3} overlay@c y {:.0};\n",
@@ -593,8 +609,17 @@ fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
     ))
 }
 
-fn convert_video_filter(state: &VideoEditState) -> Option<String> {
+fn convert_video_filter(state: &VideoEditState, speed: f64) -> Option<String> {
     let mut parts = Vec::new();
+    if let Some(crop) = state.crop {
+        parts.push(format!(
+            "crop={}:{}:{}:{}",
+            crop.width, crop.height, crop.x, crop.y
+        ));
+    }
+    if (speed - 1.0).abs() > 1e-6 {
+        parts.push(format!("setpts=PTS/{speed}"));
+    }
     if let Some(scale) = convert_scale_filter(state) {
         parts.push(scale);
     }
@@ -608,10 +633,21 @@ fn convert_video_filter(state: &VideoEditState) -> Option<String> {
     }
 }
 
-fn convert_audio_args(state: &VideoEditState) -> Vec<String> {
+fn convert_audio_args(state: &VideoEditState, speed: f64) -> Vec<String> {
     let offset = state.timeline_offset_seconds;
-    if offset > 0.001 && state.metadata.has_audio && state.audio_mode != AudioMode::Muted {
-        let ms = (offset * 1000.0).round().max(1.0) as u64;
+    let tempo = atempo_filter(speed);
+    if state.audio_mode == AudioMode::Muted || !state.metadata.has_audio {
+        return audio_args(state.audio_mode, state.metadata.has_audio);
+    }
+    if offset > 0.001 || tempo.is_some() {
+        let mut filters = Vec::new();
+        if offset > 0.001 {
+            let ms = (offset * 1000.0).round().max(1.0) as u64;
+            filters.push(format!("adelay={ms}:all=1"));
+        }
+        if let Some(tempo) = tempo {
+            filters.push(tempo);
+        }
         let mut args = match state.audio_mode {
             AudioMode::Mono => vec![
                 "-ac".into(),
@@ -623,18 +659,35 @@ fn convert_audio_args(state: &VideoEditState) -> Vec<String> {
             ],
             _ => vec!["-c:a".into(), "aac".into(), "-b:a".into(), "192k".into()],
         };
-        args.extend(["-af".into(), format!("adelay={ms}:all=1")]);
+        args.extend(["-af".into(), filters.join(",")]);
         args
     } else {
         audio_args(state.audio_mode, state.metadata.has_audio)
     }
 }
 
+fn atempo_filter(speed: f64) -> Option<String> {
+    if (speed - 1.0).abs() <= 1e-6 || !speed.is_finite() || speed <= 0.0 {
+        return None;
+    }
+    let mut remaining = speed;
+    let mut parts = Vec::new();
+    while remaining < 0.5 - 1e-9 {
+        parts.push("atempo=0.5".into());
+        remaining /= 0.5;
+    }
+    while remaining > 100.0 + 1e-9 {
+        parts.push("atempo=100".into());
+        remaining /= 100.0;
+    }
+    parts.push(format!("atempo={remaining}"));
+    Some(parts.join(","))
+}
+
 /// Scale the source into the output canvas and letterbox leftover space.
 fn convert_scale_filter(state: &VideoEditState) -> Option<String> {
     let (width, height) = state.canvas_dimensions();
-    let src_w = even_dimension(state.metadata.width.max(1));
-    let src_h = even_dimension(state.metadata.height.max(1));
+    let (src_w, src_h) = state.effective_source_dimensions();
     if width == src_w && height == src_h {
         return None;
     }
@@ -659,6 +712,9 @@ fn run_multi_segment_trim(
         let seg_path = tmp_dir.join(format!("seg_{i:04}.mp4"));
         let mut segment_state = state.clone();
         segment_state.timeline_offset_seconds = (comp - cursor).max(0.0);
+        if state.muted_for_source(start) {
+            segment_state.audio_mode = AudioMode::Muted;
+        }
         cursor = comp + (end - start).max(0.0);
         let args = if convert {
             build_single_convert_args(&segment_state, start, end, &seg_path)
@@ -826,14 +882,16 @@ mod tests {
     #[test]
     fn convert_skips_tmix_when_blur_is_off() {
         let mut state = state();
-        state.zoom_clips.push(crate::recording::editor::model::ZoomClip {
-            start: 1.5,
-            end: 3.3,
-            scale: 1.8,
-            center: (960.0, 540.0),
-            ease_ms: 200,
-            mode: crate::recording::editor::model::ZoomMode::Auto,
-        });
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 1.5,
+                end: 3.3,
+                scale: 1.8,
+                center: (960.0, 540.0),
+                ease_ms: 200,
+                mode: crate::recording::editor::model::ZoomMode::Auto,
+            });
         state.set_zoom_blur_samples(1);
         state.set_zoom_blur_shutter(0.0);
         let args = build_single_convert_args(

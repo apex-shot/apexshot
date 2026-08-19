@@ -1,4 +1,6 @@
-use crate::recording::editor::model::{format_zoom_scale, VideoEditState};
+use crate::recording::editor::model::{
+    format_zoom_scale, VideoEditState, DEFAULT_ZOOM_DURATION_SECONDS,
+};
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::{
@@ -26,8 +28,14 @@ pub(super) fn build_timeline_card(
     card.set_hexpand(true);
 
     let playing = Rc::new(Cell::new(false));
-    let clock = Label::new(Some(&clock_text(&state)));
-    clock.add_css_class("recording-editor-timeline-clock");
+    let (playhead_clock, duration_clock) = {
+        let guard = state.lock().unwrap();
+        let playhead_clock = Label::new(Some(&format_clock(guard.playhead_seconds)));
+        playhead_clock.add_css_class("recording-editor-timeline-clock");
+        let duration_clock = Label::new(Some(&format_clock(guard.source_duration())));
+        duration_clock.add_css_class("recording-editor-timeline-clock");
+        (playhead_clock, duration_clock)
+    };
 
     let play_button = icon_button("media-playback-start-symbolic", "Play");
     play_button.add_css_class("recording-editor-timeline-play");
@@ -60,10 +68,11 @@ pub(super) fn build_timeline_card(
     center.add_css_class("recording-editor-timeline-transport");
     center.set_halign(Align::Center);
     center.set_hexpand(false);
+    center.append(&playhead_clock);
     center.append(&skip_back);
     center.append(&play_button);
-    center.append(&clock);
     center.append(&skip_forward);
+    center.append(&duration_clock);
 
     let right = GtkBox::new(Orientation::Horizontal, 6);
     right.add_css_class("recording-editor-timeline-zoom-row");
@@ -88,6 +97,8 @@ pub(super) fn build_timeline_card(
 
     let hovered_video = Rc::new(Cell::new(None::<usize>));
     let hovered_zoom = Rc::new(Cell::new(None::<usize>));
+    let hover_time = Rc::new(Cell::new(None::<f64>));
+    let hover_zoom_time = Rc::new(Cell::new(None::<f64>));
     let dragging_video = Rc::new(Cell::new(None::<usize>));
     let dragging_zoom = Rc::new(Cell::new(None::<usize>));
 
@@ -118,11 +129,13 @@ pub(super) fn build_timeline_card(
     zoom_track.set_draw_func({
         let state = state.clone();
         let hovered_zoom = hovered_zoom.clone();
+        let hover_zoom_time = hover_zoom_time.clone();
         let dragging_zoom = dragging_zoom.clone();
         move |_, cr, width, height| {
             draw_zoom_clips(
                 &state,
                 hovered_zoom.get(),
+                hover_zoom_time.get(),
                 dragging_zoom.get(),
                 cr,
                 width,
@@ -150,9 +163,11 @@ pub(super) fn build_timeline_card(
     playhead.set_can_target(false);
     playhead.set_draw_func({
         let state = state.clone();
-        move |_, cr, width, height| draw_playhead(&state, cr, width, height)
+        let hover_time = hover_time.clone();
+        move |_, cr, width, height| draw_playhead(&state, hover_time.get(), cr, width, height)
     });
     board.add_overlay(&playhead);
+    bind_board_hover(&tracks, state.clone(), hover_time, playhead.clone());
 
     let scroll_adj = Adjustment::new(0.0, 0.0, 1.0, 0.1, 1.0, 1.0);
     let scroll_syncing = Rc::new(Cell::new(false));
@@ -163,7 +178,8 @@ pub(super) fn build_timeline_card(
         let video_track = video_track.clone();
         let zoom_track = zoom_track.clone();
         let playhead = playhead.clone();
-        let clock = clock.clone();
+        let playhead_clock = playhead_clock.clone();
+        let duration_clock = duration_clock.clone();
         let zoom = zoom.clone();
         let state = state.clone();
         let scroll_adj = scroll_adj.clone();
@@ -171,7 +187,8 @@ pub(super) fn build_timeline_card(
         Rc::new(move || {
             {
                 let guard = state.lock().unwrap();
-                clock.set_text(&clock_text_from(&guard));
+                playhead_clock.set_text(&format_clock(guard.playhead_seconds));
+                duration_clock.set_text(&format_clock(guard.source_duration()));
                 sync_scroll_adj(&scroll_adj, &guard, &scroll_syncing);
                 if guard.selected_zoom.is_some() {
                     zoom.add_css_class("recording-editor-timeline-tool-active");
@@ -298,7 +315,7 @@ pub(super) fn build_timeline_card(
         move |_| zoom_scale.set_value((zoom_scale.value() + 10.0).min(100.0))
     });
 
-    bind_seek(&ruler, state.clone(), media.clone(), redraw.clone());
+    bind_playhead_drag(&ruler, state.clone(), media.clone(), redraw.clone());
     bind_video_clip(
         &video_track,
         state.clone(),
@@ -312,6 +329,7 @@ pub(super) fn build_timeline_card(
         state.clone(),
         media.clone(),
         hovered_zoom.clone(),
+        hover_zoom_time.clone(),
         dragging_zoom.clone(),
         redraw.clone(),
     );
@@ -370,24 +388,9 @@ fn icon_button(icon_name: &str, tooltip: &str) -> Button {
     button
 }
 
-fn clock_text(state: &Arc<Mutex<VideoEditState>>) -> String {
-    clock_text_from(&state.lock().unwrap())
-}
-
-fn clock_text_from(state: &VideoEditState) -> String {
-    format!(
-        "{} / {}",
-        format_clock(state.playhead_seconds),
-        format_clock(state.source_duration())
-    )
-}
-
 fn format_clock(seconds: f64) -> String {
     let total = seconds.max(0.0).floor() as u64;
-    let hour = total / 3600;
-    let min = (total / 60) % 60;
-    let sec = total % 60;
-    format!("{hour:02}:{min:02}:{sec:02}")
+    format!("{}:{:02}", total / 60, total % 60)
 }
 
 fn format_range(start: f64, end: f64) -> String {
@@ -425,6 +428,7 @@ fn toggle_playback(
     };
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.seek((seek_to * 1_000_000.0) as i64);
+        media_file.set_muted(state.lock().unwrap().muted_for_source(seek_to));
         media_file.play();
     }
     playing.set(true);
@@ -492,7 +496,15 @@ fn tick_playback(
         next = end;
         reached_end = true;
     }
-    state.lock().unwrap().playhead_seconds = next;
+    {
+        let mut guard = state.lock().unwrap();
+        guard.playhead_seconds = next;
+        let muted = guard.muted_for_source(guard.source_playhead());
+        drop(guard);
+        if let Some(media_file) = media.borrow().as_ref() {
+            media_file.set_muted(muted);
+        }
+    }
     if reached_end {
         playing.set(false);
         if let Some(media_file) = media.borrow().as_ref() {
@@ -503,36 +515,71 @@ fn tick_playback(
     redraw();
 }
 
-fn bind_seek(
+fn bind_board_hover(
+    tracks: &GtkBox,
+    state: Arc<Mutex<VideoEditState>>,
+    hover_time: Rc<Cell<Option<f64>>>,
+    playhead: DrawingArea,
+) {
+    let motion = EventControllerMotion::new();
+    motion.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    motion.connect_motion({
+        let state = state.clone();
+        let hover_time = hover_time.clone();
+        let playhead = playhead.clone();
+        move |controller, x, _| {
+            let width = controller
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let time = {
+                let guard = state.lock().unwrap();
+                guard.x_to_time(x.clamp(0.0, width), width).max(0.0)
+            };
+            hover_time.set(Some(time));
+            playhead.queue_draw();
+        }
+    });
+    motion.connect_leave({
+        let hover_time = hover_time.clone();
+        let playhead = playhead.clone();
+        move |_| {
+            hover_time.set(None);
+            playhead.queue_draw();
+        }
+    });
+    tracks.add_controller(motion);
+}
+
+fn bind_playhead_drag(
     area: &DrawingArea,
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
     redraw: Rc<dyn Fn()>,
 ) {
-    let click = GestureClick::new();
-    click.set_button(1);
-    click.connect_pressed({
+    let dragging = Rc::new(Cell::new(false));
+    let drag = GestureDrag::new();
+    drag.set_button(1);
+    drag.connect_drag_begin({
         let state = state.clone();
-        let media = media.clone();
-        let redraw = redraw.clone();
-        move |gesture, _, x, _| {
+        let dragging = dragging.clone();
+        move |gesture, x, _| {
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
-            seek_to_x(&state, &media, width, x);
-            redraw();
+            dragging.set(near_playhead(&state.lock().unwrap(), width, x));
         }
     });
-    area.add_controller(click);
-
-    let drag = GestureDrag::new();
-    drag.set_button(1);
     drag.connect_drag_update({
         let state = state.clone();
         let media = media.clone();
+        let dragging = dragging.clone();
         let redraw = redraw.clone();
         move |gesture, offset_x, _| {
+            if !dragging.get() {
+                return;
+            }
             let Some((start_x, _)) = gesture.start_point() else {
                 return;
             };
@@ -559,7 +606,6 @@ fn bind_video_clip(
     click.set_button(1);
     click.connect_pressed({
         let state = state.clone();
-        let media = media.clone();
         let redraw = redraw.clone();
         move |gesture, _, x, _| {
             let width = gesture
@@ -572,11 +618,7 @@ fn bind_video_clip(
             }
             let hit = video_hit(&guard, width, x);
             select_video(&mut guard, hit.segment);
-            let seek = hit.drag.is_none() || matches!(hit.drag, Some(ClipDrag::Seek));
             drop(guard);
-            if seek {
-                seek_to_x(&state, &media, width, x);
-            }
             redraw();
         }
     });
@@ -669,7 +711,8 @@ fn bind_video_clip(
                         .unwrap()
                         .set_segment_start(index, origin_start + delta);
                 }
-                Some(ClipDrag::Seek) | None => seek_to_x(&state, &media, width, x),
+                Some(ClipDrag::Seek) => seek_to_x(&state, &media, width, x),
+                None => {}
             }
             redraw();
         }
@@ -695,13 +738,14 @@ fn bind_video_clip(
             Rc::new(move |width, x| {
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
-                    return (TrackCursor::Playhead, None);
+                    return (TrackCursor::Playhead, None, None);
                 }
                 let hit = video_hit(&guard, width, x);
-                (hit.cursor, hit.segment)
+                (hit.cursor, hit.segment, None)
             })
         },
         hover,
+        Rc::new(Cell::new(None)),
     );
 }
 
@@ -710,6 +754,7 @@ fn bind_zoom_track(
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
     hover: Rc<Cell<Option<usize>>>,
+    hover_time: Rc<Cell<Option<f64>>>,
     dragging: Rc<Cell<Option<usize>>>,
     redraw: Rc<dyn Fn()>,
 ) {
@@ -730,8 +775,10 @@ fn bind_zoom_track(
             if let Some(index) = zoom_clip_at(&guard, width, x) {
                 select_zoom(&mut guard, Some(index));
             } else {
-                guard.playhead_seconds = x_to_timeline(&guard, width, x);
-                select_zoom(&mut guard, None);
+                let at = x_to_timeline(&guard, width, x);
+                if guard.add_zoom_at(at).is_none() {
+                    select_zoom(&mut guard, None);
+                }
             }
             drop(guard);
             redraw();
@@ -817,9 +864,10 @@ fn bind_zoom_track(
                         .unwrap()
                         .move_zoom_clip(index, origin_start + delta);
                 }
-                Some(ZoomDrag::Seek) | None => {
+                Some(ZoomDrag::Seek) => {
                     seek_to_x(&state, &media, width, start_x + offset_x);
                 }
+                None => {}
             }
             redraw();
         }
@@ -840,41 +888,47 @@ fn bind_zoom_track(
             Rc::new(move |width, x| {
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
-                    return (TrackCursor::Playhead, None);
+                    return (TrackCursor::Playhead, None, None);
                 }
                 match zoom_edge_at(&guard, width, x) {
-                    Some((index, true)) => (TrackCursor::ResizeStart, Some(index)),
-                    Some((index, false)) => (TrackCursor::ResizeEnd, Some(index)),
+                    Some((index, true)) => (TrackCursor::ResizeStart, Some(index), None),
+                    Some((index, false)) => (TrackCursor::ResizeEnd, Some(index), None),
                     None => match zoom_clip_at(&guard, width, x) {
-                        Some(index) => (TrackCursor::Grab, Some(index)),
-                        None => (TrackCursor::None, None),
+                        Some(index) => (TrackCursor::Grab, Some(index), None),
+                        None => (
+                            TrackCursor::None,
+                            None,
+                            Some(x_to_timeline(&guard, width, x)),
+                        ),
                     },
                 }
             })
         },
         hover,
+        hover_time,
     );
 }
 
 fn bind_track_cursor(
     area: &DrawingArea,
-    hit: Rc<dyn Fn(f64, f64) -> (TrackCursor, Option<usize>)>,
+    hit: Rc<dyn Fn(f64, f64) -> (TrackCursor, Option<usize>, Option<f64>)>,
     hover: Rc<Cell<Option<usize>>>,
+    hover_time: Rc<Cell<Option<f64>>>,
 ) {
     let motion = EventControllerMotion::new();
     motion.connect_motion({
         let hover = hover.clone();
+        let hover_time = hover_time.clone();
         let area = area.clone();
         move |controller, x, _| {
             let Some(widget) = controller.widget() else {
                 return;
             };
             let width = widget.allocated_width().max(1) as f64;
-            let (kind, index) = hit(width, x);
-            if hover.get() != index {
-                hover.set(index);
-                area.queue_draw();
-            }
+            let (kind, index, time) = hit(width, x);
+            hover.set(index);
+            hover_time.set(time);
+            area.queue_draw();
             let cursor = match kind {
                 TrackCursor::ResizeStart => gdk::Cursor::from_name("w-resize", None),
                 TrackCursor::ResizeEnd => gdk::Cursor::from_name("e-resize", None),
@@ -887,12 +941,12 @@ fn bind_track_cursor(
     });
     motion.connect_leave({
         let hover = hover.clone();
+        let hover_time = hover_time.clone();
         let area = area.clone();
         move |controller| {
-            if hover.get().is_some() {
-                hover.set(None);
-                area.queue_draw();
-            }
+            hover.set(None);
+            hover_time.set(None);
+            area.queue_draw();
             if let Some(widget) = controller.widget() {
                 widget.set_cursor(None);
             }
@@ -935,8 +989,14 @@ fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
             continue;
         }
         let (cursor, drag) = match clip_edge_at(x, x0, x1) {
-            Some(true) => (TrackCursor::ResizeStart, segment_edge_drag(state, seg_idx, true)),
-            Some(false) => (TrackCursor::ResizeEnd, segment_edge_drag(state, seg_idx, false)),
+            Some(true) => (
+                TrackCursor::ResizeStart,
+                segment_edge_drag(state, seg_idx, true),
+            ),
+            Some(false) => (
+                TrackCursor::ResizeEnd,
+                segment_edge_drag(state, seg_idx, false),
+            ),
             None if state.cuts.is_empty() => (
                 TrackCursor::Grab,
                 Some(ClipDrag::Move {
@@ -962,7 +1022,7 @@ fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
     VideoHit {
         cursor: TrackCursor::None,
         segment: None,
-        drag: Some(ClipDrag::Seek),
+        drag: None,
     }
 }
 
@@ -1015,11 +1075,15 @@ fn clip_edge_at(x: f64, start_x: f64, end_x: f64) -> Option<bool> {
 }
 
 fn zoom_edge_at(state: &VideoEditState, width: f64, x: f64) -> Option<(usize, bool)> {
-    state.zoom_clips.iter().enumerate().find_map(|(index, clip)| {
-        let start_x = state.time_to_x(clip.start, width);
-        let end_x = state.time_to_x(clip.end, width);
-        clip_edge_at(x, start_x, end_x).map(|is_start| (index, is_start))
-    })
+    state
+        .zoom_clips
+        .iter()
+        .enumerate()
+        .find_map(|(index, clip)| {
+            let start_x = state.time_to_x(clip.start, width);
+            let end_x = state.time_to_x(clip.end, width);
+            clip_edge_at(x, start_x, end_x).map(|is_start| (index, is_start))
+        })
 }
 
 fn zoom_clip_at(state: &VideoEditState, width: f64, x: f64) -> Option<usize> {
@@ -1101,7 +1165,10 @@ enum ClipDrag {
 
 #[derive(Clone, Copy)]
 enum ZoomDrag {
-    Edge { index: usize, is_start: bool },
+    Edge {
+        index: usize,
+        is_start: bool,
+    },
     Move {
         index: usize,
         origin_start: f64,
@@ -1124,8 +1191,12 @@ const HANDLE_WIDTH: f64 = 4.0;
 const HANDLE_HIT: f64 = 6.0;
 const PLAYHEAD_HIT: f64 = 6.0;
 
-
-fn draw_ruler(state: &Arc<Mutex<VideoEditState>>, cr: &gtk4::cairo::Context, width: i32, height: i32) {
+fn draw_ruler(
+    state: &Arc<Mutex<VideoEditState>>,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
@@ -1341,6 +1412,7 @@ fn draw_video_segment(
 fn draw_zoom_clips(
     state: &Arc<Mutex<VideoEditState>>,
     hovered: Option<usize>,
+    hover_time: Option<f64>,
     dragging: Option<usize>,
     cr: &gtk4::cairo::Context,
     width: i32,
@@ -1360,21 +1432,17 @@ fn draw_zoom_clips(
             continue;
         }
         draw_one_zoom(
-            &state,
-            cr,
-            w,
-            h,
-            index,
-            start,
-            end,
-            hovered,
-            dragging,
-            false,
+            &state, cr, w, h, index, start, end, hovered, dragging, false,
         );
     }
     if let Some(index) = dragging {
         if let Some(&(_, start, end)) = clips.iter().find(|(i, _, _)| *i == index) {
             draw_one_zoom(&state, cr, w, h, index, start, end, hovered, dragging, true);
+        }
+    }
+    if let Some(start) = hover_time {
+        if let Some((start, end)) = suggested_zoom_range(&state, start) {
+            draw_zoom_suggestion(&state, cr, w, h, start, end);
         }
     }
 }
@@ -1440,6 +1508,50 @@ fn draw_one_zoom(
     }
 }
 
+fn suggested_zoom_range(state: &VideoEditState, start: f64) -> Option<(f64, f64)> {
+    let start = start.max(0.0);
+    let end = start + DEFAULT_ZOOM_DURATION_SECONDS;
+    let overlaps = state
+        .zoom_clips
+        .iter()
+        .any(|clip| start < clip.end && end > clip.start);
+    (!overlaps).then_some((start, end))
+}
+
+fn draw_zoom_suggestion(
+    state: &VideoEditState,
+    cr: &gtk4::cairo::Context,
+    w: f64,
+    h: f64,
+    start: f64,
+    end: f64,
+) {
+    let x0 = state.time_to_x(start, w);
+    let x1 = state.time_to_x(end, w);
+    let clip_w = (x1 - x0).max(22.0);
+    let y = 7.0;
+    let height = h - 14.0;
+    rounded_rect(cr, x0, y, clip_w, height, 5.0);
+    cr.set_source_rgba(0.30, 0.48, 0.86, 0.12);
+    let _ = cr.fill_preserve();
+    cr.set_source_rgba(0.72, 0.84, 1.0, 0.38);
+    cr.set_line_width(1.0);
+    cr.set_dash(&[4.0, 3.0], 0.0);
+    let _ = cr.stroke();
+    cr.set_dash(&[], 0.0);
+    if clip_w > 40.0 {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+        cr.select_font_face(
+            "sans-serif",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Normal,
+        );
+        cr.set_font_size(11.0);
+        cr.move_to(x0 + 14.0, y + height * 0.62);
+        let _ = cr.show_text("Zoom");
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ClipTone {
     fill: (f64, f64, f64, f64),
@@ -1492,6 +1604,7 @@ fn draw_edge_handle(
 
 fn draw_playhead(
     state: &Arc<Mutex<VideoEditState>>,
+    hover_time: Option<f64>,
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -1499,13 +1612,23 @@ fn draw_playhead(
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
-    let x = state.time_to_x(state.playhead_seconds, w).floor() + 0.5;
-    cr.set_source_rgb(0.86, 0.90, 0.98);
-    cr.set_line_width(2.0);
+    if let Some(time) = hover_time {
+        let hover_x = state.time_to_x(time, w);
+        if (hover_x - state.time_to_x(state.playhead_seconds, w)).abs() > 1.0 {
+            paint_playhead_mark(cr, hover_x, h, 0.22);
+        }
+    }
+    paint_playhead_mark(cr, state.time_to_x(state.playhead_seconds, w), h, 1.0);
+}
+
+fn paint_playhead_mark(cr: &gtk4::cairo::Context, x: f64, h: f64, alpha: f64) {
+    let x = x.floor() + 0.5;
+    cr.set_source_rgba(0.86, 0.90, 0.98, alpha);
+    cr.set_line_width(if alpha < 1.0 { 1.5 } else { 2.0 });
     cr.move_to(x, 26.0);
     cr.line_to(x, h);
     let _ = cr.stroke();
-
+    cr.set_source_rgba(0.86, 0.90, 0.98, alpha);
     cr.move_to(x - 5.0, 20.0);
     cr.line_to(x + 5.0, 20.0);
     cr.line_to(x, 29.0);

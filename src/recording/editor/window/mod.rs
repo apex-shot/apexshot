@@ -1,4 +1,6 @@
 #[allow(dead_code)]
+mod crop_dialog;
+#[allow(dead_code)]
 mod dialogs;
 #[allow(dead_code)]
 mod footer;
@@ -134,12 +136,10 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::None => None,
     };
     let state = state.unwrap_or_else(|| Arc::new(Mutex::new(placeholder_edit_state())));
-    let media = Rc::new(RefCell::new(
-        match &initial_video {
-            InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
-            InitialVideo::None => None,
-        },
-    ));
+    let media = Rc::new(RefCell::new(match &initial_video {
+        InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
+        InitialVideo::None => None,
+    }));
 
     let paint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let refresh_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
@@ -165,6 +165,15 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     stage.add_css_class("recording-editor-stage");
     stage.set_hexpand(true);
     stage.set_vexpand(true);
+    let preview_slot = GtkBox::new(Orientation::Vertical, 0);
+    preview_slot.set_hexpand(true);
+    preview_slot.set_vexpand(true);
+    stage.append(&preview_slot);
+    stage.append(&preview::build_stage_tools(
+        &window,
+        state.clone(),
+        ping.clone(),
+    ));
     workspace.append(&stage);
 
     let sidebar = tool_sidebar::build_tool_sidebar(state.clone(), ping.clone());

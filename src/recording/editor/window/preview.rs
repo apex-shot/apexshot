@@ -1,12 +1,13 @@
-use super::footer;
+use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
-    even_crop_rect, format_webcut_time, VideoBackground, VideoEditState, ZoomMode,
-    WEBCUT_ASPECT_RATIOS,
+    closest_aspect_ratio, even_crop_rect, format_webcut_time, VideoBackground, VideoEditState,
+    ZoomMode, WEBCUT_ASPECT_RATIOS,
 };
 use gtk4::{
-    glib, prelude::*, Align, AspectFrame, Box as GtkBox, Button, DrawingArea, GestureDrag, Image,
-    Label, MediaFile, Orientation, Overlay, Picture, Popover,
+    glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, DrawingArea,
+    GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture, Popover, Separator,
 };
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 pub(super) fn build_preview(
@@ -180,10 +181,13 @@ pub(super) fn build_preview(
             if state.zoom_clips.get(index).map(|clip| clip.mode) != Some(ZoomMode::Manual) {
                 return;
             }
-            let src_w = state.metadata.width.max(1) as f64;
-            let src_h = state.metadata.height.max(1) as f64;
+            let (view_x, view_y, view_w, view_h) =
+                current_view_rect(&state, state.source_playhead());
             if let Some(clip) = state.zoom_clips.get_mut(index) {
-                clip.center = ((x / width) * src_w, (y / height) * src_h);
+                clip.center = (
+                    view_x + (x / width) * view_w,
+                    view_y + (y / height) * view_h,
+                );
             }
         }
     });
@@ -193,6 +197,130 @@ pub(super) fn build_preview(
     root.append(&workspace);
     root.append(&player_bar);
     (root, media, play_button)
+}
+
+pub(super) fn build_stage_tools(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+) -> GtkBox {
+    let bar = GtkBox::new(Orientation::Horizontal, 10);
+    bar.add_css_class("recording-editor-stage-tools");
+    bar.set_halign(Align::Center);
+    bar.set_valign(Align::End);
+    bar.set_hexpand(true);
+
+    let initial = {
+        let guard = state.lock().unwrap();
+        stage_aspect_label(&guard)
+    };
+    let aspect = Button::new();
+    aspect.set_has_frame(false);
+    aspect.add_css_class("recording-editor-stage-chip");
+    aspect.set_tooltip_text(Some("Change aspect ratio"));
+    let aspect_label = Label::new(Some(initial));
+    aspect_label.add_css_class("recording-editor-stage-chip-label");
+    aspect.set_child(Some(&aspect_label));
+
+    let popover = Popover::new();
+    popover.set_has_arrow(false);
+    popover.set_position(gtk4::PositionType::Top);
+    popover.add_css_class("recording-editor-stage-aspect");
+    let list = GtkBox::new(Orientation::Vertical, 2);
+    list.add_css_class("recording-editor-stage-aspect-list");
+    popover.set_child(Some(&list));
+    popover.set_parent(&aspect);
+    aspect.connect_clicked({
+        let popover = popover.clone();
+        move |_| popover.popup()
+    });
+
+    append_stage_aspect_item(
+        &list,
+        &popover,
+        &aspect_label,
+        "Original",
+        None,
+        state.clone(),
+        on_change.clone(),
+    );
+    for &(label, width, height) in &WEBCUT_ASPECT_RATIOS {
+        append_stage_aspect_item(
+            &list,
+            &popover,
+            &aspect_label,
+            label,
+            Some((width, height)),
+            state.clone(),
+            on_change.clone(),
+        );
+    }
+
+    let rule = Separator::new(Orientation::Vertical);
+    rule.add_css_class("recording-editor-stage-rule");
+    rule.set_valign(Align::Center);
+
+    let crop = Button::new();
+    crop.set_has_frame(false);
+    crop.add_css_class("recording-editor-stage-chip");
+    crop.set_tooltip_text(Some("Crop video"));
+    let crop_row = GtkBox::new(Orientation::Horizontal, 6);
+    let crop_icon = Image::from_icon_name("image-crop-symbolic");
+    crop_icon.set_pixel_size(13);
+    let crop_label = Label::new(Some("Crop video"));
+    crop_label.add_css_class("recording-editor-stage-chip-label");
+    crop_row.append(&crop_icon);
+    crop_row.append(&crop_label);
+    crop.set_child(Some(&crop_row));
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let on_change = on_change.clone();
+        crop.connect_clicked(move |_| crop_dialog::show_crop(&window, &state, on_change.clone()));
+    }
+
+    bar.append(&aspect);
+    bar.append(&rule);
+    bar.append(&crop);
+    bar
+}
+
+fn stage_aspect_label(state: &VideoEditState) -> &'static str {
+    let (width, height) = state.canvas_dimensions();
+    closest_aspect_ratio(width, height)
+}
+
+fn append_stage_aspect_item(
+    list: &GtkBox,
+    popover: &Popover,
+    aspect_label: &Label,
+    label: &'static str,
+    size: Option<(u32, u32)>,
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+) {
+    let item = Button::new();
+    item.set_has_frame(false);
+    item.add_css_class("recording-editor-stage-aspect-item");
+    item.set_hexpand(true);
+    item.set_child(Some(&Label::new(Some(label))));
+    item.connect_clicked({
+        let aspect_label = aspect_label.clone();
+        let popover = popover.clone();
+        move |_| {
+            {
+                let mut guard = state.lock().unwrap();
+                match size {
+                    Some((width, height)) => guard.apply_aspect_ratio(width, height),
+                    None => guard.reset_aspect_ratio(),
+                }
+                aspect_label.set_text(stage_aspect_label(&guard));
+            }
+            popover.popdown();
+            on_change();
+        }
+    });
+    list.append(&item);
 }
 
 pub(super) fn build_empty_player_bar() -> GtkBox {
@@ -394,6 +522,23 @@ fn apply_preview_pad(clip: &gtk4::Box, padded: bool) {
     clip.set_margin_bottom(pad);
 }
 
+/// Source-coords rect currently visible on stage: static crop intersected
+/// with the active zoom window.
+fn current_view_rect(state: &VideoEditState, playhead: f64) -> (f64, f64, f64, f64) {
+    let (crop_x, crop_y, crop_w, crop_h) = state.crop_or_full();
+    let (scale, center) = state.eval_zoom(playhead);
+    if scale <= 1.01 {
+        return (crop_x, crop_y, crop_w, crop_h);
+    }
+    let (zx, zy, zw, zh) = even_crop_rect(
+        scale,
+        (center.0 - crop_x, center.1 - crop_y),
+        crop_w.max(2.0) as u32,
+        crop_h.max(2.0) as u32,
+    );
+    (crop_x + zx as f64, crop_y + zy as f64, zw as f64, zh as f64)
+}
+
 fn apply_preview_crop(
     state: &Arc<Mutex<VideoEditState>>,
     clip: &gtk4::Box,
@@ -401,10 +546,12 @@ fn apply_preview_crop(
     playhead: f64,
 ) {
     let state = state.lock().unwrap();
-    let (scale, center) = state.eval_zoom(playhead);
+    let (view_x, view_y, view_w, view_h) = current_view_rect(&state, playhead);
     let parent_w = clip.allocated_width().max(1);
     let parent_h = clip.allocated_height().max(1);
-    if scale <= 1.01 {
+    let src_w = state.metadata.width.max(1) as f64;
+    let src_h = state.metadata.height.max(1) as f64;
+    if view_w >= src_w - 1.0 && view_h >= src_h - 1.0 {
         picture.set_hexpand(true);
         picture.set_vexpand(true);
         picture.set_size_request(-1, -1);
@@ -412,12 +559,12 @@ fn apply_preview_crop(
         picture.set_margin_top(0);
         return;
     }
-    let src_w = state.metadata.width.max(1) as f64;
-    let src_h = state.metadata.height.max(1) as f64;
-    let scaled_w = ((parent_w as f64) * scale).round() as i32;
-    let scaled_h = ((parent_h as f64) * scale).round() as i32;
-    let off_x = (parent_w as f64 / 2.0 - (center.0 / src_w) * scaled_w as f64).round() as i32;
-    let off_y = (parent_h as f64 / 2.0 - (center.1 / src_h) * scaled_h as f64).round() as i32;
+    let scaled_w = (parent_w as f64 * (src_w / view_w)).round() as i32;
+    let scaled_h = (parent_h as f64 * (src_h / view_h)).round() as i32;
+    let off_x = (parent_w as f64 / 2.0 - ((view_x + view_w / 2.0) / src_w) * scaled_w as f64)
+        .round() as i32;
+    let off_y = (parent_h as f64 / 2.0 - ((view_y + view_h / 2.0) / src_h) * scaled_h as f64)
+        .round() as i32;
     picture.set_hexpand(false);
     picture.set_vexpand(false);
     picture.set_size_request(scaled_w, scaled_h);
@@ -451,17 +598,14 @@ fn draw_preview_overlays(
     }
 
     let source_t = state.source_playhead();
-    let (scale, center) = state.eval_zoom(source_t);
-    let src_w = state.metadata.width.max(1);
-    let src_h = state.metadata.height.max(1);
-    let (_cx, _cy, crop_w, crop_h) = even_crop_rect(scale, center, src_w, src_h);
-    let _ = (picture, crop_w, crop_h);
+    let (view_x, view_y, view_w, view_h) = current_view_rect(&state, source_t);
+    let _ = picture;
 
     if let Some(sidecar) = &state.sidecar {
         if let Some((x, y, kind)) = sidecar.interpolated_at(source_t) {
             let pulse = sidecar.click_pulse_at(source_t);
-            let px = (x / src_w as f64) * w;
-            let py = (y / src_h as f64) * h;
+            let px = ((x - view_x) / view_w) * w;
+            let py = ((y - view_y) / view_h) * h;
             draw_apexshot_cursor(cr, px, py, pulse, kind.as_str());
         }
     }
