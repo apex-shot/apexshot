@@ -146,8 +146,10 @@
             .recording-editor-window-controls {
                 min-height: 28px;
                 padding: 2px 8px 2px 10px;
-                background: transparent;
+                background: #000000;
                 border-bottom: 1px solid alpha(white, 0.06);
+                border-radius: 10px 10px 0 0;
+                overflow: hidden;
             }
 
             .recording-editor-window-controls.editor-toolbar {

@@ -101,6 +101,26 @@ fi
 
 echo "Requesting sudo once for uninstall/install..."
 sudo -v
+
+# PackageKit is D-Bus activated on desktop systems and can hold dpkg's lock
+# while checking for updates. Stop it before changing the package database;
+# never remove the lock files themselves.
+echo "Stopping PackageKit so dpkg can acquire its lock..."
+sudo systemctl stop packagekit.service
+for lock_file in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock; do
+  for attempt in {1..20}; do
+    if ! sudo fuser "$lock_file" >/dev/null 2>&1; then
+      break
+    fi
+    if [ "$attempt" -eq 20 ]; then
+      echo "error: $lock_file is still held after stopping PackageKit" >&2
+      sudo fuser -v "$lock_file" >&2 || true
+      exit 1
+    fi
+    sleep 0.25
+  done
+done
+
 pkg_status="$(dpkg-query -W -f='${Status}' "$PACKAGE_NAME" 2>/dev/null || true)"
 if [ -n "$pkg_status" ]; then
   echo "Purging $PACKAGE_NAME (status: $pkg_status)..."

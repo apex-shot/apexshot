@@ -83,8 +83,10 @@
 
             .recording-editor-timeline-dock {
                 padding: 2px 12px 8px 12px;
-                background: #111111;
+                background: #000000;
                 border-top: 1px solid alpha(white, 0.08);
+                border-radius: 0 0 10px 10px;
+                overflow: hidden;
             }
 
             .recording-editor-timeline-card {
@@ -188,13 +190,13 @@
             .recording-editor-tool-sidebar {
                 min-width: 288px;
                 max-width: 288px;
-                background: #111111;
+                background: #000000;
                 border-left: 1px solid alpha(white, 0.08);
             }
 
             .recording-editor-zoom-panel {
                 min-width: 0;
-                background: #111111;
+                background: #000000;
             }
 
             .recording-editor-zoom-header {
@@ -207,6 +209,35 @@
                 font-weight: 600;
             }
 
+            button.recording-editor-panel-upload {
+                min-width: 70px;
+                min-height: 24px;
+                padding: 2px 8px;
+                border: 1px solid alpha(white, 0.12);
+                border-radius: 5px;
+                background: alpha(white, 0.04);
+                color: alpha(white, 0.62);
+                font-size: 11px;
+                font-weight: 600;
+            }
+
+            button.recording-editor-panel-upload:hover,
+            button.recording-editor-panel-upload:focus {
+                border-color: alpha(#b05c38, 0.72);
+                background: alpha(#b05c38, 0.14);
+                color: #d5794e;
+            }
+
+            button.recording-editor-panel-upload label,
+            button.recording-editor-panel-upload image {
+                color: inherit;
+            }
+
+            button.recording-editor-panel-done {
+                min-width: 64px;
+                padding: 5px 10px;
+            }
+
             .recording-editor-zoom-kicker {
                 color: alpha(white, 0.45);
                 font-size: 11px;
@@ -217,7 +248,7 @@
             .recording-editor-zoom-scroll,
             .recording-editor-zoom-scroll > viewport,
             .recording-editor-zoom-scroll scrollbar {
-                background: #111111;
+                background: #000000;
                 border: none;
             }
 
@@ -317,4 +348,3 @@
             button.recording-editor-zoom-chip-active:hover label {
                 color: #f0a07a;
             }
-

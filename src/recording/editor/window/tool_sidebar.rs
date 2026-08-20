@@ -1,10 +1,11 @@
+use super::footer;
 use crate::recording::editor::model::{
     nearest_zoom_preset, VideoEditState, ZoomMode, CLIP_SPEED_PRESETS, MAX_ZOOM_BLUR_SAMPLES,
     MIN_ZOOM_BLUR_SAMPLES, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, Grid, Image, Label, Orientation, PolicyType, Scale,
-    ScrolledWindow, Switch, ToggleButton,
+    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Grid, Image, Label, Orientation,
+    PolicyType, Scale, ScrolledWindow, Switch, ToggleButton,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -18,8 +19,10 @@ pub(super) struct ToolSidebar {
 }
 
 pub(super) fn build_tool_sidebar(
+    window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
+    exporting: Rc<Cell<bool>>,
 ) -> ToolSidebar {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-tool-sidebar");
@@ -27,8 +30,8 @@ pub(super) fn build_tool_sidebar(
     root.set_vexpand(true);
     root.set_size_request(TOOL_SIDEBAR_WIDTH, -1);
 
-    let zoom_panel = build_zoom_panel(state.clone(), on_change.clone());
-    let clip_panel = build_clip_panel(state.clone(), on_change);
+    let zoom_panel = build_zoom_panel(window, state.clone(), on_change.clone(), exporting.clone());
+    let clip_panel = build_clip_panel(window, state.clone(), on_change, exporting);
     root.append(&zoom_panel.widget);
     root.append(&clip_panel.widget);
     root.set_visible(true);
@@ -71,7 +74,12 @@ struct ZoomPanel {
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> ZoomPanel {
+fn build_zoom_panel(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+    exporting: Rc<Cell<bool>>,
+) -> ZoomPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -85,6 +93,10 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     title.set_xalign(0.0);
     title.set_hexpand(true);
     header.append(&title);
+    let (upload, upload_spinner) =
+        footer::build_panel_upload_action(state.clone(), exporting.clone());
+    header.append(&upload);
+    header.append(&upload_spinner);
 
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-zoom-body");
@@ -204,6 +216,7 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     blur.append(&shutter_block);
 
     let footer_delete = delete_tool_button("Delete zoom");
+    let (done, done_spinner) = footer::build_panel_done_action(window, state.clone(), exporting);
 
     body.append(&mode_row);
     body.append(&mode_hint);
@@ -219,10 +232,15 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     scroll.set_hexpand(true);
     scroll.set_child(Some(&body));
 
-    let footer = GtkBox::new(Orientation::Vertical, 0);
+    let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-zoom-footer");
     footer.set_hexpand(true);
     footer.append(&footer_delete);
+    let footer_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    footer_spacer.set_hexpand(true);
+    footer.append(&footer_spacer);
+    footer.append(&done_spinner);
+    footer.append(&done);
 
     panel.append(&header);
     panel.append(&scroll);
@@ -378,7 +396,12 @@ struct ClipPanel {
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> ClipPanel {
+fn build_clip_panel(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+    exporting: Rc<Cell<bool>>,
+) -> ClipPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -392,6 +415,10 @@ fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     title.set_xalign(0.0);
     title.set_hexpand(true);
     header.append(&title);
+    let (upload, upload_spinner) =
+        footer::build_panel_upload_action(state.clone(), exporting.clone());
+    header.append(&upload);
+    header.append(&upload_spinner);
 
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-zoom-body");
@@ -469,10 +496,16 @@ fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     scroll.set_child(Some(&body));
 
     let footer_delete = delete_tool_button("Delete clip");
-    let footer = GtkBox::new(Orientation::Vertical, 0);
+    let (done, done_spinner) = footer::build_panel_done_action(window, state.clone(), exporting);
+    let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-zoom-footer");
     footer.set_hexpand(true);
     footer.append(&footer_delete);
+    let footer_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    footer_spacer.set_hexpand(true);
+    footer.append(&footer_spacer);
+    footer.append(&done_spinner);
+    footer.append(&done);
 
     panel.append(&header);
     panel.append(&scroll);

@@ -181,6 +181,19 @@
                 color: alpha(#1d2129, 0.92);
             }
 
+            .editor-theme-light button.recording-editor-panel-upload {
+                border-color: alpha(#111827, 0.14);
+                background: alpha(#111827, 0.04);
+                color: alpha(#1d2129, 0.62);
+            }
+
+            .editor-theme-light button.recording-editor-panel-upload:hover,
+            .editor-theme-light button.recording-editor-panel-upload:focus {
+                border-color: alpha(#b05c38, 0.52);
+                background: alpha(#b05c38, 0.10);
+                color: #9f4e2f;
+            }
+
             .editor-theme-light .recording-editor-zoom-kicker {
                 color: alpha(#1d2129, 0.45);
             }

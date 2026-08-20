@@ -107,7 +107,7 @@
             .recording-editor-timeline {
                 min-height: 48px;
                 padding: 0;
-                background: transparent;
+                background: #000000;
                 border-top: 1px solid alpha(white, 0.06);
             }
 

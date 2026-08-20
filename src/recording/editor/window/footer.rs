@@ -93,6 +93,74 @@ fn icon_action_button(icon_name: &str, tooltip: &str) -> Button {
     button
 }
 
+pub(super) fn build_panel_upload_action(
+    state: Arc<Mutex<VideoEditState>>,
+    exporting: Rc<Cell<bool>>,
+) -> (Button, Spinner) {
+    let button = Button::new();
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-panel-upload");
+    button.set_tooltip_text(Some("Export with your current settings, then upload"));
+
+    let content = GtkBox::new(Orientation::Horizontal, 5);
+    content.set_halign(Align::Center);
+    let icon = Image::from_icon_name(
+        crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
+    );
+    icon.set_pixel_size(13);
+    let label = Label::new(Some("Upload"));
+    content.append(&icon);
+    content.append(&label);
+    button.set_child(Some(&content));
+
+    let spinner = Spinner::new();
+    spinner.set_size_request(14, 14);
+    spinner.set_visible(false);
+
+    wire_upload_button(
+        &button,
+        state,
+        vec![
+            button.clone().upcast::<gtk4::Widget>(),
+            spinner.clone().upcast(),
+        ],
+        spinner.clone(),
+        exporting,
+    );
+
+    (button, spinner)
+}
+
+pub(super) fn build_panel_done_action(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    exporting: Rc<Cell<bool>>,
+) -> (Button, Spinner) {
+    let button = Button::with_label("Done");
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-primary-button");
+    button.add_css_class("recording-editor-panel-done");
+    button.set_tooltip_text(Some("Export the edited MP4"));
+
+    let spinner = Spinner::new();
+    spinner.set_size_request(14, 14);
+    spinner.set_visible(false);
+
+    wire_export_button(
+        &button,
+        window,
+        state,
+        vec![
+            button.clone().upcast::<gtk4::Widget>(),
+            spinner.clone().upcast(),
+        ],
+        spinner.clone(),
+        exporting,
+    );
+
+    (button, spinner)
+}
+
 pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, _trim_only: bool) {
     let state = state.lock().unwrap();
     let trim_only = !state.needs_reencode();

@@ -101,10 +101,11 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         .application(application)
         .title("ApexShot Recording Editor")
         .icon_name(crate::app_identity::icon_name())
-        .default_width(1040)
-        .default_height(860)
+        .default_width(1400)
+        .default_height(900)
         .decorated(false)
         .build();
+    window.set_size_request(1400, 900);
     window.add_css_class("editor-window");
 
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -119,8 +120,6 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     if crate::capture::editor::ui_support::prefers_reduced_transparency() {
         root.add_css_class("editor-reduced-transparency");
     }
-
-    root.append(&build_window_controls(&window));
 
     let state = match &initial_video {
         InitialVideo::AsyncLoad(path) => match ffmpeg::probe_metadata(path) {
@@ -140,6 +139,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
         InitialVideo::None => None,
     }));
+    root.append(&build_window_controls(&window, state.clone()));
 
     let paint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let refresh_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
@@ -176,7 +176,8 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     ));
     workspace.append(&stage);
 
-    let sidebar = tool_sidebar::build_tool_sidebar(state.clone(), ping.clone());
+    let exporting = Rc::new(Cell::new(false));
+    let sidebar = tool_sidebar::build_tool_sidebar(&window, state.clone(), ping.clone(), exporting);
     workspace.append(&sidebar.widget);
     root.append(&workspace);
 
@@ -210,21 +211,41 @@ fn placeholder_edit_state() -> VideoEditState {
     state
 }
 
-fn build_window_controls(window: &ApplicationWindow) -> GtkBox {
+fn build_window_controls(window: &ApplicationWindow, state: Arc<Mutex<VideoEditState>>) -> GtkBox {
+    const TRAFFIC_LIGHTS_WIDTH: i32 = 84;
     let bar = GtkBox::new(Orientation::Horizontal, 8);
     bar.add_css_class("recording-editor-window-controls");
     bar.set_hexpand(true);
     bar.set_vexpand(false);
     bar.set_valign(Align::Start);
 
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    bar.append(&spacer);
+    let left_balance = GtkBox::new(Orientation::Horizontal, 0);
+    left_balance.set_size_request(TRAFFIC_LIGHTS_WIDTH, -1);
+    bar.append(&left_balance);
+
+    let title_text = state.lock().unwrap().title.clone();
+    let title = Label::new(Some(&title_text));
+    title.add_css_class("recording-editor-title");
+    title.set_hexpand(true);
+    title.set_halign(Align::Center);
+    title.set_valign(Align::Center);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title.set_max_width_chars(64);
+    title.set_can_target(false);
+    bar.append(&title);
 
     let lights = toolbar::build_traffic_lights(window);
+    lights.set_size_request(TRAFFIC_LIGHTS_WIDTH, -1);
     lights.set_halign(Align::End);
     lights.set_valign(Align::Center);
-    bar.append(&lights);
+    let right_balance = GtkBox::new(Orientation::Horizontal, 0);
+    right_balance.set_size_request(tool_sidebar::TOOL_SIDEBAR_WIDTH + TRAFFIC_LIGHTS_WIDTH, -1);
+    right_balance.set_hexpand(false);
+    let right_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    right_spacer.set_hexpand(true);
+    right_balance.append(&right_spacer);
+    right_balance.append(&lights);
+    bar.append(&right_balance);
 
     crate::capture::editor::ui_support::install_window_drag(&bar, window);
     bar
