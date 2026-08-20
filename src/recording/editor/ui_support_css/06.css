@@ -1,0 +1,320 @@
+            button.recording-editor-tool-rail-button {
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
+                border-radius: 0;
+                border: none;
+                background: transparent;
+                color: alpha(white, 0.55);
+            }
+
+            button.recording-editor-tool-rail-button:hover {
+                background: transparent;
+                color: alpha(white, 0.88);
+            }
+
+            button.recording-editor-tool-rail-add {
+                background: transparent;
+                color: alpha(white, 0.88);
+            }
+
+            button.recording-editor-tool-rail-active {
+                color: #b05c38;
+            }
+
+            button.recording-editor-tool-rail-active image {
+                color: #b05c38;
+            }
+
+            .recording-editor-media-library {
+                min-width: 240px;
+                max-width: 240px;
+                padding: 10px 8px 8px 8px;
+                background: transparent;
+                border: none;
+                border-right: 1px solid alpha(white, 0.06);
+                border-radius: 0;
+            }
+
+            .recording-editor-media-header {
+                min-height: 20px;
+            }
+
+            button.recording-editor-media-close {
+                min-width: 20px;
+                min-height: 20px;
+                padding: 0;
+                border: none;
+                background: transparent;
+                color: alpha(white, 0.45);
+            }
+
+            button.recording-editor-media-close:hover {
+                color: #F1F1F3;
+                background: transparent;
+            }
+
+            .recording-editor-media-tabs {
+                background: transparent;
+                border-radius: 0;
+                margin: 0 -8px;
+                padding: 0 8px 8px 8px;
+                border-bottom: 1px solid alpha(white, 0.06);
+            }
+
+            button.recording-editor-media-tab {
+                min-width: 0;
+                min-height: 0;
+                padding: 6px 0 4px 0;
+                border: none;
+                border-radius: 0;
+                background: transparent;
+                color: alpha(white, 0.45);
+            }
+
+            button.recording-editor-media-tab image {
+                color: inherit;
+            }
+
+            button.recording-editor-media-tab label {
+                color: inherit;
+                font-size: 10px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-media-tab:hover,
+            button.recording-editor-media-tab:hover label,
+            button.recording-editor-media-tab:hover image {
+                color: alpha(white, 0.78);
+                background: transparent;
+            }
+
+            button.recording-editor-media-tab-active,
+            button.recording-editor-media-tab-active label,
+            button.recording-editor-media-tab-active image {
+                color: #b05c38;
+                background: transparent;
+            }
+
+            button.recording-editor-media-upload {
+                min-height: 88px;
+                padding: 12px 8px;
+                margin: 2px 0 4px 0;
+                border: 1px dashed alpha(white, 0.22);
+                border-radius: 10px;
+                background: transparent;
+                color: alpha(white, 0.48);
+            }
+
+            button.recording-editor-media-upload:hover,
+            button.recording-editor-media-upload:hover:focus {
+                background: transparent;
+                border-color: #b05c38;
+                color: #b05c38;
+            }
+
+            .recording-editor-media-upload-icon,
+            .recording-editor-media-upload-title,
+            .recording-editor-media-upload-hint {
+                color: inherit;
+            }
+
+            .recording-editor-media-upload-title {
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .recording-editor-media-upload-hint {
+                font-size: 11px;
+                font-weight: 400;
+                opacity: 0.78;
+            }
+
+            .recording-editor-media-scroll,
+            .recording-editor-media-list {
+                background: transparent;
+                border: none;
+            }
+
+            .recording-editor-media-row {
+                min-height: 40px;
+                padding: 4px 2px;
+                background: transparent;
+                border: none;
+                border-radius: 0;
+            }
+
+            .recording-editor-media-thumb {
+                min-width: 56px;
+                min-height: 32px;
+                border-radius: 3px;
+                background: alpha(white, 0.04);
+                overflow: hidden;
+            }
+
+            .recording-editor-media-kind-icon {
+                color: alpha(white, 0.42);
+            }
+
+            .recording-editor-media-title {
+                color: alpha(white, 0.78);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            .recording-editor-media-meta,
+            .recording-editor-media-empty {
+                color: alpha(white, 0.38);
+                font-size: 10px;
+            }
+
+            .editor-theme-light .recording-editor-media-library {
+                background: transparent;
+                border-right-color: alpha(#111827, 0.08);
+            }
+
+            .editor-theme-light .recording-editor-inspector,
+            .editor-theme-light .recording-editor-inspector scrolledwindow,
+            .editor-theme-light .recording-editor-inspector viewport,
+            .editor-theme-light .recording-editor-inspector .editor-inspector-section,
+            .editor-theme-light .recording-editor-inspector .recording-editor-panels,
+            .editor-theme-light .recording-editor-inspector .recording-editor-panel,
+            .editor-theme-light .recording-editor-inspector .recording-editor-panel-body {
+                background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-inspector {
+                border-left-color: alpha(#111827, 0.08);
+                border-right: none;
+            }
+
+            .editor-theme-light .recording-editor-inspector-toolbar {
+                border-bottom-color: alpha(#111827, 0.08);
+            }
+
+            .editor-theme-light button.recording-editor-inspector-icon {
+                color: alpha(#1d2129, 0.45);
+            }
+
+            .editor-theme-light button.recording-editor-inspector-icon:hover,
+            .editor-theme-light button.recording-editor-inspector-icon:hover image {
+                color: #1d2129;
+            }
+
+            .editor-theme-light button.recording-editor-media-close {
+                color: alpha(#1d2129, 0.45);
+            }
+
+            .editor-theme-light button.recording-editor-media-close:hover {
+                color: #1d2129;
+            }
+
+            .editor-theme-light .recording-editor-media-tabs {
+                border-bottom-color: alpha(#111827, 0.08);
+            }
+
+            .editor-theme-light button.recording-editor-media-tab,
+            .editor-theme-light button.recording-editor-media-tab label,
+            .editor-theme-light button.recording-editor-media-tab image {
+                color: alpha(#1d2129, 0.45);
+            }
+
+            .editor-theme-light button.recording-editor-media-tab:hover,
+            .editor-theme-light button.recording-editor-media-tab:hover label,
+            .editor-theme-light button.recording-editor-media-tab:hover image {
+                color: alpha(#1d2129, 0.78);
+            }
+
+            .editor-theme-light button.recording-editor-media-tab-active,
+            .editor-theme-light button.recording-editor-media-tab-active label,
+            .editor-theme-light button.recording-editor-media-tab-active image {
+                color: #b05c38;
+            }
+
+            .editor-theme-light button.recording-editor-media-upload {
+                border-color: alpha(#111827, 0.20);
+                color: alpha(#1d2129, 0.48);
+                background: transparent;
+            }
+
+            .editor-theme-light button.recording-editor-media-upload:hover,
+            .editor-theme-light button.recording-editor-media-upload:hover:focus {
+                border-color: #b05c38;
+                color: #b05c38;
+                background: transparent;
+            }
+
+            .editor-theme-light .recording-editor-media-thumb {
+                background: alpha(#111827, 0.04);
+            }
+
+            .editor-theme-light .recording-editor-media-kind-icon {
+                color: alpha(#1d2129, 0.42);
+            }
+
+            .editor-theme-light .recording-editor-media-title {
+                color: alpha(#1d2129, 0.78);
+            }
+
+            .editor-theme-light .recording-editor-media-meta,
+            .editor-theme-light .recording-editor-media-empty {
+                color: alpha(#1d2129, 0.42);
+            }
+
+            popover.recording-editor-tool-rail-popover,
+            popover.recording-editor-tool-rail-popover > contents {
+                background: #1a1a1a;
+                border: 1px solid alpha(white, 0.08);
+                border-radius: 10px;
+                padding: 6px;
+            }
+
+            .recording-editor-inspector,
+            .recording-editor-inspector scrolledwindow,
+            .recording-editor-inspector viewport,
+            .recording-editor-inspector .editor-inspector-section,
+            .recording-editor-inspector .recording-editor-panels,
+            .recording-editor-inspector .recording-editor-panel,
+            .recording-editor-inspector .recording-editor-panel-body {
+                background: #111111;
+            }
+
+            .recording-editor-inspector {
+                min-width: 240px;
+                max-width: 240px;
+                padding: 4px 8px 8px 8px;
+                border: none;
+                border-left: 1px solid alpha(white, 0.06);
+                border-radius: 0;
+            }
+
+            .recording-editor-inspector-toolbar,
+            .recording-editor-inspector .editor-sidebar-actions {
+                min-height: 24px;
+                padding: 0 2px 2px 2px;
+                margin: 0;
+                border-bottom: 1px solid alpha(white, 0.06);
+            }
+
+            button.recording-editor-inspector-icon {
+                min-width: 22px;
+                min-height: 22px;
+                padding: 0;
+                border: none;
+                border-radius: 0;
+                background: transparent;
+                color: alpha(white, 0.45);
+            }
+
+            button.recording-editor-inspector-icon:hover,
+            button.recording-editor-inspector-icon:hover image {
+                background: transparent;
+                color: alpha(white, 0.88);
+            }
+
+            .recording-editor-inspector-toolbar .recording-editor-primary-button {
+                min-width: 56px;
+                min-height: 24px;
+                padding: 2px 10px;
+            }
+

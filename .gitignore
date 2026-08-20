@@ -97,6 +97,7 @@ obs-studio/
 Kooha/
 spectacle/
 webcut/
+/Recordly/
 .antigravitycli/
 reinstall-dev-deb.sh
 # Agent local memory
