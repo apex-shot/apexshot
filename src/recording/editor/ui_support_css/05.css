@@ -262,32 +262,67 @@
                 color: alpha(#1d2129, 0.55);
             }
 
-            .editor-theme-light .recording-editor-crop-stage {
-                background: transparent;
+            .recording-editor-crop-dialog.editor-theme-light,
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-dialog-bg {
+                background: #ffffff;
+                border-color: #e6e4e0;
+            }
+
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-header,
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-stage,
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-dialog-bg {
+                background: #ffffff;
                 border-color: transparent;
             }
 
-            .editor-theme-light .recording-editor-dialog.recording-editor-crop-dialog {
-                background: #f0f1f4;
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-close {
+                background: transparent;
+                color: #807c76;
+                border: none;
+                box-shadow: none;
             }
 
-            .editor-theme-light
-                .recording-editor-dialog.recording-editor-crop-dialog
-                .recording-editor-dialog-bg {
-                background: #f0f1f4;
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-close:hover {
+                background: transparent;
+                color: #26221e;
             }
 
-            .editor-theme-light .recording-editor-crop-close {
-                color: alpha(#1d2129, 0.55);
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-footer {
+                border-top-color: alpha(#e6e4e0, 0.7);
             }
 
-            .editor-theme-light .recording-editor-crop-close:hover {
-                background: alpha(#111827, 0.08);
-                color: #1d2129;
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-name {
+                color: #26221e;
             }
 
-            .editor-theme-light .recording-editor-crop-size {
-                color: alpha(#1d2129, 0.62);
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-size {
+                color: #807c76;
+            }
+
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-secondary-button {
+                background: #f4f3f1;
+                color: #26221e;
+            }
+
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-secondary-button label {
+                background: none;
+                color: #26221e;
+            }
+
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-secondary-button:hover,
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-secondary-button:hover:focus {
+                background: #ebe9e6;
+                color: #26221e;
+                outline: none;
+                box-shadow: none;
+                border: none;
+                background-image: none;
+            }
+
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-secondary-button:hover label,
+            .recording-editor-crop-dialog.editor-theme-light .recording-editor-secondary-button:hover:focus label {
+                background: none;
+                color: #26221e;
             }
 
             .recording-editor-workspace {

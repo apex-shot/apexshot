@@ -25,35 +25,46 @@
                 default_width: 900px;
             }
 
-            /* Crop modal shares the timeline section's deeper background. */
             .recording-editor-dialog.recording-editor-crop-dialog {
-                background: #0c0c0c;
+                background: #111111;
+                border-radius: 14px;
+                border: 1px solid alpha(white, 0.08);
+                box-shadow: 0 16px 48px alpha(black, 0.45);
             }
 
             .recording-editor-dialog.recording-editor-crop-dialog .recording-editor-dialog-bg {
-                background: #0c0c0c;
+                background: #111111;
+                border: none;
+                border-radius: 14px;
+                overflow: hidden;
+            }
+
+            .recording-editor-crop-header {
+                padding: 10px 12px;
+                background: #111111;
             }
 
             .recording-editor-crop-close {
-                min-width: 28px;
-                min-height: 28px;
-                padding: 4px;
-                border-radius: 6px;
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
+                border-radius: 0;
                 background: transparent;
-                color: alpha(white, 0.55);
+                color: #a1a1aa;
+                border: none;
+                box-shadow: none;
             }
 
             .recording-editor-crop-close:hover {
-                background: alpha(white, 0.08);
-                color: white;
+                background: transparent;
+                color: #fafafa;
             }
 
-            /* No frame behind the video itself — the picture is the surface. */
             .recording-editor-crop-stage {
-                background: transparent;
+                background: #111111;
                 border: none;
                 padding: 0;
-                margin-top: 6px;
+                margin: 0;
             }
 
             .recording-editor-crop-clip {
@@ -62,11 +73,119 @@
                 border-radius: 0;
             }
 
+            .recording-editor-crop-footer {
+                padding: 24px 16px 16px;
+                border-top: 1px solid alpha(white, 0.04);
+            }
+
+            .recording-editor-crop-name {
+                color: #fafafa;
+                font-size: 15px;
+                font-weight: 500;
+                letter-spacing: -0.23px;
+            }
+
             .recording-editor-crop-size {
-                color: alpha(white, 0.62);
-                font-size: 11px;
+                color: #a1a1aa;
+                font-size: 13px;
+                font-weight: 400;
+                margin-top: 0;
+            }
+
+            .recording-editor-crop-dialog button {
+                background-image: none;
+                text-shadow: none;
+                box-shadow: none;
+                -gtk-icon-shadow: none;
+                border: none;
+                outline: none;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-primary-button,
+            .recording-editor-crop-dialog .recording-editor-secondary-button {
+                min-width: 0;
+                min-height: 36px;
+                padding: 0 16px;
+                border-radius: 8px;
+                font-size: 14px;
+                transition: none;
+                animation: none;
+                box-shadow: none;
+                outline: none;
+                border: none;
+                background-image: none;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-primary-button,
+            .recording-editor-crop-dialog .recording-editor-primary-button:hover,
+            .recording-editor-crop-dialog .recording-editor-primary-button:focus,
+            .recording-editor-crop-dialog .recording-editor-primary-button:hover:focus,
+            .recording-editor-crop-dialog .recording-editor-primary-button:active {
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+                border: none;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-primary-button {
                 font-weight: 600;
-                margin-top: 8px;
+                background: #B05C38;
+                color: white;
+                transition: none;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-primary-button label {
+                font-weight: 600;
+                background: none;
+                color: white;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-primary-button:hover,
+            .recording-editor-crop-dialog .recording-editor-primary-button:hover:focus {
+                background: #c06540;
+                color: white;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-primary-button:hover label,
+            .recording-editor-crop-dialog .recording-editor-primary-button:hover:focus label {
+                background: none;
+                color: white;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-secondary-button,
+            .recording-editor-crop-dialog .recording-editor-secondary-button:hover,
+            .recording-editor-crop-dialog .recording-editor-secondary-button:focus,
+            .recording-editor-crop-dialog .recording-editor-secondary-button:hover:focus,
+            .recording-editor-crop-dialog .recording-editor-secondary-button:active {
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+                border: none;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-secondary-button {
+                font-weight: 500;
+                background: alpha(white, 0.06);
+                color: #f1f1f3;
+                transition: none;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-secondary-button label {
+                font-weight: 500;
+                background: none;
+                color: #f1f1f3;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-secondary-button:hover,
+            .recording-editor-crop-dialog .recording-editor-secondary-button:hover:focus {
+                background: alpha(white, 0.12);
+                color: #ffffff;
+            }
+
+            .recording-editor-crop-dialog .recording-editor-secondary-button:hover label,
+            .recording-editor-crop-dialog .recording-editor-secondary-button:hover:focus label {
+                background: none;
+                color: #ffffff;
             }
 
             /* ── Light theme overrides ── */

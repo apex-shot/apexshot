@@ -52,60 +52,52 @@ pub(super) fn show_crop(
         )
     };
 
+    const DIALOG_W: i32 = 900;
+    const CHROME_H: i32 = 136;
+    let video_h = (DIALOG_W as f64 * src_h / src_w).round() as i32;
+
     let dialog = Window::builder()
         .transient_for(parent)
         .modal(true)
         .decorated(false)
-        .default_width(900)
-        .default_height(700)
+        .default_width(DIALOG_W)
+        .default_height(CHROME_H + video_h)
         .resizable(false)
         .build();
     dialog.add_css_class("recording-editor-dialog");
     dialog.add_css_class("recording-editor-crop-dialog");
-
-    let root = GtkBox::new(Orientation::Vertical, 12);
-    root.add_css_class("recording-editor-dialog-root");
-    root.set_margin_top(20);
-    root.set_margin_bottom(18);
-    root.set_margin_start(24);
-    root.set_margin_end(24);
+    if !crate::capture::editor::ui_support::prefers_dark_glass_theme() {
+        dialog.add_css_class("editor-theme-light");
+    }
 
     let wrapper = GtkBox::new(Orientation::Vertical, 0);
     wrapper.add_css_class("recording-editor-dialog-bg");
-    wrapper.append(&root);
-
-    // ── Header: title + hint left, close ✕ right ──
-    let header = GtkBox::new(Orientation::Horizontal, 12);
-    let header_text = GtkBox::new(Orientation::Vertical, 4);
-    header_text.set_hexpand(true);
-    header_text.set_valign(Align::Start);
-
-    let title = Label::new(Some("Crop video"));
-    title.add_css_class("recording-editor-dialog-title");
-    title.set_xalign(0.0);
-
-    let hint = Label::new(Some(
-        "Drag the border or corners to crop. Stretch it back over the whole frame to keep the original.",
-    ));
-    hint.add_css_class("recording-editor-dialog-body");
-    hint.set_xalign(0.0);
-    hint.set_wrap(true);
-    hint.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-
-    header_text.append(&title);
-    header_text.append(&hint);
+    wrapper.set_overflow(gtk4::Overflow::Hidden);
 
     let close = Button::new();
     close.set_has_frame(false);
+    close.set_can_focus(false);
     close.add_css_class("recording-editor-crop-close");
     close.set_tooltip_text(Some("Close"));
+    close.set_valign(Align::Center);
     let close_icon = Image::from_icon_name("window-close-symbolic");
     close_icon.set_pixel_size(16);
     close.set_child(Some(&close_icon));
     let dialog_close = dialog.clone();
     close.connect_clicked(move |_| dialog_close.close());
 
-    header.append(&header_text);
+    let title = Label::new(Some("Crop video"));
+    title.add_css_class("recording-editor-crop-name");
+    title.set_hexpand(true);
+    title.set_halign(Align::Center);
+
+    let header_pad = GtkBox::new(Orientation::Horizontal, 0);
+    header_pad.set_size_request(32, 32);
+
+    let header = GtkBox::new(Orientation::Horizontal, 0);
+    header.add_css_class("recording-editor-crop-header");
+    header.append(&header_pad);
+    header.append(&title);
     header.append(&close);
 
     // Selection rect in source pixels.
@@ -141,18 +133,20 @@ pub(super) fn show_crop(
     // so surface pixels map 1:1 onto source pixels.
     let frame = AspectFrame::new(0.5, 0.5, (src_w / src_h) as f32, false);
     frame.set_hexpand(true);
-    frame.set_vexpand(true);
+    frame.set_vexpand(false);
+    frame.set_size_request(DIALOG_W, video_h);
     frame.set_child(Some(&overlay));
 
     let stage = GtkBox::new(Orientation::Vertical, 0);
     stage.add_css_class("recording-editor-crop-stage");
     stage.set_hexpand(true);
-    stage.set_vexpand(true);
+    stage.set_vexpand(false);
+    stage.set_size_request(DIALOG_W, video_h);
     stage.append(&frame);
 
     let size_label = Label::new(None);
     size_label.add_css_class("recording-editor-crop-size");
-    size_label.set_halign(Align::Center);
+    size_label.set_xalign(0.0);
 
     let update_size_label = {
         let size_label = size_label.clone();
@@ -331,16 +325,14 @@ pub(super) fn show_crop(
     });
     draw_area.add_controller(drag);
 
-    // ── Buttons ──
-    let button_row = GtkBox::new(Orientation::Horizontal, 10);
-    button_row.set_margin_top(4);
-
     let reset = Button::with_label("Reset");
     reset.set_has_frame(false);
+    reset.set_can_focus(false);
     reset.add_css_class("recording-editor-secondary-button");
 
     let done = Button::with_label("Done");
     done.set_has_frame(false);
+    done.set_can_focus(false);
     done.add_css_class("recording-editor-primary-button");
 
     reset.connect_clicked({
@@ -370,16 +362,24 @@ pub(super) fn show_crop(
         }
     });
 
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    button_row.append(&reset);
-    button_row.append(&spacer);
-    button_row.append(&done);
+    size_label.set_halign(Align::Center);
+    size_label.set_valign(Align::Center);
+    size_label.set_hexpand(true);
 
-    root.append(&header);
-    root.append(&stage);
-    root.append(&size_label);
-    root.append(&button_row);
+    reset.set_halign(Align::Start);
+    reset.set_valign(Align::Center);
+    done.set_halign(Align::End);
+    done.set_valign(Align::Center);
+
+    let footer = GtkBox::new(Orientation::Horizontal, 0);
+    footer.add_css_class("recording-editor-crop-footer");
+    footer.append(&reset);
+    footer.append(&size_label);
+    footer.append(&done);
+
+    wrapper.append(&header);
+    wrapper.append(&stage);
+    wrapper.append(&footer);
     dialog.set_child(Some(&wrapper));
 
     let media_close = media.clone();

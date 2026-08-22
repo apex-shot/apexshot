@@ -21,11 +21,10 @@ mod toolbar;
 use super::ffmpeg;
 use super::model::{AudioMode, VideoEditState, VideoMetadata};
 use super::ui_support::install_recording_editor_css;
-use gtk4::glib;
 use gtk4::{
-    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
-    FileChooserAction, FileChooserNative, FileFilter, Image, Label, MediaFile, Orientation,
-    Overlay, ResponseType, Revealer, Scale, Spinner,
+    gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
+    DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, Image, Label,
+    MediaFile, Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -137,9 +136,10 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     let state = state.unwrap_or_else(|| Arc::new(Mutex::new(placeholder_edit_state())));
     let media = Rc::new(RefCell::new(match &initial_video {
         InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
-        InitialVideo::None => None,
+        InitialVideo::None => Some(MediaFile::new()),
     }));
-    root.append(&build_window_controls(&window, state.clone()));
+    let title = build_window_controls(&window, state.clone());
+    root.append(&title);
 
     let paint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let refresh_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
@@ -165,10 +165,11 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     stage.add_css_class("recording-editor-stage");
     stage.set_hexpand(true);
     stage.set_vexpand(true);
-    let preview_slot = GtkBox::new(Orientation::Vertical, 0);
-    preview_slot.set_hexpand(true);
-    preview_slot.set_vexpand(true);
-    stage.append(&preview_slot);
+    let estimate_label = Label::new(None);
+    let preview_media = media.borrow().clone();
+    let (preview_widget, _, _) =
+        preview::build_preview_with_media(state.clone(), estimate_label, preview_media);
+    stage.append(&preview_widget);
     stage.append(&preview::build_stage_tools(
         &window,
         state.clone(),
@@ -181,10 +182,45 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     workspace.append(&sidebar.widget);
     root.append(&workspace);
 
-    let (timeline, paint) = timeline_card::build_timeline_card(state, media, ping.clone());
+    let (timeline, paint) =
+        timeline_card::build_timeline_card(state.clone(), media.clone(), ping.clone());
     root.append(&timeline);
     *paint_slot.borrow_mut() = Some(paint);
     *refresh_slot.borrow_mut() = Some(sidebar.refresh);
+    let drop_target = DropTarget::new(gio::File::static_type(), gdk::DragAction::COPY);
+    drop_target.connect_drop({
+        let state = state.clone();
+        let media = media.clone();
+        let window = window.clone();
+        let ping = ping.clone();
+        move |_, value, _, _| {
+            let Ok(file) = value.get::<gio::File>() else {
+                return false;
+            };
+            let Some(path) = file.path() else {
+                return false;
+            };
+            let Ok(metadata) = ffmpeg::probe_metadata(&path) else {
+                return false;
+            };
+            *state.lock().unwrap() = VideoEditState::new(metadata);
+            let has_mouse_data = state
+                .lock()
+                .unwrap()
+                .sidecar
+                .as_ref()
+                .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+            if let Some(player) = media.borrow().as_ref() {
+                player.set_file(Some(&file));
+            }
+            ping();
+            if !has_mouse_data {
+                dialogs::show_manual_zoom_notice(&window);
+            }
+            true
+        }
+    });
+    preview_widget.add_controller(drop_target);
     ping();
 
     crate::capture::editor::ui_support::install_edge_resize(&root, &window);
@@ -195,19 +231,13 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
 fn placeholder_edit_state() -> VideoEditState {
     let mut state = VideoEditState::new(VideoMetadata {
         path: PathBuf::from("Screen Recording.mp4"),
-        duration_seconds: 8.0,
+        duration_seconds: 0.0,
         width: 1920,
         height: 1080,
         file_size_bytes: 0,
         has_audio: false,
     });
-    state.title = "Screen Recording".into();
-    state.playhead_seconds = 0.0;
-    let _ = state.add_zoom_at_playhead();
-    if let Some(clip) = state.zoom_clips.first_mut() {
-        clip.start = 3.2;
-        clip.end = 8.0;
-    }
+    state.title = "Drop a recording to begin".into();
     state
 }
 

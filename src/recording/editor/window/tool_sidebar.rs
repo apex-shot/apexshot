@@ -342,6 +342,7 @@ fn build_zoom_panel(
         let manual_btn = manual_btn.clone();
         let mode_hint = mode_hint.clone();
         let classic = classic.clone();
+        let classic_row = classic_row.clone();
         let chip_buttons = chip_buttons.clone();
         let syncing = syncing.clone();
         let samples_scale = samples_scale.clone();
@@ -364,6 +365,9 @@ fn build_zoom_panel(
                     ZoomMode::Auto => auto_btn.set_active(true),
                     ZoomMode::Manual => manual_btn.set_active(true),
                 }
+                classic_row.set_visible(clip.mode == ZoomMode::Auto);
+            } else {
+                classic_row.set_visible(false);
             }
             classic.set_active(guard.zoom_classic);
             samples_scale.set_value(guard.zoom_blur_samples as f64);

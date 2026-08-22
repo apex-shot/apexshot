@@ -81,6 +81,49 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
     dialog.present();
 }
 
+pub(super) fn show_manual_zoom_notice(parent: &ApplicationWindow) {
+    let dialog = Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .decorated(false)
+        .default_width(380)
+        .resizable(false)
+        .build();
+    dialog.add_css_class("recording-editor-dialog");
+
+    let root = GtkBox::new(Orientation::Vertical, 12);
+    root.add_css_class("recording-editor-dialog-root");
+    root.set_margin_top(24);
+    root.set_margin_bottom(18);
+    root.set_margin_start(24);
+    root.set_margin_end(24);
+
+    let title = Label::new(Some("Automatic zoom unavailable"));
+    title.add_css_class("recording-editor-dialog-title");
+    title.set_xalign(0.0);
+    let body = Label::new(Some(
+        "Mouse movement could not be detected for this recording. Use Manual mode to place zooms yourself.",
+    ));
+    body.add_css_class("recording-editor-dialog-body");
+    body.set_xalign(0.0);
+    body.set_wrap(true);
+    let close = Button::with_label("Got it");
+    close.set_has_frame(false);
+    close.add_css_class("recording-editor-primary-button");
+    close.set_halign(Align::End);
+    let dialog_close = dialog.clone();
+    close.connect_clicked(move |_| dialog_close.close());
+
+    root.append(&title);
+    root.append(&body);
+    root.append(&close);
+    let wrapper = GtkBox::new(Orientation::Vertical, 0);
+    wrapper.add_css_class("recording-editor-dialog-bg");
+    wrapper.append(&root);
+    dialog.set_child(Some(&wrapper));
+    dialog.present();
+}
+
 pub(super) fn show_error(
     parent: &ApplicationWindow,
     title: &str,

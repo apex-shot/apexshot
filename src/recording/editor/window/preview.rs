@@ -1,12 +1,14 @@
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
-    closest_aspect_ratio, even_crop_rect, format_webcut_time, VideoBackground, VideoEditState,
-    ZoomMode, WEBCUT_ASPECT_RATIOS,
+    closest_aspect_ratio, format_webcut_time, view_to_source, VideoBackground,
+    VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
 };
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, DrawingArea,
-    GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture, Popover, Separator,
+    CssProvider, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture, Popover,
+    Separator,
 };
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -14,10 +16,24 @@ pub(super) fn build_preview(
     state: Arc<Mutex<VideoEditState>>,
     estimate_label: Label,
 ) -> (GtkBox, MediaFile, Button) {
-    let path = {
-        let state = state.lock().unwrap();
-        state.metadata.path.clone()
-    };
+    build_preview_inner(state, estimate_label, None, true)
+}
+
+pub(super) fn build_preview_with_media(
+    state: Arc<Mutex<VideoEditState>>,
+    estimate_label: Label,
+    media: Option<MediaFile>,
+) -> (GtkBox, MediaFile, Button) {
+    build_preview_inner(state, estimate_label, media, false)
+}
+
+fn build_preview_inner(
+    state: Arc<Mutex<VideoEditState>>,
+    estimate_label: Label,
+    media: Option<MediaFile>,
+    show_player_bar: bool,
+) -> (GtkBox, MediaFile, Button) {
+    let path = state.lock().unwrap().metadata.path.clone();
 
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-preview-frame");
@@ -31,7 +47,7 @@ pub(super) fn build_preview(
     workspace.set_halign(Align::Fill);
     workspace.set_valign(Align::Fill);
 
-    let media = MediaFile::for_filename(path);
+    let media = media.unwrap_or_else(|| MediaFile::for_filename(path));
     media.set_loop(true);
 
     let picture = Picture::for_paintable(&media);
@@ -42,15 +58,28 @@ pub(super) fn build_preview(
     picture.set_valign(Align::Fill);
     picture.set_keep_aspect_ratio(true);
     picture.set_can_shrink(true);
+    picture.add_css_class("recording-editor-video-zoom-live");
+    let zoom_css = CssProvider::new();
+    if let Some(display) = gtk4::gdk::Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &zoom_css,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
+        );
+    }
 
-    let clip = gtk4::Box::new(Orientation::Vertical, 0);
+    let clip = Overlay::new();
     clip.add_css_class("recording-editor-preview-clip");
     clip.set_overflow(gtk4::Overflow::Hidden);
     clip.set_hexpand(true);
     clip.set_vexpand(true);
     clip.set_halign(Align::Fill);
     clip.set_valign(Align::Fill);
-    clip.append(&picture);
+    let bounds = GtkBox::new(Orientation::Vertical, 0);
+    bounds.set_hexpand(true);
+    bounds.set_vexpand(true);
+    clip.set_child(Some(&bounds));
+    clip.add_overlay(&picture);
 
     let overlay = Overlay::new();
     overlay.add_css_class("recording-editor-preview-canvas");
@@ -78,11 +107,13 @@ pub(super) fn build_preview(
     cursor_layer.set_hexpand(true);
     cursor_layer.set_vexpand(true);
     cursor_layer.set_can_target(true);
+    let placing_focus = Rc::new(Cell::new(false));
     cursor_layer.set_draw_func({
         let state = state.clone();
         let picture = picture.clone();
+        let placing_focus = placing_focus.clone();
         move |_, cr, width, height| {
-            draw_preview_overlays(&state, &picture, cr, width, height);
+            draw_preview_overlays(&state, &picture, cr, width, height, placing_focus.get());
         }
     });
     overlay.add_overlay(&cursor_layer);
@@ -117,12 +148,17 @@ pub(super) fn build_preview(
         let cursor_layer = cursor_layer.clone();
         let picture = picture.clone();
         let clip = clip.clone();
+        let zoom_css = zoom_css.clone();
         let stage = stage.clone();
         let clock = clock.clone();
         let aspect_label = aspect_label.clone();
         let aspect_icon = aspect_icon.clone();
+        let media_tick = media.clone();
+        let placing_focus = placing_focus.clone();
+        let cursor_layer_tick = cursor_layer.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            let (dims, zoom, pad, playhead, duration, hidden, label) = {
+            let playing = media_tick.is_playing();
+            let (dims, zoom, pad, playhead, duration, hidden, label, placing) = {
                 let s = state.lock().unwrap();
                 let source_t = s.source_playhead();
                 let (scale, _) = s.eval_zoom(source_t);
@@ -134,8 +170,14 @@ pub(super) fn build_preview(
                     s.metadata.duration_seconds,
                     s.video_hidden,
                     s.canvas_label(),
+                    placing_manual(&s, playing),
                 )
             };
+            placing_focus.set(placing);
+            let crosshair = placing
+                .then(|| gtk4::gdk::Cursor::from_name("crosshair", None))
+                .flatten();
+            cursor_layer_tick.set_cursor(crosshair.as_ref());
             picture.set_opacity(if hidden { 0.0 } else { 1.0 });
             clock.set_text(&format!(
                 "{} / {}",
@@ -144,7 +186,7 @@ pub(super) fn build_preview(
             ));
             aspect_label.set_text(label);
             aspect_icon.set_icon_name(Some(aspect_ratio_icon(label)));
-            if zoom > 1.01 && !hidden {
+            if zoom > 1.01 && !hidden && !placing {
                 zoom_badge.set_text(&format!("{:.0}%", zoom * 100.0));
                 zoom_badge.set_visible(true);
             } else {
@@ -154,7 +196,7 @@ pub(super) fn build_preview(
             if (stage.ratio() - next_ratio).abs() > 0.001 {
                 stage.set_ratio(next_ratio);
             }
-            apply_preview_crop(&state, &clip, &picture, playhead);
+            apply_preview_zoom(&state, &picture, &zoom_css, playhead, placing);
             apply_preview_pad(&clip, pad);
             cursor_layer.queue_draw();
             glib::ControlFlow::Continue
@@ -163,39 +205,81 @@ pub(super) fn build_preview(
 
     let drag = GestureDrag::new();
     drag.set_button(1);
+    let dragging_focus = Rc::new(RefCell::new(None::<(f64, f64, f64, f64)>));
+    drag.connect_drag_begin({
+        let state = state.clone();
+        let dragging_focus = dragging_focus.clone();
+        let media = media.clone();
+        let cursor_layer = cursor_layer.clone();
+        move |gesture, x, y| {
+            if media.is_playing() {
+                return;
+            }
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let height = gesture
+                .widget()
+                .map(|widget| widget.allocated_height().max(1) as f64)
+                .unwrap_or(1.0);
+            let view = {
+                let mut state = state.lock().unwrap();
+                if !placing_manual(&state, false) || state.zoom_locked {
+                    return;
+                }
+                let view = state.crop_or_full();
+                state.set_selected_zoom_center(view_to_source(view, x, y, width, height));
+                view
+            };
+            *dragging_focus.borrow_mut() = Some(view);
+            cursor_layer.queue_draw();
+        }
+    });
     drag.connect_drag_update({
         let state = state.clone();
-        let picture = picture.clone();
+        let dragging_focus = dragging_focus.clone();
+        let cursor_layer = cursor_layer.clone();
         move |gesture, offset_x, offset_y| {
+            let Some(view) = *dragging_focus.borrow() else {
+                return;
+            };
             let Some((start_x, start_y)) = gesture.start_point() else {
                 return;
             };
-            let width = picture.allocated_width().max(1) as f64;
-            let height = picture.allocated_height().max(1) as f64;
-            let x = (start_x + offset_x).clamp(0.0, width);
-            let y = (start_y + offset_y).clamp(0.0, height);
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let height = gesture
+                .widget()
+                .map(|widget| widget.allocated_height().max(1) as f64)
+                .unwrap_or(1.0);
             let mut state = state.lock().unwrap();
-            let Some(index) = state.selected_zoom else {
-                return;
-            };
-            if state.zoom_clips.get(index).map(|clip| clip.mode) != Some(ZoomMode::Manual) {
-                return;
-            }
-            let (view_x, view_y, view_w, view_h) =
-                current_view_rect(&state, state.source_playhead());
-            if let Some(clip) = state.zoom_clips.get_mut(index) {
-                clip.center = (
-                    view_x + (x / width) * view_w,
-                    view_y + (y / height) * view_h,
-                );
-            }
+            state.set_selected_zoom_center(view_to_source(
+                view,
+                start_x + offset_x,
+                start_y + offset_y,
+                width,
+                height,
+            ));
+            drop(state);
+            cursor_layer.queue_draw();
+        }
+    });
+    drag.connect_drag_end({
+        let dragging_focus = dragging_focus.clone();
+        move |_, _, _| {
+            *dragging_focus.borrow_mut() = None;
         }
     });
     cursor_layer.add_controller(drag);
 
     workspace.append(&stage);
     root.append(&workspace);
-    root.append(&player_bar);
+    if show_player_bar {
+        root.append(&player_bar);
+    }
     (root, media, play_button)
 }
 
@@ -514,7 +598,7 @@ fn canvas_ratio(width: u32, height: u32) -> f32 {
     width.max(1) as f32 / height.max(1) as f32
 }
 
-fn apply_preview_pad(clip: &gtk4::Box, padded: bool) {
+fn apply_preview_pad(clip: &Overlay, padded: bool) {
     let pad = if padded { 18 } else { 0 };
     clip.set_margin_start(pad);
     clip.set_margin_end(pad);
@@ -524,52 +608,66 @@ fn apply_preview_pad(clip: &gtk4::Box, padded: bool) {
 
 /// Source-coords rect currently visible on stage: static crop intersected
 /// with the active zoom window.
-fn current_view_rect(state: &VideoEditState, playhead: f64) -> (f64, f64, f64, f64) {
-    let (crop_x, crop_y, crop_w, crop_h) = state.crop_or_full();
-    let (scale, center) = state.eval_zoom(playhead);
-    if scale <= 1.01 {
-        return (crop_x, crop_y, crop_w, crop_h);
-    }
-    let (zx, zy, zw, zh) = even_crop_rect(
-        scale,
-        (center.0 - crop_x, center.1 - crop_y),
-        crop_w.max(2.0) as u32,
-        crop_h.max(2.0) as u32,
-    );
-    (crop_x + zx as f64, crop_y + zy as f64, zw as f64, zh as f64)
+fn source_to_zoomed_point(
+    x: f64,
+    y: f64,
+    view: (f64, f64, f64, f64),
+    center: (f64, f64),
+    scale: f64,
+    widget_w: f64,
+    widget_h: f64,
+) -> (f64, f64) {
+    let (vx, vy, vw, vh) = view;
+    let ox = (center.0 - vx) / vw.max(1.0);
+    let oy = (center.1 - vy) / vh.max(1.0);
+    let nx = (x - vx) / vw.max(1.0);
+    let ny = (y - vy) / vh.max(1.0);
+    (
+        (ox + (nx - ox) * scale) * widget_w,
+        (oy + (ny - oy) * scale) * widget_h,
+    )
 }
 
-fn apply_preview_crop(
+fn placing_manual(state: &VideoEditState, playing: bool) -> bool {
+    !playing
+        && state
+            .selected_zoom_clip()
+            .is_some_and(|clip| clip.mode == ZoomMode::Manual)
+}
+
+fn apply_preview_zoom(
     state: &Arc<Mutex<VideoEditState>>,
-    clip: &gtk4::Box,
     picture: &Picture,
+    provider: &CssProvider,
     playhead: f64,
+    placing: bool,
 ) {
-    let state = state.lock().unwrap();
-    let (view_x, view_y, view_w, view_h) = current_view_rect(&state, playhead);
-    let parent_w = clip.allocated_width().max(1);
-    let parent_h = clip.allocated_height().max(1);
-    let src_w = state.metadata.width.max(1) as f64;
-    let src_h = state.metadata.height.max(1) as f64;
-    if view_w >= src_w - 1.0 && view_h >= src_h - 1.0 {
-        picture.set_hexpand(true);
-        picture.set_vexpand(true);
-        picture.set_size_request(-1, -1);
-        picture.set_margin_start(0);
-        picture.set_margin_top(0);
-        return;
-    }
-    let scaled_w = (parent_w as f64 * (src_w / view_w)).round() as i32;
-    let scaled_h = (parent_h as f64 * (src_h / view_h)).round() as i32;
-    let off_x = (parent_w as f64 / 2.0 - ((view_x + view_w / 2.0) / src_w) * scaled_w as f64)
-        .round() as i32;
-    let off_y = (parent_h as f64 / 2.0 - ((view_y + view_h / 2.0) / src_h) * scaled_h as f64)
-        .round() as i32;
-    picture.set_hexpand(false);
-    picture.set_vexpand(false);
-    picture.set_size_request(scaled_w, scaled_h);
-    picture.set_margin_start(off_x);
-    picture.set_margin_top(off_y);
+    picture.set_hexpand(true);
+    picture.set_vexpand(true);
+    picture.set_halign(Align::Fill);
+    picture.set_valign(Align::Fill);
+    picture.set_size_request(-1, -1);
+    picture.set_margin_start(0);
+    picture.set_margin_top(0);
+    let css = {
+        let state = state.lock().unwrap();
+        let (scale, center) = if placing {
+            (1.0, (0.0, 0.0))
+        } else {
+            state.eval_zoom(playhead)
+        };
+        if placing || scale <= 1.01 {
+            ".recording-editor-video-zoom-live { transform: none; }".to_string()
+        } else {
+            let (cx, cy, cw, ch) = state.crop_or_full();
+            let ox = ((center.0 - cx) / cw.max(1.0) * 100.0).clamp(0.0, 100.0);
+            let oy = ((center.1 - cy) / ch.max(1.0) * 100.0).clamp(0.0, 100.0);
+            format!(
+                ".recording-editor-video-zoom-live {{ transform: scale({scale:.4}); transform-origin: {ox:.2}% {oy:.2}%; }}"
+            )
+        }
+    };
+    provider.load_from_data(&css);
 }
 
 fn draw_preview_overlays(
@@ -578,6 +676,7 @@ fn draw_preview_overlays(
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
+    placing: bool,
 ) {
     let state = state.lock().unwrap();
     let w = width as f64;
@@ -598,17 +697,47 @@ fn draw_preview_overlays(
     }
 
     let source_t = state.source_playhead();
-    let (view_x, view_y, view_w, view_h) = current_view_rect(&state, source_t);
+    let view = state.crop_or_full();
+    let (scale, center) = if placing {
+        (1.0, (0.0, 0.0))
+    } else {
+        state.eval_zoom(source_t)
+    };
     let _ = picture;
 
     if let Some(sidecar) = &state.sidecar {
         if let Some((x, y, kind)) = sidecar.interpolated_at(source_t) {
             let pulse = sidecar.click_pulse_at(source_t);
-            let px = ((x - view_x) / view_w) * w;
-            let py = ((y - view_y) / view_h) * h;
+            let (px, py) = source_to_zoomed_point(x, y, view, center, scale, w, h);
             draw_apexshot_cursor(cr, px, py, pulse, kind.as_str());
         }
     }
+
+    if placing {
+        if let Some(clip) = state.selected_zoom_clip() {
+            let (x, y, rect_w, rect_h) = manual_focus_rect(clip, view, w, h);
+            cr.set_source_rgba(1.0, 0.48, 0.12, 0.22);
+            cr.rectangle(x, y, rect_w, rect_h);
+            let _ = cr.fill_preserve();
+            cr.set_source_rgba(1.0, 0.62, 0.20, 0.95);
+            cr.set_line_width(2.0);
+            let _ = cr.stroke();
+        }
+    }
+}
+
+fn manual_focus_rect(
+    clip: &ZoomClip,
+    view: (f64, f64, f64, f64),
+    widget_w: f64,
+    widget_h: f64,
+) -> (f64, f64, f64, f64) {
+    let (view_x, view_y, view_w, view_h) = view;
+    let rect_w = widget_w / clip.scale.max(1.0);
+    let rect_h = widget_h / clip.scale.max(1.0);
+    let x = ((clip.center.0 - view_x) / view_w.max(1.0)) * widget_w - rect_w / 2.0;
+    let y = ((clip.center.1 - view_y) / view_h.max(1.0)) * widget_h - rect_h / 2.0;
+    (x, y, rect_w, rect_h)
 }
 
 fn draw_apexshot_cursor(cr: &gtk4::cairo::Context, x: f64, y: f64, pulse: f64, kind: &str) {

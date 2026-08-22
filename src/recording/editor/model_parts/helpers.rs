@@ -14,9 +14,7 @@ pub fn eval_zoom(
     };
     let ease = (clip.ease_ms as f64 / 1000.0).clamp(0.0, clip.duration() / 2.0);
     let scale = eased_value(t, clip.start, clip.end, ease, 1.0, clip.scale.max(1.0));
-    let center_x = eased_value(t, clip.start, clip.end, ease, frame_center.0, clip.center.0);
-    let center_y = eased_value(t, clip.start, clip.end, ease, frame_center.1, clip.center.1);
-    (scale, (center_x, center_y))
+    (scale, clip.center)
 }
 
 fn recenter_if_near_edge(
@@ -77,6 +75,51 @@ fn lerp(from: f64, to: f64, alpha: f64) -> f64 {
 fn smoothstep(t: f64) -> f64 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+pub fn zoom_fill_transform(scale: f64, target: f64, ox: f64, oy: f64) -> (f64, f64, f64) {
+    let target = target.max(1.0);
+    let scale = scale.max(1.0);
+    let progress = if target <= 1.01 {
+        0.0
+    } else {
+        ((scale - 1.0) / (target - 1.0)).clamp(0.0, 1.0)
+    };
+    (
+        (0.5 - ox * target) * progress,
+        (0.5 - oy * target) * progress,
+        scale,
+    )
+}
+
+pub fn view_to_source(
+    view: (f64, f64, f64, f64),
+    px: f64,
+    py: f64,
+    widget_w: f64,
+    widget_h: f64,
+) -> (f64, f64) {
+    let (vx, vy, vw, vh) = view;
+    (
+        vx + (px / widget_w.max(1.0)) * vw,
+        vy + (py / widget_h.max(1.0)) * vh,
+    )
+}
+
+pub fn clamp_zoom_center(crop: (f64, f64, f64, f64), scale: f64, center: (f64, f64)) -> (f64, f64) {
+    let (crop_x, crop_y, crop_w, crop_h) = crop;
+    let (_, _, zw, zh) = even_crop_rect(
+        scale.max(1.0),
+        (center.0 - crop_x, center.1 - crop_y),
+        crop_w.max(2.0) as u32,
+        crop_h.max(2.0) as u32,
+    );
+    let half_w = zw as f64 / 2.0;
+    let half_h = zh as f64 / 2.0;
+    (
+        center.0.clamp(crop_x + half_w, (crop_x + crop_w - half_w).max(crop_x + half_w)),
+        center.1.clamp(crop_y + half_h, (crop_y + crop_h - half_h).max(crop_y + half_h)),
+    )
 }
 
 pub fn even_crop_rect(

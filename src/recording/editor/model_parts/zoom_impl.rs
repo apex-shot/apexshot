@@ -154,6 +154,23 @@ impl VideoEditState {
         }
     }
 
+    pub fn set_selected_zoom_center(&mut self, center: (f64, f64)) {
+        if self.zoom_locked {
+            return;
+        }
+        let Some(index) = self.selected_zoom else {
+            return;
+        };
+        let scale = match self.zoom_clips.get(index) {
+            Some(clip) if clip.mode == ZoomMode::Manual => clip.scale,
+            _ => return,
+        };
+        let center = clamp_zoom_center(self.crop_or_full(), scale, center);
+        if let Some(clip) = self.zoom_clips.get_mut(index) {
+            clip.center = center;
+        }
+    }
+
     pub fn reset_zoom_animation(&mut self) {
         self.zoom_classic = false;
         self.zoom_blur_samples = DEFAULT_ZOOM_BLUR_SAMPLES;

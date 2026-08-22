@@ -307,7 +307,11 @@ pub fn draw_one_zoom(
         cr.set_font_size(11.0);
         cr.move_to(x0 + 14.0, y + height * 0.62);
         let label = if clip_w > 92.0 {
-            format!("Zoom  {}", format_zoom_scale(state.zoom_clips[index].scale))
+            let mode = match state.zoom_clips[index].mode {
+                crate::recording::editor::model::ZoomMode::Auto => "Auto",
+                crate::recording::editor::model::ZoomMode::Manual => "Manual",
+            };
+            format!("{mode}  {}", format_zoom_scale(state.zoom_clips[index].scale))
         } else {
             "Zoom".into()
         };

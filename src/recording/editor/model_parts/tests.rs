@@ -410,8 +410,10 @@
         assert!((center.0 - 200.0).abs() < 1e-9);
         assert!((center.1 - 100.0).abs() < 1e-9);
 
-        let (ease_in, _) = eval_zoom(&clips, 1.1, 1920.0, 1080.0);
+        let (ease_in, ease_center) = eval_zoom(&clips, 1.1, 1920.0, 1080.0);
         assert!(ease_in > 1.0 && ease_in < 2.0);
+        assert!((ease_center.0 - 200.0).abs() < 1e-9);
+        assert!((ease_center.1 - 100.0).abs() < 1e-9);
 
         let (ease_out, _) = eval_zoom(&clips, 2.7, 1920.0, 1080.0);
         assert!(ease_out > 1.0 && ease_out < 2.0);
@@ -430,6 +432,45 @@
         assert_eq!(clip.mode, ZoomMode::Manual);
         assert!((clip.scale - 1.5).abs() < 1e-9);
         assert_eq!(format_zoom_scale(clip.scale), "1.5×");
+    }
+
+    #[test]
+    fn zoom_fill_maps_box_to_the_full_frame() {
+        let target = 2.0;
+        let ox = 0.5;
+        let oy = 0.2;
+        let (tx, ty, scale) = zoom_fill_transform(target, target, ox, oy);
+        let left = tx + scale * (ox - 0.5 / target);
+        let right = tx + scale * (ox + 0.5 / target);
+        let top = ty + scale * (oy - 0.5 / target);
+        let bottom = ty + scale * (oy + 0.5 / target);
+        assert!((left - 0.0).abs() < 1e-9);
+        assert!((right - 1.0).abs() < 1e-9);
+        assert!((top - 0.0).abs() < 1e-9);
+        assert!((bottom - 1.0).abs() < 1e-9);
+        let (idle_x, idle_y, idle_s) = zoom_fill_transform(1.0, target, ox, oy);
+        assert!((idle_x).abs() < 1e-9 && idle_y.abs() < 1e-9 && (idle_s - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn view_to_source_and_click_sets_manual_center() {
+        let view = (480.0, 270.0, 960.0, 540.0);
+        let (x, y) = view_to_source(view, 480.0, 270.0, 960.0, 540.0);
+        assert!((x - 960.0).abs() < 1e-9);
+        assert!((y - 540.0).abs() < 1e-9);
+
+        let mut state = VideoEditState::new(metadata());
+        assert!(state.add_zoom_at_playhead().is_some());
+        state.set_selected_zoom_mode(ZoomMode::Manual);
+        state.set_selected_zoom_center((800.0, 400.0));
+        let center = state.selected_zoom_clip().unwrap().center;
+        assert!((center.0 - 800.0).abs() < 2.0);
+        assert!((center.1 - 400.0).abs() < 2.0);
+
+        state.set_selected_zoom_center((-50.0, 10_000.0));
+        let clamped = state.selected_zoom_clip().unwrap().center;
+        assert!(clamped.0 > 0.0);
+        assert!(clamped.1 < 1080.0);
     }
 
     #[test]
