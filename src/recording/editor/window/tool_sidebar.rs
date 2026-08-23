@@ -1,13 +1,12 @@
-use super::footer;
 use crate::recording::editor::model::{
     nearest_zoom_preset, VideoEditState, ZoomMode, CLIP_SPEED_PRESETS, MAX_ZOOM_BLUR_SAMPLES,
     MIN_ZOOM_BLUR_SAMPLES, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Grid, Image, Label, Orientation,
-    PolicyType, Scale, ScrolledWindow, Switch, ToggleButton,
+    gdk, prelude::*, Align, Box as GtkBox, Button, DrawingArea, GestureClick, GestureDrag, Grid,
+    Image, Label, Orientation, Overlay, PolicyType, ScrolledWindow, Switch, ToggleButton,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -19,10 +18,8 @@ pub(super) struct ToolSidebar {
 }
 
 pub(super) fn build_tool_sidebar(
-    window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
-    exporting: Rc<Cell<bool>>,
 ) -> ToolSidebar {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-tool-sidebar");
@@ -30,8 +27,8 @@ pub(super) fn build_tool_sidebar(
     root.set_vexpand(true);
     root.set_size_request(TOOL_SIDEBAR_WIDTH, -1);
 
-    let zoom_panel = build_zoom_panel(window, state.clone(), on_change.clone(), exporting.clone());
-    let clip_panel = build_clip_panel(window, state.clone(), on_change, exporting);
+    let zoom_panel = build_zoom_panel(state.clone(), on_change.clone());
+    let clip_panel = build_clip_panel(state.clone(), on_change);
     root.append(&zoom_panel.widget);
     root.append(&clip_panel.widget);
     root.set_visible(true);
@@ -75,10 +72,8 @@ struct ZoomPanel {
 }
 
 fn build_zoom_panel(
-    window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
-    exporting: Rc<Cell<bool>>,
 ) -> ZoomPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
@@ -93,10 +88,6 @@ fn build_zoom_panel(
     title.set_xalign(0.0);
     title.set_hexpand(true);
     header.append(&title);
-    let (upload, upload_spinner) =
-        footer::build_panel_upload_action(state.clone(), exporting.clone());
-    header.append(&upload);
-    header.append(&upload_spinner);
 
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-zoom-body");
@@ -192,31 +183,33 @@ fn build_zoom_panel(
     let blur_kicker = Label::new(Some("Blur"));
     blur_kicker.add_css_class("recording-editor-zoom-kicker");
     blur_kicker.set_xalign(0.0);
-    let (samples_block, samples_scale, samples_value) = labeled_slider(
+    let samples = labeled_slider(
         "Samples",
         MIN_ZOOM_BLUR_SAMPLES as f64,
         MAX_ZOOM_BLUR_SAMPLES as f64,
         2.0,
         state.lock().unwrap().zoom_blur_samples as f64,
     );
-    let (shutter_block, shutter_scale, shutter_value) = labeled_slider(
+    let shutter = labeled_slider(
         "Shutter",
         0.0,
         100.0,
         1.0,
         state.lock().unwrap().zoom_blur_shutter * 100.0,
     );
-    samples_value.set_text(&state.lock().unwrap().zoom_blur_samples.to_string());
-    shutter_value.set_text(&format!(
+    samples
+        .value_label
+        .set_text(&state.lock().unwrap().zoom_blur_samples.to_string());
+    shutter.value_label.set_text(&format!(
         "{:.0}%",
         state.lock().unwrap().zoom_blur_shutter * 100.0
     ));
     blur.append(&blur_kicker);
-    blur.append(&samples_block);
-    blur.append(&shutter_block);
+    blur.append(&samples.widget);
+    blur.append(&shutter.widget);
+    blur.set_visible(false);
 
     let footer_delete = delete_tool_button("Delete zoom");
-    let (done, done_spinner) = footer::build_panel_done_action(window, state.clone(), exporting);
 
     body.append(&mode_row);
     body.append(&mode_hint);
@@ -236,11 +229,6 @@ fn build_zoom_panel(
     footer.add_css_class("recording-editor-zoom-footer");
     footer.set_hexpand(true);
     footer.append(&footer_delete);
-    let footer_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    footer_spacer.set_hexpand(true);
-    footer.append(&footer_spacer);
-    footer.append(&done_spinner);
-    footer.append(&done);
 
     panel.append(&header);
     panel.append(&scroll);
@@ -285,31 +273,31 @@ fn build_zoom_panel(
             gtk4::glib::Propagation::Proceed
         }
     });
-    samples_scale.connect_value_changed({
+    samples.connect_changed({
         let state = state.clone();
         let on_change = on_change.clone();
         let syncing = syncing.clone();
-        let samples_value = samples_value.clone();
-        move |scale| {
+        let samples_value = samples.value_label.clone();
+        move |value| {
             if syncing.get() {
                 return;
             }
-            let samples = scale.value().round() as u32;
+            let samples = value.round() as u32;
             samples_value.set_text(&samples.to_string());
             state.lock().unwrap().set_zoom_blur_samples(samples);
             on_change();
         }
     });
-    shutter_scale.connect_value_changed({
+    shutter.connect_changed({
         let state = state.clone();
         let on_change = on_change.clone();
         let syncing = syncing.clone();
-        let shutter_value = shutter_value.clone();
-        move |scale| {
+        let shutter_value = shutter.value_label.clone();
+        move |value| {
             if syncing.get() {
                 return;
             }
-            let percent = scale.value().round();
+            let percent = value.round();
             shutter_value.set_text(&format!("{percent:.0}%"));
             state.lock().unwrap().set_zoom_blur_shutter(percent / 100.0);
             on_change();
@@ -343,12 +331,13 @@ fn build_zoom_panel(
         let mode_hint = mode_hint.clone();
         let classic = classic.clone();
         let classic_row = classic_row.clone();
+        let blur = blur.clone();
         let chip_buttons = chip_buttons.clone();
         let syncing = syncing.clone();
-        let samples_scale = samples_scale.clone();
-        let shutter_scale = shutter_scale.clone();
-        let samples_value = samples_value.clone();
-        let shutter_value = shutter_value.clone();
+        let samples = samples.clone();
+        let shutter = shutter.clone();
+        let samples_value = samples.value_label.clone();
+        let shutter_value = shutter.value_label.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
             panel.set_visible(true);
@@ -366,12 +355,14 @@ fn build_zoom_panel(
                     ZoomMode::Manual => manual_btn.set_active(true),
                 }
                 classic_row.set_visible(clip.mode == ZoomMode::Auto);
+                blur.set_visible(true);
             } else {
                 classic_row.set_visible(false);
+                blur.set_visible(false);
             }
             classic.set_active(guard.zoom_classic);
-            samples_scale.set_value(guard.zoom_blur_samples as f64);
-            shutter_scale.set_value(guard.zoom_blur_shutter * 100.0);
+            samples.set_value(guard.zoom_blur_samples as f64);
+            shutter.set_value(guard.zoom_blur_shutter * 100.0);
             samples_value.set_text(&guard.zoom_blur_samples.to_string());
             shutter_value.set_text(&format!("{:.0}%", guard.zoom_blur_shutter * 100.0));
             let selected_preset = selected
@@ -401,10 +392,8 @@ struct ClipPanel {
 }
 
 fn build_clip_panel(
-    window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
-    exporting: Rc<Cell<bool>>,
 ) -> ClipPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
@@ -419,10 +408,6 @@ fn build_clip_panel(
     title.set_xalign(0.0);
     title.set_hexpand(true);
     header.append(&title);
-    let (upload, upload_spinner) =
-        footer::build_panel_upload_action(state.clone(), exporting.clone());
-    header.append(&upload);
-    header.append(&upload_spinner);
 
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-zoom-body");
@@ -500,16 +485,10 @@ fn build_clip_panel(
     scroll.set_child(Some(&body));
 
     let footer_delete = delete_tool_button("Delete clip");
-    let (done, done_spinner) = footer::build_panel_done_action(window, state.clone(), exporting);
     let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-zoom-footer");
     footer.set_hexpand(true);
     footer.append(&footer_delete);
-    let footer_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    footer_spacer.set_hexpand(true);
-    footer.append(&footer_spacer);
-    footer.append(&done_spinner);
-    footer.append(&done);
 
     panel.append(&header);
     panel.append(&scroll);
@@ -568,28 +547,148 @@ fn build_clip_panel(
     }
 }
 
-fn labeled_slider(name: &str, min: f64, max: f64, step: f64, value: f64) -> (GtkBox, Scale, Label) {
-    let block = GtkBox::new(Orientation::Vertical, 2);
-    block.set_hexpand(true);
-    let row = GtkBox::new(Orientation::Horizontal, 8);
+#[derive(Clone)]
+struct BarSlider {
+    widget: GtkBox,
+    value_label: Label,
+    value: Rc<Cell<f64>>,
+    track: DrawingArea,
+    min: f64,
+    max: f64,
+    listeners: Rc<RefCell<Vec<Rc<dyn Fn(f64)>>>>,
+}
+
+impl BarSlider {
+    fn set_value(&self, value: f64) {
+        self.value.set(value.clamp(self.min, self.max));
+        self.track.queue_draw();
+    }
+
+    fn connect_changed(&self, f: impl Fn(f64) + 'static) {
+        self.listeners.borrow_mut().push(Rc::new(f));
+    }
+}
+
+fn slider_value_at(x: f64, width: f64, min: f64, max: f64, step: f64) -> f64 {
+    let t = (x / width.max(1.0)).clamp(0.0, 1.0);
+    let raw = min + t * (max - min);
+    let snapped = if step > 0.0 {
+        (raw / step).round() * step
+    } else {
+        raw
+    };
+    snapped.clamp(min, max)
+}
+
+fn labeled_slider(name: &str, min: f64, max: f64, step: f64, value: f64) -> BarSlider {
+    let value = Rc::new(Cell::new(value.clamp(min, max)));
+    let listeners: Rc<RefCell<Vec<Rc<dyn Fn(f64)>>>> = Rc::new(RefCell::new(Vec::new()));
+    let row = GtkBox::new(Orientation::Horizontal, 0);
+    row.add_css_class("recording-editor-zoom-slider-row");
     row.set_hexpand(true);
+    let overlay = Overlay::new();
+    overlay.set_hexpand(true);
+    overlay.set_valign(Align::Fill);
+    overlay.set_size_request(-1, 36);
     let label = Label::new(Some(name));
     label.add_css_class("recording-editor-zoom-classic-label");
     label.set_xalign(0.0);
-    label.set_hexpand(true);
+    label.set_valign(Align::Center);
+    label.set_margin_start(12);
+    label.set_can_target(false);
     let value_label = Label::new(Some(""));
     value_label.add_css_class("recording-editor-zoom-blur-value");
     value_label.set_halign(Align::End);
-    row.append(&label);
-    row.append(&value_label);
-    let scale = Scale::with_range(Orientation::Horizontal, min, max, step);
-    scale.add_css_class("recording-editor-zoom-slider");
-    scale.set_draw_value(false);
-    scale.set_hexpand(true);
-    scale.set_value(value);
-    block.append(&row);
-    block.append(&scale);
-    (block, scale, value_label)
+    value_label.set_valign(Align::Center);
+    value_label.set_margin_end(12);
+    value_label.set_can_target(false);
+    let chrome = GtkBox::new(Orientation::Horizontal, 0);
+    chrome.set_can_target(false);
+    chrome.set_hexpand(true);
+    chrome.set_valign(Align::Fill);
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    spacer.set_can_target(false);
+    chrome.append(&label);
+    chrome.append(&spacer);
+    chrome.append(&value_label);
+    overlay.set_child(Some(&chrome));
+    let track = DrawingArea::new();
+    track.add_css_class("recording-editor-zoom-slider-track");
+    track.set_hexpand(true);
+    track.set_vexpand(true);
+    track.set_halign(Align::Fill);
+    track.set_valign(Align::Fill);
+    track.set_can_target(true);
+    track.set_content_height(36);
+    track.set_cursor(gdk::Cursor::from_name("ew-resize", None).as_ref());
+    track.set_draw_func({
+        let value = value.clone();
+        move |_, cr, width, height| {
+            let t = (value.get() - min) / (max - min).max(1e-9);
+            let w = 5.0;
+            let pad = 6.0;
+            let h = (height as f64 - pad * 2.0).max(2.0);
+            let x = t * (width as f64 - w).max(0.0);
+            let y = pad;
+            let r = w / 2.0;
+            cr.set_source_rgb(0.82, 0.82, 0.82);
+            cr.new_sub_path();
+            cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+            cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+            cr.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+            cr.arc(x + r, y + r, r, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
+            cr.close_path();
+            let _ = cr.fill();
+        }
+    });
+    let apply = {
+        let value = value.clone();
+        let track = track.clone();
+        let listeners = listeners.clone();
+        Rc::new(move |x: f64| {
+            let next = slider_value_at(x, track.allocated_width().max(1) as f64, min, max, step);
+            if (next - value.get()).abs() < 1e-9 {
+                return;
+            }
+            value.set(next);
+            track.queue_draw();
+            for cb in listeners.borrow().iter() {
+                cb(next);
+            }
+        })
+    };
+    let click = GestureClick::new();
+    click.set_button(1);
+    click.connect_pressed({
+        let apply = apply.clone();
+        move |_, _, x, _| apply(x)
+    });
+    let drag = GestureDrag::new();
+    drag.set_button(1);
+    drag.connect_drag_update({
+        let apply = apply.clone();
+        move |gesture, dx, _| {
+            let Some((sx, _)) = gesture.start_point() else {
+                return;
+            };
+            apply(sx + dx);
+        }
+    });
+    click.group_with(&drag);
+    track.add_controller(click);
+    track.add_controller(drag);
+    overlay.add_overlay(&track);
+    row.append(&overlay);
+    BarSlider {
+        widget: row,
+        value_label,
+        value,
+        track,
+        min,
+        max,
+        listeners,
+    }
 }
 
 fn delete_tool_button(label: &str) -> Button {
@@ -606,4 +705,16 @@ fn delete_tool_button(label: &str) -> Button {
     row.append(&text);
     button.set_child(Some(&row));
     button
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slider_value_at;
+
+    #[test]
+    fn slider_maps_edges_and_snaps() {
+        assert_eq!(slider_value_at(0.0, 100.0, 0.0, 100.0, 1.0), 0.0);
+        assert_eq!(slider_value_at(100.0, 100.0, 0.0, 100.0, 1.0), 100.0);
+        assert_eq!(slider_value_at(50.0, 100.0, 1.0, 21.0, 2.0), 12.0);
+    }
 }

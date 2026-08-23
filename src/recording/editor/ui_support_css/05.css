@@ -327,6 +327,8 @@
 
             .recording-editor-workspace {
                 min-height: 0;
+                padding: 8px 10px 8px 10px;
+                background: #000000;
             }
 
             .recording-editor-tool-rail,

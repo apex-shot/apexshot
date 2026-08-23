@@ -145,6 +145,26 @@ pub fn even_crop_rect(
     )
 }
 
+/// Size and offset a full-source picture so `view` fills `clip`.
+/// Returns (picture_w, picture_h, margin_x, margin_y).
+pub fn picture_layout(
+    view: (f64, f64, f64, f64),
+    src_w: f64,
+    src_h: f64,
+    clip_w: f64,
+    clip_h: f64,
+) -> (i32, i32, i32, i32) {
+    let (vx, vy, vw, vh) = view;
+    let sx = clip_w / vw.max(1.0);
+    let sy = clip_h / vh.max(1.0);
+    (
+        (src_w * sx).round() as i32,
+        (src_h * sy).round() as i32,
+        (-vx * sx).round() as i32,
+        (-vy * sy).round() as i32,
+    )
+}
+
 /// Fit `src` inside `box` without upscaling or stretching (aspect preserved).
 pub fn fit_dimensions(src_w: u32, src_h: u32, box_w: u32, box_h: u32) -> (u32, u32) {
     let src_w = src_w.max(1);

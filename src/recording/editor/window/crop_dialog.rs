@@ -1,17 +1,19 @@
 use crate::recording::editor::model::VideoEditState;
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, DrawingArea,
-    EventControllerMotion, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture,
-    Window,
+    EventControllerMotion, GestureClick, GestureDrag, Image, Label, MediaFile, Orientation,
+    Overlay, Picture, Window,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 const ACCENT: (f64, f64, f64) = (0.690, 0.361, 0.220);
-const HANDLE_RADIUS: f64 = 14.0;
+const HANDLE_RADIUS: f64 = 28.0;
+const EDGE_INSET: f64 = 40.0;
+const HANDLE_DOT: f64 = 5.0;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum DragOp {
     Move,
     Corner(u8), // 0 TL, 1 TR, 2 BR, 3 BL
@@ -171,40 +173,11 @@ pub(super) fn show_crop(
     });
     overlay.add_overlay(&draw_area);
 
-    // ── Hit testing shared by cursor + drag (stage pixels → DragOp) ──
-    let classify = move |px: f64, py: f64, w: f64, h: f64, rect: (f64, f64, f64, f64)| -> DragOp {
-        let (sx, sy, sw, sh) = (
-            rect.0 / src_w * w,
-            rect.1 / src_h * h,
-            rect.2 / src_w * w,
-            rect.3 / src_h * h,
-        );
-        let near_x = px >= sx - HANDLE_RADIUS && px <= sx + sw + HANDLE_RADIUS;
-        let near_y = py >= sy - HANDLE_RADIUS && py <= sy + sh + HANDLE_RADIUS;
-        let left = (px - sx).abs() <= HANDLE_RADIUS;
-        let right = (px - (sx + sw)).abs() <= HANDLE_RADIUS;
-        let top = (py - sy).abs() <= HANDLE_RADIUS;
-        let bottom = (py - (sy + sh)).abs() <= HANDLE_RADIUS;
-        if near_x && near_y && top && left {
-            DragOp::Corner(0)
-        } else if near_x && near_y && top && right {
-            DragOp::Corner(1)
-        } else if near_x && near_y && bottom && right {
-            DragOp::Corner(2)
-        } else if near_x && near_y && bottom && left {
-            DragOp::Corner(3)
-        } else if near_x && left {
-            DragOp::Edge(0)
-        } else if near_x && right {
-            DragOp::Edge(1)
-        } else if near_y && top {
-            DragOp::Edge(2)
-        } else if near_y && bottom {
-            DragOp::Edge(3)
-        } else if px > sx && px < sx + sw && py > sy && py < sy + sh {
-            DragOp::Move
-        } else {
-            DragOp::New
+    let classify = {
+        let src_w = src_w;
+        let src_h = src_h;
+        move |px: f64, py: f64, w: f64, h: f64, rect: (f64, f64, f64, f64)| -> DragOp {
+            classify_crop_handle(px, py, w, h, rect, src_w, src_h)
         }
     };
 
@@ -235,14 +208,14 @@ pub(super) fn show_crop(
     let op: Rc<RefCell<Option<(DragOp, f64, f64, (f64, f64, f64, f64))>>> =
         Rc::new(RefCell::new(None));
 
-    let drag = GestureDrag::new();
-    drag.set_button(1);
-    drag.connect_drag_begin({
+    let press = GestureClick::new();
+    press.set_button(1);
+    press.connect_pressed({
         let selection = selection.clone();
         let op = op.clone();
         let classify = classify.clone();
         let draw_area = draw_area.clone();
-        move |_, px, py| {
+        move |_, _, px, py| {
             let w = draw_area.allocated_width().max(1) as f64;
             let h = draw_area.allocated_height().max(1) as f64;
             let rect = *selection.borrow();
@@ -252,6 +225,26 @@ pub(super) fn show_crop(
                 *selection.borrow_mut() =
                     (px / w.max(1.0) * src_w, py / h.max(1.0) * src_h, 2.0, 2.0);
             }
+        }
+    });
+
+    let drag = GestureDrag::new();
+    drag.set_button(1);
+    press.group_with(&drag);
+    drag.connect_drag_begin({
+        let selection = selection.clone();
+        let op = op.clone();
+        let classify = classify.clone();
+        let draw_area = draw_area.clone();
+        move |_, px, py| {
+            if op.borrow().is_some() {
+                return;
+            }
+            let w = draw_area.allocated_width().max(1) as f64;
+            let h = draw_area.allocated_height().max(1) as f64;
+            let rect = *selection.borrow();
+            let drag_op = classify(px, py, w, h, rect);
+            *op.borrow_mut() = Some((drag_op, px, py, rect));
         }
     });
     drag.connect_drag_update({
@@ -323,6 +316,13 @@ pub(super) fn show_crop(
             draw_area.queue_draw();
         }
     });
+    drag.connect_drag_end({
+        let op = op.clone();
+        move |_, _, _| {
+            *op.borrow_mut() = None;
+        }
+    });
+    draw_area.add_controller(press);
     draw_area.add_controller(drag);
 
     let reset = Button::with_label("Reset");
@@ -430,9 +430,108 @@ fn draw_crop_overlay(
     cr.rectangle(x + w, y, width - x - w, h);
     let _ = cr.fill();
 
-    // Highlight border in the app accent color.
     cr.set_source_rgb(ACCENT.0, ACCENT.1, ACCENT.2);
     cr.set_line_width(2.0);
     cr.rectangle(x, y, w, h);
     let _ = cr.stroke();
+
+    let cx = |px: f64| px.clamp(HANDLE_DOT, width - HANDLE_DOT);
+    let cy = |py: f64| py.clamp(HANDLE_DOT, height - HANDLE_DOT);
+    for (hx, hy) in [
+        (x, y),
+        (x + w, y),
+        (x + w, y + h),
+        (x, y + h),
+        (x, y + h / 2.0),
+        (x + w, y + h / 2.0),
+        (x + w / 2.0, y),
+        (x + w / 2.0, y + h),
+    ] {
+        draw_handle(cr, cx(hx), cy(hy));
+    }
+}
+
+fn draw_handle(cr: &gtk4::cairo::Context, x: f64, y: f64) {
+    cr.rectangle(x - HANDLE_DOT, y - HANDLE_DOT, HANDLE_DOT * 2.0, HANDLE_DOT * 2.0);
+    cr.set_source_rgb(1.0, 1.0, 1.0);
+    let _ = cr.fill_preserve();
+    cr.set_source_rgb(ACCENT.0, ACCENT.1, ACCENT.2);
+    cr.set_line_width(1.5);
+    let _ = cr.stroke();
+}
+
+fn edge_hit(point: f64, line: f64, widget: f64, inward_positive: bool) -> bool {
+    let on_edge = line <= HANDLE_RADIUS || line >= widget - HANDLE_RADIUS;
+    let inward = if on_edge { EDGE_INSET } else { HANDLE_RADIUS };
+    if inward_positive {
+        point >= line - HANDLE_RADIUS && point <= line + inward
+    } else {
+        point >= line - inward && point <= line + HANDLE_RADIUS
+    }
+}
+
+fn classify_crop_handle(
+    px: f64,
+    py: f64,
+    w: f64,
+    h: f64,
+    rect: (f64, f64, f64, f64),
+    src_w: f64,
+    src_h: f64,
+) -> DragOp {
+    let (sx, sy, sw, sh) = (
+        rect.0 / src_w * w,
+        rect.1 / src_h * h,
+        rect.2 / src_w * w,
+        rect.3 / src_h * h,
+    );
+    let near_x = px >= sx - HANDLE_RADIUS && px <= sx + sw + HANDLE_RADIUS;
+    let near_y = py >= sy - HANDLE_RADIUS && py <= sy + sh + HANDLE_RADIUS;
+    let left = edge_hit(px, sx, w, true);
+    let right = edge_hit(px, sx + sw, w, false);
+    let top = edge_hit(py, sy, h, true);
+    let bottom = edge_hit(py, sy + sh, h, false);
+    if near_x && near_y && top && left {
+        DragOp::Corner(0)
+    } else if near_x && near_y && top && right {
+        DragOp::Corner(1)
+    } else if near_x && near_y && bottom && right {
+        DragOp::Corner(2)
+    } else if near_x && near_y && bottom && left {
+        DragOp::Corner(3)
+    } else if near_x && left {
+        DragOp::Edge(0)
+    } else if near_x && right {
+        DragOp::Edge(1)
+    } else if near_y && top {
+        DragOp::Edge(2)
+    } else if near_y && bottom {
+        DragOp::Edge(3)
+    } else if px > sx && px < sx + sw && py > sy && py < sy + sh {
+        DragOp::Move
+    } else {
+        DragOp::New
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_frame_edge_is_easy_to_grab() {
+        let rect = (0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!(
+            classify_crop_handle(24.0, 250.0, 900.0, 506.0, rect, 1920.0, 1080.0),
+            DragOp::Edge(0)
+        );
+        assert_eq!(
+            classify_crop_handle(10.0, 10.0, 900.0, 506.0, rect, 1920.0, 1080.0),
+            DragOp::Corner(0)
+        );
+        assert_eq!(
+            classify_crop_handle(200.0, 250.0, 900.0, 506.0, rect, 1920.0, 1080.0),
+            DragOp::Move
+        );
+    }
 }

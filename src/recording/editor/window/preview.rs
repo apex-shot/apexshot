@@ -1,7 +1,7 @@
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
-    closest_aspect_ratio, format_webcut_time, view_to_source, VideoBackground,
-    VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
+    closest_aspect_ratio, even_crop_rect, format_webcut_time, picture_layout, view_to_source,
+    VideoBackground, VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
 };
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, DrawingArea,
@@ -33,7 +33,13 @@ fn build_preview_inner(
     media: Option<MediaFile>,
     show_player_bar: bool,
 ) -> (GtkBox, MediaFile, Button) {
-    let path = state.lock().unwrap().metadata.path.clone();
+    let (path, has_video) = {
+        let state = state.lock().unwrap();
+        (
+            state.metadata.path.clone(),
+            state.metadata.duration_seconds > 0.0,
+        )
+    };
 
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-preview-frame");
@@ -59,6 +65,7 @@ fn build_preview_inner(
     picture.set_keep_aspect_ratio(true);
     picture.set_can_shrink(true);
     picture.add_css_class("recording-editor-video-zoom-live");
+    picture.set_visible(has_video);
     let zoom_css = CssProvider::new();
     if let Some(display) = gtk4::gdk::Display::default() {
         gtk4::style_context_add_provider_for_display(
@@ -178,6 +185,7 @@ fn build_preview_inner(
                 .then(|| gtk4::gdk::Cursor::from_name("crosshair", None))
                 .flatten();
             cursor_layer_tick.set_cursor(crosshair.as_ref());
+            picture.set_visible(duration > 0.0);
             picture.set_opacity(if hidden { 0.0 } else { 1.0 });
             clock.set_text(&format!(
                 "{} / {}",
@@ -196,7 +204,7 @@ fn build_preview_inner(
             if (stage.ratio() - next_ratio).abs() > 0.001 {
                 stage.set_ratio(next_ratio);
             }
-            apply_preview_zoom(&state, &picture, &zoom_css, playhead, placing);
+            apply_preview_view(&state, &picture, &clip, &zoom_css, playhead, placing);
             apply_preview_pad(&clip, pad);
             cursor_layer.queue_draw();
             glib::ControlFlow::Continue
@@ -606,6 +614,28 @@ fn apply_preview_pad(clip: &Overlay, padded: bool) {
     clip.set_margin_bottom(pad);
 }
 
+fn visible_source_view(
+    state: &VideoEditState,
+    playhead: f64,
+    placing: bool,
+) -> (f64, f64, f64, f64) {
+    let (cx, cy, cw, ch) = state.crop_or_full();
+    if placing {
+        return (cx, cy, cw, ch);
+    }
+    let (scale, center) = state.eval_zoom(playhead);
+    if scale <= 1.01 {
+        return (cx, cy, cw, ch);
+    }
+    let (zx, zy, zw, zh) = even_crop_rect(
+        scale,
+        (center.0 - cx, center.1 - cy),
+        cw.max(2.0) as u32,
+        ch.max(2.0) as u32,
+    );
+    (cx + zx as f64, cy + zy as f64, zw as f64, zh as f64)
+}
+
 /// Source-coords rect currently visible on stage: static crop intersected
 /// with the active zoom window.
 fn source_to_zoomed_point(
@@ -635,39 +665,38 @@ fn placing_manual(state: &VideoEditState, playing: bool) -> bool {
             .is_some_and(|clip| clip.mode == ZoomMode::Manual)
 }
 
-fn apply_preview_zoom(
+fn apply_preview_view(
     state: &Arc<Mutex<VideoEditState>>,
     picture: &Picture,
+    clip: &Overlay,
     provider: &CssProvider,
     playhead: f64,
     placing: bool,
 ) {
-    picture.set_hexpand(true);
-    picture.set_vexpand(true);
-    picture.set_halign(Align::Fill);
-    picture.set_valign(Align::Fill);
-    picture.set_size_request(-1, -1);
-    picture.set_margin_start(0);
-    picture.set_margin_top(0);
-    let css = {
+    let clip_w = clip.allocated_width().max(0) as f64;
+    let clip_h = clip.allocated_height().max(0) as f64;
+    if clip_w < 2.0 || clip_h < 2.0 {
+        return;
+    }
+    let (view, src_w, src_h) = {
         let state = state.lock().unwrap();
-        let (scale, center) = if placing {
-            (1.0, (0.0, 0.0))
-        } else {
-            state.eval_zoom(playhead)
-        };
-        if placing || scale <= 1.01 {
-            ".recording-editor-video-zoom-live { transform: none; }".to_string()
-        } else {
-            let (cx, cy, cw, ch) = state.crop_or_full();
-            let ox = ((center.0 - cx) / cw.max(1.0) * 100.0).clamp(0.0, 100.0);
-            let oy = ((center.1 - cy) / ch.max(1.0) * 100.0).clamp(0.0, 100.0);
-            format!(
-                ".recording-editor-video-zoom-live {{ transform: scale({scale:.4}); transform-origin: {ox:.2}% {oy:.2}%; }}"
-            )
-        }
+        (
+            visible_source_view(&state, playhead, placing),
+            state.metadata.width.max(1) as f64,
+            state.metadata.height.max(1) as f64,
+        )
     };
-    provider.load_from_data(&css);
+    let (pw, ph, mx, my) = picture_layout(view, src_w, src_h, clip_w, clip_h);
+    picture.set_hexpand(false);
+    picture.set_vexpand(false);
+    picture.set_halign(Align::Start);
+    picture.set_valign(Align::Start);
+    picture.set_size_request(pw, ph);
+    picture.set_margin_start(mx);
+    picture.set_margin_top(my);
+    picture.set_margin_end(0);
+    picture.set_margin_bottom(0);
+    provider.load_from_data(".recording-editor-video-zoom-live { transform: none; }");
 }
 
 fn draw_preview_overlays(
@@ -697,18 +726,13 @@ fn draw_preview_overlays(
     }
 
     let source_t = state.source_playhead();
-    let view = state.crop_or_full();
-    let (scale, center) = if placing {
-        (1.0, (0.0, 0.0))
-    } else {
-        state.eval_zoom(source_t)
-    };
+    let view = visible_source_view(&state, source_t, placing);
     let _ = picture;
 
     if let Some(sidecar) = &state.sidecar {
         if let Some((x, y, kind)) = sidecar.interpolated_at(source_t) {
             let pulse = sidecar.click_pulse_at(source_t);
-            let (px, py) = source_to_zoomed_point(x, y, view, center, scale, w, h);
+            let (px, py) = source_to_zoomed_point(x, y, view, (0.0, 0.0), 1.0, w, h);
             draw_apexshot_cursor(cr, px, py, pulse, kind.as_str());
         }
     }

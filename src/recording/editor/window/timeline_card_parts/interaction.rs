@@ -15,17 +15,26 @@ pub fn toggle_playback(
         return;
     }
 
-    let seek_to = {
+    let (seek_to, speed, muted) = {
         let mut guard = state.lock().unwrap();
         if guard.playhead_seconds >= guard.content_end_seconds() - 0.05 {
             guard.playhead_seconds = 0.0;
         }
-        guard.source_playhead()
+        let seek_to = guard.source_playhead();
+        (
+            seek_to,
+            guard.speed_for_source(seek_to),
+            guard.muted_for_source(seek_to),
+        )
     };
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.seek((seek_to * 1_000_000.0) as i64);
-        media_file.set_muted(state.lock().unwrap().muted_for_source(seek_to));
-        media_file.play();
+        media_file.set_muted(muted);
+        if (speed - 1.0).abs() <= 1e-6 {
+            media_file.play();
+        } else {
+            media_file.pause();
+        }
     }
     playing.set(true);
     set_play_icon(play_button, "media-playback-pause-symbolic");
@@ -68,20 +77,34 @@ pub fn tick_playback(
         return;
     }
 
-    let (mut next, end) = {
+    let (mut next, end, speed, source_t) = {
         let guard = state.lock().unwrap();
-        (guard.playhead_seconds, guard.content_end_seconds())
+        let source_t = guard.source_playhead();
+        (
+            guard.playhead_seconds,
+            guard.content_end_seconds(),
+            guard.speed_for_source(source_t),
+            source_t,
+        )
     };
     let mut reached_end = false;
+    let drive_seek = (speed - 1.0).abs() > 1e-6;
 
-    if let Some(media_file) = media.borrow().as_ref() {
+    if drive_seek {
+        next += 0.05 * speed;
+        if let Some(media_file) = media.borrow().as_ref() {
+            if media_file.is_playing() {
+                media_file.pause();
+            }
+        }
+    } else if let Some(media_file) = media.borrow().as_ref() {
         if media_file.is_playing() {
             let ts = media_file.timestamp();
             if ts > 0 {
-                let source_t = ts as f64 / 1_000_000.0;
-                next = state.lock().unwrap().source_to_timeline(source_t);
+                next = state.lock().unwrap().source_to_timeline(ts as f64 / 1_000_000.0);
             }
         } else {
+            media_file.play();
             next += 0.05;
         }
     } else {
@@ -92,13 +115,16 @@ pub fn tick_playback(
         next = end;
         reached_end = true;
     }
-    {
+    let (muted, seek_to) = {
         let mut guard = state.lock().unwrap();
         guard.playhead_seconds = next;
-        let muted = guard.muted_for_source(guard.source_playhead());
-        drop(guard);
-        if let Some(media_file) = media.borrow().as_ref() {
-            media_file.set_muted(muted);
+        let seek_to = guard.source_playhead();
+        (guard.muted_for_source(seek_to), seek_to)
+    };
+    if let Some(media_file) = media.borrow().as_ref() {
+        media_file.set_muted(muted);
+        if drive_seek && (seek_to - source_t).abs() > 1e-4 {
+            media_file.seek((seek_to * 1_000_000.0) as i64);
         }
     }
     if reached_end {

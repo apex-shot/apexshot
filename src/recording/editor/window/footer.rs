@@ -93,29 +93,25 @@ fn icon_action_button(icon_name: &str, tooltip: &str) -> Button {
     button
 }
 
-pub(super) fn build_panel_upload_action(
+pub(super) fn build_upload_action(
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
 ) -> (Button, Spinner) {
     let button = Button::new();
     button.set_has_frame(false);
-    button.add_css_class("recording-editor-panel-upload");
+    button.add_css_class("recording-editor-title-upload");
     button.set_tooltip_text(Some("Export with your current settings, then upload"));
-
-    let content = GtkBox::new(Orientation::Horizontal, 5);
-    content.set_halign(Align::Center);
+    button.set_valign(Align::Center);
     let icon = Image::from_icon_name(
         crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
     );
-    icon.set_pixel_size(13);
-    let label = Label::new(Some("Upload"));
-    content.append(&icon);
-    content.append(&label);
-    button.set_child(Some(&content));
+    icon.set_pixel_size(16);
+    button.set_child(Some(&icon));
 
     let spinner = Spinner::new();
-    spinner.set_size_request(14, 14);
+    spinner.set_size_request(12, 12);
     spinner.set_visible(false);
+    spinner.set_valign(Align::Center);
 
     wire_upload_button(
         &button,
@@ -131,20 +127,34 @@ pub(super) fn build_panel_upload_action(
     (button, spinner)
 }
 
-pub(super) fn build_panel_done_action(
+pub(super) fn build_export_action(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
 ) -> (Button, Spinner) {
-    let button = Button::with_label("Done");
+    let button = Button::new();
     button.set_has_frame(false);
     button.add_css_class("recording-editor-primary-button");
-    button.add_css_class("recording-editor-panel-done");
+    button.add_css_class("recording-editor-title-export");
     button.set_tooltip_text(Some("Export the edited MP4"));
+    button.set_valign(Align::Center);
+
+    let content = GtkBox::new(Orientation::Horizontal, 4);
+    content.set_halign(Align::Center);
+    content.set_valign(Align::Center);
+    let icon = Image::from_icon_name(
+        crate::capture::editor::window::icon_names::ARROW_EXPORT_UP_REGULAR,
+    );
+    icon.set_pixel_size(12);
+    let label = Label::new(Some("Export"));
+    content.append(&icon);
+    content.append(&label);
+    button.set_child(Some(&content));
 
     let spinner = Spinner::new();
-    spinner.set_size_request(14, 14);
+    spinner.set_size_request(12, 12);
     spinner.set_visible(false);
+    spinner.set_valign(Align::Center);
 
     wire_export_button(
         &button,

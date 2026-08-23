@@ -138,15 +138,21 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
         InitialVideo::None => Some(MediaFile::new()),
     }));
-    let title = build_window_controls(&window, state.clone());
-    root.append(&title);
+    let exporting = Rc::new(Cell::new(false));
+    let (title_bar, title_label) = build_window_controls(&window, state.clone(), exporting.clone());
+    root.append(&title_bar);
 
     let paint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let refresh_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let ping = {
         let paint_slot = paint_slot.clone();
         let refresh_slot = refresh_slot.clone();
+        let state = state.clone();
+        let title_label = title_label.clone();
         Rc::new(move || {
+            let name = state.lock().unwrap().title.clone();
+            title_label.set_text(&name);
+            title_label.set_tooltip_text(Some(&name));
             if let Some(paint) = paint_slot.borrow().clone() {
                 paint();
             }
@@ -156,7 +162,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         }) as Rc<dyn Fn()>
     };
 
-    let workspace = GtkBox::new(Orientation::Horizontal, 0);
+    let workspace = GtkBox::new(Orientation::Horizontal, 8);
     workspace.add_css_class("recording-editor-workspace");
     workspace.set_hexpand(true);
     workspace.set_vexpand(true);
@@ -177,8 +183,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     ));
     workspace.append(&stage);
 
-    let exporting = Rc::new(Cell::new(false));
-    let sidebar = tool_sidebar::build_tool_sidebar(&window, state.clone(), ping.clone(), exporting);
+    let sidebar = tool_sidebar::build_tool_sidebar(state.clone(), ping.clone());
     workspace.append(&sidebar.widget);
     root.append(&workspace);
 
@@ -241,7 +246,11 @@ fn placeholder_edit_state() -> VideoEditState {
     state
 }
 
-fn build_window_controls(window: &ApplicationWindow, state: Arc<Mutex<VideoEditState>>) -> GtkBox {
+fn build_window_controls(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    exporting: Rc<Cell<bool>>,
+) -> (GtkBox, Label) {
     const TRAFFIC_LIGHTS_WIDTH: i32 = 84;
     let bar = GtkBox::new(Orientation::Horizontal, 8);
     bar.add_css_class("recording-editor-window-controls");
@@ -264,21 +273,32 @@ fn build_window_controls(window: &ApplicationWindow, state: Arc<Mutex<VideoEditS
     title.set_can_target(false);
     bar.append(&title);
 
+    let (export, export_spinner) =
+        footer::build_export_action(window, state.clone(), exporting.clone());
+    let (upload, upload_spinner) = footer::build_upload_action(state, exporting);
+    let actions = GtkBox::new(Orientation::Horizontal, 8);
+    actions.add_css_class("recording-editor-title-actions");
+    actions.set_valign(Align::Center);
+    actions.append(&upload_spinner);
+    actions.append(&upload);
+    actions.append(&export_spinner);
+    actions.append(&export);
     let lights = toolbar::build_traffic_lights(window);
     lights.set_size_request(TRAFFIC_LIGHTS_WIDTH, -1);
     lights.set_halign(Align::End);
     lights.set_valign(Align::Center);
-    let right_balance = GtkBox::new(Orientation::Horizontal, 0);
+    let right_balance = GtkBox::new(Orientation::Horizontal, 16);
     right_balance.set_size_request(tool_sidebar::TOOL_SIDEBAR_WIDTH + TRAFFIC_LIGHTS_WIDTH, -1);
     right_balance.set_hexpand(false);
     let right_spacer = GtkBox::new(Orientation::Horizontal, 0);
     right_spacer.set_hexpand(true);
     right_balance.append(&right_spacer);
+    right_balance.append(&actions);
     right_balance.append(&lights);
     bar.append(&right_balance);
 
     crate::capture::editor::ui_support::install_window_drag(&bar, window);
-    bar
+    (bar, title)
 }
 
 #[allow(dead_code)]

@@ -288,7 +288,7 @@
 
             .editor-theme-light .recording-editor-window-controls {
                 background: transparent;
-                border-bottom-color: alpha(#111827, 0.08);
+                border-bottom: none;
             }
 
             .editor-theme-light .recording-editor-title {
@@ -302,6 +302,15 @@
             .editor-theme-light button.recording-editor-title-edit:hover {
                 color: alpha(#1d2129, 0.78);
                 background: transparent;
+            }
+
+            .editor-theme-light button.recording-editor-title-upload {
+                color: alpha(#1d2129, 0.55);
+            }
+
+            .editor-theme-light button.recording-editor-title-upload:hover {
+                background: alpha(#111827, 0.06);
+                color: #b05c38;
             }
 
             .editor-theme-light .recording-editor-title-entry {
@@ -358,11 +367,11 @@
             }
 
             .editor-theme-light .recording-editor-preview-frame {
-                background: #ffffff;
+                background: transparent;
             }
 
             .editor-theme-light .recording-editor-preview-workspace {
-                background: #ffffff;
+                background: transparent;
             }
 
             .editor-theme-light .recording-editor-preview-stage,
@@ -374,16 +383,16 @@
             }
 
             .editor-theme-light .recording-editor-preview-canvas {
-                background: #111111;
-                border-color: alpha(#111827, 0.16);
+                background: transparent;
+                border: none;
             }
 
             .editor-theme-light .recording-editor-preview-clip {
-                background: #111111;
+                background: transparent;
             }
 
             .editor-theme-light .recording-editor-player-bar {
-                background: #ffffff;
+                background: transparent;
             }
 
             .editor-theme-light .recording-editor-player-clock {

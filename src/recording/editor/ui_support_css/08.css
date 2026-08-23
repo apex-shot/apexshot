@@ -79,33 +79,25 @@
                 border: none;
             }
 
+            .recording-editor-zoom-slider-row {
+                min-height: 36px;
+                padding: 0;
+                background: #000000;
+                border-radius: 8px;
+                overflow: hidden;
+            }
+
+            .recording-editor-zoom-slider-track {
+                min-height: 36px;
+                background: transparent;
+            }
+
             .recording-editor-zoom-blur-value {
-                color: alpha(white, 0.78);
+                color: alpha(white, 0.55);
                 font-size: 12px;
                 font-weight: 500;
                 font-variant-numeric: tabular-nums;
-            }
-
-            .recording-editor-root scale.recording-editor-zoom-slider {
-                min-height: 16px;
-                padding: 0;
-                margin: 0;
-            }
-
-            .recording-editor-root scale.recording-editor-zoom-slider trough {
-                min-height: 3px;
-                background: alpha(white, 0.10);
-            }
-
-            .recording-editor-root scale.recording-editor-zoom-slider highlight {
-                background: #b05c38;
-            }
-
-            .recording-editor-root scale.recording-editor-zoom-slider slider {
-                min-width: 10px;
-                min-height: 10px;
-                background: #b05c38;
-                border: none;
+                min-width: 2.5em;
             }
 
             button.recording-editor-zoom-delete {
@@ -133,11 +125,20 @@
             }
 
             .recording-editor-zoom-footer {
-                padding: 6px 14px 12px 14px;
+                padding: 8px 14px 10px 14px;
+                background: #252525;
                 border-top: 1px solid alpha(white, 0.06);
+                border-radius: 0 0 12px 12px;
             }
 
-            .editor-theme-light .recording-editor-stage,
+            .editor-theme-light .recording-editor-workspace {
+                background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-stage {
+                background: #f0f1f4;
+            }
+
             .editor-theme-light .recording-editor-timeline-dock {
                 background: #ffffff;
             }
@@ -166,19 +167,23 @@
                 color: alpha(#1d2129, 0.72);
             }
 
-            .editor-theme-light .recording-editor-tool-sidebar,
-            .editor-theme-light .recording-editor-zoom-panel,
-            .editor-theme-light .recording-editor-zoom-scroll,
-            .editor-theme-light .recording-editor-zoom-scroll > viewport {
-                background: #ffffff;
+            .editor-theme-light .recording-editor-tool-sidebar {
+                background: transparent;
+                border-left: none;
             }
 
-            .editor-theme-light .recording-editor-tool-sidebar {
-                border-left-color: alpha(#111827, 0.10);
+            .editor-theme-light .recording-editor-zoom-panel {
+                background: #f0f1f4;
+                border: none;
+            }
+
+            .editor-theme-light .recording-editor-zoom-scroll,
+            .editor-theme-light .recording-editor-zoom-scroll > viewport {
+                background: transparent;
             }
 
             .editor-theme-light .recording-editor-zoom-title {
-                color: alpha(#1d2129, 0.92);
+                color: #b05c38;
             }
 
             .editor-theme-light button.recording-editor-panel-upload {
@@ -260,11 +265,16 @@
                 border: none;
             }
 
+            .editor-theme-light .recording-editor-zoom-slider-row {
+                background: #e6e7eb;
+            }
+
             .editor-theme-light .recording-editor-zoom-blur-value {
-                color: alpha(#1d2129, 0.78);
+                color: alpha(#1d2129, 0.55);
             }
 
             .editor-theme-light .recording-editor-zoom-footer {
+                background: #e6e7eb;
                 border-top-color: alpha(#111827, 0.10);
             }
 

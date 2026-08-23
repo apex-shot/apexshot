@@ -474,6 +474,18 @@
     }
 
     #[test]
+    fn clip_speed_and_mute_work_without_selection() {
+        let mut state = VideoEditState::new(metadata());
+        assert_eq!(state.selected_segment, None);
+        assert_eq!(state.selected_clip_speed(), Some(1.0));
+        state.set_selected_clip_speed(2.0);
+        state.set_selected_clip_muted(true);
+        assert_eq!(state.selected_segment, Some(0));
+        assert!((state.speed_for_source(1.0) - 2.0).abs() < 1e-9);
+        assert!(state.muted_for_source(1.0));
+    }
+
+    #[test]
     fn selected_clip_speed_mute_and_delete() {
         let mut state = VideoEditState::new(metadata());
         state.selected_segment = Some(0);
@@ -606,6 +618,26 @@
         assert!(state.crop.is_none());
         assert_eq!(state.canvas_dimensions(), (1920, 1080));
         assert!(!state.needs_reencode());
+    }
+
+    #[test]
+    fn picture_layout_full_frame_fills_clip() {
+        assert_eq!(
+            picture_layout((0.0, 0.0, 1920.0, 1080.0), 1920.0, 1080.0, 1920.0, 1080.0),
+            (1920, 1080, 0, 0)
+        );
+    }
+
+    #[test]
+    fn picture_layout_crop_scales_and_offsets() {
+        assert_eq!(
+            picture_layout((0.0, 0.0, 960.0, 1080.0), 1920.0, 1080.0, 960.0, 1080.0),
+            (1920, 1080, 0, 0)
+        );
+        assert_eq!(
+            picture_layout((960.0, 0.0, 960.0, 1080.0), 1920.0, 1080.0, 960.0, 1080.0),
+            (1920, 1080, -960, 0)
+        );
     }
 
     #[test]

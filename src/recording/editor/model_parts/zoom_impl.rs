@@ -49,19 +49,25 @@ impl VideoEditState {
         }
     }
 
-    pub fn selected_clip_speed(&self) -> Option<f64> {
+    fn active_segment_index(&self) -> Option<usize> {
         self.selected_segment
-            .and_then(|index| self.segment_speeds.get(index).copied())
-            .or_else(|| self.selected_segment.map(|_| 1.0))
+            .or_else(|| self.segment_index_at_source(self.source_playhead()))
+            .or_else(|| (!self.segment_speeds.is_empty()).then_some(0))
+    }
+
+    pub fn selected_clip_speed(&self) -> Option<f64> {
+        self.active_segment_index()
+            .map(|index| self.segment_speed(index))
     }
 
     pub fn set_selected_clip_speed(&mut self, speed: f64) {
         if self.video_locked {
             return;
         }
-        let Some(index) = self.selected_segment else {
+        let Some(index) = self.active_segment_index() else {
             return;
         };
+        self.selected_segment = Some(index);
         if index >= self.segment_speeds.len() {
             self.segment_speeds.resize(index + 1, 1.0);
         }
@@ -69,7 +75,7 @@ impl VideoEditState {
     }
 
     pub fn selected_clip_muted(&self) -> Option<bool> {
-        self.selected_segment
+        self.active_segment_index()
             .map(|index| self.segment_is_muted(index))
     }
 
@@ -77,9 +83,10 @@ impl VideoEditState {
         if !self.has_audio_track() {
             return;
         }
-        let Some(index) = self.selected_segment else {
+        let Some(index) = self.active_segment_index() else {
             return;
         };
+        self.selected_segment = Some(index);
         if index >= self.segment_muted.len() {
             self.segment_muted.resize(index + 1, false);
         }
