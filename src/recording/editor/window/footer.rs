@@ -142,9 +142,8 @@ pub(super) fn build_export_action(
     let content = GtkBox::new(Orientation::Horizontal, 4);
     content.set_halign(Align::Center);
     content.set_valign(Align::Center);
-    let icon = Image::from_icon_name(
-        crate::capture::editor::window::icon_names::ARROW_EXPORT_UP_REGULAR,
-    );
+    let icon =
+        Image::from_icon_name(crate::capture::editor::window::icon_names::ARROW_EXPORT_UP_REGULAR);
     icon.set_pixel_size(12);
     let label = Label::new(Some("Export"));
     content.append(&icon);

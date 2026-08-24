@@ -4,8 +4,8 @@ use crate::recording::editor::model::{
     VideoBackground, VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
 };
 use gtk4::{
-    glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, DrawingArea,
-    CssProvider, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture, Popover,
+    glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
+    DrawingArea, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture, Popover,
     Separator,
 };
 use std::cell::{Cell, RefCell};

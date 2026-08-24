@@ -23,8 +23,8 @@ use super::model::{AudioMode, VideoEditState, VideoMetadata};
 use super::ui_support::install_recording_editor_css;
 use gtk4::{
     gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
-    DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, GestureClick,
-    Image, Label, MediaFile, Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
+    DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, GestureClick, Image,
+    Label, MediaFile, Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;

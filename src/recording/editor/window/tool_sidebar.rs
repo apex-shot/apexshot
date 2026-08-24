@@ -71,10 +71,7 @@ struct ZoomPanel {
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_zoom_panel(
-    state: Arc<Mutex<VideoEditState>>,
-    on_change: Rc<dyn Fn()>,
-) -> ZoomPanel {
+fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> ZoomPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -391,10 +388,7 @@ struct ClipPanel {
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_clip_panel(
-    state: Arc<Mutex<VideoEditState>>,
-    on_change: Rc<dyn Fn()>,
-) -> ClipPanel {
+fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> ClipPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -636,8 +630,20 @@ fn labeled_slider(name: &str, min: f64, max: f64, step: f64, value: f64) -> BarS
             cr.new_sub_path();
             cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
             cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
-            cr.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-            cr.arc(x + r, y + r, r, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
+            cr.arc(
+                x + r,
+                y + h - r,
+                r,
+                std::f64::consts::FRAC_PI_2,
+                std::f64::consts::PI,
+            );
+            cr.arc(
+                x + r,
+                y + r,
+                r,
+                std::f64::consts::PI,
+                3.0 * std::f64::consts::FRAC_PI_2,
+            );
             cr.close_path();
             let _ = cr.fill();
         }

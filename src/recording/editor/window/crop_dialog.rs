@@ -452,7 +452,12 @@ fn draw_crop_overlay(
 }
 
 fn draw_handle(cr: &gtk4::cairo::Context, x: f64, y: f64) {
-    cr.rectangle(x - HANDLE_DOT, y - HANDLE_DOT, HANDLE_DOT * 2.0, HANDLE_DOT * 2.0);
+    cr.rectangle(
+        x - HANDLE_DOT,
+        y - HANDLE_DOT,
+        HANDLE_DOT * 2.0,
+        HANDLE_DOT * 2.0,
+    );
     cr.set_source_rgb(1.0, 1.0, 1.0);
     let _ = cr.fill_preserve();
     cr.set_source_rgb(ACCENT.0, ACCENT.1, ACCENT.2);
