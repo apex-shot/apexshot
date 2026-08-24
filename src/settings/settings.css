@@ -10,7 +10,7 @@
             .editor-root {
                 border-radius: 10px;
                 background-color: #141414;
-                border: 1px solid alpha(white, 0.10);
+                border: none;
                 color: #F1F1F3;
             }
 
@@ -153,7 +153,7 @@
             .editor-root.editor-theme-light {
                 background-color: #f6f7fb;
                 color: #1d2129;
-                border-color: alpha(#111827, 0.10);
+                border: none;
             }
 
             .editor-root.editor-theme-light .editor-toolbar {

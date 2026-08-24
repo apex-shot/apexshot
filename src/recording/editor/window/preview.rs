@@ -1,7 +1,7 @@
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
-    closest_aspect_ratio, even_crop_rect, format_webcut_time, picture_layout, view_to_source,
-    VideoBackground, VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
+    even_crop_rect, format_webcut_time, picture_layout, view_to_source, VideoBackground,
+    VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
 };
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
@@ -315,7 +315,7 @@ pub(super) fn build_stage_tools(
 
     let initial = {
         let guard = state.lock().unwrap();
-        stage_aspect_label(&guard)
+        guard.canvas_label()
     };
     let aspect = Button::new();
     aspect.set_has_frame(false);
@@ -388,11 +388,6 @@ pub(super) fn build_stage_tools(
     bar
 }
 
-fn stage_aspect_label(state: &VideoEditState) -> &'static str {
-    let (width, height) = state.canvas_dimensions();
-    closest_aspect_ratio(width, height)
-}
-
 fn append_stage_aspect_item(
     list: &GtkBox,
     popover: &Popover,
@@ -417,7 +412,7 @@ fn append_stage_aspect_item(
                     Some((width, height)) => guard.apply_aspect_ratio(width, height),
                     None => guard.reset_aspect_ratio(),
                 }
-                aspect_label.set_text(stage_aspect_label(&guard));
+                aspect_label.set_text(guard.canvas_label());
             }
             popover.popdown();
             on_change();

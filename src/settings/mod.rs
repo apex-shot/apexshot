@@ -533,6 +533,7 @@ fn build_settings_window(app: &Application) {
         screenshot_format: screenshots.format_input.clone(),
         video_export_location: recordings.video_export_location_entry.clone(),
         rec_filename_pattern: recordings.rec_filename_pattern_entry.clone(),
+        rec_remember_export_folder: recordings.rec_remember_export_folder.clone(),
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),
@@ -735,6 +736,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_combo(&inputs.screenshot_format);
     wire_entry(&inputs.video_export_location);
     wire_entry(&inputs.rec_filename_pattern);
+    wire_check(&inputs.rec_remember_export_folder);
     wire_check(&inputs.screenshot_quick_access);
     wire_check(&inputs.screenshot_copy_to_clipboard);
     wire_check(&inputs.screenshot_save);

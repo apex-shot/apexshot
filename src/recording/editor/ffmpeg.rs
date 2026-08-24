@@ -309,8 +309,7 @@ pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
     }
 }
 
-pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
-    let output_path = state.export_path();
+pub fn run_trim_only(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -325,8 +324,7 @@ pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     Ok(output_path)
 }
 
-pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
-    let output_path = state.export_path();
+pub fn run_convert(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -345,14 +343,18 @@ pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
 /// Uses stream-copy when quality/dimensions are unchanged; otherwise re-encodes.
 /// Falls back to convert if trim-only fails (e.g. awkward codecs/containers).
 pub fn export_edited(state: &VideoEditState) -> anyhow::Result<PathBuf> {
+    export_edited_to(state, state.export_path())
+}
+
+pub fn export_edited_to(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
     if state.needs_reencode() {
-        return run_convert(state);
+        return run_convert(state, output_path);
     }
-    match run_trim_only(state) {
+    match run_trim_only(state, output_path.clone()) {
         Ok(path) => Ok(path),
         Err(err) => {
             eprintln!("[video-editor] trim-only export failed ({err}); falling back to convert");
-            run_convert(state)
+            run_convert(state, output_path)
         }
     }
 }
