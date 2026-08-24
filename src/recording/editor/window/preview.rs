@@ -125,6 +125,15 @@ fn build_preview_inner(
     });
     overlay.add_overlay(&cursor_layer);
 
+    let empty_hint = Label::new(Some("Click to open a video, or drop one here"));
+    empty_hint.add_css_class("recording-editor-empty-preview-hint");
+    empty_hint.set_halign(Align::Center);
+    empty_hint.set_valign(Align::Center);
+    empty_hint.set_wrap(true);
+    empty_hint.set_can_target(false);
+    empty_hint.set_visible(!has_video);
+    overlay.add_overlay(&empty_hint);
+
     let zoom_badge = Label::new(None);
     zoom_badge.add_css_class("recording-editor-dim-badge");
     zoom_badge.set_halign(Align::End);
@@ -163,6 +172,7 @@ fn build_preview_inner(
         let media_tick = media.clone();
         let placing_focus = placing_focus.clone();
         let cursor_layer_tick = cursor_layer.clone();
+        let empty_hint = empty_hint.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
             let playing = media_tick.is_playing();
             let (dims, zoom, pad, playhead, duration, hidden, label, placing) = {
@@ -186,6 +196,7 @@ fn build_preview_inner(
                 .flatten();
             cursor_layer_tick.set_cursor(crosshair.as_ref());
             picture.set_visible(duration > 0.0);
+            empty_hint.set_visible(duration <= 0.0);
             picture.set_opacity(if hidden { 0.0 } else { 1.0 });
             clock.set_text(&format!(
                 "{} / {}",

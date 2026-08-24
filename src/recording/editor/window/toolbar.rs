@@ -199,11 +199,7 @@ pub(super) fn build_traffic_lights(window: &ApplicationWindow) -> GtkBox {
 
     let window_zoom = window.clone();
     zoom.connect_clicked(move |_| {
-        if window_zoom.is_maximized() {
-            window_zoom.unmaximize();
-        } else {
-            window_zoom.maximize();
-        }
+        window_zoom.set_fullscreened(!window_zoom.is_fullscreen());
     });
 
     right_box

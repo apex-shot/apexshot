@@ -4,6 +4,10 @@
                 color: alpha(#1d2129, 0.45);
             }
 
+            .editor-theme-light .recording-editor-empty-preview-hint {
+                color: alpha(#1d2129, 0.55);
+            }
+
             .editor-theme-light .recording-editor-drop-banner {
                 background: #ffffff;
                 border-color: alpha(#111827, 0.10);

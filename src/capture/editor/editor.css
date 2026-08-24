@@ -16,6 +16,16 @@
                 box-shadow: none;
             }
 
+            window.fullscreen .editor-root,
+            window.fullscreen .editor-footer,
+            window.fullscreen .recording-editor-window-controls {
+                border-radius: 0;
+            }
+
+            window.fullscreen .editor-root {
+                border: none;
+            }
+
             .editor-top-chrome {
                 min-height: 56px;
                 background: none;

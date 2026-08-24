@@ -238,14 +238,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         }
     });
 
-    let zoomed_state = Rc::new(Cell::new(false));
-    let zoomed_state_btn = zoomed_state.clone();
     let window_zoom = window.downgrade();
     traffic_zoom.connect_clicked(move |_| {
         if let Some(window) = window_zoom.upgrade() {
-            let next_zoomed = !zoomed_state_btn.get();
-            zoomed_state_btn.set(next_zoomed);
-            window.set_fullscreened(next_zoomed);
+            window.set_fullscreened(!window.is_fullscreen());
         }
     });
 

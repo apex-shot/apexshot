@@ -23,8 +23,8 @@ use super::model::{AudioMode, VideoEditState, VideoMetadata};
 use super::ui_support::install_recording_editor_css;
 use gtk4::{
     gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
-    DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, Image, Label,
-    MediaFile, Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
+    DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, GestureClick,
+    Image, Label, MediaFile, Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -205,32 +205,88 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             let Some(path) = file.path() else {
                 return false;
             };
-            let Ok(metadata) = ffmpeg::probe_metadata(&path) else {
-                return false;
-            };
-            *state.lock().unwrap() = VideoEditState::new(metadata);
-            let has_mouse_data = state
-                .lock()
-                .unwrap()
-                .sidecar
-                .as_ref()
-                .is_some_and(|sidecar| !sidecar.pointer.is_empty());
-            if let Some(player) = media.borrow().as_ref() {
-                player.set_file(Some(&file));
-            }
-            ping();
-            if !has_mouse_data {
-                dialogs::show_manual_zoom_notice(&window);
-            }
-            true
+            load_preview_video(path, &state, &media, &window, &ping)
         }
     });
     preview_widget.add_controller(drop_target);
+
+    let open_click = GestureClick::new();
+    open_click.set_button(1);
+    open_click.connect_released({
+        let state = state.clone();
+        let media = media.clone();
+        let window = window.clone();
+        let ping = ping.clone();
+        move |_, _, _, _| {
+            if state.lock().unwrap().metadata.duration_seconds > 0.0 {
+                return;
+            }
+            show_open_preview_video(&window, state.clone(), media.clone(), ping.clone());
+        }
+    });
+    preview_widget.add_controller(open_click);
     ping();
 
     crate::capture::editor::ui_support::install_edge_resize(&root, &window);
     window.set_child(Some(&root));
     window.present();
+}
+
+fn load_preview_video(
+    path: PathBuf,
+    state: &Arc<Mutex<VideoEditState>>,
+    media: &Rc<RefCell<Option<MediaFile>>>,
+    window: &ApplicationWindow,
+    ping: &Rc<dyn Fn()>,
+) -> bool {
+    let Ok(metadata) = ffmpeg::probe_metadata(&path) else {
+        return false;
+    };
+    *state.lock().unwrap() = VideoEditState::new(metadata);
+    let has_mouse_data = state
+        .lock()
+        .unwrap()
+        .sidecar
+        .as_ref()
+        .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+    if let Some(player) = media.borrow().as_ref() {
+        player.set_file(Some(&gio::File::for_path(&path)));
+    }
+    ping();
+    if !has_mouse_data {
+        dialogs::show_manual_zoom_notice(window);
+    }
+    true
+}
+
+fn show_open_preview_video(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    media: Rc<RefCell<Option<MediaFile>>>,
+    ping: Rc<dyn Fn()>,
+) {
+    let chooser = FileChooserNative::new(
+        Some("Open video"),
+        Some(window),
+        FileChooserAction::Open,
+        Some("Open"),
+        Some("Cancel"),
+    );
+    let filter = FileFilter::new();
+    filter.set_name(Some("Videos"));
+    filter.add_mime_type("video/mp4");
+    filter.add_pattern("*.mp4");
+    chooser.add_filter(&filter);
+    let window = window.clone();
+    chooser.connect_response(move |dialog, response| {
+        if response == ResponseType::Accept {
+            if let Some(path) = dialog.file().and_then(|file| file.path()) {
+                load_preview_video(path, &state, &media, &window, &ping);
+            }
+        }
+        dialog.hide();
+    });
+    chooser.show();
 }
 
 fn placeholder_edit_state() -> VideoEditState {

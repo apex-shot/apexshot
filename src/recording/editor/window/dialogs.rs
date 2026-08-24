@@ -1,32 +1,50 @@
 use crate::recording::editor::model::format_size;
 use gtk4::{
-    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Window,
+    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Popover,
 };
 use std::path::PathBuf;
 
-pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
-    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+fn popup_on_editor(parent: &ApplicationWindow, card: &impl IsA<gtk4::Widget>) -> Popover {
+    let popover = Popover::new();
+    popover.set_parent(parent);
+    popover.add_css_class("recording-editor-dialog");
+    popover.set_autohide(false);
+    popover.set_has_arrow(false);
+    popover.set_child(Some(card));
+    let width = parent.allocated_width().max(1);
+    let height = parent.allocated_height().max(1);
+    popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+        width / 2,
+        height / 2,
+        1,
+        1,
+    )));
+    popover.popup();
+    popover
+}
 
-    let dialog = Window::builder()
-        .transient_for(parent)
-        .modal(true)
-        .decorated(false)
-        .default_width(380)
-        .default_height(-1)
-        .resizable(false)
-        .build();
-    dialog.add_css_class("recording-editor-dialog");
+fn close_editor_popup(popover: &Popover) {
+    popover.popdown();
+    popover.unparent();
+}
 
+fn dialog_card() -> (GtkBox, GtkBox) {
     let root = GtkBox::new(Orientation::Vertical, 12);
     root.add_css_class("recording-editor-dialog-root");
     root.set_margin_top(24);
     root.set_margin_bottom(18);
     root.set_margin_start(24);
     root.set_margin_end(24);
-
     let wrapper = GtkBox::new(Orientation::Vertical, 0);
     wrapper.add_css_class("recording-editor-dialog-bg");
+    wrapper.set_size_request(380, -1);
     wrapper.append(&root);
+    (wrapper, root)
+}
+
+pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let (wrapper, root) = dialog_card();
 
     let title = Label::new(Some("Export complete"));
     title.add_css_class("recording-editor-dialog-title");
@@ -55,48 +73,30 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
     close.set_has_frame(false);
     close.add_css_class("recording-editor-primary-button");
 
-    let dialog_close = dialog.clone();
-    close.connect_clicked(move |_| dialog_close.close());
-
-    let dialog_open = dialog.clone();
-    let path_open = path.clone();
-    open_folder.connect_clicked(move |_| {
-        if let Some(parent_dir) = path_open.parent() {
-            let _ = crate::utils::open::open_path(parent_dir);
-        }
-        dialog_open.close();
-    });
-
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
-
     button_row.append(&open_folder);
     button_row.append(&spacer);
     button_row.append(&close);
-
     root.append(&title);
     root.append(&body);
     root.append(&button_row);
-    dialog.set_child(Some(&wrapper));
-    dialog.present();
+
+    let dialog = popup_on_editor(parent, &wrapper);
+    close.connect_clicked({
+        let dialog = dialog.clone();
+        move |_| close_editor_popup(&dialog)
+    });
+    open_folder.connect_clicked(move |_| {
+        if let Some(parent_dir) = path.parent() {
+            let _ = crate::utils::open::open_path(parent_dir);
+        }
+        close_editor_popup(&dialog);
+    });
 }
 
 pub(super) fn show_manual_zoom_notice(parent: &ApplicationWindow) {
-    let dialog = Window::builder()
-        .transient_for(parent)
-        .modal(true)
-        .decorated(false)
-        .default_width(380)
-        .resizable(false)
-        .build();
-    dialog.add_css_class("recording-editor-dialog");
-
-    let root = GtkBox::new(Orientation::Vertical, 12);
-    root.add_css_class("recording-editor-dialog-root");
-    root.set_margin_top(24);
-    root.set_margin_bottom(18);
-    root.set_margin_start(24);
-    root.set_margin_end(24);
+    let (wrapper, root) = dialog_card();
 
     let title = Label::new(Some("Automatic zoom unavailable"));
     title.add_css_class("recording-editor-dialog-title");
@@ -111,17 +111,13 @@ pub(super) fn show_manual_zoom_notice(parent: &ApplicationWindow) {
     close.set_has_frame(false);
     close.add_css_class("recording-editor-primary-button");
     close.set_halign(Align::End);
-    let dialog_close = dialog.clone();
-    close.connect_clicked(move |_| dialog_close.close());
 
     root.append(&title);
     root.append(&body);
     root.append(&close);
-    let wrapper = GtkBox::new(Orientation::Vertical, 0);
-    wrapper.add_css_class("recording-editor-dialog-bg");
-    wrapper.append(&root);
-    dialog.set_child(Some(&wrapper));
-    dialog.present();
+
+    let dialog = popup_on_editor(parent, &wrapper);
+    close.connect_clicked(move |_| close_editor_popup(&dialog));
 }
 
 pub(super) fn show_error(
@@ -130,26 +126,7 @@ pub(super) fn show_error(
     message: &str,
     detail: Option<&str>,
 ) {
-    let dialog = Window::builder()
-        .transient_for(parent)
-        .modal(true)
-        .decorated(false)
-        .default_width(380)
-        .default_height(-1)
-        .resizable(false)
-        .build();
-    dialog.add_css_class("recording-editor-dialog");
-
-    let root = GtkBox::new(Orientation::Vertical, 12);
-    root.add_css_class("recording-editor-dialog-root");
-    root.set_margin_top(24);
-    root.set_margin_bottom(18);
-    root.set_margin_start(24);
-    root.set_margin_end(24);
-
-    let wrapper = GtkBox::new(Orientation::Vertical, 0);
-    wrapper.add_css_class("recording-editor-dialog-bg");
-    wrapper.append(&root);
+    let (wrapper, root) = dialog_card();
 
     let title_label = Label::new(Some(title));
     title_label.add_css_class("recording-editor-dialog-title");
@@ -172,15 +149,12 @@ pub(super) fn show_error(
     let close = Button::with_label("Close");
     close.set_has_frame(false);
     close.add_css_class("recording-editor-primary-button");
-
-    let dialog_close = dialog.clone();
-    close.connect_clicked(move |_| dialog_close.close());
-
     button_row.append(&close);
 
     root.append(&title_label);
     root.append(&body);
     root.append(&button_row);
-    dialog.set_child(Some(&wrapper));
-    dialog.present();
+
+    let dialog = popup_on_editor(parent, &wrapper);
+    close.connect_clicked(move |_| close_editor_popup(&dialog));
 }

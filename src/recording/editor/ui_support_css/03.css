@@ -313,6 +313,16 @@
             }
 
             /* ── Dialog ── */
+            popover.recording-editor-dialog,
+            popover.recording-editor-dialog contents,
+            popover.recording-editor-dialog > contents {
+                padding: 0;
+                margin: 0;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
             .recording-editor-dialog {
                 background: #1e1e1e;
                 border-radius: 12px;

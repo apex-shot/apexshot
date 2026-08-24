@@ -62,6 +62,11 @@
                 min-height: 260px;
             }
 
+            .recording-editor-empty-preview-hint {
+                color: alpha(white, 0.55);
+                font-size: 14px;
+            }
+
             .recording-editor-empty-track-row {
                 background: #2c2c2c;
                 border-radius: 0;
