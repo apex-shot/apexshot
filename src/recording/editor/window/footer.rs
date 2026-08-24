@@ -187,8 +187,9 @@ fn wire_upload_button(
     spinner: Spinner,
     exporting: Rc<Cell<bool>>,
 ) {
+    button.set_sensitive(state.lock().unwrap().has_source_video());
     button.connect_clicked(move |_| {
-        if exporting.get() {
+        if exporting.get() || !state.lock().unwrap().has_source_video() {
             return;
         }
 
@@ -283,8 +284,9 @@ fn wire_export_button(
     exporting: Rc<Cell<bool>>,
 ) {
     let window = window.clone();
+    button.set_sensitive(state.lock().unwrap().has_source_video());
     button.connect_clicked(move |_| {
-        if exporting.get() {
+        if exporting.get() || !state.lock().unwrap().has_source_video() {
             return;
         }
         exporting.set(true);
@@ -344,4 +346,26 @@ fn wire_export_button(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn cloud_and_export_require_video_and_upload_applies_edits() {
+        let source = include_str!("footer.rs");
+        for fn_name in ["fn wire_upload_button", "fn wire_export_button"] {
+            let start = source.find(fn_name).expect(fn_name);
+            assert!(
+                source[start..].contains("has_source_video()"),
+                "{fn_name} must no-op when no video is loaded",
+            );
+        }
+        let upload = &source[source.find("fn wire_upload_button").expect("upload wire")..];
+        let export_pos = upload.find("export_edited").expect("export current edits");
+        let upload_pos = upload.find("upload_file").expect("cloud upload");
+        assert!(
+            export_pos < upload_pos,
+            "Cloud must export current editor edits before uploading",
+        );
+    }
 }

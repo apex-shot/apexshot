@@ -281,6 +281,10 @@ impl VideoEditState {
         self.x_to_time(x, width) / self.source_duration()
     }
 
+    pub fn has_source_video(&self) -> bool {
+        self.metadata.duration_seconds > 0.0
+    }
+
     pub fn has_audio_track(&self) -> bool {
         self.metadata.has_audio && !self.audio_removed
     }
@@ -401,5 +405,4 @@ impl VideoEditState {
         }
         self.project_media.push(item);
     }
-
 }

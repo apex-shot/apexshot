@@ -93,22 +93,29 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     let mode_row = GtkBox::new(Orientation::Horizontal, 12);
     mode_row.add_css_class("recording-editor-zoom-mode");
     mode_row.set_hexpand(true);
+    let auto_available = state.lock().unwrap().supports_auto_zoom();
     let auto_btn = ToggleButton::with_label("Auto");
     auto_btn.add_css_class("recording-editor-zoom-mode-btn");
     auto_btn.set_has_frame(false);
     auto_btn.set_hexpand(false);
-    auto_btn.set_active(true);
+    auto_btn.set_sensitive(auto_available);
+    auto_btn.set_active(auto_available);
     let manual_btn = ToggleButton::with_label("Manual");
     manual_btn.add_css_class("recording-editor-zoom-mode-btn");
     manual_btn.set_has_frame(false);
     manual_btn.set_hexpand(false);
     manual_btn.set_group(Some(&auto_btn));
+    if !auto_available {
+        manual_btn.set_active(true);
+    }
     mode_row.append(&auto_btn);
     mode_row.append(&manual_btn);
 
-    let mode_hint = Label::new(Some(
-        "Camera recenters when the cursor nears the edge of the zoomed view",
-    ));
+    let mode_hint = Label::new(Some(if auto_available {
+        "Camera recenters when the cursor nears the edge of the zoomed view"
+    } else {
+        "Set a fixed focus point for this zoom"
+    }));
     mode_hint.add_css_class("recording-editor-zoom-hint");
     mode_hint.set_wrap(true);
     mode_hint.set_xalign(0.0);
@@ -338,22 +345,33 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         Rc::new(move || {
             let guard = state.lock().unwrap();
             panel.set_visible(true);
+            let auto_available = guard.supports_auto_zoom();
             let selected = guard.selected_zoom_clip().cloned();
             syncing.set(true);
+            auto_btn.set_sensitive(auto_available);
             if let Some(clip) = &selected {
-                mode_hint.set_text(match clip.mode {
+                let mode = if clip.mode == ZoomMode::Auto && auto_available {
+                    ZoomMode::Auto
+                } else {
+                    ZoomMode::Manual
+                };
+                mode_hint.set_text(match mode {
                     ZoomMode::Manual => "Set a fixed focus point for this zoom",
                     ZoomMode::Auto => {
                         "Camera recenters when the cursor nears the edge of the zoomed view"
                     }
                 });
-                match clip.mode {
+                match mode {
                     ZoomMode::Auto => auto_btn.set_active(true),
                     ZoomMode::Manual => manual_btn.set_active(true),
                 }
-                classic_row.set_visible(clip.mode == ZoomMode::Auto);
+                classic_row.set_visible(mode == ZoomMode::Auto);
                 blur.set_visible(true);
             } else {
+                if !auto_available {
+                    manual_btn.set_active(true);
+                    mode_hint.set_text("Set a fixed focus point for this zoom");
+                }
                 classic_row.set_visible(false);
                 blur.set_visible(false);
             }

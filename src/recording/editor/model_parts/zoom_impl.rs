@@ -26,7 +26,11 @@ impl VideoEditState {
             scale: DEFAULT_ZOOM_SCALE,
             center,
             ease_ms: DEFAULT_ZOOM_EASE_MS,
-            mode: ZoomMode::Auto,
+            mode: if self.supports_auto_zoom() {
+                ZoomMode::Auto
+            } else {
+                ZoomMode::Manual
+            },
         });
         self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
         let index = self
@@ -137,8 +141,17 @@ impl VideoEditState {
             .and_then(|index| self.zoom_clips.get(index))
     }
 
+    pub fn supports_auto_zoom(&self) -> bool {
+        self.sidecar
+            .as_ref()
+            .is_some_and(|sidecar| !sidecar.pointer.is_empty())
+    }
+
     pub fn set_selected_zoom_mode(&mut self, mode: ZoomMode) {
         if self.zoom_locked {
+            return;
+        }
+        if mode == ZoomMode::Auto && !self.supports_auto_zoom() {
             return;
         }
         if let Some(clip) = self

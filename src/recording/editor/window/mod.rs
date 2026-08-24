@@ -139,7 +139,8 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::None => Some(MediaFile::new()),
     }));
     let exporting = Rc::new(Cell::new(false));
-    let (title_bar, title_label) = build_window_controls(&window, state.clone(), exporting.clone());
+    let (title_bar, title_label, upload_btn, export_btn) =
+        build_window_controls(&window, state.clone(), exporting.clone());
     root.append(&title_bar);
 
     let paint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
@@ -149,10 +150,19 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         let refresh_slot = refresh_slot.clone();
         let state = state.clone();
         let title_label = title_label.clone();
+        let upload_btn = upload_btn.clone();
+        let export_btn = export_btn.clone();
+        let exporting = exporting.clone();
         Rc::new(move || {
-            let name = state.lock().unwrap().title.clone();
+            let (name, has_video) = {
+                let state = state.lock().unwrap();
+                (state.title.clone(), state.has_source_video())
+            };
             title_label.set_text(&name);
             title_label.set_tooltip_text(Some(&name));
+            let enabled = has_video && !exporting.get();
+            upload_btn.set_sensitive(enabled);
+            export_btn.set_sensitive(enabled);
             if let Some(paint) = paint_slot.borrow().clone() {
                 paint();
             }
@@ -243,12 +253,7 @@ fn load_preview_video(
         return false;
     };
     *state.lock().unwrap() = VideoEditState::new(metadata);
-    let has_mouse_data = state
-        .lock()
-        .unwrap()
-        .sidecar
-        .as_ref()
-        .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+    let has_mouse_data = state.lock().unwrap().supports_auto_zoom();
     if let Some(player) = media.borrow().as_ref() {
         player.set_file(Some(&gio::File::for_path(&path)));
     }
@@ -306,7 +311,7 @@ fn build_window_controls(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
-) -> (GtkBox, Label) {
+) -> (GtkBox, Label, Button, Button) {
     const TRAFFIC_LIGHTS_WIDTH: i32 = 84;
     let bar = GtkBox::new(Orientation::Horizontal, 8);
     bar.add_css_class("recording-editor-window-controls");
@@ -354,7 +359,7 @@ fn build_window_controls(
     bar.append(&right_balance);
 
     crate::capture::editor::ui_support::install_window_drag(&bar, window);
-    (bar, title)
+    (bar, title, upload, export)
 }
 
 #[allow(dead_code)]
