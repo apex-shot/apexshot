@@ -2,6 +2,31 @@ fn ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
     a0 < b1 && b0 < a1
 }
 
+pub fn snap_to_target(value: f64, target: f64, threshold: f64) -> f64 {
+    if threshold >= 0.0 && (value - target).abs() <= threshold {
+        target
+    } else {
+        value
+    }
+}
+
+pub fn snap_range_to_target(start: f64, duration: f64, target: f64, threshold: f64) -> f64 {
+    let duration = duration.max(0.0);
+    let end = start + duration;
+    let to_start = (target - start).abs();
+    let to_end = (target - end).abs();
+    let can_snap_start = to_start <= threshold;
+    let aligned_start = target - duration;
+    let can_snap_end = to_end <= threshold && aligned_start >= -1e-9;
+    if can_snap_start && (!can_snap_end || to_start <= to_end) {
+        target.max(0.0)
+    } else if can_snap_end {
+        aligned_start.max(0.0)
+    } else {
+        start
+    }
+}
+
 pub fn eval_zoom(
     clips: &[ZoomClip],
     t: f64,

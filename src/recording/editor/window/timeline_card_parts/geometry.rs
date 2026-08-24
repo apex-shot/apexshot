@@ -167,6 +167,41 @@ pub fn pixels_per_second(state: &VideoEditState, width: f64) -> f64 {
     width.max(1.0) / state.visible_span_seconds().max(0.001)
 }
 
+pub fn playhead_snap_threshold(state: &VideoEditState, width: f64) -> f64 {
+    PLAYHEAD_SNAP / pixels_per_second(state, width).max(1e-6)
+}
+
+pub fn snap_timeline_to_playhead(state: &VideoEditState, width: f64, time: f64) -> f64 {
+    snap_to_target(
+        time,
+        state.playhead_seconds,
+        playhead_snap_threshold(state, width),
+    )
+    .max(0.0)
+}
+
+pub fn snap_source_to_playhead(state: &VideoEditState, width: f64, source_t: f64) -> f64 {
+    snap_to_target(
+        source_t,
+        state.source_playhead(),
+        playhead_snap_threshold(state, width),
+    )
+}
+
+pub fn snap_range_start_to_playhead(
+    state: &VideoEditState,
+    width: f64,
+    start: f64,
+    duration: f64,
+) -> f64 {
+    snap_range_to_target(
+        start,
+        duration,
+        state.playhead_seconds,
+        playhead_snap_threshold(state, width),
+    )
+}
+
 pub fn sync_scroll_adj(adj: &Adjustment, state: &VideoEditState, syncing: &Cell<bool>) {
     let visible = state.visible_span_seconds();
     let upper = state.timeline_canvas_seconds().max(visible);
@@ -233,3 +268,4 @@ pub const HANDLE_INSET: f64 = 6.0;
 pub const HANDLE_WIDTH: f64 = 4.0;
 pub const HANDLE_HIT: f64 = 6.0;
 pub const PLAYHEAD_HIT: f64 = 6.0;
+pub const PLAYHEAD_SNAP: f64 = 12.0;

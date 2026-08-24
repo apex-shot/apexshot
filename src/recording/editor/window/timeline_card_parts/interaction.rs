@@ -292,46 +292,56 @@ pub fn bind_video_clip(
             let x = start_x + offset_x;
             match drag_kind.get() {
                 Some(ClipDrag::Start) => {
-                    let seconds = {
-                        let guard = state.lock().unwrap();
-                        x_to_source(&guard, width, x)
-                    };
-                    state.lock().unwrap().set_trim_start(seconds);
+                    let mut guard = state.lock().unwrap();
+                    let seconds =
+                        snap_source_to_playhead(&guard, width, x_to_source(&guard, width, x));
+                    guard.set_trim_start(seconds);
                 }
                 Some(ClipDrag::End) => {
-                    let seconds = {
-                        let guard = state.lock().unwrap();
-                        x_to_source(&guard, width, x)
-                    };
-                    state.lock().unwrap().set_trim_end(seconds);
+                    let mut guard = state.lock().unwrap();
+                    let seconds =
+                        snap_source_to_playhead(&guard, width, x_to_source(&guard, width, x));
+                    guard.set_trim_end(seconds);
                 }
                 Some(ClipDrag::Cut(index)) => {
-                    let seconds = {
-                        let guard = state.lock().unwrap();
-                        x_to_source(&guard, width, x)
-                    };
-                    state.lock().unwrap().move_cut(index, seconds);
+                    let mut guard = state.lock().unwrap();
+                    let seconds =
+                        snap_source_to_playhead(&guard, width, x_to_source(&guard, width, x));
+                    guard.move_cut(index, seconds);
                 }
                 Some(ClipDrag::Move {
                     origin_offset,
                     pixels_per_second,
                 }) => {
+                    let mut guard = state.lock().unwrap();
                     let delta = (x - start_x) / pixels_per_second.max(1e-6);
-                    state
-                        .lock()
-                        .unwrap()
-                        .set_timeline_offset(origin_offset + delta);
+                    let start = snap_range_start_to_playhead(
+                        &guard,
+                        width,
+                        origin_offset + delta,
+                        guard.trim_duration(),
+                    );
+                    guard.set_timeline_offset(start);
                 }
                 Some(ClipDrag::Segment {
                     index,
                     origin_start,
                     pixels_per_second,
                 }) => {
+                    let mut guard = state.lock().unwrap();
                     let delta = (x - start_x) / pixels_per_second.max(1e-6);
-                    state
-                        .lock()
-                        .unwrap()
-                        .set_segment_start(index, origin_start + delta);
+                    let duration = guard
+                        .segment_boundaries()
+                        .get(index)
+                        .map(|(start, end)| (end - start).max(0.0))
+                        .unwrap_or(0.0);
+                    let start = snap_range_start_to_playhead(
+                        &guard,
+                        width,
+                        origin_start + delta,
+                        duration,
+                    );
+                    guard.set_segment_start(index, start);
                 }
                 Some(ClipDrag::Seek) => seek_to_x(&state, &media, width, x),
                 None => {}
@@ -397,7 +407,7 @@ pub fn bind_zoom_track(
             if let Some(index) = zoom_clip_at(&guard, width, x) {
                 select_zoom(&mut guard, Some(index));
             } else {
-                let at = x_to_timeline(&guard, width, x);
+                let at = snap_timeline_to_playhead(&guard, width, x_to_timeline(&guard, width, x));
                 if guard.add_zoom_at(at).is_none() {
                     select_zoom(&mut guard, None);
                 }
@@ -462,11 +472,12 @@ pub fn bind_zoom_track(
                 .unwrap_or(1.0);
             match drag_kind.get() {
                 Some(ZoomDrag::Edge { index, is_start }) => {
-                    let seconds = {
-                        let guard = state.lock().unwrap();
-                        x_to_timeline(&guard, width, start_x + offset_x)
-                    };
                     let mut guard = state.lock().unwrap();
+                    let seconds = snap_timeline_to_playhead(
+                        &guard,
+                        width,
+                        x_to_timeline(&guard, width, start_x + offset_x),
+                    );
                     if let Some(clip) = guard.zoom_clips.get(index).cloned() {
                         if is_start {
                             guard.set_zoom_range(index, seconds, clip.end);
@@ -480,11 +491,20 @@ pub fn bind_zoom_track(
                     origin_start,
                     pixels_per_second,
                 }) => {
+                    let mut guard = state.lock().unwrap();
+                    let duration = guard
+                        .zoom_clips
+                        .get(index)
+                        .map(|clip| clip.duration())
+                        .unwrap_or(0.0);
                     let delta = offset_x / pixels_per_second.max(1e-6);
-                    state
-                        .lock()
-                        .unwrap()
-                        .move_zoom_clip(index, origin_start + delta);
+                    let start = snap_range_start_to_playhead(
+                        &guard,
+                        width,
+                        origin_start + delta,
+                        duration,
+                    );
+                    guard.move_zoom_clip(index, start);
                 }
                 Some(ZoomDrag::Seek) => {
                     seek_to_x(&state, &media, width, start_x + offset_x);

@@ -597,6 +597,37 @@ fn auto_zoom_recenters_when_cursor_nears_edge() {
 }
 
 #[test]
+fn snap_to_target_uses_threshold() {
+    assert!((snap_to_target(2.95, 3.0, 0.1) - 3.0).abs() < 1e-9);
+    assert!((snap_to_target(2.8, 3.0, 0.1) - 2.8).abs() < 1e-9);
+    assert!((snap_to_target(3.08, 3.0, 0.1) - 3.0).abs() < 1e-9);
+}
+
+#[test]
+fn snap_range_prefers_start_then_end() {
+    assert!((snap_range_to_target(2.95, 2.0, 3.0, 0.12) - 3.0).abs() < 1e-9);
+    assert!((snap_range_to_target(1.05, 2.0, 3.0, 0.12) - 1.0).abs() < 1e-9);
+    assert!((snap_range_to_target(2.95, 0.1, 3.0, 0.12) - 3.0).abs() < 1e-9);
+    assert!((snap_range_to_target(0.0, 2.0, 5.0, 0.12) - 0.0).abs() < 1e-9);
+}
+
+#[test]
+fn zoom_and_clip_moves_snap_start_to_playhead() {
+    let mut state = VideoEditState::new(metadata());
+    state.playhead_seconds = 3.0;
+    let index = state.add_zoom_at(0.0).unwrap();
+    let duration = state.zoom_clips[index].duration();
+    let start = snap_range_to_target(2.94, duration, state.playhead_seconds, 0.12);
+    state.move_zoom_clip(index, start);
+    assert!((state.zoom_clips[index].start - 3.0).abs() < 1e-9);
+    assert!((state.zoom_clips[index].duration() - duration).abs() < 1e-9);
+
+    let offset = snap_range_to_target(2.94, state.trim_duration(), state.playhead_seconds, 0.12);
+    state.set_timeline_offset(offset);
+    assert!((state.timeline_offset_seconds - 3.0).abs() < 1e-9);
+}
+
+#[test]
 fn zoom_blur_mix_frames_scales_samples_by_shutter() {
     let mut state = VideoEditState::new(metadata());
     assert_eq!(state.zoom_blur_mix_frames(), 12);

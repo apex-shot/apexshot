@@ -1,5 +1,6 @@
 use crate::recording::editor::model::{
-    format_zoom_scale, VideoEditState, DEFAULT_ZOOM_DURATION_SECONDS,
+    format_zoom_scale, snap_range_to_target, snap_to_target, VideoEditState,
+    DEFAULT_ZOOM_DURATION_SECONDS,
 };
 use gtk4::gdk;
 use gtk4::glib;
