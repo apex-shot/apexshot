@@ -58,5 +58,5 @@ pub use storage::{
     annotations_exist, background_alignment_from_serializable, background_style_from_serializable,
     compute_image_hash, crop_aspect_ratio_from_serializable, delete_annotations, load_annotations,
     load_original_image, original_exists, save_annotations, serializable_to_action,
-    AnnotationError,
+    AnnotationError, ImageSessionSnapshot,
 };

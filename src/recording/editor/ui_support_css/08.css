@@ -72,34 +72,6 @@
                 opacity: 0.35;
             }
 
-            .recording-editor-zoom-blur {
-                margin-top: 16px;
-                padding: 0;
-                background: transparent;
-                border: none;
-            }
-
-            .recording-editor-zoom-slider-row {
-                min-height: 36px;
-                padding: 0;
-                background: #000000;
-                border-radius: 8px;
-                overflow: hidden;
-            }
-
-            .recording-editor-zoom-slider-track {
-                min-height: 36px;
-                background: transparent;
-            }
-
-            .recording-editor-zoom-blur-value {
-                color: alpha(white, 0.55);
-                font-size: 12px;
-                font-weight: 500;
-                font-variant-numeric: tabular-nums;
-                min-width: 2.5em;
-            }
-
             button.recording-editor-zoom-delete {
                 min-height: 24px;
                 padding: 0;
@@ -258,19 +230,6 @@
 
             .editor-theme-light switch.recording-editor-zoom-switch {
                 background: alpha(#111827, 0.16);
-            }
-
-            .editor-theme-light .recording-editor-zoom-blur {
-                background: transparent;
-                border: none;
-            }
-
-            .editor-theme-light .recording-editor-zoom-slider-row {
-                background: #e6e7eb;
-            }
-
-            .editor-theme-light .recording-editor-zoom-blur-value {
-                color: alpha(#1d2129, 0.55);
             }
 
             .editor-theme-light .recording-editor-zoom-footer {

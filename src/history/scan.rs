@@ -225,6 +225,8 @@ mod tests {
         write_capture(&dir, "notes.txt", 1_004, 4);
         write_capture(&dir, "archive.png.bak", 1_005, 4);
         write_capture(&dir, "noextension", 1_006, 4);
+        write_capture(&dir, "clip.apexshot.json", 1_007, 4);
+        write_capture(&dir, "project.json", 1_008, 4);
 
         let images = scan_folder(&dir, MediaKind::Image);
         let mut names: Vec<&str> = images.iter().map(|e| e.display_name.as_str()).collect();
@@ -313,6 +315,14 @@ mod tests {
 
         assert!(scan_folder(&missing, MediaKind::Image).is_empty());
         assert!(scan_folder(&missing, MediaKind::Video).is_empty());
+    }
+
+    #[test]
+    fn json_sidecars_are_never_captures() {
+        assert!(!MediaKind::Image.matches(Path::new("shot.json")));
+        assert!(!MediaKind::Video.matches(Path::new("clip.apexshot.json")));
+        assert!(!MediaKind::Video.matches(Path::new("abc.json")));
+        assert!(MediaKind::Video.matches(Path::new("clip.mp4")));
     }
 
     #[test]

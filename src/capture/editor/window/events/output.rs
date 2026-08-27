@@ -6,11 +6,32 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::annotations::save_annotations;
+use crate::annotations::{save_annotations, AnnotationError};
 use crate::capture::editor::{
     io_ops::{copy_uri_to_clipboard, save_edited_image},
     state::EditorState,
 };
+
+pub fn persist_image_session(
+    path: &Path,
+    state: &EditorState,
+) -> Result<(), AnnotationError> {
+    save_annotations(
+        path,
+        state.base_image.width(),
+        state.base_image.height(),
+        &state.actions,
+        &state.base_image,
+        &state.background_style,
+        state.background_padding,
+        state.background_shadow,
+        state.background_insert,
+        state.auto_balance,
+        state.background_alignment,
+        state.background_corner_radius,
+        state.background_aspect_ratio,
+    )
+}
 
 pub(super) fn wire_output_lifecycle(
     app: &Application,
@@ -101,21 +122,7 @@ pub(super) fn wire_output_lifecycle(
             let (image_result, annotation_data) = {
                 let state = state_save.lock().unwrap();
                 let save_result = save_edited_image(&path_save, &state);
-                let annotation_result = save_annotations(
-                    &path_save,
-                    state.base_image.width(),
-                    state.base_image.height(),
-                    &state.actions,
-                    &state.base_image,
-                    &state.background_style,
-                    state.background_padding,
-                    state.background_shadow,
-                    state.background_insert,
-                    state.auto_balance,
-                    state.background_alignment,
-                    state.background_corner_radius,
-                    state.background_aspect_ratio,
-                );
+                let annotation_result = persist_image_session(&path_save, &state);
                 (save_result, annotation_result)
             };
 
@@ -188,5 +195,19 @@ mod tests {
             save_position < upload_position,
             "Image editor Upload must persist canvas edits before uploading the file"
         );
+    }
+
+    #[test]
+    fn done_still_flattens_and_persists_session() {
+        let source = include_str!("output.rs");
+        let start = source
+            .find("save_btn.connect_clicked(move |_| {")
+            .expect("Done click handler");
+        let handler = &source[start..];
+        let flatten = handler.find("save_edited_image").expect("flatten PNG");
+        let persist = handler
+            .find("persist_image_session")
+            .expect("persist session");
+        assert!(flatten < persist, "Done must flatten before writing the sidecar");
     }
 }

@@ -42,6 +42,18 @@ fn has_source_video_requires_duration() {
 }
 
 #[test]
+fn default_session_is_not_dirty_and_trim_is() {
+    let state = VideoEditState::new(metadata());
+    assert!(state.session_is_default());
+    assert!(!state.session_is_dirty(None));
+    let mut trimmed = state.clone();
+    trimmed.trim_start_seconds = 1.0;
+    assert!(trimmed.session_is_dirty(None));
+    let last = trimmed.to_project();
+    assert!(!trimmed.session_is_dirty(Some(&last)));
+}
+
+#[test]
 fn output_path_adds_edited_suffix() {
     let path = PathBuf::from("/tmp/ApexShot Recording.mp4");
     assert_eq!(
@@ -625,17 +637,6 @@ fn zoom_and_clip_moves_snap_start_to_playhead() {
     let offset = snap_range_to_target(2.94, state.trim_duration(), state.playhead_seconds, 0.12);
     state.set_timeline_offset(offset);
     assert!((state.timeline_offset_seconds - 3.0).abs() < 1e-9);
-}
-
-#[test]
-fn zoom_blur_mix_frames_scales_samples_by_shutter() {
-    let mut state = VideoEditState::new(metadata());
-    assert_eq!(state.zoom_blur_mix_frames(), 12);
-    state.set_zoom_blur_samples(1);
-    assert_eq!(state.zoom_blur_mix_frames(), 1);
-    state.set_zoom_blur_samples(21);
-    state.set_zoom_blur_shutter(1.0);
-    assert_eq!(state.zoom_blur_mix_frames(), 21);
 }
 
 #[test]

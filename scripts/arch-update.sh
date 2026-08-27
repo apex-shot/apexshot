@@ -35,6 +35,27 @@ handoff_if_wrong_distro() {
     fi
 }
 
+refuse_if_steamos() {
+    local id=""
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        id="$(. /etc/os-release && printf '%s' "${ID:-}")"
+    fi
+    if [[ "${id}" != "steamos" ]] && [[ ! -e /etc/steamos-release ]] && ! command -v steamos-readonly >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "SteamOS is not supported by the ApexShot updater." >&2
+    echo >&2
+    echo "SteamOS is Arch-based, so this script looks like it should work. It will not:" >&2
+    echo "the root filesystem is read-only, pacman keys are not initialized, and SteamOS" >&2
+    echo "updates wipe anything pacman installs under /usr." >&2
+    echo >&2
+    echo "If you want Steam Deck / SteamOS support, please open an issue:" >&2
+    echo "https://github.com/${REPO}/issues" >&2
+    exit 1
+}
+
 BOLD="\033[1m"
 DIM="\033[2m"
 RESET="\033[0m"
@@ -535,6 +556,7 @@ main() {
     trap cleanup EXIT
 
     handoff_if_wrong_distro "$@"
+    refuse_if_steamos
     header
     check_prereqs
     detect_current_version

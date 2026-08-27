@@ -312,8 +312,24 @@
                 font-weight: 600;
             }
 
+            .recording-editor-shell {
+                border-radius: 10px;
+                overflow: hidden;
+                background: #000000;
+            }
+
+            window.fullscreen .recording-editor-shell,
+            window.fullscreen .recording-editor-modal-scrim {
+                border-radius: 0;
+            }
+
+            .recording-editor-modal-scrim {
+                border-radius: 10px;
+                background: alpha(black, 0.42);
+            }
+
             .recording-editor-root.recording-editor-modal-blur {
-                filter: blur(8px) brightness(0.58);
+                filter: blur(8px) brightness(0.7);
             }
 
             /* ── Dialog ── */

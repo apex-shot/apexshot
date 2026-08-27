@@ -5,10 +5,6 @@ pub const DEFAULT_ZOOM_SCALE: f64 = 1.8;
 pub const DEFAULT_ZOOM_EASE_MS: u32 = 200;
 pub const MIN_ZOOM_SCALE: f64 = 1.2;
 pub const MAX_ZOOM_SCALE: f64 = 5.0;
-pub const DEFAULT_ZOOM_BLUR_SAMPLES: u32 = 13;
-pub const DEFAULT_ZOOM_BLUR_SHUTTER: f64 = 0.94;
-pub const MIN_ZOOM_BLUR_SAMPLES: u32 = 1;
-pub const MAX_ZOOM_BLUR_SAMPLES: u32 = 21;
 pub const ZOOM_SCALE_PRESETS: [(&str, f64); 6] = [
     ("1.25×", 1.25),
     ("1.5×", 1.5),
@@ -202,8 +198,6 @@ pub struct VideoEditState {
     pub zoom_hidden: bool,
     /// Classic animation keeps a fixed focus point even when the clip is Auto.
     pub zoom_classic: bool,
-    pub zoom_blur_samples: u32,
-    pub zoom_blur_shutter: f64,
     /// 0 = fit the whole clip, 100 = 8× time-axis zoom (WebCut scaler).
     pub timeline_scale: f64,
     /// Seconds of empty timeline before the clip. Dragging the clip body

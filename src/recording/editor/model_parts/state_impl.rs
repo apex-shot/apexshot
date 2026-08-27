@@ -37,8 +37,6 @@ impl VideoEditState {
             zoom_locked: false,
             zoom_hidden: false,
             zoom_classic: false,
-            zoom_blur_samples: DEFAULT_ZOOM_BLUR_SAMPLES,
-            zoom_blur_shutter: DEFAULT_ZOOM_BLUR_SHUTTER,
             timeline_scale: 0.0,
             timeline_offset_seconds: 0.0,
             timeline_scroll_seconds: 0.0,

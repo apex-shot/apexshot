@@ -477,10 +477,6 @@ fn build_composite_convert_args(
         filter.push(',');
         filter.push_str(&pad);
     }
-    if let Some(blur) = zoom_blur_filter(state) {
-        filter.push(',');
-        filter.push_str(&blur);
-    }
     let speed = state.speed_for_source(start);
     if (speed - 1.0).abs() > 1e-6 {
         filter.push_str(&format!(",setpts=PTS/{speed}"));
@@ -591,14 +587,6 @@ fn write_cursor_png(path: &Path) -> anyhow::Result<()> {
     }
     img.save(path)?;
     Ok(())
-}
-
-fn zoom_blur_filter(state: &VideoEditState) -> Option<String> {
-    let frames = state.zoom_blur_mix_frames();
-    if frames <= 1 {
-        return None;
-    }
-    Some(format!("tmix=frames={frames}"))
 }
 
 fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
@@ -877,32 +865,8 @@ mod tests {
         assert!(args
             .iter()
             .any(|arg| arg.contains("sendcmd") && arg.contains("crop@z")));
-        assert!(args.iter().any(|arg| arg.contains("tmix=frames=12")));
-        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
-    }
-
-    #[test]
-    fn convert_skips_tmix_when_blur_is_off() {
-        let mut state = state();
-        state
-            .zoom_clips
-            .push(crate::recording::editor::model::ZoomClip {
-                start: 1.5,
-                end: 3.3,
-                scale: 1.8,
-                center: (960.0, 540.0),
-                ease_ms: 200,
-                mode: crate::recording::editor::model::ZoomMode::Auto,
-            });
-        state.set_zoom_blur_samples(1);
-        state.set_zoom_blur_shutter(0.0);
-        let args = build_single_convert_args(
-            &state,
-            state.trim_start_seconds,
-            state.trim_end_seconds,
-            Path::new("/tmp/output.mp4"),
-        );
         assert!(!args.iter().any(|arg| arg.contains("tmix")));
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
     }
 
     #[test]

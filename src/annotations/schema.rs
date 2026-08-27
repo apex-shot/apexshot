@@ -260,7 +260,7 @@ pub enum NumberSize {
 }
 
 /// Serializable annotation - mirrors AnnotationAction but with serializable types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SerializableAnnotation {
     Pen {

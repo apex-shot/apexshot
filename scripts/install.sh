@@ -13,6 +13,27 @@ is_gnome_session() {
     [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] || [[ "${desktop,,}" == *gnome* ]]
 }
 
+refuse_steamos() {
+    cat >&2 <<'EOF'
+SteamOS is not supported by the ApexShot installer.
+
+SteamOS is Arch-based, so this script looks like it should work. It will not:
+the root filesystem is read-only, the desktop user has no sudo password until
+you set one, and pacman keys are not initialized. SteamOS updates also wipe
+anything pacman installs under /usr.
+
+The flood of "corrupted / missing PGP" y/n prompts, and the final
+"nothing was updated" / "no packages were upgraded" message, are pacman
+hitting SteamOS's unsigned/stale package cache — not a broken ApexShot
+package. Unlocking the filesystem and fixing keys will not give you a
+lasting install.
+
+If you want Steam Deck / SteamOS support, please open an issue:
+https://github.com/apex-shot/apexshot/issues
+EOF
+    exit 1
+}
+
 detect_distro_family() {
     local id=""
     local id_like=""
@@ -22,6 +43,12 @@ detect_distro_family() {
         source /etc/os-release
         id="${ID:-}"
         id_like="${ID_LIKE:-}"
+    fi
+
+    # SteamOS sets ID_LIKE=arch and ships pacman, but it is not Arch.
+    if [[ "${id}" == "steamos" ]] || [[ -e /etc/steamos-release ]] || command -v steamos-readonly >/dev/null 2>&1; then
+        printf '%s' "steamos"
+        return
     fi
 
     case " ${id} ${id_like} " in
@@ -61,6 +88,9 @@ if ! is_gnome_session; then
 fi
 
 case "$(detect_distro_family)" in
+    steamos)
+        refuse_steamos
+        ;;
     arch)
         if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/arch-install.sh" ]]; then
             exec bash "${SCRIPT_DIR}/arch-install.sh" "$@"

@@ -955,7 +955,12 @@ pub fn build_timeline(
         let state = state.clone();
         let refresh_rails = refresh_rails.clone();
         move |_| {
-            state.lock().unwrap().reset_video_edits();
+            let path = {
+                let mut guard = state.lock().unwrap();
+                guard.reset_video_edits();
+                guard.metadata.path.clone()
+            };
+            crate::recording::editor::project::delete_project(&path);
             refresh_rails();
         }
     });

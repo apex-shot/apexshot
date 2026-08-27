@@ -20,6 +20,7 @@ mod toolbar;
 
 use super::ffmpeg;
 use super::model::{AudioMode, VideoEditState, VideoMetadata};
+use super::project::{self, persist_video_session};
 use super::ui_support::install_recording_editor_css;
 use gtk4::{
     gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
@@ -122,7 +123,11 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
 
     let state = match &initial_video {
         InitialVideo::AsyncLoad(path) => match ffmpeg::probe_metadata(path) {
-            Ok(metadata) => Some(Arc::new(Mutex::new(VideoEditState::new(metadata)))),
+            Ok(metadata) => {
+                let mut state = VideoEditState::new(metadata);
+                project::restore_into(&mut state);
+                Some(Arc::new(Mutex::new(state)))
+            }
             Err(err) => {
                 eprintln!(
                     "[recording-editor] failed to probe {}: {err}",
@@ -237,9 +242,61 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     preview_widget.add_controller(open_click);
     ping();
 
-    crate::capture::editor::ui_support::install_edge_resize(&root, &window);
-    window.set_child(Some(&root));
+    let shell = Overlay::new();
+    shell.add_css_class("recording-editor-shell");
+    shell.set_hexpand(true);
+    shell.set_vexpand(true);
+    if root.has_css_class("editor-theme-light") {
+        shell.add_css_class("editor-theme-light");
+    }
+    let scrim = GtkBox::new(Orientation::Vertical, 0);
+    scrim.add_css_class("recording-editor-modal-scrim");
+    scrim.set_halign(Align::Fill);
+    scrim.set_valign(Align::Fill);
+    scrim.set_hexpand(true);
+    scrim.set_vexpand(true);
+    scrim.set_visible(false);
+    scrim.set_can_target(true);
+    shell.set_child(Some(&root));
+    shell.add_overlay(&scrim);
+    shell.set_clip_overlay(&scrim, true);
+    crate::capture::editor::ui_support::install_edge_resize(&shell, &window);
+    window.set_child(Some(&shell));
+    wire_close_persist(&window, state.clone(), exporting.clone());
     window.present();
+}
+
+fn wire_close_persist(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    exporting: Rc<Cell<bool>>,
+) {
+    let force_close = Rc::new(Cell::new(false));
+    window.connect_close_request(move |window| {
+        if force_close.get() {
+            persist_video_session(&state.lock().unwrap());
+            return glib::Propagation::Proceed;
+        }
+        if !state.lock().unwrap().has_source_video() {
+            return glib::Propagation::Proceed;
+        }
+        if exporting.get() {
+            let window = window.clone();
+            let state = state.clone();
+            let force_close = force_close.clone();
+            dialogs::show_export_in_progress_close(&window, {
+                let window = window.clone();
+                move || {
+                    persist_video_session(&state.lock().unwrap());
+                    force_close.set(true);
+                    window.close();
+                }
+            });
+            return glib::Propagation::Stop;
+        }
+        persist_video_session(&state.lock().unwrap());
+        glib::Propagation::Proceed
+    });
 }
 
 fn load_preview_video(
@@ -252,7 +309,9 @@ fn load_preview_video(
     let Ok(metadata) = ffmpeg::probe_metadata(&path) else {
         return false;
     };
-    *state.lock().unwrap() = VideoEditState::new(metadata);
+    let mut next = VideoEditState::new(metadata);
+    project::restore_into(&mut next);
+    *state.lock().unwrap() = next;
     let has_mouse_data = state.lock().unwrap().supports_auto_zoom();
     if let Some(player) = media.borrow().as_ref() {
         player.set_file(Some(&gio::File::for_path(&path)));
@@ -928,12 +987,11 @@ fn load_video_async(
             Ok(Ok((metadata, thumbnails, waveform))) => {
                 stop_loading();
 
-                let state = Arc::new(Mutex::new(VideoEditState::new(metadata)));
-                {
-                    let mut state = state.lock().unwrap();
-                    state.quality = 70;
-                    state.audio_mode = AudioMode::Unchanged;
-                }
+                let mut loaded = VideoEditState::new(metadata);
+                loaded.quality = 70;
+                loaded.audio_mode = AudioMode::Unchanged;
+                project::restore_into(&mut loaded);
+                let state = Arc::new(Mutex::new(loaded));
                 populate_loaded_root(
                     &root,
                     &window,
@@ -969,4 +1027,26 @@ fn is_supported_video_path(path: &std::path::Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("mp4"))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn close_persists_project_and_does_not_export() {
+        let source = include_str!("mod.rs");
+        let start = source
+            .find("fn wire_close_persist(")
+            .expect("video close persist handler");
+        let rest = &source[start + 1..];
+        let end = rest.find("\nfn ").map(|i| start + 1 + i).unwrap_or(source.len());
+        let handler = &source[start..end];
+        assert!(
+            handler.contains("persist_video_session"),
+            "Video close handler must persist the project sidecar"
+        );
+        assert!(
+            !handler.contains("export_edited_to"),
+            "Video close must not encode an MP4"
+        );
+    }
 }

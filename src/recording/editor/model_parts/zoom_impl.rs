@@ -193,22 +193,6 @@ impl VideoEditState {
 
     pub fn reset_zoom_animation(&mut self) {
         self.zoom_classic = false;
-        self.zoom_blur_samples = DEFAULT_ZOOM_BLUR_SAMPLES;
-        self.zoom_blur_shutter = DEFAULT_ZOOM_BLUR_SHUTTER;
-    }
-
-    pub fn set_zoom_blur_samples(&mut self, samples: u32) {
-        self.zoom_blur_samples = samples.clamp(MIN_ZOOM_BLUR_SAMPLES, MAX_ZOOM_BLUR_SAMPLES);
-    }
-
-    pub fn set_zoom_blur_shutter(&mut self, shutter: f64) {
-        self.zoom_blur_shutter = shutter.clamp(0.0, 1.0);
-    }
-
-    pub fn zoom_blur_mix_frames(&self) -> u32 {
-        // ponytail: tmix averages output frames, not crop-path samples. Multi-crop blend if it looks wrong.
-        let frames = (self.zoom_blur_samples as f64 * self.zoom_blur_shutter).round() as u32;
-        frames.clamp(1, MAX_ZOOM_BLUR_SAMPLES)
     }
 
     pub fn move_zoom_clip(&mut self, index: usize, start: f64) {

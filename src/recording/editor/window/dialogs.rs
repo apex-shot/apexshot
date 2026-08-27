@@ -47,13 +47,21 @@ fn close_editor_popup(popover: &Popover) {
 }
 
 fn set_editor_modal_blur(parent: &ApplicationWindow, on: bool) {
-    let Some(child) = parent.child() else {
+    let Some(shell) = parent.child() else {
         return;
     };
-    if on {
-        child.add_css_class("recording-editor-modal-blur");
-    } else {
-        child.remove_css_class("recording-editor-modal-blur");
+    let mut child = shell.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if widget.has_css_class("recording-editor-modal-scrim") {
+            widget.set_visible(on);
+            continue;
+        }
+        if on {
+            widget.add_css_class("recording-editor-modal-blur");
+        } else {
+            widget.remove_css_class("recording-editor-modal-blur");
+        }
     }
 }
 
@@ -193,4 +201,51 @@ pub(super) fn show_error(
 
     let dialog = popup_on_editor(parent, &wrapper);
     close.connect_clicked(move |_| close_editor_popup(&dialog));
+}
+
+pub(super) fn show_export_in_progress_close(
+    parent: &ApplicationWindow,
+    on_close_anyway: impl Fn() + 'static,
+) {
+    let (wrapper, root) = dialog_card();
+
+    let title = Label::new(Some("Export is still running."));
+    title.add_css_class("recording-editor-dialog-title");
+    title.set_xalign(0.0);
+    let body = Label::new(Some(
+        "Closing now stops the encode. Your edit session is kept.",
+    ));
+    body.add_css_class("recording-editor-dialog-body");
+    body.set_xalign(0.0);
+    constrain_dialog_body(&body);
+
+    let button_row = GtkBox::new(Orientation::Horizontal, 12);
+    button_row.set_halign(Align::End);
+    button_row.set_margin_top(8);
+
+    let keep = Button::with_label("Keep editing");
+    keep.set_has_frame(false);
+    keep.add_css_class("recording-editor-secondary-button");
+    let close_anyway = Button::with_label("Close anyway");
+    close_anyway.set_has_frame(false);
+    close_anyway.add_css_class("recording-editor-primary-button");
+    button_row.append(&keep);
+    button_row.append(&close_anyway);
+
+    root.append(&title);
+    root.append(&body);
+    root.append(&button_row);
+
+    let dialog = popup_on_editor(parent, &wrapper);
+    keep.connect_clicked({
+        let dialog = dialog.clone();
+        move |_| close_editor_popup(&dialog)
+    });
+    close_anyway.connect_clicked({
+        let dialog = dialog.clone();
+        move |_| {
+            close_editor_popup(&dialog);
+            on_close_anyway();
+        }
+    });
 }

@@ -37,6 +37,7 @@ use keyboard::wire_window_keyboard;
 use motion::wire_canvas_motion;
 use options::{wire_tool_options, ToolOptionsParts};
 use output::wire_output_lifecycle;
+pub(super) use output::persist_image_session;
 use tools::{wire_tool_mode_switches, ToolModeButtons};
 use zoom::wire_zoom_controls;
 
