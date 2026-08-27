@@ -247,6 +247,10 @@
                 color: #1d2129;
             }
 
+            .editor-theme-light.recording-editor-modal-blur {
+                filter: blur(8px) brightness(0.78);
+            }
+
             .editor-theme-light .recording-editor-dialog {
                 background: #ffffff;
                 border-color: alpha(#111827, 0.08);

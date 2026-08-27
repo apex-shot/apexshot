@@ -1,6 +1,6 @@
 use crate::recording::editor::model::format_size;
 use gtk4::{
-    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Popover,
+    glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Popover,
 };
 use std::path::PathBuf;
 
@@ -10,22 +10,51 @@ fn popup_on_editor(parent: &ApplicationWindow, card: &impl IsA<gtk4::Widget>) ->
     popover.add_css_class("recording-editor-dialog");
     popover.set_autohide(false);
     popover.set_has_arrow(false);
+    popover.set_position(gtk4::PositionType::Bottom);
     popover.set_child(Some(card));
-    let width = parent.allocated_width().max(1);
-    let height = parent.allocated_height().max(1);
-    popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
-        width / 2,
-        height / 2,
-        1,
-        1,
-    )));
+    set_editor_modal_blur(parent, true);
+    center_editor_popup(&popover, parent);
     popover.popup();
+    glib::idle_add_local_once({
+        let popover = popover.clone();
+        let parent = parent.clone();
+        move || center_editor_popup(&popover, &parent)
+    });
     popover
 }
 
+fn center_editor_popup(popover: &Popover, parent: &ApplicationWindow) {
+    let width = parent.allocated_width().max(1);
+    let height = parent.allocated_height().max(1);
+    let card_h = popover.allocated_height().max(1);
+    popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+        width / 2,
+        (height - card_h).max(0) / 2,
+        1,
+        1,
+    )));
+}
+
 fn close_editor_popup(popover: &Popover) {
+    if let Some(parent) = popover
+        .parent()
+        .and_then(|widget| widget.downcast::<ApplicationWindow>().ok())
+    {
+        set_editor_modal_blur(&parent, false);
+    }
     popover.popdown();
     popover.unparent();
+}
+
+fn set_editor_modal_blur(parent: &ApplicationWindow, on: bool) {
+    let Some(child) = parent.child() else {
+        return;
+    };
+    if on {
+        child.add_css_class("recording-editor-modal-blur");
+    } else {
+        child.remove_css_class("recording-editor-modal-blur");
+    }
 }
 
 fn dialog_card() -> (GtkBox, GtkBox) {
@@ -38,8 +67,17 @@ fn dialog_card() -> (GtkBox, GtkBox) {
     let wrapper = GtkBox::new(Orientation::Vertical, 0);
     wrapper.add_css_class("recording-editor-dialog-bg");
     wrapper.set_size_request(380, -1);
+    wrapper.set_hexpand(false);
+    wrapper.set_halign(Align::Center);
     wrapper.append(&root);
     (wrapper, root)
+}
+
+fn constrain_dialog_body(body: &Label) {
+    body.set_wrap(true);
+    body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    body.set_max_width_chars(44);
+    body.set_hexpand(false);
 }
 
 pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
@@ -58,8 +96,7 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
     )));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);
-    body.set_wrap(true);
-    body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    constrain_dialog_body(&body);
 
     let button_row = GtkBox::new(Orientation::Horizontal, 0);
     button_row.set_hexpand(true);
@@ -106,7 +143,7 @@ pub(super) fn show_manual_zoom_notice(parent: &ApplicationWindow) {
     ));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);
-    body.set_wrap(true);
+    constrain_dialog_body(&body);
     let close = Button::with_label("Got it");
     close.set_has_frame(false);
     close.add_css_class("recording-editor-primary-button");
@@ -139,8 +176,7 @@ pub(super) fn show_error(
     let body = Label::new(Some(&body_text));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);
-    body.set_wrap(true);
-    body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    constrain_dialog_body(&body);
 
     let button_row = GtkBox::new(Orientation::Horizontal, 12);
     button_row.set_halign(Align::End);

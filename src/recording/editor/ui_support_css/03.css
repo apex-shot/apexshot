@@ -312,12 +312,18 @@
                 font-weight: 600;
             }
 
+            .recording-editor-root.recording-editor-modal-blur {
+                filter: blur(8px) brightness(0.58);
+            }
+
             /* ── Dialog ── */
             popover.recording-editor-dialog,
             popover.recording-editor-dialog contents,
             popover.recording-editor-dialog > contents {
                 padding: 0;
                 margin: 0;
+                min-width: 360px;
+                max-width: 400px;
                 background: transparent;
                 border: none;
                 box-shadow: none;
