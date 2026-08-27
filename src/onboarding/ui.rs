@@ -1,7 +1,7 @@
 //! Shared onboarding UI building blocks (feature cards, option cards, tips).
 
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Label, Orientation};
+use gtk4::{Align, Box as GtkBox, Image, Label, Orientation};
 
 /// Vertical stack of icon + title (+ optional subtitle) feature cards in a framed list.
 pub fn feature_card_list(items: &[(&str, &str, &str)]) -> GtkBox {
@@ -30,8 +30,9 @@ pub fn feature_card_row(icon: &str, title: &str, subtitle: &str, muted: bool) ->
     }
     row.set_hexpand(true);
 
-    let badge = Label::new(Some(icon));
+    let badge = Image::from_icon_name(icon);
     badge.add_css_class("onboarding-icon-badge");
+    badge.set_pixel_size(20);
     badge.set_halign(Align::Center);
     badge.set_valign(Align::Center);
     badge.set_size_request(40, 40);
@@ -77,9 +78,10 @@ pub fn option_card(icon: &str, title: &str, body: &str) -> GtkBox {
     let header = GtkBox::new(Orientation::Horizontal, 10);
     header.set_halign(Align::Start);
 
-    let badge = Label::new(Some(icon));
-    badge.add_css_class("onboarding-icon-badge");
-    badge.set_size_request(36, 36);
+    let badge = Image::from_icon_name(icon);
+    badge.add_css_class("onboarding-option-icon");
+    badge.set_pixel_size(28);
+    badge.set_size_request(32, 32);
     badge.set_halign(Align::Center);
     badge.set_valign(Align::Center);
     header.append(&badge);
@@ -119,10 +121,12 @@ pub fn tip_block(title: &str, body: &str) -> GtkBox {
         escape_markup(title)
     ));
     title_label.set_halign(Align::Start);
+    title_label.set_xalign(0.0);
     row.append(&title_label);
 
     let body_label = Label::new(Some(body));
     body_label.set_halign(Align::Start);
+    body_label.set_xalign(0.0);
     body_label.set_wrap(true);
     body_label.set_width_request(480);
     body_label.add_css_class("settings-sub-option");

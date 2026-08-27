@@ -1,6 +1,7 @@
 use gtk4::{prelude::*, Align, Box as GtkBox, Label, Orientation};
 
 use super::ui::{feature_card_list, option_card, status_pill};
+use crate::capture::editor::window::icon_names::{self, custom};
 
 pub fn build(content: &GtkBox) {
     let title = Label::new(None);
@@ -25,17 +26,17 @@ pub fn build(content: &GtkBox) {
 
     let features = feature_card_list(&[
         (
-            "⇄",
+            custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
             "Sync across devices",
             "Pull recent uploads when you're signed in",
         ),
         (
-            "↗",
+            custom::ARROW2_TOP_RIGHT_SYMBOLIC,
             "Instant share links",
             "Copy a URL after capture without leaving the workflow",
         ),
         (
-            "☁",
+            icon_names::FOLDER_OPEN_REGULAR,
             "Storage you control",
             "Hosted ApexShot Cloud or your own XBackBone instance",
         ),
@@ -55,19 +56,19 @@ pub fn build(content: &GtkBox) {
     options_row.set_hexpand(true);
 
     options_row.append(&option_card(
-        "A",
+        custom::APEXSHOT_CLOUD,
         "ApexShot Cloud",
         "Hosted by us, ready out of the box with device login.",
     ));
     options_row.append(&option_card(
-        "X",
+        custom::XBACKBONE,
         "XBackBone",
         "Self-host for full control of storage and URLs.",
     ));
     content.append(&options_row);
 
     let hint = Label::new(Some(
-        "Skip for now if you want. Configure later in Settings → Cloud.",
+        "Skip for now if you want. After you Connect, your next screenshot gets a share link. Configure later in Settings → Cloud.",
     ));
     hint.set_halign(Align::Center);
     hint.set_wrap(true);

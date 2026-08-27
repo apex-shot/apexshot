@@ -2,6 +2,7 @@ use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
 
 use super::ui::feature_card_list;
+use crate::capture::editor::window::icon_names::custom;
 use crate::config::load_config;
 use crate::daemon::{ensure_daemon_running, trigger_daemon_action_sync};
 
@@ -31,12 +32,12 @@ pub fn build(content: &GtkBox) {
 
     let tips = feature_card_list(&[
         (
-            "◉",
+            custom::OVERLAPPING_WINDOWS_SYMBOLIC,
             "Tray icon",
             "Right-click for Area, Screen, Window, and Record",
         ),
         (
-            "☰",
+            custom::SETTINGS_SYMBOLIC,
             "App menu",
             "Opening ApexShot shows Settings; captures stay on tray and hotkeys",
         ),
@@ -82,7 +83,7 @@ pub fn build(content: &GtkBox) {
     try_btn.set_halign(Align::Center);
     try_btn.set_margin_top(28);
     try_btn.set_tooltip_text(Some(
-        "Starts the tray daemon if needed, then opens area capture",
+        "Starts the tray daemon if needed, then takes a full screenshot",
     ));
     try_btn.connect_clicked(|_| {
         std::thread::spawn(|| {
@@ -92,16 +93,16 @@ pub fn build(content: &GtkBox) {
                 let exe = std::env::current_exe()
                     .unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
                 let _ = std::process::Command::new(exe)
-                    .args(["capture", "area"])
+                    .args(["capture", "screen"])
                     .spawn();
                 return;
             }
-            if !trigger_daemon_action_sync("capture_area") {
-                eprintln!("[onboarding] Daemon did not accept capture_area");
+            if !trigger_daemon_action_sync("capture_screen") {
+                eprintln!("[onboarding] Daemon did not accept capture_screen");
                 let exe = std::env::current_exe()
                     .unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
                 let _ = std::process::Command::new(exe)
-                    .args(["capture", "area"])
+                    .args(["capture", "screen"])
                     .spawn();
             }
         });

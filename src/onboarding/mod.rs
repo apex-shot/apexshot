@@ -91,6 +91,15 @@ pub fn show_onboarding_window() -> anyhow::Result<()> {
 }
 
 fn build_onboarding_window(app: &Application) {
+    use std::sync::Once;
+    static INIT_ICONS: Once = Once::new();
+    INIT_ICONS.call_once(|| {
+        relm4_icons::initialize_icons(
+            crate::capture::editor::window::icon_names::GRESOURCE_BYTES,
+            crate::capture::editor::window::icon_names::RESOURCE_PREFIX,
+        );
+    });
+
     install_settings_css();
 
     let window = ApplicationWindow::builder()
@@ -156,7 +165,7 @@ fn build_onboarding_window(app: &Application) {
     top_nav_box.set_halign(Align::Start);
     top_nav_box.set_margin_top(16);
     top_nav_box.set_margin_bottom(8);
-    top_nav_box.set_margin_start(24);
+    top_nav_box.set_margin_start(12);
 
     // Progress indicator
     let progress_box = GtkBox::new(Orientation::Horizontal, 6);
@@ -175,7 +184,7 @@ fn build_onboarding_window(app: &Application) {
     nav_box.set_halign(Align::End);
     nav_box.set_margin_top(20);
     nav_box.set_margin_bottom(16);
-    nav_box.set_margin_end(24);
+    nav_box.set_margin_end(12);
 
     root_box.append(&top_nav_box);
     root_box.append(&progress_box);
@@ -264,7 +273,6 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
         let back_btn = Button::with_label("← Back");
         back_btn.add_css_class("secondary-settings-button");
         back_btn.add_css_class("onboarding-back-button");
-        back_btn.set_margin_start(16);
         let widgets_clone = OnboardingWidgets {
             window: widgets.window.clone(),
             content_box: widgets.content_box.clone(),
@@ -287,7 +295,6 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
     if let Some(next_step) = step.next() {
         let next_btn = Button::with_label("Next →");
         next_btn.add_css_class("settings-primary-btn");
-        next_btn.set_margin_end(16);
         let widgets_clone = OnboardingWidgets {
             window: widgets.window.clone(),
             content_box: widgets.content_box.clone(),
@@ -303,7 +310,6 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
         // Final step - "Start Using ApexShot"
         let finish_btn = Button::with_label("Start Using ApexShot");
         finish_btn.add_css_class("settings-primary-btn");
-        finish_btn.set_margin_end(16);
         let window = widgets.window.clone();
         finish_btn.connect_clicked(move |_| {
             let _ = mark_onboarding_complete();
