@@ -1,7 +1,7 @@
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
-    even_crop_rect, format_webcut_time, view_to_source, zoom_camera_transform, VideoBackground,
-    VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
+    even_crop_rect, format_webcut_time, view_to_source, zoom_camera_transform, ClickEffect,
+    VideoBackground, VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
 };
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
@@ -760,10 +760,43 @@ fn draw_preview_overlays(
     let _ = picture;
 
     if let Some(sidecar) = &state.sidecar {
-        if let Some((x, y, kind)) = sidecar.interpolated_at(source_t) {
-            let pulse = sidecar.click_pulse_at(source_t);
-            let (px, py) = source_to_zoomed_point(x, y, view, (0.0, 0.0), 1.0, w, h);
-            draw_apexshot_cursor(cr, px, py, pulse, kind.as_str());
+        if let Some(frame) = sidecar.presented_at(
+            source_t,
+            state.cursor.smooth,
+            state.cursor.hide_idle,
+            state.cursor.idle_ms,
+        ) {
+            let cursor = state.cursor.clamped();
+            let pulse = match cursor.click_effect {
+                ClickEffect::Pulse => {
+                    1.0 + (sidecar.click_pulse_at(source_t) - 1.0) * cursor.click_intensity
+                }
+                _ => 1.0,
+            };
+            if cursor.click_effect == ClickEffect::Ripple {
+                for (x, y, progress) in sidecar.click_ripples_at(source_t) {
+                    let (px, py) = source_to_zoomed_point(x, y, view, (0.0, 0.0), 1.0, w, h);
+                    crate::recording::editor::cursor_sprite::draw_ripple(
+                        cr,
+                        px,
+                        py,
+                        progress,
+                        cursor.size,
+                        cursor.click_intensity,
+                        frame.alpha,
+                    );
+                }
+            }
+            let (px, py) = source_to_zoomed_point(frame.x, frame.y, view, (0.0, 0.0), 1.0, w, h);
+            crate::recording::editor::cursor_sprite::draw(
+                cr,
+                px,
+                py,
+                pulse,
+                frame.kind.as_str(),
+                cursor,
+                frame.alpha,
+            );
         }
     }
 
@@ -804,37 +837,4 @@ fn manual_focus_rect(
     (x, y, rect_w, rect_h)
 }
 
-fn draw_apexshot_cursor(cr: &gtk4::cairo::Context, x: f64, y: f64, pulse: f64, kind: &str) {
-    let size = 16.0 * pulse;
-    if pulse > 1.02 {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.28);
-        cr.arc(x, y, size + 6.0, 0.0, std::f64::consts::TAU);
-        let _ = cr.fill();
-    }
-    cr.set_source_rgb(1.0, 1.0, 1.0);
-    cr.set_line_width(1.4);
-    match kind {
-        "text" => {
-            cr.move_to(x, y - size * 0.6);
-            cr.line_to(x, y + size * 0.6);
-            let _ = cr.stroke();
-        }
-        "hand" => {
-            cr.arc(x, y, size * 0.35, 0.0, std::f64::consts::TAU);
-            let _ = cr.fill();
-        }
-        _ => {
-            cr.move_to(x, y);
-            cr.line_to(x + size * 0.15, y + size * 0.85);
-            cr.line_to(x + size * 0.38, y + size * 0.62);
-            cr.close_path();
-            let _ = cr.fill();
-            cr.set_source_rgb(0.12, 0.12, 0.14);
-            cr.move_to(x, y);
-            cr.line_to(x + size * 0.15, y + size * 0.85);
-            cr.line_to(x + size * 0.38, y + size * 0.62);
-            cr.close_path();
-            let _ = cr.stroke();
-        }
-    }
-}
+

@@ -1,9 +1,11 @@
+use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
-    nearest_zoom_preset, VideoEditState, ZoomMode, CLIP_SPEED_PRESETS, ZOOM_SCALE_PRESETS,
+    nearest_zoom_preset, ClickEffect, CursorTheme, EditorTool, VideoEditState, ZoomMode,
+    CLIP_SPEED_PRESETS, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, Grid, Image, Label, Orientation, PolicyType,
-    ScrolledWindow, Switch, ToggleButton,
+    prelude::*, Align, Box as GtkBox, Button, DrawingArea, Grid, Image, Label, Orientation,
+    PolicyType, Scale, ScrolledWindow, Switch, ToggleButton,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -26,8 +28,10 @@ pub(super) fn build_tool_sidebar(
     root.set_vexpand(true);
     root.set_size_request(TOOL_SIDEBAR_WIDTH, -1);
 
+    let cursor_panel = build_cursor_panel(state.clone(), on_change.clone());
     let zoom_panel = build_zoom_panel(state.clone(), on_change.clone());
     let clip_panel = build_clip_panel(state.clone(), on_change);
+    root.append(&cursor_panel.widget);
     root.append(&zoom_panel.widget);
     root.append(&clip_panel.widget);
     root.set_visible(true);
@@ -35,11 +39,13 @@ pub(super) fn build_tool_sidebar(
 
     let refresh = {
         let state = state.clone();
+        let refresh_cursor = cursor_panel.refresh;
         let refresh_zoom = zoom_panel.refresh;
         let refresh_clip = clip_panel.refresh;
         let last_zoom = last_zoom.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
+            let tool = guard.selected_tool;
             let zoom = guard.selected_zoom.is_some();
             let clip = guard.selected_segment.is_some();
             drop(guard);
@@ -48,10 +54,14 @@ pub(super) fn build_tool_sidebar(
             } else if clip {
                 last_zoom.set(false);
             }
-            let show_zoom = zoom || (!clip && last_zoom.get());
+            let show_cursor = tool == EditorTool::Cursor;
+            let show_zoom = !show_cursor && (zoom || (!clip && last_zoom.get()));
+            cursor_panel.widget.set_visible(show_cursor);
             zoom_panel.widget.set_visible(show_zoom);
-            clip_panel.widget.set_visible(!show_zoom);
-            if show_zoom {
+            clip_panel.widget.set_visible(!show_cursor && !show_zoom);
+            if show_cursor {
+                refresh_cursor();
+            } else if show_zoom {
                 refresh_zoom();
             } else {
                 refresh_clip();
@@ -63,6 +73,309 @@ pub(super) fn build_tool_sidebar(
         widget: root,
         refresh,
     }
+}
+
+struct CursorPanel {
+    widget: GtkBox,
+    refresh: Rc<dyn Fn()>,
+}
+
+fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> CursorPanel {
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.add_css_class("recording-editor-zoom-panel");
+    panel.set_hexpand(true);
+    panel.set_vexpand(true);
+
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    header.add_css_class("recording-editor-zoom-header");
+    header.set_hexpand(true);
+    let title = Label::new(Some("Cursor"));
+    title.add_css_class("recording-editor-zoom-title");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    header.append(&title);
+
+    let body = GtkBox::new(Orientation::Vertical, 8);
+    body.add_css_class("recording-editor-zoom-body");
+    body.set_hexpand(true);
+    let hint = Label::new(Some("Shown over the recording in preview and export"));
+    hint.add_css_class("recording-editor-zoom-hint");
+    hint.set_wrap(true);
+    hint.set_xalign(0.0);
+    body.append(&hint);
+
+    let grid = Grid::new();
+    grid.add_css_class("recording-editor-cursor-grid");
+    grid.set_column_spacing(8);
+    grid.set_row_spacing(8);
+    grid.set_column_homogeneous(true);
+    grid.set_hexpand(true);
+
+    let cards: Vec<(CursorTheme, ToggleButton, DrawingArea)> = CursorTheme::ALL
+        .iter()
+        .enumerate()
+        .map(|(index, &theme)| {
+            let card = ToggleButton::new();
+            card.add_css_class("recording-editor-cursor-card");
+            card.set_has_frame(false);
+            card.set_hexpand(true);
+            let column = GtkBox::new(Orientation::Vertical, 6);
+            column.set_halign(Align::Fill);
+            let preview = DrawingArea::new();
+            preview.add_css_class("recording-editor-cursor-preview");
+            preview.set_content_width(72);
+            preview.set_content_height(56);
+            preview.set_hexpand(true);
+            preview.set_draw_func(move |_, cr, width, height| {
+                cursor_sprite::draw_centered(cr, width as f64, height as f64, theme);
+            });
+            let name = Label::new(Some(theme.label()));
+            name.add_css_class("recording-editor-cursor-card-label");
+            name.set_xalign(0.5);
+            column.append(&preview);
+            column.append(&name);
+            card.set_child(Some(&column));
+            card.connect_clicked({
+                let state = state.clone();
+                let on_change = on_change.clone();
+                move |button| {
+                    if !button.is_active() {
+                        return;
+                    }
+                    state.lock().unwrap().cursor.theme = theme;
+                    on_change();
+                }
+            });
+            grid.attach(&card, (index % 2) as i32, (index / 2) as i32, 1, 1);
+            (theme, card, preview)
+        })
+        .collect();
+
+    let first = cards[0].1.clone();
+    for (index, (_, card, _)) in cards.iter().enumerate() {
+        if index > 0 {
+            card.set_group(Some(&first));
+        }
+    }
+
+    body.append(&grid);
+
+    let size_row = cursor_slider_row("Size");
+    let shadow_row = cursor_slider_row("Shadow");
+    let smooth_row = cursor_slider_row("Smoothing");
+    size_row.scale.set_range(MIN_CURSOR_SIZE, MAX_CURSOR_SIZE);
+    size_row.scale.set_increments(0.05, 0.25);
+    shadow_row.scale.set_range(0.0, 1.0);
+    shadow_row.scale.set_increments(0.05, 0.1);
+    smooth_row.scale.set_range(0.0, 1.0);
+    smooth_row.scale.set_increments(0.05, 0.1);
+    body.append(&size_row.widget);
+    body.append(&shadow_row.widget);
+    body.append(&smooth_row.widget);
+
+    let idle_row = GtkBox::new(Orientation::Horizontal, 8);
+    idle_row.add_css_class("recording-editor-zoom-classic");
+    idle_row.set_hexpand(true);
+    let idle_label = Label::new(Some("Hide when idle"));
+    idle_label.add_css_class("recording-editor-zoom-classic-label");
+    idle_label.set_xalign(0.0);
+    idle_label.set_hexpand(true);
+    let idle_switch = Switch::new();
+    idle_switch.add_css_class("recording-editor-zoom-switch");
+    idle_switch.set_valign(Align::Center);
+    idle_switch.set_halign(Align::End);
+    idle_row.append(&idle_label);
+    idle_row.append(&idle_switch);
+    body.append(&idle_row);
+
+    let click_label = Label::new(Some("Click effect"));
+    click_label.add_css_class("recording-editor-zoom-kicker");
+    click_label.set_xalign(0.0);
+    body.append(&click_label);
+    let click_row = GtkBox::new(Orientation::Horizontal, 12);
+    click_row.add_css_class("recording-editor-zoom-mode");
+    click_row.set_hexpand(true);
+    let none_btn = ToggleButton::with_label("None");
+    let pulse_btn = ToggleButton::with_label("Pulse");
+    let ripple_btn = ToggleButton::with_label("Ripple");
+    for btn in [&none_btn, &pulse_btn, &ripple_btn] {
+        btn.add_css_class("recording-editor-zoom-mode-btn");
+        btn.set_has_frame(false);
+        click_row.append(btn);
+    }
+    pulse_btn.set_group(Some(&none_btn));
+    ripple_btn.set_group(Some(&none_btn));
+    body.append(&click_row);
+    let intensity_row = cursor_slider_row("Intensity");
+    intensity_row.scale.set_range(0.0, 1.0);
+    intensity_row.scale.set_increments(0.05, 0.1);
+    body.append(&intensity_row.widget);
+
+    let scroll = ScrolledWindow::new();
+    scroll.add_css_class("recording-editor-zoom-scroll");
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    scroll.set_child(Some(&body));
+    panel.append(&header);
+    panel.append(&scroll);
+
+    let syncing = Rc::new(Cell::new(false));
+    size_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().cursor.size = scale.value();
+            on_change();
+        }
+    });
+    shadow_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().cursor.shadow = scale.value();
+            on_change();
+        }
+    });
+    smooth_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().cursor.smooth = scale.value();
+            on_change();
+        }
+    });
+    idle_switch.connect_state_set({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                state.lock().unwrap().cursor.hide_idle = active;
+                on_change();
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    none_btn.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            state.lock().unwrap().cursor.click_effect = ClickEffect::None;
+            on_change();
+        }
+    });
+    pulse_btn.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            state.lock().unwrap().cursor.click_effect = ClickEffect::Pulse;
+            on_change();
+        }
+    });
+    ripple_btn.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            state.lock().unwrap().cursor.click_effect = ClickEffect::Ripple;
+            on_change();
+        }
+    });
+    intensity_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().cursor.click_intensity = scale.value();
+            on_change();
+        }
+    });
+
+    let refresh = {
+        let cards = cards;
+        let size_scale = size_row.scale.clone();
+        let shadow_scale = shadow_row.scale.clone();
+        let smooth_scale = smooth_row.scale.clone();
+        let idle_switch = idle_switch.clone();
+        let none_btn = none_btn.clone();
+        let pulse_btn = pulse_btn.clone();
+        let ripple_btn = ripple_btn.clone();
+        let intensity_scale = intensity_row.scale.clone();
+        let syncing = syncing.clone();
+        Rc::new(move || {
+            let cursor = state.lock().unwrap().cursor;
+            for (item, card, preview) in &cards {
+                card.set_active(*item == cursor.theme);
+                preview.queue_draw();
+            }
+            syncing.set(true);
+            size_scale.set_value(cursor.size);
+            shadow_scale.set_value(cursor.shadow);
+            smooth_scale.set_value(cursor.smooth);
+            idle_switch.set_active(cursor.hide_idle);
+            match cursor.click_effect {
+                ClickEffect::None => none_btn.set_active(true),
+                ClickEffect::Pulse => pulse_btn.set_active(true),
+                ClickEffect::Ripple => ripple_btn.set_active(true),
+            }
+            intensity_scale.set_value(cursor.click_intensity);
+            intensity_scale.set_sensitive(cursor.click_effect != ClickEffect::None);
+            syncing.set(false);
+        }) as Rc<dyn Fn()>
+    };
+
+    CursorPanel {
+        widget: panel,
+        refresh,
+    }
+}
+
+struct CursorSliderRow {
+    widget: GtkBox,
+    scale: Scale,
+}
+
+fn cursor_slider_row(label: &str) -> CursorSliderRow {
+    let widget = GtkBox::new(Orientation::Vertical, 4);
+    widget.add_css_class("recording-editor-cursor-slider-row");
+    widget.set_hexpand(true);
+    let caption = Label::new(Some(label));
+    caption.add_css_class("recording-editor-zoom-kicker");
+    caption.set_xalign(0.0);
+    let scale = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.05);
+    scale.add_css_class("recording-editor-cursor-slider");
+    scale.set_draw_value(false);
+    scale.set_hexpand(true);
+    widget.append(&caption);
+    widget.append(&scale);
+    CursorSliderRow { widget, scale }
 }
 
 struct ZoomPanel {

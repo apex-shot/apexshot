@@ -139,6 +139,44 @@
                 color: alpha(#1d2129, 0.72);
             }
 
+            .editor-theme-light .recording-editor-tool-section {
+                background: #f0f1f4;
+            }
+
+            .editor-theme-light button.recording-editor-tool-section-btn:hover {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-theme-light button.recording-editor-tool-section-btn:checked,
+            .editor-theme-light button.recording-editor-tool-section-btn:checked:hover {
+                background: alpha(#b05c38, 0.14);
+            }
+
+            .editor-theme-light button.recording-editor-cursor-card {
+                background: alpha(#111827, 0.04);
+            }
+
+            .editor-theme-light button.recording-editor-cursor-card:hover {
+                background: alpha(#111827, 0.07);
+            }
+
+            .editor-theme-light button.recording-editor-cursor-card:checked,
+            .editor-theme-light button.recording-editor-cursor-card:checked:hover {
+                background: alpha(#b05c38, 0.14);
+            }
+
+            .editor-theme-light .recording-editor-cursor-card-label {
+                color: alpha(#1d2129, 0.62);
+            }
+
+            .editor-theme-light button.recording-editor-cursor-card:checked .recording-editor-cursor-card-label {
+                color: #b05c38;
+            }
+
+            .editor-theme-light .recording-editor-root scale.recording-editor-cursor-slider trough {
+                background: alpha(#111827, 0.12);
+            }
+
             .editor-theme-light .recording-editor-tool-sidebar {
                 background: transparent;
                 border-left: none;

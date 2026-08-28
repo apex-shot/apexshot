@@ -188,6 +188,84 @@
                 min-height: 56px;
             }
 
+            .recording-editor-tool-section {
+                min-width: 56px;
+                max-width: 56px;
+                padding: 12px 8px;
+                background: #111111;
+                border-radius: 12px;
+            }
+
+            button.recording-editor-tool-section-btn {
+                min-width: 40px;
+                min-height: 40px;
+                padding: 0;
+                border: none;
+                border-radius: 10px;
+                background: transparent;
+            }
+
+            button.recording-editor-tool-section-btn:hover {
+                background: alpha(white, 0.06);
+            }
+
+            button.recording-editor-tool-section-btn:checked,
+            button.recording-editor-tool-section-btn:checked:hover {
+                background: alpha(#b05c38, 0.18);
+            }
+
+            button.recording-editor-cursor-card {
+                min-height: 96px;
+                padding: 10px 8px 8px 8px;
+                border: none;
+                border-radius: 10px;
+                background: alpha(white, 0.04);
+            }
+
+            button.recording-editor-cursor-card:hover {
+                background: alpha(white, 0.07);
+            }
+
+            button.recording-editor-cursor-card:checked,
+            button.recording-editor-cursor-card:checked:hover {
+                background: alpha(#b05c38, 0.16);
+            }
+
+            .recording-editor-cursor-card-label {
+                color: alpha(white, 0.68);
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-cursor-card:checked .recording-editor-cursor-card-label {
+                color: #d5794e;
+            }
+
+            .recording-editor-cursor-slider-row {
+                padding: 2px 0 6px 0;
+            }
+
+            .recording-editor-root scale.recording-editor-cursor-slider {
+                min-height: 14px;
+                padding: 0;
+            }
+
+            .recording-editor-root scale.recording-editor-cursor-slider trough {
+                min-height: 3px;
+                background: alpha(white, 0.10);
+            }
+
+            .recording-editor-root scale.recording-editor-cursor-slider highlight {
+                background: #b05c38;
+            }
+
+            .recording-editor-root scale.recording-editor-cursor-slider slider {
+                min-width: 10px;
+                min-height: 10px;
+                background: #b05c38;
+                border: none;
+            }
+
             .recording-editor-tool-sidebar {
                 min-width: 288px;
                 max-width: 288px;

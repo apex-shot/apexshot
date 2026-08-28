@@ -95,6 +95,7 @@ pub fn select_video(state: &mut VideoEditState, segment: Option<usize>) {
     state.selected_segment = segment;
     if segment.is_some() {
         state.selected_zoom = None;
+        state.selected_tool = crate::recording::editor::model::EditorTool::Timeline;
     }
 }
 
@@ -102,6 +103,7 @@ pub fn select_zoom(state: &mut VideoEditState, index: Option<usize>) {
     state.selected_zoom = index;
     if index.is_some() {
         state.selected_segment = None;
+        state.selected_tool = crate::recording::editor::model::EditorTool::Timeline;
     }
 }
 

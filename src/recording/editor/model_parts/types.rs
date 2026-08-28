@@ -92,6 +92,137 @@ pub enum ZoomMode {
     Manual,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EditorTool {
+    #[default]
+    Cursor,
+    Timeline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorTheme {
+    #[default]
+    Adwaita,
+    Yaru,
+    White,
+    Black,
+}
+
+impl CursorTheme {
+    pub const ALL: [Self; 4] = [Self::Adwaita, Self::Yaru, Self::White, Self::Black];
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "yaru" => Self::Yaru,
+            "white" | "windows" => Self::White,
+            "black" | "inverted" | "dark" => Self::Black,
+            _ => Self::Adwaita,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Adwaita => "adwaita",
+            Self::Yaru => "yaru",
+            Self::White => "white",
+            Self::Black => "black",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Adwaita => "Adwaita",
+            Self::Yaru => "Yaru",
+            Self::White => "White",
+            Self::Black => "Black",
+        }
+    }
+}
+
+pub const MIN_CURSOR_SIZE: f64 = 0.5;
+pub const MAX_CURSOR_SIZE: f64 = 3.0;
+pub const DEFAULT_CURSOR_SIZE: f64 = 1.0;
+pub const DEFAULT_CURSOR_SHADOW: f64 = 0.4;
+pub const DEFAULT_CURSOR_SMOOTH: f64 = 0.35;
+pub const DEFAULT_CURSOR_IDLE_MS: f64 = 800.0;
+pub const DEFAULT_CLICK_INTENSITY: f64 = 0.7;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClickEffect {
+    None,
+    Pulse,
+    #[default]
+    Ripple,
+}
+
+impl ClickEffect {
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "none" => Self::None,
+            "pulse" => Self::Pulse,
+            _ => Self::Ripple,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Pulse => "pulse",
+            Self::Ripple => "ripple",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Pulse => "Pulse",
+            Self::Ripple => "Ripple",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CursorSettings {
+    pub theme: CursorTheme,
+    pub size: f64,
+    pub shadow: f64,
+    pub smooth: f64,
+    pub hide_idle: bool,
+    pub idle_ms: f64,
+    pub click_effect: ClickEffect,
+    pub click_intensity: f64,
+}
+
+impl Default for CursorSettings {
+    fn default() -> Self {
+        Self {
+            theme: CursorTheme::Adwaita,
+            size: DEFAULT_CURSOR_SIZE,
+            shadow: DEFAULT_CURSOR_SHADOW,
+            smooth: DEFAULT_CURSOR_SMOOTH,
+            hide_idle: false,
+            idle_ms: DEFAULT_CURSOR_IDLE_MS,
+            click_effect: ClickEffect::Ripple,
+            click_intensity: DEFAULT_CLICK_INTENSITY,
+        }
+    }
+}
+
+impl CursorSettings {
+    pub fn clamped(self) -> Self {
+        Self {
+            theme: self.theme,
+            size: self.size.clamp(MIN_CURSOR_SIZE, MAX_CURSOR_SIZE),
+            shadow: self.shadow.clamp(0.0, 1.0),
+            smooth: self.smooth.clamp(0.0, 1.0),
+            hide_idle: self.hide_idle,
+            idle_ms: self.idle_ms.clamp(120.0, 4000.0),
+            click_effect: self.click_effect,
+            click_intensity: self.click_intensity.clamp(0.0, 1.0),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZoomClip {
     pub start: f64,
@@ -187,6 +318,8 @@ pub struct VideoEditState {
     /// Static source crop in original video pixels. `None` keeps the full frame.
     pub crop: Option<CropSelection>,
     pub sidecar: Option<PointerSidecar>,
+    pub cursor: CursorSettings,
+    pub selected_tool: EditorTool,
     pub project_media: Vec<ProjectMedia>,
     /// Display / export name (file stem, without extension).
     pub title: String,

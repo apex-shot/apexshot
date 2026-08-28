@@ -15,6 +15,7 @@ mod rail;
 #[allow(dead_code)]
 mod timeline;
 mod timeline_card;
+mod tool_section;
 mod tool_sidebar;
 mod toolbar;
 
@@ -182,6 +183,9 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     workspace.set_hexpand(true);
     workspace.set_vexpand(true);
 
+    let tools = tool_section::build_tool_section(state.clone(), ping.clone());
+    workspace.append(&tools.widget);
+
     let stage = GtkBox::new(Orientation::Vertical, 0);
     stage.add_css_class("recording-editor-stage");
     stage.set_hexpand(true);
@@ -206,7 +210,14 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         timeline_card::build_timeline_card(state.clone(), media.clone(), ping.clone());
     root.append(&timeline);
     *paint_slot.borrow_mut() = Some(paint);
-    *refresh_slot.borrow_mut() = Some(sidebar.refresh);
+    *refresh_slot.borrow_mut() = Some({
+        let refresh_tools = tools.refresh;
+        let refresh_sidebar = sidebar.refresh;
+        Rc::new(move || {
+            refresh_tools();
+            refresh_sidebar();
+        }) as Rc<dyn Fn()>
+    });
     let drop_target = DropTarget::new(gio::File::static_type(), gdk::DragAction::COPY);
     drop_target.connect_drop({
         let state = state.clone();

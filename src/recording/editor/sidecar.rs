@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 pub const SIDECAR_VERSION: u32 = 1;
 pub const MAX_CLICKS: usize = 500;
 pub const CLICK_PULSE_WINDOW_SECONDS: f64 = 0.08;
+pub const CLICK_RIPPLE_WINDOW_SECONDS: f64 = 0.32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -65,6 +66,14 @@ impl CaptureRegion {
     pub fn is_area(self) -> bool {
         self.w > 0 && self.h > 0
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CursorFrame {
+    pub x: f64,
+    pub y: f64,
+    pub kind: CursorKind,
+    pub alpha: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -198,6 +207,75 @@ impl PointerSidecar {
         }
     }
 
+    pub fn presented_at(
+        &self,
+        t: f64,
+        smooth: f64,
+        hide_idle: bool,
+        idle_ms: f64,
+    ) -> Option<CursorFrame> {
+        let (x, y, kind) = self.interpolated_at(t)?;
+        let (x, y) = if smooth <= 0.01 {
+            (x, y)
+        } else {
+            self.smoothed_at(t, smooth.clamp(0.0, 1.0))
+        };
+        let alpha = if hide_idle {
+            self.idle_alpha(t, idle_ms)
+        } else {
+            1.0
+        };
+        Some(CursorFrame { x, y, kind, alpha })
+    }
+
+    fn smoothed_at(&self, t: f64, smooth: f64) -> (f64, f64) {
+        let Some(first) = self.pointer.first() else {
+            return (0.0, 0.0);
+        };
+        let tau = 0.01 + smooth * smooth * 0.26;
+        let mut px = first.x;
+        let mut py = first.y;
+        let mut pt = first.t;
+        for sample in self.pointer.iter().skip(1) {
+            let target_t = sample.t.min(t);
+            let dt = (target_t - pt).max(0.0);
+            let k = 1.0 - (-dt / tau).exp();
+            if sample.t <= t {
+                px += (sample.x - px) * k;
+                py += (sample.y - py) * k;
+                pt = sample.t;
+                continue;
+            }
+            if let Some((ix, iy, _)) = self.interpolated_at(t) {
+                px += (ix - px) * k;
+                py += (iy - py) * k;
+            }
+            break;
+        }
+        (px, py)
+    }
+
+    fn idle_alpha(&self, t: f64, idle_ms: f64) -> f64 {
+        let window = (idle_ms / 1000.0).clamp(0.12, 4.0);
+        let Some((cx, cy, _)) = self.interpolated_at(t) else {
+            return 1.0;
+        };
+        let mut last_move = self.pointer.first().map(|sample| sample.t).unwrap_or(0.0);
+        for sample in &self.pointer {
+            if sample.t > t {
+                break;
+            }
+            if (sample.x - cx).hypot(sample.y - cy) > 8.0 {
+                last_move = sample.t;
+            }
+        }
+        let still = t - last_move;
+        if still <= window {
+            return 1.0;
+        }
+        (1.0 - (still - window) / 0.18).clamp(0.0, 1.0)
+    }
+
     pub fn interpolated_at(&self, t: f64) -> Option<(f64, f64, CursorKind)> {
         if self.pointer.is_empty() {
             return None;
@@ -232,6 +310,18 @@ impl PointerSidecar {
             }
         }
         1.0 + peak * 0.35
+    }
+
+    pub fn click_ripples_at(&self, t: f64) -> Vec<(f64, f64, f64)> {
+        let mut ripples = Vec::new();
+        for click in &self.clicks {
+            let age = t - click.t;
+            if age >= 0.0 && age <= CLICK_RIPPLE_WINDOW_SECONDS {
+                let progress = (age / CLICK_RIPPLE_WINDOW_SECONDS).clamp(0.0, 1.0);
+                ripples.push((click.x, click.y, progress));
+            }
+        }
+        ripples
     }
 }
 
@@ -348,6 +438,57 @@ mod tests {
     }
 
     #[test]
+    fn presented_at_smooths_behind_raw_sample() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 0.0,
+            y: 0.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.2,
+            x: 200.0,
+            y: 0.0,
+            kind: CursorKind::Default,
+        });
+        let raw = sidecar.interpolated_at(0.2).unwrap();
+        let presented = sidecar.presented_at(0.2, 0.8, false, 800.0).unwrap();
+        assert!(presented.x < raw.0);
+        assert!(presented.x > 0.0);
+        assert!((presented.alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn presented_at_hides_idle_cursor() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.05,
+            x: 12.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 2.0,
+            x: 12.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+        });
+        let shown = sidecar.presented_at(0.05, 0.0, true, 400.0).unwrap();
+        let hidden = sidecar.presented_at(2.0, 0.0, true, 400.0).unwrap();
+        assert!((shown.alpha - 1.0).abs() < 1e-9);
+        assert!(hidden.alpha < 0.05);
+    }
+
+    #[test]
     fn interpolated_sample_lerps_between_neighbors() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
@@ -382,6 +523,24 @@ mod tests {
         assert!((sidecar.click_pulse_at(1.0) - 1.35).abs() < 1e-9);
         assert!((sidecar.click_pulse_at(0.0) - 1.0).abs() < 1e-9);
         assert!(sidecar.click_pulse_at(1.04) > 1.0);
+    }
+
+    #[test]
+    fn click_ripples_expand_after_click() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.clicks.push(ClickSample {
+            t: 1.0,
+            x: 40.0,
+            y: 80.0,
+            button: 1,
+        });
+        assert!(sidecar.click_ripples_at(0.5).is_empty());
+        let ripples = sidecar.click_ripples_at(1.08);
+        assert_eq!(ripples.len(), 1);
+        assert!((ripples[0].0 - 40.0).abs() < 1e-9);
+        assert!(ripples[0].2 > 0.0 && ripples[0].2 < 1.0);
+        assert!(sidecar.click_ripples_at(1.5).is_empty());
     }
 
     #[test]

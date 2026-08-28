@@ -10,8 +10,10 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use super::model::{
-    AudioMode, CropSelection, DimensionPreset, ProjectMedia, ProjectMediaKind, VideoBackground,
-    VideoEditState, ZoomClip, ZoomMode,
+    AudioMode, ClickEffect, CropSelection, CursorSettings, CursorTheme, DimensionPreset,
+    ProjectMedia, ProjectMediaKind, VideoBackground, VideoEditState, ZoomClip, ZoomMode,
+    DEFAULT_CLICK_INTENSITY, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE,
+    DEFAULT_CURSOR_SMOOTH,
 };
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
@@ -56,6 +58,22 @@ pub struct VideoProjectFile {
     pub timeline_scroll_seconds: f64,
     #[serde(default)]
     pub selected_zoom: Option<usize>,
+    #[serde(default)]
+    pub cursor_theme: CursorThemeFile,
+    #[serde(default = "default_cursor_size")]
+    pub cursor_size: f64,
+    #[serde(default = "default_cursor_shadow")]
+    pub cursor_shadow: f64,
+    #[serde(default = "default_cursor_smooth")]
+    pub cursor_smooth: f64,
+    #[serde(default)]
+    pub cursor_hide_idle: bool,
+    #[serde(default = "default_cursor_idle_ms")]
+    pub cursor_idle_ms: f64,
+    #[serde(default)]
+    pub cursor_click_effect: ClickEffectFile,
+    #[serde(default = "default_click_intensity")]
+    pub cursor_click_intensity: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,6 +91,28 @@ pub struct ZoomClipFile {
 pub enum ZoomModeFile {
     Auto,
     Manual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorThemeFile {
+    #[default]
+    #[serde(alias = "classic", alias = "crosshair", alias = "hand", alias = "circle")]
+    Adwaita,
+    Yaru,
+    #[serde(alias = "windows")]
+    White,
+    #[serde(alias = "inverted", alias = "dark")]
+    Black,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClickEffectFile {
+    None,
+    Pulse,
+    #[default]
+    Ripple,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,6 +338,60 @@ fn dimension_from_file(preset: DimensionFile) -> DimensionPreset {
     }
 }
 
+fn cursor_theme_to_file(theme: CursorTheme) -> CursorThemeFile {
+    match theme {
+        CursorTheme::Adwaita => CursorThemeFile::Adwaita,
+        CursorTheme::Yaru => CursorThemeFile::Yaru,
+        CursorTheme::White => CursorThemeFile::White,
+        CursorTheme::Black => CursorThemeFile::Black,
+    }
+}
+
+fn cursor_theme_from_file(theme: CursorThemeFile) -> CursorTheme {
+    match theme {
+        CursorThemeFile::Adwaita => CursorTheme::Adwaita,
+        CursorThemeFile::Yaru => CursorTheme::Yaru,
+        CursorThemeFile::White => CursorTheme::White,
+        CursorThemeFile::Black => CursorTheme::Black,
+    }
+}
+
+fn default_cursor_size() -> f64 {
+    DEFAULT_CURSOR_SIZE
+}
+
+fn default_cursor_shadow() -> f64 {
+    DEFAULT_CURSOR_SHADOW
+}
+
+fn default_cursor_smooth() -> f64 {
+    DEFAULT_CURSOR_SMOOTH
+}
+
+fn default_cursor_idle_ms() -> f64 {
+    DEFAULT_CURSOR_IDLE_MS
+}
+
+fn default_click_intensity() -> f64 {
+    DEFAULT_CLICK_INTENSITY
+}
+
+fn click_effect_to_file(effect: ClickEffect) -> ClickEffectFile {
+    match effect {
+        ClickEffect::None => ClickEffectFile::None,
+        ClickEffect::Pulse => ClickEffectFile::Pulse,
+        ClickEffect::Ripple => ClickEffectFile::Ripple,
+    }
+}
+
+fn click_effect_from_file(effect: ClickEffectFile) -> ClickEffect {
+    match effect {
+        ClickEffectFile::None => ClickEffect::None,
+        ClickEffectFile::Pulse => ClickEffect::Pulse,
+        ClickEffectFile::Ripple => ClickEffect::Ripple,
+    }
+}
+
 fn audio_to_file(mode: AudioMode) -> AudioFile {
     match mode {
         AudioMode::Unchanged => AudioFile::Unchanged,
@@ -398,6 +492,14 @@ impl VideoEditState {
             timeline_scale: self.timeline_scale,
             timeline_scroll_seconds: self.timeline_scroll_seconds,
             selected_zoom: self.selected_zoom,
+            cursor_theme: cursor_theme_to_file(self.cursor.theme),
+            cursor_size: self.cursor.size,
+            cursor_shadow: self.cursor.shadow,
+            cursor_smooth: self.cursor.smooth,
+            cursor_hide_idle: self.cursor.hide_idle,
+            cursor_idle_ms: self.cursor.idle_ms,
+            cursor_click_effect: click_effect_to_file(self.cursor.click_effect),
+            cursor_click_intensity: self.cursor.click_intensity,
         }
     }
 
@@ -436,6 +538,17 @@ impl VideoEditState {
         self.selected_zoom = file
             .selected_zoom
             .filter(|index| *index < self.zoom_clips.len());
+        self.cursor = CursorSettings {
+            theme: cursor_theme_from_file(file.cursor_theme),
+            size: file.cursor_size,
+            shadow: file.cursor_shadow,
+            smooth: file.cursor_smooth,
+            hide_idle: file.cursor_hide_idle,
+            idle_ms: file.cursor_idle_ms,
+            click_effect: click_effect_from_file(file.cursor_click_effect),
+            click_intensity: file.cursor_click_intensity,
+        }
+        .clamped();
         self.project_media
             .retain(|item| item.path == self.metadata.path);
         for item in file.extra_media {
@@ -561,6 +674,9 @@ mod tests {
             b: 36,
         };
         state.background_padding = 40.0;
+        state.cursor.theme = CursorTheme::White;
+        state.cursor.size = 1.5;
+        state.cursor.shadow = 0.7;
         state.add_project_media(ProjectMedia {
             path: extra.clone(),
             display_name: "B-roll".into(),

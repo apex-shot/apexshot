@@ -39,6 +39,7 @@ impl VideoEditState {
             .position(|clip| (clip.start - start).abs() < 1e-6)?;
         self.selected_zoom = Some(index);
         self.selected_segment = None;
+        self.selected_tool = EditorTool::Timeline;
         Some(index)
     }
 

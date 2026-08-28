@@ -477,6 +477,20 @@ fn selected_zoom_mode_and_scale_update_clip() {
 }
 
 #[test]
+fn default_cursor_tool_uses_classic_theme() {
+    let mut state = VideoEditState::new(metadata());
+    assert_eq!(state.selected_tool, EditorTool::Cursor);
+    assert_eq!(state.cursor.theme, CursorTheme::Adwaita);
+    assert!((state.cursor.size - 1.0).abs() < 1e-9);
+    state.cursor.theme = CursorTheme::Black;
+    state.cursor.size = 1.6;
+    state.cursor.shadow = 0.8;
+    state.selected_tool = EditorTool::Timeline;
+    assert_eq!(state.cursor.theme.label(), "Black");
+    assert_eq!(state.cursor.theme.as_str(), "black");
+}
+
+#[test]
 fn add_zoom_uses_manual_when_auto_zoom_is_unavailable() {
     let mut state = VideoEditState::new(metadata());
     assert!(!state.supports_auto_zoom());

@@ -28,6 +28,8 @@ impl VideoEditState {
             background_shadow: 15.0,
             crop: None,
             sidecar,
+            cursor: CursorSettings::default(),
+            selected_tool: EditorTool::Cursor,
             project_media,
             title,
             video_locked: false,

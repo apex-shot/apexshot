@@ -449,8 +449,9 @@ fn build_composite_convert_args(
     let _ = std::fs::create_dir_all(&work_dir);
     let cmd_path = work_dir.join("zoom.cmd");
     let cursor_path = work_dir.join("cursor.png");
-    let _ = write_cursor_png(&cursor_path);
-    let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end));
+    let cursor_hot = super::cursor_sprite::write_png(&cursor_path, state.cursor, "default")
+        .unwrap_or((8.0, 6.0));
+    let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end, cursor_hot));
 
     let (base_w, base_h) = state.canvas_dimensions();
     let (out_w, out_h) = state.padded_output_dimensions();
@@ -531,7 +532,12 @@ fn static_crop_prefix(state: &VideoEditState) -> String {
     }
 }
 
-fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
+fn build_sendcmd(
+    state: &VideoEditState,
+    start: f64,
+    end: f64,
+    cursor_hot: (f64, f64),
+) -> String {
     let fps = 30.0;
     let duration = (end - start).max(0.0);
     let frames = ((duration * fps).ceil() as usize).max(1);
@@ -553,40 +559,32 @@ fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
             "{local_t:.3} crop@z w {w};\n{local_t:.3} crop@z h {h};\n{local_t:.3} crop@z x {x};\n{local_t:.3} crop@z y {y};\n"
         ));
         if let Some(sidecar) = &state.sidecar {
-            if let Some((cx, cy, _)) = sidecar.interpolated_at(source_t) {
-                let pulse = sidecar.click_pulse_at(source_t);
-                let rel_x = ((cx - crop_x - x as f64) / w as f64) * base_w as f64 + pad_x;
-                let rel_y = ((cy - crop_y - y as f64) / h as f64) * base_h as f64 + pad_y;
-                let size = (16.0 * pulse).round();
-                lines.push_str(&format!(
-                    "{local_t:.3} overlay@c x {:.0};\n{local_t:.3} overlay@c y {:.0};\n",
-                    (rel_x - size * 0.1).round(),
-                    (rel_y - size * 0.1).round()
-                ));
+            if let Some(frame) = sidecar.presented_at(
+                source_t,
+                state.cursor.smooth,
+                state.cursor.hide_idle,
+                state.cursor.idle_ms,
+            ) {
+                if frame.alpha >= 0.12 {
+                    let rel_x =
+                        ((frame.x - crop_x - x as f64) / w as f64) * base_w as f64 + pad_x;
+                    let rel_y =
+                        ((frame.y - crop_y - y as f64) / h as f64) * base_h as f64 + pad_y;
+                    let (hx, hy) = cursor_hot;
+                    lines.push_str(&format!(
+                        "{local_t:.3} overlay@c x {:.0};\n{local_t:.3} overlay@c y {:.0};\n",
+                        (rel_x - hx).round(),
+                        (rel_y - hy).round()
+                    ));
+                } else {
+                    lines.push_str(&format!(
+                        "{local_t:.3} overlay@c x -9999;\n{local_t:.3} overlay@c y -9999;\n"
+                    ));
+                }
             }
         }
     }
     lines
-}
-
-fn write_cursor_png(path: &Path) -> anyhow::Result<()> {
-    let mut img = image::RgbaImage::new(32, 32);
-    for y in 0..28 {
-        let width = (y / 2).min(10) as u32;
-        for x in 0..=width {
-            let edge = x == 0 || x == width || y == 0 || y == 27;
-            let pixel = if edge {
-                image::Rgba([20, 20, 24, 255])
-            } else {
-                image::Rgba([255, 255, 255, 255])
-            };
-            if x < 32 {
-                img.put_pixel(x, y as u32, pixel);
-            }
-        }
-    }
-    img.save(path)?;
-    Ok(())
 }
 
 fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
