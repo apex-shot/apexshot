@@ -553,6 +553,15 @@ pub fn should_use_pointer_track() -> bool {
 }
 
 fn with_shell_overlay_proxy<T>(
+    f: impl FnOnce(&zbus::blocking::Proxy<'_>) -> anyhow::Result<T> + Send + 'static,
+) -> anyhow::Result<T>
+where
+    T: Send + 'static,
+{
+    crate::utils::run_off_tokio(move || with_shell_overlay_proxy_inner(f))
+}
+
+fn with_shell_overlay_proxy_inner<T>(
     f: impl FnOnce(&zbus::blocking::Proxy<'_>) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     if let Some(msg) = crate::app_identity::host_escape_blocked("zbus") {

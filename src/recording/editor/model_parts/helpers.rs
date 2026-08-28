@@ -84,11 +84,11 @@ fn eased_value(t: f64, start: f64, end: f64, ease: f64, from: f64, to: f64) -> f
     }
     if t < start + ease {
         let alpha = ((t - start) / ease).clamp(0.0, 1.0);
-        return lerp(from, to, smoothstep(alpha));
+        return lerp(from, to, ease_out_cubic(alpha));
     }
     if t > end - ease {
         let alpha = ((end - t) / ease).clamp(0.0, 1.0);
-        return lerp(from, to, smoothstep(alpha));
+        return lerp(from, to, ease_out_cubic(alpha));
     }
     to
 }
@@ -97,9 +97,9 @@ fn lerp(from: f64, to: f64, alpha: f64) -> f64 {
     from + (to - from) * alpha
 }
 
-fn smoothstep(t: f64) -> f64 {
+fn ease_out_cubic(t: f64) -> f64 {
     let t = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
+    1.0 - (1.0 - t).powi(3)
 }
 
 pub fn zoom_fill_transform(scale: f64, target: f64, ox: f64, oy: f64) -> (f64, f64, f64) {
@@ -187,6 +187,24 @@ pub fn picture_layout(
         (src_h * sy).round() as i32,
         (-vx * sx).round() as i32,
         (-vy * sy).round() as i32,
+    )
+}
+
+/// Translate+scale that maps source `view` onto a clip, origin top-left.
+/// Picture is the full source fitted to the clip: `x' = x * sx + tx`.
+pub fn zoom_camera_transform(
+    view: (f64, f64, f64, f64),
+    src_w: f64,
+    src_h: f64,
+    clip_w: f64,
+    clip_h: f64,
+) -> (f64, f64, f64, f64) {
+    let (vx, vy, vw, vh) = view;
+    (
+        -vx / vw.max(1.0) * clip_w,
+        -vy / vh.max(1.0) * clip_h,
+        src_w / vw.max(1.0),
+        src_h / vh.max(1.0),
     )
 }
 

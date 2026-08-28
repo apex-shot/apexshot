@@ -46,6 +46,24 @@ pub fn desktop_notification_with_options(
         return None;
     }
 
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let summary = summary.to_string();
+        let body = body.to_string();
+        return crate::utils::run_off_tokio(move || {
+            desktop_notification_with_options_inner(&summary, &body, urgency, replaces_id)
+        });
+    }
+
+    desktop_notification_with_options_inner(summary, body, urgency, replaces_id)
+}
+
+fn desktop_notification_with_options_inner(
+    summary: &str,
+    body: &str,
+    urgency: Urgency,
+    replaces_id: u32,
+) -> Option<u32> {
+
     // Flatpak: D-Bus Notifications only — never shell out to notify-send.
     let force_dbus = crate::app_identity::portal_only() || prefer_dbus_primary();
 
@@ -210,6 +228,17 @@ mod tests {
     fn empty_notification_is_noop() {
         desktop_notification("", "");
         assert!(desktop_notification_with_options("", "", Urgency::Normal, 0).is_none());
+    }
+
+    #[test]
+    fn desktop_notification_inside_tokio_does_not_panic() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            desktop_notification("ApexShot test", "nested-runtime guard");
+        });
     }
 
     #[test]

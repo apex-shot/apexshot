@@ -706,6 +706,22 @@ fn picture_layout_crop_scales_and_offsets() {
 }
 
 #[test]
+fn zoom_camera_keeps_right_focus_at_stage_center() {
+    let (tx, ty, sx, sy) =
+        zoom_camera_transform((0.0, 0.0, 1920.0, 1080.0), 1920.0, 1080.0, 1920.0, 1080.0);
+    assert!((tx).abs() < 1e-9 && ty.abs() < 1e-9);
+    assert!((sx - 1.0).abs() < 1e-9 && (sy - 1.0).abs() < 1e-9);
+
+    let (tx, ty, sx, sy) =
+        zoom_camera_transform((960.0, 270.0, 960.0, 540.0), 1920.0, 1080.0, 1920.0, 1080.0);
+    assert!((sx - 2.0).abs() < 1e-9 && (sy - 2.0).abs() < 1e-9);
+    let x = (1440.0 / 1920.0 * 1920.0) * sx + tx;
+    let y = (540.0 / 1080.0 * 1080.0) * sy + ty;
+    assert!((x - 960.0).abs() < 1e-6);
+    assert!((y - 540.0).abs() < 1e-6);
+}
+
+#[test]
 fn crop_selection_is_clamped_and_even() {
     let mut state = VideoEditState::new(metadata());
     state.set_crop(-50.0, -20.0, 99999.0, 333.0);

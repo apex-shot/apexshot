@@ -1,6 +1,6 @@
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
-    even_crop_rect, format_webcut_time, picture_layout, view_to_source, VideoBackground,
+    even_crop_rect, format_webcut_time, view_to_source, zoom_camera_transform, VideoBackground,
     VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
 };
 use gtk4::{
@@ -173,7 +173,8 @@ fn build_preview_inner(
         let placing_focus = placing_focus.clone();
         let cursor_layer_tick = cursor_layer.clone();
         let empty_hint = empty_hint.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        let last_zoom_css = Rc::new(RefCell::new(String::new()));
+        glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
             let playing = media_tick.is_playing();
             let (dims, zoom, pad, playhead, duration, hidden, label, placing) = {
                 let s = state.lock().unwrap();
@@ -215,7 +216,15 @@ fn build_preview_inner(
             if (stage.ratio() - next_ratio).abs() > 0.001 {
                 stage.set_ratio(next_ratio);
             }
-            apply_preview_view(&state, &picture, &clip, &zoom_css, playhead, placing);
+            apply_preview_view(
+                &state,
+                &picture,
+                &clip,
+                &zoom_css,
+                &last_zoom_css,
+                playhead,
+                placing,
+            );
             apply_preview_pad(&clip, pad);
             cursor_layer.queue_draw();
             glib::ControlFlow::Continue
@@ -676,9 +685,19 @@ fn apply_preview_view(
     picture: &Picture,
     clip: &Overlay,
     provider: &CssProvider,
+    last_css: &RefCell<String>,
     playhead: f64,
     placing: bool,
 ) {
+    picture.set_hexpand(true);
+    picture.set_vexpand(true);
+    picture.set_halign(Align::Fill);
+    picture.set_valign(Align::Fill);
+    picture.set_size_request(-1, -1);
+    picture.set_margin_start(0);
+    picture.set_margin_top(0);
+    picture.set_margin_end(0);
+    picture.set_margin_bottom(0);
     let clip_w = clip.allocated_width().max(0) as f64;
     let clip_h = clip.allocated_height().max(0) as f64;
     if clip_w < 2.0 || clip_h < 2.0 {
@@ -692,17 +711,22 @@ fn apply_preview_view(
             state.metadata.height.max(1) as f64,
         )
     };
-    let (pw, ph, mx, my) = picture_layout(view, src_w, src_h, clip_w, clip_h);
-    picture.set_hexpand(false);
-    picture.set_vexpand(false);
-    picture.set_halign(Align::Start);
-    picture.set_valign(Align::Start);
-    picture.set_size_request(pw, ph);
-    picture.set_margin_start(mx);
-    picture.set_margin_top(my);
-    picture.set_margin_end(0);
-    picture.set_margin_bottom(0);
-    provider.load_from_data(".recording-editor-video-zoom-live { transform: none; }");
+    let (tx, ty, sx, sy) = zoom_camera_transform(view, src_w, src_h, clip_w, clip_h);
+    let css = if (sx - 1.0).abs() < 0.002
+        && (sy - 1.0).abs() < 0.002
+        && tx.abs() < 0.5
+        && ty.abs() < 0.5
+    {
+        ".recording-editor-video-zoom-live { transform: none; }".to_string()
+    } else {
+        format!(
+            ".recording-editor-video-zoom-live {{ transform-origin: 0px 0px; transform: translate({tx:.2}px, {ty:.2}px) scale({sx:.4}, {sy:.4}); }}"
+        )
+    };
+    if *last_css.borrow() != css {
+        provider.load_from_data(&css);
+        last_css.replace(css);
+    }
 }
 
 fn draw_preview_overlays(
@@ -765,8 +789,18 @@ fn manual_focus_rect(
     let (view_x, view_y, view_w, view_h) = view;
     let rect_w = widget_w / clip.scale.max(1.0);
     let rect_h = widget_h / clip.scale.max(1.0);
-    let x = ((clip.center.0 - view_x) / view_w.max(1.0)) * widget_w - rect_w / 2.0;
-    let y = ((clip.center.1 - view_y) / view_h.max(1.0)) * widget_h - rect_h / 2.0;
+    let raw_x = ((clip.center.0 - view_x) / view_w.max(1.0)) * widget_w - rect_w / 2.0;
+    let raw_y = ((clip.center.1 - view_y) / view_h.max(1.0)) * widget_h - rect_h / 2.0;
+    let x = if rect_w >= widget_w {
+        (widget_w - rect_w) / 2.0
+    } else {
+        raw_x.clamp(0.0, widget_w - rect_w)
+    };
+    let y = if rect_h >= widget_h {
+        (widget_h - rect_h) / 2.0
+    } else {
+        raw_y.clamp(0.0, widget_h - rect_h)
+    };
     (x, y, rect_w, rect_h)
 }
 

@@ -81,9 +81,7 @@ fn notify_daemon_event(event: &str) {
     match event {
         "recording_session_started" => {
             let _ = crate::daemon::notify_daemon_recording_started();
-            // Persistent blinking red-circle notification (click → stop). This
-            // is the stop affordance that works everywhere: no tray host and
-            // no shell extension required.
+            // One-shot stop-instruction notification (Stop button / shortcut).
             indicator_notify::show_recording_indicator();
         }
         "recording_session_paused" => {

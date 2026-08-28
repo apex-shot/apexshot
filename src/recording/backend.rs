@@ -70,52 +70,25 @@ pub(super) struct PreparedGifWaylandRecording {
     backend: BuiltPipeline,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RecordingScreenCastTarget {
-    Screen,
-    Area,
-}
+const RECORDING_RESTORE_TOKEN_FILES: &[&str] = &[
+    "wayland-record-screen.token",
+    "wayland-record-area.token",
+];
 
-impl RecordingScreenCastTarget {
-    fn token_file_name(self) -> &'static str {
-        match self {
-            Self::Screen => "wayland-record-screen.token",
-            Self::Area => "wayland-record-area.token",
-        }
-    }
-}
-
-pub(super) fn recording_restore_token_path(target: RecordingScreenCastTarget) -> Option<PathBuf> {
-    let mut path = dirs::cache_dir()?;
-    path.push("apexshot");
-    path.push(target.token_file_name());
-    Some(path)
-}
-
-pub(super) fn load_recording_restore_token(target: RecordingScreenCastTarget) -> Option<String> {
-    let path = recording_restore_token_path(target)?;
-    let raw = std::fs::read_to_string(path).ok()?;
-    let token = raw.trim();
-    if token.is_empty() {
-        None
-    } else {
-        Some(token.to_string())
-    }
-}
-
-pub(super) fn save_recording_restore_token(target: RecordingScreenCastTarget, token: &str) {
-    let Some(path) = recording_restore_token_path(target) else {
+/// Older builds saved ScreenCast restore tokens and used `PersistMode::ExplicitlyRevoked`,
+/// which shows GNOME's "Remember this choice" checkbox and locks later recordings
+/// to the last window/screen. Recording never restores now.
+fn discard_stale_recording_restore_tokens() {
+    let Some(mut dir) = dirs::cache_dir() else {
         return;
     };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(path, token);
+    dir.push("apexshot");
+    discard_recording_restore_tokens_in(&dir);
 }
 
-pub(super) fn clear_recording_restore_token(target: RecordingScreenCastTarget) {
-    if let Some(path) = recording_restore_token_path(target) {
-        let _ = std::fs::remove_file(path);
+fn discard_recording_restore_tokens_in(dir: &std::path::Path) {
+    for name in RECORDING_RESTORE_TOKEN_FILES {
+        let _ = std::fs::remove_file(dir.join(name));
     }
 }
 
@@ -1106,11 +1079,6 @@ pub(super) async fn get_wayland_source(
         (config.x, config.y, config.width, config.height),
         (Some(_), Some(_), Some(w), Some(h)) if w > 0 && h > 0
     );
-    let target = if wants_area_crop {
-        RecordingScreenCastTarget::Area
-    } else {
-        RecordingScreenCastTarget::Screen
-    };
     let cursor_mode = if config.pointer_track {
         // GNOME pointer sidecar path: hide the OS cursor and draw ApexShot's
         // pointer in the editor. Do not switch to Metadata — GNOME ScreenCast
@@ -1129,8 +1097,6 @@ pub(super) async fn get_wayland_source(
     async fn request_screencast(
         cursor_mode: CursorMode,
         wants_area_crop: bool,
-        restore_token: Option<&str>,
-        persist_mode: PersistMode,
     ) -> super::RecordResult<(
         ashpd::desktop::screencast::Streams,
         RecordingPortalSession,
@@ -1153,26 +1119,26 @@ pub(super) async fn get_wayland_source(
             SourceType::Monitor | SourceType::Window
         };
 
+        // PersistMode::DoNot hides GNOME's "Remember this choice" checkbox and
+        // never restores a previous window/screen. Pick a source every time.
         proxy
             .select_sources(
                 &session,
                 cursor_mode,
                 source_types,
                 false,
-                restore_token,
-                persist_mode,
+                None,
+                PersistMode::DoNot,
             )
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?
             .response()
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
 
-        if restore_token.is_none() {
-            if wants_area_crop {
-                println!("Please select the monitor containing the recording area...");
-            } else {
-                println!("Please select a screen or window to record...");
-            }
+        if wants_area_crop {
+            println!("Please select the monitor containing the recording area...");
+        } else {
+            println!("Please select a screen or window to record...");
         }
 
         let response = proxy
@@ -1190,53 +1156,9 @@ pub(super) async fn get_wayland_source(
         Ok((response, session, pipewire_fd))
     }
 
-    let (response, session, pipewire_fd) = if let Some(token) = load_recording_restore_token(target)
-    {
-        match request_screencast(
-            cursor_mode,
-            wants_area_crop,
-            Some(token.as_str()),
-            PersistMode::ExplicitlyRevoked,
-        )
-        .await
-        {
-            Ok(response) => response,
-            Err(err) => {
-                eprintln!(
-                    "[recording] ScreenCast restore token failed for {:?}: {err}; retrying interactively.",
-                    target
-                );
-                clear_recording_restore_token(target);
-                let response = request_screencast(
-                    cursor_mode,
-                    wants_area_crop,
-                    None,
-                    PersistMode::ExplicitlyRevoked,
-                )
-                .await?;
-                if let Some(token) = response.0.restore_token() {
-                    if !token.trim().is_empty() {
-                        save_recording_restore_token(target, token);
-                    }
-                }
-                response
-            }
-        }
-    } else {
-        let response = request_screencast(
-            cursor_mode,
-            wants_area_crop,
-            None,
-            PersistMode::ExplicitlyRevoked,
-        )
-        .await?;
-        if let Some(token) = response.0.restore_token() {
-            if !token.trim().is_empty() {
-                save_recording_restore_token(target, token);
-            }
-        }
-        response
-    };
+    discard_stale_recording_restore_tokens();
+    let (response, session, pipewire_fd) =
+        request_screencast(cursor_mode, wants_area_crop).await?;
 
     let stream = response
         .streams()
@@ -1932,5 +1854,28 @@ mod tests {
             .expect_err("selection should be rejected");
 
         assert!(err.contains("outside the selected monitor"));
+    }
+
+    #[test]
+    fn discard_recording_restore_tokens_removes_cached_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-restore-token-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let screen = dir.join("wayland-record-screen.token");
+        let area = dir.join("wayland-record-area.token");
+        let other = dir.join("keep-me.txt");
+        std::fs::write(&screen, "old-token").expect("write screen token");
+        std::fs::write(&area, "old-token").expect("write area token");
+        std::fs::write(&other, "keep").expect("write unrelated file");
+
+        discard_recording_restore_tokens_in(&dir);
+
+        assert!(!screen.exists());
+        assert!(!area.exists());
+        assert!(other.exists());
+        let _ = std::fs::remove_file(&other);
+        let _ = std::fs::remove_dir(&dir);
     }
 }
