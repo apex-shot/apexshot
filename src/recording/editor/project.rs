@@ -573,7 +573,10 @@ mod tests {
         let loaded = load_project(&video).expect("project should load");
         let mut restored = VideoEditState::new(metadata_for(&video, 32));
         restored.apply_project(loaded);
-        assert_eq!(edits_for_compare(&restored.to_project()), edits_for_compare(&state.to_project()));
+        assert_eq!(
+            edits_for_compare(&restored.to_project()),
+            edits_for_compare(&state.to_project())
+        );
         assert!(restored.sidecar.is_none());
 
         cleanup_project(&video);
@@ -658,12 +661,14 @@ mod tests {
                 y: 2.0,
                 kind: crate::recording::editor::sidecar::CursorKind::Default,
             });
-        sidecar.clicks.push(crate::recording::editor::sidecar::ClickSample {
-            t: 0.4,
-            x: 1.0,
-            y: 2.0,
-            button: 1,
-        });
+        sidecar
+            .clicks
+            .push(crate::recording::editor::sidecar::ClickSample {
+                t: 0.4,
+                x: 1.0,
+                y: 2.0,
+                button: 1,
+            });
         state.sidecar = Some(sidecar);
     }
 

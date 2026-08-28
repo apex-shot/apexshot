@@ -44,9 +44,7 @@ pub(super) struct WaylandSource {
     /// Portal remote FD. `None` for KDE-native streams that publish on the
     /// default session PipeWire socket (same as Spectacle / KPipeWire).
     pipewire_fd: Option<OwnedFd>,
-    #[allow(dead_code)]
     stream_width: u32,
-    #[allow(dead_code)]
     stream_height: u32,
     #[allow(dead_code)]
     crop: Option<CropMargins>,
@@ -70,10 +68,8 @@ pub(super) struct PreparedGifWaylandRecording {
     backend: BuiltPipeline,
 }
 
-const RECORDING_RESTORE_TOKEN_FILES: &[&str] = &[
-    "wayland-record-screen.token",
-    "wayland-record-area.token",
-];
+const RECORDING_RESTORE_TOKEN_FILES: &[&str] =
+    &["wayland-record-screen.token", "wayland-record-area.token"];
 
 /// Older builds saved ScreenCast restore tokens and used `PersistMode::ExplicitlyRevoked`,
 /// which shows GNOME's "Remember this choice" checkbox and locks later recordings
@@ -124,64 +120,20 @@ fn compute_wayland_crop(
 
 /// Resolve the stream's top-left in global coordinates.
 ///
-/// KDE's ScreenCast portal often returns `position=None` even for monitor
-/// streams. Infer from the monitor that contains the selection when possible,
-/// otherwise fall back to `(0, 0)` so area recording does not hard-crash.
+/// Do not query GDK here: this runs on the recording worker thread, and GTK
+/// is only safe on the daemon's main thread. Off-thread `Display::default()`
+/// segfaults in libc (`tokio-rt-worker`) right after the ScreenCast portal
+/// returns — which is why area recording died while fullscreen did not.
 fn resolve_wayland_stream_position(
     reported: Option<(i32, i32)>,
-    stream_size: (i32, i32),
-    selection: (i32, i32, u32, u32),
+    _stream_size: (i32, i32),
+    _selection: (i32, i32, u32, u32),
 ) -> (i32, i32) {
     if let Some(pos) = reported {
         return pos;
     }
-
-    let (sel_x, sel_y, sel_w, sel_h) = selection;
-    let cx = sel_x + (sel_w as i32) / 2;
-    let cy = sel_y + (sel_h as i32) / 2;
-    let (stream_w, stream_h) = stream_size;
-
-    // Prefer a monitor that contains the selection center and matches the
-    // stream size (typical when the portal returns a single-monitor stream).
-    for (mx, my, mw, mh) in iter_gdk_monitor_geometries() {
-        if cx >= mx
-            && cy >= my
-            && cx < mx + mw
-            && cy < my + mh
-            && (stream_w <= 0 || stream_h <= 0 || (mw == stream_w && mh == stream_h))
-        {
-            eprintln!(
-                "[recording] Stream missing position metadata; using monitor origin ({mx},{my}) for crop"
-            );
-            return (mx, my);
-        }
-    }
-
     eprintln!("[recording] Stream missing position metadata; assuming (0,0) for crop");
     (0, 0)
-}
-
-pub(super) fn iter_gdk_monitor_geometries() -> Vec<(i32, i32, i32, i32)> {
-    use gtk4::gdk::prelude::*;
-    use gtk4::glib::object::Cast;
-    use gtk4::prelude::ListModelExt;
-
-    let Some(display) = gtk4::gdk::Display::default() else {
-        return Vec::new();
-    };
-    let monitors = display.monitors();
-    let mut out = Vec::new();
-    for i in 0..monitors.n_items() {
-        let Some(item) = monitors.item(i) else {
-            continue;
-        };
-        let Ok(monitor) = item.downcast::<gtk4::gdk::Monitor>() else {
-            continue;
-        };
-        let g = monitor.geometry();
-        out.push((g.x(), g.y(), g.width(), g.height()));
-    }
-    out
 }
 
 /// Build a client-side crop for a pre-selected area, or `None` to record the
@@ -439,7 +391,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     config: &super::RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> super::RecordResult<(PathBuf, super::RecordingTerminalAction)> {
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
 
     let final_path = final_path.to_path_buf();
@@ -447,19 +399,24 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     // Open PipeWire capture stream (continuous).
     // Portal path: connect via the remote FD from OpenPipeWireRemote.
     // KDE-native path: node lives on the default session socket.
+    // Negotiate against the portal/KWin stream size, not the area crop.
+    // Feeding the crop as VideoSize makes GNOME emit a buffer that does not
+    // match the negotiated format, which used to panic in convert_to_rgba_frame.
+    let hint_w = (wayland_source.stream_width > 0).then_some(wayland_source.stream_width);
+    let hint_h = (wayland_source.stream_height > 0).then_some(wayland_source.stream_height);
     let capture = match wayland_source.pipewire_fd {
         Some(fd) => crate::pipewire_engine::PipeWireCapture::connect(
             fd,
             wayland_source.node_id,
             None, // continuous — no max frame limit
-            config.width,
-            config.height,
+            hint_w,
+            hint_h,
         ),
         None => crate::pipewire_engine::PipeWireCapture::connect_default(
             wayland_source.node_id,
             None,
-            config.width,
-            config.height,
+            hint_w,
+            hint_h,
         ),
     }
     .map_err(|e| RecordError::GStreamerError(format!("PipeWire capture failed: {e}")))?;
@@ -468,22 +425,26 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         RecordError::GStreamerError("No format negotiated before recording".into())
     })?;
 
-    // Raw frame dimensions sent into ffmpeg after our manual area crop. Video
-    // settings such as max resolution are applied as ffmpeg filters, not here.
-    let mut input_width = format.width;
-    let mut input_height = format.height;
-    if let Some(crop) = wayland_source.crop {
-        input_width = input_width
-            .checked_sub(crop.left + crop.right)
-            .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop width".into()))?;
-        input_height = input_height
-            .checked_sub(crop.top + crop.bottom)
-            .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop height".into()))?;
-        eprintln!(
-            "[recording] Applying Wayland area crop: left={} top={} right={} bottom={} => {}x{}",
-            crop.left, crop.top, crop.right, crop.bottom, input_width, input_height
-        );
-    }
+    let crop = wayland_source.crop.and_then(|crop| {
+        scale_crop_to_frame(
+            crop,
+            wayland_source.stream_width,
+            wayland_source.stream_height,
+            format.width,
+            format.height,
+        )
+    });
+    let (input_width, input_height) = match crop {
+        Some(crop) => {
+            let (width, height) = even_crop_output(crop, format.width, format.height);
+            eprintln!(
+                "[recording] Applying Wayland area crop: left={} top={} => {}x{}",
+                crop.left, crop.top, width, height
+            );
+            (width, height)
+        }
+        None => (format.width.max(2) & !1, format.height.max(2) & !1),
+    };
     let fps = config.fps.max(1);
 
     // Build ffmpeg command
@@ -494,15 +455,6 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         .arg("-loglevel")
         .arg("warning")
         .arg("-nostats");
-
-    if use_vaapi {
-        let (vaapi_width, vaapi_height) =
-            fit_within_max_resolution(input_width, input_height, config.max_resolution);
-        let vaapi_args = super::wf_recorder::ffmpeg_vaapi_args(vaapi_width, vaapi_height);
-        for arg in &vaapi_args {
-            ffmpeg_cmd.arg(arg);
-        }
-    }
 
     ffmpeg_cmd
         .arg("-f")
@@ -516,7 +468,41 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         .arg("-i")
         .arg("pipe:0");
 
-    if !use_vaapi {
+    // Add every input before filters, codecs, maps, and other output options.
+    // FFmpeg otherwise applies an option such as -vf to the following PulseAudio
+    // input and exits with AVERROR(EINVAL) (234).
+    if config.mic_enabled || config.speaker_enabled {
+        super::audio::ensure_pipewire_pulse_running();
+
+        if config.mic_enabled {
+            let mic_dev = config
+                .mic_source
+                .clone()
+                .unwrap_or_else(super::audio::get_pulse_default_source);
+            eprintln!("[recording] Audio: mic device={mic_dev}");
+            ffmpeg_cmd.arg("-f").arg("pulse");
+            ffmpeg_cmd.arg("-i").arg(&mic_dev);
+        }
+
+        if config.speaker_enabled {
+            let spk_dev = config
+                .speaker_source
+                .clone()
+                .unwrap_or_else(super::audio::get_pulse_speaker_monitor);
+            eprintln!("[recording] Audio: speaker monitor={spk_dev}");
+            ffmpeg_cmd.arg("-f").arg("pulse");
+            ffmpeg_cmd.arg("-i").arg(&spk_dev);
+        }
+    }
+
+    if use_vaapi {
+        let (vaapi_width, vaapi_height) =
+            fit_within_max_resolution(input_width, input_height, config.max_resolution);
+        let vaapi_args = super::wf_recorder::ffmpeg_vaapi_args(vaapi_width, vaapi_height);
+        for arg in &vaapi_args {
+            ffmpeg_cmd.arg(arg);
+        }
+    } else {
         // Convert desktop RGBA (full-range RGB) to standard limited-range
         // YUV420P for broad MP4/player compatibility. Tagging H.264 as full
         // range can make some Linux players display lifted blacks / a washed
@@ -560,33 +546,9 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         }
     }
 
-    // Add audio inputs when mic/speaker are enabled.
-    // ffmpeg captures from PulseAudio directly with -f pulse. On modern GNOME
-    // this is normally provided by pipewire-pulse, so start it if the user
-    // session has not already activated it.
+    // Map audio after all inputs have been declared. ffmpeg captures from
+    // PulseAudio directly; on modern GNOME this is provided by pipewire-pulse.
     if config.mic_enabled || config.speaker_enabled {
-        super::audio::ensure_pipewire_pulse_running();
-
-        if config.mic_enabled {
-            let mic_dev = config
-                .mic_source
-                .clone()
-                .unwrap_or_else(super::audio::get_pulse_default_source);
-            eprintln!("[recording] Audio: mic device={mic_dev}");
-            ffmpeg_cmd.arg("-f").arg("pulse");
-            ffmpeg_cmd.arg("-i").arg(&mic_dev);
-        }
-
-        if config.speaker_enabled {
-            let spk_dev = config
-                .speaker_source
-                .clone()
-                .unwrap_or_else(super::audio::get_pulse_speaker_monitor);
-            eprintln!("[recording] Audio: speaker monitor={spk_dev}");
-            ffmpeg_cmd.arg("-f").arg("pulse");
-            ffmpeg_cmd.arg("-i").arg(&spk_dev);
-        }
-
         // Mix multiple audio streams if both enabled.
         if config.mic_enabled && config.speaker_enabled {
             ffmpeg_cmd.arg("-filter_complex");
@@ -601,18 +563,40 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         if config.mono_audio {
             ffmpeg_cmd.arg("-ac").arg("1");
         }
+        // Pulse sources never EOF. Without this, closing the video pipe leaves
+        // ffmpeg blocked on mic/speaker input and Stop never finishes.
+        ffmpeg_cmd.arg("-shortest");
     }
 
     ffmpeg_cmd.arg(&final_path);
     ffmpeg_cmd.stdin(Stdio::piped());
     ffmpeg_cmd.stdout(Stdio::null());
-    ffmpeg_cmd.stderr(Stdio::inherit());
+    ffmpeg_cmd.stderr(Stdio::piped());
 
     let mut child = ffmpeg_cmd
         .spawn()
         .map_err(|e| RecordError::GStreamerError(format!("Failed to spawn ffmpeg: {e}")))?;
 
     let mut stdin = child.stdin.take().expect("stdin should be piped");
+    let mut stderr = child.stderr.take().expect("stderr should be piped");
+    let stderr_reader = std::thread::spawn(move || {
+        const MAX_DIAGNOSTIC_BYTES: usize = 16 * 1024;
+        let mut output = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            match stderr.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    output.extend_from_slice(&buffer[..read]);
+                    if output.len() > MAX_DIAGNOSTIC_BYTES {
+                        let excess = output.len() - MAX_DIAGNOSTIC_BYTES;
+                        output.drain(..excess);
+                    }
+                }
+            }
+        }
+        String::from_utf8_lossy(&output).into_owned()
+    });
 
     println!("Recording (native PipeWire + ffmpeg) to {:?}", final_path);
 
@@ -624,6 +608,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     let mut next_frame_at: Option<std::time::Instant> = None;
     let mut last_pixels: Option<Vec<u8>> = None;
     let mut paused = false;
+    let first_frame_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
 
     loop {
         // Check for control commands
@@ -679,11 +664,26 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         // 16s mostly-static recording can encode as a 4s video at 30fps.
         match capture.try_recv_frame() {
             Ok(Some(frame)) => {
-                last_pixels = Some(if let Some(crop) = wayland_source.crop {
-                    crop_rgba_frame(&frame, crop)?
+                let expected = input_width as usize * input_height as usize * 4;
+                let pixels = if let Some(crop) = crop {
+                    crop_rgba_frame(&frame, crop, input_width, input_height).ok()
+                } else if frame.pixels.len() == expected {
+                    Some(frame.pixels)
                 } else {
-                    frame.pixels
-                });
+                    None
+                };
+                match pixels {
+                    Some(pixels) if pixels.len() == expected => last_pixels = Some(pixels),
+                    Some(pixels) => {
+                        eprintln!(
+                            "[recording] Skipping frame with {} bytes (expected {expected})",
+                            pixels.len()
+                        );
+                    }
+                    None => {
+                        eprintln!("[recording] Skipping frame that failed area crop");
+                    }
+                }
                 if next_frame_at.is_none() {
                     next_frame_at = Some(std::time::Instant::now());
                 }
@@ -696,6 +696,15 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         }
 
         let Some(pixels) = last_pixels.as_ref() else {
+            if std::time::Instant::now() > first_frame_deadline {
+                drop(stdin);
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(RecordError::GStreamerError(
+                    "Recording produced no frames. The screen share ended before capture started."
+                        .into(),
+                ));
+            }
             std::thread::sleep(std::time::Duration::from_millis(1));
             continue;
         };
@@ -733,26 +742,44 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         }
     }
 
+    if matches!(
+        stop_action,
+        super::RecordingTerminalAction::Save | super::RecordingTerminalAction::Discard
+    ) {
+        crate::gnome_shell::hide_recording_mask_best_effort();
+        super::notify_daemon_event("recording_session_ended");
+    }
+
     // Close stdin to signal ffmpeg EOF
     drop(stdin);
 
-    // Wait for ffmpeg to finish
-    let status = child
-        .wait()
-        .map_err(|e| RecordError::GStreamerError(format!("Failed to wait for ffmpeg: {e}")))?;
+    let status = wait_for_ffmpeg_child(&mut child)?;
+    let ffmpeg_stderr = stderr_reader.join().unwrap_or_default();
 
     if stop_action == super::RecordingTerminalAction::Discard {
         let _ = std::fs::remove_file(&final_path);
         return Ok((final_path, stop_action));
     }
 
-    if !status.success() {
+    if frames_written == 0 {
         let _ = std::fs::remove_file(&final_path);
-        return Err(RecordError::GStreamerError(format!(
-            "ffmpeg failed to encode the recording (exit {status}). \
-             On Fedora, install a codec pack or ensure libopenh264 is available \
-             (ffmpeg-free typically provides it)."
-        )));
+        return Err(RecordError::GStreamerError(
+            "Recording produced no frames. The screen share ended before capture started.".into(),
+        ));
+    }
+
+    if !status.success() {
+        let keep_output = std::fs::metadata(&final_path)
+            .map(|metadata| metadata.len() > 0)
+            .unwrap_or(false);
+        if !keep_output {
+            let _ = std::fs::remove_file(&final_path);
+            let detail = ffmpeg_error_detail(&ffmpeg_stderr);
+            return Err(RecordError::GStreamerError(format!(
+                "ffmpeg failed to encode the recording with {encoder_name} (exit {status}).{detail}"
+            )));
+        }
+        eprintln!("[recording] ffmpeg exited {status}; keeping output because it already has data");
     }
 
     // Guard against zero-byte / missing outputs that used to be reported as saved.
@@ -778,6 +805,79 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     }
 
     Ok((final_path, stop_action))
+}
+
+fn ffmpeg_error_detail(stderr: &str) -> String {
+    let lines: Vec<_> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return " Check that FFmpeg supports the selected encoder and audio devices.".into();
+    }
+
+    let start = lines.len().saturating_sub(3);
+    let mut detail = lines[start..].join(" ");
+    if detail.len() > 600 {
+        detail.truncate(600);
+        detail.push_str("...");
+    }
+    format!(" FFmpeg reported: {detail}")
+}
+
+fn wait_for_ffmpeg_child(
+    child: &mut std::process::Child,
+) -> super::RecordResult<std::process::ExitStatus> {
+    if let Some(status) = wait_for_ffmpeg_exit(child, std::time::Duration::from_secs(8))? {
+        return Ok(status);
+    }
+
+    eprintln!("[recording] ffmpeg did not exit after stdin close; interrupting");
+    interrupt_child(child);
+    if let Some(status) = wait_for_ffmpeg_exit(child, std::time::Duration::from_secs(2))? {
+        return Ok(status);
+    }
+
+    let _ = child.kill();
+    child
+        .wait()
+        .map_err(|e| RecordError::GStreamerError(format!("Failed to wait for ffmpeg: {e}")))
+}
+
+fn wait_for_ffmpeg_exit(
+    child: &mut std::process::Child,
+    timeout: std::time::Duration,
+) -> super::RecordResult<Option<std::process::ExitStatus>> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(Some(status)),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(None) => return Ok(None),
+            Err(e) => {
+                return Err(RecordError::GStreamerError(format!(
+                    "Failed to wait for ffmpeg: {e}"
+                )));
+            }
+        }
+    }
+}
+
+fn interrupt_child(child: &std::process::Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as libc::pid_t;
+        if pid > 0 {
+            unsafe {
+                libc::kill(pid, libc::SIGINT);
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = child;
 }
 
 pub(super) fn fit_within_max_resolution(
@@ -812,18 +912,53 @@ pub(super) fn wayland_video_filter(max_resolution: Option<(u32, u32)>) -> String
     format!("{scale},format=yuv420p")
 }
 
+fn scale_crop_to_frame(
+    crop: CropMargins,
+    src_w: u32,
+    src_h: u32,
+    frame_w: u32,
+    frame_h: u32,
+) -> Option<CropMargins> {
+    if frame_w < 2 || frame_h < 2 {
+        return None;
+    }
+    let scaled = if src_w > 0 && src_h > 0 && (src_w != frame_w || src_h != frame_h) {
+        let sx = frame_w as f64 / src_w as f64;
+        let sy = frame_h as f64 / src_h as f64;
+        CropMargins {
+            left: (crop.left as f64 * sx).round() as u32,
+            right: (crop.right as f64 * sx).round() as u32,
+            top: (crop.top as f64 * sy).round() as u32,
+            bottom: (crop.bottom as f64 * sy).round() as u32,
+        }
+    } else {
+        crop
+    };
+    if scaled.left + scaled.right >= frame_w || scaled.top + scaled.bottom >= frame_h {
+        return None;
+    }
+    Some(scaled)
+}
+
+fn even_crop_output(crop: CropMargins, frame_w: u32, frame_h: u32) -> (u32, u32) {
+    let mut width = frame_w.saturating_sub(crop.left + crop.right).max(2);
+    let mut height = frame_h.saturating_sub(crop.top + crop.bottom).max(2);
+    width &= !1;
+    height &= !1;
+    (width.max(2), height.max(2))
+}
+
 fn crop_rgba_frame(
     frame: &crate::pipewire_engine::PipeWireFrame,
     crop: CropMargins,
+    out_width: u32,
+    out_height: u32,
 ) -> super::RecordResult<Vec<u8>> {
-    let out_width = frame
-        .width
-        .checked_sub(crop.left + crop.right)
-        .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop width".into()))?;
-    let out_height = frame
-        .height
-        .checked_sub(crop.top + crop.bottom)
-        .ok_or_else(|| RecordError::GStreamerError("Invalid Wayland crop height".into()))?;
+    if crop.left + out_width > frame.width || crop.top + out_height > frame.height {
+        return Err(RecordError::GStreamerError(
+            "Wayland crop exceeded frame bounds".into(),
+        ));
+    }
 
     let src_stride = frame.stride as usize;
     let row_bytes = out_width as usize * 4;
@@ -1157,8 +1292,7 @@ pub(super) async fn get_wayland_source(
     }
 
     discard_stale_recording_restore_tokens();
-    let (response, session, pipewire_fd) =
-        request_screencast(cursor_mode, wants_area_crop).await?;
+    let (response, session, pipewire_fd) = request_screencast(cursor_mode, wants_area_crop).await?;
 
     let stream = response
         .streams()
@@ -1827,9 +1961,41 @@ mod tests {
     }
 
     #[test]
+    fn scale_crop_maps_portal_size_onto_negotiated_frame() {
+        let crop = CropMargins {
+            left: 100,
+            right: 100,
+            top: 50,
+            bottom: 50,
+        };
+        let scaled = scale_crop_to_frame(crop, 1920, 1080, 3840, 2160).expect("crop should scale");
+        assert_eq!(scaled.left, 200);
+        assert_eq!(scaled.right, 200);
+        assert_eq!(scaled.top, 100);
+        assert_eq!(scaled.bottom, 100);
+        assert!(scale_crop_to_frame(crop, 200, 100, 200, 100).is_none());
+    }
+
+    #[test]
+    fn ffmpeg_error_detail_keeps_the_useful_final_lines() {
+        let stderr = "banner\ninput description\nMove this option before the file it belongs to.\n\
+                      Error opening input files: Invalid argument\n";
+        let detail = ffmpeg_error_detail(stderr);
+
+        assert!(detail.contains("Move this option before the file it belongs to."));
+        assert!(detail.contains("Error opening input files: Invalid argument"));
+        assert!(!detail.contains("banner"));
+    }
+
+    #[test]
+    fn ffmpeg_error_detail_has_a_fallback() {
+        let detail = ffmpeg_error_detail("");
+        assert!(detail.contains("selected encoder and audio devices"));
+    }
+
+    #[test]
     fn missing_stream_position_defaults_to_origin() {
         let pos = resolve_wayland_stream_position(None, (1920, 1080), (100, 100, 200, 200));
-        // Without GDK monitors in unit tests, falls back to (0, 0).
         assert_eq!(pos, (0, 0));
         assert_eq!(
             resolve_wayland_stream_position(Some((1920, 0)), (2560, 1440), (2000, 10, 100, 100)),

@@ -12,10 +12,7 @@ use crate::capture::editor::{
     state::EditorState,
 };
 
-pub fn persist_image_session(
-    path: &Path,
-    state: &EditorState,
-) -> Result<(), AnnotationError> {
+pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), AnnotationError> {
     save_annotations(
         path,
         state.base_image.width(),
@@ -208,6 +205,9 @@ mod tests {
         let persist = handler
             .find("persist_image_session")
             .expect("persist session");
-        assert!(flatten < persist, "Done must flatten before writing the sidecar");
+        assert!(
+            flatten < persist,
+            "Done must flatten before writing the sidecar"
+        );
     }
 }

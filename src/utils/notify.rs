@@ -63,7 +63,6 @@ fn desktop_notification_with_options_inner(
     urgency: Urgency,
     replaces_id: u32,
 ) -> Option<u32> {
-
     // Flatpak: D-Bus Notifications only — never shell out to notify-send.
     let force_dbus = crate::app_identity::portal_only() || prefer_dbus_primary();
 

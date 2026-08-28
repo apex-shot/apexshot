@@ -462,7 +462,7 @@ pub async fn run_recording_with_native_controls(
     });
 
     control_server.set_command_sender(control_command_tx);
-    // `start_recording_*` emits recording_session_started (tray + desktop toast).
+    super::notify_daemon_event("recording_session_started");
     let outcome = if let Some(prepared_backend) = prepared_backend {
         super::backend::start_recording_with_prepared_backend(prepared_backend, Some(command_rx))
             .await
@@ -515,8 +515,15 @@ async fn run_recording_with_shell_mask(
     config: super::RecordingConfig,
     params: RecordingControlsParams,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
+    let _chrome = crate::gnome_shell::RecordingChromeGuard::clear_on_drop();
     // Same ordering as the native path: portal / backend first, then countdown.
-    let mut prepared_backend = prepare_shell_recording(config.clone()).await?;
+    let mut prepared_backend = match prepare_shell_recording(config.clone()).await {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            super::notify_recording_session_ended_best_effort();
+            return Err(err.into());
+        }
+    };
 
     let _shell_mask = if params.use_shell_mask {
         match crate::gnome_shell::show_recording_mask(crate::gnome_shell::RecordingMaskGeometry {
@@ -535,9 +542,18 @@ async fn run_recording_with_shell_mask(
         None
     };
 
-    if params.countdown_enabled && !run_shell_recording_countdown(params.clone()).await? {
-        super::notify_recording_session_ended_best_effort();
-        return Ok((config.output_path.clone(), StopAction::Discard));
+    if params.countdown_enabled {
+        match run_shell_recording_countdown(params.clone()).await {
+            Ok(true) => {}
+            Ok(false) => {
+                super::notify_recording_session_ended_best_effort();
+                return Ok((config.output_path.clone(), StopAction::Discard));
+            }
+            Err(err) => {
+                super::notify_recording_session_ended_best_effort();
+                return Err(err);
+            }
+        }
     }
 
     let session_id = format!(
@@ -638,10 +654,12 @@ pub fn run_overlay_recording_request_with_gtk(
 
     eprintln!("Starting recording to {:?}...", prepared.output_path);
 
+    crate::gnome_shell::hide_recording_mask_best_effort();
+    let _chrome = crate::gnome_shell::RecordingChromeGuard::clear_on_drop();
     let open_editor = prepared.open_editor;
     let recording_config = prepared.recording_config.clone();
     let controls_params = prepared.controls_params.clone();
-    let outcome = std::thread::spawn(move || -> anyhow::Result<(PathBuf, StopAction)> {
+    let outcome = match std::thread::spawn(move || -> anyhow::Result<(PathBuf, StopAction)> {
         let runtime = tokio::runtime::Runtime::new()?;
         if let Some(params) = controls_params {
             runtime
@@ -655,7 +673,14 @@ pub fn run_overlay_recording_request_with_gtk(
         }
     })
     .join()
-    .map_err(|_| anyhow::anyhow!("recording worker panicked"))?;
+    {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            crate::gnome_shell::hide_recording_mask_best_effort();
+            super::notify_recording_session_ended_best_effort();
+            return Err(anyhow::anyhow!("recording worker panicked"));
+        }
+    };
 
     match outcome {
         Ok((path, StopAction::Discard)) => {
@@ -697,7 +722,12 @@ pub fn run_overlay_recording_request_with_gtk(
             }
             Ok(path)
         }
-        Err(err) => Err(anyhow::anyhow!("Recording failed: {err}")),
+        Err(err) => {
+            crate::gnome_shell::hide_recording_mask_best_effort();
+            super::notify_recording_session_ended_best_effort();
+            crate::utils::notify::desktop_notification("Recording failed", &err.to_string());
+            Err(anyhow::anyhow!("Recording failed: {err}"))
+        }
     }
 }
 

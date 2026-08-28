@@ -82,8 +82,12 @@ impl ksni::Tray for ApexShotTray {
         }
     }
 
+    fn category(&self) -> ksni::Category {
+        ksni::Category::SystemServices
+    }
+
     fn id(&self) -> String {
-        crate::app_identity::app_id().to_string()
+        status_notifier_id()
     }
     fn icon_name(&self) -> String {
         String::new()
@@ -136,9 +140,13 @@ impl ksni::Tray for ApexShotTray {
             item!("History", idle, TrayAction::OpenHistory),
             item!("Settings", idle, TrayAction::OpenSettings),
             MenuItem::Separator,
-            item!("Quit", idle, TrayAction::Quit),
+            item!("Quit", true, TrayAction::Quit),
         ]
     }
+}
+
+pub fn status_notifier_id() -> String {
+    format!("{}.Tray", crate::app_identity::app_id())
 }
 
 pub fn spawn_tray(tx: Sender<TrayAction>) -> anyhow::Result<ksni::Handle<ApexShotTray>> {
@@ -146,4 +154,16 @@ pub fn spawn_tray(tx: Sender<TrayAction>) -> anyhow::Result<ksni::Handle<ApexSho
     let handle = service.handle();
     service.spawn();
     Ok(handle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tray_id_is_not_the_application_window_id() {
+        let id = status_notifier_id();
+        assert_ne!(id, crate::app_identity::app_id());
+        assert!(id.ends_with(".Tray"));
+    }
 }

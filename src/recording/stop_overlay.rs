@@ -198,7 +198,7 @@ pub fn run_recording_countdown_bar(
     seconds: u32,
 ) -> Result<bool, StopOverlayError> {
     let app = Application::builder()
-        .application_id(crate::app_identity::app_id())
+        .application_id("com.apexshot.recording")
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 

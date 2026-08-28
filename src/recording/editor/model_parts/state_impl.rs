@@ -103,7 +103,7 @@ impl VideoEditState {
                 return self.segment_start(0) + (source_t - start);
             }
         }
-        if let Some((index, &(start, _))) = bounds.iter().enumerate().last() {
+        if let Some((index, &(start, _))) = bounds.iter().enumerate().next_back() {
             return self.segment_start(index) + (source_t - start);
         }
         source_t.max(0.0)

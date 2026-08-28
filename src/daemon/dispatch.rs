@@ -1,6 +1,9 @@
 use super::capture_handlers;
 use super::recording_handlers;
-use super::{spawn_daemon_tray, ApexShotTray, DaemonAction, DaemonState, HOTKEY_SUPPRESSED};
+use super::{
+    respawn_daemon_tray, spawn_daemon_tray, ApexShotTray, DaemonAction, DaemonState,
+    HOTKEY_SUPPRESSED,
+};
 use std::sync::{Arc, Mutex};
 
 /// Dispatch one daemon action. Returns `false` when the daemon should quit.
@@ -99,6 +102,7 @@ pub(super) fn dispatch_daemon_action(
                 crate::recording::RecordingControlCommand::StopSave,
             ) {
                 eprintln!("[daemon] No active recording available for stop/save.");
+                idle_recording_tray(action_tx, tray_handle, recording_tray_state);
             }
         }
 
@@ -161,14 +165,7 @@ pub(super) fn dispatch_daemon_action(
         }
         DaemonAction::RecordingSessionStarted => {
             *recording_tray_state = Some(recording_handlers::RecordingTrayState::started());
-            if tray_handle.is_none() {
-                match spawn_daemon_tray(action_tx) {
-                    Ok(handle) => *tray_handle = Some(handle),
-                    Err(e) => {
-                        eprintln!("[daemon] Failed to show recording tray: {e}");
-                    }
-                }
-            }
+            respawn_daemon_tray(action_tx, tray_handle);
             recording_handlers::update_recording_tray(tray_handle, recording_tray_state.as_ref());
         }
         DaemonAction::RecordingSessionPaused => {
@@ -196,8 +193,7 @@ pub(super) fn dispatch_daemon_action(
             }
         }
         DaemonAction::RecordingSessionEnded => {
-            *recording_tray_state = None;
-            recording_handlers::update_tray_recording_state(tray_handle, None);
+            idle_recording_tray(action_tx, tray_handle, recording_tray_state);
         }
         DaemonAction::SetHotkeySuppressed(suppressed) => {
             HOTKEY_SUPPRESSED.store(suppressed, std::sync::atomic::Ordering::Relaxed);
@@ -213,4 +209,14 @@ pub(super) fn dispatch_daemon_action(
     }
 
     true
+}
+
+fn idle_recording_tray(
+    action_tx: &std::sync::mpsc::Sender<DaemonAction>,
+    tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,
+    recording_tray_state: &mut Option<recording_handlers::RecordingTrayState>,
+) {
+    *recording_tray_state = None;
+    respawn_daemon_tray(action_tx, tray_handle);
+    recording_handlers::update_tray_recording_state(tray_handle, None);
 }

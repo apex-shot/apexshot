@@ -673,6 +673,7 @@ pub(super) fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonSta
         Ok(AreaCapturePathResult::RecordingRequested(request)) => {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
                 eprintln!("[daemon] Recording failed: {err}");
+                send_desktop_notification("Recording failed", &err.to_string());
                 // Show notification for GNOME extension not installed
                 if err
                     .to_string()

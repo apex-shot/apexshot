@@ -472,6 +472,20 @@ pub fn hide_recording_mask_best_effort() {
     let _ = hide_recording_countdown();
 }
 
+pub struct RecordingChromeGuard;
+
+impl RecordingChromeGuard {
+    pub fn clear_on_drop() -> Self {
+        Self
+    }
+}
+
+impl Drop for RecordingChromeGuard {
+    fn drop(&mut self) {
+        hide_recording_mask_best_effort();
+    }
+}
+
 pub fn show_recording_countdown(
     geometry: RecordingMaskGeometry,
     seconds: u32,

@@ -253,12 +253,10 @@ fn preprocess_image(image: &RgbaImage, config: &PreprocessConfig) -> Vec<u8> {
             } else {
                 inverted as u8
             }
+        } else if apply_contrast {
+            ((*pixel as f32 - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0) as u8
         } else {
-            if apply_contrast {
-                ((*pixel as f32 - 128.0) * config.contrast + 128.0).clamp(0.0, 255.0) as u8
-            } else {
-                *pixel
-            }
+            *pixel
         };
         *pixel = processed;
     }

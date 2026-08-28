@@ -2841,7 +2841,11 @@ mod tests {
             .find("fn persist_image_session_on_close(")
             .expect("image close persist helper");
         let rest = &source[start + 1..];
-        let end = rest.find("\nfn ").or_else(|| rest.find("\n#[cfg(test)]")).map(|i| start + 1 + i).unwrap_or(source.len());
+        let end = rest
+            .find("\nfn ")
+            .or_else(|| rest.find("\n#[cfg(test)]"))
+            .map(|i| start + 1 + i)
+            .unwrap_or(source.len());
         let handler = &source[start..end];
         assert!(
             handler.contains("persist_image_session"),

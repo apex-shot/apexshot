@@ -173,18 +173,13 @@ pub(super) fn show_crop(
     });
     overlay.add_overlay(&draw_area);
 
-    let classify = {
-        let src_w = src_w;
-        let src_h = src_h;
-        move |px: f64, py: f64, w: f64, h: f64, rect: (f64, f64, f64, f64)| -> DragOp {
-            classify_crop_handle(px, py, w, h, rect, src_w, src_h)
-        }
+    let classify = move |px: f64, py: f64, w: f64, h: f64, rect: (f64, f64, f64, f64)| -> DragOp {
+        classify_crop_handle(px, py, w, h, rect, src_w, src_h)
     };
 
     // Cursor feedback: change cursor when hovering the outline/handles/body.
     {
         let selection = selection.clone();
-        let classify = classify.clone();
         let motion = EventControllerMotion::new();
         motion.connect_motion({
             let draw_area = draw_area.clone();
@@ -213,7 +208,6 @@ pub(super) fn show_crop(
     press.connect_pressed({
         let selection = selection.clone();
         let op = op.clone();
-        let classify = classify.clone();
         let draw_area = draw_area.clone();
         move |_, _, px, py| {
             let w = draw_area.allocated_width().max(1) as f64;
@@ -234,7 +228,6 @@ pub(super) fn show_crop(
     drag.connect_drag_begin({
         let selection = selection.clone();
         let op = op.clone();
-        let classify = classify.clone();
         let draw_area = draw_area.clone();
         move |_, px, py| {
             if op.borrow().is_some() {

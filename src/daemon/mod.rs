@@ -327,6 +327,24 @@ pub(super) fn spawn_daemon_tray(
     spawn_tray(tray_tx).context("Failed to spawn tray icon")
 }
 
+pub(super) fn respawn_daemon_tray(
+    action_tx: &std::sync::mpsc::Sender<DaemonAction>,
+    tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,
+) {
+    if let Some(handle) = tray_handle.take() {
+        handle.shutdown();
+    }
+    match spawn_daemon_tray(action_tx) {
+        Ok(handle) => {
+            *tray_handle = Some(handle);
+            eprintln!("[daemon] Tray icon re-registered.");
+        }
+        Err(e) => {
+            eprintln!("[daemon] Failed to show recording tray: {e}");
+        }
+    }
+}
+
 /// A request for GTK work that must run on the main OS thread.
 /// The daemon sends these through a channel; the main thread executes them.
 pub enum GtkWork {

@@ -1038,7 +1038,10 @@ mod tests {
             .find("fn wire_close_persist(")
             .expect("video close persist handler");
         let rest = &source[start + 1..];
-        let end = rest.find("\nfn ").map(|i| start + 1 + i).unwrap_or(source.len());
+        let end = rest
+            .find("\nfn ")
+            .map(|i| start + 1 + i)
+            .unwrap_or(source.len());
         let handler = &source[start..end];
         assert!(
             handler.contains("persist_video_session"),

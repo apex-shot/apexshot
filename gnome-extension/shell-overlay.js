@@ -9,6 +9,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const DBUS_NAME = 'org.apexshot.ShellOverlay';
 const DBUS_PATH = '/org/apexshot/ShellOverlay';
+const DAEMON_BUS_NAME = 'org.apexshot.Daemon';
 
 const DBUS_INTERFACE = `
 <node>
@@ -57,6 +58,7 @@ export class ShellOverlayService {
     constructor() {
         this._dbus = null;
         this._nameId = 0;
+        this._daemonWatchId = 0;
         this._monitorsChangedId = 0;
         this._maskGroup = null;
         this._rect = null;
@@ -87,9 +89,24 @@ export class ShellOverlayService {
 
         this._monitorsChangedId = Main.layoutManager.connect('monitors-changed',
             () => this._redraw());
+
+        this._daemonWatchId = Gio.bus_watch_name(
+            Gio.BusType.SESSION,
+            DAEMON_BUS_NAME,
+            Gio.BusNameWatcherFlags.NONE,
+            () => {},
+            () => {
+                this.HideMask();
+                this.HideCountdown();
+                this._stopPointerTrackInternal(false);
+            });
     }
 
     disable() {
+        if (this._daemonWatchId) {
+            Gio.bus_unwatch_name(this._daemonWatchId);
+            this._daemonWatchId = 0;
+        }
         if (this._monitorsChangedId) {
             Main.layoutManager.disconnect(this._monitorsChangedId);
             this._monitorsChangedId = 0;
