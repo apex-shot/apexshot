@@ -362,7 +362,7 @@ fn native_controls_should_be_visible(
 ) -> bool {
     // Floating recording controls are disabled on the native (non-GNOME) path.
     // Fedora/KDE and other desktops use global shortcuts + tray + desktop
-    // notifications, matching system tools like Spectacle.
+    // notifications.
     false
 }
 

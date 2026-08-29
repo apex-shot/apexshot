@@ -344,6 +344,10 @@
                 border-radius: 0;
             }
 
+            .recording-editor-cursor-layer {
+                transform: none;
+            }
+
             .recording-editor-player-bar {
                 min-height: 28px;
                 margin: 0 -28px 0 -28px;

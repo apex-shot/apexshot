@@ -1,3 +1,4 @@
+pub mod cursor_export;
 pub mod cursor_sprite;
 pub mod ffmpeg;
 pub mod model;

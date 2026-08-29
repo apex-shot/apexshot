@@ -21,7 +21,7 @@ pub(super) type RecordingPortalSession =
 pub(super) enum WaylandCaptureSession {
     /// XDG ScreenCast portal session (GNOME and generic fallback).
     Portal(#[allow(dead_code)] RecordingPortalSession),
-    /// KWin `zkde_screencast_unstable_v1` (Spectacle-style, no portal dialog).
+    /// KWin `zkde_screencast_unstable_v1` (no portal dialog).
     /// Boxed so the portal variant stays small (clippy `large_enum_variant`).
     KdeNative(Box<crate::backend::kde_screencast::KdeScreencastHandle>),
 }
@@ -42,7 +42,7 @@ impl std::fmt::Debug for WaylandCaptureSession {
 pub(super) struct WaylandSource {
     node_id: u32,
     /// Portal remote FD. `None` for KDE-native streams that publish on the
-    /// default session PipeWire socket (same as Spectacle / KPipeWire).
+    /// default session PipeWire socket.
     pipewire_fd: Option<OwnedFd>,
     stream_width: u32,
     stream_height: u32,
@@ -1092,18 +1092,15 @@ fn build_x11_gstreamer_pipeline(
 fn video_encoder_props(profile: &EncoderProfile, config: &super::RecordingConfig) -> String {
     let key_int_max = config.fps.saturating_mul(2).max(1);
 
-    // Presets informed by OBS's obs-ffmpeg-video-encoders.c, adapted for
-    // file recording (prioritize quality over streaming latency).
+    // File-recording presets (quality over streaming latency).
 
     if profile.encoder == "x264enc" {
-        // OBS default: veryfast, CRF 23, main profile.
-        // For screen recording we bump quality slightly but keep the fast preset.
+        // veryfast, CRF 22, main profile.
         return format!("preset=veryfast crf=22 profile=main key-int-max={key_int_max}",);
     }
 
     if profile.encoder == "vp9enc" {
-        // OBS default: CQ 30, deadline good, cpu-used 0.
-        // For local recording we use slightly higher quality.
+        // Local recording: slightly higher quality than typical streaming CQ.
         return format!(
             "deadline=good end-usage=cq cq-level=20 target-bitrate=0 cpu-used=2 row-mt=true threads=8 keyframe-max-dist={key_int_max} lag-in-frames=0",
         );
@@ -1174,10 +1171,9 @@ async fn build_pipeline(
     })
 }
 
-/// On KDE Plasma, the reliable capture path is the desktop portal UI
-/// (same chooser Spectacle uses under the hood). KDE-native
-/// `zkde_screencast` is opt-in only — it needs compositor authorization that
-/// often fails for third-party apps and caused confusing dual-UI / crashes.
+/// On KDE Plasma, the reliable capture path is the desktop portal UI.
+/// Native `zkde_screencast` is opt-in only — it needs compositor authorization
+/// that often fails for third-party apps and caused confusing dual-UI / crashes.
 pub(super) fn prefer_kde_native_screencast() -> bool {
     std::env::var_os("APEXSHOT_KDE_NATIVE_SCREENCAST").is_some()
         && crate::backend::kde_screencast::is_kde_native_screencast_preferred()
@@ -1338,7 +1334,7 @@ pub(super) async fn get_wayland_source(
     })
 }
 
-/// Spectacle-style KWin screencast: `zkde_screencast_unstable_v1` → PipeWire node
+/// KWin screencast: `zkde_screencast_unstable_v1` → PipeWire node
 /// on the default session socket. No xdg-desktop-portal dialog.
 pub(super) fn get_kde_wayland_source(
     config: &super::RecordingConfig,
@@ -1876,7 +1872,7 @@ mod tests {
 
         let props = video_encoder_props(profile_by_encoder("x264enc"), &config);
 
-        // OBS-based preset: veryfast + crf 22 + main profile
+        // veryfast + crf 22 + main profile
         assert!(props.contains("preset=veryfast"));
         assert!(props.contains("crf=22"));
         assert!(props.contains("profile=main"));

@@ -1,8 +1,8 @@
-//! Native PipeWire engine for screen capture — OBS-style.
+//! Native PipeWire engine for screen capture.
 //!
 //! Replaces the GStreamer `pipewiresrc` pipeline with direct `libpipewire` API.
 //!
-//! Architecture (mirrors OBS's `plugins/linux-pipewire/pipewire.c`):
+//! Architecture:
 //!
 //! 1. `PipeWireCapture` wraps the full PipeWire connection lifecycle:
 //!    `ThreadLoopRc` → `ContextRc` → `CoreRc` → `StreamRc`.
@@ -217,8 +217,7 @@ impl PipeWireCapture {
     /// Connect to the default session PipeWire socket.
     ///
     /// Used by KDE-native `zkde_screencast_unstable_v1` streams, which publish
-    /// a node on the regular session graph (same approach as Spectacle's
-    /// `PipeWireRecord`) rather than a portal-scoped remote.
+    /// a node on the regular session graph rather than a portal-scoped remote.
     pub fn connect_default(
         node_id: u32,
         max_frames: Option<u64>,
@@ -685,7 +684,7 @@ fn rgba_copy_plan(raw_len: usize, width: usize, height: usize, bpp: usize) -> Op
     if raw_len < min_len {
         return None;
     }
-    if raw_len % height == 0 {
+    if raw_len.is_multiple_of(height) {
         let stride = raw_len / height;
         if stride >= packed {
             return Some(stride);
@@ -768,7 +767,7 @@ fn build_shm_buffers_pod() -> Vec<u8> {
         id: spa::param::ParamType::Buffers.as_raw(),
         properties: vec![Property::new(
             spa_sys::SPA_PARAM_BUFFERS_dataType,
-            Value::Int(data_type as i32),
+            Value::Int(data_type),
         )],
     };
     pw::spa::pod::serialize::PodSerializer::serialize(

@@ -551,6 +551,176 @@ pub fn bind_zoom_track(
     );
 }
 
+pub fn bind_hide_track(
+    area: &DrawingArea,
+    state: Arc<Mutex<VideoEditState>>,
+    media: Rc<RefCell<Option<MediaFile>>>,
+    hover: Rc<Cell<Option<usize>>>,
+    hover_time: Rc<Cell<Option<f64>>>,
+    dragging: Rc<Cell<Option<usize>>>,
+    redraw: Rc<dyn Fn()>,
+) {
+    let click = GestureClick::new();
+    click.set_button(1);
+    click.connect_pressed({
+        let state = state.clone();
+        let redraw = redraw.clone();
+        move |gesture, _, x, _| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let mut guard = state.lock().unwrap();
+            if near_playhead(&guard, width, x) {
+                return;
+            }
+            if let Some(index) = cursor_hide_clip_at(&guard, width, x) {
+                select_cursor_hide(&mut guard, Some(index));
+            } else {
+                let at = snap_timeline_to_playhead(&guard, width, x_to_timeline(&guard, width, x));
+                if guard.add_cursor_hide_at(at).is_none() {
+                    select_cursor_hide(&mut guard, None);
+                }
+            }
+            drop(guard);
+            redraw();
+        }
+    });
+    area.add_controller(click);
+
+    let drag_kind = Rc::new(Cell::new(None::<HideDrag>));
+    let drag = GestureDrag::new();
+    drag.set_button(1);
+    drag.connect_drag_begin({
+        let state = state.clone();
+        let drag_kind = drag_kind.clone();
+        let dragging = dragging.clone();
+        move |gesture, x, _| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let mut guard = state.lock().unwrap();
+            if near_playhead(&guard, width, x) {
+                dragging.set(None);
+                drag_kind.set(Some(HideDrag::Seek));
+                return;
+            }
+            let kind = if let Some((index, is_start)) = cursor_hide_edge_at(&guard, width, x) {
+                select_cursor_hide(&mut guard, Some(index));
+                Some(HideDrag::Edge { index, is_start })
+            } else if let Some(index) = cursor_hide_clip_at(&guard, width, x) {
+                select_cursor_hide(&mut guard, Some(index));
+                let clip = &guard.cursor_hide_clips[index];
+                Some(HideDrag::Move {
+                    index,
+                    origin_start: clip.start,
+                    pixels_per_second: pixels_per_second(&guard, width),
+                })
+            } else {
+                None
+            };
+            dragging.set(match kind {
+                Some(HideDrag::Move { index, .. }) => Some(index),
+                _ => None,
+            });
+            drag_kind.set(kind);
+        }
+    });
+    drag.connect_drag_update({
+        let state = state.clone();
+        let media = media.clone();
+        let drag_kind = drag_kind.clone();
+        let redraw = redraw.clone();
+        move |gesture, offset_x, _| {
+            let Some((start_x, _)) = gesture.start_point() else {
+                return;
+            };
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            match drag_kind.get() {
+                Some(HideDrag::Edge { index, is_start }) => {
+                    let mut guard = state.lock().unwrap();
+                    let seconds = snap_timeline_to_playhead(
+                        &guard,
+                        width,
+                        x_to_timeline(&guard, width, start_x + offset_x),
+                    );
+                    if let Some(clip) = guard.cursor_hide_clips.get(index).cloned() {
+                        if is_start {
+                            guard.set_cursor_hide_range(index, seconds, clip.end);
+                        } else {
+                            guard.set_cursor_hide_range(index, clip.start, seconds);
+                        }
+                    }
+                }
+                Some(HideDrag::Move {
+                    index,
+                    origin_start,
+                    pixels_per_second,
+                }) => {
+                    let mut guard = state.lock().unwrap();
+                    let duration = guard
+                        .cursor_hide_clips
+                        .get(index)
+                        .map(|clip| clip.duration())
+                        .unwrap_or(0.0);
+                    let delta = offset_x / pixels_per_second.max(1e-6);
+                    let start = snap_range_start_to_playhead(
+                        &guard,
+                        width,
+                        origin_start + delta,
+                        duration,
+                    );
+                    guard.move_cursor_hide_clip(index, start);
+                }
+                Some(HideDrag::Seek) => {
+                    seek_to_x(&state, &media, width, start_x + offset_x);
+                }
+                None => {}
+            }
+            redraw();
+        }
+    });
+    drag.connect_drag_end({
+        let dragging = dragging.clone();
+        let redraw = redraw.clone();
+        move |_, _, _| {
+            dragging.set(None);
+            redraw();
+        }
+    });
+    area.add_controller(drag);
+    bind_track_cursor(
+        area,
+        {
+            let state = state.clone();
+            Rc::new(move |width, x| {
+                let guard = state.lock().unwrap();
+                if near_playhead(&guard, width, x) {
+                    return (TrackCursor::Playhead, None, None);
+                }
+                match cursor_hide_edge_at(&guard, width, x) {
+                    Some((index, true)) => (TrackCursor::ResizeStart, Some(index), None),
+                    Some((index, false)) => (TrackCursor::ResizeEnd, Some(index), None),
+                    None => match cursor_hide_clip_at(&guard, width, x) {
+                        Some(index) => (TrackCursor::Grab, Some(index), None),
+                        None => (
+                            TrackCursor::None,
+                            None,
+                            Some(x_to_timeline(&guard, width, x)),
+                        ),
+                    },
+                }
+            })
+        },
+        hover,
+        hover_time,
+    );
+}
+
 pub fn bind_track_cursor(
     area: &DrawingArea,
     hit: Rc<dyn Fn(f64, f64) -> (TrackCursor, Option<usize>, Option<f64>)>,

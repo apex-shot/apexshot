@@ -399,7 +399,7 @@ async fn start_shell_recording(
 ///
 /// No floating control bar — users control the session with configured
 /// global shortcuts and the tray. Lifecycle feedback is via desktop
-/// notifications (same idea as Spectacle / system recorders).
+/// notifications.
 pub async fn run_recording_with_native_controls(
     config: super::RecordingConfig,
     params: RecordingControlsParams,

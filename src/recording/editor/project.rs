@@ -10,10 +10,11 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use super::model::{
-    AudioMode, ClickEffect, CropSelection, CursorSettings, CursorTheme, DimensionPreset,
-    ProjectMedia, ProjectMediaKind, VideoBackground, VideoEditState, ZoomClip, ZoomMode,
-    DEFAULT_CLICK_INTENSITY, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE,
-    DEFAULT_CURSOR_SMOOTH,
+    AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
+    DimensionPreset, ProjectMedia, ProjectMediaKind, VideoBackground, VideoEditState, ZoomClip,
+    ZoomMode, DEFAULT_CLICK_INTENSITY, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW,
+    DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY,
+    DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
 };
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
@@ -35,6 +36,8 @@ pub struct VideoProjectFile {
     pub segment_muted: Vec<bool>,
     pub timeline_offset_seconds: f64,
     pub zoom_clips: Vec<ZoomClipFile>,
+    #[serde(default)]
+    pub cursor_hide_clips: Vec<CursorHideClipFile>,
     pub zoom_classic: bool,
     pub zoom_hidden: bool,
     pub zoom_locked: bool,
@@ -59,9 +62,13 @@ pub struct VideoProjectFile {
     #[serde(default)]
     pub selected_zoom: Option<usize>,
     #[serde(default)]
+    pub selected_cursor_hide: Option<usize>,
+    #[serde(default)]
     pub cursor_theme: CursorThemeFile,
     #[serde(default = "default_cursor_size")]
     pub cursor_size: f64,
+    #[serde(default = "default_cursor_speed")]
+    pub cursor_speed: f64,
     #[serde(default = "default_cursor_shadow")]
     pub cursor_shadow: f64,
     #[serde(default = "default_cursor_smooth")]
@@ -74,6 +81,18 @@ pub struct VideoProjectFile {
     pub cursor_click_effect: ClickEffectFile,
     #[serde(default = "default_click_intensity")]
     pub cursor_click_intensity: f64,
+    #[serde(default = "default_cursor_trail")]
+    pub cursor_trail: f64,
+    #[serde(default = "default_cursor_tilt")]
+    pub cursor_tilt: f64,
+    #[serde(default = "default_cursor_sway")]
+    pub cursor_sway: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CursorHideClipFile {
+    pub start: f64,
+    pub end: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,7 +116,12 @@ pub enum ZoomModeFile {
 #[serde(rename_all = "snake_case")]
 pub enum CursorThemeFile {
     #[default]
-    #[serde(alias = "classic", alias = "crosshair", alias = "hand", alias = "circle")]
+    #[serde(
+        alias = "classic",
+        alias = "crosshair",
+        alias = "hand",
+        alias = "circle"
+    )]
     Adwaita,
     Yaru,
     #[serde(alias = "windows")]
@@ -270,6 +294,20 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
     }
 }
 
+fn hide_to_file(clip: &CursorHideClip) -> CursorHideClipFile {
+    CursorHideClipFile {
+        start: clip.start,
+        end: clip.end,
+    }
+}
+
+fn hide_from_file(clip: &CursorHideClipFile) -> CursorHideClip {
+    CursorHideClip {
+        start: clip.start,
+        end: clip.end,
+    }
+}
+
 fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
     ZoomClip {
         start: clip.start,
@@ -360,6 +398,10 @@ fn default_cursor_size() -> f64 {
     DEFAULT_CURSOR_SIZE
 }
 
+fn default_cursor_speed() -> f64 {
+    DEFAULT_CURSOR_SPEED
+}
+
 fn default_cursor_shadow() -> f64 {
     DEFAULT_CURSOR_SHADOW
 }
@@ -374,6 +416,18 @@ fn default_cursor_idle_ms() -> f64 {
 
 fn default_click_intensity() -> f64 {
     DEFAULT_CLICK_INTENSITY
+}
+
+fn default_cursor_trail() -> f64 {
+    DEFAULT_CURSOR_TRAIL
+}
+
+fn default_cursor_tilt() -> f64 {
+    DEFAULT_CURSOR_TILT
+}
+
+fn default_cursor_sway() -> f64 {
+    DEFAULT_CURSOR_SWAY
 }
 
 fn click_effect_to_file(effect: ClickEffect) -> ClickEffectFile {
@@ -470,6 +524,7 @@ impl VideoEditState {
             segment_muted: self.segment_muted.clone(),
             timeline_offset_seconds: self.timeline_offset_seconds,
             zoom_clips: self.zoom_clips.iter().map(zoom_to_file).collect(),
+            cursor_hide_clips: self.cursor_hide_clips.iter().map(hide_to_file).collect(),
             zoom_classic: self.zoom_classic,
             zoom_hidden: self.zoom_hidden,
             zoom_locked: self.zoom_locked,
@@ -492,14 +547,19 @@ impl VideoEditState {
             timeline_scale: self.timeline_scale,
             timeline_scroll_seconds: self.timeline_scroll_seconds,
             selected_zoom: self.selected_zoom,
+            selected_cursor_hide: self.selected_cursor_hide,
             cursor_theme: cursor_theme_to_file(self.cursor.theme),
             cursor_size: self.cursor.size,
+            cursor_speed: self.cursor.speed,
             cursor_shadow: self.cursor.shadow,
             cursor_smooth: self.cursor.smooth,
             cursor_hide_idle: self.cursor.hide_idle,
             cursor_idle_ms: self.cursor.idle_ms,
             cursor_click_effect: click_effect_to_file(self.cursor.click_effect),
             cursor_click_intensity: self.cursor.click_intensity,
+            cursor_trail: self.cursor.trail,
+            cursor_tilt: self.cursor.tilt,
+            cursor_sway: self.cursor.sway,
         }
     }
 
@@ -515,6 +575,7 @@ impl VideoEditState {
         self.segment_muted = file.segment_muted;
         self.timeline_offset_seconds = file.timeline_offset_seconds;
         self.zoom_clips = file.zoom_clips.iter().map(zoom_from_file).collect();
+        self.cursor_hide_clips = file.cursor_hide_clips.iter().map(hide_from_file).collect();
         self.zoom_classic = file.zoom_classic;
         self.zoom_hidden = file.zoom_hidden;
         self.zoom_locked = file.zoom_locked;
@@ -538,15 +599,22 @@ impl VideoEditState {
         self.selected_zoom = file
             .selected_zoom
             .filter(|index| *index < self.zoom_clips.len());
+        self.selected_cursor_hide = file
+            .selected_cursor_hide
+            .filter(|index| *index < self.cursor_hide_clips.len());
         self.cursor = CursorSettings {
             theme: cursor_theme_from_file(file.cursor_theme),
             size: file.cursor_size,
+            speed: file.cursor_speed,
             shadow: file.cursor_shadow,
             smooth: file.cursor_smooth,
             hide_idle: file.cursor_hide_idle,
             idle_ms: file.cursor_idle_ms,
             click_effect: click_effect_from_file(file.cursor_click_effect),
             click_intensity: file.cursor_click_intensity,
+            trail: file.cursor_trail,
+            tilt: file.cursor_tilt,
+            sway: file.cursor_sway,
         }
         .clamped();
         self.project_media
@@ -676,7 +744,12 @@ mod tests {
         state.background_padding = 40.0;
         state.cursor.theme = CursorTheme::White;
         state.cursor.size = 1.5;
+        state.cursor.speed = 2.0;
         state.cursor.shadow = 0.7;
+        state.cursor_hide_clips.push(CursorHideClip {
+            start: 4.0,
+            end: 5.5,
+        });
         state.add_project_media(ProjectMedia {
             path: extra.clone(),
             display_name: "B-roll".into(),

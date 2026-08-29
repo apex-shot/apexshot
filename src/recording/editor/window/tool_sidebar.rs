@@ -1,13 +1,14 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorTheme, EditorTool, VideoEditState, ZoomMode,
-    CLIP_SPEED_PRESETS, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE, ZOOM_SCALE_PRESETS,
+    CLIP_SPEED_PRESETS, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED,
+    ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, DrawingArea, Grid, Image, Label, Orientation,
-    PolicyType, Scale, ScrolledWindow, Switch, ToggleButton,
+    gdk, prelude::*, Align, Box as GtkBox, Button, DrawingArea, GestureDrag, Grid, Image, Label,
+    Orientation, PolicyType, ScrolledWindow, Switch, ToggleButton, Widget,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -30,9 +31,11 @@ pub(super) fn build_tool_sidebar(
 
     let cursor_panel = build_cursor_panel(state.clone(), on_change.clone());
     let zoom_panel = build_zoom_panel(state.clone(), on_change.clone());
+    let hide_panel = build_hide_panel(state.clone(), on_change.clone());
     let clip_panel = build_clip_panel(state.clone(), on_change);
     root.append(&cursor_panel.widget);
     root.append(&zoom_panel.widget);
+    root.append(&hide_panel.widget);
     root.append(&clip_panel.widget);
     root.set_visible(true);
     let last_zoom = Rc::new(Cell::new(false));
@@ -41,28 +44,36 @@ pub(super) fn build_tool_sidebar(
         let state = state.clone();
         let refresh_cursor = cursor_panel.refresh;
         let refresh_zoom = zoom_panel.refresh;
+        let refresh_hide = hide_panel.refresh;
         let refresh_clip = clip_panel.refresh;
         let last_zoom = last_zoom.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
             let tool = guard.selected_tool;
             let zoom = guard.selected_zoom.is_some();
+            let hide = guard.selected_cursor_hide.is_some();
             let clip = guard.selected_segment.is_some();
             drop(guard);
             if zoom {
                 last_zoom.set(true);
-            } else if clip {
+            } else if clip || hide {
                 last_zoom.set(false);
             }
             let show_cursor = tool == EditorTool::Cursor;
-            let show_zoom = !show_cursor && (zoom || (!clip && last_zoom.get()));
+            let show_zoom = !show_cursor && (zoom || (!clip && !hide && last_zoom.get()));
+            let show_hide = !show_cursor && !show_zoom && hide;
             cursor_panel.widget.set_visible(show_cursor);
             zoom_panel.widget.set_visible(show_zoom);
-            clip_panel.widget.set_visible(!show_cursor && !show_zoom);
+            hide_panel.widget.set_visible(show_hide);
+            clip_panel
+                .widget
+                .set_visible(!show_cursor && !show_zoom && !show_hide);
             if show_cursor {
                 refresh_cursor();
             } else if show_zoom {
                 refresh_zoom();
+            } else if show_hide {
+                refresh_hide();
             } else {
                 refresh_clip();
             }
@@ -163,15 +174,33 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
     let size_row = cursor_slider_row("Size");
     let shadow_row = cursor_slider_row("Shadow");
     let smooth_row = cursor_slider_row("Smoothing");
+    let speed_row = cursor_slider_row("Speed");
+    let trail_row = cursor_slider_row("Trail");
+    let tilt_row = cursor_slider_row("Tilt");
+    let sway_row = cursor_slider_row("Sway");
     size_row.scale.set_range(MIN_CURSOR_SIZE, MAX_CURSOR_SIZE);
     size_row.scale.set_increments(0.05, 0.25);
     shadow_row.scale.set_range(0.0, 1.0);
     shadow_row.scale.set_increments(0.05, 0.1);
     smooth_row.scale.set_range(0.0, 1.0);
     smooth_row.scale.set_increments(0.05, 0.1);
+    speed_row
+        .scale
+        .set_range(MIN_CURSOR_SPEED, MAX_CURSOR_SPEED);
+    speed_row.scale.set_increments(0.05, 0.25);
+    trail_row.scale.set_range(0.0, 1.0);
+    trail_row.scale.set_increments(0.05, 0.1);
+    tilt_row.scale.set_range(0.0, 1.0);
+    tilt_row.scale.set_increments(0.05, 0.1);
+    sway_row.scale.set_range(0.0, 1.0);
+    sway_row.scale.set_increments(0.05, 0.1);
     body.append(&size_row.widget);
     body.append(&shadow_row.widget);
     body.append(&smooth_row.widget);
+    body.append(&speed_row.widget);
+    body.append(&trail_row.widget);
+    body.append(&tilt_row.widget);
+    body.append(&sway_row.widget);
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
@@ -188,23 +217,22 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
     idle_row.append(&idle_switch);
     body.append(&idle_row);
 
-    let click_label = Label::new(Some("Click effect"));
+    let click_label = Label::new(Some("CLICK EFFECT"));
     click_label.add_css_class("recording-editor-zoom-kicker");
     click_label.set_xalign(0.0);
     body.append(&click_label);
-    let click_row = GtkBox::new(Orientation::Horizontal, 12);
-    click_row.add_css_class("recording-editor-zoom-mode");
+    let click_row = GtkBox::new(Orientation::Horizontal, 6);
+    click_row.add_css_class("recording-editor-click-effect-row");
     click_row.set_hexpand(true);
-    let none_btn = ToggleButton::with_label("None");
-    let pulse_btn = ToggleButton::with_label("Pulse");
-    let ripple_btn = ToggleButton::with_label("Ripple");
-    for btn in [&none_btn, &pulse_btn, &ripple_btn] {
-        btn.add_css_class("recording-editor-zoom-mode-btn");
-        btn.set_has_frame(false);
-        click_row.append(btn);
-    }
+    click_row.set_homogeneous(true);
+    let none_btn = click_effect_card(ClickEffect::None);
+    let pulse_btn = click_effect_card(ClickEffect::Pulse);
+    let ripple_btn = click_effect_card(ClickEffect::Ripple);
     pulse_btn.set_group(Some(&none_btn));
     ripple_btn.set_group(Some(&none_btn));
+    click_row.append(&none_btn);
+    click_row.append(&pulse_btn);
+    click_row.append(&ripple_btn);
     body.append(&click_row);
     let intensity_row = cursor_slider_row("Intensity");
     intensity_row.scale.set_range(0.0, 1.0);
@@ -254,6 +282,54 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
                 return;
             }
             state.lock().unwrap().cursor.smooth = scale.value();
+            on_change();
+        }
+    });
+    speed_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().cursor.speed = scale.value();
+            on_change();
+        }
+    });
+    trail_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().cursor.trail = scale.value();
+            on_change();
+        }
+    });
+    tilt_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().cursor.tilt = scale.value();
+            on_change();
+        }
+    });
+    sway_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().cursor.sway = scale.value();
             on_change();
         }
     });
@@ -323,6 +399,10 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
         let size_scale = size_row.scale.clone();
         let shadow_scale = shadow_row.scale.clone();
         let smooth_scale = smooth_row.scale.clone();
+        let speed_scale = speed_row.scale.clone();
+        let trail_scale = trail_row.scale.clone();
+        let tilt_scale = tilt_row.scale.clone();
+        let sway_scale = sway_row.scale.clone();
         let idle_switch = idle_switch.clone();
         let none_btn = none_btn.clone();
         let pulse_btn = pulse_btn.clone();
@@ -339,6 +419,10 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
             size_scale.set_value(cursor.size);
             shadow_scale.set_value(cursor.shadow);
             smooth_scale.set_value(cursor.smooth);
+            speed_scale.set_value(cursor.speed);
+            trail_scale.set_value(cursor.trail);
+            tilt_scale.set_value(cursor.tilt);
+            sway_scale.set_value(cursor.sway);
             idle_switch.set_active(cursor.hide_idle);
             match cursor.click_effect {
                 ClickEffect::None => none_btn.set_active(true),
@@ -358,24 +442,305 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
 }
 
 struct CursorSliderRow {
-    widget: GtkBox,
-    scale: Scale,
+    widget: DrawingArea,
+    scale: FillSlider,
+}
+
+fn click_effect_card(effect: ClickEffect) -> ToggleButton {
+    let card = ToggleButton::new();
+    card.add_css_class("recording-editor-click-effect-card");
+    card.set_has_frame(false);
+    card.set_hexpand(true);
+    let column = GtkBox::new(Orientation::Vertical, 4);
+    column.set_halign(Align::Center);
+    column.set_valign(Align::Center);
+    if effect != ClickEffect::None {
+        let preview = DrawingArea::new();
+        preview.set_content_width(36);
+        preview.set_content_height(28);
+        preview.set_can_target(false);
+        preview.set_draw_func(move |widget, cr, width, height| {
+            draw_click_effect_icon(widget, cr, width as f64, height as f64, effect);
+        });
+        column.append(&preview);
+    }
+    let name = Label::new(Some(effect.label()));
+    name.add_css_class("recording-editor-click-effect-label");
+    name.set_xalign(0.5);
+    column.append(&name);
+    card.set_child(Some(&column));
+    card
+}
+
+fn draw_click_effect_icon(
+    widget: &DrawingArea,
+    cr: &gtk4::cairo::Context,
+    width: f64,
+    height: f64,
+    effect: ClickEffect,
+) {
+    let cx = width / 2.0;
+    let cy = height / 2.0;
+    let light = widget_is_light(widget);
+    let (r, g, b) = if light {
+        (0.15, 0.16, 0.18)
+    } else {
+        (1.0, 1.0, 1.0)
+    };
+    cr.set_line_cap(gtk4::cairo::LineCap::Round);
+    cr.set_line_join(gtk4::cairo::LineJoin::Round);
+    match effect {
+        ClickEffect::Pulse => {
+            cr.set_source_rgba(r, g, b, 0.18);
+            cr.arc(cx, cy, 11.0, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+            cr.set_source_rgba(r, g, b, 0.82);
+            cr.arc(cx, cy, 5.5, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+        }
+        ClickEffect::Ripple => {
+            cr.set_source_rgba(r, g, b, 0.82);
+            cr.arc(cx, cy, 2.0, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+            cr.set_line_width(1.4);
+            cr.set_source_rgba(r, g, b, 0.72);
+            cr.arc(cx, cy, 6.2, 0.0, std::f64::consts::TAU);
+            let _ = cr.stroke();
+            cr.set_source_rgba(r, g, b, 0.38);
+            cr.arc(cx, cy, 10.2, 0.0, std::f64::consts::TAU);
+            let _ = cr.stroke();
+        }
+        ClickEffect::None => {}
+    }
 }
 
 fn cursor_slider_row(label: &str) -> CursorSliderRow {
-    let widget = GtkBox::new(Orientation::Vertical, 4);
-    widget.add_css_class("recording-editor-cursor-slider-row");
-    widget.set_hexpand(true);
-    let caption = Label::new(Some(label));
-    caption.add_css_class("recording-editor-zoom-kicker");
-    caption.set_xalign(0.0);
-    let scale = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.05);
-    scale.add_css_class("recording-editor-cursor-slider");
-    scale.set_draw_value(false);
-    scale.set_hexpand(true);
-    widget.append(&caption);
-    widget.append(&scale);
-    CursorSliderRow { widget, scale }
+    let scale = FillSlider::new(label);
+    CursorSliderRow {
+        widget: scale.area.clone(),
+        scale,
+    }
+}
+
+#[derive(Clone)]
+struct FillSlider {
+    area: DrawingArea,
+    value: Rc<Cell<f64>>,
+    min: Rc<Cell<f64>>,
+    max: Rc<Cell<f64>>,
+    step: Rc<Cell<f64>>,
+    enabled: Rc<Cell<bool>>,
+    listeners: Rc<RefCell<Vec<Rc<dyn Fn(&FillSlider)>>>>,
+}
+
+impl FillSlider {
+    fn new(label: &str) -> Self {
+        let area = DrawingArea::new();
+        area.add_css_class("recording-editor-fill-slider");
+        area.set_hexpand(true);
+        area.set_size_request(-1, 32);
+        let slider = Self {
+            area: area.clone(),
+            value: Rc::new(Cell::new(0.0)),
+            min: Rc::new(Cell::new(0.0)),
+            max: Rc::new(Cell::new(1.0)),
+            step: Rc::new(Cell::new(0.05)),
+            enabled: Rc::new(Cell::new(true)),
+            listeners: Rc::new(RefCell::new(Vec::new())),
+        };
+        area.set_draw_func({
+            let slider = slider.clone();
+            let label = label.to_string();
+            move |widget, cr, width, height| {
+                slider.draw(widget, cr, width, height, &label);
+            }
+        });
+        let drag = GestureDrag::new();
+        drag.set_button(1);
+        drag.connect_drag_begin({
+            let slider = slider.clone();
+            move |gesture, x, _| slider.apply_x(gesture, x)
+        });
+        drag.connect_drag_update({
+            let slider = slider.clone();
+            move |gesture, dx, _| {
+                let Some((start, _)) = gesture.start_point() else {
+                    return;
+                };
+                slider.apply_x(gesture, start + dx);
+            }
+        });
+        area.add_controller(drag);
+        area.set_cursor(gdk::Cursor::from_name("ew-resize", None).as_ref());
+        slider
+    }
+
+    fn value(&self) -> f64 {
+        self.value.get()
+    }
+
+    fn set_value(&self, value: f64) {
+        let min = self.min.get();
+        let max = self.max.get();
+        let value = value.clamp(min.min(max), min.max(max));
+        self.value.set(value);
+        self.area.queue_draw();
+        let listeners = self.listeners.borrow().clone();
+        for listener in listeners {
+            listener(self);
+        }
+    }
+
+    fn set_range(&self, min: f64, max: f64) {
+        self.min.set(min);
+        self.max.set(max.max(min + 1e-9));
+        self.set_value(self.value.get());
+    }
+
+    fn set_increments(&self, step: f64, _page: f64) {
+        self.step.set(step.max(0.0));
+    }
+
+    fn set_sensitive(&self, sensitive: bool) {
+        self.enabled.set(sensitive);
+        self.area.set_sensitive(sensitive);
+        self.area.queue_draw();
+    }
+
+    fn connect_value_changed<F>(&self, f: F)
+    where
+        F: Fn(&FillSlider) + 'static,
+    {
+        self.listeners.borrow_mut().push(Rc::new(f));
+    }
+
+    fn apply_x(&self, gesture: &GestureDrag, x: f64) {
+        if !self.enabled.get() {
+            return;
+        }
+        let width = gesture
+            .widget()
+            .map(|widget| widget.allocated_width().max(1) as f64)
+            .unwrap_or(1.0);
+        let min = self.min.get();
+        let max = self.max.get();
+        let t = (x / width).clamp(0.0, 1.0);
+        let mut value = min + t * (max - min);
+        let step = self.step.get();
+        if step > 1e-9 {
+            value = ((value - min) / step).round() * step + min;
+        }
+        self.set_value(value);
+    }
+
+    fn draw(
+        &self,
+        widget: &DrawingArea,
+        cr: &gtk4::cairo::Context,
+        width: i32,
+        height: i32,
+        label: &str,
+    ) {
+        let w = width as f64;
+        let h = height as f64;
+        if w < 8.0 || h < 8.0 {
+            return;
+        }
+        let light = widget_is_light(widget);
+        let enabled = if self.enabled.get() { 1.0 } else { 0.42 };
+        let min = self.min.get();
+        let max = self.max.get();
+        let progress = ((self.value.get() - min) / (max - min).max(1e-9)).clamp(0.0, 1.0);
+        let radius = 8.0;
+        fill_slider_rounded_rect(cr, 0.0, 0.0, w, h, radius);
+        if light {
+            cr.set_source_rgba(0.11, 0.13, 0.16, 0.10 * enabled);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.07 * enabled);
+        }
+        let _ = cr.fill();
+
+        let fill_w = progress * w;
+        let show_fill = fill_w >= h;
+        if show_fill {
+            fill_slider_rounded_rect(cr, 0.0, 0.0, fill_w, h, radius);
+            if light {
+                cr.set_source_rgba(0.11, 0.13, 0.16, 0.16 * enabled);
+            } else {
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.12 * enabled);
+            }
+            let _ = cr.fill();
+        }
+
+        let tick_x = if show_fill {
+            (fill_w - 6.0).max(radius * 0.45)
+        } else {
+            10.0
+        };
+        cr.set_line_width(1.5);
+        cr.set_line_cap(gtk4::cairo::LineCap::Round);
+        if light {
+            cr.set_source_rgba(0.15, 0.16, 0.18, 0.82 * enabled);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * enabled);
+        }
+        cr.move_to(tick_x, h * 0.28);
+        cr.line_to(tick_x, h * 0.72);
+        let _ = cr.stroke();
+
+        if light {
+            cr.set_source_rgba(0.15, 0.16, 0.18, 0.72 * enabled);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.72 * enabled);
+        }
+        cr.select_font_face(
+            "sans-serif",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Normal,
+        );
+        cr.set_font_size(12.0);
+        cr.move_to(14.0, h * 0.66);
+        let _ = cr.show_text(label);
+        let display = (progress * 100.0).round() as i32;
+        let text = display.to_string();
+        if let Ok(ext) = cr.text_extents(&text) {
+            cr.move_to(w - 14.0 - ext.width(), h * 0.66);
+            let _ = cr.show_text(&text);
+        }
+    }
+}
+
+fn fill_slider_rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+    let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+    cr.new_sub_path();
+    cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+    cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+    cr.arc(
+        x + r,
+        y + h - r,
+        r,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    cr.arc(
+        x + r,
+        y + r,
+        r,
+        std::f64::consts::PI,
+        3.0 * std::f64::consts::FRAC_PI_2,
+    );
+    cr.close_path();
+}
+
+fn widget_is_light(widget: &impl gtk4::glib::object::IsA<Widget>) -> bool {
+    let mut current = Some(widget.clone().upcast::<Widget>());
+    while let Some(node) = current {
+        if node.has_css_class("editor-theme-light") {
+            return true;
+        }
+        current = node.parent();
+    }
+    false
 }
 
 struct ZoomPanel {
@@ -792,6 +1157,76 @@ fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     };
 
     ClipPanel {
+        widget: panel,
+        refresh,
+    }
+}
+
+struct HidePanel {
+    widget: GtkBox,
+    refresh: Rc<dyn Fn()>,
+}
+
+fn build_hide_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> HidePanel {
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.add_css_class("recording-editor-zoom-panel");
+    panel.set_hexpand(true);
+    panel.set_vexpand(true);
+
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    header.add_css_class("recording-editor-zoom-header");
+    header.set_hexpand(true);
+    let title = Label::new(Some("Hide cursor"));
+    title.add_css_class("recording-editor-zoom-title");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    header.append(&title);
+
+    let body = GtkBox::new(Orientation::Vertical, 8);
+    body.add_css_class("recording-editor-zoom-body");
+    body.set_hexpand(true);
+    let hint = Label::new(Some(
+        "Cursor is hidden for this range in preview and export",
+    ));
+    hint.add_css_class("recording-editor-zoom-hint");
+    hint.set_wrap(true);
+    hint.set_xalign(0.0);
+    hint.set_max_width_chars(34);
+    body.append(&hint);
+
+    let scroll = ScrolledWindow::new();
+    scroll.add_css_class("recording-editor-zoom-scroll");
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    scroll.set_child(Some(&body));
+
+    let footer_delete = delete_tool_button("Delete hide");
+    footer_delete.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        move |_| {
+            state.lock().unwrap().remove_selected_cursor_hide();
+            on_change();
+        }
+    });
+    let footer = GtkBox::new(Orientation::Horizontal, 6);
+    footer.add_css_class("recording-editor-zoom-footer");
+    footer.set_hexpand(true);
+    footer.append(&footer_delete);
+
+    panel.append(&header);
+    panel.append(&scroll);
+    panel.append(&footer);
+
+    let refresh = {
+        let panel = panel.clone();
+        Rc::new(move || {
+            panel.set_visible(true);
+        }) as Rc<dyn Fn()>
+    };
+
+    HidePanel {
         widget: panel,
         refresh,
     }

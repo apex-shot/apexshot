@@ -1,6 +1,7 @@
 pub const MIN_TRIM_DURATION_SECONDS: f64 = 0.25;
 pub(super) const MIN_DIMENSION: u32 = 64;
 pub const DEFAULT_ZOOM_DURATION_SECONDS: f64 = 1.8;
+pub const DEFAULT_CURSOR_HIDE_DURATION_SECONDS: f64 = 1.8;
 pub const DEFAULT_ZOOM_SCALE: f64 = 1.8;
 pub const DEFAULT_ZOOM_EASE_MS: u32 = 600;
 pub const MIN_ZOOM_SCALE: f64 = 1.2;
@@ -142,10 +143,16 @@ impl CursorTheme {
 pub const MIN_CURSOR_SIZE: f64 = 0.5;
 pub const MAX_CURSOR_SIZE: f64 = 3.0;
 pub const DEFAULT_CURSOR_SIZE: f64 = 1.0;
+pub const MIN_CURSOR_SPEED: f64 = 0.25;
+pub const MAX_CURSOR_SPEED: f64 = 3.0;
+pub const DEFAULT_CURSOR_SPEED: f64 = 1.0;
 pub const DEFAULT_CURSOR_SHADOW: f64 = 0.4;
 pub const DEFAULT_CURSOR_SMOOTH: f64 = 0.35;
 pub const DEFAULT_CURSOR_IDLE_MS: f64 = 800.0;
 pub const DEFAULT_CLICK_INTENSITY: f64 = 0.7;
+pub const DEFAULT_CURSOR_TRAIL: f64 = 0.0;
+pub const DEFAULT_CURSOR_TILT: f64 = 0.0;
+pub const DEFAULT_CURSOR_SWAY: f64 = 0.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ClickEffect {
@@ -185,12 +192,16 @@ impl ClickEffect {
 pub struct CursorSettings {
     pub theme: CursorTheme,
     pub size: f64,
+    pub speed: f64,
     pub shadow: f64,
     pub smooth: f64,
     pub hide_idle: bool,
     pub idle_ms: f64,
     pub click_effect: ClickEffect,
     pub click_intensity: f64,
+    pub trail: f64,
+    pub tilt: f64,
+    pub sway: f64,
 }
 
 impl Default for CursorSettings {
@@ -198,12 +209,16 @@ impl Default for CursorSettings {
         Self {
             theme: CursorTheme::Adwaita,
             size: DEFAULT_CURSOR_SIZE,
+            speed: DEFAULT_CURSOR_SPEED,
             shadow: DEFAULT_CURSOR_SHADOW,
             smooth: DEFAULT_CURSOR_SMOOTH,
             hide_idle: false,
             idle_ms: DEFAULT_CURSOR_IDLE_MS,
             click_effect: ClickEffect::Ripple,
             click_intensity: DEFAULT_CLICK_INTENSITY,
+            trail: DEFAULT_CURSOR_TRAIL,
+            tilt: DEFAULT_CURSOR_TILT,
+            sway: DEFAULT_CURSOR_SWAY,
         }
     }
 }
@@ -213,12 +228,16 @@ impl CursorSettings {
         Self {
             theme: self.theme,
             size: self.size.clamp(MIN_CURSOR_SIZE, MAX_CURSOR_SIZE),
+            speed: self.speed.clamp(MIN_CURSOR_SPEED, MAX_CURSOR_SPEED),
             shadow: self.shadow.clamp(0.0, 1.0),
             smooth: self.smooth.clamp(0.0, 1.0),
             hide_idle: self.hide_idle,
             idle_ms: self.idle_ms.clamp(120.0, 4000.0),
             click_effect: self.click_effect,
             click_intensity: self.click_intensity.clamp(0.0, 1.0),
+            trail: self.trail.clamp(0.0, 1.0),
+            tilt: self.tilt.clamp(0.0, 1.0),
+            sway: self.sway.clamp(0.0, 1.0),
         }
     }
 }
@@ -236,6 +255,22 @@ pub struct ZoomClip {
 impl ZoomClip {
     pub fn duration(&self) -> f64 {
         (self.end - self.start).max(0.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CursorHideClip {
+    pub start: f64,
+    pub end: f64,
+}
+
+impl CursorHideClip {
+    pub fn duration(&self) -> f64 {
+        (self.end - self.start).max(0.0)
+    }
+
+    pub fn contains(&self, t: f64) -> bool {
+        t >= self.start && t <= self.end
     }
 }
 
@@ -310,6 +345,8 @@ pub struct VideoEditState {
     pub segment_muted: Vec<bool>,
     pub zoom_clips: Vec<ZoomClip>,
     pub selected_zoom: Option<usize>,
+    pub cursor_hide_clips: Vec<CursorHideClip>,
+    pub selected_cursor_hide: Option<usize>,
     pub selected_segment: Option<usize>,
     pub background: VideoBackground,
     pub background_padding: f64,

@@ -29,6 +29,7 @@ pub fn build_timeline_card(
     let skip_forward = icon_button("media-skip-forward-symbolic", "Skip forward 1s");
 
     let zoom = labeled_tool_button("zoom-fit-best-symbolic", "Zoom", "Add zoom at playhead");
+    let hide = labeled_tool_button("view-conceal-symbolic", "Hide", "Hide cursor at playhead");
     let split = labeled_tool_button("edit-cut-symbolic", "Split", "Split at playhead");
 
     let zoom_out = icon_button("zoom-out-symbolic", "Zoom out timeline");
@@ -48,6 +49,7 @@ pub fn build_timeline_card(
     left.set_halign(Align::Start);
     left.set_hexpand(true);
     left.append(&zoom);
+    left.append(&hide);
     left.append(&split);
 
     let center = GtkBox::new(Orientation::Horizontal, 8);
@@ -83,10 +85,13 @@ pub fn build_timeline_card(
 
     let hovered_video = Rc::new(Cell::new(None::<usize>));
     let hovered_zoom = Rc::new(Cell::new(None::<usize>));
+    let hovered_hide = Rc::new(Cell::new(None::<usize>));
     let hover_time = Rc::new(Cell::new(None::<f64>));
     let hover_zoom_time = Rc::new(Cell::new(None::<f64>));
+    let hover_hide_time = Rc::new(Cell::new(None::<f64>));
     let dragging_video = Rc::new(Cell::new(None::<usize>));
     let dragging_zoom = Rc::new(Cell::new(None::<usize>));
+    let dragging_hide = Rc::new(Cell::new(None::<usize>));
 
     let video_track = DrawingArea::new();
     video_track.add_css_class("recording-editor-card-video-track");
@@ -130,12 +135,35 @@ pub fn build_timeline_card(
         }
     });
 
+    let hide_track = DrawingArea::new();
+    hide_track.add_css_class("recording-editor-card-hide-track");
+    hide_track.set_hexpand(true);
+    hide_track.set_size_request(-1, 56);
+    hide_track.set_draw_func({
+        let state = state.clone();
+        let hovered_hide = hovered_hide.clone();
+        let hover_hide_time = hover_hide_time.clone();
+        let dragging_hide = dragging_hide.clone();
+        move |_, cr, width, height| {
+            draw_cursor_hide_clips(
+                &state,
+                hovered_hide.get(),
+                hover_hide_time.get(),
+                dragging_hide.get(),
+                cr,
+                width,
+                height,
+            )
+        }
+    });
+
     let tracks = GtkBox::new(Orientation::Vertical, 10);
     tracks.add_css_class("recording-editor-card-tracks");
     tracks.set_hexpand(true);
     tracks.append(&ruler);
     tracks.append(&video_track);
     tracks.append(&zoom_track);
+    tracks.append(&hide_track);
 
     let board = Overlay::new();
     board.add_css_class("recording-editor-card-board");
@@ -163,10 +191,12 @@ pub fn build_timeline_card(
         let ruler = ruler.clone();
         let video_track = video_track.clone();
         let zoom_track = zoom_track.clone();
+        let hide_track = hide_track.clone();
         let playhead = playhead.clone();
         let playhead_clock = playhead_clock.clone();
         let duration_clock = duration_clock.clone();
         let zoom = zoom.clone();
+        let hide = hide.clone();
         let state = state.clone();
         let scroll_adj = scroll_adj.clone();
         let scroll_syncing = scroll_syncing.clone();
@@ -181,10 +211,16 @@ pub fn build_timeline_card(
                 } else {
                     zoom.remove_css_class("recording-editor-timeline-tool-active");
                 }
+                if guard.selected_cursor_hide.is_some() {
+                    hide.add_css_class("recording-editor-timeline-tool-active");
+                } else {
+                    hide.remove_css_class("recording-editor-timeline-tool-active");
+                }
             }
             ruler.queue_draw();
             video_track.queue_draw();
             zoom_track.queue_draw();
+            hide_track.queue_draw();
             playhead.queue_draw();
         })
     };
@@ -245,6 +281,26 @@ pub fn build_timeline_card(
                     .position(|clip| playhead >= clip.start && playhead <= clip.end)
                 {
                     select_zoom(&mut guard, Some(index));
+                }
+            }
+            drop(guard);
+            redraw();
+        }
+    });
+
+    hide.connect_clicked({
+        let state = state.clone();
+        let redraw = redraw.clone();
+        move |_| {
+            let mut guard = state.lock().unwrap();
+            if guard.add_cursor_hide_at_playhead().is_none() {
+                let playhead = guard.playhead_seconds;
+                if let Some(index) = guard
+                    .cursor_hide_clips
+                    .iter()
+                    .position(|clip| playhead >= clip.start && playhead <= clip.end)
+                {
+                    select_cursor_hide(&mut guard, Some(index));
                 }
             }
             drop(guard);
@@ -317,6 +373,15 @@ pub fn build_timeline_card(
         hovered_zoom.clone(),
         hover_zoom_time.clone(),
         dragging_zoom.clone(),
+        redraw.clone(),
+    );
+    bind_hide_track(
+        &hide_track,
+        state.clone(),
+        media.clone(),
+        hovered_hide.clone(),
+        hover_hide_time.clone(),
+        dragging_hide.clone(),
         redraw.clone(),
     );
 

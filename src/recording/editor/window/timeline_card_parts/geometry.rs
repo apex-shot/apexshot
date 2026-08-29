@@ -95,6 +95,7 @@ pub fn select_video(state: &mut VideoEditState, segment: Option<usize>) {
     state.selected_segment = segment;
     if segment.is_some() {
         state.selected_zoom = None;
+        state.selected_cursor_hide = None;
         state.selected_tool = crate::recording::editor::model::EditorTool::Timeline;
     }
 }
@@ -103,6 +104,16 @@ pub fn select_zoom(state: &mut VideoEditState, index: Option<usize>) {
     state.selected_zoom = index;
     if index.is_some() {
         state.selected_segment = None;
+        state.selected_cursor_hide = None;
+        state.selected_tool = crate::recording::editor::model::EditorTool::Timeline;
+    }
+}
+
+pub fn select_cursor_hide(state: &mut VideoEditState, index: Option<usize>) {
+    state.selected_cursor_hide = index;
+    if index.is_some() {
+        state.selected_segment = None;
+        state.selected_zoom = None;
         state.selected_tool = crate::recording::editor::model::EditorTool::Timeline;
     }
 }
@@ -133,6 +144,26 @@ pub fn zoom_edge_at(state: &VideoEditState, width: f64, x: f64) -> Option<(usize
 
 pub fn zoom_clip_at(state: &VideoEditState, width: f64, x: f64) -> Option<usize> {
     state.zoom_clips.iter().position(|clip| {
+        let start_x = state.time_to_x(clip.start, width);
+        let end_x = state.time_to_x(clip.end, width);
+        x >= start_x && x <= end_x
+    })
+}
+
+pub fn cursor_hide_edge_at(state: &VideoEditState, width: f64, x: f64) -> Option<(usize, bool)> {
+    state
+        .cursor_hide_clips
+        .iter()
+        .enumerate()
+        .find_map(|(index, clip)| {
+            let start_x = state.time_to_x(clip.start, width);
+            let end_x = state.time_to_x(clip.end, width);
+            clip_edge_at(x, start_x, end_x).map(|is_start| (index, is_start))
+        })
+}
+
+pub fn cursor_hide_clip_at(state: &VideoEditState, width: f64, x: f64) -> Option<usize> {
+    state.cursor_hide_clips.iter().position(|clip| {
         let start_x = state.time_to_x(clip.start, width);
         let end_x = state.time_to_x(clip.end, width);
         x >= start_x && x <= end_x
@@ -245,6 +276,20 @@ pub enum ClipDrag {
 
 #[derive(Clone, Copy)]
 pub enum ZoomDrag {
+    Edge {
+        index: usize,
+        is_start: bool,
+    },
+    Move {
+        index: usize,
+        origin_start: f64,
+        pixels_per_second: f64,
+    },
+    Seek,
+}
+
+#[derive(Clone, Copy)]
+pub enum HideDrag {
     Edge {
         index: usize,
         is_start: bool,

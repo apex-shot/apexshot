@@ -2,8 +2,7 @@
 //!
 //! Capture support is intentionally distro-light: on Wayland ApexShot uses the
 //! XDG ScreenCast portal plus PipeWire as the primary "share screen" capture
-//! path, matching the broad approach used by Flameshot-compatible Linux
-//! desktops. Distro-specific code here is for detection, dependency guidance,
+//! path. Distro-specific code here is for detection, dependency guidance,
 //! packaging, and small integration differences.
 
 pub mod arch;

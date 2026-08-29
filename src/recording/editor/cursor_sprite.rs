@@ -1,4 +1,4 @@
-use super::model::{CursorSettings, CursorTheme};
+use super::model::{CursorSettings, CursorTheme, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE};
 use gtk4::cairo::{Antialias, Context, Filter, Format, ImageSurface, SurfacePattern};
 use image::RgbaImage;
 use std::f64::consts::TAU;
@@ -28,6 +28,11 @@ enum SpriteKind {
     Hand,
     Text,
     Crosshair,
+}
+
+pub fn overlay_scale(size: f64, zoom: f64) -> f64 {
+    let _ = zoom;
+    size.clamp(MIN_CURSOR_SIZE, MAX_CURSOR_SIZE)
 }
 
 pub fn hotspot(theme: CursorTheme, kind: &str) -> (f64, f64) {
@@ -65,7 +70,7 @@ pub fn draw(
         return;
     }
     let settings = settings.clamped();
-    let scale = settings.size * pulse.max(0.7);
+    let scale = overlay_scale(settings.size, 1.0) * pulse.max(0.7);
     if pulse > 1.02 {
         cr.set_source_rgba(
             1.0,
@@ -79,7 +84,61 @@ pub fn draw(
     let bitmap = bitmap(settings.theme, kind);
     let surface = surface_from_rgba(bitmap);
     let (hx, hy) = hotspot(settings.theme, kind);
-    paint_sprite(cr, &surface, x, y, hx, hy, scale, settings.shadow, alpha);
+    paint_sprite(
+        cr,
+        &surface,
+        x,
+        y,
+        hx,
+        hy,
+        scale,
+        settings.shadow,
+        alpha,
+        0.0,
+    );
+}
+
+pub fn draw_tilted(
+    cr: &Context,
+    x: f64,
+    y: f64,
+    pulse: f64,
+    kind: &str,
+    settings: CursorSettings,
+    alpha: f64,
+    tilt: f64,
+) {
+    let alpha = alpha.clamp(0.0, 1.0);
+    if alpha < 0.02 {
+        return;
+    }
+    let settings = settings.clamped();
+    let scale = overlay_scale(settings.size, 1.0) * pulse.max(0.7);
+    if pulse > 1.02 {
+        cr.set_source_rgba(
+            1.0,
+            1.0,
+            1.0,
+            0.22 * ((pulse - 1.0) / 0.35).clamp(0.0, 1.0) * alpha,
+        );
+        cr.arc(x, y, 16.0 * scale, 0.0, TAU);
+        let _ = cr.fill();
+    }
+    let bitmap = bitmap(settings.theme, kind);
+    let surface = surface_from_rgba(bitmap);
+    let (hx, hy) = hotspot(settings.theme, kind);
+    paint_sprite(
+        cr,
+        &surface,
+        x,
+        y,
+        hx,
+        hy,
+        scale,
+        settings.shadow,
+        alpha,
+        tilt,
+    );
 }
 
 pub fn draw_ripple(
@@ -97,7 +156,7 @@ pub fn draw_ripple(
     if amount < 0.02 {
         return;
     }
-    let radius = (10.0 + 34.0 * progress) * size.clamp(0.5, 3.0);
+    let radius = (10.0 + 34.0 * progress) * overlay_scale(size, 1.0);
     cr.set_line_width((2.4 * (1.0 - progress * 0.45)).clamp(1.1, 2.4));
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * amount);
     cr.arc(x, y, radius, 0.0, TAU);
@@ -128,11 +187,7 @@ pub fn draw_centered(cr: &Context, width: f64, height: f64, theme: CursorTheme) 
     let _ = cr.restore();
 }
 
-pub fn write_png(
-    path: &Path,
-    settings: CursorSettings,
-    kind: &str,
-) -> anyhow::Result<(f64, f64)> {
+pub fn write_png(path: &Path, settings: CursorSettings, kind: &str) -> anyhow::Result<(f64, f64)> {
     let settings = settings.clamped();
     let scale = settings.size;
     let (hx, hy) = hotspot(settings.theme, kind);
@@ -178,17 +233,21 @@ fn paint_sprite(
     scale: f64,
     shadow: f64,
     alpha: f64,
+    tilt: f64,
 ) {
+    let _ = cr.save();
+    cr.translate(x, y);
+    if tilt.abs() > 0.001 {
+        cr.rotate(tilt);
+    }
     if shadow > 0.01 {
         let _ = cr.save();
-        cr.translate(x + 2.2 * scale * shadow, y + 3.2 * scale * shadow);
+        cr.translate(2.2 * scale * shadow, 3.2 * scale * shadow);
         cr.scale(scale, scale);
         cr.set_source_rgba(0.0, 0.0, 0.0, 0.55 * shadow * alpha);
         let _ = cr.mask_surface(surface, -hx, -hy);
         let _ = cr.restore();
     }
-    let _ = cr.save();
-    cr.translate(x, y);
     cr.scale(scale, scale);
     let pattern = SurfacePattern::create(surface);
     pattern.set_filter(Filter::Best);
@@ -367,5 +426,13 @@ mod tests {
         .clamped();
         assert!((settings.size - 3.0).abs() < 1e-9);
         assert!((settings.shadow - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn overlay_scale_ignores_zoom() {
+        let size = 1.4;
+        assert!((overlay_scale(size, 1.0) - size).abs() < 1e-12);
+        assert!((overlay_scale(size, 2.0) - overlay_scale(size, 1.0)).abs() < 1e-12);
+        assert!((overlay_scale(size, 2.0) - size * 2.0).abs() > 0.5);
     }
 }

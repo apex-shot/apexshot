@@ -2,11 +2,11 @@
 //!
 //! Still-image capture strategy (first match wins):
 //!
-//! 0. **KDE native** `org.kde.KWin.ScreenShot2` — preferred on Plasma Wayland
-//!    (same as Spectacle). No portal permission dialog.
+//! 0. **KDE native** `org.kde.KWin.ScreenShot2` — preferred on Plasma Wayland.
+//!    No portal permission dialog.
 //! 1. **wlroots native** `zwlr_screencopy_manager_v1` — Hyprland, Sway, Niri, …
-//! 2. **`org.freedesktop.portal.Screenshot`** — Flameshot-style single still
-//!    grab (GNOME and most desktops). Opt-in force-first via
+//! 2. **`org.freedesktop.portal.Screenshot`** — single still grab (GNOME and
+//!    most desktops). Opt-in force-first via
 //!    `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL`.
 //! 3. **ScreenCast portal + PipeWire** — last-resort still fallback (heavy;
 //!    preferred for *recording*, not screenshots).
@@ -178,7 +178,7 @@ fn crop_capture(
 
 impl WaylandBackend {
     /// When set, try the Screenshot portal before compositor-native paths.
-    /// Useful for debugging / matching Flameshot exactly on a given desktop.
+    /// Useful for debugging the portal path on a given desktop.
     /// Always true under portal-only / Flatpak builds.
     fn should_force_screenshot_portal_first() -> bool {
         crate::app_identity::portal_only()
@@ -187,7 +187,7 @@ impl WaylandBackend {
 
     /// Preferred still-image path after native compositors fail.
     ///
-    /// Screenshot portal is a single D-Bus call (like Flameshot). ScreenCast +
+    /// Screenshot portal is a single D-Bus call. ScreenCast +
     /// PipeWire remains a last resort because it is much slower for freezes.
     fn capture_still_via_screenshot_portal() -> DisplayResult<CaptureData> {
         let start = std::time::Instant::now();
@@ -714,7 +714,7 @@ impl WaylandBackend {
     /// Capture used for direct area crops / selection freezes on Wayland.
     ///
     /// Order: KDE native → wlr-screencopy (~50 ms) → Screenshot portal
-    /// (Flameshot-style) → ScreenCast last resort.
+    /// → ScreenCast last resort.
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
         self.capture_screen_for_selection_at(None)
     }

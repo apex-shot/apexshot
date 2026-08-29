@@ -208,6 +208,22 @@ pub fn zoom_camera_transform(
     )
 }
 
+/// Map a source-pixel point onto widget/output space through the visible zoom view.
+/// Sprite size is not part of this mapping — draw at `cursor.size` only.
+pub fn source_to_zoomed_point(
+    x: f64,
+    y: f64,
+    view: (f64, f64, f64, f64),
+    widget_w: f64,
+    widget_h: f64,
+) -> (f64, f64) {
+    let (vx, vy, vw, vh) = view;
+    (
+        ((x - vx) / vw.max(1.0)) * widget_w,
+        ((y - vy) / vh.max(1.0)) * widget_h,
+    )
+}
+
 /// Fit `src` inside `box` without upscaling or stretching (aspect preserved).
 pub fn fit_dimensions(src_w: u32, src_h: u32, box_w: u32, box_h: u32) -> (u32, u32) {
     let src_w = src_w.max(1);

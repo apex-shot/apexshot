@@ -1,8 +1,10 @@
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
-    even_crop_rect, format_webcut_time, view_to_source, zoom_camera_transform, ClickEffect,
-    VideoBackground, VideoEditState, ZoomClip, ZoomMode, WEBCUT_ASPECT_RATIOS,
+    even_crop_rect, format_webcut_time, source_to_zoomed_point, view_to_source,
+    zoom_camera_transform, ClickEffect, CursorSettings, VideoBackground, VideoEditState, ZoomClip,
+    ZoomMode, WEBCUT_ASPECT_RATIOS,
 };
+use crate::recording::editor::sidecar::CursorMotion;
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
     DrawingArea, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture, Popover,
@@ -111,16 +113,16 @@ fn build_preview_inner(
     stage.set_child(Some(&overlay));
 
     let cursor_layer = DrawingArea::new();
+    cursor_layer.add_css_class("recording-editor-cursor-layer");
     cursor_layer.set_hexpand(true);
     cursor_layer.set_vexpand(true);
     cursor_layer.set_can_target(true);
     let placing_focus = Rc::new(Cell::new(false));
     cursor_layer.set_draw_func({
         let state = state.clone();
-        let picture = picture.clone();
         let placing_focus = placing_focus.clone();
         move |_, cr, width, height| {
-            draw_preview_overlays(&state, &picture, cr, width, height, placing_focus.get());
+            draw_preview_overlays(&state, cr, width, height, placing_focus.get());
         }
     });
     overlay.add_overlay(&cursor_layer);
@@ -651,28 +653,6 @@ fn visible_source_view(
     (cx + zx as f64, cy + zy as f64, zw as f64, zh as f64)
 }
 
-/// Source-coords rect currently visible on stage: static crop intersected
-/// with the active zoom window.
-fn source_to_zoomed_point(
-    x: f64,
-    y: f64,
-    view: (f64, f64, f64, f64),
-    center: (f64, f64),
-    scale: f64,
-    widget_w: f64,
-    widget_h: f64,
-) -> (f64, f64) {
-    let (vx, vy, vw, vh) = view;
-    let ox = (center.0 - vx) / vw.max(1.0);
-    let oy = (center.1 - vy) / vh.max(1.0);
-    let nx = (x - vx) / vw.max(1.0);
-    let ny = (y - vy) / vh.max(1.0);
-    (
-        (ox + (nx - ox) * scale) * widget_w,
-        (oy + (ny - oy) * scale) * widget_h,
-    )
-}
-
 fn placing_manual(state: &VideoEditState, playing: bool) -> bool {
     !playing
         && state
@@ -731,7 +711,6 @@ fn apply_preview_view(
 
 fn draw_preview_overlays(
     state: &Arc<Mutex<VideoEditState>>,
-    picture: &Picture,
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -757,16 +736,12 @@ fn draw_preview_overlays(
 
     let source_t = state.source_playhead();
     let view = visible_source_view(&state, source_t, placing);
-    let _ = picture;
+    let (zoom, _) = state.eval_zoom(source_t);
 
     if let Some(sidecar) = &state.sidecar {
-        if let Some(frame) = sidecar.presented_at(
-            source_t,
-            state.cursor.smooth,
-            state.cursor.hide_idle,
-            state.cursor.idle_ms,
-        ) {
-            let cursor = state.cursor.clamped();
+        if let Some(mut frame) = sidecar.presented_at(source_t, cursor_motion(state.cursor)) {
+            frame.alpha *= state.cursor_hide_alpha_for_source(source_t);
+            let cursor = overlay_cursor(state.cursor, zoom);
             let pulse = match cursor.click_effect {
                 ClickEffect::Pulse => {
                     1.0 + (sidecar.click_pulse_at(source_t) - 1.0) * cursor.click_intensity
@@ -775,7 +750,7 @@ fn draw_preview_overlays(
             };
             if cursor.click_effect == ClickEffect::Ripple {
                 for (x, y, progress) in sidecar.click_ripples_at(source_t) {
-                    let (px, py) = source_to_zoomed_point(x, y, view, (0.0, 0.0), 1.0, w, h);
+                    let (px, py) = source_to_zoomed_point(x, y, view, w, h);
                     crate::recording::editor::cursor_sprite::draw_ripple(
                         cr,
                         px,
@@ -787,8 +762,21 @@ fn draw_preview_overlays(
                     );
                 }
             }
-            let (px, py) = source_to_zoomed_point(frame.x, frame.y, view, (0.0, 0.0), 1.0, w, h);
-            crate::recording::editor::cursor_sprite::draw(
+            for &(x, y, ghost) in &frame.trail {
+                let (px, py) = source_to_zoomed_point(x, y, view, w, h);
+                crate::recording::editor::cursor_sprite::draw_tilted(
+                    cr,
+                    px,
+                    py,
+                    1.0,
+                    frame.kind.as_str(),
+                    cursor,
+                    frame.alpha * ghost,
+                    frame.tilt,
+                );
+            }
+            let (px, py) = source_to_zoomed_point(frame.x, frame.y, view, w, h);
+            crate::recording::editor::cursor_sprite::draw_tilted(
                 cr,
                 px,
                 py,
@@ -796,6 +784,7 @@ fn draw_preview_overlays(
                 frame.kind.as_str(),
                 cursor,
                 frame.alpha,
+                frame.tilt,
             );
         }
     }
@@ -810,6 +799,25 @@ fn draw_preview_overlays(
             cr.set_line_width(2.0);
             let _ = cr.stroke();
         }
+    }
+}
+
+fn overlay_cursor(cursor: CursorSettings, zoom: f64) -> CursorSettings {
+    let mut cursor = cursor.clamped();
+    cursor.size = crate::recording::editor::cursor_sprite::overlay_scale(cursor.size, zoom);
+    cursor
+}
+
+fn cursor_motion(cursor: CursorSettings) -> CursorMotion {
+    let cursor = cursor.clamped();
+    CursorMotion {
+        smooth: cursor.smooth,
+        hide_idle: cursor.hide_idle,
+        idle_ms: cursor.idle_ms,
+        trail: cursor.trail,
+        tilt: cursor.tilt,
+        sway: cursor.sway,
+        speed: cursor.speed,
     }
 }
 
@@ -837,4 +845,20 @@ fn manual_focus_rect(
     (x, y, rect_w, rect_h)
 }
 
-
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn cursor_layer_is_not_css_zoomed() {
+        let source = include_str!("preview.rs");
+        assert!(source.contains("recording-editor-cursor-layer"));
+        assert!(source.contains("cursor_sprite::overlay_scale"));
+        assert!(source.contains("source_to_zoomed_point"));
+        assert!(source.contains("cursor_hide_alpha_for_source"));
+        assert!(
+            !source.contains("cursor_layer.add_css_class(\"recording-editor-video-zoom-live\")")
+        );
+        let css = include_str!("../ui_support_css/01.css");
+        assert!(css.contains(".recording-editor-cursor-layer"));
+        assert!(css.contains("transform: none"));
+    }
+}

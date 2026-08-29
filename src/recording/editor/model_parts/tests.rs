@@ -654,6 +654,45 @@ fn zoom_and_clip_moves_snap_start_to_playhead() {
 }
 
 #[test]
+fn cursor_hide_clips_reject_overlap_and_zero_alpha_inside() {
+    let mut state = VideoEditState::new(metadata());
+    let index = state.add_cursor_hide_at_playhead().unwrap();
+    assert_eq!(index, 0);
+    assert_eq!(state.cursor_hide_clips.len(), 1);
+    assert!(
+        (state.cursor_hide_clips[0].duration() - DEFAULT_CURSOR_HIDE_DURATION_SECONDS).abs() < 1e-9
+    );
+    assert!(state.add_cursor_hide_at(0.2).is_none());
+    assert_eq!(state.cursor_hide_clips.len(), 1);
+    assert!((state.cursor_hide_alpha(0.5) - 0.0).abs() < 1e-12);
+    assert!((state.cursor_hide_alpha(4.0) - 1.0).abs() < 1e-12);
+    assert!((state.cursor_hide_alpha_for_source(0.5) - 0.0).abs() < 1e-12);
+
+    state.playhead_seconds = 5.0;
+    let later = state.add_cursor_hide_at_playhead().unwrap();
+    assert_eq!(later, 1);
+    let duration = state.cursor_hide_clips[later].duration();
+    let start = snap_range_to_target(2.94, duration, 3.0, 0.12);
+    state.move_cursor_hide_clip(later, start);
+    assert!((state.cursor_hide_clips[later].start - 3.0).abs() < 1e-9);
+
+    state.selected_zoom = Some(0);
+    state.selected_cursor_hide = Some(0);
+    assert!(state.selected_cursor_hide_clip().is_some());
+}
+
+#[test]
+fn adding_cursor_hide_clears_zoom_selection() {
+    let mut state = VideoEditState::new(metadata());
+    assert!(state.add_zoom_at_playhead().is_some());
+    assert!(state.selected_zoom.is_some());
+    state.playhead_seconds = 4.0;
+    assert!(state.add_cursor_hide_at_playhead().is_some());
+    assert!(state.selected_zoom.is_none());
+    assert!(state.selected_cursor_hide.is_some());
+}
+
+#[test]
 fn even_crop_stays_inside_frame() {
     let (x, y, w, h) = even_crop_rect(1.8, (10.0, 10.0), 1920, 1080);
     assert!(w.is_multiple_of(2) && h.is_multiple_of(2));
@@ -733,6 +772,52 @@ fn zoom_camera_keeps_right_focus_at_stage_center() {
     let y = (540.0 / 1080.0 * 1080.0) * sy + ty;
     assert!((x - 960.0).abs() < 1e-6);
     assert!((y - 540.0).abs() < 1e-6);
+}
+
+#[test]
+fn overlay_point_tracks_zoom_without_scaling_sprite() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(ZoomClip {
+        start: 0.0,
+        end: 4.0,
+        scale: 2.0,
+        center: (960.0, 540.0),
+        ease_ms: 0,
+        mode: ZoomMode::Auto,
+    });
+    let (zoom, center) = state.eval_zoom(1.0);
+    assert!((zoom - 2.0).abs() < 1e-9);
+
+    let crop = state.crop_or_full();
+    let (zx, zy, zw, zh) = even_crop_rect(
+        zoom,
+        (center.0 - crop.0, center.1 - crop.1),
+        crop.2.max(2.0) as u32,
+        crop.3.max(2.0) as u32,
+    );
+    let view_1x = crop;
+    let view_2x = (crop.0 + zx as f64, crop.1 + zy as f64, zw as f64, zh as f64);
+    let widget_w = 960.0;
+    let widget_h = 540.0;
+    let src = (200.0, 180.0);
+    let p1 = source_to_zoomed_point(src.0, src.1, view_1x, widget_w, widget_h);
+    let p2 = source_to_zoomed_point(src.0, src.1, view_2x, widget_w, widget_h);
+    assert!(
+        (p1.0 - p2.0).abs() > 10.0 || (p1.1 - p2.1).abs() > 10.0,
+        "hotspot must move with 2× zoom, got {p1:?} vs {p2:?}"
+    );
+
+    let mid_1x = source_to_zoomed_point(960.0, 540.0, view_1x, widget_w, widget_h);
+    let mid_2x = source_to_zoomed_point(960.0, 540.0, view_2x, widget_w, widget_h);
+    assert!((mid_1x.0 - mid_2x.0).abs() < 1e-6);
+    assert!((mid_1x.1 - mid_2x.1).abs() < 1e-6);
+
+    let size = 1.4;
+    let scale_1x = crate::recording::editor::cursor_sprite::overlay_scale(size, 1.0);
+    let scale_2x = crate::recording::editor::cursor_sprite::overlay_scale(size, zoom);
+    assert!((scale_1x - scale_2x).abs() < 1e-12);
+    assert!((scale_2x - size).abs() < 1e-12);
+    assert!((scale_2x - size * zoom).abs() > 0.5);
 }
 
 #[test]

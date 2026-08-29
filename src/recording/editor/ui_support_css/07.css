@@ -172,7 +172,7 @@
             }
 
             .recording-editor-card-board {
-                min-height: 192px;
+                min-height: 258px;
                 padding: 0 0 10px 0;
             }
 
@@ -185,6 +185,10 @@
             }
 
             .recording-editor-card-zoom-track {
+                min-height: 56px;
+            }
+
+            .recording-editor-card-hide-track {
                 min-height: 56px;
             }
 
@@ -241,29 +245,9 @@
                 color: #d5794e;
             }
 
-            .recording-editor-cursor-slider-row {
-                padding: 2px 0 6px 0;
-            }
-
-            .recording-editor-root scale.recording-editor-cursor-slider {
-                min-height: 14px;
-                padding: 0;
-            }
-
-            .recording-editor-root scale.recording-editor-cursor-slider trough {
-                min-height: 3px;
-                background: alpha(white, 0.10);
-            }
-
-            .recording-editor-root scale.recording-editor-cursor-slider highlight {
-                background: #b05c38;
-            }
-
-            .recording-editor-root scale.recording-editor-cursor-slider slider {
-                min-width: 10px;
-                min-height: 10px;
-                background: #b05c38;
-                border: none;
+            .recording-editor-fill-slider {
+                min-height: 32px;
+                margin: 0 0 8px 0;
             }
 
             .recording-editor-tool-sidebar {
@@ -319,7 +303,38 @@
                 color: alpha(white, 0.45);
                 font-size: 11px;
                 font-weight: 600;
-                letter-spacing: 0.3px;
+                letter-spacing: 0.6px;
+            }
+
+            .recording-editor-click-effect-row {
+                margin: 2px 0 4px 0;
+            }
+
+            button.recording-editor-click-effect-card {
+                min-height: 64px;
+                padding: 8px 4px 6px 4px;
+                border: none;
+                border-radius: 10px;
+                background: alpha(white, 0.04);
+            }
+
+            button.recording-editor-click-effect-card:hover {
+                background: alpha(white, 0.07);
+            }
+
+            button.recording-editor-click-effect-card:checked,
+            button.recording-editor-click-effect-card:checked:hover {
+                background: alpha(#b05c38, 0.16);
+            }
+
+            .recording-editor-click-effect-label {
+                color: alpha(white, 0.68);
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-click-effect-card:checked .recording-editor-click-effect-label {
+                color: #d5794e;
             }
 
             .recording-editor-zoom-scroll,

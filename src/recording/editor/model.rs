@@ -29,6 +29,11 @@ mod zoom {
     include!("model_parts/zoom_impl.rs");
 }
 
+mod cursor_hide {
+    use super::*;
+    include!("model_parts/cursor_hide_impl.rs");
+}
+
 include!("model_parts/helpers.rs");
 
 #[cfg(test)]

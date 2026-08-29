@@ -329,6 +329,145 @@ pub fn suggested_zoom_range(state: &VideoEditState, start: f64) -> Option<(f64, 
     (!overlaps).then_some((start, end))
 }
 
+pub fn draw_cursor_hide_clips(
+    state: &Arc<Mutex<VideoEditState>>,
+    hovered: Option<usize>,
+    hover_time: Option<f64>,
+    dragging: Option<usize>,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let state = state.lock().unwrap();
+    let w = width as f64;
+    let h = height as f64;
+    let clips: Vec<(usize, f64, f64)> = state
+        .cursor_hide_clips
+        .iter()
+        .enumerate()
+        .map(|(index, clip)| (index, clip.start, clip.end))
+        .collect();
+    for &(index, start, end) in &clips {
+        if dragging == Some(index) {
+            continue;
+        }
+        draw_one_hide(
+            &state, cr, w, h, index, start, end, hovered, dragging, false,
+        );
+    }
+    if let Some(index) = dragging {
+        if let Some(&(_, start, end)) = clips.iter().find(|(i, _, _)| *i == index) {
+            draw_one_hide(&state, cr, w, h, index, start, end, hovered, dragging, true);
+        }
+    }
+    if let Some(start) = hover_time {
+        if let Some((start, end)) = suggested_hide_range(&state, start) {
+            draw_hide_suggestion(&state, cr, w, h, start, end);
+        }
+    }
+}
+
+pub fn draw_one_hide(
+    state: &VideoEditState,
+    cr: &gtk4::cairo::Context,
+    w: f64,
+    h: f64,
+    index: usize,
+    start: f64,
+    end: f64,
+    hovered: Option<usize>,
+    dragging: Option<usize>,
+    lifted: bool,
+) {
+    let x0 = state.time_to_x(start, w);
+    let x1 = state.time_to_x(end, w);
+    let clip_w = (x1 - x0).max(22.0);
+    let selected = lifted || state.selected_cursor_hide == Some(index);
+    let faint =
+        !lifted && (dragging.is_some() || (state.selected_cursor_hide.is_some() && !selected));
+    let rose = ClipTone {
+        fill: if faint {
+            (0.72, 0.28, 0.32, 0.10)
+        } else if selected {
+            (0.78, 0.32, 0.36, 0.36)
+        } else {
+            (0.72, 0.28, 0.32, 0.26)
+        },
+        handle: (1.0, 0.78, 0.80, if faint { 0.30 } else { 0.98 }),
+    };
+    let y = if lifted { 1.0 } else { 7.0 };
+    let height = h - 14.0;
+    if lifted {
+        rounded_rect(cr, x0 + 3.0, y + 8.0, clip_w, height, 5.0);
+        cr.set_source_rgba(0.0, 0.0, 0.0, 0.38);
+        let _ = cr.fill();
+    }
+    draw_translucent_clip(
+        cr,
+        x0,
+        y,
+        clip_w,
+        height,
+        rose,
+        lifted || hovered == Some(index),
+    );
+    if clip_w > 40.0 {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
+        cr.select_font_face(
+            "sans-serif",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Normal,
+        );
+        cr.set_font_size(11.0);
+        cr.move_to(x0 + 14.0, y + height * 0.62);
+        let _ = cr.show_text("Hide");
+    }
+}
+
+pub fn suggested_hide_range(state: &VideoEditState, start: f64) -> Option<(f64, f64)> {
+    let start = start.max(0.0);
+    let end = start + DEFAULT_CURSOR_HIDE_DURATION_SECONDS;
+    let overlaps = state
+        .cursor_hide_clips
+        .iter()
+        .any(|clip| start < clip.end && end > clip.start);
+    (!overlaps).then_some((start, end))
+}
+
+pub fn draw_hide_suggestion(
+    state: &VideoEditState,
+    cr: &gtk4::cairo::Context,
+    w: f64,
+    h: f64,
+    start: f64,
+    end: f64,
+) {
+    let x0 = state.time_to_x(start, w);
+    let x1 = state.time_to_x(end, w);
+    let clip_w = (x1 - x0).max(22.0);
+    let y = 7.0;
+    let height = h - 14.0;
+    rounded_rect(cr, x0, y, clip_w, height, 5.0);
+    cr.set_source_rgba(0.78, 0.32, 0.36, 0.12);
+    let _ = cr.fill_preserve();
+    cr.set_source_rgba(1.0, 0.78, 0.80, 0.38);
+    cr.set_line_width(1.0);
+    cr.set_dash(&[4.0, 3.0], 0.0);
+    let _ = cr.stroke();
+    cr.set_dash(&[], 0.0);
+    if clip_w > 40.0 {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+        cr.select_font_face(
+            "sans-serif",
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Normal,
+        );
+        cr.set_font_size(11.0);
+        cr.move_to(x0 + 14.0, y + height * 0.62);
+        let _ = cr.show_text("Hide");
+    }
+}
+
 pub fn draw_zoom_suggestion(
     state: &VideoEditState,
     cr: &gtk4::cairo::Context,

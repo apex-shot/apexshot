@@ -448,10 +448,8 @@ fn build_composite_convert_args(
     ));
     let _ = std::fs::create_dir_all(&work_dir);
     let cmd_path = work_dir.join("zoom.cmd");
-    let cursor_path = work_dir.join("cursor.png");
-    let cursor_hot = super::cursor_sprite::write_png(&cursor_path, state.cursor, "default")
-        .unwrap_or((8.0, 6.0));
-    let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end, cursor_hot));
+    let cursor_path = work_dir.join("cursor.rgba");
+    let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end));
 
     let (base_w, base_h) = state.canvas_dimensions();
     let (out_w, out_h) = state.padded_output_dimensions();
@@ -464,6 +462,12 @@ fn build_composite_convert_args(
     };
 
     let (eff_w, eff_h) = state.effective_source_dimensions();
+    let draw_cursor = state
+        .sidecar
+        .as_ref()
+        .is_some_and(|sidecar| !sidecar.pointer.is_empty())
+        && super::cursor_export::write_rgba_track(state, start, end, base_w, base_h, &cursor_path)
+            .is_ok();
     let mut filter = format!(
         "[0:v]sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={base_w}:{base_h}:force_original_aspect_ratio=decrease,pad={base_w}:{base_h}:(ow-iw)/2:(oh-ih)/2:0x000000",
         escape_filter_path(&cmd_path),
@@ -471,6 +475,9 @@ fn build_composite_convert_args(
         src_w = eff_w.max(2),
         src_h = eff_h.max(2),
     );
+    if draw_cursor {
+        filter.push_str("[base];[base][1:v]overlay=0:0:eof_action=pass:format=auto");
+    }
     if out_w != base_w || out_h != base_h {
         filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
     }
@@ -481,13 +488,6 @@ fn build_composite_convert_args(
     let speed = state.speed_for_source(start);
     if (speed - 1.0).abs() > 1e-6 {
         filter.push_str(&format!(",setpts=PTS/{speed}"));
-    }
-    let draw_cursor = state
-        .sidecar
-        .as_ref()
-        .is_some_and(|sidecar| !sidecar.pointer.is_empty());
-    if draw_cursor {
-        filter.push_str("[v];[v][1:v]overlay@c=x=0:y=0:eof_action=pass");
     }
 
     let mut args = vec![
@@ -501,8 +501,14 @@ fn build_composite_convert_args(
     ];
     if draw_cursor {
         args.extend([
-            "-loop".into(),
-            "1".into(),
+            "-f".into(),
+            "rawvideo".into(),
+            "-pix_fmt".into(),
+            "rgba".into(),
+            "-video_size".into(),
+            format!("{base_w}x{base_h}"),
+            "-framerate".into(),
+            format!("{:.0}", super::cursor_export::fps()),
             "-i".into(),
             cursor_path.to_string_lossy().into_owned(),
         ]);
@@ -532,12 +538,7 @@ fn static_crop_prefix(state: &VideoEditState) -> String {
     }
 }
 
-fn build_sendcmd(
-    state: &VideoEditState,
-    start: f64,
-    end: f64,
-    cursor_hot: (f64, f64),
-) -> String {
+fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
     let fps = 30.0;
     let duration = (end - start).max(0.0);
     let frames = ((duration * fps).ceil() as usize).max(1);
@@ -558,32 +559,8 @@ fn build_sendcmd(
         lines.push_str(&format!(
             "{local_t:.3} crop@z w {w};\n{local_t:.3} crop@z h {h};\n{local_t:.3} crop@z x {x};\n{local_t:.3} crop@z y {y};\n"
         ));
-        if let Some(sidecar) = &state.sidecar {
-            if let Some(frame) = sidecar.presented_at(
-                source_t,
-                state.cursor.smooth,
-                state.cursor.hide_idle,
-                state.cursor.idle_ms,
-            ) {
-                if frame.alpha >= 0.12 {
-                    let rel_x =
-                        ((frame.x - crop_x - x as f64) / w as f64) * base_w as f64 + pad_x;
-                    let rel_y =
-                        ((frame.y - crop_y - y as f64) / h as f64) * base_h as f64 + pad_y;
-                    let (hx, hy) = cursor_hot;
-                    lines.push_str(&format!(
-                        "{local_t:.3} overlay@c x {:.0};\n{local_t:.3} overlay@c y {:.0};\n",
-                        (rel_x - hx).round(),
-                        (rel_y - hy).round()
-                    ));
-                } else {
-                    lines.push_str(&format!(
-                        "{local_t:.3} overlay@c x -9999;\n{local_t:.3} overlay@c y -9999;\n"
-                    ));
-                }
-            }
-        }
     }
+    let _ = (pad_x, pad_y, base_w, base_h, out_w, out_h);
     lines
 }
 
@@ -863,6 +840,7 @@ mod tests {
         assert!(args
             .iter()
             .any(|arg| arg.contains("sendcmd") && arg.contains("crop@z")));
+        assert!(!args.iter().any(|arg| arg.contains("overlay@c")));
         assert!(!args.iter().any(|arg| arg.contains("tmix")));
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
     }

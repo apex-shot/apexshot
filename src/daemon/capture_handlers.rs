@@ -475,7 +475,7 @@ pub(super) fn send_desktop_notification(summary: &str, body: &str) {
     crate::utils::notify::desktop_notification(summary, body);
 }
 
-/// Surface a capture failure to the user (Spectacle-style: failures are never silent).
+/// Surface a capture failure to the user. Failures are never silent.
 /// Cancel / launch-blocked paths should not call this.
 pub(super) fn notify_screenshot_capture_failed(context: &str, err: &impl std::fmt::Display) {
     let technical = err.to_string();

@@ -21,6 +21,8 @@ impl VideoEditState {
             segment_muted: vec![false],
             zoom_clips: Vec::new(),
             selected_zoom: None,
+            cursor_hide_clips: Vec::new(),
+            selected_cursor_hide: None,
             selected_segment: None,
             background: VideoBackground::None,
             background_padding: 24.0,
@@ -59,8 +61,14 @@ impl VideoEditState {
             .iter()
             .map(|clip| clip.end)
             .fold(0.0_f64, f64::max);
+        let hide_end = self
+            .cursor_hide_clips
+            .iter()
+            .map(|clip| clip.end)
+            .fold(0.0_f64, f64::max);
         self.video_end_seconds()
             .max(zoom_end)
+            .max(hide_end)
             .max(self.source_duration())
     }
 
