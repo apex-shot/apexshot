@@ -53,6 +53,7 @@ pub(super) fn build_tool_sidebar(
             let zoom = guard.selected_zoom.is_some();
             let hide = guard.selected_cursor_hide.is_some();
             let clip = guard.selected_segment.is_some();
+            let pointer_data = guard.supports_auto_zoom();
             drop(guard);
             if zoom {
                 last_zoom.set(true);
@@ -60,7 +61,8 @@ pub(super) fn build_tool_sidebar(
                 last_zoom.set(false);
             }
             let show_cursor = tool == EditorTool::Cursor;
-            let show_zoom = !show_cursor && (zoom || (!clip && !hide && last_zoom.get()));
+            let show_zoom =
+                !show_cursor && (zoom || (!clip && !hide && (last_zoom.get() || pointer_data)));
             let show_hide = !show_cursor && !show_zoom && hide;
             cursor_panel.widget.set_visible(show_cursor);
             zoom_panel.widget.set_visible(show_zoom);
@@ -763,6 +765,14 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     title.set_hexpand(true);
     header.append(&title);
 
+    let detect = Button::with_label("Detect");
+    detect.add_css_class("recording-editor-zoom-detect");
+    detect.set_has_frame(false);
+    detect.set_halign(Align::End);
+    detect.set_tooltip_text(Some("Add zooms where clicks were recorded"));
+    detect.set_sensitive(state.lock().unwrap().supports_auto_zoom());
+    header.append(&detect);
+
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
@@ -929,6 +939,16 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
             on_change();
         }
     });
+    detect.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        move |_| {
+            let added = state.lock().unwrap().suggest_zoom_clips();
+            if added > 0 {
+                on_change();
+            }
+        }
+    });
     let delete = {
         let state = state.clone();
         let on_change = on_change.clone();
@@ -950,6 +970,7 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let classic = classic.clone();
         let classic_row = classic_row.clone();
         let chip_buttons = chip_buttons.clone();
+        let detect = detect.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
@@ -958,6 +979,7 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
             let selected = guard.selected_zoom_clip().cloned();
             syncing.set(true);
             auto_btn.set_sensitive(auto_available);
+            detect.set_sensitive(auto_available && !guard.zoom_locked);
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
                     ZoomMode::Auto
@@ -976,9 +998,13 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
                 }
                 classic_row.set_visible(mode == ZoomMode::Auto);
             } else {
+                mode_hint.set_text(if auto_available {
+                    "Select a zoom to adjust it, or use Detect to add zooms where clicks were recorded"
+                } else {
+                    "Select a zoom to adjust it"
+                });
                 if !auto_available {
                     manual_btn.set_active(true);
-                    mode_hint.set_text("Set a fixed focus point for this zoom");
                 }
                 classic_row.set_visible(false);
             }

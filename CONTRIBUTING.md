@@ -21,6 +21,10 @@ Thank you for your interest in contributing to ApexShot! This document provides 
 - **Rust** (latest stable, install via [rustup](https://www.rust-lang.org/tools/install)).
   The workflow expects the `rustfmt` and `clippy` components — `rustup
   component add rustfmt clippy` if you don't already have them.
+  Using distro Rust instead of rustup works too: `sudo apt-get install -y
+  clippy rustfmt` (Ubuntu 24.04; newer releases name it `rust-clippy`),
+  `sudo dnf install -y clippy rustfmt` (Fedora), or
+  `sudo pacman -S --needed clippy rustfmt` (Arch).
 - **C++17 compiler** (`g++` or `clang`) and **CMake ≥ 3.16** for the
   capture-overlay binary in `capture-overlay/`.
 - **GTK4** + **gtk4-layer-shell** development headers (the latter built

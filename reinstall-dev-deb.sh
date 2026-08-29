@@ -28,6 +28,15 @@ if ! cargo deb --version >/dev/null 2>&1; then
   exit 1
 fi
 
+# CI gates on `cargo fmt` and `cargo clippy`; make sure both are present.
+# Ubuntu ships clippy as "clippy" (24.04) or "rust-clippy" (newer releases).
+if ! command -v cargo-clippy >/dev/null 2>&1 || ! command -v cargo-fmt >/dev/null 2>&1; then
+  echo "Installing Rust lint/format tools (clippy, rustfmt)..."
+  CLIPPY_PKG="clippy"
+  apt-cache show clippy >/dev/null 2>&1 || CLIPPY_PKG="rust-clippy"
+  sudo apt-get install -y "$CLIPPY_PKG" rustfmt
+fi
+
 export CARGO_INCREMENTAL=1
 
 echo "Building ApexShot .deb..."

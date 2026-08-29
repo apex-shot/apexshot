@@ -252,6 +252,8 @@ ensure_build_tools() {
     local missing=()
     command -v cargo >/dev/null 2>&1 || missing+=(cargo)
     command -v cmake >/dev/null 2>&1 || missing+=(cmake)
+    command -v cargo-clippy >/dev/null 2>&1 || missing+=(clippy)
+    command -v cargo-fmt >/dev/null 2>&1 || missing+=(rustfmt)
     if [[ $USE_RPM -eq 1 ]]; then
         command -v rpmbuild >/dev/null 2>&1 || missing+=(rpm-build)
     fi

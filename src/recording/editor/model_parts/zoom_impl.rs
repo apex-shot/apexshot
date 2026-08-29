@@ -149,6 +149,73 @@ impl VideoEditState {
             .is_some_and(|sidecar| !sidecar.pointer.is_empty())
     }
 
+    /// Populate the timeline with zoom clips derived from recorded pointer
+    /// interactions. Returns the number of clips added.
+    pub fn suggest_zoom_clips(&mut self) -> usize {
+        if self.zoom_locked {
+            return 0;
+        }
+        let Some(sidecar) = &self.sidecar else {
+            return 0;
+        };
+        let suggestions = zoom_suggest::suggest_zooms(
+            sidecar,
+            self.metadata.width as f64,
+            self.metadata.height as f64,
+            self.source_duration(),
+        );
+        if suggestions.is_empty() {
+            return 0;
+        }
+        let mode = if self.supports_auto_zoom() {
+            ZoomMode::Auto
+        } else {
+            ZoomMode::Manual
+        };
+        let crop = self.crop_or_full();
+        let segments = self.ordered_placed_segments();
+        let mut added = 0;
+        for suggestion in suggestions {
+            let Some(&(composition_start, source_start, source_end)) = segments
+                .iter()
+                .find(|&&(_, start, end)| {
+                    suggestion.center_time >= start && suggestion.center_time <= end
+                })
+            else {
+                continue;
+            };
+            let start = suggestion.start.max(source_start);
+            let end = suggestion.end.min(source_end);
+            if end - start < zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS {
+                continue;
+            }
+            let timeline_start = composition_start + (start - source_start);
+            let timeline_end = composition_start + (end - source_start);
+            if self
+                .zoom_clips
+                .iter()
+                .any(|clip| ranges_overlap(timeline_start, timeline_end, clip.start, clip.end))
+            {
+                continue;
+            }
+            let center = clamp_zoom_center(crop, zoom_suggest::AUTO_ZOOM_SCALE, suggestion.center);
+            self.zoom_clips.push(ZoomClip {
+                start: timeline_start,
+                end: timeline_end,
+                scale: zoom_suggest::AUTO_ZOOM_SCALE,
+                center,
+                ease_ms: DEFAULT_ZOOM_EASE_MS,
+                mode,
+            });
+            added += 1;
+        }
+        if added > 0 {
+            self.zoom_clips
+                .sort_by(|a, b| a.start.total_cmp(&b.start));
+        }
+        added
+    }
+
     pub fn set_selected_zoom_mode(&mut self, mode: ZoomMode) {
         if self.zoom_locked {
             return;

@@ -20,7 +20,7 @@ mod tool_sidebar;
 mod toolbar;
 
 use super::ffmpeg;
-use super::model::{AudioMode, VideoEditState, VideoMetadata};
+use super::model::{AudioMode, EditorTool, VideoEditState, VideoMetadata};
 use super::project::{self, persist_video_session};
 use super::ui_support::install_recording_editor_css;
 use gtk4::{
@@ -127,6 +127,9 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             Ok(metadata) => {
                 let mut state = VideoEditState::new(metadata);
                 project::restore_into(&mut state);
+                if state.zoom_clips.is_empty() && state.suggest_zoom_clips() > 0 {
+                    state.selected_tool = EditorTool::Timeline;
+                }
                 Some(Arc::new(Mutex::new(state)))
             }
             Err(err) => {

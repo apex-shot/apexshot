@@ -553,6 +553,8 @@ install_from_source() {
     local deps=(
         rust
         cargo
+        clippy
+        rustfmt
         git
         cmake
         clang
