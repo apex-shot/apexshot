@@ -1066,4 +1066,21 @@ mod tests {
             "Video close must not encode an MP4"
         );
     }
+
+    #[test]
+    fn light_theme_playhead_is_black_and_clips_have_no_lift_shadow() {
+        let painting = include_str!("timeline_card_parts/painting.rs");
+        assert!(
+            painting.contains("cr.set_source_rgba(0.07, 0.08, 0.09, alpha)"),
+            "Light-theme playhead must paint black"
+        );
+        assert!(
+            !painting.contains("0.0, 0.0, 0.0, 0.38"),
+            "Lifted clips must not draw a drop shadow"
+        );
+        assert!(
+            painting.contains("fn widget_is_light"),
+            "Timeline painting must detect the light theme"
+        );
+    }
 }

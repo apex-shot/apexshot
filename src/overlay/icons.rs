@@ -102,7 +102,7 @@ pub(crate) fn draw_toolbar_icon(
         }
         ToolbarIcon::Ocr => {
             context.select_font_face(
-                "Sans",
+                crate::typography::UI_FONT_FAMILY,
                 gtk4::cairo::FontSlant::Normal,
                 gtk4::cairo::FontWeight::Bold,
             );
@@ -198,7 +198,7 @@ pub(crate) fn draw_toolbar_icon(
             context.set_source_rgba(color.0, color.1, color.2, color.3);
             let _ = context.fill();
             context.select_font_face(
-                "Sans",
+                crate::typography::UI_FONT_FAMILY,
                 gtk4::cairo::FontSlant::Normal,
                 gtk4::cairo::FontWeight::Bold,
             );

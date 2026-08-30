@@ -46,6 +46,7 @@ pub(crate) struct RecordingState {
     pub(crate) video_max_res: usize,
     pub(crate) video_fps: usize,
     pub(crate) record_mono: bool,
+    pub(crate) noise_suppression: bool,
     pub(crate) open_editor: bool,
 
     // GIF tab settings
@@ -95,6 +96,7 @@ impl Default for RecordingState {
             video_max_res: 0,
             video_fps: 1,
             record_mono: false,
+            noise_suppression: false,
             open_editor: false,
             gif_fps: 15.0,
             gif_quality: 0.9,

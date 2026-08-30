@@ -321,6 +321,7 @@
             window.fullscreen .recording-editor-shell,
             window.fullscreen .recording-editor-modal-scrim {
                 border-radius: 0;
+                border: none;
             }
 
             .recording-editor-modal-scrim {

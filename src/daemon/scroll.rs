@@ -1,17 +1,26 @@
 use ashpd::desktop::{
-    remote_desktop::{Axis, DeviceType, KeyState, RemoteDesktop},
-    screencast::{CursorMode, Screencast, SourceType},
-    PersistMode, Session,
+    remote_desktop::{
+        Axis, DeviceType, KeyState, NotifyKeyboardKeycodeOptions, NotifyKeyboardKeysymOptions,
+        NotifyPointerAxisDiscreteOptions, NotifyPointerAxisOptions, NotifyPointerButtonOptions,
+        NotifyPointerMotionAbsoluteOptions, RemoteDesktop, SelectDevicesOptions, StartOptions,
+    },
+    screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
+    CreateSessionOptions, PersistMode, Session,
 };
 
 /// The D-Bus interface object. Holds a channel sender to forward actions to
 /// the daemon's main loop.
 pub(super) struct PortalScrollSession {
-    remote: RemoteDesktop<'static>,
-    session: Session<'static, RemoteDesktop<'static>>,
+    remote: RemoteDesktop,
+    session: Session<RemoteDesktop>,
     stream_node_id: Option<u32>,
     stream_pos: (i32, i32),
     stream_size: Option<(i32, i32)>,
+    /// Keeps the portal connection that owns the session alive. Session.Close
+    /// wedges the zbus machinery of the connection it traveled on, so scroll
+    /// injection must not reuse a process-global portal connection.
+    #[allow(dead_code)]
+    conn: zbus::Connection,
 }
 
 #[derive(Default)]
@@ -26,25 +35,29 @@ impl ScrollInjector {
             return Ok(true);
         }
 
-        let remote: RemoteDesktop<'static> = RemoteDesktop::new()
+        let conn = zbus::Connection::session()
+            .await
+            .map_err(|e| format!("session bus: {e}"))?;
+
+        let remote = RemoteDesktop::with_connection(conn.clone())
             .await
             .map_err(|e| format!("RemoteDesktop proxy init failed: {e}"))?;
 
-        let screencast = Screencast::new()
+        let screencast = Screencast::with_connection(conn.clone())
             .await
             .map_err(|e| format!("Screencast proxy init failed: {e}"))?;
 
-        let session: Session<'static, RemoteDesktop<'static>> = remote
-            .create_session()
+        let session: Session<RemoteDesktop> = remote
+            .create_session(CreateSessionOptions::default())
             .await
             .map_err(|e| format!("RemoteDesktop create_session failed: {e}"))?;
 
         remote
             .select_devices(
                 &session,
-                DeviceType::Pointer | DeviceType::Keyboard,
-                None,
-                PersistMode::DoNot,
+                SelectDevicesOptions::default()
+                    .set_devices(DeviceType::Pointer | DeviceType::Keyboard)
+                    .set_persist_mode(PersistMode::DoNot),
             )
             .await
             .map_err(|e| format!("RemoteDesktop select_devices failed: {e}"))?;
@@ -52,24 +65,24 @@ impl ScrollInjector {
         screencast
             .select_sources(
                 &session,
-                CursorMode::Hidden,
-                SourceType::Monitor.into(),
-                false,
-                None,
-                PersistMode::DoNot,
+                SelectSourcesOptions::default()
+                    .set_cursor_mode(CursorMode::Hidden)
+                    .set_sources(ashpd::enumflags2::BitFlags::from(SourceType::Monitor))
+                    .set_multiple(false)
+                    .set_persist_mode(PersistMode::DoNot),
             )
             .await
             .map_err(|e| format!("Screencast select_sources failed: {e}"))?;
 
         let selected = remote
-            .start(&session, None)
+            .start(&session, None, StartOptions::default())
             .await
             .map_err(|e| format!("RemoteDesktop start request failed: {e}"))?
             .response()
             .map_err(|e| format!("RemoteDesktop start denied: {e}"))?;
 
         let (stream_node_id, stream_pos, stream_size) =
-            if let Some(stream) = selected.streams().and_then(|streams| streams.first()) {
+            if let Some(stream) = selected.streams().first() {
                 (
                     Some(stream.pipe_wire_node_id()),
                     stream.position().unwrap_or((0, 0)),
@@ -85,6 +98,7 @@ impl ScrollInjector {
             stream_node_id,
             stream_pos,
             stream_size,
+            conn,
         });
         self.focused = false;
         eprintln!(
@@ -116,19 +130,35 @@ impl ScrollInjector {
 
             if portal
                 .remote
-                .notify_pointer_motion_absolute(&portal.session, stream_id, local_x, local_y)
+                .notify_pointer_motion_absolute(
+                    &portal.session,
+                    stream_id,
+                    local_x,
+                    local_y,
+                    NotifyPointerMotionAbsoluteOptions::default(),
+                )
                 .await
                 .is_ok()
             {
                 ok = true;
                 let press_ok = portal
                     .remote
-                    .notify_pointer_button(&portal.session, 272, KeyState::Pressed)
+                    .notify_pointer_button(
+                        &portal.session,
+                        272,
+                        KeyState::Pressed,
+                        NotifyPointerButtonOptions::default(),
+                    )
                     .await
                     .is_ok();
                 let release_ok = portal
                     .remote
-                    .notify_pointer_button(&portal.session, 272, KeyState::Released)
+                    .notify_pointer_button(
+                        &portal.session,
+                        272,
+                        KeyState::Released,
+                        NotifyPointerButtonOptions::default(),
+                    )
                     .await
                     .is_ok();
                 self.focused = press_ok && release_ok;
@@ -140,46 +170,86 @@ impl ScrollInjector {
         for _ in 0..count {
             let axis_ok = portal
                 .remote
-                .notify_pointer_axis_discrete(&portal.session, Axis::Vertical, -1)
+                .notify_pointer_axis_discrete(
+                    &portal.session,
+                    Axis::Vertical,
+                    -1,
+                    NotifyPointerAxisDiscreteOptions::default(),
+                )
                 .await
                 .is_ok();
 
             let smooth_axis_ok = portal
                 .remote
-                .notify_pointer_axis(&portal.session, 0.0, 36.0, true)
+                .notify_pointer_axis(
+                    &portal.session,
+                    0.0,
+                    36.0,
+                    NotifyPointerAxisOptions::default().set_finish(true),
+                )
                 .await
                 .is_ok();
 
             let keysym_ok = portal
                 .remote
-                .notify_keyboard_keysym(&portal.session, 0xFF56, KeyState::Pressed)
+                .notify_keyboard_keysym(
+                    &portal.session,
+                    0xFF56,
+                    KeyState::Pressed,
+                    NotifyKeyboardKeysymOptions::default(),
+                )
                 .await
                 .is_ok()
                 && portal
                     .remote
-                    .notify_keyboard_keysym(&portal.session, 0xFF56, KeyState::Released)
+                    .notify_keyboard_keysym(
+                        &portal.session,
+                        0xFF56,
+                        KeyState::Released,
+                        NotifyKeyboardKeysymOptions::default(),
+                    )
                     .await
                     .is_ok();
 
             let keycode_ok = portal
                 .remote
-                .notify_keyboard_keycode(&portal.session, 109, KeyState::Pressed)
+                .notify_keyboard_keycode(
+                    &portal.session,
+                    109,
+                    KeyState::Pressed,
+                    NotifyKeyboardKeycodeOptions::default(),
+                )
                 .await
                 .is_ok()
                 && portal
                     .remote
-                    .notify_keyboard_keycode(&portal.session, 109, KeyState::Released)
+                    .notify_keyboard_keycode(
+                        &portal.session,
+                        109,
+                        KeyState::Released,
+                        NotifyKeyboardKeycodeOptions::default(),
+                    )
                     .await
                     .is_ok();
 
             let down_keycode_ok = portal
                 .remote
-                .notify_keyboard_keycode(&portal.session, 108, KeyState::Pressed)
+                .notify_keyboard_keycode(
+                    &portal.session,
+                    108,
+                    KeyState::Pressed,
+                    NotifyKeyboardKeycodeOptions::default(),
+                )
                 .await
                 .is_ok()
                 && portal
                     .remote
-                    .notify_keyboard_keycode(&portal.session, 108, KeyState::Released)
+                    .notify_keyboard_keycode(
+                        &portal.session,
+                        108,
+                        KeyState::Released,
+                        NotifyKeyboardKeycodeOptions::default(),
+                    )
                     .await
                     .is_ok();
 

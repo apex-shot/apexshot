@@ -1,7 +1,7 @@
             .recording-editor-root {
                 padding: 0;
                 color: #F1F1F3;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
                 min-width: 900px;
                 min-height: 640px;
                 background: #000000;
@@ -60,12 +60,47 @@
                 border-radius: 999px;
                 background: alpha(white, 0.08);
                 border: none;
+                box-shadow: none;
+                outline: none;
             }
 
             .recording-editor-root scale highlight {
                 min-height: 4px;
                 border-radius: 999px;
                 background: #b05c38;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .recording-editor-root scale slider {
+                min-width: 12px;
+                min-height: 12px;
+                margin: 0;
+                padding: 0;
+                border: none;
+                border-radius: 999px;
+                background: #b05c38;
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+                -gtk-icon-shadow: none;
+                color: #b05c38;
+            }
+
+            .recording-editor-root scale slider:hover,
+            .recording-editor-root scale slider:active,
+            .recording-editor-root scale slider:disabled,
+            .recording-editor-root scale:hover slider,
+            .recording-editor-root scale:active slider,
+            .recording-editor-root scale:focus slider,
+            .recording-editor-root scale:focus-within slider,
+            .recording-editor-root scale.fine-tune slider {
+                background: #b05c38;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                outline: none;
+                -gtk-icon-shadow: none;
             }
 
             .recording-editor-root checkbutton {

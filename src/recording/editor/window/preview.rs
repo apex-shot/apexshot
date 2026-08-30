@@ -1,8 +1,8 @@
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
     even_crop_rect, format_webcut_time, source_to_zoomed_point, view_to_source,
-    zoom_camera_transform, ClickEffect, CursorSettings, VideoBackground, VideoEditState, ZoomClip,
-    ZoomMode, WEBCUT_ASPECT_RATIOS,
+    zoom_camera_transform, CursorSettings, VideoBackground, VideoEditState, ZoomClip, ZoomMode,
+    WEBCUT_ASPECT_RATIOS,
 };
 use crate::recording::editor::sidecar::CursorMotion;
 use gtk4::{
@@ -742,25 +742,18 @@ fn draw_preview_overlays(
         if let Some(mut frame) = sidecar.presented_at(source_t, cursor_motion(state.cursor)) {
             frame.alpha *= state.cursor_hide_alpha_for_source(source_t);
             let cursor = overlay_cursor(state.cursor, zoom);
-            let pulse = match cursor.click_effect {
-                ClickEffect::Pulse => {
-                    1.0 + (sidecar.click_pulse_at(source_t) - 1.0) * cursor.click_intensity
-                }
-                _ => 1.0,
-            };
-            if cursor.click_effect == ClickEffect::Ripple {
-                for (x, y, progress) in sidecar.click_ripples_at(source_t) {
-                    let (px, py) = source_to_zoomed_point(x, y, view, w, h);
-                    crate::recording::editor::cursor_sprite::draw_ripple(
-                        cr,
-                        px,
-                        py,
-                        progress,
-                        cursor.size,
-                        cursor.click_intensity,
-                        frame.alpha,
-                    );
-                }
+            for (x, y, progress) in
+                sidecar.click_ripples_at(source_t, cursor.click_window_seconds())
+            {
+                let (px, py) = source_to_zoomed_point(x, y, view, w, h);
+                crate::recording::editor::cursor_sprite::draw_click(
+                    cr,
+                    px,
+                    py,
+                    progress,
+                    cursor,
+                    frame.alpha,
+                );
             }
             for &(x, y, ghost) in &frame.trail {
                 let (px, py) = source_to_zoomed_point(x, y, view, w, h);
@@ -780,7 +773,7 @@ fn draw_preview_overlays(
                 cr,
                 px,
                 py,
-                pulse,
+                1.0,
                 frame.kind.as_str(),
                 cursor,
                 frame.alpha,

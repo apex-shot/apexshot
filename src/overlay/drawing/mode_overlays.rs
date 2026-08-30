@@ -89,7 +89,7 @@ pub(super) fn draw_countdown_bubble(
 
         // Draw countdown number
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -129,7 +129,7 @@ pub(super) fn draw_countdown_bubble(
 
         // Draw countdown number or "Cancel"
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -208,7 +208,7 @@ pub(super) fn draw_scroll_popup(
 
     // Title
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
@@ -219,7 +219,7 @@ pub(super) fn draw_scroll_popup(
 
     // Body text
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
@@ -265,7 +265,7 @@ pub(super) fn draw_scroll_popup(
     let _ = context.stroke();
 
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
@@ -293,7 +293,7 @@ pub(super) fn draw_crosshair_mode_bubble(
     screen_height: f64,
 ) {
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
@@ -390,7 +390,7 @@ pub(super) fn draw_window_picker(
 
     // Section header "Select a Window"
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
@@ -439,7 +439,7 @@ pub(super) fn draw_window_picker(
             &win.class
         };
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -479,7 +479,7 @@ pub(super) fn draw_window_picker(
         }
 
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );

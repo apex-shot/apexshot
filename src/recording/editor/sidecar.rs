@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub const SIDECAR_VERSION: u32 = 1;
+pub const MAX_POINTER_SAMPLES: usize = 8_000;
 pub const MAX_CLICKS: usize = 500;
 pub const CLICK_PULSE_WINDOW_SECONDS: f64 = 0.08;
 pub const CLICK_RIPPLE_WINDOW_SECONDS: f64 = 0.32;
@@ -409,12 +410,13 @@ impl PointerSidecar {
         1.0 + peak * 0.35
     }
 
-    pub fn click_ripples_at(&self, t: f64) -> Vec<(f64, f64, f64)> {
+    pub fn click_ripples_at(&self, t: f64, window: f64) -> Vec<(f64, f64, f64)> {
+        let window = window.max(1e-6);
         let mut ripples = Vec::new();
         for click in &self.clicks {
             let age = t - click.t;
-            if (0.0..=CLICK_RIPPLE_WINDOW_SECONDS).contains(&age) {
-                let progress = (age / CLICK_RIPPLE_WINDOW_SECONDS).clamp(0.0, 1.0);
+            if (0.0..=window).contains(&age) {
+                let progress = (age / window).clamp(0.0, 1.0);
                 ripples.push((click.x, click.y, progress));
             }
         }
@@ -688,7 +690,7 @@ mod tests {
         assert!((presented.x - expected.0).abs() < 1e-9);
         assert!((presented.y - expected.1).abs() < 1e-9);
         assert!((presented.x - 200.0).abs() < 1e-9);
-        let ripples = sidecar.click_ripples_at(1.0);
+        let ripples = sidecar.click_ripples_at(1.0, CLICK_RIPPLE_WINDOW_SECONDS);
         assert_eq!(ripples.len(), 1);
         assert!((ripples[0].0 - 100.0).abs() < 1e-9);
         assert!(sidecar.click_pulse_at(1.0) > 1.0);
@@ -741,12 +743,35 @@ mod tests {
             y: 80.0,
             button: 1,
         });
-        assert!(sidecar.click_ripples_at(0.5).is_empty());
-        let ripples = sidecar.click_ripples_at(1.08);
+        assert!(sidecar
+            .click_ripples_at(0.5, CLICK_RIPPLE_WINDOW_SECONDS)
+            .is_empty());
+        let ripples = sidecar.click_ripples_at(1.08, CLICK_RIPPLE_WINDOW_SECONDS);
         assert_eq!(ripples.len(), 1);
         assert!((ripples[0].0 - 40.0).abs() < 1e-9);
         assert!(ripples[0].2 > 0.0 && ripples[0].2 < 1.0);
-        assert!(sidecar.click_ripples_at(1.5).is_empty());
+        assert!(sidecar
+            .click_ripples_at(1.5, CLICK_RIPPLE_WINDOW_SECONDS)
+            .is_empty());
+    }
+
+    #[test]
+    fn click_ripples_honor_effect_window() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.clicks.push(ClickSample {
+            t: 1.0,
+            x: 40.0,
+            y: 80.0,
+            button: 1,
+        });
+        assert!(sidecar.click_ripples_at(1.4, 0.32).is_empty());
+        let long = sidecar.click_ripples_at(1.4, 0.5);
+        assert_eq!(long.len(), 1);
+        assert!((long[0].2 - 0.8).abs() < 1e-9);
+        let short = sidecar.click_ripples_at(1.16, 0.32);
+        assert_eq!(short.len(), 1);
+        assert!((short[0].2 - 0.5).abs() < 1e-9);
     }
 
     #[test]

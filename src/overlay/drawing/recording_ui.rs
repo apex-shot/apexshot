@@ -33,6 +33,7 @@ pub(crate) fn draw_recording_panel(
     mic_level: f64,
     speaker_level: f64,
     record_mono: bool,
+    noise_suppression: bool,
     open_editor: bool,
     rec_controls: bool,
     hidpi: bool,
@@ -346,7 +347,7 @@ pub(crate) fn draw_recording_panel(
             (1.0, 1.0, 1.0, icon_alpha),
         );
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -403,6 +404,7 @@ pub(crate) fn draw_recording_panel(
             video_max_res,
             video_fps,
             record_mono,
+            noise_suppression,
             open_editor,
             rec_controls,
             hidpi,

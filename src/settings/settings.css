@@ -12,6 +12,7 @@
                 background-color: #141414;
                 border: none;
                 color: #F1F1F3;
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
             }
 
             .editor-toolbar {

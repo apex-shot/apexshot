@@ -1,6 +1,6 @@
-use crate::recording::editor::cursor_sprite;
+use crate::capture::editor::window::icon_names;
 use crate::recording::editor::model::{EditorTool, VideoEditState};
-use gtk4::{prelude::*, Align, Box as GtkBox, DrawingArea, Orientation, ToggleButton};
+use gtk4::{prelude::*, Align, Box as GtkBox, Image, Orientation, ToggleButton};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -25,19 +25,11 @@ pub(super) fn build_tool_section(
     cursor.set_has_frame(false);
     cursor.set_tooltip_text(Some("Cursor"));
     cursor.set_halign(Align::Center);
-    let glyph = DrawingArea::new();
-    glyph.set_content_width(24);
-    glyph.set_content_height(24);
-    glyph.set_halign(Align::Center);
-    glyph.set_valign(Align::Center);
-    glyph.set_draw_func({
-        let state = state.clone();
-        move |_, cr, width, height| {
-            let theme = state.lock().unwrap().cursor.theme;
-            cursor_sprite::draw_centered(cr, width as f64, height as f64, theme);
-        }
-    });
-    cursor.set_child(Some(&glyph));
+    let icon = Image::from_icon_name(icon_names::POINTER_PRIMARY_CLICK);
+    icon.set_pixel_size(18);
+    icon.set_halign(Align::Center);
+    icon.set_valign(Align::Center);
+    cursor.set_child(Some(&icon));
     cursor.connect_clicked({
         let state = state.clone();
         let on_change = on_change.clone();
@@ -51,11 +43,9 @@ pub(super) fn build_tool_section(
 
     let refresh = {
         let cursor = cursor.clone();
-        let glyph = glyph.clone();
         Rc::new(move || {
             let tool = state.lock().unwrap().selected_tool;
             cursor.set_active(tool == EditorTool::Cursor);
-            glyph.queue_draw();
         }) as Rc<dyn Fn()>
     };
 

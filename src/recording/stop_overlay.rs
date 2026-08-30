@@ -862,7 +862,11 @@ fn setup_countdown_window(
             );
             let _ = cr.fill();
 
-            cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+            cr.select_font_face(
+                crate::typography::UI_FONT_FAMILY,
+                cairo::FontSlant::Normal,
+                cairo::FontWeight::Bold,
+            );
             cr.set_font_size(if is_hovered { 34.0 } else { 72.0 });
             if is_hovered {
                 cr.set_source_rgb(1.0, 228.0 / 255.0, 214.0 / 255.0);
@@ -1359,7 +1363,11 @@ fn draw_stop_glyph(cr: &cairo::Context, rect: RectF, show_timer: bool, secs: u64
         let mins = secs / 60;
         let s = secs % 60;
         let text = format!("{}:{:02}", mins, s);
-        cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+        cr.select_font_face(
+            crate::typography::UI_FONT_FAMILY,
+            cairo::FontSlant::Normal,
+            cairo::FontWeight::Bold,
+        );
         cr.set_font_size(16.5);
         let label_x = rect.x + 42.0;
         let label_y = cy + 5.6;

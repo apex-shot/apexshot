@@ -223,10 +223,27 @@
 
             .editor-theme-light.recording-editor-root scale trough {
                 background: alpha(#111827, 0.08);
+                box-shadow: none;
+                outline: none;
             }
 
             .editor-theme-light.recording-editor-root scale highlight {
                 background: #b05c38;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .editor-theme-light.recording-editor-root scale slider,
+            .editor-theme-light.recording-editor-root scale slider:hover,
+            .editor-theme-light.recording-editor-root scale slider:active,
+            .editor-theme-light.recording-editor-root scale:focus slider,
+            .editor-theme-light.recording-editor-root scale:focus-within slider {
+                background: #b05c38;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                outline: none;
+                -gtk-icon-shadow: none;
             }
 
             .editor-theme-light.recording-editor-root checkbutton {
@@ -287,7 +304,7 @@
             }
 
             .editor-theme-light .recording-editor-window-controls {
-                background: transparent;
+                background: #ffffff;
                 border-bottom: none;
             }
 

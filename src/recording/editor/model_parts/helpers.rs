@@ -38,7 +38,15 @@ pub fn eval_zoom(
         return (1.0, frame_center);
     };
     let ease = (clip.ease_ms as f64 / 1000.0).clamp(0.0, clip.duration() / 2.0);
-    let scale = eased_value(t, clip.start, clip.end, ease, 1.0, clip.scale.max(1.0));
+    let scale = eased_value(
+        t,
+        clip.start,
+        clip.end,
+        ease,
+        1.0,
+        clip.scale.max(1.0),
+        clip.easing,
+    );
     (scale, clip.center)
 }
 
@@ -78,28 +86,31 @@ fn recenter_if_near_edge(
     )
 }
 
-fn eased_value(t: f64, start: f64, end: f64, ease: f64, from: f64, to: f64) -> f64 {
+fn eased_value(
+    t: f64,
+    start: f64,
+    end: f64,
+    ease: f64,
+    from: f64,
+    to: f64,
+    easing: ZoomEasing,
+) -> f64 {
     if ease <= f64::EPSILON {
         return to;
     }
     if t < start + ease {
         let alpha = ((t - start) / ease).clamp(0.0, 1.0);
-        return lerp(from, to, ease_out_cubic(alpha));
+        return lerp(from, to, easing.apply(alpha));
     }
     if t > end - ease {
         let alpha = ((end - t) / ease).clamp(0.0, 1.0);
-        return lerp(from, to, ease_out_cubic(alpha));
+        return lerp(from, to, easing.apply(alpha));
     }
     to
 }
 
 fn lerp(from: f64, to: f64, alpha: f64) -> f64 {
     from + (to - from) * alpha
-}
-
-fn ease_out_cubic(t: f64) -> f64 {
-    let t = t.clamp(0.0, 1.0);
-    1.0 - (1.0 - t).powi(3)
 }
 
 pub fn zoom_fill_transform(scale: f64, target: f64, ox: f64, oy: f64) -> (f64, f64, f64) {
@@ -142,8 +153,14 @@ pub fn clamp_zoom_center(crop: (f64, f64, f64, f64), scale: f64, center: (f64, f
     let half_w = zw as f64 / 2.0;
     let half_h = zh as f64 / 2.0;
     (
-        center.0.clamp(crop_x + half_w, (crop_x + crop_w - half_w).max(crop_x + half_w)),
-        center.1.clamp(crop_y + half_h, (crop_y + crop_h - half_h).max(crop_y + half_h)),
+        center.0.clamp(
+            crop_x + half_w,
+            (crop_x + crop_w - half_w).max(crop_x + half_w),
+        ),
+        center.1.clamp(
+            crop_y + half_h,
+            (crop_y + crop_h - half_h).max(crop_y + half_h),
+        ),
     )
 }
 
@@ -381,4 +398,3 @@ fn unique_edited_path(parent: &Path, stem: &str) -> PathBuf {
 
     unreachable!("unbounded edited output path search should always return")
 }
-

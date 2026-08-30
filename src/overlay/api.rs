@@ -86,6 +86,7 @@ impl AreaSelector {
         state.recording.video_max_res = app_config.rec_video_max_res as usize;
         state.recording.video_fps = app_config.rec_video_fps as usize;
         state.recording.record_mono = app_config.rec_video_mono;
+        state.recording.noise_suppression = app_config.rec_noise_suppression;
         state.recording.open_editor = app_config.rec_video_open_editor;
         state.recording.gif_fps = app_config.rec_gif_fps as f64;
         state.recording.gif_quality = app_config.rec_gif_quality;

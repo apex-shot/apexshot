@@ -111,6 +111,30 @@ fn deb_package_includes_background_gradient_assets() {
 }
 
 #[test]
+fn deb_package_includes_gnome_extension() {
+    let cargo_toml = include_str!("../Cargo.toml");
+    for file in [
+        "metadata.json",
+        "extension.js",
+        "shell-overlay.js",
+        "window-list.js",
+        "preview-stacking.js",
+    ] {
+        let asset = format!("gnome-extension/{file}");
+        assert!(
+            cargo_toml.contains(&asset),
+            "release .deb must include {asset}"
+        );
+    }
+    assert!(
+        cargo_toml.contains(
+            "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/"
+        ),
+        "GNOME extension assets must be installed in the system extension directory"
+    );
+}
+
+#[test]
 fn arch_pkgbuild_version_matches_cargo_package_version() {
     let cargo_toml = include_str!("../Cargo.toml");
     let pkgbuild = include_str!("../packaging/arch/PKGBUILD");

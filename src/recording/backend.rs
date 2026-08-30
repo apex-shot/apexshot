@@ -2,8 +2,9 @@ use super::*;
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,13 +15,40 @@ struct CropMargins {
     bottom: u32,
 }
 
+/// Holds overlay meters off for the lifetime of a capture so a second
+/// pulsesrc cannot xrun the recording source on loud transients.
+struct RecordingAudioExclusiveGuard {
+    active: bool,
+}
+
+impl RecordingAudioExclusiveGuard {
+    fn acquire(needed: bool) -> Self {
+        if !needed {
+            return Self { active: false };
+        }
+        if crate::daemon::recording_audio_is_exclusive() {
+            return Self { active: false };
+        }
+        crate::daemon::release_audio_monitors_for_recording();
+        Self { active: true }
+    }
+}
+
+impl Drop for RecordingAudioExclusiveGuard {
+    fn drop(&mut self) {
+        if self.active {
+            crate::daemon::end_recording_audio_exclusive();
+        }
+    }
+}
+
 pub(super) type RecordingPortalSession =
-    ashpd::desktop::Session<'static, ashpd::desktop::screencast::Screencast<'static>>;
+    ashpd::desktop::Session<ashpd::desktop::screencast::Screencast>;
 
 /// Backend that owns the lifetime of a Wayland capture stream.
 pub(super) enum WaylandCaptureSession {
     /// XDG ScreenCast portal session (GNOME and generic fallback).
-    Portal(#[allow(dead_code)] RecordingPortalSession),
+    Portal(#[allow(dead_code)] OwnedPortalSession),
     /// KWin `zkde_screencast_unstable_v1` (no portal dialog).
     /// Boxed so the portal variant stays small (clippy `large_enum_variant`).
     KdeNative(Box<crate::backend::kde_screencast::KdeScreencastHandle>),
@@ -38,6 +66,67 @@ impl std::fmt::Debug for WaylandCaptureSession {
     }
 }
 
+/// A portal ScreenCast session bound to a recording-private D-Bus connection.
+///
+/// `Session.Close` wedges the zbus proxy machinery of the connection it
+/// travels on (reproduced against xdg-desktop-portal on GNOME 50: after a
+/// Close, every later portal call on that connection hangs without even
+/// reaching the bus). A process-global portal connection would therefore
+/// break every recording after the first. Giving each recording its own
+/// connection contains the damage: the Close travels on the owning
+/// connection (the only sender the portal accepts), and the connection is
+/// dropped together with the recording.
+pub(super) struct OwnedPortalSession {
+    conn: zbus::Connection,
+    session: Option<RecordingPortalSession>,
+}
+
+impl OwnedPortalSession {
+    fn new(conn: zbus::Connection, session: RecordingPortalSession) -> Self {
+        Self {
+            conn,
+            session: Some(session),
+        }
+    }
+
+    fn as_session(&self) -> &RecordingPortalSession {
+        self.session.as_ref().expect("portal session")
+    }
+}
+
+impl Drop for OwnedPortalSession {
+    fn drop(&mut self) {
+        let Some(session) = self.session.take() else {
+            return;
+        };
+        // Keep the owning connection alive until Close finishes, then let it
+        // die with this recording. A wedged connection never outlives it.
+        let conn = self.conn.clone();
+        crate::utils::run_off_tokio(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(err) => {
+                    eprintln!("[recording] Portal session close runtime: {err}");
+                    return;
+                }
+            };
+            match rt.block_on(async move {
+                tokio::time::timeout(Duration::from_secs(2), session.close()).await
+            }) {
+                Ok(Ok(())) => eprintln!("[recording] Closed portal session"),
+                Ok(Err(err)) => eprintln!("[recording] Portal session close: {err}"),
+                Err(_) => eprintln!(
+                    "[recording] Portal session close timed out; dropping the recording portal connection"
+                ),
+            }
+            drop(conn);
+        });
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct WaylandSource {
     node_id: u32,
@@ -48,7 +137,7 @@ pub(super) struct WaylandSource {
     stream_height: u32,
     #[allow(dead_code)]
     crop: Option<CropMargins>,
-    _session: WaylandCaptureSession,
+    session: Option<WaylandCaptureSession>,
 }
 
 #[derive(Debug)]
@@ -252,6 +341,7 @@ pub(super) async fn start_recording_with_prepared_backend(
         let final_path = built.final_path.clone();
         let encoder_name = built.encoder_name.clone();
         let encoder_props = built.encoder_props.clone();
+        let audio_muxer = built.profile.muxer;
         let config = built.config.clone();
         return tokio::task::spawn_blocking(move || {
             record_wayland_with_ffmpeg_sync(
@@ -259,6 +349,7 @@ pub(super) async fn start_recording_with_prepared_backend(
                 &final_path,
                 &encoder_name,
                 &encoder_props,
+                audio_muxer,
                 &config,
                 command_rx,
             )
@@ -382,19 +473,111 @@ fn select_encoder(
     Err(RecordError::NoEncoderFound)
 }
 
+/// Try to start the GStreamer audio capture (mic + speaker monitor mixed and
+/// encoded in-process). `None` means the caller should keep the legacy
+/// ffmpeg-pulse audio inputs — only when GStreamer plugins are missing or
+/// the pipeline cannot produce samples.
+fn start_gst_audio_or_fallback(
+    config: &super::RecordingConfig,
+    muxer: &str,
+) -> Option<super::gst_audio::ActiveGstAudio> {
+    use super::gst_audio::{audio_available, ActiveGstAudio, AudioTermination, GstAudioSetup};
+
+    let setup = GstAudioSetup::from_recording(config)?;
+    if !audio_available(muxer, AudioTermination::AppSink, setup.noise_suppression) {
+        eprintln!("[recording] GStreamer audio unavailable; using ffmpeg pulse inputs");
+        return None;
+    }
+    match ActiveGstAudio::start(&setup, muxer) {
+        Ok(audio) => {
+            println!("Recording audio via GStreamer (mic/monitor mix, unified pipeline)");
+            Some(audio)
+        }
+        Err(err) => {
+            eprintln!("[recording] GStreamer audio first start failed ({err}); retrying");
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            match ActiveGstAudio::start(&setup, muxer) {
+                Ok(audio) => {
+                    println!("Recording audio via GStreamer (mic/monitor mix, unified pipeline)");
+                    Some(audio)
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[recording] GStreamer audio failed to start ({err}); using ffmpeg pulse inputs"
+                    );
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// Give the ffmpeg child the audio pipe as fd 3 (`-i pipe:3`).
+///
+/// The `OwnedFd` is moved into the pre_exec closure so the parent keeps the
+/// read end open until after `spawn()` forks; the parent's copy then closes
+/// with the closure, leaving ffmpeg's fd 3 as the only reader (EOF propagates
+/// when the GStreamer writer thread exits).
+#[cfg(unix)]
+pub(super) fn attach_audio_pipe_as_fd3(cmd: &mut std::process::Command, read_fd: OwnedFd) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        cmd.pre_exec(move || {
+            let fd = read_fd.as_raw_fd();
+            if fd != 3 && libc::dup2(fd, 3) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // dup2 clears CLOEXEC on its target, but dup2(x, x) is a no-op —
+            // clear it explicitly so fd 3 survives exec.
+            if libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // Drop the original read end so ffmpeg does not keep a second copy
+            // of the pipe. Extra copies (especially a leftover write end) stop
+            // EOF from ever arriving, so ffmpeg hangs after recording stops.
+            if fd != 3 && libc::close(fd) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn attach_audio_pipe_as_fd3(_cmd: &mut std::process::Command, read_fd: OwnedFd) {
+    drop(read_fd);
+}
+
 /// Wayland recording: native PipeWire frame capture + ffmpeg pipe for encoding.
 pub(super) fn record_wayland_with_ffmpeg_sync(
-    wayland_source: WaylandSource,
+    mut wayland_source: WaylandSource,
     final_path: &std::path::Path,
     encoder_name: &str,
     encoder_props: &str,
+    audio_muxer: &str,
     config: &super::RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> super::RecordResult<(PathBuf, super::RecordingTerminalAction)> {
-    use std::io::{Read, Write};
+    use std::io::Read;
     use std::process::{Command, Stdio};
 
     let final_path = final_path.to_path_buf();
+
+    // Audio first: `gst::init()` must happen before `pw::init()` in this
+    // process (PipeWire video thread below). Overlay meters also have to
+    // drop their pulsesrc before we open the recording source, and stay
+    // off until this capture ends (peaks xrun a second pulsesrc).
+    let _ = super::gst_audio::ensure_gst_initialized();
+    let _audio_exclusive =
+        RecordingAudioExclusiveGuard::acquire(config.mic_enabled || config.speaker_enabled);
+    if config.mic_enabled || config.speaker_enabled {
+        super::audio::ensure_pipewire_pulse_running();
+    }
+    let mut gst_audio = if config.mic_enabled || config.speaker_enabled {
+        start_gst_audio_or_fallback(config, audio_muxer)
+    } else {
+        None
+    };
 
     // Open PipeWire capture stream (continuous).
     // Portal path: connect via the remote FD from OpenPipeWireRemote.
@@ -404,7 +587,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     // match the negotiated format, which used to panic in convert_to_rgba_frame.
     let hint_w = (wayland_source.stream_width > 0).then_some(wayland_source.stream_width);
     let hint_h = (wayland_source.stream_height > 0).then_some(wayland_source.stream_height);
-    let capture = match wayland_source.pipewire_fd {
+    let capture = match match wayland_source.pipewire_fd {
         Some(fd) => crate::pipewire_engine::PipeWireCapture::connect(
             fd,
             wayland_source.node_id,
@@ -418,8 +601,20 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
             hint_w,
             hint_h,
         ),
-    }
-    .map_err(|e| RecordError::GStreamerError(format!("PipeWire capture failed: {e}")))?;
+    } {
+        Ok(capture) => capture,
+        Err(e) => {
+            if let Some(mut audio) = gst_audio.take() {
+                audio.abort();
+            }
+            return Err(RecordError::GStreamerError(format!(
+                "PipeWire capture failed: {e}"
+            )));
+        }
+    };
+    // Declared after `capture` so unwind/error cleanup closes the exclusive
+    // portal session before attempting native PipeWire teardown.
+    let mut capture_session = wayland_source.session.take();
 
     let format = capture.format().ok_or_else(|| {
         RecordError::GStreamerError("No format negotiated before recording".into())
@@ -469,11 +664,20 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         .arg("pipe:0");
 
     // Add every input before filters, codecs, maps, and other output options.
-    // FFmpeg otherwise applies an option such as -vf to the following PulseAudio
+    // FFmpeg otherwise applies an option such as -vf to the following audio
     // input and exits with AVERROR(EINVAL) (234).
-    if config.mic_enabled || config.speaker_enabled {
-        super::audio::ensure_pipewire_pulse_running();
-
+    let gst_audio_fd = gst_audio.as_mut().and_then(|audio| {
+        let format = audio.input_format();
+        audio.take_read_fd().map(|fd| (format, fd))
+    });
+    if let Some((format, read_fd)) = gst_audio_fd {
+        // GStreamer path: encoded audio arrives on an inherited fd as a second
+        // input. Both inputs EOF deterministically (pipe writer closes on EOS),
+        // so no -shortest hack is needed.
+        ffmpeg_cmd.arg("-f").arg(format);
+        ffmpeg_cmd.arg("-i").arg("pipe:3");
+        attach_audio_pipe_as_fd3(&mut ffmpeg_cmd, read_fd);
+    } else if config.mic_enabled || config.speaker_enabled {
         if config.mic_enabled {
             let mic_dev = config
                 .mic_source
@@ -546,26 +750,35 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         }
     }
 
-    // Map audio after all inputs have been declared. ffmpeg captures from
-    // PulseAudio directly; on modern GNOME this is provided by pipewire-pulse.
+    // Map audio after all inputs have been declared.
     if config.mic_enabled || config.speaker_enabled {
-        // Mix multiple audio streams if both enabled.
-        if config.mic_enabled && config.speaker_enabled {
-            ffmpeg_cmd.arg("-filter_complex");
-            ffmpeg_cmd.arg("[1:a][2:a]amix=inputs=2:duration=first[aout]");
-            ffmpeg_cmd.arg("-map").arg("0:v");
-            ffmpeg_cmd.arg("-map").arg("[aout]");
-        } else {
+        if gst_audio.is_some() {
+            // Encoded audio is muxed as-is; mono is handled by the GStreamer
+            // branch caps, so no channel conversion happens here.
             ffmpeg_cmd.arg("-map").arg("0:v");
             ffmpeg_cmd.arg("-map").arg("1:a");
-        }
+            ffmpeg_cmd.arg("-c:a").arg("copy");
+        } else {
+            // Legacy pulse inputs: ffmpeg captures from PulseAudio directly;
+            // on modern GNOME this is provided by pipewire-pulse.
+            if config.mic_enabled && config.speaker_enabled {
+                ffmpeg_cmd.arg("-filter_complex");
+                ffmpeg_cmd.arg("[1:a][2:a]amix=inputs=2:duration=first[aout]");
+                ffmpeg_cmd.arg("-map").arg("0:v");
+                ffmpeg_cmd.arg("-map").arg("[aout]");
+            } else {
+                ffmpeg_cmd.arg("-map").arg("0:v");
+                ffmpeg_cmd.arg("-map").arg("1:a");
+            }
 
-        if config.mono_audio {
-            ffmpeg_cmd.arg("-ac").arg("1");
+            if config.mono_audio {
+                ffmpeg_cmd.arg("-ac").arg("1");
+            }
+            // Pulse sources never EOF. Without this, closing the video pipe
+            // leaves ffmpeg blocked on mic/speaker input and Stop never
+            // finishes. (The GStreamer pipe path EOFs deterministically.)
+            ffmpeg_cmd.arg("-shortest");
         }
-        // Pulse sources never EOF. Without this, closing the video pipe leaves
-        // ffmpeg blocked on mic/speaker input and Stop never finishes.
-        ffmpeg_cmd.arg("-shortest");
     }
 
     ffmpeg_cmd.arg(&final_path);
@@ -573,11 +786,24 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     ffmpeg_cmd.stdout(Stdio::null());
     ffmpeg_cmd.stderr(Stdio::piped());
 
-    let mut child = ffmpeg_cmd
-        .spawn()
-        .map_err(|e| RecordError::GStreamerError(format!("Failed to spawn ffmpeg: {e}")))?;
+    let mut child = match ffmpeg_cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            if let Some(mut audio) = gst_audio.take() {
+                audio.abort();
+            }
+            return Err(RecordError::GStreamerError(format!(
+                "Failed to spawn ffmpeg: {e}"
+            )));
+        }
+    };
 
     let mut stdin = child.stdin.take().expect("stdin should be piped");
+    set_child_stdin_nonblocking(&stdin).map_err(|e| {
+        let _ = child.kill();
+        let _ = child.wait();
+        RecordError::GStreamerError(format!("Failed to make ffmpeg input cancellable: {e}"))
+    })?;
     let mut stderr = child.stderr.take().expect("stderr should be piped");
     let stderr_reader = std::thread::spawn(move || {
         const MAX_DIAGNOSTIC_BYTES: usize = 16 * 1024;
@@ -641,14 +867,31 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
                 }
                 RecordingControlCommand::Pause if !paused => {
                     println!("Recording paused");
+                    if let Some(audio) = gst_audio.as_mut() {
+                        audio.set_paused(true);
+                    }
                     paused = true;
+                    super::notify_daemon_event("recording_session_paused");
                 }
                 RecordingControlCommand::Resume if paused => {
                     println!("Recording resumed");
+                    if let Some(audio) = gst_audio.as_mut() {
+                        audio.set_paused(false);
+                    }
                     paused = false;
                     next_frame_at = None; // don't skip the first frame
+                    super::notify_daemon_event("recording_session_resumed");
                 }
                 _ => {}
+            }
+        }
+
+        // An audio pipeline error truncates the audio track but must not kill
+        // an otherwise healthy video recording.
+        if let Some(err) = gst_audio.as_ref().and_then(|a| a.poll_bus_error()) {
+            eprintln!("[recording] GStreamer audio error: {err}; continuing without audio");
+            if let Some(mut audio) = gst_audio.take() {
+                audio.abort();
             }
         }
 
@@ -700,6 +943,9 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
                 drop(stdin);
                 let _ = child.kill();
                 let _ = child.wait();
+                if let Some(mut audio) = gst_audio.take() {
+                    audio.abort();
+                }
                 return Err(RecordError::GStreamerError(
                     "Recording produced no frames. The screen share ended before capture started."
                         .into(),
@@ -720,14 +966,26 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         }
         next_frame_at = Some(deadline + frame_interval);
 
-        // Write frame to ffmpeg stdin
-        if let Err(e) = stdin.write_all(pixels) {
-            if e.kind() == std::io::ErrorKind::BrokenPipe {
-                eprintln!("ffmpeg pipe broken (likely exited)");
-            } else {
-                eprintln!("Failed to write to ffmpeg: {e}");
+        // A nonblocking pipe keeps stop/discard responsive even if ffmpeg
+        // stalls and stops consuming raw frames.
+        match write_ffmpeg_frame_interruptible(
+            &mut stdin,
+            pixels,
+            &mut command_rx,
+            &mut stop_action,
+            &mut paused,
+            &mut gst_audio,
+        ) {
+            Ok(true) => {}
+            Ok(false) => break,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    eprintln!("ffmpeg pipe broken (likely exited)");
+                } else {
+                    eprintln!("Failed to write to ffmpeg: {e}");
+                }
+                break;
             }
-            break;
         }
 
         frames_written += 1;
@@ -742,16 +1000,29 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         }
     }
 
+    // Release the exclusive GNOME ScreenCast session before audio drain or
+    // ffmpeg finalization. Those can block for seconds; the compositor must
+    // not stay captured while they finish.
+    drop(capture_session.take());
+    drop(capture);
+
+    // Deterministic encoder stop: EOS audio, close the audio pipe, then close
+    // video stdin so ffmpeg finalizes once both inputs are at EOF.
+    if let Some(mut audio) = gst_audio.take() {
+        if stop_action == super::RecordingTerminalAction::Discard {
+            audio.abort();
+        } else {
+            audio.stop();
+        }
+    }
+    drop(stdin);
+
     if matches!(
         stop_action,
         super::RecordingTerminalAction::Save | super::RecordingTerminalAction::Discard
     ) {
-        crate::gnome_shell::hide_recording_mask_best_effort();
         super::notify_daemon_event("recording_session_ended");
     }
-
-    // Close stdin to signal ffmpeg EOF
-    drop(stdin);
 
     let status = wait_for_ffmpeg_child(&mut child)?;
     let ffmpeg_stderr = stderr_reader.join().unwrap_or_default();
@@ -843,6 +1114,80 @@ fn wait_for_ffmpeg_child(
     child
         .wait()
         .map_err(|e| RecordError::GStreamerError(format!("Failed to wait for ffmpeg: {e}")))
+}
+
+#[cfg(unix)]
+fn set_child_stdin_nonblocking(stdin: &std::process::ChildStdin) -> std::io::Result<()> {
+    let fd = stdin.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_child_stdin_nonblocking(_stdin: &std::process::ChildStdin) -> std::io::Result<()> {
+    Ok(())
+}
+
+fn write_ffmpeg_frame_interruptible(
+    stdin: &mut std::process::ChildStdin,
+    pixels: &[u8],
+    command_rx: &mut Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
+    stop_action: &mut super::RecordingTerminalAction,
+    paused: &mut bool,
+    gst_audio: &mut Option<super::gst_audio::ActiveGstAudio>,
+) -> std::io::Result<bool> {
+    use std::io::Write;
+
+    let mut offset = 0;
+    while offset < pixels.len() {
+        match stdin.write(&pixels[offset..]) {
+            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(written) => offset += written,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                if let Some(rx) = command_rx {
+                    match rx.try_recv() {
+                        Ok(RecordingControlCommand::Restart) => {
+                            *stop_action = super::RecordingTerminalAction::Restart;
+                            return Ok(false);
+                        }
+                        Ok(RecordingControlCommand::StopSave) => return Ok(false),
+                        Ok(RecordingControlCommand::StopDiscard) => {
+                            *stop_action = super::RecordingTerminalAction::Discard;
+                            return Ok(false);
+                        }
+                        Ok(RecordingControlCommand::Pause) if !*paused => {
+                            if let Some(audio) = gst_audio.as_mut() {
+                                audio.set_paused(true);
+                            }
+                            *paused = true;
+                            super::notify_daemon_event("recording_session_paused");
+                        }
+                        Ok(RecordingControlCommand::Resume) if *paused => {
+                            if let Some(audio) = gst_audio.as_mut() {
+                                audio.set_paused(false);
+                            }
+                            *paused = false;
+                            super::notify_daemon_event("recording_session_resumed");
+                        }
+                        Ok(_) | Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                            *command_rx = None;
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(true)
 }
 
 fn wait_for_ffmpeg_exit(
@@ -978,8 +1323,42 @@ fn crop_rgba_frame(
     Ok(cropped)
 }
 
+/// Best-effort audio for the X11 path: the shared GStreamer audio bin linked
+/// into the video muxer. Audio is a new capability here — any setup failure
+/// falls back to the historical video-only recording instead of failing.
+fn build_x11_audio_bin(
+    config: &super::RecordingConfig,
+    profile: &EncoderProfile,
+) -> Option<super::gst_audio::GstAudioBin> {
+    use super::gst_audio::{
+        audio_available, build_audio_bin, encoder_for_muxer, AudioTermination, GstAudioSetup,
+    };
+
+    let setup = GstAudioSetup::from_recording(config)?;
+    if !audio_available(
+        profile.muxer,
+        AudioTermination::GhostPad,
+        setup.noise_suppression,
+    ) {
+        eprintln!("[recording] X11 audio unavailable: GStreamer audio elements missing");
+        return None;
+    }
+    let encoder = encoder_for_muxer(profile.muxer)?;
+    match build_audio_bin(&setup, encoder, AudioTermination::GhostPad) {
+        Ok(bin) => {
+            println!("Recording audio via GStreamer (X11, first-class audio track)");
+            Some(bin)
+        }
+        Err(err) => {
+            eprintln!("[recording] X11 audio skipped: {err}");
+            None
+        }
+    }
+}
+
 /// X11 fallback recording using GStreamer ximagesrc.
-/// Preserved from the previous implementation for backward compatibility.
+/// Preserved from the previous implementation for backward compatibility,
+/// now with optional audio from the shared GStreamer audio bin.
 #[allow(unused_assignments)]
 async fn record_x11_with_gstreamer(
     config: &super::RecordingConfig,
@@ -987,9 +1366,13 @@ async fn record_x11_with_gstreamer(
     final_path: &std::path::Path,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> super::RecordResult<(PathBuf, super::RecordingTerminalAction)> {
+    let _audio_exclusive =
+        RecordingAudioExclusiveGuard::acquire(config.mic_enabled || config.speaker_enabled);
     gst::init().map_err(|e| RecordError::InitError(e.to_string()))?;
 
-    let pipeline_str = build_x11_gstreamer_pipeline(config, profile, final_path)?;
+    let audio_bin = build_x11_audio_bin(config, profile);
+    let pipeline_str =
+        build_x11_gstreamer_pipeline(config, profile, final_path, audio_bin.is_some())?;
     println!("Starting recording (GStreamer X11) to: {:?}", final_path);
     println!("Pipeline: {}", pipeline_str);
 
@@ -997,6 +1380,25 @@ async fn record_x11_with_gstreamer(
         .map_err(|e| RecordError::GStreamerError(format!("Failed to parse pipeline: {}", e)))?
         .downcast::<gst::Pipeline>()
         .map_err(|_| RecordError::GStreamerError("Cast to Pipeline failed".into()))?;
+
+    if let Some(audio) = audio_bin {
+        let muxer = pipeline
+            .by_name("mux")
+            .ok_or_else(|| RecordError::GStreamerError("named muxer not found".into()))?;
+        pipeline
+            .add(&audio.bin)
+            .map_err(|e| RecordError::GStreamerError(format!("Failed to add audio bin: {e}")))?;
+        let audio_pad = muxer
+            .request_pad_simple("audio_%u")
+            .ok_or_else(|| RecordError::GStreamerError("no audio pad on muxer".into()))?;
+        let ghost = audio
+            .bin
+            .static_pad("src")
+            .ok_or_else(|| RecordError::GStreamerError("audio bin has no ghost pad".into()))?;
+        ghost.link(&audio_pad).map_err(|e| {
+            RecordError::GStreamerError(format!("Failed to link audio into muxer: {e:?}"))
+        })?;
+    }
 
     pipeline
         .set_state(gst::State::Playing)
@@ -1009,6 +1411,7 @@ async fn record_x11_with_gstreamer(
     let mut command_rx = command_rx;
     let mut stop_action = super::RecordingTerminalAction::Save;
     let mut stopping = false;
+    let mut paused = false;
 
     loop {
         tokio::select! {
@@ -1041,6 +1444,20 @@ async fn record_x11_with_gstreamer(
                         stopping = true;
                         break;
                     }
+                    RecordingControlCommand::Pause if !paused => {
+                        pipeline
+                            .set_state(gst::State::Paused)
+                            .map_err(|e| RecordError::GStreamerError(format!("Failed to pause pipeline: {e}")))?;
+                        paused = true;
+                        super::notify_daemon_event("recording_session_paused");
+                    }
+                    RecordingControlCommand::Resume if paused => {
+                        pipeline
+                            .set_state(gst::State::Playing)
+                            .map_err(|e| RecordError::GStreamerError(format!("Failed to resume pipeline: {e}")))?;
+                        paused = false;
+                        super::notify_daemon_event("recording_session_resumed");
+                    }
                     _ => {}
                 }
             }
@@ -1061,6 +1478,9 @@ async fn record_x11_with_gstreamer(
         }
     }
 
+    if paused {
+        let _ = pipeline.set_state(gst::State::Playing);
+    }
     pipeline
         .set_state(gst::State::Null)
         .map_err(|e| RecordError::GStreamerError(format!("Cleanup failed: {}", e)))?;
@@ -1073,18 +1493,25 @@ async fn record_x11_with_gstreamer(
 }
 
 /// Build a GStreamer pipeline string for X11 capture (preserved from old code).
+/// The muxer is named when audio is attached so the audio bin can request a pad.
 fn build_x11_gstreamer_pipeline(
     config: &super::RecordingConfig,
     profile: &EncoderProfile,
     output_path: &std::path::Path,
+    with_audio: bool,
 ) -> super::RecordResult<String> {
     let output_str = output_path.to_string_lossy();
     let video_source = get_x11_source(config)?;
     let video_raw_caps = format!("video/x-raw,framerate={}/1", config.fps);
+    let muxer = if with_audio {
+        format!("{} name=mux", profile.muxer)
+    } else {
+        profile.muxer.to_string()
+    };
 
     Ok(format!(
         "{} ! videoconvert ! {}videorate ! {} ! {} ! {} ! filesink location=\"{}\"",
-        video_source, video_raw_caps, "queue", profile.encoder, profile.muxer, output_str
+        video_source, video_raw_caps, "queue", profile.encoder, muxer, output_str
     ))
 }
 
@@ -1198,14 +1625,16 @@ pub(super) async fn get_wayland_source(
     }
 
     use ashpd::desktop::{
-        screencast::{CursorMode, Screencast, SourceType},
-        PersistMode,
+        screencast::{
+            CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
+            StartCastOptions,
+        },
+        CreateSessionOptions, PersistMode,
     };
 
     // Fedora / KDE / GNOME: system portal picks the source; ApexShot settings
     // still control countdown, audio, shortcuts, notifications, and save path.
     println!("Requesting Wayland ScreenCast session (system share UI)…");
-
     let wants_area_crop = matches!(
         (config.x, config.y, config.width, config.height),
         (Some(_), Some(_), Some(w), Some(h)) if w > 0 && h > 0
@@ -1230,19 +1659,28 @@ pub(super) async fn get_wayland_source(
         wants_area_crop: bool,
     ) -> super::RecordResult<(
         ashpd::desktop::screencast::Streams,
-        RecordingPortalSession,
+        OwnedPortalSession,
         OwnedFd,
     )> {
         let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
 
-        let proxy = Screencast::new()
+        // Recording-private portal connection: a Session.Close wedges the
+        // zbus machinery of the connection it traveled on, so a shared
+        // process-global connection would hang every recording after the
+        // first. See OwnedPortalSession.
+        let conn = zbus::Connection::session()
+            .await
+            .map_err(|e| RecordError::PortalError(e.to_string()))?;
+
+        let proxy = Screencast::with_connection(conn.clone())
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
 
         let session = proxy
-            .create_session()
+            .create_session(CreateSessionOptions::default())
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
+        let setup_guard = OwnedPortalSession::new(conn, session);
 
         let source_types = if wants_area_crop {
             SourceType::Monitor.into()
@@ -1254,12 +1692,12 @@ pub(super) async fn get_wayland_source(
         // never restores a previous window/screen. Pick a source every time.
         proxy
             .select_sources(
-                &session,
-                cursor_mode,
-                source_types,
-                false,
-                None,
-                PersistMode::DoNot,
+                setup_guard.as_session(),
+                SelectSourcesOptions::default()
+                    .set_cursor_mode(cursor_mode)
+                    .set_sources(source_types)
+                    .set_multiple(false)
+                    .set_persist_mode(PersistMode::DoNot),
             )
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?
@@ -1273,22 +1711,26 @@ pub(super) async fn get_wayland_source(
         }
 
         let response = proxy
-            .start(&session, None)
+            .start(setup_guard.as_session(), None, StartCastOptions::default())
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?
             .response()
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
 
         let pipewire_fd = proxy
-            .open_pipe_wire_remote(&session)
+            .open_pipe_wire_remote(
+                setup_guard.as_session(),
+                OpenPipeWireRemoteOptions::default(),
+            )
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
 
-        Ok((response, session, pipewire_fd))
+        Ok((response, setup_guard, pipewire_fd))
     }
 
     discard_stale_recording_restore_tokens();
-    let (response, session, pipewire_fd) = request_screencast(cursor_mode, wants_area_crop).await?;
+    let (response, portal_session, pipewire_fd) =
+        request_screencast(cursor_mode, wants_area_crop).await?;
 
     let stream = response
         .streams()
@@ -1330,7 +1772,7 @@ pub(super) async fn get_wayland_source(
         stream_width,
         stream_height,
         crop,
-        _session: WaylandCaptureSession::Portal(session),
+        session: Some(WaylandCaptureSession::Portal(portal_session)),
     })
 }
 
@@ -1365,7 +1807,7 @@ pub(super) fn get_kde_wayland_source(
         stream_width,
         stream_height,
         crop: None,
-        _session: WaylandCaptureSession::KdeNative(Box::new(handle)),
+        session: Some(WaylandCaptureSession::KdeNative(Box::new(handle))),
     })
 }
 
@@ -1816,6 +2258,7 @@ mod tests {
             speaker_enabled: false,
             mic_source: None,
             speaker_source: None,
+            noise_suppression: false,
             gif_quality: 0.75,
             gif_optimize: true,
             gif_max_width: Some(800),

@@ -228,7 +228,11 @@ pub(crate) fn draw_feature_toolbar(
         } else {
             gtk4::cairo::FontWeight::Normal
         };
-        context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, font_weight);
+        context.select_font_face(
+            crate::typography::UI_FONT_FAMILY,
+            gtk4::cairo::FontSlant::Normal,
+            font_weight,
+        );
         context.set_font_size(9.5);
         context.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
         if let Ok(extents) = context.text_extents(label) {
@@ -253,7 +257,7 @@ pub(crate) fn draw_feature_toolbar(
         if index == super::icons::TOOLBAR_TIMER_INDEX && timer_tool_active {
             let badge_text = format!("{}s", capture_delay_seconds);
             context.select_font_face(
-                "Sans",
+                crate::typography::UI_FONT_FAMILY,
                 gtk4::cairo::FontSlant::Normal,
                 gtk4::cairo::FontWeight::Bold,
             );
@@ -279,7 +283,7 @@ pub(crate) fn draw_feature_toolbar(
     let size_center_x = size_panel_x + size_panel_width / 2.0;
 
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
@@ -301,7 +305,7 @@ pub(crate) fn draw_feature_toolbar(
     }
 
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
@@ -450,7 +454,11 @@ pub(super) fn draw_text_centered(
     } else {
         gtk4::cairo::FontWeight::Normal
     };
-    context.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, weight);
+    context.select_font_face(
+        crate::typography::UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        weight,
+    );
     context.set_font_size(size);
     context.set_source_rgba(rgba.0, rgba.1, rgba.2, rgba.3);
     if let Ok(extents) = context.text_extents(text) {
@@ -535,7 +543,7 @@ pub(super) fn draw_aspect_ratio_menu(
         }
 
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             if selected {
                 gtk4::cairo::FontWeight::Bold
@@ -768,6 +776,7 @@ pub(crate) fn draw_overlay(
                 st.recording.mic_level,
                 st.recording.speaker_level,
                 st.recording.record_mono,
+                st.recording.noise_suppression,
                 st.recording.open_editor,
                 st.recording.rec_controls,
                 st.recording.hidpi,
@@ -870,6 +879,7 @@ pub(crate) fn draw_overlay(
                 st.recording.mic_level,
                 st.recording.speaker_level,
                 st.recording.record_mono,
+                st.recording.noise_suppression,
                 st.recording.open_editor,
                 st.recording.rec_controls,
                 st.recording.hidpi,

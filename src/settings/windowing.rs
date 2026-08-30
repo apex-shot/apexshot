@@ -122,7 +122,7 @@ fn request_background_autostart(enable: bool) -> anyhow::Result<std::path::PathB
         ashpd::desktop::background::Background::request()
             .reason(reason)
             .auto_start(enable)
-            .command(&["apexshot", "daemon"])
+            .command(["apexshot", "daemon"])
             .dbus_activatable(false)
             .send()
             .await

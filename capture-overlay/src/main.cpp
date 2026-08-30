@@ -485,6 +485,13 @@ int main(int argc, char* argv[])
     }
 
     QApplication app(argc, argv);
+    // Match the Rust overlay/editor typography. Qt falls back to the system
+    // sans when the Inter family is unavailable.
+    {
+        QFont overlayFont = app.font();
+        overlayFont.setFamily(QStringLiteral("Inter"));
+        app.setFont(overlayFont);
+    }
     app.setApplicationName("ApexShot Capture");
     app.setDesktopFileName("io.github.codegoddy.apexshot");
     app.setWindowIcon(QIcon::fromTheme("io.github.codegoddy.apexshot"));

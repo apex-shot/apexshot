@@ -97,13 +97,14 @@ pub(super) fn dispatch_daemon_action(
             tokio::task::spawn_blocking(capture_handlers::spawn_empty_image_editor_subprocess);
         }
         DaemonAction::StopRecordingSave => {
-            crate::gnome_shell::hide_recording_mask_best_effort();
-            if !crate::recording::send_active_recording_command(
+            let stopped = crate::recording::send_active_recording_command(
                 crate::recording::RecordingControlCommand::StopSave,
-            ) {
+            );
+            if !stopped {
                 eprintln!("[daemon] No active recording available for stop/save.");
                 idle_recording_tray(action_tx, tray_handle, recording_tray_state);
             }
+            std::thread::spawn(crate::gnome_shell::hide_recording_mask_best_effort);
         }
 
         DaemonAction::ShowLastPreview => {

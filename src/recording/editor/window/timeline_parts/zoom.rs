@@ -139,7 +139,7 @@ pub fn draw_ruler(
     };
     let minor = (major / 5.0).max(0.2);
     cr.select_font_face(
-        "sans-serif",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
@@ -245,7 +245,7 @@ pub fn draw_zoom_track(
         let _ = cr.fill();
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
         cr.select_font_face(
-            "sans-serif",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );

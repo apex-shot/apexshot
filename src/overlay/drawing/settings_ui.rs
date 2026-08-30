@@ -54,7 +54,7 @@ pub(crate) fn draw_dropdown_button(
     context.fill().ok();
 
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
@@ -90,6 +90,7 @@ pub(crate) fn draw_settings_menu(
     video_max_res: usize,
     video_fps: usize,
     record_mono: bool,
+    noise_suppression: bool,
     open_editor: bool,
     rec_controls: bool,
     hidpi: bool,
@@ -128,7 +129,7 @@ pub(crate) fn draw_settings_menu(
     );
 
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
@@ -191,7 +192,7 @@ pub(crate) fn draw_settings_menu(
             (1.0, 1.0, 1.0, 150.0 / 255.0)
         };
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             if is_active_tab || tab_hovered {
                 gtk4::cairo::FontWeight::Bold
@@ -241,6 +242,7 @@ pub(crate) fn draw_settings_menu(
             video_max_res,
             video_fps,
             record_mono,
+            noise_suppression,
             open_editor,
             accent_r,
             accent_g,
@@ -364,7 +366,7 @@ pub(crate) fn draw_general_row(
 ) {
     if !label.is_empty() {
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -405,7 +407,7 @@ pub(crate) fn draw_general_row(
         56.0 / 255.0,
     );
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
@@ -448,6 +450,7 @@ pub(crate) fn draw_settings_video_tab(
     video_max_res: usize,
     video_fps: usize,
     record_mono: bool,
+    noise_suppression: bool,
     open_editor: bool,
     _accent_r: f64,
     _accent_g: f64,
@@ -456,7 +459,7 @@ pub(crate) fn draw_settings_video_tab(
     let card_x = menu_x + 18.0;
     let card_y = menu_y + 106.0;
     let card_w = menu_w - 36.0;
-    let row_heights = [76.0, 52.0, 52.0, 76.0];
+    let row_heights = [76.0, 52.0, 52.0, 52.0, 76.0];
     let card_h: f64 = row_heights.iter().sum();
     let label_x = card_x + 14.0;
     let control_right = card_x + card_w - 14.0;
@@ -467,7 +470,7 @@ pub(crate) fn draw_settings_video_tab(
     context.set_source_rgba(1.0, 1.0, 1.0, 13.0 / 255.0);
     context.set_line_width(1.0);
     let mut divider_y = card_y;
-    for height in row_heights.iter().take(3) {
+    for height in row_heights.iter().take(4) {
         divider_y += height;
         context.move_to(card_x + 14.0, divider_y);
         context.line_to(card_x + card_w - 14.0, divider_y);
@@ -477,7 +480,7 @@ pub(crate) fn draw_settings_video_tab(
     let draw_text =
         |context: &gtk4::cairo::Context, text: &str, x: f64, y: f64, bold: bool, alpha: f64| {
             context.select_font_face(
-                "Sans",
+                crate::typography::UI_FONT_FAMILY,
                 gtk4::cairo::FontSlant::Normal,
                 if bold {
                     gtk4::cairo::FontWeight::Bold
@@ -570,7 +573,41 @@ pub(crate) fn draw_settings_video_tab(
 
     let row4 = row3 + row_heights[2];
     if hovered_item == 6 {
-        super::rounded_rect_path(context, card_x, row4, card_w, row_heights[3], 8.0);
+        super::rounded_rect_path(context, card_x, row4, card_w, row_heights[3], 6.0);
+        context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
+        context.fill().ok();
+    }
+    draw_text(
+        context,
+        "Noise suppression",
+        label_x,
+        row4 + 31.0,
+        true,
+        0.9,
+    );
+    draw_text(
+        context,
+        "Clean up microphone noise",
+        label_x + 160.0,
+        row4 + 31.0,
+        false,
+        0.55,
+    );
+    draw_checkbox(
+        context,
+        control_right - 18.0,
+        row4 + 17.0,
+        18.0,
+        noise_suppression,
+        false,
+        176.0 / 255.0,
+        92.0 / 255.0,
+        56.0 / 255.0,
+    );
+
+    let row5 = row4 + row_heights[3];
+    if hovered_item == 7 {
+        super::rounded_rect_path(context, card_x, row5, card_w, row_heights[4], 8.0);
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
@@ -578,7 +615,7 @@ pub(crate) fn draw_settings_video_tab(
         context,
         "Open video editor",
         label_x,
-        row4 + 27.0,
+        row5 + 27.0,
         true,
         0.9,
     );
@@ -586,14 +623,14 @@ pub(crate) fn draw_settings_video_tab(
         context,
         "Edit quality, resolution and audio after recording",
         label_x,
-        row4 + 50.0,
+        row5 + 50.0,
         false,
         0.55,
     );
     draw_checkbox(
         context,
         control_right - 18.0,
-        row4 + 29.0,
+        row5 + 29.0,
         18.0,
         open_editor,
         false,
@@ -640,7 +677,7 @@ pub(crate) fn draw_settings_gif_tab(
 
     let draw_label = |context: &gtk4::cairo::Context, txt: &str, y: f64| {
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -665,7 +702,7 @@ pub(crate) fn draw_settings_gif_tab(
     context.fill().ok();
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
     context.select_font_face(
-        "Sans",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
@@ -851,7 +888,7 @@ pub(crate) fn draw_settings_dropdown_popup(
             let _ = context.restore();
         }
         context.select_font_face(
-            "Sans",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );

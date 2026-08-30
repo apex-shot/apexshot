@@ -144,4 +144,14 @@ echo "Verifying installed binaries..."
 cmp "$ROOT_DIR/target/release/apexshot" /usr/bin/apexshot
 cmp "$ROOT_DIR/target/release/apexshot-capture" /usr/bin/apexshot-capture
 
+echo "Updating GNOME Shell extension (user copy shadows /usr/share)..."
+EXT_UUID="apexshot-gnome-integration@apexshot.github.io"
+USER_EXT="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+mkdir -p "$USER_EXT"
+cp -a "$ROOT_DIR/gnome-extension/"*.json "$ROOT_DIR/gnome-extension/"*.js "$USER_EXT/"
+if command -v gnome-extensions >/dev/null 2>&1; then
+  gnome-extensions disable "$EXT_UUID" 2>/dev/null || true
+  gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
+fi
+
 echo "Installed $PACKAGE_NAME from $newest_deb"

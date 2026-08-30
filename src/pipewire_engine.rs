@@ -186,14 +186,29 @@ enum PipeWireCoreSource {
 
 pub struct PipeWireCapture {
     inner: Arc<Mutex<StreamInner>>,
-    _thread_loop: pw::thread_loop::ThreadLoopRc,
-    _context: pw::context::ContextRc,
-    _core: pw::core::CoreRc,
-    _stream: pw::stream::StreamRc,
     // Keep the listener alive for the lifetime of the capture. Dropping it
     // unregisters PipeWire callbacks, which means format negotiation can
     // succeed but no process callbacks arrive afterwards (empty 261-byte mp4s).
     _listener: pw::stream::StreamListener<Arc<Mutex<StreamInner>>>,
+    _stream: pw::stream::StreamRc,
+    _core: pw::core::CoreRc,
+    _context: pw::context::ContextRc,
+    // Destroyed last so disconnect/stop in Drop still have a live loop.
+    _thread_loop: pw::thread_loop::ThreadLoopRc,
+}
+
+fn teardown_pw_stream(thread_loop: &pw::thread_loop::ThreadLoopRc, stream: &pw::stream::StreamRc) {
+    {
+        let _lock = thread_loop.lock();
+        let _ = stream.disconnect();
+    }
+    thread_loop.stop();
+}
+
+impl Drop for PipeWireCapture {
+    fn drop(&mut self) {
+        teardown_pw_stream(&self._thread_loop, &self._stream);
+    }
 }
 
 impl PipeWireCapture {
@@ -248,6 +263,8 @@ impl PipeWireCapture {
                 .map_err(|e| PipeWireError::Init(format!("Failed to create thread loop: {e}")))?
         };
 
+        // Hold the loop lock while creating objects bound to it (PipeWire rule).
+        let _setup_lock = thread_loop.lock();
         let context = pw::context::ContextRc::new(&thread_loop, None)
             .map_err(|e| PipeWireError::Init(format!("Failed to create context: {e}")))?;
 
@@ -394,6 +411,7 @@ impl PipeWireCapture {
             )
             .map_err(|e| PipeWireError::Connect(format!("Failed to connect stream: {e}")))?;
 
+        drop(_setup_lock);
         thread_loop.start();
 
         let start = Instant::now();
@@ -405,6 +423,7 @@ impl PipeWireCapture {
                 }
             }
             if Instant::now().duration_since(start) > Duration::from_secs(5) {
+                teardown_pw_stream(&thread_loop, &stream);
                 return Err(PipeWireError::FormatNegotiation);
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -413,20 +432,22 @@ impl PipeWireCapture {
         {
             let guard = inner.lock().unwrap();
             if let Some(ref err) = guard.error {
+                teardown_pw_stream(&thread_loop, &stream);
                 return Err(PipeWireError::Stream(err.clone()));
             }
             if guard.format.is_none() {
+                teardown_pw_stream(&thread_loop, &stream);
                 return Err(PipeWireError::FormatNegotiation);
             }
         }
 
         Ok(PipeWireCapture {
             inner,
-            _thread_loop: thread_loop,
-            _context: context,
-            _core: core,
-            _stream: stream,
             _listener,
+            _stream: stream,
+            _core: core,
+            _context: context,
+            _thread_loop: thread_loop,
         })
     }
 

@@ -512,6 +512,10 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
         if (!iface.isValid()) {
             return;
         }
+        // Bound the GUI-thread D-Bus wait. An unbounded call freezes the
+        // overlay; a frozen overlay owns the capture worker and swallows
+        // later hotkeys (they only refocus the stuck window).
+        iface.setTimeout(150);
 
         const double previousMicLevel = m_micLevel;
         const double previousSpeakerLevel = m_speakerLevel;

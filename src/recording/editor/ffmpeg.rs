@@ -827,6 +827,7 @@ mod tests {
                 scale: 1.8,
                 center: (960.0, 540.0),
                 ease_ms: 200,
+                easing: crate::recording::editor::model::ZoomEasing::Glide,
                 mode: crate::recording::editor::model::ZoomMode::Auto,
             });
         assert!(state.needs_reencode());

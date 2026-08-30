@@ -249,6 +249,51 @@ mod tests {
     }
 
     #[test]
+    fn settings_video_rows_keep_five_ordered_click_targets() {
+        let selection_x = 300.0;
+        let selection_y = 220.0;
+        let selection_width = 640.0;
+        let selection_height = 360.0;
+        let screen_width = 1600.0;
+        let screen_height = 1000.0;
+        let panel = compute_settings_menu_layout(
+            selection_x,
+            selection_y,
+            selection_width,
+            screen_width,
+            screen_height,
+        )
+        .panel;
+
+        let hit = |x: f64, y: f64| {
+            settings_menu_hit_item(
+                selection_x,
+                selection_y,
+                selection_width,
+                selection_height,
+                screen_width,
+                screen_height,
+                x,
+                y,
+                SettingsTab::Video,
+            )
+        };
+
+        // Dropdown rows: max resolution (3), frame rate (4).
+        assert_eq!(hit(panel.x + 340.0, panel.y + 143.0), Some(3));
+        assert_eq!(hit(panel.x + 370.0, panel.y + 208.0), Some(4));
+        // Toggle rows: mono (5), noise suppression (6), open editor (7).
+        for (offset_y, expected_index) in [260.0, 312.0, 376.0].into_iter().zip(5..=7) {
+            assert_eq!(
+                hit(panel.x + 30.0, panel.y + offset_y),
+                Some(expected_index)
+            );
+        }
+        // Below the settings card there is no click target.
+        assert_eq!(hit(panel.x + 30.0, panel.y + 420.0), None);
+    }
+
+    #[test]
     fn settings_dropdown_hover_geometry_matches_each_option_row() {
         let selection_x = 300.0;
         let selection_y = 220.0;
@@ -418,11 +463,21 @@ pub(crate) fn settings_menu_hit_item(
                 x: menu_x + 18.0,
                 y: menu_y + 286.0,
                 width: menu_w - 36.0,
-                height: 76.0,
+                height: 52.0,
             })
             .contains(x, y)
             {
                 return Some(6);
+            }
+            if (RectF {
+                x: menu_x + 18.0,
+                y: menu_y + 338.0,
+                width: menu_w - 36.0,
+                height: 76.0,
+            })
+            .contains(x, y)
+            {
+                return Some(7);
             }
         }
         SettingsTab::Gif => {

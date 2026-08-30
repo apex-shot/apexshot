@@ -80,7 +80,9 @@ pub fn build_timeline_card(
     ruler.set_size_request(-1, 36);
     ruler.set_draw_func({
         let state = state.clone();
-        move |_, cr, width, height| draw_ruler(&state, cr, width, height)
+        move |area, cr, width, height| {
+            draw_ruler(&state, widget_is_light(area), cr, width, height)
+        }
     });
 
     let hovered_video = Rc::new(Cell::new(None::<usize>));
@@ -178,7 +180,16 @@ pub fn build_timeline_card(
     playhead.set_draw_func({
         let state = state.clone();
         let hover_time = hover_time.clone();
-        move |_, cr, width, height| draw_playhead(&state, hover_time.get(), cr, width, height)
+        move |area, cr, width, height| {
+            draw_playhead(
+                &state,
+                hover_time.get(),
+                widget_is_light(area),
+                cr,
+                width,
+                height,
+            )
+        }
     });
     board.add_overlay(&playhead);
     bind_board_hover(&tracks, state.clone(), hover_time, playhead.clone());

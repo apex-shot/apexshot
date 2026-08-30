@@ -42,6 +42,36 @@ pub fn has_active_recording_control() -> bool {
         .is_some()
 }
 
+static RECORDING_BUSY: AtomicBool = AtomicBool::new(false);
+
+fn try_begin_recording_busy() -> bool {
+    RECORDING_BUSY
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+fn end_recording_busy() {
+    RECORDING_BUSY.store(false, Ordering::Release);
+}
+
+/// Process-wide lock so a second Record click cannot stack portal sessions.
+pub struct RecordingBusyGuard;
+
+impl RecordingBusyGuard {
+    pub fn acquire() -> anyhow::Result<Self> {
+        if try_begin_recording_busy() {
+            return Ok(Self);
+        }
+        anyhow::bail!("A recording is already in progress")
+    }
+}
+
+impl Drop for RecordingBusyGuard {
+    fn drop(&mut self) {
+        end_recording_busy();
+    }
+}
+
 fn apply_command_side_effects(command: RecordingControlCommand, paused: &AtomicBool) {
     match command {
         RecordingControlCommand::Pause => paused.store(true, Ordering::Relaxed),
@@ -236,10 +266,20 @@ impl Drop for RecordingControlServer {
 #[cfg(test)]
 mod tests {
     use super::{
-        has_active_recording_control, send_active_recording_command, RecordingControlCommand,
-        RecordingControlServer,
+        end_recording_busy, has_active_recording_control, send_active_recording_command,
+        try_begin_recording_busy, RecordingControlCommand, RecordingControlServer,
     };
     use tokio::sync::mpsc;
+
+    #[test]
+    fn recording_busy_flag_is_exclusive() {
+        end_recording_busy();
+        assert!(try_begin_recording_busy());
+        assert!(!try_begin_recording_busy());
+        end_recording_busy();
+        assert!(try_begin_recording_busy());
+        end_recording_busy();
+    }
 
     #[test]
     fn session_ending_commands_are_limited_to_stop_and_discard() {

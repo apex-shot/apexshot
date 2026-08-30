@@ -46,8 +46,10 @@ const DBUS_INTERFACE = `
 
 const MASK_STYLE = 'background-color: rgba(0, 0, 0, 0.55);';
 const COUNTDOWN_SIZE = 184;
+const POINTER_POLL_MS = 16;
+const MAX_POINTER_SAMPLES = 8000;
 const COUNTDOWN_STYLE = 'background-color: rgba(0, 0, 0, 0.94); border-radius: 92px;';
-const COUNTDOWN_LABEL_STYLE = 'color: white; font-size: 72px; font-weight: bold;';
+const COUNTDOWN_LABEL_STYLE = 'color: white; font-size: 72px; font-weight: bold; font-family: Inter, Cantarell, sans-serif;';
 
 /// Dims everything outside the area ApexShot is recording.
 ///
@@ -190,7 +192,7 @@ export class ShellOverlayService {
         this._setupCursorTracking();
         this._setupClickTracking();
         this._samplePointer(true);
-        this._pollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 8, () => {
+        this._pollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POINTER_POLL_MS, () => {
             if (!this._tracking)
                 return GLib.SOURCE_REMOVE;
             this._samplePointer(false);
@@ -209,7 +211,11 @@ export class ShellOverlayService {
 
     _setupCursorTracking() {
         try {
-            this._tracker = Meta.CursorTracker.get_for_display(global.display);
+            if (global.backend && typeof global.backend.get_cursor_tracker === 'function') {
+                this._tracker = global.backend.get_cursor_tracker();
+            } else if (Meta.CursorTracker && typeof Meta.CursorTracker.get_for_display === 'function') {
+                this._tracker = Meta.CursorTracker.get_for_display(global.display);
+            }
             if (this._tracker) {
                 this._cursorChangedId = this._tracker.connect('cursor-changed', () => {
                     this._updateCursorKind();
@@ -222,8 +228,10 @@ export class ShellOverlayService {
     }
 
     _updateCursorKind() {
-        if (!this._tracker)
+        if (!this._tracker || typeof this._tracker.get_cursor !== 'function') {
+            this._cursorKind = 'default';
             return;
+        }
         try {
             this._cursorKind = classifyCursorFromId(this._tracker.get_cursor());
         } catch (e) {
@@ -271,12 +279,29 @@ export class ShellOverlayService {
         this._readPointer();
         const t = (GLib.get_monotonic_time() - this._t0) / 1_000_000;
         const last = this._samples.length > 0 ? this._samples[this._samples.length - 1] : null;
-        if (!force && last && last[1] === this._x && last[2] === this._y && last[3] === this._cursorKind)
+        const still = last && last[1] === this._x && last[2] === this._y && last[3] === this._cursorKind;
+        // Keep a still sample every 100ms so the editor can detect dwells.
+        // App-window clicks never reach the Shell stage on Wayland.
+        if (!force && still && (t - last[0]) < 0.1)
             return;
         this._samples.push([t, this._x, this._y, this._cursorKind]);
+        if (this._samples.length >= MAX_POINTER_SAMPLES)
+            this._compactPointerSamples();
+    }
+
+    _compactPointerSamples() {
+        const lastIndex = this._samples.length - 1;
+        const compacted = [this._samples[0]];
+        for (let i = 2; i < lastIndex; i += 2)
+            compacted.push(this._samples[i]);
+        if (lastIndex > 0)
+            compacted.push(this._samples[lastIndex]);
+        this._samples = compacted;
     }
 
     _stopPointerTrackInternal(returnData) {
+        if (this._tracking)
+            this._samplePointer(true);
         this._tracking = false;
         if (this._pollId) {
             GLib.source_remove(this._pollId);

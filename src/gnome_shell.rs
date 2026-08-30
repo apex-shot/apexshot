@@ -1,6 +1,7 @@
 use std::process::Command;
+use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 
 use crate::capture_overlay::RecordingRequest;
 
@@ -89,26 +90,7 @@ pub fn is_shell_overlay_service_available() -> bool {
     if crate::app_identity::portal_only() {
         return false;
     }
-    let output = Command::new("dbus-send")
-        .args([
-            "--session",
-            "--dest=org.freedesktop.DBus",
-            "--type=method_call",
-            "--print-reply=literal",
-            "/org/freedesktop/DBus",
-            "org.freedesktop.DBus.NameHasOwner",
-            &format!("string:{MASK_DBUS_DEST}"),
-        ])
-        .output();
-
-    match output {
-        Ok(out) if out.status.success() => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            // dbus-send --print-reply=literal prints e.g. "   boolean true"
-            stdout.contains("true")
-        }
-        _ => false,
-    }
+    overlay_name_has_owner()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -461,8 +443,14 @@ pub fn show_recording_mask(geometry: RecordingMaskGeometry) -> anyhow::Result<Ma
 
     let _ = hide_recording_mask();
 
-    run_shell_overlay_method("ShowMask", show_mask_args(geometry))
-        .context("failed to launch dbus-send for ShowMask")?;
+    overlay_call_timeout(Duration::from_secs(2), move |proxy| {
+        proxy
+            .call::<_, _, ()>(
+                "ShowMask",
+                &(geometry.x, geometry.y, geometry.width, geometry.height),
+            )
+            .context("ShowMask failed")
+    })?;
 
     Ok(MaskHandle { shown: true })
 }
@@ -498,11 +486,24 @@ pub fn show_recording_countdown(
         return Ok(CountdownHandle { shown: false });
     }
 
-    run_shell_overlay_method("ShowCountdown", show_countdown_args(geometry, seconds))
-        .context("failed to launch dbus-send for ShowCountdown")?;
+    overlay_call_timeout(Duration::from_secs(2), move |proxy| {
+        proxy
+            .call::<_, _, ()>(
+                "ShowCountdown",
+                &(
+                    geometry.x,
+                    geometry.y,
+                    geometry.width,
+                    geometry.height,
+                    seconds,
+                ),
+            )
+            .context("ShowCountdown failed")
+    })?;
     Ok(CountdownHandle { shown: true })
 }
 
+#[cfg(test)]
 fn show_mask_args(geometry: RecordingMaskGeometry) -> Vec<String> {
     vec![
         format!("int32:{}", geometry.x),
@@ -512,47 +513,27 @@ fn show_mask_args(geometry: RecordingMaskGeometry) -> Vec<String> {
     ]
 }
 
+#[cfg(test)]
 fn show_countdown_args(geometry: RecordingMaskGeometry, seconds: u32) -> Vec<String> {
     let mut args = show_mask_args(geometry);
     args.push(format!("uint32:{seconds}"));
     args
 }
 
-fn run_shell_overlay_method(method: &str, args: Vec<String>) -> anyhow::Result<()> {
-    if let Some(msg) = crate::app_identity::host_escape_blocked("dbus-send") {
-        anyhow::bail!(msg);
-    }
-    let mut command = Command::new("dbus-send");
-    command.args([
-        "--session",
-        &format!("--dest={MASK_DBUS_DEST}"),
-        "--type=method_call",
-        "--print-reply=literal",
-        MASK_DBUS_PATH,
-        &format!("{MASK_DBUS_IFACE}.{method}"),
-    ]);
-
-    for arg in &args {
-        command.arg(arg);
-    }
-
-    let status = command
-        .status()
-        .with_context(|| format!("failed to launch dbus-send for {method}"))?;
-
-    if !status.success() {
-        return Err(anyhow!("dbus-send {method} exited with status {status}"));
-    }
-
-    Ok(())
-}
-
 fn hide_recording_mask() -> anyhow::Result<()> {
-    run_shell_overlay_method("HideMask", Vec::new())
+    overlay_call_timeout(Duration::from_secs(2), |proxy| {
+        proxy
+            .call::<_, _, ()>("HideMask", &())
+            .context("HideMask failed")
+    })
 }
 
 fn hide_recording_countdown() -> anyhow::Result<()> {
-    run_shell_overlay_method("HideCountdown", Vec::new())
+    overlay_call_timeout(Duration::from_secs(2), |proxy| {
+        proxy
+            .call::<_, _, ()>("HideCountdown", &())
+            .context("HideCountdown failed")
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -566,26 +547,50 @@ pub fn should_use_pointer_track() -> bool {
     current_session_supports_gnome_shell_overlay() && is_shell_overlay_service_available()
 }
 
+fn overlay_name_has_owner() -> bool {
+    crate::utils::run_off_tokio(|| {
+        let conn = zbus::blocking::connection::Builder::session()
+            .ok()?
+            .method_timeout(Duration::from_secs(1))
+            .build()
+            .ok()?;
+        let proxy = zbus::blocking::fdo::DBusProxy::new(&conn).ok()?;
+        let name = zbus::names::BusName::try_from(MASK_DBUS_DEST).ok()?;
+        proxy.name_has_owner(name).ok()
+    })
+    .unwrap_or(false)
+}
+
+fn overlay_call_timeout<T>(
+    timeout: Duration,
+    f: impl FnOnce(&zbus::blocking::Proxy<'_>) -> anyhow::Result<T> + Send + 'static,
+) -> anyhow::Result<T>
+where
+    T: Send + 'static,
+{
+    crate::utils::run_off_tokio(move || {
+        if let Some(msg) = crate::app_identity::host_escape_blocked("zbus") {
+            anyhow::bail!(msg);
+        }
+        let conn = zbus::blocking::connection::Builder::session()
+            .context("failed to create session bus builder for ShellOverlay")?
+            .method_timeout(timeout)
+            .build()
+            .context("failed to connect to session bus for ShellOverlay")?;
+        let proxy =
+            zbus::blocking::Proxy::new(&conn, MASK_DBUS_DEST, MASK_DBUS_PATH, MASK_DBUS_IFACE)
+                .context("failed to create ShellOverlay proxy")?;
+        f(&proxy)
+    })
+}
+
 fn with_shell_overlay_proxy<T>(
     f: impl FnOnce(&zbus::blocking::Proxy<'_>) -> anyhow::Result<T> + Send + 'static,
 ) -> anyhow::Result<T>
 where
     T: Send + 'static,
 {
-    crate::utils::run_off_tokio(move || with_shell_overlay_proxy_inner(f))
-}
-
-fn with_shell_overlay_proxy_inner<T>(
-    f: impl FnOnce(&zbus::blocking::Proxy<'_>) -> anyhow::Result<T>,
-) -> anyhow::Result<T> {
-    if let Some(msg) = crate::app_identity::host_escape_blocked("zbus") {
-        anyhow::bail!(msg);
-    }
-    let conn = zbus::blocking::Connection::session()
-        .context("failed to connect to session bus for ShellOverlay")?;
-    let proxy = zbus::blocking::Proxy::new(&conn, MASK_DBUS_DEST, MASK_DBUS_PATH, MASK_DBUS_IFACE)
-        .context("failed to create ShellOverlay proxy")?;
-    f(&proxy)
+    overlay_call_timeout(Duration::from_secs(5), f)
 }
 
 pub fn start_pointer_track() -> anyhow::Result<()> {

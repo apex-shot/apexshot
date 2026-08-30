@@ -27,6 +27,7 @@ pub mod preview_launch;
 pub mod qr;
 pub mod recording;
 pub mod settings;
+mod typography;
 pub mod usage_telemetry;
 pub mod utils;
 

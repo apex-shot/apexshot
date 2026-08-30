@@ -166,7 +166,7 @@ pub fn draw_extra_video_clip(
     let _ = cr.fill();
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
     cr.select_font_face(
-        "sans-serif",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );

@@ -7,7 +7,7 @@ use gtk4::glib;
 use gtk4::{
     prelude::*, Adjustment, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion,
     EventControllerScroll, EventControllerScrollFlags, GestureClick, GestureDrag, Image, Label,
-    MediaFile, Orientation, Overlay, Scale, Scrollbar,
+    MediaFile, Orientation, Overlay, Scale, Scrollbar, Widget,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

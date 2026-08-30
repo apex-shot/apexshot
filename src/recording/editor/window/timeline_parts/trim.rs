@@ -187,7 +187,7 @@ pub fn draw_trim_overlay(
         let removed_count = state.segments_kept.iter().filter(|&&k| !k).count();
         if removed_count > 0 {
             cr.select_font_face(
-                "sans-serif",
+                crate::typography::UI_FONT_FAMILY,
                 gtk4::cairo::FontSlant::Normal,
                 gtk4::cairo::FontWeight::Bold,
             );

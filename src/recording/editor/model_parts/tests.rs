@@ -420,6 +420,7 @@ fn needs_reencode_when_zoom_or_background_present() {
         scale: 1.8,
         center: (960.0, 540.0),
         ease_ms: 200,
+        easing: ZoomEasing::Glide,
         mode: ZoomMode::Auto,
     });
     assert!(state.needs_reencode());
@@ -441,6 +442,7 @@ fn eval_zoom_eases_in_and_out() {
         scale: 2.0,
         center: (200.0, 100.0),
         ease_ms: 200,
+        easing: ZoomEasing::Glide,
         mode: ZoomMode::Manual,
     }];
     let (outside, _) = eval_zoom(&clips, 0.5, 1920.0, 1080.0);
@@ -643,12 +645,7 @@ fn attach_sidecar_with_clicks(state: &mut VideoEditState, clicks: &[(f64, f64, f
     for &(t, x, y) in clicks {
         sidecar
             .clicks
-            .push(crate::recording::editor::sidecar::ClickSample {
-                t,
-                x,
-                y,
-                button: 1,
-            });
+            .push(crate::recording::editor::sidecar::ClickSample { t, x, y, button: 1 });
     }
     state.sidecar = Some(sidecar);
 }
@@ -662,7 +659,7 @@ fn suggest_zoom_clips_places_regions_at_click_clusters() {
     let first = &state.zoom_clips[0];
     assert!((first.start - 2.5).abs() < 1e-9);
     assert!((first.end - 3.5).abs() < 1e-9);
-    assert!((first.scale - 1.5).abs() < 1e-9);
+    assert!((first.scale - 1.8).abs() < 1e-9);
     assert_eq!(first.mode, ZoomMode::Auto);
     assert!((first.center.0 - 960.0).abs() < 1e-9);
     assert!((first.center.1 - 540.0).abs() < 1e-9);
@@ -696,6 +693,70 @@ fn suggest_zoom_clips_requires_recorded_clicks() {
     attach_pointer(&mut state, 960.0, 540.0);
     assert_eq!(state.suggest_zoom_clips(), 0);
     assert!(state.zoom_clips.is_empty());
+}
+
+fn attach_sidecar_with_pointer(state: &mut VideoEditState, points: &[(f64, f64, f64)]) {
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for &(t, x, y) in points {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+}
+
+#[test]
+fn suggest_zoom_clips_places_regions_on_pointer_dwells() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_pointer(
+        &mut state,
+        &[
+            (2.0, 960.0, 540.0),
+            (3.4, 962.0, 541.0),
+            (7.0, 1200.0, 600.0),
+            (7.6, 1201.0, 602.0),
+        ],
+    );
+    assert_eq!(state.suggest_zoom_clips(), 2);
+    assert!((state.zoom_clips[0].start - 1.5).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 3.9).abs() < 1e-9);
+    assert!((state.zoom_clips[0].center.0 - 961.0).abs() < 1.0);
+    assert!((state.zoom_clips[1].start - 6.5).abs() < 1e-9);
+    assert!((state.zoom_clips[1].scale - 1.8).abs() < 1e-9);
+}
+
+#[test]
+fn suggest_zoom_clips_ignores_stop_bar_clicks() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(9.4, 941.0, -215.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 0);
+}
+
+#[test]
+fn redetect_zoom_clips_replaces_auto_zooms_for_this_video() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(9.4, 941.0, -215.0)]);
+    state.add_zoom_at(0.5);
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert_eq!(state.zoom_clips[0].mode, ZoomMode::Auto);
+    attach_sidecar_with_pointer(&mut state, &[(4.0, 500.0, 400.0), (5.2, 501.0, 401.0)]);
+    assert!(state.redetect_zoom_clips());
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert!((state.zoom_clips[0].start - 3.5).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 5.7).abs() < 1e-9);
 }
 
 #[test]
@@ -868,6 +929,7 @@ fn overlay_point_tracks_zoom_without_scaling_sprite() {
         scale: 2.0,
         center: (960.0, 540.0),
         ease_ms: 0,
+        easing: ZoomEasing::Glide,
         mode: ZoomMode::Auto,
     });
     let (zoom, center) = state.eval_zoom(1.0);
@@ -903,6 +965,116 @@ fn overlay_point_tracks_zoom_without_scaling_sprite() {
     assert!((scale_1x - scale_2x).abs() < 1e-12);
     assert!((scale_2x - size).abs() < 1e-12);
     assert!((scale_2x - size * zoom).abs() > 0.5);
+}
+
+#[test]
+fn settings_clamp_click_style_and_duration() {
+    let settings = CursorSettings {
+        size: 9.0,
+        click_scale: 8.0,
+        click_opacity: 4.0,
+        click_duration_ms: 5000,
+        click_intensity: 3.0,
+        ..CursorSettings::default()
+    }
+    .clamped();
+    assert!((settings.size - MAX_CURSOR_SIZE).abs() < 1e-12);
+    assert!((settings.click_scale - MAX_CLICK_SCALE).abs() < 1e-12);
+    assert!((settings.click_opacity - 1.0).abs() < 1e-12);
+    assert_eq!(settings.click_duration_ms, MAX_CLICK_DURATION_MS);
+    assert!((settings.click_intensity - 1.0).abs() < 1e-12);
+
+    let low = CursorSettings {
+        click_scale: 0.01,
+        click_opacity: -1.0,
+        click_duration_ms: 1,
+        ..CursorSettings::default()
+    }
+    .clamped();
+    assert!((low.click_scale - MIN_CLICK_SCALE).abs() < 1e-12);
+    assert!((low.click_opacity - 0.0).abs() < 1e-12);
+    assert_eq!(low.click_duration_ms, MIN_CLICK_DURATION_MS);
+}
+
+#[test]
+fn motion_preset_matching_is_derived_from_knobs() {
+    let mut settings = CursorSettings::default();
+    assert!(settings.matching_motion_preset().is_none());
+    settings.apply_motion_preset(CursorMotionStyle::Focused);
+    assert_eq!(
+        settings.matching_motion_preset(),
+        Some(CursorMotionStyle::Focused)
+    );
+    assert!((settings.size - CURSOR_MOTION_FOCUSED.size).abs() < 1e-12);
+    assert!((settings.smooth - CURSOR_MOTION_FOCUSED.smooth).abs() < 1e-12);
+    assert!((settings.speed - CURSOR_MOTION_FOCUSED.speed).abs() < 1e-12);
+    settings.apply_motion_preset(CursorMotionStyle::Smooth);
+    assert_eq!(
+        settings.matching_motion_preset(),
+        Some(CursorMotionStyle::Smooth)
+    );
+    settings.trail = 0.12;
+    assert!(settings.matching_motion_preset().is_none());
+}
+
+#[test]
+fn zoom_easing_curves_match_at_boundaries() {
+    for easing in ZoomEasing::ALL {
+        assert!((easing.apply(0.0) - 0.0).abs() < 1e-12);
+        assert!((easing.apply(1.0) - 1.0).abs() < 1e-12);
+    }
+    assert!((ZoomEasing::Linear.apply(0.5) - 0.5).abs() < 1e-12);
+    assert!((ZoomEasing::Smooth.apply(0.5) - 0.5).abs() < 1e-12);
+    assert!((ZoomEasing::Glide.apply(0.5) - 0.875).abs() < 1e-12);
+    assert!((ZoomEasing::Snappy.apply(0.5) - 0.96875).abs() < 1e-12);
+    assert!(ZoomEasing::Snappy.apply(0.5) > ZoomEasing::Glide.apply(0.5));
+    assert!(ZoomEasing::Glide.apply(0.5) > ZoomEasing::Linear.apply(0.5));
+}
+
+#[test]
+fn eval_zoom_uses_easing_curve_during_ease_in() {
+    let clip = |easing| ZoomClip {
+        start: 1.0,
+        end: 3.0,
+        scale: 2.0,
+        center: (200.0, 100.0),
+        ease_ms: 1000,
+        easing,
+        mode: ZoomMode::Manual,
+    };
+    let linear = eval_zoom(&[clip(ZoomEasing::Linear)], 1.5, 1920.0, 1080.0).0;
+    let glide = eval_zoom(&[clip(ZoomEasing::Glide)], 1.5, 1920.0, 1080.0).0;
+    let snappy = eval_zoom(&[clip(ZoomEasing::Snappy)], 1.5, 1920.0, 1080.0).0;
+    let at_start = eval_zoom(&[clip(ZoomEasing::Snappy)], 1.0, 1920.0, 1080.0).0;
+    let at_hold = eval_zoom(&[clip(ZoomEasing::Linear)], 2.0, 1920.0, 1080.0).0;
+    assert!((linear - 1.5).abs() < 1e-9);
+    assert!((glide - 1.875).abs() < 1e-9);
+    assert!(snappy > glide);
+    assert!((at_start - 1.0).abs() < 1e-9);
+    assert!((at_hold - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn selected_zoom_easing_and_ease_ms_update_clip() {
+    let mut state = VideoEditState::new(metadata());
+    assert!(state.add_zoom_at_playhead().is_some());
+    assert_eq!(
+        state.selected_zoom_clip().unwrap().easing,
+        ZoomEasing::Glide
+    );
+    assert_eq!(
+        state.selected_zoom_clip().unwrap().ease_ms,
+        DEFAULT_ZOOM_EASE_MS
+    );
+    state.set_selected_zoom_easing(ZoomEasing::Snappy);
+    state.set_selected_zoom_ease_ms(240);
+    let clip = state.selected_zoom_clip().unwrap();
+    assert_eq!(clip.easing, ZoomEasing::Snappy);
+    assert_eq!(clip.ease_ms, 240);
+    state.reset_zoom_animation();
+    let clip = state.selected_zoom_clip().unwrap();
+    assert_eq!(clip.easing, ZoomEasing::Glide);
+    assert_eq!(clip.ease_ms, DEFAULT_ZOOM_EASE_MS);
 }
 
 #[test]

@@ -29,6 +29,7 @@ pub mod dnd;
 mod audio;
 mod backend;
 mod controls;
+mod gst_audio;
 mod wf_recorder;
 
 #[derive(Debug, Error)]
@@ -59,6 +60,18 @@ pub enum RecordError {
 }
 
 pub use audio::{list_audio_inputs, list_audio_outputs};
+
+/// GStreamer pulsesrc level meter used by the daemon/overlay instead of a
+/// second native PipeWire capture (which races recording + screen capture).
+pub(crate) fn run_audio_level_monitor(
+    label: &'static str,
+    device: Option<String>,
+    capture_sink: bool,
+    level: &'static std::sync::atomic::AtomicU64,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    gst_audio::run_pulse_level_monitor(label, device, capture_sink, level, stop);
+}
 pub use controls::{
     persist_overlay_recording_request_state, prepare_overlay_recording_request,
     run_overlay_recording_request, run_overlay_recording_request_with_gtk,
@@ -136,6 +149,8 @@ pub struct RecordingConfig {
     pub speaker_enabled: bool,
     pub mic_source: Option<String>,
     pub speaker_source: Option<String>,
+    /// webrtcdsp noise suppression on the mic branch (GStreamer audio path).
+    pub noise_suppression: bool,
     // GIF-specific settings
     pub gif_quality: f64,
     pub gif_optimize: bool,
@@ -206,6 +221,7 @@ impl Default for RecordingConfig {
             speaker_enabled: false,
             mic_source: None,
             speaker_source: None,
+            noise_suppression: false,
             gif_quality: 0.75,
             gif_optimize: true,
             gif_max_width: Some(800),
@@ -259,6 +275,7 @@ impl RecordingConfig {
             speaker_enabled: false,
             mic_source: None,
             speaker_source: None,
+            noise_suppression: app_config.rec_noise_suppression,
             gif_quality: app_config.rec_gif_quality,
             gif_optimize: app_config.rec_gif_optimize,
             gif_max_width: match app_config.rec_gif_size_idx {

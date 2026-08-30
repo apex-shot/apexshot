@@ -158,17 +158,31 @@
             .recording-editor-root scale.recording-editor-timeline-zoom trough {
                 min-height: 3px;
                 background: alpha(white, 0.10);
+                box-shadow: none;
+                outline: none;
+                border: none;
             }
 
             .recording-editor-root scale.recording-editor-timeline-zoom highlight {
                 background: #b05c38;
+                box-shadow: none;
+                outline: none;
             }
 
-            .recording-editor-root scale.recording-editor-timeline-zoom slider {
+            .recording-editor-root scale.recording-editor-timeline-zoom slider,
+            .recording-editor-root scale.recording-editor-timeline-zoom slider:hover,
+            .recording-editor-root scale.recording-editor-timeline-zoom slider:active,
+            .recording-editor-root scale.recording-editor-timeline-zoom:focus slider,
+            .recording-editor-root scale.recording-editor-timeline-zoom:focus-within slider {
                 min-width: 10px;
                 min-height: 10px;
+                margin: 0;
                 background: #b05c38;
+                background-image: none;
                 border: none;
+                box-shadow: none;
+                outline: none;
+                -gtk-icon-shadow: none;
             }
 
             .recording-editor-card-board {
@@ -207,15 +221,22 @@
                 border: none;
                 border-radius: 10px;
                 background: transparent;
+                color: alpha(white, 0.72);
+            }
+
+            button.recording-editor-tool-section-btn image {
+                color: inherit;
             }
 
             button.recording-editor-tool-section-btn:hover {
                 background: alpha(white, 0.06);
+                color: alpha(white, 0.94);
             }
 
             button.recording-editor-tool-section-btn:checked,
             button.recording-editor-tool-section-btn:checked:hover {
                 background: alpha(#b05c38, 0.18);
+                color: #d5794e;
             }
 
             button.recording-editor-cursor-card {
@@ -335,6 +356,168 @@
 
             button.recording-editor-click-effect-card:checked .recording-editor-click-effect-label {
                 color: #d5794e;
+            }
+
+            .recording-editor-cursor-tabs {
+                margin: 0 14px 8px 14px;
+                padding: 3px;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+            }
+
+            button.recording-editor-cursor-tab {
+                min-height: 26px;
+                padding: 0 6px;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                color: alpha(white, 0.52);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-cursor-tab label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-cursor-tab:hover {
+                color: alpha(white, 0.92);
+                background: transparent;
+            }
+
+            button.recording-editor-cursor-tab:checked,
+            button.recording-editor-cursor-tab:checked:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-cursor-tab:checked label,
+            button.recording-editor-cursor-tab:checked:hover label {
+                color: inherit;
+            }
+
+            .recording-editor-click-live-preview {
+                min-height: 88px;
+                margin: 0 0 4px 0;
+            }
+
+            button.recording-editor-motion-preset {
+                min-height: 56px;
+                padding: 8px 6px;
+                border: none;
+                border-radius: 10px;
+                background: alpha(white, 0.04);
+            }
+
+            button.recording-editor-motion-preset:hover {
+                background: alpha(white, 0.07);
+            }
+
+            button.recording-editor-motion-preset:checked,
+            button.recording-editor-motion-preset:checked:hover {
+                background: alpha(#b05c38, 0.16);
+            }
+
+            .recording-editor-motion-preset-label {
+                color: alpha(white, 0.78);
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .recording-editor-motion-preset-hint {
+                color: alpha(white, 0.42);
+                font-size: 10px;
+            }
+
+            button.recording-editor-motion-preset:checked .recording-editor-motion-preset-label {
+                color: #d5794e;
+            }
+
+            .recording-editor-click-color-row {
+                margin-top: 2px;
+            }
+
+            button.recording-editor-click-color-swatch {
+                min-width: 36px;
+                min-height: 26px;
+                padding: 3px;
+                border: none;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+            }
+
+            button.recording-editor-click-color-swatch:hover {
+                background: alpha(white, 0.10);
+            }
+
+            .recording-editor-click-color-hex {
+                color: alpha(white, 0.55);
+                font-size: 11px;
+                font-variant-numeric: tabular-nums;
+            }
+
+            button.recording-editor-click-color-dot {
+                min-width: 18px;
+                min-height: 18px;
+                padding: 1px;
+                border: none;
+                border-radius: 999px;
+                background: transparent;
+            }
+
+            button.recording-editor-click-color-dot:hover {
+                background: alpha(white, 0.08);
+            }
+
+            .recording-editor-zoom-easing-kicker {
+                margin-top: 14px;
+            }
+
+            .recording-editor-zoom-easing {
+                margin-top: 8px;
+            }
+
+            .recording-editor-zoom-ease {
+                margin-top: 10px;
+            }
+
+            button.recording-editor-zoom-easing-btn {
+                min-height: 28px;
+                padding: 0 6px;
+                border: none;
+                border-radius: 6px;
+                background: alpha(white, 0.06);
+                color: alpha(white, 0.62);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-zoom-easing-btn label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-zoom-easing-btn:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.92);
+            }
+
+            button.recording-editor-zoom-easing-btn:checked,
+            button.recording-editor-zoom-easing-btn:checked:hover {
+                background: alpha(#b05c38, 0.18);
+                color: #f0a07a;
+            }
+
+            button.recording-editor-zoom-easing-btn:checked label,
+            button.recording-editor-zoom-easing-btn:checked:hover label {
+                color: #f0a07a;
+            }
+
+            button.recording-editor-zoom-easing-btn:disabled {
+                opacity: 0.35;
             }
 
             .recording-editor-zoom-scroll,

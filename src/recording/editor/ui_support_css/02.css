@@ -190,6 +190,12 @@
                 min-width: 10px;
                 min-height: 10px;
                 margin: 0;
+                background: #b05c38;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                outline: none;
+                -gtk-icon-shadow: none;
             }
 
             .recording-editor-timeline-board {

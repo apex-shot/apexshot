@@ -4,7 +4,7 @@ use crate::{
     config::{save_config, AppConfig},
     recording::editor::sidecar::{
         delete_recording_outputs, CaptureRegion, ClickSample, CursorKind, PointerSample,
-        PointerSidecar, MAX_CLICKS,
+        PointerSidecar, MAX_CLICKS, MAX_POINTER_SAMPLES,
     },
 };
 use std::path::{Path, PathBuf};
@@ -48,11 +48,12 @@ impl PointerTrackSession {
         }
     }
 
-    fn finish_save(&self, output_path: &Path) -> bool {
+    fn finish_save(mut self, output_path: &Path) -> bool {
         if !self.started {
             PointerSidecar::delete_next_to_video(output_path);
             return false;
         }
+        self.started = false;
         match crate::gnome_shell::stop_pointer_track() {
             Ok(result) => {
                 if result.samples.is_empty() {
@@ -66,6 +67,7 @@ impl PointerTrackSession {
                 sidecar.pointer = result
                     .samples
                     .into_iter()
+                    .take(MAX_POINTER_SAMPLES)
                     .map(|(t, x, y, kind)| PointerSample {
                         t,
                         x: x as f64,
@@ -105,13 +107,25 @@ impl PointerTrackSession {
         }
     }
 
-    fn finish_discard(&self, output_path: &Path) {
+    fn finish_discard(mut self, output_path: &Path) {
         if self.started {
+            self.started = false;
             if let Err(err) = crate::gnome_shell::stop_pointer_track() {
                 eprintln!("[recording] StopPointerTrack on discard failed: {err}");
             }
         }
         delete_recording_outputs(output_path);
+    }
+}
+
+impl Drop for PointerTrackSession {
+    fn drop(&mut self) {
+        if self.started {
+            self.started = false;
+            if let Err(err) = crate::gnome_shell::stop_pointer_track() {
+                eprintln!("[recording] StopPointerTrack during cleanup failed: {err}");
+            }
+        }
     }
 }
 
@@ -174,6 +188,7 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_video_max_res = request.video_max_res;
     app_config.rec_video_fps = request.video_fps;
     app_config.rec_video_mono = request.record_mono;
+    app_config.rec_noise_suppression = request.noise_suppression;
     app_config.rec_video_open_editor = request.open_editor;
     app_config.rec_gif_fps = request.gif_fps;
     app_config.rec_gif_quality = request.gif_quality;
@@ -255,6 +270,7 @@ pub fn prepare_overlay_recording_request(
         speaker_enabled: request.speaker,
         mic_source: None,
         speaker_source: None,
+        noise_suppression: request.noise_suppression,
         gif_quality,
         gif_optimize,
         gif_max_width,
@@ -290,7 +306,14 @@ pub async fn run_recording_with_controls(
 ) -> anyhow::Result<(PathBuf, StopAction)> {
     // Fedora: video recording is not supported.
     super::refuse_fedora_recording()?;
+    let _busy = super::control_session::RecordingBusyGuard::acquire()?;
+    run_recording_with_controls_locked(config, params).await
+}
 
+async fn run_recording_with_controls_locked(
+    config: super::RecordingConfig,
+    params: RecordingControlsParams,
+) -> anyhow::Result<(PathBuf, StopAction)> {
     // On GNOME the shell extension dims the area outside the capture rect.
     if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
         return run_recording_with_shell_mask(config, params).await;
@@ -646,7 +669,11 @@ pub fn run_overlay_recording_request_with_gtk(
 
     save_config(&prepared.updated_app_config)?;
 
-    let _dnd_guard = if request.notifications {
+    // Own admission before changing desktop state. Keep it until DND and audio
+    // exclusivity have both been restored so another take cannot overlap cleanup.
+    let busy = super::control_session::RecordingBusyGuard::acquire()?;
+
+    let dnd_guard = if request.notifications {
         crate::recording::dnd::DndGuard::enable()
     } else {
         None
@@ -654,8 +681,16 @@ pub fn run_overlay_recording_request_with_gtk(
 
     eprintln!("Starting recording to {:?}...", prepared.output_path);
 
+    crate::daemon::release_audio_monitors_for_recording();
+    struct EndExclusive;
+    impl Drop for EndExclusive {
+        fn drop(&mut self) {
+            crate::daemon::end_recording_audio_exclusive();
+        }
+    }
+    let end_exclusive = EndExclusive;
     crate::gnome_shell::hide_recording_mask_best_effort();
-    let _chrome = crate::gnome_shell::RecordingChromeGuard::clear_on_drop();
+    let chrome = crate::gnome_shell::RecordingChromeGuard::clear_on_drop();
     let open_editor = prepared.open_editor;
     let recording_config = prepared.recording_config.clone();
     let controls_params = prepared.controls_params.clone();
@@ -663,7 +698,7 @@ pub fn run_overlay_recording_request_with_gtk(
         let runtime = tokio::runtime::Runtime::new()?;
         if let Some(params) = controls_params {
             runtime
-                .block_on(run_recording_with_controls(recording_config, params))
+                .block_on(run_recording_with_controls_locked(recording_config, params))
                 .map_err(|err| anyhow::anyhow!("failed to run recording controls: {err}"))
         } else {
             runtime
@@ -681,6 +716,13 @@ pub fn run_overlay_recording_request_with_gtk(
             return Err(anyhow::anyhow!("recording worker panicked"));
         }
     };
+
+    // Restore desktop state before completion/error notifications and before
+    // allowing another recording to acquire the process-wide admission guard.
+    drop(chrome);
+    drop(end_exclusive);
+    drop(dnd_guard);
+    drop(busy);
 
     match outcome {
         Ok((path, StopAction::Discard)) => {
@@ -735,12 +777,17 @@ pub fn run_overlay_recording_request_with_gtk(
 /// event loop and doesn't conflict with the recording worker thread.
 fn spawn_recording_editor_subprocess(path: std::path::PathBuf) {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-    if let Err(e) = std::process::Command::new(&exe)
+    match std::process::Command::new(&exe)
         .arg("video-editor")
         .arg(&path)
         .spawn()
     {
-        eprintln!("[recording] Failed to spawn recording editor: {e}");
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(e) => eprintln!("[recording] Failed to spawn recording editor: {e}"),
     }
 }
 
@@ -772,6 +819,7 @@ mod tests {
             video_max_res: 2,
             video_fps: 3,
             record_mono: true,
+            noise_suppression: true,
             open_editor: true,
             gif_fps: 12,
             gif_quality: 0.4,
@@ -807,6 +855,7 @@ mod tests {
         assert_eq!(prepared.updated_app_config.rec_video_max_res, 2);
         assert_eq!(prepared.updated_app_config.rec_video_fps, 3);
         assert_eq!(prepared.updated_app_config.rec_video_mono, true);
+        assert_eq!(prepared.updated_app_config.rec_noise_suppression, true);
         assert_eq!(prepared.updated_app_config.rec_video_open_editor, true);
         assert_eq!(prepared.open_editor, true);
         assert_eq!(prepared.recording_config.output_path, prepared.output_path);
@@ -823,6 +872,7 @@ mod tests {
         assert_eq!(prepared.recording_config.max_resolution, Some((1280, 720)));
         assert_eq!(prepared.recording_config.fps, 60);
         assert_eq!(prepared.recording_config.mono_audio, true);
+        assert_eq!(prepared.recording_config.noise_suppression, true);
         assert_eq!(prepared.recording_config.mic_enabled, true);
         assert_eq!(prepared.recording_config.speaker_enabled, false);
         assert_eq!(prepared.recording_config.gif_quality, 0.75);
@@ -988,6 +1038,7 @@ mod tests {
             video_max_res: 1,
             video_fps: 2,
             record_mono: false,
+            noise_suppression: false,
             open_editor: false,
             gif_fps: 18,
             gif_quality: 0.6,

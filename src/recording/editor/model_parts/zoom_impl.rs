@@ -26,6 +26,7 @@ impl VideoEditState {
             scale: DEFAULT_ZOOM_SCALE,
             center,
             ease_ms: DEFAULT_ZOOM_EASE_MS,
+            easing: ZoomEasing::Glide,
             mode: if self.supports_auto_zoom() {
                 ZoomMode::Auto
             } else {
@@ -176,9 +177,8 @@ impl VideoEditState {
         let segments = self.ordered_placed_segments();
         let mut added = 0;
         for suggestion in suggestions {
-            let Some(&(composition_start, source_start, source_end)) = segments
-                .iter()
-                .find(|&&(_, start, end)| {
+            let Some(&(composition_start, source_start, source_end)) =
+                segments.iter().find(|&&(_, start, end)| {
                     suggestion.center_time >= start && suggestion.center_time <= end
                 })
             else {
@@ -198,22 +198,43 @@ impl VideoEditState {
             {
                 continue;
             }
-            let center = clamp_zoom_center(crop, zoom_suggest::AUTO_ZOOM_SCALE, suggestion.center);
+            let scale = suggestion.scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+            let center = clamp_zoom_center(crop, scale, suggestion.center);
             self.zoom_clips.push(ZoomClip {
                 start: timeline_start,
                 end: timeline_end,
-                scale: zoom_suggest::AUTO_ZOOM_SCALE,
+                scale,
                 center,
                 ease_ms: DEFAULT_ZOOM_EASE_MS,
+                easing: ZoomEasing::Glide,
                 mode,
             });
             added += 1;
         }
         if added > 0 {
-            self.zoom_clips
-                .sort_by(|a, b| a.start.total_cmp(&b.start));
+            self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
         }
         added
+    }
+
+    /// Drop previously auto-detected zooms and place new ones from this
+    /// recording's pointer path. Manual clips are kept.
+    pub fn redetect_zoom_clips(&mut self) -> bool {
+        if self.zoom_locked {
+            return false;
+        }
+        let before = self.zoom_clips.len();
+        self.zoom_clips.retain(|clip| clip.mode != ZoomMode::Auto);
+        let removed = before - self.zoom_clips.len();
+        self.selected_zoom = None;
+        let added = self.suggest_zoom_clips();
+        if added > 0 {
+            self.selected_zoom = self
+                .zoom_clips
+                .iter()
+                .position(|clip| clip.mode == ZoomMode::Auto);
+        }
+        removed > 0 || added > 0
     }
 
     pub fn set_selected_zoom_mode(&mut self, mode: ZoomMode) {
@@ -243,6 +264,30 @@ impl VideoEditState {
         }
     }
 
+    pub fn set_selected_zoom_easing(&mut self, easing: ZoomEasing) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.easing = easing;
+        }
+    }
+
+    pub fn set_selected_zoom_ease_ms(&mut self, ease_ms: u32) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
+        }
+    }
+
     pub fn set_selected_zoom_center(&mut self, center: (f64, f64)) {
         if self.zoom_locked {
             return;
@@ -262,6 +307,13 @@ impl VideoEditState {
 
     pub fn reset_zoom_animation(&mut self) {
         self.zoom_classic = false;
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.easing = ZoomEasing::Glide;
+            clip.ease_ms = DEFAULT_ZOOM_EASE_MS;
+        }
     }
 
     pub fn move_zoom_clip(&mut self, index: usize, start: f64) {
@@ -344,5 +396,4 @@ impl VideoEditState {
             recenter_if_near_edge(center, (cursor_x, cursor_y), scale, frame_w, frame_h),
         )
     }
-
 }

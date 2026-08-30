@@ -1,5 +1,5 @@
 use super::cursor_sprite;
-use super::model::{even_crop_rect, source_to_zoomed_point, ClickEffect, VideoEditState};
+use super::model::{even_crop_rect, source_to_zoomed_point, VideoEditState};
 use super::sidecar::CursorMotion;
 use gtk4::cairo::{Context, Format, ImageSurface, Operator};
 use std::io::Write;
@@ -52,25 +52,11 @@ pub fn write_rgba_track(
         overlay_cursor.size = cursor_sprite::overlay_scale(cursor.size, scale);
         if let Some(mut frame) = sidecar.presented_at(source_t, motion) {
             frame.alpha *= state.cursor_hide_alpha_for_source(source_t);
-            let pulse = match cursor.click_effect {
-                ClickEffect::Pulse => {
-                    1.0 + (sidecar.click_pulse_at(source_t) - 1.0) * cursor.click_intensity
-                }
-                _ => 1.0,
-            };
-            if overlay_cursor.click_effect == ClickEffect::Ripple {
-                for (x, y, progress) in sidecar.click_ripples_at(source_t) {
-                    let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
-                    cursor_sprite::draw_ripple(
-                        &cr,
-                        px,
-                        py,
-                        progress,
-                        overlay_cursor.size,
-                        overlay_cursor.click_intensity,
-                        frame.alpha,
-                    );
-                }
+            for (x, y, progress) in
+                sidecar.click_ripples_at(source_t, overlay_cursor.click_window_seconds())
+            {
+                let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
+                cursor_sprite::draw_click(&cr, px, py, progress, overlay_cursor, frame.alpha);
             }
             for &(x, y, ghost) in &frame.trail {
                 let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
@@ -91,7 +77,7 @@ pub fn write_rgba_track(
                 &cr,
                 px,
                 py,
-                pulse,
+                1.0,
                 frame.kind.as_str(),
                 overlay_cursor,
                 frame.alpha,

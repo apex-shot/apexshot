@@ -1,12 +1,14 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
-    nearest_zoom_preset, ClickEffect, CursorTheme, EditorTool, VideoEditState, ZoomMode,
-    CLIP_SPEED_PRESETS, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED,
-    ZOOM_SCALE_PRESETS,
+    nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoEditState,
+    ZoomEasing, ZoomMode, CLIP_SPEED_PRESETS, DEFAULT_ZOOM_EASE_MS, MAX_CLICK_DURATION_MS,
+    MAX_CLICK_SCALE, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MAX_ZOOM_EASE_MS, MIN_CLICK_DURATION_MS,
+    MIN_CLICK_SCALE, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, MIN_ZOOM_EASE_MS, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    gdk, prelude::*, Align, Box as GtkBox, Button, DrawingArea, GestureDrag, Grid, Image, Label,
-    Orientation, PolicyType, ScrolledWindow, Switch, ToggleButton, Widget,
+    gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
+    GestureDrag, Grid, Image, Label, Orientation, PolicyType, ScrolledWindow, Switch, ToggleButton,
+    Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -88,662 +90,7 @@ pub(super) fn build_tool_sidebar(
     }
 }
 
-struct CursorPanel {
-    widget: GtkBox,
-    refresh: Rc<dyn Fn()>,
-}
-
-fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> CursorPanel {
-    let panel = GtkBox::new(Orientation::Vertical, 0);
-    panel.add_css_class("recording-editor-zoom-panel");
-    panel.set_hexpand(true);
-    panel.set_vexpand(true);
-
-    let header = GtkBox::new(Orientation::Horizontal, 8);
-    header.add_css_class("recording-editor-zoom-header");
-    header.set_hexpand(true);
-    let title = Label::new(Some("Cursor"));
-    title.add_css_class("recording-editor-zoom-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    header.append(&title);
-
-    let body = GtkBox::new(Orientation::Vertical, 8);
-    body.add_css_class("recording-editor-zoom-body");
-    body.set_hexpand(true);
-    let hint = Label::new(Some("Shown over the recording in preview and export"));
-    hint.add_css_class("recording-editor-zoom-hint");
-    hint.set_wrap(true);
-    hint.set_xalign(0.0);
-    body.append(&hint);
-
-    let grid = Grid::new();
-    grid.add_css_class("recording-editor-cursor-grid");
-    grid.set_column_spacing(8);
-    grid.set_row_spacing(8);
-    grid.set_column_homogeneous(true);
-    grid.set_hexpand(true);
-
-    let cards: Vec<(CursorTheme, ToggleButton, DrawingArea)> = CursorTheme::ALL
-        .iter()
-        .enumerate()
-        .map(|(index, &theme)| {
-            let card = ToggleButton::new();
-            card.add_css_class("recording-editor-cursor-card");
-            card.set_has_frame(false);
-            card.set_hexpand(true);
-            let column = GtkBox::new(Orientation::Vertical, 6);
-            column.set_halign(Align::Fill);
-            let preview = DrawingArea::new();
-            preview.add_css_class("recording-editor-cursor-preview");
-            preview.set_content_width(72);
-            preview.set_content_height(56);
-            preview.set_hexpand(true);
-            preview.set_draw_func(move |_, cr, width, height| {
-                cursor_sprite::draw_centered(cr, width as f64, height as f64, theme);
-            });
-            let name = Label::new(Some(theme.label()));
-            name.add_css_class("recording-editor-cursor-card-label");
-            name.set_xalign(0.5);
-            column.append(&preview);
-            column.append(&name);
-            card.set_child(Some(&column));
-            card.connect_clicked({
-                let state = state.clone();
-                let on_change = on_change.clone();
-                move |button| {
-                    if !button.is_active() {
-                        return;
-                    }
-                    state.lock().unwrap().cursor.theme = theme;
-                    on_change();
-                }
-            });
-            grid.attach(&card, (index % 2) as i32, (index / 2) as i32, 1, 1);
-            (theme, card, preview)
-        })
-        .collect();
-
-    let first = cards[0].1.clone();
-    for (index, (_, card, _)) in cards.iter().enumerate() {
-        if index > 0 {
-            card.set_group(Some(&first));
-        }
-    }
-
-    body.append(&grid);
-
-    let size_row = cursor_slider_row("Size");
-    let shadow_row = cursor_slider_row("Shadow");
-    let smooth_row = cursor_slider_row("Smoothing");
-    let speed_row = cursor_slider_row("Speed");
-    let trail_row = cursor_slider_row("Trail");
-    let tilt_row = cursor_slider_row("Tilt");
-    let sway_row = cursor_slider_row("Sway");
-    size_row.scale.set_range(MIN_CURSOR_SIZE, MAX_CURSOR_SIZE);
-    size_row.scale.set_increments(0.05, 0.25);
-    shadow_row.scale.set_range(0.0, 1.0);
-    shadow_row.scale.set_increments(0.05, 0.1);
-    smooth_row.scale.set_range(0.0, 1.0);
-    smooth_row.scale.set_increments(0.05, 0.1);
-    speed_row
-        .scale
-        .set_range(MIN_CURSOR_SPEED, MAX_CURSOR_SPEED);
-    speed_row.scale.set_increments(0.05, 0.25);
-    trail_row.scale.set_range(0.0, 1.0);
-    trail_row.scale.set_increments(0.05, 0.1);
-    tilt_row.scale.set_range(0.0, 1.0);
-    tilt_row.scale.set_increments(0.05, 0.1);
-    sway_row.scale.set_range(0.0, 1.0);
-    sway_row.scale.set_increments(0.05, 0.1);
-    body.append(&size_row.widget);
-    body.append(&shadow_row.widget);
-    body.append(&smooth_row.widget);
-    body.append(&speed_row.widget);
-    body.append(&trail_row.widget);
-    body.append(&tilt_row.widget);
-    body.append(&sway_row.widget);
-
-    let idle_row = GtkBox::new(Orientation::Horizontal, 8);
-    idle_row.add_css_class("recording-editor-zoom-classic");
-    idle_row.set_hexpand(true);
-    let idle_label = Label::new(Some("Hide when idle"));
-    idle_label.add_css_class("recording-editor-zoom-classic-label");
-    idle_label.set_xalign(0.0);
-    idle_label.set_hexpand(true);
-    let idle_switch = Switch::new();
-    idle_switch.add_css_class("recording-editor-zoom-switch");
-    idle_switch.set_valign(Align::Center);
-    idle_switch.set_halign(Align::End);
-    idle_row.append(&idle_label);
-    idle_row.append(&idle_switch);
-    body.append(&idle_row);
-
-    let click_label = Label::new(Some("CLICK EFFECT"));
-    click_label.add_css_class("recording-editor-zoom-kicker");
-    click_label.set_xalign(0.0);
-    body.append(&click_label);
-    let click_row = GtkBox::new(Orientation::Horizontal, 6);
-    click_row.add_css_class("recording-editor-click-effect-row");
-    click_row.set_hexpand(true);
-    click_row.set_homogeneous(true);
-    let none_btn = click_effect_card(ClickEffect::None);
-    let pulse_btn = click_effect_card(ClickEffect::Pulse);
-    let ripple_btn = click_effect_card(ClickEffect::Ripple);
-    pulse_btn.set_group(Some(&none_btn));
-    ripple_btn.set_group(Some(&none_btn));
-    click_row.append(&none_btn);
-    click_row.append(&pulse_btn);
-    click_row.append(&ripple_btn);
-    body.append(&click_row);
-    let intensity_row = cursor_slider_row("Intensity");
-    intensity_row.scale.set_range(0.0, 1.0);
-    intensity_row.scale.set_increments(0.05, 0.1);
-    body.append(&intensity_row.widget);
-
-    let scroll = ScrolledWindow::new();
-    scroll.add_css_class("recording-editor-zoom-scroll");
-    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
-    scroll.set_vexpand(true);
-    scroll.set_hexpand(true);
-    scroll.set_child(Some(&body));
-    panel.append(&header);
-    panel.append(&scroll);
-
-    let syncing = Rc::new(Cell::new(false));
-    size_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().cursor.size = scale.value();
-            on_change();
-        }
-    });
-    shadow_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().cursor.shadow = scale.value();
-            on_change();
-        }
-    });
-    smooth_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().cursor.smooth = scale.value();
-            on_change();
-        }
-    });
-    speed_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().cursor.speed = scale.value();
-            on_change();
-        }
-    });
-    trail_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().cursor.trail = scale.value();
-            on_change();
-        }
-    });
-    tilt_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().cursor.tilt = scale.value();
-            on_change();
-        }
-    });
-    sway_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().cursor.sway = scale.value();
-            on_change();
-        }
-    });
-    idle_switch.connect_state_set({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |_, active| {
-            if !syncing.get() {
-                state.lock().unwrap().cursor.hide_idle = active;
-                on_change();
-            }
-            gtk4::glib::Propagation::Proceed
-        }
-    });
-    none_btn.connect_toggled({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
-                return;
-            }
-            state.lock().unwrap().cursor.click_effect = ClickEffect::None;
-            on_change();
-        }
-    });
-    pulse_btn.connect_toggled({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
-                return;
-            }
-            state.lock().unwrap().cursor.click_effect = ClickEffect::Pulse;
-            on_change();
-        }
-    });
-    ripple_btn.connect_toggled({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
-                return;
-            }
-            state.lock().unwrap().cursor.click_effect = ClickEffect::Ripple;
-            on_change();
-        }
-    });
-    intensity_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().cursor.click_intensity = scale.value();
-            on_change();
-        }
-    });
-
-    let refresh = {
-        let cards = cards;
-        let size_scale = size_row.scale.clone();
-        let shadow_scale = shadow_row.scale.clone();
-        let smooth_scale = smooth_row.scale.clone();
-        let speed_scale = speed_row.scale.clone();
-        let trail_scale = trail_row.scale.clone();
-        let tilt_scale = tilt_row.scale.clone();
-        let sway_scale = sway_row.scale.clone();
-        let idle_switch = idle_switch.clone();
-        let none_btn = none_btn.clone();
-        let pulse_btn = pulse_btn.clone();
-        let ripple_btn = ripple_btn.clone();
-        let intensity_scale = intensity_row.scale.clone();
-        let syncing = syncing.clone();
-        Rc::new(move || {
-            let cursor = state.lock().unwrap().cursor;
-            for (item, card, preview) in &cards {
-                card.set_active(*item == cursor.theme);
-                preview.queue_draw();
-            }
-            syncing.set(true);
-            size_scale.set_value(cursor.size);
-            shadow_scale.set_value(cursor.shadow);
-            smooth_scale.set_value(cursor.smooth);
-            speed_scale.set_value(cursor.speed);
-            trail_scale.set_value(cursor.trail);
-            tilt_scale.set_value(cursor.tilt);
-            sway_scale.set_value(cursor.sway);
-            idle_switch.set_active(cursor.hide_idle);
-            match cursor.click_effect {
-                ClickEffect::None => none_btn.set_active(true),
-                ClickEffect::Pulse => pulse_btn.set_active(true),
-                ClickEffect::Ripple => ripple_btn.set_active(true),
-            }
-            intensity_scale.set_value(cursor.click_intensity);
-            intensity_scale.set_sensitive(cursor.click_effect != ClickEffect::None);
-            syncing.set(false);
-        }) as Rc<dyn Fn()>
-    };
-
-    CursorPanel {
-        widget: panel,
-        refresh,
-    }
-}
-
-struct CursorSliderRow {
-    widget: DrawingArea,
-    scale: FillSlider,
-}
-
-fn click_effect_card(effect: ClickEffect) -> ToggleButton {
-    let card = ToggleButton::new();
-    card.add_css_class("recording-editor-click-effect-card");
-    card.set_has_frame(false);
-    card.set_hexpand(true);
-    let column = GtkBox::new(Orientation::Vertical, 4);
-    column.set_halign(Align::Center);
-    column.set_valign(Align::Center);
-    if effect != ClickEffect::None {
-        let preview = DrawingArea::new();
-        preview.set_content_width(36);
-        preview.set_content_height(28);
-        preview.set_can_target(false);
-        preview.set_draw_func(move |widget, cr, width, height| {
-            draw_click_effect_icon(widget, cr, width as f64, height as f64, effect);
-        });
-        column.append(&preview);
-    }
-    let name = Label::new(Some(effect.label()));
-    name.add_css_class("recording-editor-click-effect-label");
-    name.set_xalign(0.5);
-    column.append(&name);
-    card.set_child(Some(&column));
-    card
-}
-
-fn draw_click_effect_icon(
-    widget: &DrawingArea,
-    cr: &gtk4::cairo::Context,
-    width: f64,
-    height: f64,
-    effect: ClickEffect,
-) {
-    let cx = width / 2.0;
-    let cy = height / 2.0;
-    let light = widget_is_light(widget);
-    let (r, g, b) = if light {
-        (0.15, 0.16, 0.18)
-    } else {
-        (1.0, 1.0, 1.0)
-    };
-    cr.set_line_cap(gtk4::cairo::LineCap::Round);
-    cr.set_line_join(gtk4::cairo::LineJoin::Round);
-    match effect {
-        ClickEffect::Pulse => {
-            cr.set_source_rgba(r, g, b, 0.18);
-            cr.arc(cx, cy, 11.0, 0.0, std::f64::consts::TAU);
-            let _ = cr.fill();
-            cr.set_source_rgba(r, g, b, 0.82);
-            cr.arc(cx, cy, 5.5, 0.0, std::f64::consts::TAU);
-            let _ = cr.fill();
-        }
-        ClickEffect::Ripple => {
-            cr.set_source_rgba(r, g, b, 0.82);
-            cr.arc(cx, cy, 2.0, 0.0, std::f64::consts::TAU);
-            let _ = cr.fill();
-            cr.set_line_width(1.4);
-            cr.set_source_rgba(r, g, b, 0.72);
-            cr.arc(cx, cy, 6.2, 0.0, std::f64::consts::TAU);
-            let _ = cr.stroke();
-            cr.set_source_rgba(r, g, b, 0.38);
-            cr.arc(cx, cy, 10.2, 0.0, std::f64::consts::TAU);
-            let _ = cr.stroke();
-        }
-        ClickEffect::None => {}
-    }
-}
-
-fn cursor_slider_row(label: &str) -> CursorSliderRow {
-    let scale = FillSlider::new(label);
-    CursorSliderRow {
-        widget: scale.area.clone(),
-        scale,
-    }
-}
-
-#[derive(Clone)]
-struct FillSlider {
-    area: DrawingArea,
-    value: Rc<Cell<f64>>,
-    min: Rc<Cell<f64>>,
-    max: Rc<Cell<f64>>,
-    step: Rc<Cell<f64>>,
-    enabled: Rc<Cell<bool>>,
-    listeners: Rc<RefCell<Vec<Rc<dyn Fn(&FillSlider)>>>>,
-}
-
-impl FillSlider {
-    fn new(label: &str) -> Self {
-        let area = DrawingArea::new();
-        area.add_css_class("recording-editor-fill-slider");
-        area.set_hexpand(true);
-        area.set_size_request(-1, 32);
-        let slider = Self {
-            area: area.clone(),
-            value: Rc::new(Cell::new(0.0)),
-            min: Rc::new(Cell::new(0.0)),
-            max: Rc::new(Cell::new(1.0)),
-            step: Rc::new(Cell::new(0.05)),
-            enabled: Rc::new(Cell::new(true)),
-            listeners: Rc::new(RefCell::new(Vec::new())),
-        };
-        area.set_draw_func({
-            let slider = slider.clone();
-            let label = label.to_string();
-            move |widget, cr, width, height| {
-                slider.draw(widget, cr, width, height, &label);
-            }
-        });
-        let drag = GestureDrag::new();
-        drag.set_button(1);
-        drag.connect_drag_begin({
-            let slider = slider.clone();
-            move |gesture, x, _| slider.apply_x(gesture, x)
-        });
-        drag.connect_drag_update({
-            let slider = slider.clone();
-            move |gesture, dx, _| {
-                let Some((start, _)) = gesture.start_point() else {
-                    return;
-                };
-                slider.apply_x(gesture, start + dx);
-            }
-        });
-        area.add_controller(drag);
-        area.set_cursor(gdk::Cursor::from_name("ew-resize", None).as_ref());
-        slider
-    }
-
-    fn value(&self) -> f64 {
-        self.value.get()
-    }
-
-    fn set_value(&self, value: f64) {
-        let min = self.min.get();
-        let max = self.max.get();
-        let value = value.clamp(min.min(max), min.max(max));
-        self.value.set(value);
-        self.area.queue_draw();
-        let listeners = self.listeners.borrow().clone();
-        for listener in listeners {
-            listener(self);
-        }
-    }
-
-    fn set_range(&self, min: f64, max: f64) {
-        self.min.set(min);
-        self.max.set(max.max(min + 1e-9));
-        self.set_value(self.value.get());
-    }
-
-    fn set_increments(&self, step: f64, _page: f64) {
-        self.step.set(step.max(0.0));
-    }
-
-    fn set_sensitive(&self, sensitive: bool) {
-        self.enabled.set(sensitive);
-        self.area.set_sensitive(sensitive);
-        self.area.queue_draw();
-    }
-
-    fn connect_value_changed<F>(&self, f: F)
-    where
-        F: Fn(&FillSlider) + 'static,
-    {
-        self.listeners.borrow_mut().push(Rc::new(f));
-    }
-
-    fn apply_x(&self, gesture: &GestureDrag, x: f64) {
-        if !self.enabled.get() {
-            return;
-        }
-        let width = gesture
-            .widget()
-            .map(|widget| widget.allocated_width().max(1) as f64)
-            .unwrap_or(1.0);
-        let min = self.min.get();
-        let max = self.max.get();
-        let t = (x / width).clamp(0.0, 1.0);
-        let mut value = min + t * (max - min);
-        let step = self.step.get();
-        if step > 1e-9 {
-            value = ((value - min) / step).round() * step + min;
-        }
-        self.set_value(value);
-    }
-
-    fn draw(
-        &self,
-        widget: &DrawingArea,
-        cr: &gtk4::cairo::Context,
-        width: i32,
-        height: i32,
-        label: &str,
-    ) {
-        let w = width as f64;
-        let h = height as f64;
-        if w < 8.0 || h < 8.0 {
-            return;
-        }
-        let light = widget_is_light(widget);
-        let enabled = if self.enabled.get() { 1.0 } else { 0.42 };
-        let min = self.min.get();
-        let max = self.max.get();
-        let progress = ((self.value.get() - min) / (max - min).max(1e-9)).clamp(0.0, 1.0);
-        let radius = 8.0;
-        fill_slider_rounded_rect(cr, 0.0, 0.0, w, h, radius);
-        if light {
-            cr.set_source_rgba(0.11, 0.13, 0.16, 0.10 * enabled);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.07 * enabled);
-        }
-        let _ = cr.fill();
-
-        let fill_w = progress * w;
-        let show_fill = fill_w >= h;
-        if show_fill {
-            fill_slider_rounded_rect(cr, 0.0, 0.0, fill_w, h, radius);
-            if light {
-                cr.set_source_rgba(0.11, 0.13, 0.16, 0.16 * enabled);
-            } else {
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.12 * enabled);
-            }
-            let _ = cr.fill();
-        }
-
-        let tick_x = if show_fill {
-            (fill_w - 6.0).max(radius * 0.45)
-        } else {
-            10.0
-        };
-        cr.set_line_width(1.5);
-        cr.set_line_cap(gtk4::cairo::LineCap::Round);
-        if light {
-            cr.set_source_rgba(0.15, 0.16, 0.18, 0.82 * enabled);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * enabled);
-        }
-        cr.move_to(tick_x, h * 0.28);
-        cr.line_to(tick_x, h * 0.72);
-        let _ = cr.stroke();
-
-        if light {
-            cr.set_source_rgba(0.15, 0.16, 0.18, 0.72 * enabled);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.72 * enabled);
-        }
-        cr.select_font_face(
-            "sans-serif",
-            gtk4::cairo::FontSlant::Normal,
-            gtk4::cairo::FontWeight::Normal,
-        );
-        cr.set_font_size(12.0);
-        cr.move_to(14.0, h * 0.66);
-        let _ = cr.show_text(label);
-        let display = (progress * 100.0).round() as i32;
-        let text = display.to_string();
-        if let Ok(ext) = cr.text_extents(&text) {
-            cr.move_to(w - 14.0 - ext.width(), h * 0.66);
-            let _ = cr.show_text(&text);
-        }
-    }
-}
-
-fn fill_slider_rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
-    let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
-    cr.new_sub_path();
-    cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
-    cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
-    cr.arc(
-        x + r,
-        y + h - r,
-        r,
-        std::f64::consts::FRAC_PI_2,
-        std::f64::consts::PI,
-    );
-    cr.arc(
-        x + r,
-        y + r,
-        r,
-        std::f64::consts::PI,
-        3.0 * std::f64::consts::FRAC_PI_2,
-    );
-    cr.close_path();
-}
-
-fn widget_is_light(widget: &impl gtk4::glib::object::IsA<Widget>) -> bool {
-    let mut current = Some(widget.clone().upcast::<Widget>());
-    while let Some(node) = current {
-        if node.has_css_class("editor-theme-light") {
-            return true;
-        }
-        current = node.parent();
-    }
-    false
-}
+include!("tool_sidebar_cursor.rs");
 
 struct ZoomPanel {
     widget: GtkBox,
@@ -769,7 +116,9 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     detect.add_css_class("recording-editor-zoom-detect");
     detect.set_has_frame(false);
     detect.set_halign(Align::End);
-    detect.set_tooltip_text(Some("Add zooms where clicks were recorded"));
+    detect.set_tooltip_text(Some(
+        "Place zooms on clicks and cursor pauses in this recording",
+    ));
     detect.set_sensitive(state.lock().unwrap().supports_auto_zoom());
     header.append(&detect);
 
@@ -868,6 +217,65 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     classic_row.append(&classic_label);
     classic_row.append(&classic);
 
+    let easing_label = Label::new(Some("Easing"));
+    easing_label.add_css_class("recording-editor-zoom-kicker");
+    easing_label.add_css_class("recording-editor-zoom-easing-kicker");
+    easing_label.set_xalign(0.0);
+    let easing_row = GtkBox::new(Orientation::Horizontal, 6);
+    easing_row.add_css_class("recording-editor-zoom-easing");
+    easing_row.set_hexpand(true);
+    easing_row.set_homogeneous(true);
+    let easing_buttons: Vec<(ZoomEasing, ToggleButton)> = ZoomEasing::ALL
+        .iter()
+        .map(|&easing| {
+            let button = ToggleButton::with_label(easing.label());
+            button.add_css_class("recording-editor-zoom-easing-btn");
+            button.set_has_frame(false);
+            button.set_hexpand(true);
+            button.connect_toggled({
+                let state = state.clone();
+                let on_change = on_change.clone();
+                let syncing = syncing.clone();
+                move |button| {
+                    if syncing.get() || !button.is_active() {
+                        return;
+                    }
+                    state.lock().unwrap().set_selected_zoom_easing(easing);
+                    on_change();
+                }
+            });
+            easing_row.append(&button);
+            (easing, button)
+        })
+        .collect();
+    let first_easing = easing_buttons[0].1.clone();
+    for (index, (_, button)) in easing_buttons.iter().enumerate() {
+        if index > 0 {
+            button.set_group(Some(&first_easing));
+        }
+    }
+    let ease_row = cursor_slider_row("Ease");
+    ease_row.widget.add_css_class("recording-editor-zoom-ease");
+    ease_row
+        .scale
+        .set_range(MIN_ZOOM_EASE_MS as f64, MAX_ZOOM_EASE_MS as f64);
+    ease_row.scale.set_increments(20.0, 100.0);
+    ease_row.scale.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |scale| {
+            if syncing.get() {
+                return;
+            }
+            state
+                .lock()
+                .unwrap()
+                .set_selected_zoom_ease_ms(scale.value().round() as u32);
+            on_change();
+        }
+    });
+
     let footer_delete = delete_tool_button("Delete zoom");
 
     body.append(&mode_row);
@@ -875,6 +283,9 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     body.append(&chips);
     body.append(&animation_header);
     body.append(&classic_row);
+    body.append(&easing_label);
+    body.append(&easing_row);
+    body.append(&ease_row.widget);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -943,8 +354,7 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let state = state.clone();
         let on_change = on_change.clone();
         move |_| {
-            let added = state.lock().unwrap().suggest_zoom_clips();
-            if added > 0 {
+            if state.lock().unwrap().redetect_zoom_clips() {
                 on_change();
             }
         }
@@ -971,15 +381,23 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let classic_row = classic_row.clone();
         let chip_buttons = chip_buttons.clone();
         let detect = detect.clone();
+        let easing_buttons = easing_buttons.clone();
+        let ease_scale = ease_row.scale.clone();
+        let easing_row = easing_row.clone();
+        let easing_label = easing_label.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
             panel.set_visible(true);
             let auto_available = guard.supports_auto_zoom();
             let selected = guard.selected_zoom_clip().cloned();
+            let has_clip = selected.is_some();
             syncing.set(true);
             auto_btn.set_sensitive(auto_available);
             detect.set_sensitive(auto_available && !guard.zoom_locked);
+            easing_row.set_sensitive(has_clip);
+            easing_label.set_sensitive(has_clip);
+            ease_scale.set_sensitive(has_clip);
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
                     ZoomMode::Auto
@@ -999,7 +417,7 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
                 classic_row.set_visible(mode == ZoomMode::Auto);
             } else {
                 mode_hint.set_text(if auto_available {
-                    "Select a zoom to adjust it, or use Detect to add zooms where clicks were recorded"
+                    "Select a zoom to adjust it, or use Detect to place zooms on clicks and pauses in this recording"
                 } else {
                     "Select a zoom to adjust it"
                 });
@@ -1009,6 +427,19 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
                 classic_row.set_visible(false);
             }
             classic.set_active(guard.zoom_classic);
+            let selected_easing = selected
+                .as_ref()
+                .map(|clip| clip.easing)
+                .unwrap_or(ZoomEasing::Glide);
+            for (easing, button) in &easing_buttons {
+                button.set_active(*easing == selected_easing);
+            }
+            ease_scale.set_value(
+                selected
+                    .as_ref()
+                    .map(|clip| clip.ease_ms as f64)
+                    .unwrap_or(DEFAULT_ZOOM_EASE_MS as f64),
+            );
             let selected_preset = selected
                 .as_ref()
                 .map(|clip| nearest_zoom_preset(clip.scale));

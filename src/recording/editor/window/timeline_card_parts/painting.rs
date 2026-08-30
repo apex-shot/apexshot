@@ -1,5 +1,17 @@
+pub fn widget_is_light(widget: &impl gtk4::prelude::IsA<Widget>) -> bool {
+    let mut current = Some(widget.clone().upcast::<Widget>());
+    while let Some(node) = current {
+        if node.has_css_class("editor-theme-light") {
+            return true;
+        }
+        current = node.parent();
+    }
+    false
+}
+
 pub fn draw_ruler(
     state: &Arc<Mutex<VideoEditState>>,
+    light: bool,
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -13,9 +25,14 @@ pub fn draw_ruler(
     let view_start = state.x_to_time(0.0, w).max(0.0);
     let view_end = state.x_to_time(w, w).max(view_start);
     let playhead = state.playhead_seconds;
+    let (tick_r, tick_g, tick_b) = if light {
+        (0.11, 0.13, 0.16)
+    } else {
+        (1.0, 1.0, 1.0)
+    };
 
     cr.select_font_face(
-        "sans-serif",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
@@ -30,17 +47,39 @@ pub fn draw_ruler(
         let x = state.time_to_x(t, w).floor() + 0.5;
         if x >= -8.0 && x <= w + 8.0 {
             let on_major = near_step(t, major);
-            cr.set_source_rgba(1.0, 1.0, 1.0, if on_major { 0.28 } else { 0.10 });
+            cr.set_source_rgba(
+                tick_r,
+                tick_g,
+                tick_b,
+                if light {
+                    if on_major {
+                        0.42
+                    } else {
+                        0.16
+                    }
+                } else if on_major {
+                    0.28
+                } else {
+                    0.10
+                },
+            );
             cr.move_to(x, if on_major { h - 11.0 } else { h - 5.0 });
             cr.line_to(x, h);
             let _ = cr.stroke();
             if on_major {
                 let label = format_ruler_label(t, major);
+                let near_playhead = (t - playhead).abs() < major * 0.08;
                 cr.set_source_rgba(
-                    1.0,
-                    1.0,
-                    1.0,
-                    if (t - playhead).abs() < major * 0.08 {
+                    tick_r,
+                    tick_g,
+                    tick_b,
+                    if light {
+                        if near_playhead {
+                            0.88
+                        } else {
+                            0.50
+                        }
+                    } else if near_playhead {
                         0.92
                     } else {
                         0.52
@@ -176,11 +215,6 @@ pub fn draw_video_segment(
     let clip_w = (x1 - x0).max(24.0);
     let y = if lifted { 2.0 } else { 8.0 };
     let height = h - 16.0;
-    if lifted {
-        rounded_rect(cr, x0 + 3.0, y + 8.0, clip_w, height, 5.0);
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.38);
-        let _ = cr.fill();
-    }
     draw_translucent_clip(cr, x0, y, clip_w, height, tone, show_handles);
     if selected {
         rounded_rect(cr, x0, y, clip_w, height, 5.0);
@@ -199,7 +233,7 @@ pub fn draw_video_segment(
         let _ = cr.fill();
     }
     cr.select_font_face(
-        "sans-serif",
+        crate::typography::UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
@@ -283,11 +317,6 @@ pub fn draw_one_zoom(
     };
     let y = if lifted { 1.0 } else { 7.0 };
     let height = h - 14.0;
-    if lifted {
-        rounded_rect(cr, x0 + 3.0, y + 8.0, clip_w, height, 5.0);
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.38);
-        let _ = cr.fill();
-    }
     draw_translucent_clip(
         cr,
         x0,
@@ -300,7 +329,7 @@ pub fn draw_one_zoom(
     if clip_w > 40.0 {
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
         cr.select_font_face(
-            "sans-serif",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );
@@ -397,11 +426,6 @@ pub fn draw_one_hide(
     };
     let y = if lifted { 1.0 } else { 7.0 };
     let height = h - 14.0;
-    if lifted {
-        rounded_rect(cr, x0 + 3.0, y + 8.0, clip_w, height, 5.0);
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.38);
-        let _ = cr.fill();
-    }
     draw_translucent_clip(
         cr,
         x0,
@@ -414,7 +438,7 @@ pub fn draw_one_hide(
     if clip_w > 40.0 {
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
         cr.select_font_face(
-            "sans-serif",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );
@@ -458,7 +482,7 @@ pub fn draw_hide_suggestion(
     if clip_w > 40.0 {
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
         cr.select_font_face(
-            "sans-serif",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );
@@ -492,7 +516,7 @@ pub fn draw_zoom_suggestion(
     if clip_w > 40.0 {
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
         cr.select_font_face(
-            "sans-serif",
+            crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );
@@ -555,6 +579,7 @@ pub fn draw_edge_handle(
 pub fn draw_playhead(
     state: &Arc<Mutex<VideoEditState>>,
     hover_time: Option<f64>,
+    light: bool,
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -565,20 +590,34 @@ pub fn draw_playhead(
     if let Some(time) = hover_time {
         let hover_x = state.time_to_x(time, w);
         if (hover_x - state.time_to_x(state.playhead_seconds, w)).abs() > 1.0 {
-            paint_playhead_mark(cr, hover_x, h, 0.22);
+            paint_playhead_mark(cr, hover_x, h, light, 0.22);
         }
     }
-    paint_playhead_mark(cr, state.time_to_x(state.playhead_seconds, w), h, 1.0);
+    paint_playhead_mark(
+        cr,
+        state.time_to_x(state.playhead_seconds, w),
+        h,
+        light,
+        1.0,
+    );
 }
 
-pub fn paint_playhead_mark(cr: &gtk4::cairo::Context, x: f64, h: f64, alpha: f64) {
+pub fn paint_playhead_mark(cr: &gtk4::cairo::Context, x: f64, h: f64, light: bool, alpha: f64) {
     let x = x.floor() + 0.5;
-    cr.set_source_rgba(0.86, 0.90, 0.98, alpha);
+    if light {
+        cr.set_source_rgba(0.07, 0.08, 0.09, alpha);
+    } else {
+        cr.set_source_rgba(0.86, 0.90, 0.98, alpha);
+    }
     cr.set_line_width(if alpha < 1.0 { 1.5 } else { 2.0 });
     cr.move_to(x, 26.0);
     cr.line_to(x, h);
     let _ = cr.stroke();
-    cr.set_source_rgba(0.86, 0.90, 0.98, alpha);
+    if light {
+        cr.set_source_rgba(0.07, 0.08, 0.09, alpha);
+    } else {
+        cr.set_source_rgba(0.86, 0.90, 0.98, alpha);
+    }
     cr.move_to(x - 5.0, 20.0);
     cr.line_to(x + 5.0, 20.0);
     cr.line_to(x, 29.0);

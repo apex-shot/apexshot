@@ -12,7 +12,8 @@ use std::time::UNIX_EPOCH;
 use super::model::{
     AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
     DimensionPreset, ProjectMedia, ProjectMediaKind, VideoBackground, VideoEditState, ZoomClip,
-    ZoomMode, DEFAULT_CLICK_INTENSITY, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW,
+    ZoomEasing, ZoomMode, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
+    DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW,
     DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY,
     DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
 };
@@ -81,6 +82,14 @@ pub struct VideoProjectFile {
     pub cursor_click_effect: ClickEffectFile,
     #[serde(default = "default_click_intensity")]
     pub cursor_click_intensity: f64,
+    #[serde(default = "default_click_color")]
+    pub cursor_click_color: (u8, u8, u8),
+    #[serde(default = "default_click_scale")]
+    pub cursor_click_scale: f64,
+    #[serde(default = "default_click_opacity")]
+    pub cursor_click_opacity: f64,
+    #[serde(default = "default_click_duration_ms")]
+    pub cursor_click_duration_ms: u32,
     #[serde(default = "default_cursor_trail")]
     pub cursor_trail: f64,
     #[serde(default = "default_cursor_tilt")]
@@ -102,7 +111,19 @@ pub struct ZoomClipFile {
     pub scale: f64,
     pub center: (f64, f64),
     pub ease_ms: u32,
+    #[serde(default)]
+    pub easing: ZoomEasingFile,
     pub mode: ZoomModeFile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZoomEasingFile {
+    #[default]
+    Glide,
+    Smooth,
+    Snappy,
+    Linear,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,9 +155,11 @@ pub enum CursorThemeFile {
 #[serde(rename_all = "snake_case")]
 pub enum ClickEffectFile {
     None,
-    Pulse,
+    #[serde(alias = "pulse")]
+    Spotlight,
     #[default]
     Ripple,
+    Echo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -287,6 +310,7 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
         scale: clip.scale,
         center: clip.center,
         ease_ms: clip.ease_ms,
+        easing: zoom_easing_to_file(clip.easing),
         mode: match clip.mode {
             ZoomMode::Auto => ZoomModeFile::Auto,
             ZoomMode::Manual => ZoomModeFile::Manual,
@@ -315,10 +339,29 @@ fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
         scale: clip.scale,
         center: clip.center,
         ease_ms: clip.ease_ms,
+        easing: zoom_easing_from_file(clip.easing),
         mode: match clip.mode {
             ZoomModeFile::Auto => ZoomMode::Auto,
             ZoomModeFile::Manual => ZoomMode::Manual,
         },
+    }
+}
+
+fn zoom_easing_to_file(easing: ZoomEasing) -> ZoomEasingFile {
+    match easing {
+        ZoomEasing::Glide => ZoomEasingFile::Glide,
+        ZoomEasing::Smooth => ZoomEasingFile::Smooth,
+        ZoomEasing::Snappy => ZoomEasingFile::Snappy,
+        ZoomEasing::Linear => ZoomEasingFile::Linear,
+    }
+}
+
+fn zoom_easing_from_file(easing: ZoomEasingFile) -> ZoomEasing {
+    match easing {
+        ZoomEasingFile::Glide => ZoomEasing::Glide,
+        ZoomEasingFile::Smooth => ZoomEasing::Smooth,
+        ZoomEasingFile::Snappy => ZoomEasing::Snappy,
+        ZoomEasingFile::Linear => ZoomEasing::Linear,
     }
 }
 
@@ -418,6 +461,22 @@ fn default_click_intensity() -> f64 {
     DEFAULT_CLICK_INTENSITY
 }
 
+fn default_click_color() -> (u8, u8, u8) {
+    DEFAULT_CLICK_COLOR
+}
+
+fn default_click_scale() -> f64 {
+    DEFAULT_CLICK_SCALE
+}
+
+fn default_click_opacity() -> f64 {
+    DEFAULT_CLICK_OPACITY
+}
+
+fn default_click_duration_ms() -> u32 {
+    DEFAULT_CLICK_DURATION_MS
+}
+
 fn default_cursor_trail() -> f64 {
     DEFAULT_CURSOR_TRAIL
 }
@@ -433,16 +492,18 @@ fn default_cursor_sway() -> f64 {
 fn click_effect_to_file(effect: ClickEffect) -> ClickEffectFile {
     match effect {
         ClickEffect::None => ClickEffectFile::None,
-        ClickEffect::Pulse => ClickEffectFile::Pulse,
+        ClickEffect::Spotlight => ClickEffectFile::Spotlight,
         ClickEffect::Ripple => ClickEffectFile::Ripple,
+        ClickEffect::Echo => ClickEffectFile::Echo,
     }
 }
 
 fn click_effect_from_file(effect: ClickEffectFile) -> ClickEffect {
     match effect {
         ClickEffectFile::None => ClickEffect::None,
-        ClickEffectFile::Pulse => ClickEffect::Pulse,
+        ClickEffectFile::Spotlight => ClickEffect::Spotlight,
         ClickEffectFile::Ripple => ClickEffect::Ripple,
+        ClickEffectFile::Echo => ClickEffect::Echo,
     }
 }
 
@@ -557,6 +618,10 @@ impl VideoEditState {
             cursor_idle_ms: self.cursor.idle_ms,
             cursor_click_effect: click_effect_to_file(self.cursor.click_effect),
             cursor_click_intensity: self.cursor.click_intensity,
+            cursor_click_color: self.cursor.click_color,
+            cursor_click_scale: self.cursor.click_scale,
+            cursor_click_opacity: self.cursor.click_opacity,
+            cursor_click_duration_ms: self.cursor.click_duration_ms,
             cursor_trail: self.cursor.trail,
             cursor_tilt: self.cursor.tilt,
             cursor_sway: self.cursor.sway,
@@ -612,6 +677,10 @@ impl VideoEditState {
             idle_ms: file.cursor_idle_ms,
             click_effect: click_effect_from_file(file.cursor_click_effect),
             click_intensity: file.cursor_click_intensity,
+            click_color: file.cursor_click_color,
+            click_scale: file.cursor_click_scale,
+            click_opacity: file.cursor_click_opacity,
+            click_duration_ms: file.cursor_click_duration_ms,
             trail: file.cursor_trail,
             tilt: file.cursor_tilt,
             sway: file.cursor_sway,
@@ -728,6 +797,7 @@ mod tests {
             scale: 1.8,
             center: (0.4, 0.6),
             ease_ms: 200,
+            easing: ZoomEasing::Glide,
             mode: ZoomMode::Manual,
         });
         state.crop = Some(CropSelection {
@@ -791,6 +861,7 @@ mod tests {
             scale: 2.0,
             center: (0.5, 0.5),
             ease_ms: 200,
+            easing: ZoomEasing::Glide,
             mode: ZoomMode::Auto,
         });
         assert!(zoomed.session_is_dirty(None));
@@ -876,6 +947,83 @@ mod tests {
         let restored = VideoEditState::new(metadata_for(&video, 16));
         assert!(restored.session_is_default());
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_project_json_defaults_click_settings_and_zoom_easing() {
+        let dir = scratch("old-defaults");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.zoom_clips.push(ZoomClip {
+            start: 1.0,
+            end: 2.8,
+            scale: 1.8,
+            center: (0.5, 0.5),
+            ease_ms: 400,
+            easing: ZoomEasing::Snappy,
+            mode: ZoomMode::Manual,
+        });
+        state.cursor.click_color = (12, 34, 56);
+        state.cursor.click_scale = 1.6;
+        state.cursor.click_opacity = 0.4;
+        state.cursor.click_duration_ms = 900;
+        let mut json = serde_json::to_value(state.to_project()).unwrap();
+        let object = json.as_object_mut().unwrap();
+        object.remove("cursor_click_color");
+        object.remove("cursor_click_scale");
+        object.remove("cursor_click_opacity");
+        object.remove("cursor_click_duration_ms");
+        for clip in json
+            .get_mut("zoom_clips")
+            .and_then(|value| value.as_array_mut())
+            .unwrap()
+        {
+            clip.as_object_mut().unwrap().remove("easing");
+        }
+        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
+        assert_eq!(file.cursor_click_color, DEFAULT_CLICK_COLOR);
+        assert!((file.cursor_click_scale - DEFAULT_CLICK_SCALE).abs() < 1e-12);
+        assert!((file.cursor_click_opacity - DEFAULT_CLICK_OPACITY).abs() < 1e-12);
+        assert_eq!(file.cursor_click_duration_ms, DEFAULT_CLICK_DURATION_MS);
+        assert_eq!(file.zoom_clips[0].easing, ZoomEasingFile::Glide);
+
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(file);
+        assert_eq!(restored.cursor.click_color, DEFAULT_CLICK_COLOR);
+        assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Glide);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_click_effect_styling_and_zoom_easing() {
+        let dir = scratch("click-style");
+        let video = write_video(&dir, "clip.mp4", 24);
+        let mut state = VideoEditState::new(metadata_for(&video, 24));
+        state.cursor.click_color = (32, 160, 240);
+        state.cursor.click_scale = 1.4;
+        state.cursor.click_opacity = 0.55;
+        state.cursor.click_duration_ms = 800;
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 2.0,
+            center: (0.4, 0.6),
+            ease_ms: 480,
+            easing: ZoomEasing::Snappy,
+            mode: ZoomMode::Manual,
+        });
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 24));
+        restored.apply_project(loaded);
+        assert_eq!(restored.cursor.click_color, (32, 160, 240));
+        assert!((restored.cursor.click_scale - 1.4).abs() < 1e-12);
+        assert!((restored.cursor.click_opacity - 0.55).abs() < 1e-12);
+        assert_eq!(restored.cursor.click_duration_ms, 800);
+        assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Snappy);
+        assert_eq!(restored.zoom_clips[0].ease_ms, 480);
+        cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
     }
 }

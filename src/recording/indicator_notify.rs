@@ -67,7 +67,11 @@ pub fn show_recording_indicator() {
     if let Some(mut prev) = slot.take() {
         prev.active.store(false, Ordering::Relaxed);
         if let Some(join) = prev.join.take() {
-            let _ = join.join();
+            // Don't join on this thread: hide/show can run while the worker
+            // is still winding down and a join deadlock freezes Record.
+            thread::spawn(move || {
+                let _ = join.join();
+            });
         }
     }
 
@@ -136,7 +140,9 @@ pub fn hide_recording_indicator() {
         let _ = close_notification_blocking(id);
     }
     if let Some(join) = state.join.take() {
-        let _ = join.join();
+        thread::spawn(move || {
+            let _ = join.join();
+        });
     }
 }
 

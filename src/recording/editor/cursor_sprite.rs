@@ -1,4 +1,4 @@
-use super::model::{CursorSettings, CursorTheme, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE};
+use super::model::{ClickEffect, CursorSettings, CursorTheme, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE};
 use gtk4::cairo::{Antialias, Context, Filter, Format, ImageSurface, SurfacePattern};
 use image::RgbaImage;
 use std::f64::consts::TAU;
@@ -141,6 +141,55 @@ pub fn draw_tilted(
     );
 }
 
+pub fn draw_click(
+    cr: &Context,
+    x: f64,
+    y: f64,
+    progress: f64,
+    settings: CursorSettings,
+    alpha: f64,
+) {
+    let settings = settings.clamped();
+    let alpha = (alpha * settings.click_opacity).clamp(0.0, 1.0);
+    match settings.click_effect {
+        ClickEffect::None => {}
+        ClickEffect::Spotlight => draw_spotlight(
+            cr,
+            x,
+            y,
+            progress,
+            settings.size,
+            settings.click_intensity,
+            alpha,
+            settings.click_color,
+            settings.click_scale,
+        ),
+        ClickEffect::Ripple => draw_ripple(
+            cr,
+            x,
+            y,
+            progress,
+            settings.size,
+            settings.click_intensity,
+            alpha,
+            settings.click_color,
+            settings.click_scale,
+        ),
+        ClickEffect::Echo => draw_echo(
+            cr,
+            x,
+            y,
+            progress,
+            settings.size,
+            settings.click_intensity,
+            alpha,
+            settings.click_color,
+            settings.click_scale,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn draw_ripple(
     cr: &Context,
     x: f64,
@@ -149,6 +198,8 @@ pub fn draw_ripple(
     size: f64,
     intensity: f64,
     alpha: f64,
+    color: (u8, u8, u8),
+    scale: f64,
 ) {
     let progress = progress.clamp(0.0, 1.0);
     let fade = (1.0 - progress).powi(2);
@@ -156,14 +207,92 @@ pub fn draw_ripple(
     if amount < 0.02 {
         return;
     }
-    let radius = (10.0 + 34.0 * progress) * overlay_scale(size, 1.0);
+    let (r, g, b) = click_rgb(color);
+    let radius = (10.0 + 34.0 * progress) * overlay_scale(size, 1.0) * scale.max(0.01);
     cr.set_line_width((2.4 * (1.0 - progress * 0.45)).clamp(1.1, 2.4));
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * amount);
+    cr.set_source_rgba(r, g, b, 0.82 * amount);
     cr.arc(x, y, radius, 0.0, TAU);
     let _ = cr.stroke();
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.16 * amount);
+    cr.set_source_rgba(r, g, b, 0.16 * amount);
     cr.arc(x, y, radius * 0.55, 0.0, TAU);
     let _ = cr.fill();
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn draw_spotlight(
+    cr: &Context,
+    x: f64,
+    y: f64,
+    progress: f64,
+    size: f64,
+    intensity: f64,
+    alpha: f64,
+    color: (u8, u8, u8),
+    scale: f64,
+) {
+    let progress = progress.clamp(0.0, 1.0);
+    let fade = (1.0 - progress).powi(2);
+    let amount = fade * intensity.clamp(0.0, 1.0) * alpha.clamp(0.0, 1.0);
+    if amount < 0.02 {
+        return;
+    }
+    let (r, g, b) = click_rgb(color);
+    let scale = overlay_scale(size, 1.0) * scale.max(0.01);
+    let base = 12.0 * scale;
+    let glow = base + progress * 26.0 * scale;
+    let inner = (base * 0.72).max(glow * 0.76);
+    cr.set_line_width(1.5);
+    cr.set_source_rgba(r, g, b, 0.3 * amount);
+    cr.arc(x, y, glow, 0.0, TAU);
+    let _ = cr.stroke();
+    cr.set_line_width(1.7);
+    cr.set_source_rgba(r, g, b, 0.56 * amount);
+    cr.arc(x, y, inner, 0.0, TAU);
+    let _ = cr.stroke();
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn draw_echo(
+    cr: &Context,
+    x: f64,
+    y: f64,
+    progress: f64,
+    size: f64,
+    intensity: f64,
+    alpha: f64,
+    color: (u8, u8, u8),
+    scale: f64,
+) {
+    let progress = progress.clamp(0.0, 1.0);
+    let fade = (1.0 - progress).powi(2);
+    let amount = fade * intensity.clamp(0.0, 1.0) * alpha.clamp(0.0, 1.0);
+    if amount < 0.02 {
+        return;
+    }
+    let (r, g, b) = click_rgb(color);
+    let scale = overlay_scale(size, 1.0) * scale.max(0.01);
+    let base = 12.0 * scale;
+    let outer = base + progress * 32.0 * scale;
+    let inner = (base * 0.58).max(outer * 0.62);
+    cr.set_line_width(2.0);
+    cr.set_source_rgba(r, g, b, 0.72 * amount);
+    cr.arc(x, y, outer, 0.0, TAU);
+    let _ = cr.stroke();
+    cr.set_line_width(1.5);
+    cr.set_source_rgba(r, g, b, 0.4 * amount);
+    cr.arc(x, y, inner, 0.0, TAU);
+    let _ = cr.stroke();
+    cr.set_source_rgba(r, g, b, 0.22 * amount);
+    cr.arc(x, y, 3.0_f64.max(base * 0.18), 0.0, TAU);
+    let _ = cr.fill();
+}
+
+fn click_rgb(color: (u8, u8, u8)) -> (f64, f64, f64) {
+    (
+        color.0 as f64 / 255.0,
+        color.1 as f64 / 255.0,
+        color.2 as f64 / 255.0,
+    )
 }
 
 pub fn draw_centered(cr: &Context, width: f64, height: f64, theme: CursorTheme) {

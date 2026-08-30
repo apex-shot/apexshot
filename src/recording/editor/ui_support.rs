@@ -23,3 +23,23 @@ pub fn install_recording_editor_css() {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::RECORDING_EDITOR_CSS;
+
+    #[test]
+    fn light_theme_chrome_matches_timeline() {
+        assert!(RECORDING_EDITOR_CSS.contains(
+            ".editor-theme-light .recording-editor-window-controls {\n                background: #ffffff;"
+        ));
+        assert!(RECORDING_EDITOR_CSS.contains(
+            ".editor-theme-light.recording-editor-shell {\n                background: #ffffff;\n                border: 1px solid alpha(#111827, 0.18);"
+        ));
+        assert!(RECORDING_EDITOR_CSS
+            .contains(".recording-editor-root scale slider {\n                min-width: 12px;"));
+        assert!(RECORDING_EDITOR_CSS
+            .contains(".recording-editor-root scale.recording-editor-timeline-zoom slider"));
+        assert!(RECORDING_EDITOR_CSS.contains("box-shadow: none;"));
+    }
+}

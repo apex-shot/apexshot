@@ -50,6 +50,29 @@ for user_dir in /home/*; do
   fi
 done
 
+# ~/.local/share/gnome-shell/extensions shadows /usr/share. Refresh any
+# user copy so a stale CursorTracker still doesn't run after upgrade.
+EXT_UUID="apexshot-gnome-integration@apexshot.github.io"
+SYSTEM_EXT="/usr/share/gnome-shell/extensions/$EXT_UUID"
+if [ -d "$SYSTEM_EXT" ]; then
+  for user_dir in /home/*; do
+    user_name=$(basename "$user_dir")
+    case "$user_name" in
+      lost+found|share|nobody|root) continue ;;
+    esac
+    user_uid=$(id -u "$user_name" 2>/dev/null) || continue
+    user_gid=$(id -g "$user_name" 2>/dev/null) || continue
+    user_ext_parent="$user_dir/.local/share/gnome-shell/extensions"
+    user_ext="$user_ext_parent/$EXT_UUID"
+    # Only refresh a copy that already shadows the package-managed extension.
+    # New installs should use /usr/share directly.
+    [ -d "$user_ext" ] || continue
+    rm -rf "$user_ext"
+    cp -a "$SYSTEM_EXT" "$user_ext_parent/"
+    chown -R "$user_uid:$user_gid" "$user_ext"
+  done
+fi
+
 # Update desktop database so the app appears in the dock/app launcher
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database /usr/share/applications/ 2>/dev/null || true

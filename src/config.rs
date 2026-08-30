@@ -64,6 +64,8 @@ pub struct AppConfig {
     pub rec_video_fps: u8,
     pub rec_video_mono: bool,
     pub rec_video_open_editor: bool,
+    /// webrtcdsp noise suppression on the recording mic (GStreamer audio path).
+    pub rec_noise_suppression: bool,
     // Recording GIF tab settings
     pub rec_gif_fps: u8,
     pub rec_gif_quality: f64,
@@ -200,6 +202,7 @@ impl Default for AppConfig {
             rec_video_fps: 1,     // 1 = 30fps
             rec_video_mono: false,
             rec_video_open_editor: false,
+            rec_noise_suppression: false,
             rec_gif_fps: 50,
             rec_gif_quality: 0.75,
             rec_gif_size_idx: 0,
