@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 pub const SIDECAR_VERSION: u32 = 1;
@@ -141,12 +142,20 @@ impl PointerSidecar {
     }
 
     pub fn sidecar_path(video_path: &Path) -> PathBuf {
+        pointer_sidecars_directory().join(sidecar_file_name(video_path))
+    }
+
+    pub fn legacy_sidecar_path(video_path: &Path) -> PathBuf {
         let parent = video_path.parent().unwrap_or_else(|| Path::new(""));
         let stem = video_path
             .file_stem()
             .and_then(|stem| stem.to_str())
             .unwrap_or("recording");
         parent.join(format!("{stem}.apexshot.json"))
+    }
+
+    pub fn exists_next_to_video(video_path: &Path) -> bool {
+        Self::sidecar_path(video_path).is_file() || Self::legacy_sidecar_path(video_path).is_file()
     }
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
@@ -158,18 +167,9 @@ impl PointerSidecar {
     pub fn load_next_to_video(video_path: &Path) -> Option<Self> {
         let path = Self::sidecar_path(video_path);
         if !path.is_file() {
-            return None;
+            return Self::load_migrate_legacy_sidecar(video_path);
         }
-        match Self::load(&path) {
-            Ok(sidecar) => Some(sidecar),
-            Err(err) => {
-                eprintln!(
-                    "[recording] failed to load pointer sidecar {}: {err}",
-                    path.display()
-                );
-                None
-            }
-        }
+        Self::load_logged(&path)
     }
 
     pub fn write(&self, path: &Path) -> anyhow::Result<()> {
@@ -188,14 +188,14 @@ impl PointerSidecar {
     }
 
     pub fn delete_next_to_video(video_path: &Path) {
-        let path = Self::sidecar_path(video_path);
-        if path.exists() {
-            if let Err(err) = std::fs::remove_file(&path) {
-                eprintln!(
-                    "[recording] failed to delete pointer sidecar {}: {err}",
-                    path.display()
-                );
-            }
+        let current_path = Self::sidecar_path(video_path);
+        if current_path.is_file() {
+            remove_sidecar(&current_path);
+        }
+
+        let legacy_path = Self::legacy_sidecar_path(video_path);
+        if legacy_path.is_file() {
+            remove_sidecar(&legacy_path);
         }
     }
 
@@ -213,6 +213,34 @@ impl PointerSidecar {
             click.x -= origin_x;
             click.y -= origin_y;
         }
+    }
+
+    fn load_logged(path: &Path) -> Option<Self> {
+        match Self::load(path) {
+            Ok(sidecar) => Some(sidecar),
+            Err(err) => {
+                eprintln!(
+                    "[recording] failed to load pointer sidecar {}: {err}",
+                    path.display()
+                );
+                None
+            }
+        }
+    }
+
+    fn load_migrate_legacy_sidecar(video_path: &Path) -> Option<Self> {
+        let legacy_path = Self::legacy_sidecar_path(video_path);
+        if !legacy_path.is_file() {
+            return None;
+        }
+
+        let sidecar = Self::load_logged(&legacy_path)?;
+        if sidecar.write(&Self::sidecar_path(video_path)).is_ok() {
+            // The MP4 folder should contain media files only. Keep cursor data
+            // in the private app-data directory and migrate old recordings too.
+            remove_sidecar(&legacy_path);
+        }
+        Some(sidecar)
     }
 
     pub fn sample_at(&self, t: f64) -> Option<&PointerSample> {
@@ -424,6 +452,32 @@ impl PointerSidecar {
     }
 }
 
+fn pointer_sidecars_directory() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("apexshot")
+        .join("pointer-sidecars")
+}
+
+fn sidecar_file_name(video_path: &Path) -> PathBuf {
+    let canonical = video_path
+        .canonicalize()
+        .unwrap_or_else(|_| video_path.to_path_buf());
+    let path_str = canonical.to_string_lossy();
+    let mut hasher = Sha256::new();
+    hasher.update(path_str.as_bytes());
+    PathBuf::from(format!("{:x}", hasher.finalize()))
+}
+
+fn remove_sidecar(path: &Path) {
+    if let Err(err) = std::fs::remove_file(path) {
+        eprintln!(
+            "[recording] failed to delete pointer sidecar {}: {err}",
+            path.display()
+        );
+    }
+}
+
 pub fn delete_recording_outputs(video_path: &Path) {
     if video_path.exists() {
         let _ = std::fs::remove_file(video_path);
@@ -436,11 +490,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sidecar_path_uses_apexshot_json_stem() {
+    fn sidecar_path_is_app_local_and_legacy_path_stays_local() {
         let video = PathBuf::from("/tmp/ApexShot Recording 2026-08-15 at 12-00-00.mp4");
         assert_eq!(
             PointerSidecar::sidecar_path(&video),
-            PathBuf::from("/tmp/ApexShot Recording 2026-08-15 at 12-00-00.apexshot.json")
+            pointer_sidecars_directory().join(sidecar_file_name(&video))
+        );
+        assert_ne!(
+            PointerSidecar::sidecar_path(&video),
+            PointerSidecar::legacy_sidecar_path(&video)
         );
     }
 
@@ -476,6 +534,7 @@ mod tests {
 
         let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
         assert_eq!(loaded, sidecar);
+        PointerSidecar::delete_next_to_video(&video);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -488,6 +547,40 @@ mod tests {
         let path = dir.join("empty.apexshot.json");
         std::fs::write(&path, b"").unwrap();
         assert!(PointerSidecar::load(&path).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_sidecar_is_migrated_out_of_media_folder() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-sidecar-legacy-migration-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("legacy.mp4");
+        let mut sidecar =
+            PointerSidecar::new(42, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 5.0,
+            y: 6.0,
+            kind: CursorKind::Default,
+        });
+        sidecar
+            .write(&PointerSidecar::legacy_sidecar_path(&video))
+            .unwrap();
+
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded, sidecar);
+        assert!(PointerSidecar::sidecar_path(&video).is_file());
+        assert!(!PointerSidecar::legacy_sidecar_path(&video).exists());
+
+        PointerSidecar::delete_next_to_video(&video);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

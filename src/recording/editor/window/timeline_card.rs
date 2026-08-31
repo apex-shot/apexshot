@@ -1,6 +1,7 @@
 use crate::recording::editor::model::{
-    format_zoom_scale, snap_range_to_target, snap_to_target, VideoEditState,
-    DEFAULT_CURSOR_HIDE_DURATION_SECONDS, DEFAULT_ZOOM_DURATION_SECONDS,
+    format_zoom_scale, playhead_for_replay, snap_range_to_target, snap_to_target,
+    usable_media_timestamp_seconds, VideoEditState, DEFAULT_CURSOR_HIDE_DURATION_SECONDS,
+    DEFAULT_ZOOM_DURATION_SECONDS,
 };
 use gtk4::gdk;
 use gtk4::glib;

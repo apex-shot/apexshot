@@ -1,7 +1,7 @@
 //! Edit-list sidecar for the recording editor.
 //!
 //! Stored under `~/.local/share/apexshot/video-projects/{sha256(source path)}.json`.
-//! Pointer samples stay in `{stem}.apexshot.json` next to the MP4.
+//! Pointer samples stay under `~/.local/share/apexshot/pointer-sidecars/`.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

@@ -1090,3 +1090,18 @@ fn crop_selection_is_clamped_and_even() {
     assert_eq!(state.crop_or_full(), (0.0, 0.0, 1920.0, 332.0));
     assert_eq!(state.effective_source_dimensions(), (1920, 332));
 }
+
+#[test]
+fn replay_rewinds_from_the_end_and_keeps_mid_playhead() {
+    assert_eq!(playhead_for_replay(7.0, 7.0), 0.0);
+    assert_eq!(playhead_for_replay(6.96, 7.0), 0.0);
+    assert!((playhead_for_replay(3.2, 7.0) - 3.2).abs() < 1e-12);
+}
+
+#[test]
+fn media_timestamp_zero_is_valid_once_seek_completes() {
+    assert_eq!(usable_media_timestamp_seconds(0, false), Some(0.0));
+    assert_eq!(usable_media_timestamp_seconds(1_500_000, false), Some(1.5));
+    assert_eq!(usable_media_timestamp_seconds(0, true), None);
+    assert_eq!(usable_media_timestamp_seconds(-1, false), None);
+}

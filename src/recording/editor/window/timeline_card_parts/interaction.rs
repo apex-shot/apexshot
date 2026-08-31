@@ -17,9 +17,8 @@ pub fn toggle_playback(
 
     let (seek_to, speed, muted) = {
         let mut guard = state.lock().unwrap();
-        if guard.playhead_seconds >= guard.content_end_seconds() - 0.05 {
-            guard.playhead_seconds = 0.0;
-        }
+        guard.playhead_seconds =
+            playhead_for_replay(guard.playhead_seconds, guard.content_end_seconds());
         let seek_to = guard.source_playhead();
         (
             seek_to,
@@ -28,12 +27,11 @@ pub fn toggle_playback(
         )
     };
     if let Some(media_file) = media.borrow().as_ref() {
+        media_file.pause();
         media_file.seek((seek_to * 1_000_000.0) as i64);
         media_file.set_muted(muted);
         if (speed - 1.0).abs() <= 1e-6 {
             media_file.play();
-        } else {
-            media_file.pause();
         }
     }
     playing.set(true);
@@ -77,6 +75,17 @@ pub fn tick_playback(
         return;
     }
 
+    if let Some(media_file) = media.borrow().as_ref() {
+        if media_file.is_seeking() {
+            redraw();
+            return;
+        }
+        if media_file.is_ended() {
+            stop_playback_at_end(state, media, playing, play_button, redraw);
+            return;
+        }
+    }
+
     let (mut next, end, speed, source_t) = {
         let guard = state.lock().unwrap();
         let source_t = guard.source_playhead();
@@ -99,13 +108,13 @@ pub fn tick_playback(
         }
     } else if let Some(media_file) = media.borrow().as_ref() {
         if media_file.is_playing() {
-            let ts = media_file.timestamp();
-            if ts > 0 {
-                next = state.lock().unwrap().source_to_timeline(ts as f64 / 1_000_000.0);
+            if let Some(seconds) =
+                usable_media_timestamp_seconds(media_file.timestamp(), media_file.is_seeking())
+            {
+                next = state.lock().unwrap().source_to_timeline(seconds);
             }
         } else {
             media_file.play();
-            next += 0.05;
         }
     } else {
         next += 0.05;
@@ -128,12 +137,28 @@ pub fn tick_playback(
         }
     }
     if reached_end {
-        playing.set(false);
-        if let Some(media_file) = media.borrow().as_ref() {
-            media_file.pause();
-        }
-        set_play_icon(play_button, "media-playback-start-symbolic");
+        stop_playback_at_end(state, media, playing, play_button, redraw);
+        return;
     }
+    redraw();
+}
+
+fn stop_playback_at_end(
+    state: &Arc<Mutex<VideoEditState>>,
+    media: &Rc<RefCell<Option<MediaFile>>>,
+    playing: &Rc<Cell<bool>>,
+    play_button: &Button,
+    redraw: &Rc<dyn Fn()>,
+) {
+    playing.set(false);
+    {
+        let mut guard = state.lock().unwrap();
+        guard.playhead_seconds = guard.content_end_seconds();
+    }
+    if let Some(media_file) = media.borrow().as_ref() {
+        media_file.pause();
+    }
+    set_play_icon(play_button, "media-playback-start-symbolic");
     redraw();
 }
 
@@ -335,12 +360,8 @@ pub fn bind_video_clip(
                         .get(index)
                         .map(|(start, end)| (end - start).max(0.0))
                         .unwrap_or(0.0);
-                    let start = snap_range_start_to_playhead(
-                        &guard,
-                        width,
-                        origin_start + delta,
-                        duration,
-                    );
+                    let start =
+                        snap_range_start_to_playhead(&guard, width, origin_start + delta, duration);
                     guard.set_segment_start(index, start);
                 }
                 Some(ClipDrag::Seek) => seek_to_x(&state, &media, width, x),
@@ -498,12 +519,8 @@ pub fn bind_zoom_track(
                         .map(|clip| clip.duration())
                         .unwrap_or(0.0);
                     let delta = offset_x / pixels_per_second.max(1e-6);
-                    let start = snap_range_start_to_playhead(
-                        &guard,
-                        width,
-                        origin_start + delta,
-                        duration,
-                    );
+                    let start =
+                        snap_range_start_to_playhead(&guard, width, origin_start + delta, duration);
                     guard.move_zoom_clip(index, start);
                 }
                 Some(ZoomDrag::Seek) => {
@@ -668,12 +685,8 @@ pub fn bind_hide_track(
                         .map(|clip| clip.duration())
                         .unwrap_or(0.0);
                     let delta = offset_x / pixels_per_second.max(1e-6);
-                    let start = snap_range_start_to_playhead(
-                        &guard,
-                        width,
-                        origin_start + delta,
-                        duration,
-                    );
+                    let start =
+                        snap_range_start_to_playhead(&guard, width, origin_start + delta, duration);
                     guard.move_cursor_hide_clip(index, start);
                 }
                 Some(HideDrag::Seek) => {
@@ -766,4 +779,3 @@ pub fn bind_track_cursor(
     });
     area.add_controller(motion);
 }
-

@@ -2,6 +2,22 @@ fn ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
     a0 < b1 && b0 < a1
 }
 
+pub fn playhead_for_replay(playhead: f64, content_end: f64) -> f64 {
+    if playhead >= content_end - 0.05 {
+        0.0
+    } else {
+        playhead
+    }
+}
+
+pub fn usable_media_timestamp_seconds(timestamp_us: i64, seeking: bool) -> Option<f64> {
+    if seeking || timestamp_us < 0 {
+        None
+    } else {
+        Some(timestamp_us as f64 / 1_000_000.0)
+    }
+}
+
 pub fn snap_to_target(value: f64, target: f64, threshold: f64) -> f64 {
     if threshold >= 0.0 && (value - target).abs() <= threshold {
         target

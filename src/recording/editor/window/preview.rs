@@ -56,7 +56,7 @@ fn build_preview_inner(
     workspace.set_valign(Align::Fill);
 
     let media = media.unwrap_or_else(|| MediaFile::for_filename(path));
-    media.set_loop(true);
+    media.set_loop(false);
 
     let picture = Picture::for_paintable(&media);
     picture.add_css_class("recording-editor-video");

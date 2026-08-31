@@ -758,7 +758,7 @@ pub fn run_overlay_recording_request_with_gtk(
                 .unwrap_or("recording");
             crate::utils::notify::desktop_notification("Recording saved", file_name);
 
-            let sidecar_exists = PointerSidecar::sidecar_path(&path).is_file();
+            let sidecar_exists = PointerSidecar::exists_next_to_video(&path);
             if sidecar_exists || open_editor {
                 spawn_recording_editor_subprocess(path.clone());
             }

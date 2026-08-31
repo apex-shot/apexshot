@@ -563,21 +563,16 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
 
     let final_path = final_path.to_path_buf();
 
-    // Audio first: `gst::init()` must happen before `pw::init()` in this
-    // process (PipeWire video thread below). Overlay meters also have to
-    // drop their pulsesrc before we open the recording source, and stay
-    // off until this capture ends (peaks xrun a second pulsesrc).
+    // Initialize GStreamer before PipeWire so the libraries do not fight over
+    // spa/libpipewire startup. Do not start audio yet: starting it here lets
+    // audio run while the portal/PipeWire stream is still negotiating, which
+    // makes the saved audio track longer than the actual video timeline.
     let _ = super::gst_audio::ensure_gst_initialized();
     let _audio_exclusive =
         RecordingAudioExclusiveGuard::acquire(config.mic_enabled || config.speaker_enabled);
     if config.mic_enabled || config.speaker_enabled {
         super::audio::ensure_pipewire_pulse_running();
     }
-    let mut gst_audio = if config.mic_enabled || config.speaker_enabled {
-        start_gst_audio_or_fallback(config, audio_muxer)
-    } else {
-        None
-    };
 
     // Open PipeWire capture stream (continuous).
     // Portal path: connect via the remote FD from OpenPipeWireRemote.
@@ -604,9 +599,6 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     } {
         Ok(capture) => capture,
         Err(e) => {
-            if let Some(mut audio) = gst_audio.take() {
-                audio.abort();
-            }
             return Err(RecordError::GStreamerError(format!(
                 "PipeWire capture failed: {e}"
             )));
@@ -642,6 +634,14 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     };
     let fps = config.fps.max(1);
 
+    // Start audio only after the video capture stream is negotiated. This
+    // keeps the encoded audio timeline aligned with the first video frame.
+    let mut active_audio = if config.mic_enabled || config.speaker_enabled {
+        start_gst_audio_or_fallback(config, audio_muxer)
+    } else {
+        None
+    };
+
     // Build ffmpeg command
     let use_vaapi = super::wf_recorder::should_use_vaapi();
     let mut ffmpeg_cmd = Command::new("ffmpeg");
@@ -666,7 +666,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     // Add every input before filters, codecs, maps, and other output options.
     // FFmpeg otherwise applies an option such as -vf to the following audio
     // input and exits with AVERROR(EINVAL) (234).
-    let gst_audio_fd = gst_audio.as_mut().and_then(|audio| {
+    let gst_audio_fd = active_audio.as_mut().and_then(|audio| {
         let format = audio.input_format();
         audio.take_read_fd().map(|fd| (format, fd))
     });
@@ -752,7 +752,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
 
     // Map audio after all inputs have been declared.
     if config.mic_enabled || config.speaker_enabled {
-        if gst_audio.is_some() {
+        if active_audio.is_some() {
             // Encoded audio is muxed as-is; mono is handled by the GStreamer
             // branch caps, so no channel conversion happens here.
             ffmpeg_cmd.arg("-map").arg("0:v");
@@ -789,7 +789,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     let mut child = match ffmpeg_cmd.spawn() {
         Ok(child) => child,
         Err(e) => {
-            if let Some(mut audio) = gst_audio.take() {
+            if let Some(mut audio) = active_audio.take() {
                 audio.abort();
             }
             return Err(RecordError::GStreamerError(format!(
@@ -867,7 +867,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
                 }
                 RecordingControlCommand::Pause if !paused => {
                     println!("Recording paused");
-                    if let Some(audio) = gst_audio.as_mut() {
+                    if let Some(audio) = active_audio.as_mut() {
                         audio.set_paused(true);
                     }
                     paused = true;
@@ -875,7 +875,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
                 }
                 RecordingControlCommand::Resume if paused => {
                     println!("Recording resumed");
-                    if let Some(audio) = gst_audio.as_mut() {
+                    if let Some(audio) = active_audio.as_mut() {
                         audio.set_paused(false);
                     }
                     paused = false;
@@ -888,9 +888,9 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
 
         // An audio pipeline error truncates the audio track but must not kill
         // an otherwise healthy video recording.
-        if let Some(err) = gst_audio.as_ref().and_then(|a| a.poll_bus_error()) {
+        if let Some(err) = active_audio.as_ref().and_then(|a| a.poll_bus_error()) {
             eprintln!("[recording] GStreamer audio error: {err}; continuing without audio");
-            if let Some(mut audio) = gst_audio.take() {
+            if let Some(mut audio) = active_audio.take() {
                 audio.abort();
             }
         }
@@ -943,7 +943,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
                 drop(stdin);
                 let _ = child.kill();
                 let _ = child.wait();
-                if let Some(mut audio) = gst_audio.take() {
+                if let Some(mut audio) = active_audio.take() {
                     audio.abort();
                 }
                 return Err(RecordError::GStreamerError(
@@ -964,7 +964,6 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
             std::thread::sleep(std::time::Duration::from_millis(1));
             continue;
         }
-        next_frame_at = Some(deadline + frame_interval);
 
         // A nonblocking pipe keeps stop/discard responsive even if ffmpeg
         // stalls and stops consuming raw frames.
@@ -974,10 +973,24 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
             &mut command_rx,
             &mut stop_action,
             &mut paused,
-            &mut gst_audio,
+            &mut active_audio,
         ) {
-            Ok(true) => {}
-            Ok(false) => break,
+            Ok(keep_recording) => {
+                frames_written += 1;
+                next_frame_at = Some(deadline + frame_interval);
+                if frames_written == 1 {
+                    eprintln!(
+                        "[recording] First frame written to ffmpeg ({} bytes)",
+                        pixels.len()
+                    );
+                }
+                if frames_written.is_multiple_of(30) {
+                    eprintln!("[recording] {} frames written", frames_written);
+                }
+                if !keep_recording {
+                    break;
+                }
+            }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::BrokenPipe {
                     eprintln!("ffmpeg pipe broken (likely exited)");
@@ -987,16 +1000,37 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
                 break;
             }
         }
+    }
 
-        frames_written += 1;
-        if frames_written == 1 {
-            eprintln!(
-                "[recording] First frame written to ffmpeg ({} bytes)",
-                pixels.len()
+    if stop_action == super::RecordingTerminalAction::Save {
+        if let Some(pixels) = last_pixels.as_ref() {
+            let catch_up = frames_due_for_catch_up(
+                next_frame_at,
+                std::time::Instant::now(),
+                frame_interval,
+                u64::from(fps).saturating_mul(3).max(1),
             );
-        }
-        if frames_written.is_multiple_of(30) {
-            eprintln!("[recording] {} frames written", frames_written);
+            for _ in 0..catch_up {
+                match write_ffmpeg_frame_interruptible(
+                    &mut stdin,
+                    pixels,
+                    &mut command_rx,
+                    &mut stop_action,
+                    &mut paused,
+                    &mut active_audio,
+                ) {
+                    Ok(_) => {
+                        frames_written += 1;
+                        if let Some(deadline) = next_frame_at.as_mut() {
+                            *deadline += frame_interval;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            if catch_up > 0 {
+                eprintln!("[recording] Wrote {catch_up} catch-up frames ({frames_written} total)");
+            }
         }
     }
 
@@ -1008,7 +1042,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
 
     // Deterministic encoder stop: EOS audio, close the audio pipe, then close
     // video stdin so ffmpeg finalizes once both inputs are at EOF.
-    if let Some(mut audio) = gst_audio.take() {
+    if let Some(mut audio) = active_audio.take() {
         if stop_action == super::RecordingTerminalAction::Discard {
             audio.abort();
         } else {
@@ -1097,16 +1131,36 @@ fn ffmpeg_error_detail(stderr: &str) -> String {
     format!(" FFmpeg reported: {detail}")
 }
 
+fn frames_due_for_catch_up(
+    next_frame_at: Option<std::time::Instant>,
+    now: std::time::Instant,
+    frame_interval: std::time::Duration,
+    max_frames: u64,
+) -> u64 {
+    let Some(mut deadline) = next_frame_at else {
+        return 0;
+    };
+    if frame_interval.is_zero() || max_frames == 0 {
+        return 0;
+    }
+    let mut due = 0u64;
+    while deadline <= now && due < max_frames {
+        due += 1;
+        deadline += frame_interval;
+    }
+    due
+}
+
 fn wait_for_ffmpeg_child(
     child: &mut std::process::Child,
 ) -> super::RecordResult<std::process::ExitStatus> {
-    if let Some(status) = wait_for_ffmpeg_exit(child, std::time::Duration::from_secs(8))? {
+    if let Some(status) = wait_for_ffmpeg_exit(child, std::time::Duration::from_secs(20))? {
         return Ok(status);
     }
 
     eprintln!("[recording] ffmpeg did not exit after stdin close; interrupting");
     interrupt_child(child);
-    if let Some(status) = wait_for_ffmpeg_exit(child, std::time::Duration::from_secs(2))? {
+    if let Some(status) = wait_for_ffmpeg_exit(child, std::time::Duration::from_secs(5))? {
         return Ok(status);
     }
 
@@ -1140,11 +1194,12 @@ fn write_ffmpeg_frame_interruptible(
     command_rx: &mut Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
     stop_action: &mut super::RecordingTerminalAction,
     paused: &mut bool,
-    gst_audio: &mut Option<super::gst_audio::ActiveGstAudio>,
+    active_audio: &mut Option<super::gst_audio::ActiveGstAudio>,
 ) -> std::io::Result<bool> {
     use std::io::Write;
 
     let mut offset = 0;
+    let mut stop_after_frame = false;
     while offset < pixels.len() {
         match stdin.write(&pixels[offset..]) {
             Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
@@ -1157,20 +1212,22 @@ fn write_ffmpeg_frame_interruptible(
                             *stop_action = super::RecordingTerminalAction::Restart;
                             return Ok(false);
                         }
-                        Ok(RecordingControlCommand::StopSave) => return Ok(false),
+                        Ok(RecordingControlCommand::StopSave) => {
+                            stop_after_frame = true;
+                        }
                         Ok(RecordingControlCommand::StopDiscard) => {
                             *stop_action = super::RecordingTerminalAction::Discard;
                             return Ok(false);
                         }
                         Ok(RecordingControlCommand::Pause) if !*paused => {
-                            if let Some(audio) = gst_audio.as_mut() {
+                            if let Some(audio) = active_audio.as_mut() {
                                 audio.set_paused(true);
                             }
                             *paused = true;
                             super::notify_daemon_event("recording_session_paused");
                         }
                         Ok(RecordingControlCommand::Resume) if *paused => {
-                            if let Some(audio) = gst_audio.as_mut() {
+                            if let Some(audio) = active_audio.as_mut() {
                                 audio.set_paused(false);
                             }
                             *paused = false;
@@ -1187,7 +1244,7 @@ fn write_ffmpeg_frame_interruptible(
             Err(err) => return Err(err),
         }
     }
-    Ok(true)
+    Ok(!stop_after_frame)
 }
 
 fn wait_for_ffmpeg_exit(
@@ -2482,5 +2539,25 @@ mod tests {
         assert!(other.exists());
         let _ = std::fs::remove_file(&other);
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn catch_up_writes_nothing_when_ahead_of_the_clock() {
+        let now = std::time::Instant::now();
+        let interval = std::time::Duration::from_millis(33);
+        assert_eq!(
+            frames_due_for_catch_up(Some(now + interval), now, interval, 90),
+            0
+        );
+        assert_eq!(frames_due_for_catch_up(None, now, interval, 90), 0);
+    }
+
+    #[test]
+    fn catch_up_fills_missed_frame_deadlines_up_to_the_cap() {
+        let now = std::time::Instant::now();
+        let interval = std::time::Duration::from_millis(100);
+        let behind = now - std::time::Duration::from_millis(250);
+        assert_eq!(frames_due_for_catch_up(Some(behind), now, interval, 90), 3);
+        assert_eq!(frames_due_for_catch_up(Some(behind), now, interval, 2), 2);
     }
 }
