@@ -144,14 +144,30 @@ echo "Verifying installed binaries..."
 cmp "$ROOT_DIR/target/release/apexshot" /usr/bin/apexshot
 cmp "$ROOT_DIR/target/release/apexshot-capture" /usr/bin/apexshot-capture
 
-echo "Updating GNOME Shell extension (user copy shadows /usr/share)..."
 EXT_UUID="apexshot-gnome-integration@apexshot.github.io"
 USER_EXT="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
-mkdir -p "$USER_EXT"
-cp -a "$ROOT_DIR/gnome-extension/"*.json "$ROOT_DIR/gnome-extension/"*.js "$USER_EXT/"
-if command -v gnome-extensions >/dev/null 2>&1; then
-  gnome-extensions disable "$EXT_UUID" 2>/dev/null || true
-  gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
+EXT_FILES=(metadata.json extension.js shell-overlay.js window-list.js preview-stacking.js)
+extension_changed=false
+for file in "${EXT_FILES[@]}"; do
+  if [[ ! -f "$USER_EXT/$file" ]] \
+    || ! cmp -s "$ROOT_DIR/gnome-extension/$file" "$USER_EXT/$file"; then
+    extension_changed=true
+    break
+  fi
+done
+
+if [[ "$extension_changed" == true ]]; then
+  echo "Updating GNOME Shell extension (source changed)..."
+  mkdir -p "$USER_EXT"
+  for file in "${EXT_FILES[@]}"; do
+    cp -a "$ROOT_DIR/gnome-extension/$file" "$USER_EXT/$file"
+  done
+  if command -v gnome-extensions >/dev/null 2>&1; then
+    gnome-extensions disable "$EXT_UUID" 2>/dev/null || true
+    gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
+  fi
+else
+  echo "GNOME Shell extension is unchanged; skipping copy and reload."
 fi
 
 echo "Installed $PACKAGE_NAME from $newest_deb"

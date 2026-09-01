@@ -77,6 +77,8 @@ export class ShellOverlayService {
         this._cursorKind = 'default';
         this._x = 0;
         this._y = 0;
+        this._modifiers = 0;
+        this._buttonMask = 0;
     }
 
     enable() {
@@ -190,6 +192,8 @@ export class ShellOverlayService {
         this._t0 = GLib.get_monotonic_time();
         this._tracking = true;
         this._setupCursorTracking();
+        this._readPointer();
+        this._buttonMask = this._pressedButtonMask();
         this._setupClickTracking();
         this._samplePointer(true);
         this._pollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POINTER_POLL_MS, () => {
@@ -252,9 +256,8 @@ export class ShellOverlayService {
                         return Clutter.EVENT_PROPAGATE;
                     const [x, y] = event.get_coords();
                     const t = (GLib.get_monotonic_time() - this._t0) / 1_000_000;
-                    this._clicks.push([t, Math.floor(x), Math.floor(y), button]);
-                    if (this._clicks.length > 500)
-                        this._clicks.shift();
+                    this._recordClick(t, Math.floor(x), Math.floor(y), button);
+                    this._buttonMask |= this._maskForButton(button);
                 } catch (e) {
                     log(`ApexShot: click handler error: ${e.message}`);
                 }
@@ -271,17 +274,57 @@ export class ShellOverlayService {
             if (result && result.length >= 2) {
                 this._x = Math.floor(result[0]);
                 this._y = Math.floor(result[1]);
+                this._modifiers = result.length >= 3 ? result[2] : 0;
             }
         } catch (e) {}
+    }
+
+    _maskForButton(button) {
+        if (button === 1)
+            return Clutter.ModifierType.BUTTON1_MASK;
+        if (button === 2)
+            return Clutter.ModifierType.BUTTON2_MASK;
+        if (button === 3)
+            return Clutter.ModifierType.BUTTON3_MASK;
+        return 0;
+    }
+
+    _pressedButtonMask() {
+        return [1, 2, 3].reduce((mask, button) => {
+            const buttonMask = this._maskForButton(button);
+            return (this._modifiers & buttonMask) !== 0 ? mask | buttonMask : mask;
+        }, 0);
+    }
+
+    _recordClick(t, x, y, button) {
+        const last = this._clicks.length > 0 ? this._clicks[this._clicks.length - 1] : null;
+        if (last && last[3] === button && Math.abs(t - last[0]) < 0.03 &&
+            Math.abs(x - last[1]) <= 2 && Math.abs(y - last[2]) <= 2)
+            return;
+        this._clicks.push([t, x, y, button]);
+        if (this._clicks.length > 500)
+            this._clicks.shift();
+    }
+
+    _sampleButtons(t) {
+        const current = this._pressedButtonMask();
+        const pressed = current & ~this._buttonMask;
+        for (const button of [1, 2, 3]) {
+            if ((pressed & this._maskForButton(button)) !== 0)
+                this._recordClick(t, this._x, this._y, button);
+        }
+        this._buttonMask = current;
     }
 
     _samplePointer(force) {
         this._readPointer();
         const t = (GLib.get_monotonic_time() - this._t0) / 1_000_000;
+        // Shell stage events do not include application windows on Wayland,
+        // but the global pointer state includes button modifier masks.
+        this._sampleButtons(t);
         const last = this._samples.length > 0 ? this._samples[this._samples.length - 1] : null;
         const still = last && last[1] === this._x && last[2] === this._y && last[3] === this._cursorKind;
         // Keep a still sample every 100ms so the editor can detect dwells.
-        // App-window clicks never reach the Shell stage on Wayland.
         if (!force && still && (t - last[0]) < 0.1)
             return;
         this._samples.push([t, this._x, this._y, this._cursorKind]);
@@ -326,6 +369,8 @@ export class ShellOverlayService {
         this._samples = [];
         this._clicks = [];
         this._t0 = 0;
+        this._modifiers = 0;
+        this._buttonMask = 0;
         if (returnData)
             return [t0, samples, clicks];
         return [0, [], []];

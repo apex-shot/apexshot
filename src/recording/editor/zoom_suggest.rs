@@ -1,16 +1,14 @@
-//! Automatic zoom placement derived from purposeful pointer landings.
+//! Automatic zoom placement derived from clicks and purposeful pointer landings.
 //!
-//! GNOME's stage click hook only sees Shell chrome, not clicks inside the
-//! recorded application. Auto zoom therefore ignores click samples and looks
-//! for a stronger signal in the pointer path: move a meaningful distance,
-//! arrive at a target, then hold there briefly.
+//! Recorded clicks are primary attention signals. Pointer landings remain a
+//! fallback for hover-driven interfaces and recordings without click samples.
 
 use crate::recording::editor::sidecar::PointerSidecar;
 
-/// Zoom scale used for a single purposeful pointer landing.
+/// Zoom scale used for a single purposeful interaction.
 pub const AUTO_ZOOM_SCALE: f64 = 1.5;
-/// Tighter zoom used when the pointer returns to the same target.
-pub const REPEATED_LANDING_ZOOM_SCALE: f64 = 1.8;
+/// Tighter zoom used for repeated interactions with the same target.
+pub const REPEATED_INTERACTION_ZOOM_SCALE: f64 = 1.8;
 /// Shortest useful region after trim/segment clipping.
 pub const MIN_SUGGESTED_ZOOM_SECONDS: f64 = 1.4;
 /// Normal auto-zoom duration before recording-boundary clipping.
@@ -36,17 +34,19 @@ const MAX_CLUSTER_SPAN_SECONDS: f64 = 2.5;
 const PRE_ROLL_SECONDS: f64 = 0.35;
 const POST_ROLL_SECONDS: f64 = 1.1;
 const SECONDS_PER_SUGGESTION: f64 = 6.0;
+const CLICK_CONFIDENCE: f64 = 100.0;
 
 /// A zoom region in source-time seconds with the pixel focus to zoom on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ZoomSuggestion {
     pub start: f64,
     pub end: f64,
-    /// Source time of the pointer landing used to place the suggestion.
+    /// Source time of the interaction used to place the suggestion.
     pub center_time: f64,
     /// Focus point in encoded-video pixel coordinates.
     pub center: (f64, f64),
     pub scale: f64,
+    pub(crate) priority: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,6 +62,7 @@ struct Landing {
     end: f64,
     center: (f64, f64),
     confidence: f64,
+    is_click: bool,
 }
 
 #[derive(Debug)]
@@ -75,7 +76,7 @@ struct ScoredSuggestion {
     score: f64,
 }
 
-/// Build conservative zoom suggestions from this recording's pointer path.
+/// Build conservative zoom suggestions from this recording's pointer interactions.
 ///
 /// Area-recording sidecars store coordinates relative to the selected region,
 /// while the editor works in encoded-video pixels. Coordinates are scaled into
@@ -101,7 +102,8 @@ pub fn suggest_zooms(
         return Vec::new();
     };
     let samples = transformed_samples(sidecar, scale_x, scale_y, width, height, total_seconds);
-    if samples.len() < 3 {
+    let clicks = transformed_clicks(sidecar, scale_x, scale_y, width, height, total_seconds);
+    if samples.len() < 3 && clicks.is_empty() {
         return Vec::new();
     }
 
@@ -113,7 +115,9 @@ pub fn suggest_zooms(
     let cluster_radius = (diagonal * CLUSTER_RADIUS_DIAGONAL_FRACTION)
         .clamp(MIN_CLUSTER_RADIUS_PX, MAX_CLUSTER_RADIUS_PX);
 
-    let landings = detect_landings(&samples, still_radius, arrival_distance);
+    let mut landings = detect_landings(&samples, still_radius, arrival_distance);
+    landings.extend(clicks);
+    landings.sort_by(|a, b| a.start.total_cmp(&b.start));
     let clusters = cluster_landings(landings, cluster_radius);
     let mut suggestions: Vec<ScoredSuggestion> = clusters
         .into_iter()
@@ -181,6 +185,44 @@ fn transformed_samples(
     samples
 }
 
+fn transformed_clicks(
+    sidecar: &PointerSidecar,
+    scale_x: f64,
+    scale_y: f64,
+    width: f64,
+    height: f64,
+    total_seconds: f64,
+) -> Vec<Landing> {
+    sidecar
+        .clicks
+        .iter()
+        .filter_map(|click| {
+            let x = click.x * scale_x;
+            let y = click.y * scale_y;
+            if !click.t.is_finite()
+                || !x.is_finite()
+                || !y.is_finite()
+                || click.t < 0.0
+                || click.t > total_seconds
+                || x < 0.0
+                || x >= width
+                || y < 0.0
+                || y >= height
+                || !(1..=3).contains(&click.button)
+            {
+                return None;
+            }
+            Some(Landing {
+                start: click.t,
+                end: click.t,
+                center: (x, y),
+                confidence: CLICK_CONFIDENCE,
+                is_click: true,
+            })
+        })
+        .collect()
+}
+
 fn detect_landings(
     samples: &[FrameSample],
     still_radius: f64,
@@ -239,6 +281,7 @@ fn detect_landings(
             end: samples[hold_end].t,
             center,
             confidence,
+            is_click: false,
         });
         index = hold_end + 1;
     }
@@ -275,14 +318,21 @@ fn cluster_landings(landings: Vec<Landing>, cluster_radius: f64) -> Vec<LandingC
 fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option<ScoredSuggestion> {
     let first = cluster.landings.first()?;
     let last = cluster.landings.last()?;
-    let center = median_landing_position(&cluster.landings);
-    let center_time = median(
-        cluster
-            .landings
-            .iter()
-            .map(|landing| landing.start)
-            .collect(),
+    let clicks: Vec<_> = cluster
+        .landings
+        .iter()
+        .filter(|landing| landing.is_click)
+        .collect();
+    let focus: Vec<_> = if clicks.is_empty() {
+        cluster.landings.iter().collect()
+    } else {
+        clicks.clone()
+    };
+    let center = (
+        median(focus.iter().map(|landing| landing.center.0).collect()),
+        median(focus.iter().map(|landing| landing.center.1).collect()),
     );
+    let center_time = median(focus.iter().map(|landing| landing.start).collect());
 
     let mut start = (first.start - PRE_ROLL_SECONDS).max(0.0);
     let mut end = (last.end + POST_ROLL_SECONDS).min(total_seconds);
@@ -300,7 +350,11 @@ fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option
         return None;
     }
 
-    let repeated = cluster.landings.len() > 1;
+    let repeated = if clicks.is_empty() {
+        cluster.landings.len() > 1
+    } else {
+        clicks.len() > 1
+    };
     let score = cluster
         .landings
         .iter()
@@ -314,10 +368,11 @@ fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option
             center_time,
             center,
             scale: if repeated {
-                REPEATED_LANDING_ZOOM_SCALE
+                REPEATED_INTERACTION_ZOOM_SCALE
             } else {
                 AUTO_ZOOM_SCALE
             },
+            priority: score,
         },
         score,
     })
@@ -481,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_click_alone_does_not_create_a_suggestion() {
+    fn valid_click_alone_creates_a_suggestion() {
         let mut data = sidecar();
         data.clicks.push(ClickSample {
             t: 3.0,
@@ -489,7 +544,116 @@ mod tests {
             y: 500.0,
             button: 1,
         });
+        let suggestions = suggest_zooms(&data, W, H, 10.0);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].center, (800.0, 500.0));
+        assert_eq!(suggestions[0].center_time, 3.0);
+        assert_eq!(suggestions[0].scale, AUTO_ZOOM_SCALE);
+        assert!(suggestions[0].start < 3.0);
+        assert!(suggestions[0].end > 3.0);
+    }
+
+    #[test]
+    fn area_click_coordinates_are_scaled_to_encoded_video_pixels() {
+        let mut data = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 200,
+                y: 100,
+                w: 960,
+                h: 540,
+            },
+        );
+        data.clicks.push(ClickSample {
+            t: 3.0,
+            x: 400.0,
+            y: 250.0,
+            button: 1,
+        });
+        let suggestions = suggest_zooms(&data, W, H, 10.0);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].center, (800.0, 500.0));
+    }
+
+    #[test]
+    fn repeated_clicks_on_the_same_target_merge() {
+        let mut data = sidecar();
+        data.clicks.extend([
+            ClickSample {
+                t: 3.0,
+                x: 800.0,
+                y: 500.0,
+                button: 1,
+            },
+            ClickSample {
+                t: 3.4,
+                x: 802.0,
+                y: 500.0,
+                button: 1,
+            },
+        ]);
+        let suggestions = suggest_zooms(&data, W, H, 10.0);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].center, (801.0, 500.0));
+        assert_eq!(suggestions[0].scale, REPEATED_INTERACTION_ZOOM_SCALE);
+    }
+
+    #[test]
+    fn invalid_clicks_are_ignored() {
+        let mut data = sidecar();
+        data.clicks.extend([
+            ClickSample {
+                t: 3.0,
+                x: -1.0,
+                y: 500.0,
+                button: 1,
+            },
+            ClickSample {
+                t: 4.0,
+                x: 800.0,
+                y: 500.0,
+                button: 8,
+            },
+            ClickSample {
+                t: f64::NAN,
+                x: 800.0,
+                y: 500.0,
+                button: 1,
+            },
+        ]);
         assert!(suggest_zooms(&data, W, H, 10.0).is_empty());
+    }
+
+    #[test]
+    fn click_is_preferred_over_a_landing_when_density_is_capped() {
+        let mut data = sidecar();
+        add_landing(&mut data, 1.5, (100.0, 100.0), (400.0, 300.0), 0.6);
+        data.clicks.push(ClickSample {
+            t: 4.5,
+            x: 1500.0,
+            y: 700.0,
+            button: 1,
+        });
+        let suggestions = suggest_zooms(&data, W, H, 6.0);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].center, (1500.0, 700.0));
+        assert_eq!(suggestions[0].center_time, 4.5);
+    }
+
+    #[test]
+    fn click_and_matching_landing_merge_without_inflating_scale() {
+        let mut data = sidecar();
+        add_landing(&mut data, 3.0, (100.0, 100.0), (800.0, 500.0), 0.6);
+        data.clicks.push(ClickSample {
+            t: 3.05,
+            x: 801.0,
+            y: 500.0,
+            button: 1,
+        });
+        let suggestions = suggest_zooms(&data, W, H, 10.0);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].center, (801.0, 500.0));
+        assert_eq!(suggestions[0].scale, AUTO_ZOOM_SCALE);
     }
 
     #[test]
@@ -516,7 +680,7 @@ mod tests {
         ]);
         let suggestions = suggest_zooms(&data, W, H, 10.0);
         assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].scale, REPEATED_LANDING_ZOOM_SCALE);
+        assert_eq!(suggestions[0].scale, REPEATED_INTERACTION_ZOOM_SCALE);
         assert!(point_distance(suggestions[0].center, (900.0, 600.0)) < 2.0);
     }
 

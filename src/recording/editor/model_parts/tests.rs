@@ -832,6 +832,58 @@ fn suggest_zoom_clips_ignores_stop_bar_clicks() {
 }
 
 #[test]
+fn click_only_sidecar_supports_auto_zoom_suggestions() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0)]);
+    state.sidecar.as_mut().unwrap().pointer.clear();
+
+    assert!(state.supports_auto_zoom());
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert_eq!(state.zoom_clips[0].mode, ZoomMode::Auto);
+    assert!((state.zoom_clips[0].center.0 - 800.0).abs() < 1e-9);
+    assert!((state.zoom_clips[0].center.1 - 500.0).abs() < 1e-9);
+}
+
+#[test]
+fn click_redetection_preserves_manual_zoom_clips() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let manual = state.add_zoom_at(0.25).unwrap();
+    state.set_selected_zoom_mode(ZoomMode::Manual);
+    let manual_clip = state.zoom_clips[manual].clone();
+    attach_sidecar_with_clicks(&mut state, &[(5.0, 1200.0, 600.0)]);
+
+    assert!(state.redetect_zoom_clips());
+    assert_eq!(state.zoom_clips.len(), 2);
+    assert!(state.zoom_clips.contains(&manual_clip));
+    assert!(state
+        .zoom_clips
+        .iter()
+        .any(|clip| clip.mode == ZoomMode::Auto));
+}
+
+#[test]
+fn click_zoom_wins_when_its_region_overlaps_a_landing() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 400.0, 300.0)]);
+    state
+        .sidecar
+        .as_mut()
+        .unwrap()
+        .clicks
+        .push(crate::recording::editor::sidecar::ClickSample {
+            t: 4.0,
+            x: 1100.0,
+            y: 600.0,
+            button: 1,
+        });
+
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].center.0 - 1100.0).abs() < 1e-9);
+    assert!((state.zoom_clips[0].center.1 - 600.0).abs() < 1e-9);
+}
+
+#[test]
 fn redetect_zoom_clips_replaces_auto_zooms_for_this_video() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(9.4, 941.0, -215.0)]);

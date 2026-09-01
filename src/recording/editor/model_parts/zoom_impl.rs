@@ -175,7 +175,7 @@ impl VideoEditState {
     pub fn supports_auto_zoom(&self) -> bool {
         self.sidecar
             .as_ref()
-            .is_some_and(|sidecar| !sidecar.pointer.is_empty())
+            .is_some_and(|sidecar| !sidecar.pointer.is_empty() || !sidecar.clicks.is_empty())
     }
 
     /// Populate the timeline with zoom clips derived from recorded pointer
@@ -187,7 +187,7 @@ impl VideoEditState {
         let Some(sidecar) = &self.sidecar else {
             return 0;
         };
-        let suggestions = zoom_suggest::suggest_zooms(
+        let mut suggestions = zoom_suggest::suggest_zooms(
             sidecar,
             self.metadata.width as f64,
             self.metadata.height as f64,
@@ -196,6 +196,11 @@ impl VideoEditState {
         if suggestions.is_empty() {
             return 0;
         }
+        suggestions.sort_by(|a, b| {
+            b.priority
+                .total_cmp(&a.priority)
+                .then_with(|| a.start.total_cmp(&b.start))
+        });
         let mode = if self.supports_auto_zoom() {
             ZoomMode::Auto
         } else {
