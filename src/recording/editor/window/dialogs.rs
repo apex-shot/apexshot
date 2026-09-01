@@ -143,11 +143,11 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
 pub(super) fn show_manual_zoom_notice(parent: &ApplicationWindow) {
     let (wrapper, root) = dialog_card();
 
-    let title = Label::new(Some("Automatic zoom unavailable"));
+    let title = Label::new(Some("No pointer data found"));
     title.add_css_class("recording-editor-dialog-title");
     title.set_xalign(0.0);
     let body = Label::new(Some(
-        "Mouse movement could not be detected for this recording. Use Manual mode to place zooms yourself.",
+        "Open Zoom and choose Detect to analyze visible cursor motion, or use Manual mode to place zooms yourself.",
     ));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);

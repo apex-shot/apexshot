@@ -145,6 +145,23 @@ fn hidden_zoom_skips_eval_and_clear_zoom_clips() {
 }
 
 #[test]
+fn inferred_pointer_enables_auto_zoom_without_forcing_cursor_composite() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 400.0, 300.0);
+    state
+        .sidecar
+        .as_mut()
+        .unwrap()
+        .mark_inferred_from_video();
+
+    assert!(state.supports_auto_zoom());
+    assert!(!state.needs_composite());
+    assert!(state.add_zoom_at_playhead().is_some());
+    assert_eq!(state.selected_zoom_clip().unwrap().mode, ZoomMode::Auto);
+    assert!(state.needs_composite());
+}
+
+#[test]
 fn output_path_increments_when_existing_file_present() {
     let dir =
         std::env::temp_dir().join(format!("apexshot-video-editor-test-{}", std::process::id()));

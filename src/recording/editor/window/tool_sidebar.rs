@@ -112,16 +112,6 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     title.set_hexpand(true);
     header.append(&title);
 
-    let detect = Button::with_label("Detect");
-    detect.add_css_class("recording-editor-zoom-detect");
-    detect.set_has_frame(false);
-    detect.set_halign(Align::End);
-    detect.set_tooltip_text(Some(
-        "Place zooms on clicks and cursor pauses in this recording",
-    ));
-    detect.set_sensitive(state.lock().unwrap().supports_auto_zoom());
-    header.append(&detect);
-
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
@@ -355,15 +345,6 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
             on_change();
         }
     });
-    detect.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |_| {
-            if state.lock().unwrap().redetect_zoom_clips() {
-                on_change();
-            }
-        }
-    });
     let delete = {
         let state = state.clone();
         let on_change = on_change.clone();
@@ -385,7 +366,6 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let classic = classic.clone();
         let classic_row = classic_row.clone();
         let chip_buttons = chip_buttons.clone();
-        let detect = detect.clone();
         let easing_buttons = easing_buttons.clone();
         let ease_scale = ease_row.scale.clone();
         let easing_row = easing_row.clone();
@@ -403,7 +383,6 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
             syncing.set(true);
             auto_btn.set_sensitive(auto_available && can_edit);
             manual_btn.set_sensitive(can_edit);
-            detect.set_sensitive(auto_available && !guard.zoom_locked);
             classic.set_sensitive(can_edit);
             reset.set_sensitive(can_edit);
             easing_row.set_sensitive(can_edit);
@@ -429,9 +408,9 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
                 classic_row.set_visible(mode == ZoomMode::Auto);
             } else {
                 mode_hint.set_text(if auto_available {
-                    "Select a zoom to adjust it, or use Detect to place zooms on clicks and pauses in this recording"
+                    "Select a zoom to adjust it; timeline detection uses clicks and pointer pauses"
                 } else {
-                    "Select a zoom to adjust it"
+                    "Add a Manual zoom, or analyze visible cursor motion from the timeline"
                 });
                 if !auto_available {
                     manual_btn.set_active(true);

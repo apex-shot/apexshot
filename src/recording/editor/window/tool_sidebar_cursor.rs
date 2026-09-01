@@ -28,6 +28,17 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
     title.set_hexpand(true);
     header.append(&title);
 
+    let availability_hint = Label::new(None);
+    availability_hint.add_css_class("recording-editor-zoom-hint");
+    availability_hint.set_wrap(true);
+    availability_hint.set_max_width_chars(32);
+    availability_hint.set_halign(Align::Fill);
+    availability_hint.set_xalign(0.0);
+    availability_hint.set_margin_start(14);
+    availability_hint.set_margin_end(14);
+    availability_hint.set_margin_bottom(8);
+    availability_hint.set_visible(false);
+
     let tabs = GtkBox::new(Orientation::Horizontal, 0);
     tabs.add_css_class("recording-editor-cursor-tabs");
     tabs.set_hexpand(true);
@@ -63,6 +74,7 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
     scroll.set_child(Some(&pages));
 
     panel.append(&header);
+    panel.append(&availability_hint);
     panel.append(&tabs);
     panel.append(&scroll);
 
@@ -107,7 +119,36 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
         let refresh_style = style.refresh;
         let refresh_motion = motion.refresh;
         let refresh_effects = effects.refresh;
+        let state = state.clone();
+        let tabs = tabs.clone();
+        let scroll = scroll.clone();
         Rc::new(move || {
+            let guard = state.lock().unwrap();
+            let can_style = guard
+                .sidecar
+                .as_ref()
+                .is_some_and(|sidecar| sidecar.can_render_cursor_overlay());
+            let inferred = guard.sidecar.as_ref().is_some_and(|sidecar| {
+                sidecar.source
+                    == crate::recording::editor::sidecar::PointerDataSource::InferredFromVideo
+            });
+            drop(guard);
+            tabs.set_sensitive(can_style);
+            scroll.set_sensitive(can_style);
+            availability_hint.set_visible(!can_style);
+            let (message, tooltip) = if inferred {
+                (
+                    "Cursor styling unavailable\nThe cursor is baked into this imported video.",
+                    "Its inferred path can still guide Auto Zoom, but replacement is disabled to prevent a duplicate cursor.",
+                )
+            } else {
+                (
+                    "Cursor styling unavailable\nNo editable cursor data was found.",
+                    "Cursor styling requires pointer data from an ApexShot recording.",
+                )
+            };
+            availability_hint.set_text(message);
+            availability_hint.set_tooltip_text(Some(tooltip));
             refresh_style();
             refresh_motion();
             refresh_effects();

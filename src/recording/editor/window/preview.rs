@@ -738,7 +738,11 @@ fn draw_preview_overlays(
     let view = visible_source_view(&state, source_t, placing);
     let (zoom, _) = state.eval_zoom(source_t);
 
-    if let Some(sidecar) = &state.sidecar {
+    if let Some(sidecar) = state
+        .sidecar
+        .as_ref()
+        .filter(|sidecar| sidecar.can_render_cursor_overlay())
+    {
         if let Some(mut frame) = sidecar.presented_at(source_t, cursor_motion(state.cursor)) {
             frame.alpha *= state.cursor_hide_alpha_for_source(source_t);
             let cursor = overlay_cursor(state.cursor, zoom);

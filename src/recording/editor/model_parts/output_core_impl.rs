@@ -63,7 +63,7 @@ impl VideoEditState {
             || self
                 .sidecar
                 .as_ref()
-                .is_some_and(|sidecar| !sidecar.pointer.is_empty())
+                .is_some_and(|sidecar| sidecar.can_render_cursor_overlay())
     }
 
     pub fn default_zoom_center(&self, at_seconds: f64) -> (f64, f64) {

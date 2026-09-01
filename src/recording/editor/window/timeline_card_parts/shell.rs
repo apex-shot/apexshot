@@ -31,6 +31,12 @@ pub fn build_timeline_card(
     let zoom = labeled_tool_button("zoom-fit-best-symbolic", "Zoom", "Add zoom at playhead");
     let hide = labeled_tool_button("view-conceal-symbolic", "Hide", "Hide cursor at playhead");
     let split = labeled_tool_button("edit-cut-symbolic", "Split", "Split at playhead");
+    let detect = labeled_tool_button(
+        "view-reveal-symbolic",
+        "Detect",
+        "Detect automatic zooms from clicks and cursor motion",
+    );
+    let analyzing = Rc::new(Cell::new(false));
 
     let zoom_out = icon_button("zoom-out-symbolic", "Zoom out timeline");
     let zoom_in = icon_button("zoom-in-symbolic", "Zoom in timeline");
@@ -51,6 +57,7 @@ pub fn build_timeline_card(
     left.append(&zoom);
     left.append(&hide);
     left.append(&split);
+    left.append(&detect);
 
     let center = GtkBox::new(Orientation::Horizontal, 8);
     center.add_css_class("recording-editor-timeline-transport");
@@ -208,6 +215,8 @@ pub fn build_timeline_card(
         let duration_clock = duration_clock.clone();
         let zoom = zoom.clone();
         let hide = hide.clone();
+        let detect = detect.clone();
+        let analyzing = analyzing.clone();
         let state = state.clone();
         let scroll_adj = scroll_adj.clone();
         let scroll_syncing = scroll_syncing.clone();
@@ -227,6 +236,9 @@ pub fn build_timeline_card(
                 } else {
                     hide.remove_css_class("recording-editor-timeline-tool-active");
                 }
+                detect.set_sensitive(
+                    guard.has_source_video() && !guard.zoom_locked && !analyzing.get(),
+                );
             }
             ruler.queue_draw();
             video_track.queue_draw();
@@ -326,6 +338,151 @@ pub fn build_timeline_card(
             let cut_at = state.lock().unwrap().source_playhead();
             state.lock().unwrap().add_cut(cut_at);
             redraw();
+        }
+    });
+
+    detect.connect_clicked({
+        let state = state.clone();
+        let redraw = redraw.clone();
+        let analyzing = analyzing.clone();
+        move |button| {
+            if analyzing.get() {
+                return;
+            }
+            let guard = state.lock().unwrap();
+            if guard.supports_auto_zoom() {
+                drop(guard);
+                let mut guard = state.lock().unwrap();
+                let changed = guard.redetect_zoom_clips();
+                let auto_zooms = guard
+                    .zoom_clips
+                    .iter()
+                    .filter(|clip| clip.mode == ZoomMode::Auto)
+                    .count();
+                let manual_zooms = guard
+                    .zoom_clips
+                    .iter()
+                    .filter(|clip| clip.mode == ZoomMode::Manual)
+                    .count();
+                drop(guard);
+                if changed {
+                    redraw();
+                }
+                if auto_zooms == 0 {
+                    let message = if manual_zooms > 0 {
+                        "No Auto Zooms were added. Manual zooms are preserved, and overlapping detections are skipped."
+                    } else {
+                        "No clear clicks or purposeful pointer pauses were found."
+                    };
+                    crate::utils::notify::desktop_notification("No Auto Zooms added", message);
+                }
+                return;
+            }
+            if !guard.has_source_video() || guard.zoom_locked {
+                return;
+            }
+            let metadata = guard.metadata.clone();
+            drop(guard);
+
+            analyzing.set(true);
+            button.set_sensitive(false);
+            button.set_tooltip_text(Some("Analyzing visible cursor motion…"));
+            let (sender, receiver) = mpsc::channel::<Result<
+                crate::recording::editor::sidecar::PointerSidecar,
+                String,
+            >>();
+            let analyzed_path = metadata.path.clone();
+            std::thread::spawn(move || {
+                let result = crate::recording::editor::imported_pointer::analyze(&metadata)
+                    .and_then(|sidecar| {
+                        sidecar.write_next_to_video(&metadata.path)?;
+                        Ok(sidecar)
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = sender.send(result);
+            });
+
+            let state = state.clone();
+            let redraw = redraw.clone();
+            let analyzing = analyzing.clone();
+            let button = button.clone();
+            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                match receiver.try_recv() {
+                    Ok(Ok(sidecar)) => {
+                        let mut guard = state.lock().unwrap();
+                        if guard.metadata.path != analyzed_path {
+                            analyzing.set(false);
+                            button.set_tooltip_text(Some(
+                                "Detect automatic zooms from clicks and cursor motion",
+                            ));
+                            return glib::ControlFlow::Break;
+                        }
+                        let samples = sidecar.pointer.len();
+                        guard.sidecar = Some(sidecar);
+                        guard.redetect_zoom_clips();
+                        let auto_zooms = guard
+                            .zoom_clips
+                            .iter()
+                            .filter(|clip| clip.mode == ZoomMode::Auto)
+                            .count();
+                        let manual_zooms = guard
+                            .zoom_clips
+                            .iter()
+                            .filter(|clip| clip.mode == ZoomMode::Manual)
+                            .count();
+                        drop(guard);
+                        analyzing.set(false);
+                        button.set_tooltip_text(Some(
+                            "Detect automatic zooms from clicks and cursor motion",
+                        ));
+                        redraw();
+                        if auto_zooms > 0 {
+                            crate::utils::notify::desktop_notification(
+                                "Auto Zoom detection complete",
+                                &format!(
+                                    "Added {auto_zooms} Auto Zooms from {samples} cursor-motion samples."
+                                ),
+                            );
+                        } else {
+                            let message = if manual_zooms > 0 {
+                                "Cursor motion was found, but Manual zooms already cover the detected moments."
+                            } else {
+                                "Cursor motion was found, but no purposeful pauses were clear enough to place zooms."
+                            };
+                            crate::utils::notify::desktop_notification(
+                                "No Auto Zooms added",
+                                message,
+                            );
+                        }
+                        glib::ControlFlow::Break
+                    }
+                    Ok(Err(error)) => {
+                        analyzing.set(false);
+                        button.set_sensitive(true);
+                        button.set_tooltip_text(Some(
+                            "Detect automatic zooms from clicks and cursor motion",
+                        ));
+                        crate::utils::notify::desktop_notification(
+                            "Cursor analysis could not place Auto Zooms",
+                            &error,
+                        );
+                        glib::ControlFlow::Break
+                    }
+                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        analyzing.set(false);
+                        button.set_sensitive(true);
+                        button.set_tooltip_text(Some(
+                            "Detect automatic zooms from clicks and cursor motion",
+                        ));
+                        crate::utils::notify::desktop_notification(
+                            "Cursor analysis stopped",
+                            "The analysis worker stopped unexpectedly. Manual Zoom is still available.",
+                        );
+                        glib::ControlFlow::Break
+                    }
+                }
+            });
         }
     });
 

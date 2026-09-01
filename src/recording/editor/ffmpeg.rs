@@ -469,7 +469,7 @@ fn build_composite_convert_args(
     let draw_cursor = state
         .sidecar
         .as_ref()
-        .is_some_and(|sidecar| !sidecar.pointer.is_empty())
+        .is_some_and(|sidecar| sidecar.can_render_cursor_overlay())
         && super::cursor_export::write_rgba_track(state, start, end, base_w, base_h, &cursor_path)
             .is_ok();
     let mut filter = format!(

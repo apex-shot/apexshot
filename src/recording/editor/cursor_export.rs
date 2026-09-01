@@ -18,6 +18,9 @@ pub fn write_rgba_track(
     let Some(sidecar) = state.sidecar.as_ref() else {
         anyhow::bail!("no pointer sidecar");
     };
+    if !sidecar.can_render_cursor_overlay() {
+        anyhow::bail!("pointer data was inferred from baked video frames");
+    }
     let width = width.max(2);
     let height = height.max(2);
     let duration = (end - start).max(0.0);
@@ -175,5 +178,32 @@ mod tests {
         assert_eq!(bytes.len(), frames * 80 * 60 * 4);
         assert!(bytes.iter().any(|b| *b != 0));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rejects_inferred_pointer_tracks_with_a_baked_cursor() {
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/imported-video.mp4"),
+            duration_seconds: 0.2,
+            width: 80,
+            height: 60,
+            file_size_bytes: 8,
+            has_audio: false,
+        });
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.mark_inferred_from_video();
+        state.sidecar = Some(sidecar);
+
+        let path = std::env::temp_dir().join("apexshot-inferred-cursor.rgba");
+        let error = write_rgba_track(&state, 0.0, 0.2, 80, 60, &path).unwrap_err();
+        assert!(error.to_string().contains("inferred"));
+        assert!(!path.exists());
     }
 }

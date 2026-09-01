@@ -32,32 +32,6 @@
                 opacity: 0.35;
             }
 
-            button.recording-editor-zoom-detect {
-                min-height: 18px;
-                padding: 0;
-                background: transparent;
-                color: #b05c38;
-                font-size: 11px;
-                font-weight: 500;
-            }
-
-            button.recording-editor-zoom-detect label {
-                color: #b05c38;
-                font-size: 11px;
-                font-weight: 500;
-            }
-
-            button.recording-editor-zoom-detect:hover,
-            button.recording-editor-zoom-detect:hover label {
-                color: #f0a07a;
-                background: transparent;
-            }
-
-            button.recording-editor-zoom-detect:disabled,
-            button.recording-editor-zoom-detect:disabled label {
-                opacity: 0.35;
-            }
-
             .recording-editor-zoom-classic {
                 margin-top: 8px;
                 padding: 0;
@@ -383,11 +357,6 @@
 
             .editor-theme-light button.recording-editor-zoom-reset,
             .editor-theme-light button.recording-editor-zoom-reset label {
-                color: #b05c38;
-            }
-
-            .editor-theme-light button.recording-editor-zoom-detect,
-            .editor-theme-light button.recording-editor-zoom-detect label {
                 color: #b05c38;
             }
 

@@ -9,6 +9,14 @@ pub const CLICK_PULSE_WINDOW_SECONDS: f64 = 0.08;
 pub const CLICK_RIPPLE_WINDOW_SECONDS: f64 = 0.32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PointerDataSource {
+    #[default]
+    Recorded,
+    InferredFromVideo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CursorKind {
     #[default]
@@ -128,6 +136,8 @@ pub struct PointerSidecar {
     pub region: CaptureRegion,
     pub pointer: Vec<PointerSample>,
     pub clicks: Vec<ClickSample>,
+    #[serde(default)]
+    pub source: PointerDataSource,
 }
 
 impl PointerSidecar {
@@ -138,7 +148,16 @@ impl PointerSidecar {
             region,
             pointer: Vec::new(),
             clicks: Vec::new(),
+            source: PointerDataSource::Recorded,
         }
+    }
+
+    pub fn mark_inferred_from_video(&mut self) {
+        self.source = PointerDataSource::InferredFromVideo;
+    }
+
+    pub fn can_render_cursor_overlay(&self) -> bool {
+        self.source == PointerDataSource::Recorded && !self.pointer.is_empty()
     }
 
     pub fn sidecar_path(video_path: &Path) -> PathBuf {
@@ -480,6 +499,39 @@ pub fn delete_recording_outputs(video_path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_json_defaults_to_recorded_pointer_data() {
+        let json = r#"{
+            "version": 1,
+            "t0_monotonic_us": 0,
+            "region": { "x": 0, "y": 0, "w": 1920, "h": 1080 },
+            "pointer": [],
+            "clicks": []
+        }"#;
+        let sidecar: PointerSidecar = serde_json::from_str(json).unwrap();
+        assert_eq!(sidecar.source, PointerDataSource::Recorded);
+    }
+
+    #[test]
+    fn inferred_pointer_data_cannot_render_a_second_cursor() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 20.0,
+            y: 30.0,
+            kind: CursorKind::Default,
+        });
+        assert!(sidecar.can_render_cursor_overlay());
+
+        sidecar.mark_inferred_from_video();
+        assert!(!sidecar.can_render_cursor_overlay());
+        let loaded: PointerSidecar =
+            serde_json::from_str(&serde_json::to_string(&sidecar).unwrap()).unwrap();
+        assert_eq!(loaded.source, PointerDataSource::InferredFromVideo);
+        assert!(!loaded.can_render_cursor_overlay());
+    }
 
     #[test]
     fn sidecar_path_is_app_local_and_legacy_path_stays_local() {

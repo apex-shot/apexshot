@@ -1,6 +1,6 @@
 use crate::recording::editor::model::{
     format_zoom_scale, playhead_for_replay, snap_range_to_target, snap_to_target,
-    usable_media_timestamp_seconds, VideoEditState, DEFAULT_CURSOR_HIDE_DURATION_SECONDS,
+    usable_media_timestamp_seconds, VideoEditState, ZoomMode, DEFAULT_CURSOR_HIDE_DURATION_SECONDS,
     DEFAULT_ZOOM_DURATION_SECONDS,
 };
 use gtk4::gdk;
@@ -12,7 +12,7 @@ use gtk4::{
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 
 mod shell {
     use super::*;
