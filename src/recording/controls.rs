@@ -10,6 +10,53 @@ use crate::{
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
+static HARVESTED_POINTER_TRACK: std::sync::Mutex<Option<crate::gnome_shell::PointerTrackResult>> =
+    std::sync::Mutex::new(None);
+
+fn preserve_first_pointer_track(
+    slot: &mut Option<crate::gnome_shell::PointerTrackResult>,
+    result: crate::gnome_shell::PointerTrackResult,
+) -> bool {
+    if slot.is_some() {
+        return false;
+    }
+    *slot = Some(result);
+    true
+}
+
+/// Stop GNOME pointer tracking as soon as capture ends so hotkeys work while
+/// the file is still being muxed. `finish_save` writes the stashed samples.
+pub(super) fn harvest_pointer_track_on_session_end() {
+    if !crate::gnome_shell::is_shell_overlay_service_available() {
+        return;
+    }
+
+    // Capture end and outer recording cleanup can both emit session_ended.
+    // StopPointerTrack is destructive: the first call returns the recording,
+    // while a second returns an empty t0=0 payload. Never let that duplicate
+    // notification erase samples that are waiting for finish_save.
+    if HARVESTED_POINTER_TRACK
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    if let Ok(result) = crate::gnome_shell::stop_pointer_track() {
+        if let Ok(mut guard) = HARVESTED_POINTER_TRACK.lock() {
+            let _ = preserve_first_pointer_track(&mut guard, result);
+        }
+    }
+}
+
+fn take_harvested_pointer_track() -> Option<crate::gnome_shell::PointerTrackResult> {
+    HARVESTED_POINTER_TRACK
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take())
+}
+
 struct PointerTrackSession {
     started: bool,
     region: CaptureRegion,
@@ -24,6 +71,7 @@ impl PointerTrackSession {
                 region,
             };
         }
+        let _ = take_harvested_pointer_track();
         match crate::gnome_shell::start_pointer_track() {
             Ok(()) => {
                 eprintln!("[recording] pointer track started (OS cursor hidden)");
@@ -49,12 +97,17 @@ impl PointerTrackSession {
     }
 
     fn finish_save(mut self, output_path: &Path) -> bool {
-        if !self.started {
-            PointerSidecar::delete_next_to_video(output_path);
-            return false;
-        }
+        let was_started = self.started;
         self.started = false;
-        match crate::gnome_shell::stop_pointer_track() {
+        let result = match take_harvested_pointer_track() {
+            Some(result) => Ok(result),
+            None if !was_started => {
+                PointerSidecar::delete_next_to_video(output_path);
+                return false;
+            }
+            None => crate::gnome_shell::stop_pointer_track(),
+        };
+        match result {
             Ok(result) => {
                 if result.samples.is_empty() {
                     eprintln!("[recording] StopPointerTrack returned no pointer samples");
@@ -108,8 +161,9 @@ impl PointerTrackSession {
     }
 
     fn finish_discard(mut self, output_path: &Path) {
-        if self.started {
-            self.started = false;
+        let was_started = self.started;
+        self.started = false;
+        if take_harvested_pointer_track().is_none() && was_started {
             if let Err(err) = crate::gnome_shell::stop_pointer_track() {
                 eprintln!("[recording] StopPointerTrack on discard failed: {err}");
             }
@@ -120,11 +174,15 @@ impl PointerTrackSession {
 
 impl Drop for PointerTrackSession {
     fn drop(&mut self) {
-        if self.started {
-            self.started = false;
-            if let Err(err) = crate::gnome_shell::stop_pointer_track() {
-                eprintln!("[recording] StopPointerTrack during cleanup failed: {err}");
-            }
+        if !self.started {
+            return;
+        }
+        self.started = false;
+        if take_harvested_pointer_track().is_some() {
+            return;
+        }
+        if let Err(err) = crate::gnome_shell::stop_pointer_track() {
+            eprintln!("[recording] StopPointerTrack during cleanup failed: {err}");
         }
     }
 }
@@ -796,6 +854,34 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use pretty_assertions::assert_eq;
+
+    fn pointer_result(
+        t0_monotonic_us: i64,
+        sample_x: i32,
+    ) -> crate::gnome_shell::PointerTrackResult {
+        crate::gnome_shell::PointerTrackResult {
+            t0_monotonic_us,
+            samples: vec![(0.0, sample_x, 20, "default".into())],
+            clicks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn duplicate_session_end_keeps_the_first_pointer_track() {
+        let mut slot = None;
+        assert!(preserve_first_pointer_track(
+            &mut slot,
+            pointer_result(123, 10)
+        ));
+        assert!(!preserve_first_pointer_track(
+            &mut slot,
+            pointer_result(0, 99)
+        ));
+
+        let saved = slot.expect("first pointer track should remain stashed");
+        assert_eq!(saved.t0_monotonic_us, 123);
+        assert_eq!(saved.samples[0].1, 10);
+    }
 
     #[test]
     fn prepare_overlay_recording_request_maps_video_settings() {

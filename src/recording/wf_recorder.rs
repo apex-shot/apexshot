@@ -223,6 +223,14 @@ pub(super) async fn record_with_wf_recorder(
         }
     }
 
+    if matches!(
+        stop_action,
+        super::RecordingTerminalAction::Save | super::RecordingTerminalAction::Discard
+    ) {
+        super::control_session::release_recording_busy();
+        super::notify_daemon_event("recording_session_ended");
+    }
+
     if let Some(pid) = child.id() {
         let _ = std::process::Command::new("kill")
             .args(["-INT", &pid.to_string()])
@@ -384,6 +392,14 @@ pub(super) async fn record_gif_with_wf_recorder(
                 }
             }
         }
+    }
+
+    if matches!(
+        stop_action,
+        super::RecordingTerminalAction::Save | super::RecordingTerminalAction::Discard
+    ) {
+        super::control_session::release_recording_busy();
+        super::notify_daemon_event("recording_session_ended");
     }
 
     if let Some(pid) = child.id() {

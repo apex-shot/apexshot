@@ -476,7 +476,7 @@ fn build_composite_convert_args(
         src_h = eff_h.max(2),
     );
     if draw_cursor {
-        filter.push_str("[base];[base][1:v]overlay=0:0:eof_action=pass:format=auto");
+        filter.push_str("[base];[base][1:v]overlay=0:0:eof_action=pass:shortest=0:format=auto");
     }
     if out_w != base_w || out_h != base_h {
         filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
@@ -523,9 +523,6 @@ fn build_composite_convert_args(
         quality_to_crf(state.quality).to_string(),
     ]);
     args.extend(convert_audio_args(state, speed));
-    if draw_cursor {
-        args.push("-shortest".into());
-    }
     args.push(output_path.to_string_lossy().into_owned());
     args
 }
@@ -843,6 +840,10 @@ mod tests {
             .any(|arg| arg.contains("sendcmd") && arg.contains("crop@z")));
         assert!(!args.iter().any(|arg| arg.contains("overlay@c")));
         assert!(!args.iter().any(|arg| arg.contains("tmix")));
+        assert!(
+            !args.iter().any(|arg| arg == "-shortest"),
+            "cursor/zoom export must not cut the video to a shorter overlay track"
+        );
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
     }
 

@@ -336,6 +336,7 @@ pub(super) fn spawn_daemon_tray(
     spawn_tray(tray_tx).context("Failed to spawn tray icon")
 }
 
+#[allow(dead_code)]
 pub(super) fn respawn_daemon_tray(
     action_tx: &std::sync::mpsc::Sender<DaemonAction>,
     tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,

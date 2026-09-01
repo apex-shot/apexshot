@@ -113,17 +113,27 @@ pub(super) async fn handle_open_recording_ui(_tx: std::sync::mpsc::Sender<Daemon
 
     match tokio::task::spawn_blocking(open_recording_ui_via_cpp).await {
         Ok(Ok(AreaCapturePathResult::RecordingRequested(request))) => {
-            if let Err(err) = run_overlay_recording_request_with_gtk(request, None) {
-                eprintln!("[daemon] Recording UI failed: {err}");
-                // Show notification for GNOME extension not installed
-                if err
-                    .to_string()
-                    .contains("GNOME Shell extension is not installed")
-                {
-                    super::capture_handlers::send_desktop_notification(
-                        "Recording failed",
-                        "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
-                    );
+            let overlay_result = tokio::task::spawn_blocking(move || {
+                run_overlay_recording_request_with_gtk(request, None)
+            })
+            .await;
+            match overlay_result {
+                Ok(Ok(_)) => {}
+                Ok(Err(err)) => {
+                    eprintln!("[daemon] Recording UI failed: {err}");
+                    // Show notification for GNOME extension not installed
+                    if err
+                        .to_string()
+                        .contains("GNOME Shell extension is not installed")
+                    {
+                        super::capture_handlers::send_desktop_notification(
+                            "Recording failed",
+                            "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
+                        );
+                    }
+                }
+                Err(err) => {
+                    eprintln!("[daemon] Recording overlay task panicked: {err}");
                 }
             }
         }

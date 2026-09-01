@@ -199,6 +199,14 @@ impl VideoEditState {
                 continue;
             }
             let scale = suggestion.scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+            let (crop_x, crop_y, crop_w, crop_h) = crop;
+            if suggestion.center.0 < crop_x
+                || suggestion.center.0 >= crop_x + crop_w
+                || suggestion.center.1 < crop_y
+                || suggestion.center.1 >= crop_y + crop_h
+            {
+                continue;
+            }
             let center = clamp_zoom_center(crop, scale, suggestion.center);
             self.zoom_clips.push(ZoomClip {
                 start: timeline_start,

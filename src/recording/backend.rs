@@ -195,15 +195,24 @@ fn compute_wayland_crop(
     let right = stream_w - left - sel_w as i32;
     let bottom = stream_h - top - sel_h as i32;
 
-    if left < 0 || top < 0 || right < 0 || bottom < 0 {
+    // Overlay geometry and portal stream metadata can differ by a physical
+    // pixel at fractional display scales. Treat that as edge rounding and
+    // clip to the stream instead of abandoning the crop (which also makes
+    // pointer/auto-zoom coordinates refer to the wrong frame).
+    const EDGE_ROUNDING_TOLERANCE_PX: i32 = 2;
+    if left < -EDGE_ROUNDING_TOLERANCE_PX
+        || top < -EDGE_ROUNDING_TOLERANCE_PX
+        || right < -EDGE_ROUNDING_TOLERANCE_PX
+        || bottom < -EDGE_ROUNDING_TOLERANCE_PX
+    {
         return Err("selection falls outside the selected monitor stream".into());
     }
 
     Ok(CropMargins {
-        left: left as u32,
-        right: right as u32,
-        top: top as u32,
-        bottom: bottom as u32,
+        left: left.max(0) as u32,
+        right: right.max(0) as u32,
+        top: top.max(0) as u32,
+        bottom: bottom.max(0) as u32,
     })
 }
 
@@ -568,8 +577,9 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     // audio run while the portal/PipeWire stream is still negotiating, which
     // makes the saved audio track longer than the actual video timeline.
     let _ = super::gst_audio::ensure_gst_initialized();
-    let _audio_exclusive =
-        RecordingAudioExclusiveGuard::acquire(config.mic_enabled || config.speaker_enabled);
+    let mut audio_exclusive = Some(RecordingAudioExclusiveGuard::acquire(
+        config.mic_enabled || config.speaker_enabled,
+    ));
     if config.mic_enabled || config.speaker_enabled {
         super::audio::ensure_pipewire_pulse_running();
     }
@@ -658,8 +668,15 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         .arg("rgba")
         .arg("-s")
         .arg(format!("{}x{}", input_width, input_height))
-        .arg("-r")
+        .arg("-framerate")
         .arg(fps.to_string())
+        // Rawvideo normally numbers submitted frames consecutively. At large
+        // resolutions encoder backpressure may allow only a few submissions
+        // per second, producing a sub-second video inside a much longer audio
+        // file. Timestamp frames when FFmpeg receives them so sparse writes
+        // retain the real recording duration.
+        .arg("-use_wallclock_as_timestamps")
+        .arg("1")
         .arg("-i")
         .arg("pipe:0");
 
@@ -781,6 +798,15 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         }
     }
 
+    // Convert wall-clock-spaced input timestamps to the configured constant
+    // frame rate inside FFmpeg. This duplicates the latest decoded frame
+    // without pushing hundreds of MiB/s of repeated RGBA data through stdin.
+    ffmpeg_cmd
+        .arg("-fps_mode")
+        .arg("cfr")
+        .arg("-r")
+        .arg(fps.to_string());
+
     ffmpeg_cmd.arg(&final_path);
     ffmpeg_cmd.stdin(Stdio::piped());
     ffmpeg_cmd.stdout(Stdio::null());
@@ -832,6 +858,7 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
     let mut frames_written = 0u64;
     let frame_interval = std::time::Duration::from_secs_f64(1.0 / fps as f64);
     let mut next_frame_at: Option<std::time::Instant> = None;
+    let mut first_written_at: Option<std::time::Instant> = None;
     let mut last_pixels: Option<Vec<u8>> = None;
     let mut paused = false;
     let first_frame_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
@@ -905,6 +932,8 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         // Keep the latest PipeWire frame, but write to ffmpeg on our own clock.
         // Some compositors only deliver changed frames; without duplicates a
         // 16s mostly-static recording can encode as a 4s video at 30fps.
+        // Take at most one buffer per tick — spinning the queue can recycle a
+        // PipeWire buffer into a black frame.
         match capture.try_recv_frame() {
             Ok(Some(frame)) => {
                 let expected = input_width as usize * input_height as usize * 4;
@@ -977,12 +1006,25 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         ) {
             Ok(keep_recording) => {
                 frames_written += 1;
+                if first_written_at.is_none() {
+                    first_written_at = Some(std::time::Instant::now());
+                }
                 next_frame_at = Some(deadline + frame_interval);
                 if frames_written == 1 {
+                    let max_rgb = pixels
+                        .chunks_exact(4)
+                        .map(|px| px[0].max(px[1]).max(px[2]))
+                        .max()
+                        .unwrap_or(0);
                     eprintln!(
-                        "[recording] First frame written to ffmpeg ({} bytes)",
+                        "[recording] First frame written to ffmpeg ({} bytes, max_rgb={max_rgb})",
                         pixels.len()
                     );
+                    if max_rgb == 0 {
+                        eprintln!(
+                            "[recording] First frame is fully black — capture buffer is empty"
+                        );
+                    }
                 }
                 if frames_written.is_multiple_of(30) {
                     eprintln!("[recording] {} frames written", frames_written);
@@ -1002,46 +1044,29 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
         }
     }
 
-    if stop_action == super::RecordingTerminalAction::Save {
-        if let Some(pixels) = last_pixels.as_ref() {
-            let catch_up = frames_due_for_catch_up(
-                next_frame_at,
-                std::time::Instant::now(),
-                frame_interval,
-                u64::from(fps).saturating_mul(3).max(1),
-            );
-            for _ in 0..catch_up {
-                match write_ffmpeg_frame_interruptible(
-                    &mut stdin,
-                    pixels,
-                    &mut command_rx,
-                    &mut stop_action,
-                    &mut paused,
-                    &mut active_audio,
-                ) {
-                    Ok(_) => {
-                        frames_written += 1;
-                        if let Some(deadline) = next_frame_at.as_mut() {
-                            *deadline += frame_interval;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-            if catch_up > 0 {
-                eprintln!("[recording] Wrote {catch_up} catch-up frames ({frames_written} total)");
-            }
-        }
-    }
+    let stopped_at = std::time::Instant::now();
 
     // Release the exclusive GNOME ScreenCast session before audio drain or
     // ffmpeg finalization. Those can block for seconds; the compositor must
-    // not stay captured while they finish.
+    // not stay captured while they finish. Drop it *before* unlocking the
+    // busy flag so a new recording cannot open a second portal on top of this
+    // one.
     drop(capture_session.take());
     drop(capture);
 
-    // Deterministic encoder stop: EOS audio, close the audio pipe, then close
-    // video stdin so ffmpeg finalizes once both inputs are at EOF.
+    if matches!(
+        stop_action,
+        super::RecordingTerminalAction::Save | super::RecordingTerminalAction::Discard
+    ) {
+        // Tray / hotkeys / screenshots become available immediately. ffmpeg
+        // keeps writing the file in this worker.
+        super::control_session::release_recording_busy();
+        super::notify_daemon_event("recording_session_ended");
+    }
+
+    // Stop audio at the same wall-clock instant as video capture. Do not keep
+    // the mic open while ffmpeg drains — that would grow the audio track past
+    // the session.
     if let Some(mut audio) = active_audio.take() {
         if stop_action == super::RecordingTerminalAction::Discard {
             audio.abort();
@@ -1049,14 +1074,21 @@ pub(super) fn record_wayland_with_ffmpeg_sync(
             audio.stop();
         }
     }
-    drop(stdin);
+    drop(audio_exclusive.take());
 
-    if matches!(
-        stop_action,
-        super::RecordingTerminalAction::Save | super::RecordingTerminalAction::Discard
+    if let (Some(start), true) = (
+        first_written_at,
+        stop_action == super::RecordingTerminalAction::Save,
     ) {
-        super::notify_daemon_event("recording_session_ended");
+        let wall = stopped_at.saturating_duration_since(start).as_secs_f64();
+        eprintln!(
+            "[recording] duration wall={wall:.3}s submitted_frames={frames_written} output_fps={fps}"
+        );
     }
+
+    // Deterministic encoder stop: close video stdin so ffmpeg finalizes once
+    // both inputs are at EOF (audio already EOFed above).
+    drop(stdin);
 
     let status = wait_for_ffmpeg_child(&mut child)?;
     let ffmpeg_stderr = stderr_reader.join().unwrap_or_default();
@@ -1131,6 +1163,7 @@ fn ffmpeg_error_detail(stderr: &str) -> String {
     format!(" FFmpeg reported: {detail}")
 }
 
+#[cfg(test)]
 fn frames_due_for_catch_up(
     next_frame_at: Option<std::time::Instant>,
     now: std::time::Instant,
@@ -2519,6 +2552,16 @@ mod tests {
     }
 
     #[test]
+    fn compute_wayland_crop_tolerates_one_pixel_overlay_rounding() {
+        let crop = compute_wayland_crop((0, 0), (1920, 1200), (150, 141, 1610, 1060))
+            .expect("one-pixel edge mismatch should be clipped");
+        assert_eq!(crop.left, 150);
+        assert_eq!(crop.right, 160);
+        assert_eq!(crop.top, 141);
+        assert_eq!(crop.bottom, 0);
+    }
+
+    #[test]
     fn discard_recording_restore_tokens_removes_cached_files() {
         let dir = std::env::temp_dir().join(format!(
             "apexshot-restore-token-test-{}",
@@ -2559,5 +2602,15 @@ mod tests {
         let behind = now - std::time::Duration::from_millis(250);
         assert_eq!(frames_due_for_catch_up(Some(behind), now, interval, 90), 3);
         assert_eq!(frames_due_for_catch_up(Some(behind), now, interval, 2), 2);
+    }
+
+    #[test]
+    fn catch_up_covers_encoder_lag_of_several_seconds() {
+        let now = std::time::Instant::now();
+        let interval = std::time::Duration::from_millis(33);
+        let behind = now - std::time::Duration::from_secs(10);
+        let due = frames_due_for_catch_up(Some(behind), now, interval, 30 * 120);
+        assert!(due >= 300, "expected ~10s of 30fps duplicates, got {due}");
+        assert!(due <= 310);
     }
 }

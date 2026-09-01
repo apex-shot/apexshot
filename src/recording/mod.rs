@@ -115,6 +115,9 @@ fn notify_daemon_event(event: &str) {
             // does not linger while encode / after-capture work continues.
             crate::gnome_shell::hide_recording_mask_best_effort();
             indicator_notify::hide_recording_indicator();
+            // Stop the GNOME pointer hook now so global hotkeys work while
+            // ffmpeg still muxes. Sidecar samples are stashed for finish_save.
+            controls::harvest_pointer_track_on_session_end();
         }
         _ => {}
     }

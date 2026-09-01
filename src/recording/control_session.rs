@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex, OnceLock,
 };
 
@@ -42,25 +42,36 @@ pub fn has_active_recording_control() -> bool {
         .is_some()
 }
 
-static RECORDING_BUSY: AtomicBool = AtomicBool::new(false);
-
-fn try_begin_recording_busy() -> bool {
-    RECORDING_BUSY
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_ok()
-}
+/// 0 means free. Non-zero is the id of the guard that currently owns capture.
+static RECORDING_BUSY_OWNER: AtomicU64 = AtomicU64::new(0);
+static RECORDING_BUSY_NEXT: AtomicU64 = AtomicU64::new(1);
 
 fn end_recording_busy() {
-    RECORDING_BUSY.store(false, Ordering::Release);
+    RECORDING_BUSY_OWNER.store(0, Ordering::Release);
+}
+
+/// Drop capture exclusivity as soon as the portal/stream is gone so a
+/// screenshot or new recording can start while ffmpeg still finalizes.
+pub(super) fn release_recording_busy() {
+    end_recording_busy();
 }
 
 /// Process-wide lock so a second Record click cannot stack portal sessions.
-pub struct RecordingBusyGuard;
+///
+/// Drop is generation-safe: releasing early (so encode can finish in the
+/// background) and then dropping this guard must not clear a newer session.
+pub struct RecordingBusyGuard {
+    id: u64,
+}
 
 impl RecordingBusyGuard {
     pub fn acquire() -> anyhow::Result<Self> {
-        if try_begin_recording_busy() {
-            return Ok(Self);
+        let id = RECORDING_BUSY_NEXT.fetch_add(1, Ordering::Relaxed);
+        if RECORDING_BUSY_OWNER
+            .compare_exchange(0, id, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            return Ok(Self { id });
         }
         anyhow::bail!("A recording is already in progress")
     }
@@ -68,7 +79,8 @@ impl RecordingBusyGuard {
 
 impl Drop for RecordingBusyGuard {
     fn drop(&mut self) {
-        end_recording_busy();
+        let _ =
+            RECORDING_BUSY_OWNER.compare_exchange(self.id, 0, Ordering::AcqRel, Ordering::Acquire);
     }
 }
 
@@ -266,18 +278,35 @@ impl Drop for RecordingControlServer {
 #[cfg(test)]
 mod tests {
     use super::{
-        end_recording_busy, has_active_recording_control, send_active_recording_command,
-        try_begin_recording_busy, RecordingControlCommand, RecordingControlServer,
+        end_recording_busy, has_active_recording_control, release_recording_busy,
+        send_active_recording_command, RecordingBusyGuard, RecordingControlCommand,
+        RecordingControlServer,
     };
     use tokio::sync::mpsc;
 
     #[test]
     fn recording_busy_flag_is_exclusive() {
         end_recording_busy();
-        assert!(try_begin_recording_busy());
-        assert!(!try_begin_recording_busy());
+        let first = RecordingBusyGuard::acquire().expect("first acquire");
+        assert!(RecordingBusyGuard::acquire().is_err());
+        drop(first);
+        let second = RecordingBusyGuard::acquire().expect("acquire after drop");
+        drop(second);
+    }
+
+    #[test]
+    fn early_release_allows_a_new_recording_without_old_guard_clobbering_it() {
         end_recording_busy();
-        assert!(try_begin_recording_busy());
+        let first = RecordingBusyGuard::acquire().expect("first acquire");
+        release_recording_busy();
+        let second = RecordingBusyGuard::acquire().expect("acquire after early release");
+        drop(first);
+        assert!(
+            RecordingBusyGuard::acquire().is_err(),
+            "dropping the old guard must not clear a newer session"
+        );
+        drop(second);
+        assert!(RecordingBusyGuard::acquire().is_ok());
         end_recording_busy();
     }
 

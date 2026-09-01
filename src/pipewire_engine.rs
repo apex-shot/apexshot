@@ -162,6 +162,21 @@ fn format_swaps_rb(format: spa::param::video::VideoFormat) -> bool {
 // Internal shared state
 // ---------------------------------------------------------------------------
 
+const CONTINUOUS_FRAME_QUEUE_CAPACITY: usize = 1;
+
+fn push_latest_continuous_frame(
+    frames: &mut std::collections::VecDeque<Vec<u8>>,
+    pixel_data: Vec<u8>,
+) -> usize {
+    let mut dropped = 0;
+    while frames.len() >= CONTINUOUS_FRAME_QUEUE_CAPACITY {
+        frames.pop_front();
+        dropped += 1;
+    }
+    frames.push_back(pixel_data);
+    dropped
+}
+
 struct StreamInner {
     format: Option<NegotiatedFormat>,
     raw_format: Option<spa::param::video::VideoInfoRaw>,
@@ -397,7 +412,21 @@ impl PipeWireCapture {
                 let Some(pixel_data) = copy_cpu_frame(&mut datas[..], chunk_size) else {
                     return;
                 };
-                guard.frames.push_back(pixel_data);
+
+                // A recording encoder can be slower than the compositor at
+                // large resolutions. Never retain every full RGBA frame while
+                // it catches up: a 1920x1200 frame is about 9 MiB, so an
+                // unbounded queue can OOM-kill the daemon (and its tray icon)
+                // within seconds. Recording needs the freshest frame, whereas
+                // finite still capture must preserve every requested frame.
+                if guard.max_frames.is_none() {
+                    let dropped = push_latest_continuous_frame(&mut guard.frames, pixel_data);
+                    for _ in 0..dropped {
+                        guard.cursor_queue.pop_front();
+                    }
+                } else {
+                    guard.frames.push_back(pixel_data);
+                }
             })
             .register()
             .map_err(|e| PipeWireError::Connect(format!("Failed to register listener: {e}")))?;
@@ -1008,5 +1037,15 @@ mod tests {
         assert_eq!(rgba_copy_plan(0, 1920, 1080, 4), None);
         let padded = 1920 * 4 + 64;
         assert_eq!(rgba_copy_plan(padded * 1080, 1920, 1080, 4), Some(padded));
+    }
+
+    #[test]
+    fn continuous_capture_queue_keeps_only_the_freshest_full_frame() {
+        let mut frames = std::collections::VecDeque::new();
+        assert_eq!(push_latest_continuous_frame(&mut frames, vec![1]), 0);
+        assert_eq!(push_latest_continuous_frame(&mut frames, vec![2]), 1);
+        assert_eq!(push_latest_continuous_frame(&mut frames, vec![3]), 1);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames.front(), Some(&vec![3]));
     }
 }

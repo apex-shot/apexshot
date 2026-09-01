@@ -1,9 +1,6 @@
 use super::capture_handlers;
 use super::recording_handlers;
-use super::{
-    respawn_daemon_tray, spawn_daemon_tray, ApexShotTray, DaemonAction, DaemonState,
-    HOTKEY_SUPPRESSED,
-};
+use super::{spawn_daemon_tray, ApexShotTray, DaemonAction, DaemonState, HOTKEY_SUPPRESSED};
 use std::sync::{Arc, Mutex};
 
 /// Dispatch one daemon action. Returns `false` when the daemon should quit.
@@ -102,7 +99,7 @@ pub(super) fn dispatch_daemon_action(
             );
             if !stopped {
                 eprintln!("[daemon] No active recording available for stop/save.");
-                idle_recording_tray(action_tx, tray_handle, recording_tray_state);
+                idle_recording_tray(tray_handle, recording_tray_state);
             }
             std::thread::spawn(crate::gnome_shell::hide_recording_mask_best_effort);
         }
@@ -166,7 +163,6 @@ pub(super) fn dispatch_daemon_action(
         }
         DaemonAction::RecordingSessionStarted => {
             *recording_tray_state = Some(recording_handlers::RecordingTrayState::started());
-            respawn_daemon_tray(action_tx, tray_handle);
             recording_handlers::update_recording_tray(tray_handle, recording_tray_state.as_ref());
         }
         DaemonAction::RecordingSessionPaused => {
@@ -194,7 +190,7 @@ pub(super) fn dispatch_daemon_action(
             }
         }
         DaemonAction::RecordingSessionEnded => {
-            idle_recording_tray(action_tx, tray_handle, recording_tray_state);
+            idle_recording_tray(tray_handle, recording_tray_state);
         }
         DaemonAction::SetHotkeySuppressed(suppressed) => {
             HOTKEY_SUPPRESSED.store(suppressed, std::sync::atomic::Ordering::Relaxed);
@@ -213,11 +209,12 @@ pub(super) fn dispatch_daemon_action(
 }
 
 fn idle_recording_tray(
-    action_tx: &std::sync::mpsc::Sender<DaemonAction>,
     tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,
     recording_tray_state: &mut Option<recording_handlers::RecordingTrayState>,
 ) {
+    // Never shutdown/respawn the StatusNotifier item here. Stop used to fire
+    // session_ended twice (capture end, then mux end); tearing the tray down
+    // in the middle of a re-register left the icon gone.
     *recording_tray_state = None;
-    respawn_daemon_tray(action_tx, tray_handle);
     recording_handlers::update_tray_recording_state(tray_handle, None);
 }
