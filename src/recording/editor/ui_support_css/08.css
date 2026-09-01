@@ -343,8 +343,7 @@
             }
 
             .editor-theme-light .recording-editor-zoom-mode {
-                background: transparent;
-                border: none;
+                background: alpha(#111827, 0.06);
             }
 
             .editor-theme-light button.recording-editor-zoom-mode-btn {
@@ -353,13 +352,13 @@
 
             .editor-theme-light button.recording-editor-zoom-mode-btn:checked,
             .editor-theme-light button.recording-editor-zoom-mode-btn:checked:hover {
-                background: transparent;
-                color: #b05c38;
+                background: alpha(#111827, 0.08);
+                color: alpha(#1d2129, 0.92);
             }
 
             .editor-theme-light button.recording-editor-zoom-mode-btn:checked label,
             .editor-theme-light button.recording-editor-zoom-mode-btn:checked:hover label {
-                color: #b05c38;
+                color: inherit;
             }
 
             .editor-theme-light .recording-editor-zoom-hint {

@@ -149,6 +149,13 @@ pub enum CursorThemeFile {
     White,
     #[serde(alias = "inverted", alias = "dark")]
     Black,
+    Macos,
+    Tahoe,
+    #[serde(alias = "tahoe-inverted")]
+    TahoeInverted,
+    Dot,
+    #[serde(alias = "minimal")]
+    Figma,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -425,6 +432,11 @@ fn cursor_theme_to_file(theme: CursorTheme) -> CursorThemeFile {
         CursorTheme::Yaru => CursorThemeFile::Yaru,
         CursorTheme::White => CursorThemeFile::White,
         CursorTheme::Black => CursorThemeFile::Black,
+        CursorTheme::Macos => CursorThemeFile::Macos,
+        CursorTheme::Tahoe => CursorThemeFile::Tahoe,
+        CursorTheme::TahoeInverted => CursorThemeFile::TahoeInverted,
+        CursorTheme::Dot => CursorThemeFile::Dot,
+        CursorTheme::Figma => CursorThemeFile::Figma,
     }
 }
 
@@ -434,6 +446,11 @@ fn cursor_theme_from_file(theme: CursorThemeFile) -> CursorTheme {
         CursorThemeFile::Yaru => CursorTheme::Yaru,
         CursorThemeFile::White => CursorTheme::White,
         CursorThemeFile::Black => CursorTheme::Black,
+        CursorThemeFile::Macos => CursorTheme::Macos,
+        CursorThemeFile::Tahoe => CursorTheme::Tahoe,
+        CursorThemeFile::TahoeInverted => CursorTheme::TahoeInverted,
+        CursorThemeFile::Dot => CursorTheme::Dot,
+        CursorThemeFile::Figma => CursorTheme::Figma,
     }
 }
 

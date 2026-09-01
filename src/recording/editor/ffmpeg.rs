@@ -377,7 +377,11 @@ fn build_single_trim_args(
         "copy".into(),
     ];
     // Apply audio mode (mute/mono work even with video stream copy)
-    match state.audio_mode {
+    match if state.muted_for_source(start) {
+        AudioMode::Muted
+    } else {
+        state.audio_mode
+    } {
         AudioMode::Muted => args.push("-an".into()),
         AudioMode::Mono => {
             args.extend([
@@ -430,7 +434,7 @@ fn build_single_convert_args(
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
     ]);
-    args.extend(convert_audio_args(state, speed));
+    args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
     args
 }
@@ -481,13 +485,13 @@ fn build_composite_convert_args(
     if out_w != base_w || out_h != base_h {
         filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
     }
-    if let Some(pad) = lead_in_tpad(state) {
-        filter.push(',');
-        filter.push_str(&pad);
-    }
     let speed = state.speed_for_source(start);
     if (speed - 1.0).abs() > 1e-6 {
         filter.push_str(&format!(",setpts=PTS/{speed}"));
+    }
+    if let Some(pad) = lead_in_tpad(state) {
+        filter.push(',');
+        filter.push_str(&pad);
     }
 
     let mut args = vec![
@@ -522,7 +526,7 @@ fn build_composite_convert_args(
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
     ]);
-    args.extend(convert_audio_args(state, speed));
+    args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
     args
 }
@@ -595,22 +599,27 @@ fn convert_video_filter(state: &VideoEditState, speed: f64) -> Option<String> {
     }
 }
 
-fn convert_audio_args(state: &VideoEditState, speed: f64) -> Vec<String> {
+fn convert_audio_args(state: &VideoEditState, speed: f64, source_start: f64) -> Vec<String> {
     let offset = state.timeline_offset_seconds;
     let tempo = atempo_filter(speed);
-    if state.audio_mode == AudioMode::Muted || !state.metadata.has_audio {
-        return audio_args(state.audio_mode, state.metadata.has_audio);
+    let mode = if state.muted_for_source(source_start) {
+        AudioMode::Muted
+    } else {
+        state.audio_mode
+    };
+    if mode == AudioMode::Muted || !state.metadata.has_audio {
+        return audio_args(mode, state.metadata.has_audio);
     }
     if offset > 0.001 || tempo.is_some() {
         let mut filters = Vec::new();
+        if let Some(tempo) = tempo {
+            filters.push(tempo);
+        }
         if offset > 0.001 {
             let ms = (offset * 1000.0).round().max(1.0) as u64;
             filters.push(format!("adelay={ms}:all=1"));
         }
-        if let Some(tempo) = tempo {
-            filters.push(tempo);
-        }
-        let mut args = match state.audio_mode {
+        let mut args = match mode {
             AudioMode::Mono => vec![
                 "-ac".into(),
                 "1".into(),
@@ -624,7 +633,7 @@ fn convert_audio_args(state: &VideoEditState, speed: f64) -> Vec<String> {
         args.extend(["-af".into(), filters.join(",")]);
         args
     } else {
-        audio_args(state.audio_mode, state.metadata.has_audio)
+        audio_args(mode, state.metadata.has_audio)
     }
 }
 
@@ -677,7 +686,7 @@ fn run_multi_segment_trim(
         if state.muted_for_source(start) {
             segment_state.audio_mode = AudioMode::Muted;
         }
-        cursor = comp + (end - start).max(0.0);
+        cursor = comp + (end - start).max(0.0) / state.speed_for_source(start);
         let args = if convert {
             build_single_convert_args(&segment_state, start, end, &seg_path)
         } else {
@@ -790,6 +799,27 @@ mod tests {
     }
 
     #[test]
+    fn clip_mute_removes_audio_from_single_segment_commands() {
+        let mut s = state();
+        s.set_selected_clip_muted(true);
+        let trim = build_single_trim_args(
+            &s,
+            s.trim_start_seconds,
+            s.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        let convert = build_single_convert_args(
+            &s,
+            s.trim_start_seconds,
+            s.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+
+        assert!(trim.iter().any(|arg| arg == "-an"));
+        assert!(convert.iter().any(|arg| arg == "-an"));
+    }
+
+    #[test]
     fn convert_command_uses_h264_crf_and_audio_args() {
         let mut state = state();
         state.quality = 70;
@@ -845,6 +875,52 @@ mod tests {
             "cursor/zoom export must not cut the video to a shorter overlay track"
         );
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
+    }
+
+    #[test]
+    fn composite_speed_is_applied_before_timeline_padding() {
+        let mut state = state();
+        state.timeline_offset_seconds = 2.0;
+        state.segment_starts[0] = 2.0;
+        state.set_selected_clip_speed(2.0);
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 2.0,
+                end: 3.8,
+                scale: 1.8,
+                center: (960.0, 540.0),
+                ease_ms: 200,
+                easing: crate::recording::editor::model::ZoomEasing::Glide,
+                mode: crate::recording::editor::model::ZoomMode::Manual,
+            });
+        let args = build_single_convert_args(
+            &state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        let graph = args
+            .windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].as_str())
+            .unwrap();
+
+        assert!(graph.contains("setpts=PTS/2,tpad=start_duration=2.000"));
+    }
+
+    #[test]
+    fn audio_speed_is_applied_before_timeline_delay() {
+        let mut state = state();
+        state.timeline_offset_seconds = 2.0;
+        let args = convert_audio_args(&state, 2.0, state.trim_start_seconds);
+        let filter = args
+            .windows(2)
+            .find(|pair| pair[0] == "-af")
+            .map(|pair| pair[1].as_str())
+            .unwrap();
+
+        assert_eq!(filter, "atempo=2,adelay=2000:all=1");
     }
 
     #[test]

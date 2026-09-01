@@ -50,6 +50,9 @@ impl VideoEditState {
         {
             return true;
         }
+        if self.segment_muted.iter().any(|muted| *muted) {
+            return true;
+        }
         // Quality only takes effect when re-encoding.
         self.quality != 70
     }

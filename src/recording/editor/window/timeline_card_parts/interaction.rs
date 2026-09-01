@@ -100,7 +100,7 @@ pub fn tick_playback(
     let drive_seek = (speed - 1.0).abs() > 1e-6;
 
     if drive_seek {
-        next += 0.05 * speed;
+        next += 0.05;
         if let Some(media_file) = media.borrow().as_ref() {
             if media_file.is_playing() {
                 media_file.pause();
@@ -356,10 +356,7 @@ pub fn bind_video_clip(
                     let mut guard = state.lock().unwrap();
                     let delta = (x - start_x) / pixels_per_second.max(1e-6);
                     let duration = guard
-                        .segment_boundaries()
-                        .get(index)
-                        .map(|(start, end)| (end - start).max(0.0))
-                        .unwrap_or(0.0);
+                        .segment_timeline_duration(index);
                     let start =
                         snap_range_start_to_playhead(&guard, width, origin_start + delta, duration);
                     guard.set_segment_start(index, start);

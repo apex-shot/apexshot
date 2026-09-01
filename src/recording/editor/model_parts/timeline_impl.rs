@@ -53,9 +53,10 @@ impl VideoEditState {
 
     /// Duration of only the kept segments.
     pub fn kept_duration(&self) -> f64 {
-        self.ordered_kept_segments()
+        self.segment_order
             .iter()
-            .map(|(start, end)| (end - start).max(0.0))
+            .filter(|&&index| self.segments_kept.get(index).copied().unwrap_or(true))
+            .map(|&index| self.segment_timeline_duration(index))
             .sum()
     }
 
@@ -111,7 +112,8 @@ impl VideoEditState {
             .get(insert_pos)
             .map(|(start, _)| *start)
             .unwrap_or(0.0);
-        let right_start = (left_start + (seconds - left_src)).max(0.0);
+        let right_start =
+            (left_start + (seconds - left_src) / self.segment_speed(insert_pos)).max(0.0);
         if insert_pos + 1 > self.segment_starts.len() {
             self.segment_starts.resize(insert_pos + 1, left_start);
         }
@@ -259,7 +261,14 @@ impl VideoEditState {
         placed.windows(2).any(|pair| {
             let (left_comp, left_src, left_end) = pair[0];
             let (right_comp, _, _) = pair[1];
-            right_comp > left_comp + (left_end - left_src).max(0.0) + 0.001
+            let index = self
+                .segment_boundaries()
+                .iter()
+                .position(|&(start, end)| start == left_src && end == left_end);
+            let duration = index
+                .map(|index| self.segment_timeline_duration(index))
+                .unwrap_or_else(|| (left_end - left_src).max(0.0));
+            right_comp > left_comp + duration + 0.001
         })
     }
 

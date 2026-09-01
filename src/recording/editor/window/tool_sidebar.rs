@@ -126,20 +126,21 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
 
-    let mode_row = GtkBox::new(Orientation::Horizontal, 12);
+    let mode_row = GtkBox::new(Orientation::Horizontal, 0);
     mode_row.add_css_class("recording-editor-zoom-mode");
     mode_row.set_hexpand(true);
+    mode_row.set_homogeneous(true);
     let auto_available = state.lock().unwrap().supports_auto_zoom();
     let auto_btn = ToggleButton::with_label("Auto");
     auto_btn.add_css_class("recording-editor-zoom-mode-btn");
     auto_btn.set_has_frame(false);
-    auto_btn.set_hexpand(false);
+    auto_btn.set_hexpand(true);
     auto_btn.set_sensitive(auto_available);
     auto_btn.set_active(auto_available);
     let manual_btn = ToggleButton::with_label("Manual");
     manual_btn.add_css_class("recording-editor-zoom-mode-btn");
     manual_btn.set_has_frame(false);
-    manual_btn.set_hexpand(false);
+    manual_btn.set_hexpand(true);
     manual_btn.set_group(Some(&auto_btn));
     if !auto_available {
         manual_btn.set_active(true);
@@ -336,8 +337,12 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let syncing = syncing.clone();
         move |_, active| {
             if !syncing.get() {
-                state.lock().unwrap().zoom_classic = active;
-                on_change();
+                let mut guard = state.lock().unwrap();
+                if !guard.zoom_locked {
+                    guard.zoom_classic = active;
+                    drop(guard);
+                    on_change();
+                }
             }
             gtk4::glib::Propagation::Proceed
         }
@@ -385,6 +390,8 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let ease_scale = ease_row.scale.clone();
         let easing_row = easing_row.clone();
         let easing_label = easing_label.clone();
+        let reset = reset.clone();
+        let footer_delete = footer_delete.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
@@ -392,12 +399,17 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
             let auto_available = guard.supports_auto_zoom();
             let selected = guard.selected_zoom_clip().cloned();
             let has_clip = selected.is_some();
+            let can_edit = has_clip && !guard.zoom_locked;
             syncing.set(true);
-            auto_btn.set_sensitive(auto_available);
+            auto_btn.set_sensitive(auto_available && can_edit);
+            manual_btn.set_sensitive(can_edit);
             detect.set_sensitive(auto_available && !guard.zoom_locked);
-            easing_row.set_sensitive(has_clip);
-            easing_label.set_sensitive(has_clip);
-            ease_scale.set_sensitive(has_clip);
+            classic.set_sensitive(can_edit);
+            reset.set_sensitive(can_edit);
+            easing_row.set_sensitive(can_edit);
+            easing_label.set_sensitive(can_edit);
+            ease_scale.set_sensitive(can_edit);
+            footer_delete.set_sensitive(can_edit);
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
                     ZoomMode::Auto
@@ -444,6 +456,7 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
                 .as_ref()
                 .map(|clip| nearest_zoom_preset(clip.scale));
             for (chip, &(_, scale)) in chip_buttons.iter().zip(ZOOM_SCALE_PRESETS.iter()) {
+                chip.set_sensitive(can_edit);
                 let active = selected_preset.is_some_and(|preset| (scale - preset).abs() < 1e-6);
                 if active {
                     chip.add_css_class("recording-editor-zoom-chip-active");
@@ -591,16 +604,19 @@ fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let panel = panel.clone();
         let mute = mute.clone();
         let chip_buttons = chip_buttons.clone();
+        let footer_delete = footer_delete.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
             panel.set_visible(true);
             let speed = guard.selected_clip_speed();
             let muted = guard.selected_clip_muted().unwrap_or(false);
-            let can_mute = speed.is_some() && guard.has_audio_track();
+            let can_edit = speed.is_some() && !guard.video_locked;
+            let can_mute = can_edit && guard.has_audio_track() && !guard.audio_locked;
             syncing.set(true);
             mute.set_active(muted);
             for (chip, &(_, preset)) in chip_buttons.iter().zip(CLIP_SPEED_PRESETS.iter()) {
+                chip.set_sensitive(can_edit);
                 let active = speed.is_some_and(|value| (value - preset).abs() < 1e-6);
                 if active {
                     chip.add_css_class("recording-editor-zoom-chip-active");
@@ -609,6 +625,7 @@ fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
                 }
             }
             mute.set_sensitive(can_mute);
+            footer_delete.set_sensitive(guard.selected_segment.is_some() && !guard.video_locked);
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };

@@ -595,6 +595,47 @@ fn selected_clip_speed_mute_and_delete() {
 }
 
 #[test]
+fn clip_speed_controls_timeline_mapping_duration_and_reencode() {
+    let mut state = VideoEditState::new(metadata());
+    state.selected_segment = Some(0);
+    state.set_selected_clip_speed(2.0);
+
+    assert!((state.source_to_timeline(8.0) - 4.0).abs() < 1e-9);
+    assert!((state.timeline_to_source(4.0) - 8.0).abs() < 1e-9);
+    assert!((state.composition_duration() - 5.0).abs() < 1e-9);
+    assert!(state.needs_reencode());
+}
+
+#[test]
+fn clip_settings_at_a_cut_belong_to_the_clip_starting_there() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.selected_segment = Some(0);
+    state.set_selected_clip_speed(0.5);
+    state.selected_segment = Some(1);
+    state.set_selected_clip_speed(2.0);
+    state.set_selected_clip_muted(true);
+
+    assert!((state.speed_for_source(4.0) - 2.0).abs() < 1e-9);
+    assert!(state.muted_for_source(4.0));
+    assert!((state.source_to_timeline(4.0) - state.segment_start(1)).abs() < 1e-9);
+    assert!(state.video_has_edits());
+}
+
+#[test]
+fn clip_mute_requires_reencode_and_deleted_segments_do_not_map() {
+    let mut state = VideoEditState::new(metadata());
+    state.set_selected_clip_muted(true);
+    assert!(state.needs_reencode());
+
+    state.add_cut(4.0);
+    state.set_segment_start(1, 8.0);
+    state.selected_segment = Some(1);
+    state.remove_selected_clip();
+    assert!((state.timeline_to_source(9.0) - 9.0).abs() < 1e-9);
+}
+
+#[test]
 fn auto_zoom_recenters_when_cursor_nears_edge() {
     let mut state = VideoEditState::new(metadata());
     attach_pointer(&mut state, 1800.0, 540.0);
@@ -622,6 +663,26 @@ fn auto_zoom_recenters_when_cursor_nears_edge() {
     state.zoom_classic = true;
     let (_, classic_center) = state.eval_zoom(0.5);
     assert!((classic_center.0 - 960.0).abs() < 1e-6);
+}
+
+#[test]
+fn switching_auto_zoom_to_manual_preserves_the_visible_center() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 1800.0, 540.0);
+    state.playhead_seconds = 0.5;
+    let index = state.add_zoom_at_playhead().unwrap();
+    state.zoom_clips[index].start = 0.0;
+    state.zoom_clips[index].end = 2.0;
+    state.zoom_clips[index].center = (960.0, 540.0);
+    state.zoom_clips[index].scale = 2.0;
+    state.zoom_clips[index].ease_ms = 0;
+    let (_, visible_center) = state.eval_zoom(state.source_playhead());
+
+    state.set_selected_zoom_mode(ZoomMode::Manual);
+
+    assert_eq!(state.zoom_clips[index].mode, ZoomMode::Manual);
+    assert!((state.zoom_clips[index].center.0 - visible_center.0).abs() < 1e-6);
+    assert!((state.zoom_clips[index].center.1 - visible_center.1).abs() < 1e-6);
 }
 
 fn attach_sidecar_with_clicks(state: &mut VideoEditState, clicks: &[(f64, f64, f64)]) {

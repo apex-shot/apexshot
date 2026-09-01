@@ -264,19 +264,18 @@ impl PointerSidecar {
     }
 
     pub fn presented_at(&self, t: f64, motion: CursorMotion) -> Option<CursorFrame> {
-        let path_t = self.path_t(t, motion.speed);
-        let (_, _, kind) = self.interpolated_at(path_t)?;
+        let (_, _, kind) = self.interpolated_at(t)?;
         let (mut x, mut y) = if motion.smooth <= 0.01 {
-            self.interpolated_at(path_t).map(|(x, y, _)| (x, y))?
+            self.interpolated_at(t).map(|(x, y, _)| (x, y))?
         } else {
-            self.smoothed_at(path_t, motion.smooth.clamp(0.0, 1.0))
+            self.smoothed_at(t, motion.smooth, motion.speed)
         };
-        let (vx, vy) = self.velocity_at(path_t, motion.smooth);
+        let (vx, vy) = self.velocity_at(t, motion.smooth, motion.speed);
         let travel = vx.hypot(vy);
         let still = (1.0 - (travel / 90.0).clamp(0.0, 1.0)).powi(2);
         if motion.sway > 0.01 {
-            x += (path_t * 5.1).sin() * 2.6 * motion.sway * still;
-            y += (path_t * 3.7).cos() * 1.8 * motion.sway * still;
+            x += (t * 5.1).sin() * 2.6 * motion.sway * still;
+            y += (t * 3.7).cos() * 1.8 * motion.sway * still;
         }
         let tilt = if motion.tilt <= 0.01 || travel < 28.0 {
             0.0
@@ -285,11 +284,11 @@ impl PointerSidecar {
             (angle * motion.tilt * 0.28 * (travel / 220.0).clamp(0.0, 1.0)).clamp(-0.42, 0.42)
         };
         let alpha = if motion.hide_idle {
-            self.idle_alpha(path_t, motion.idle_ms)
+            self.idle_alpha(t, motion.idle_ms)
         } else {
             1.0
         };
-        let trail = self.trail_at(path_t, motion);
+        let trail = self.trail_at(t, motion);
         Some(CursorFrame {
             x,
             y,
@@ -300,25 +299,18 @@ impl PointerSidecar {
         })
     }
 
-    fn path_t(&self, t: f64, speed: f64) -> f64 {
-        let speed = speed.clamp(0.25, 3.0);
-        let t0 = self.pointer.first().map(|sample| sample.t).unwrap_or(0.0);
-        let t1 = self.pointer.last().map(|sample| sample.t).unwrap_or(t0);
-        (t0 + (t - t0) * speed).clamp(t0.min(t1), t0.max(t1))
-    }
-
-    fn velocity_at(&self, t: f64, smooth: f64) -> (f64, f64) {
+    fn velocity_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {
         let dt = 0.04;
         let a = if smooth <= 0.01 {
             self.interpolated_at((t - dt).max(0.0))
                 .map(|(x, y, _)| (x, y))
         } else {
-            Some(self.smoothed_at((t - dt).max(0.0), smooth))
+            Some(self.smoothed_at((t - dt).max(0.0), smooth, speed))
         };
         let b = if smooth <= 0.01 {
             self.interpolated_at(t).map(|(x, y, _)| (x, y))
         } else {
-            Some(self.smoothed_at(t, smooth))
+            Some(self.smoothed_at(t, smooth, speed))
         };
         match (a, b) {
             (Some((ax, ay)), Some((bx, by))) => ((bx - ax) / dt, (by - ay) / dt),
@@ -343,7 +335,7 @@ impl PointerSidecar {
                     None => continue,
                 }
             } else {
-                self.smoothed_at(back, motion.smooth)
+                self.smoothed_at(back, motion.smooth, motion.speed)
             };
             let alpha =
                 motion.trail * (1.0 - index as f64 / (count as f64 + 0.35)).powf(1.35) * 0.42;
@@ -354,11 +346,11 @@ impl PointerSidecar {
         trail
     }
 
-    fn smoothed_at(&self, t: f64, smooth: f64) -> (f64, f64) {
+    fn smoothed_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {
         let Some(first) = self.pointer.first() else {
             return (0.0, 0.0);
         };
-        let tau = 0.01 + smooth * smooth * 0.26;
+        let tau = (0.01 + smooth.clamp(0.0, 1.0).powi(2) * 0.26) / speed.clamp(0.25, 3.0);
         let mut px = first.x;
         let mut py = first.y;
         let mut pt = first.t;
@@ -707,6 +699,66 @@ mod tests {
     }
 
     #[test]
+    fn idle_delay_controls_when_cursor_fades() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+        });
+        let short_delay = sidecar
+            .presented_at(
+                1.0,
+                CursorMotion {
+                    hide_idle: true,
+                    idle_ms: 200.0,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        let long_delay = sidecar
+            .presented_at(
+                1.0,
+                CursorMotion {
+                    hide_idle: true,
+                    idle_ms: 2000.0,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+
+        assert!(short_delay.alpha < 0.05);
+        assert!((long_delay.alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sway_offsets_an_idle_cursor() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+        });
+        let still = sidecar.presented_at(1.0, CursorMotion::default()).unwrap();
+        let swaying = sidecar
+            .presented_at(
+                1.0,
+                CursorMotion {
+                    sway: 1.0,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+
+        assert!((swaying.x - still.x).abs() > 0.1);
+        assert!((swaying.y - still.y).abs() > 0.1);
+    }
+
+    #[test]
     fn presented_at_adds_trail_and_tilt_when_moving() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
@@ -737,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn presented_at_speed_two_matches_unsmoothed_path_at_double_time() {
+    fn presented_at_speed_keeps_cursor_on_the_recorded_timeline() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         sidecar.pointer.push(PointerSample {
@@ -770,7 +822,7 @@ mod tests {
             y: 10.0,
             button: 1,
         });
-        let expected = sidecar.interpolated_at(2.0).unwrap();
+        let expected = sidecar.interpolated_at(1.0).unwrap();
         let presented = sidecar
             .presented_at(
                 1.0,
@@ -782,11 +834,53 @@ mod tests {
             .unwrap();
         assert!((presented.x - expected.0).abs() < 1e-9);
         assert!((presented.y - expected.1).abs() < 1e-9);
-        assert!((presented.x - 200.0).abs() < 1e-9);
+        assert!((presented.x - 100.0).abs() < 1e-9);
         let ripples = sidecar.click_ripples_at(1.0, CLICK_RIPPLE_WINDOW_SECONDS);
         assert_eq!(ripples.len(), 1);
-        assert!((ripples[0].0 - 100.0).abs() < 1e-9);
+        assert!((presented.x - ripples[0].0).abs() < 1e-9);
+        assert!((presented.y - ripples[0].1).abs() < 1e-9);
         assert!(sidecar.click_pulse_at(1.0) > 1.0);
+    }
+
+    #[test]
+    fn speed_controls_how_quickly_smoothing_catches_up() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 0.0,
+            y: 0.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.2,
+            x: 200.0,
+            y: 0.0,
+            kind: CursorKind::Default,
+        });
+        let slow = sidecar
+            .presented_at(
+                0.2,
+                CursorMotion {
+                    smooth: 0.8,
+                    speed: 0.5,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        let fast = sidecar
+            .presented_at(
+                0.2,
+                CursorMotion {
+                    smooth: 0.8,
+                    speed: 2.0,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+
+        assert!(fast.x > slow.x);
+        assert!(fast.x <= 200.0);
     }
 
     #[test]

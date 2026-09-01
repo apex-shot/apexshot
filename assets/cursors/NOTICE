@@ -3,3 +3,5 @@ Cursor bitmaps are extracted from system icon themes:
 - adwaita/ — GNOME Adwaita (LGPL-3.0 / CC-BY-SA-3.0)
 - yaru/ — Ubuntu Yaru (CC-BY-SA-4.0)
 - white/, black/ — DMZ cursors (CC-BY-SA)
+- macos/, tahoe/, tahoe_inverted/ — macOS-style cursor artwork (AGPL-3.0)
+- dot/, figma/ — minimal cursor artwork (AGPL-3.0)

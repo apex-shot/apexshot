@@ -78,7 +78,23 @@ impl VideoEditState {
         if index >= self.segment_speeds.len() {
             self.segment_speeds.resize(index + 1, 1.0);
         }
-        self.segment_speeds[index] = speed.clamp(MIN_CLIP_SPEED, MAX_CLIP_SPEED);
+        let old_end = self.segment_start(index) + self.segment_timeline_duration(index);
+        let old_duration = self.segment_timeline_duration(index);
+        self.segment_speeds[index] = if speed.is_finite() {
+            speed.clamp(MIN_CLIP_SPEED, MAX_CLIP_SPEED)
+        } else {
+            1.0
+        };
+        let shift = self.segment_timeline_duration(index) - old_duration;
+        if shift.abs() > 1e-9 {
+            for (other, start) in self.segment_starts.iter_mut().enumerate() {
+                if other != index && *start + 1e-9 >= old_end {
+                    *start = (*start + shift).max(0.0);
+                }
+            }
+        }
+        self.sync_offset_from_segments();
+        self.clamp_timeline_scroll();
     }
 
     pub fn selected_clip_muted(&self) -> Option<bool> {
@@ -87,7 +103,7 @@ impl VideoEditState {
     }
 
     pub fn set_selected_clip_muted(&mut self, muted: bool) {
-        if !self.has_audio_track() {
+        if self.audio_locked || !self.has_audio_track() {
             return;
         }
         let Some(index) = self.active_segment_index() else {
@@ -113,7 +129,19 @@ impl VideoEditState {
     }
 
     pub fn segment_speed(&self, index: usize) -> f64 {
-        self.segment_speeds.get(index).copied().unwrap_or(1.0)
+        let speed = self.segment_speeds.get(index).copied().unwrap_or(1.0);
+        if speed.is_finite() {
+            speed.clamp(MIN_CLIP_SPEED, MAX_CLIP_SPEED)
+        } else {
+            1.0
+        }
+    }
+
+    pub fn segment_timeline_duration(&self, index: usize) -> f64 {
+        self.segment_boundaries()
+            .get(index)
+            .map(|(start, end)| (end - start).max(0.0) / self.segment_speed(index))
+            .unwrap_or(0.0)
     }
 
     pub fn segment_is_muted(&self, index: usize) -> bool {
@@ -136,7 +164,7 @@ impl VideoEditState {
     fn segment_index_at_source(&self, source_t: f64) -> Option<usize> {
         self.segment_boundaries()
             .iter()
-            .position(|&(start, end)| source_t + 1e-9 >= start && source_t <= end + 1e-9)
+            .rposition(|&(start, end)| source_t + 1e-9 >= start && source_t <= end + 1e-9)
     }
 
     pub fn selected_zoom_clip(&self) -> Option<&ZoomClip> {
@@ -189,8 +217,9 @@ impl VideoEditState {
             if end - start < zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS {
                 continue;
             }
-            let timeline_start = composition_start + (start - source_start);
-            let timeline_end = composition_start + (end - source_start);
+            let speed = self.speed_for_source(suggestion.center_time);
+            let timeline_start = composition_start + (start - source_start) / speed;
+            let timeline_end = composition_start + (end - source_start) / speed;
             if self
                 .zoom_clips
                 .iter()
@@ -252,10 +281,19 @@ impl VideoEditState {
         if mode == ZoomMode::Auto && !self.supports_auto_zoom() {
             return;
         }
+        let visible_center = (mode == ZoomMode::Manual
+            && self
+                .selected_zoom_clip()
+                .is_some_and(|clip| clip.mode == ZoomMode::Auto))
+        .then(|| self.eval_zoom(self.source_playhead()).1);
+        let crop = self.crop_or_full();
         if let Some(clip) = self
             .selected_zoom
             .and_then(|index| self.zoom_clips.get_mut(index))
         {
+            if let Some(center) = visible_center {
+                clip.center = clamp_zoom_center(crop, clip.scale, center);
+            }
             clip.mode = mode;
         }
     }
@@ -314,6 +352,9 @@ impl VideoEditState {
     }
 
     pub fn reset_zoom_animation(&mut self) {
+        if self.zoom_locked {
+            return;
+        }
         self.zoom_classic = false;
         if let Some(clip) = self
             .selected_zoom

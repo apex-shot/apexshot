@@ -69,7 +69,6 @@ impl VideoEditState {
         self.video_end_seconds()
             .max(zoom_end)
             .max(hide_end)
-            .max(self.source_duration())
     }
 
     fn video_end_seconds(&self) -> f64 {
@@ -80,10 +79,9 @@ impl VideoEditState {
             .filter_map(|&i| {
                 bounds
                     .get(i)
-                    .map(|(start, end)| self.segment_start(i) + (end - start).max(0.0))
+                    .map(|_| self.segment_start(i) + self.segment_timeline_duration(i))
             })
             .fold(0.0_f64, f64::max)
-            .max(self.source_duration())
     }
 
     pub fn visible_span_seconds(&self) -> f64 {
@@ -103,18 +101,27 @@ impl VideoEditState {
 
     pub fn source_to_timeline(&self, source_t: f64) -> f64 {
         let bounds = self.segment_boundaries();
-        for (index, &(start, end)) in bounds.iter().enumerate() {
+        for (index, &(start, end)) in bounds.iter().enumerate().rev() {
+            if !self.segments_kept.get(index).copied().unwrap_or(true) {
+                continue;
+            }
             if source_t + 1e-9 >= start && source_t <= end + 1e-9 {
-                return self.segment_start(index) + (source_t - start);
+                return self.segment_start(index) + (source_t - start) / self.segment_speed(index);
             }
         }
-        if let Some(&(start, _)) = bounds.first() {
+        if let Some((index, &(start, _))) = bounds
+            .iter()
+            .enumerate()
+            .find(|(index, _)| self.segments_kept.get(*index).copied().unwrap_or(true))
+        {
             if source_t < start {
-                return self.segment_start(0) + (source_t - start);
+                return self.segment_start(index) + (source_t - start) / self.segment_speed(index);
             }
         }
-        if let Some((index, &(start, _))) = bounds.iter().enumerate().next_back() {
-            return self.segment_start(index) + (source_t - start);
+        if let Some((index, &(start, _))) = bounds.iter().enumerate().rev().find(|(index, _)| {
+            self.segments_kept.get(*index).copied().unwrap_or(true)
+        }) {
+            return self.segment_start(index) + (source_t - start) / self.segment_speed(index);
         }
         source_t.max(0.0)
     }
@@ -122,10 +129,13 @@ impl VideoEditState {
     pub fn timeline_to_source(&self, timeline_t: f64) -> f64 {
         let bounds = self.segment_boundaries();
         for (index, &(start, end)) in bounds.iter().enumerate() {
+            if !self.segments_kept.get(index).copied().unwrap_or(true) {
+                continue;
+            }
             let comp = self.segment_start(index);
-            let comp_end = comp + (end - start).max(0.0);
+            let comp_end = comp + self.segment_timeline_duration(index);
             if timeline_t + 1e-9 >= comp && timeline_t <= comp_end + 1e-9 {
-                return start + (timeline_t - comp);
+                return (start + (timeline_t - comp) * self.segment_speed(index)).min(end);
             }
         }
         timeline_t - self.timeline_offset_seconds
@@ -166,7 +176,7 @@ impl VideoEditState {
         let Some(&(src_start, src_end)) = bounds.get(index) else {
             return start.max(0.0);
         };
-        let duration = (src_end - src_start).max(0.0);
+        let duration = (src_end - src_start).max(0.0) / self.segment_speed(index);
         let mut start = if start.is_finite() {
             start.max(0.0)
         } else {
@@ -180,7 +190,7 @@ impl VideoEditState {
                         return None;
                     }
                     let other_start = self.segment_start(other);
-                    let other_end = other_start + (s1 - s0).max(0.0);
+                    let other_end = other_start + (s1 - s0).max(0.0) / self.segment_speed(other);
                     ranges_overlap(start, end, other_start, other_end)
                         .then_some((other_start, other_end))
                 })
@@ -231,7 +241,7 @@ impl VideoEditState {
         self.clamp_timeline_scroll();
     }
 
-    fn sync_offset_from_segments(&mut self) {
+    pub(super) fn sync_offset_from_segments(&mut self) {
         if let Some(min) = self.segment_starts.iter().copied().reduce(f64::min) {
             self.timeline_offset_seconds = min.max(0.0);
         }
@@ -242,7 +252,7 @@ impl VideoEditState {
         self.clamp_timeline_scroll();
     }
 
-    fn clamp_timeline_scroll(&mut self) {
+    pub(super) fn clamp_timeline_scroll(&mut self) {
         let max_scroll = self.max_timeline_scroll();
         self.timeline_scroll_seconds = self.timeline_scroll_seconds.clamp(0.0, max_scroll);
     }
@@ -328,6 +338,12 @@ impl VideoEditState {
             || (self.trim_end_seconds - self.metadata.duration_seconds).abs() > 0.001
             || self.timeline_offset_seconds > f64::EPSILON
             || !self.cuts.is_empty()
+            || self.segments_kept.iter().any(|kept| !kept)
+            || self
+                .segment_speeds
+                .iter()
+                .any(|speed| (*speed - 1.0).abs() > 1e-6)
+            || self.segment_muted.iter().any(|muted| *muted)
     }
 
     pub fn is_muted(&self) -> bool {

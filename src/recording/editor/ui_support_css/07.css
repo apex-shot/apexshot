@@ -532,16 +532,16 @@
             }
 
             .recording-editor-zoom-mode {
-                padding: 0;
-                background: transparent;
-                border: none;
+                padding: 3px;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
             }
 
             button.recording-editor-zoom-mode-btn {
-                min-height: 24px;
-                padding: 0 8px 0 0;
+                min-height: 26px;
+                padding: 0 6px;
                 border: none;
-                border-radius: 0;
+                border-radius: 6px;
                 background: transparent;
                 color: alpha(white, 0.52);
                 font-size: 12px;
@@ -561,13 +561,13 @@
 
             button.recording-editor-zoom-mode-btn:checked,
             button.recording-editor-zoom-mode-btn:checked:hover {
-                background: transparent;
-                color: #b05c38;
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
             }
 
             button.recording-editor-zoom-mode-btn:checked label,
             button.recording-editor-zoom-mode-btn:checked:hover label {
-                color: #b05c38;
+                color: inherit;
             }
 
             button.recording-editor-zoom-mode-btn:disabled {

@@ -9,12 +9,12 @@ pub fn video_layout(state: &VideoEditState, width: f64) -> Vec<(usize, usize, f6
         if !state.segments_kept.get(seg_idx).copied().unwrap_or(true) {
             continue;
         }
-        let Some(&(start, end)) = bounds.get(seg_idx) else {
+        if bounds.get(seg_idx).is_none() {
             continue;
-        };
+        }
         let comp = state.segment_start(seg_idx);
         let x0 = state.time_to_x(comp, width);
-        let x1 = state.time_to_x(comp + (end - start).max(0.0), width);
+        let x1 = state.time_to_x(comp + state.segment_timeline_duration(seg_idx), width);
         layout.push((order_pos, seg_idx, x0, x1.max(x0 + 8.0)));
     }
     layout

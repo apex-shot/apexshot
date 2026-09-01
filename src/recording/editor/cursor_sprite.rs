@@ -21,6 +21,30 @@ const BLACK_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/black/defau
 const BLACK_HAND: &[u8] = include_bytes!("../../../assets/cursors/black/hand.png");
 const BLACK_TEXT: &[u8] = include_bytes!("../../../assets/cursors/black/text.png");
 const BLACK_CROSSHAIR: &[u8] = include_bytes!("../../../assets/cursors/black/crosshair.png");
+const MACOS_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/macos/default.png");
+const MACOS_HAND: &[u8] = include_bytes!("../../../assets/cursors/macos/hand.png");
+const MACOS_TEXT: &[u8] = include_bytes!("../../../assets/cursors/macos/text.png");
+const MACOS_CROSSHAIR: &[u8] = include_bytes!("../../../assets/cursors/macos/crosshair.png");
+const TAHOE_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/tahoe/default.png");
+const TAHOE_HAND: &[u8] = include_bytes!("../../../assets/cursors/tahoe/hand.png");
+const TAHOE_TEXT: &[u8] = include_bytes!("../../../assets/cursors/tahoe/text.png");
+const TAHOE_CROSSHAIR: &[u8] = include_bytes!("../../../assets/cursors/tahoe/crosshair.png");
+const TAHOE_INVERTED_DEFAULT: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/default.png");
+const TAHOE_INVERTED_HAND: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/hand.png");
+const TAHOE_INVERTED_TEXT: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/text.png");
+const TAHOE_INVERTED_CROSSHAIR: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/crosshair.png");
+const DOT_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/dot/default.png");
+const DOT_HAND: &[u8] = include_bytes!("../../../assets/cursors/dot/hand.png");
+const DOT_TEXT: &[u8] = include_bytes!("../../../assets/cursors/dot/text.png");
+const DOT_CROSSHAIR: &[u8] = include_bytes!("../../../assets/cursors/dot/crosshair.png");
+const FIGMA_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/figma/default.png");
+const FIGMA_HAND: &[u8] = include_bytes!("../../../assets/cursors/figma/hand.png");
+const FIGMA_TEXT: &[u8] = include_bytes!("../../../assets/cursors/figma/text.png");
+const FIGMA_CROSSHAIR: &[u8] = include_bytes!("../../../assets/cursors/figma/crosshair.png");
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SpriteKind {
@@ -53,6 +77,26 @@ pub fn hotspot(theme: CursorTheme, kind: &str) -> (f64, f64) {
         (CursorTheme::Black, SpriteKind::Hand) => (18.0, 10.0),
         (CursorTheme::Black, SpriteKind::Text) => (22.0, 22.0),
         (CursorTheme::Black, SpriteKind::Crosshair) => (22.0, 22.0),
+        (CursorTheme::Macos, SpriteKind::Default) => (7.8, 4.1),
+        (CursorTheme::Macos, SpriteKind::Hand) => (16.5, 6.2),
+        (CursorTheme::Macos, SpriteKind::Text) => (24.2, 24.1),
+        (CursorTheme::Macos, SpriteKind::Crosshair) => (24.1, 24.0),
+        (CursorTheme::Tahoe, SpriteKind::Default) => (7.9, 4.1),
+        (CursorTheme::Tahoe, SpriteKind::Hand) => (15.8, 5.1),
+        (CursorTheme::Tahoe, SpriteKind::Text) => (24.3, 40.1),
+        (CursorTheme::Tahoe, SpriteKind::Crosshair) => (24.1, 24.0),
+        (CursorTheme::TahoeInverted, SpriteKind::Default) => (7.9, 4.1),
+        (CursorTheme::TahoeInverted, SpriteKind::Hand) => (15.8, 5.1),
+        (CursorTheme::TahoeInverted, SpriteKind::Text) => (24.3, 40.1),
+        (CursorTheme::TahoeInverted, SpriteKind::Crosshair) => (24.1, 24.0),
+        (CursorTheme::Dot, SpriteKind::Default) => (24.0, 24.0),
+        (CursorTheme::Dot, SpriteKind::Hand) => (24.0, 24.0),
+        (CursorTheme::Dot, SpriteKind::Text) => (24.0, 24.0),
+        (CursorTheme::Dot, SpriteKind::Crosshair) => (24.0, 24.0),
+        (CursorTheme::Figma, SpriteKind::Default) => (7.0, 3.0),
+        (CursorTheme::Figma, SpriteKind::Hand) => (7.0, 3.0),
+        (CursorTheme::Figma, SpriteKind::Text) => (7.0, 3.0),
+        (CursorTheme::Figma, SpriteKind::Crosshair) => (7.0, 3.0),
     }
 }
 
@@ -238,17 +282,14 @@ pub fn draw_spotlight(
     }
     let (r, g, b) = click_rgb(color);
     let scale = overlay_scale(size, 1.0) * scale.max(0.01);
-    let base = 12.0 * scale;
-    let glow = base + progress * 26.0 * scale;
-    let inner = (base * 0.72).max(glow * 0.76);
-    cr.set_line_width(1.5);
-    cr.set_source_rgba(r, g, b, 0.3 * amount);
-    cr.arc(x, y, glow, 0.0, TAU);
-    let _ = cr.stroke();
-    cr.set_line_width(1.7);
-    cr.set_source_rgba(r, g, b, 0.56 * amount);
-    cr.arc(x, y, inner, 0.0, TAU);
-    let _ = cr.stroke();
+    let radius = (18.0 + progress * 12.0) * scale;
+    let glow = gtk4::cairo::RadialGradient::new(x, y, 0.0, x, y, radius);
+    glow.add_color_stop_rgba(0.0, r, g, b, 0.52 * amount);
+    glow.add_color_stop_rgba(0.48, r, g, b, 0.24 * amount);
+    glow.add_color_stop_rgba(1.0, r, g, b, 0.0);
+    let _ = cr.set_source(&glow);
+    cr.arc(x, y, radius, 0.0, TAU);
+    let _ = cr.fill();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -468,6 +509,86 @@ fn bitmap(theme: CursorTheme, kind: &str) -> &'static RgbaImage {
             static IMG: OnceLock<RgbaImage> = OnceLock::new();
             IMG.get_or_init(|| decode(BLACK_CROSSHAIR))
         }
+        (CursorTheme::Macos, SpriteKind::Default) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(MACOS_DEFAULT))
+        }
+        (CursorTheme::Macos, SpriteKind::Hand) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(MACOS_HAND))
+        }
+        (CursorTheme::Macos, SpriteKind::Text) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(MACOS_TEXT))
+        }
+        (CursorTheme::Macos, SpriteKind::Crosshair) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(MACOS_CROSSHAIR))
+        }
+        (CursorTheme::Tahoe, SpriteKind::Default) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(TAHOE_DEFAULT))
+        }
+        (CursorTheme::Tahoe, SpriteKind::Hand) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(TAHOE_HAND))
+        }
+        (CursorTheme::Tahoe, SpriteKind::Text) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(TAHOE_TEXT))
+        }
+        (CursorTheme::Tahoe, SpriteKind::Crosshair) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(TAHOE_CROSSHAIR))
+        }
+        (CursorTheme::TahoeInverted, SpriteKind::Default) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(TAHOE_INVERTED_DEFAULT))
+        }
+        (CursorTheme::TahoeInverted, SpriteKind::Hand) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(TAHOE_INVERTED_HAND))
+        }
+        (CursorTheme::TahoeInverted, SpriteKind::Text) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(TAHOE_INVERTED_TEXT))
+        }
+        (CursorTheme::TahoeInverted, SpriteKind::Crosshair) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(TAHOE_INVERTED_CROSSHAIR))
+        }
+        (CursorTheme::Dot, SpriteKind::Default) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(DOT_DEFAULT))
+        }
+        (CursorTheme::Dot, SpriteKind::Hand) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(DOT_HAND))
+        }
+        (CursorTheme::Dot, SpriteKind::Text) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(DOT_TEXT))
+        }
+        (CursorTheme::Dot, SpriteKind::Crosshair) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(DOT_CROSSHAIR))
+        }
+        (CursorTheme::Figma, SpriteKind::Default) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(FIGMA_DEFAULT))
+        }
+        (CursorTheme::Figma, SpriteKind::Hand) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(FIGMA_HAND))
+        }
+        (CursorTheme::Figma, SpriteKind::Text) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(FIGMA_TEXT))
+        }
+        (CursorTheme::Figma, SpriteKind::Crosshair) => {
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode(FIGMA_CROSSHAIR))
+        }
     }
 }
 
@@ -522,6 +643,67 @@ fn surface_from_rgba(img: &RgbaImage) -> ImageSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recording::editor::model::{MAX_CLICK_SCALE, MIN_CLICK_SCALE};
+
+    const TEST_SURFACE_SIZE: i32 = 192;
+
+    fn render_click(settings: CursorSettings) -> Vec<u8> {
+        let mut surface =
+            ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_click(
+                &cr,
+                TEST_SURFACE_SIZE as f64 / 2.0,
+                TEST_SURFACE_SIZE as f64 / 2.0,
+                0.25,
+                settings,
+                1.0,
+            );
+        }
+        surface.flush();
+        let pixels = surface.data().unwrap().to_vec();
+        pixels
+    }
+
+    fn render_cursor(settings: CursorSettings) -> Vec<u8> {
+        let mut surface =
+            ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw(
+                &cr,
+                TEST_SURFACE_SIZE as f64 / 2.0,
+                TEST_SURFACE_SIZE as f64 / 2.0,
+                1.0,
+                "default",
+                settings,
+                1.0,
+            );
+        }
+        surface.flush();
+        let pixels = surface.data().unwrap().to_vec();
+        pixels
+    }
+
+    fn alpha_bounds(pixels: &[u8]) -> Option<(usize, usize, usize, usize)> {
+        let size = TEST_SURFACE_SIZE as usize;
+        let mut bounds: Option<(usize, usize, usize, usize)> = None;
+        for y in 0..size {
+            for x in 0..size {
+                if pixels[(y * size + x) * 4 + 3] == 0 {
+                    continue;
+                }
+                bounds = Some(match bounds {
+                    Some((min_x, min_y, max_x, max_y)) => {
+                        (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
+                    }
+                    None => (x, y, x, y),
+                });
+            }
+        }
+        bounds
+    }
 
     #[test]
     fn png_writes_nonempty_file() {
@@ -563,5 +745,114 @@ mod tests {
         assert!((overlay_scale(size, 1.0) - size).abs() < 1e-12);
         assert!((overlay_scale(size, 2.0) - overlay_scale(size, 1.0)).abs() < 1e-12);
         assert!((overlay_scale(size, 2.0) - size * 2.0).abs() > 0.5);
+    }
+
+    #[test]
+    fn every_theme_has_renderable_cursor_kinds() {
+        for theme in CursorTheme::ALL {
+            for kind in ["default", "hand", "text", "crosshair"] {
+                let image = bitmap(theme, kind);
+                assert!(image.width() > 0 && image.height() > 0, "{theme:?} {kind}");
+                assert!(
+                    image.pixels().any(|pixel| pixel.0[3] > 0),
+                    "{theme:?} {kind}"
+                );
+                let (hot_x, hot_y) = hotspot(theme, kind);
+                assert!(
+                    hot_x >= 0.0 && hot_x < image.width() as f64,
+                    "{theme:?} {kind}"
+                );
+                assert!(
+                    hot_y >= 0.0 && hot_y < image.height() as f64,
+                    "{theme:?} {kind}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn size_and_shadow_change_cursor_rendering() {
+        let small = render_cursor(CursorSettings {
+            size: MIN_CURSOR_SIZE,
+            shadow: 0.0,
+            ..CursorSettings::default()
+        });
+        let large = render_cursor(CursorSettings {
+            size: MAX_CURSOR_SIZE,
+            shadow: 0.0,
+            ..CursorSettings::default()
+        });
+        let shadowed = render_cursor(CursorSettings {
+            size: MIN_CURSOR_SIZE,
+            shadow: 1.0,
+            ..CursorSettings::default()
+        });
+        let (small_min_x, _, small_max_x, _) = alpha_bounds(&small).unwrap();
+        let (large_min_x, _, large_max_x, _) = alpha_bounds(&large).unwrap();
+        assert!(large_max_x - large_min_x > small_max_x - small_min_x);
+        assert_ne!(small, shadowed);
+    }
+
+    #[test]
+    fn click_effects_are_distinct_and_off_is_transparent() {
+        let render = |click_effect| {
+            render_click(CursorSettings {
+                click_effect,
+                ..CursorSettings::default()
+            })
+        };
+        let off = render(ClickEffect::None);
+        let spotlight = render(ClickEffect::Spotlight);
+        let ripple = render(ClickEffect::Ripple);
+        let echo = render(ClickEffect::Echo);
+
+        assert!(off.iter().all(|byte| *byte == 0));
+        assert!(spotlight.iter().any(|byte| *byte != 0));
+        assert!(ripple.iter().any(|byte| *byte != 0));
+        assert!(echo.iter().any(|byte| *byte != 0));
+        assert_ne!(spotlight, ripple);
+        assert_ne!(spotlight, echo);
+        assert_ne!(ripple, echo);
+    }
+
+    #[test]
+    fn click_color_scale_opacity_and_intensity_affect_rendering() {
+        let red = render_click(CursorSettings {
+            click_color: (255, 0, 0),
+            ..CursorSettings::default()
+        });
+        let blue = render_click(CursorSettings {
+            click_color: (0, 0, 255),
+            ..CursorSettings::default()
+        });
+        let red_total: usize = red.chunks_exact(4).map(|pixel| pixel[2] as usize).sum();
+        let red_blue_total: usize = red.chunks_exact(4).map(|pixel| pixel[0] as usize).sum();
+        let blue_total: usize = blue.chunks_exact(4).map(|pixel| pixel[0] as usize).sum();
+        let blue_red_total: usize = blue.chunks_exact(4).map(|pixel| pixel[2] as usize).sum();
+        assert!(red_total > red_blue_total);
+        assert!(blue_total > blue_red_total);
+
+        let small = render_click(CursorSettings {
+            click_scale: MIN_CLICK_SCALE,
+            ..CursorSettings::default()
+        });
+        let large = render_click(CursorSettings {
+            click_scale: MAX_CLICK_SCALE,
+            ..CursorSettings::default()
+        });
+        let (small_min_x, _, small_max_x, _) = alpha_bounds(&small).unwrap();
+        let (large_min_x, _, large_max_x, _) = alpha_bounds(&large).unwrap();
+        assert!(large_max_x - large_min_x > small_max_x - small_min_x);
+
+        let transparent = render_click(CursorSettings {
+            click_opacity: 0.0,
+            ..CursorSettings::default()
+        });
+        let no_intensity = render_click(CursorSettings {
+            click_intensity: 0.0,
+            ..CursorSettings::default()
+        });
+        assert!(transparent.iter().all(|byte| *byte == 0));
+        assert!(no_intensity.iter().all(|byte| *byte == 0));
     }
 }

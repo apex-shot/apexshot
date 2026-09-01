@@ -107,16 +107,36 @@ pub enum CursorTheme {
     Yaru,
     White,
     Black,
+    Macos,
+    Tahoe,
+    TahoeInverted,
+    Dot,
+    Figma,
 }
 
 impl CursorTheme {
-    pub const ALL: [Self; 4] = [Self::Adwaita, Self::Yaru, Self::White, Self::Black];
+    pub const ALL: [Self; 9] = [
+        Self::Adwaita,
+        Self::Yaru,
+        Self::White,
+        Self::Black,
+        Self::Macos,
+        Self::Tahoe,
+        Self::TahoeInverted,
+        Self::Dot,
+        Self::Figma,
+    ];
 
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "yaru" => Self::Yaru,
             "white" | "windows" => Self::White,
             "black" | "inverted" | "dark" => Self::Black,
+            "macos" | "mac" => Self::Macos,
+            "tahoe" => Self::Tahoe,
+            "tahoe_inverted" | "tahoe-inverted" => Self::TahoeInverted,
+            "dot" => Self::Dot,
+            "figma" | "minimal" => Self::Figma,
             _ => Self::Adwaita,
         }
     }
@@ -127,6 +147,11 @@ impl CursorTheme {
             Self::Yaru => "yaru",
             Self::White => "white",
             Self::Black => "black",
+            Self::Macos => "macos",
+            Self::Tahoe => "tahoe",
+            Self::TahoeInverted => "tahoe_inverted",
+            Self::Dot => "dot",
+            Self::Figma => "figma",
         }
     }
 
@@ -136,6 +161,11 @@ impl CursorTheme {
             Self::Yaru => "Yaru",
             Self::White => "White",
             Self::Black => "Black",
+            Self::Macos => "macOS",
+            Self::Tahoe => "Tahoe",
+            Self::TahoeInverted => "Tahoe Inverted",
+            Self::Dot => "Dot",
+            Self::Figma => "Minimal",
         }
     }
 }

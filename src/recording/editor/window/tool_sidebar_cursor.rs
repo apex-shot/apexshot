@@ -325,6 +325,11 @@ fn build_cursor_motion_tab(
     idle_row.append(&idle_switch);
     body.append(&idle_row);
 
+    let idle_delay_row = cursor_slider_row("Idle delay");
+    idle_delay_row.scale.set_range(120.0, 4000.0);
+    idle_delay_row.scale.set_increments(40.0, 200.0);
+    body.append(&idle_delay_row.widget);
+
     let syncing = Rc::new(Cell::new(false));
     focused_btn.connect_clicked({
         let state = state.clone();
@@ -393,6 +398,13 @@ fn build_cursor_motion_tab(
         on_change.clone(),
         |cursor, value| cursor.sway = value,
     );
+    bind_cursor_f64(
+        &idle_delay_row.scale,
+        syncing.clone(),
+        state.clone(),
+        on_change.clone(),
+        |cursor, value| cursor.idle_ms = value,
+    );
     idle_switch.connect_state_set({
         let state = state.clone();
         let on_change = on_change.clone();
@@ -415,6 +427,7 @@ fn build_cursor_motion_tab(
         let tilt_scale = tilt_row.scale.clone();
         let sway_scale = sway_row.scale.clone();
         let idle_switch = idle_switch.clone();
+        let idle_delay_scale = idle_delay_row.scale.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let cursor = state.lock().unwrap().cursor;
@@ -439,6 +452,8 @@ fn build_cursor_motion_tab(
             tilt_scale.set_value(cursor.tilt);
             sway_scale.set_value(cursor.sway);
             idle_switch.set_active(cursor.hide_idle);
+            idle_delay_scale.set_value(cursor.idle_ms);
+            idle_delay_scale.set_sensitive(cursor.hide_idle);
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };
