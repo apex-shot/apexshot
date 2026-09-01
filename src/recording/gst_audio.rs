@@ -207,13 +207,8 @@ fn branch_caps(channels: i32) -> gst::Caps {
         .build()
 }
 
-fn encoder_caps(encoder: AudioEncoder, channels: i32) -> gst::Caps {
-    let format = match encoder {
-        AudioEncoder::Aac => "F32LE",
-        AudioEncoder::Opus => "S16LE",
-    };
+fn encoder_caps(channels: i32) -> gst::Caps {
     gst::Caps::builder("audio/x-raw")
-        .field("format", format)
         .field("rate", AUDIO_SAMPLE_RATE)
         .field("channels", channels)
         .field("layout", "interleaved")
@@ -354,7 +349,7 @@ pub(super) fn build_audio_bin(
         make_element("audioconvert", "audio_out_convert")?,
     ];
     let enc_caps = make_element("capsfilter", "audio_enc_caps")?;
-    enc_caps.set_property("caps", encoder_caps(encoder, channels));
+    enc_caps.set_property("caps", encoder_caps(channels));
     out_elements.push(enc_caps);
     let encoder_name = encoder_element_factory(encoder)
         .ok_or_else(|| format!("no GStreamer encoder for {encoder:?}"))?;
@@ -913,6 +908,27 @@ mod tests {
         assert_eq!(encoder_for_muxer("unknownmux"), None);
         assert_eq!(ffmpeg_input_format(AudioEncoder::Aac), "aac");
         assert_eq!(ffmpeg_input_format(AudioEncoder::Opus), "ogg");
+    }
+
+    #[test]
+    fn encoder_caps_are_compatible_with_every_aac_fallback() {
+        if ensure_gst_initialized().is_err() {
+            eprintln!("skipping: GStreamer not available");
+            return;
+        }
+        let caps = encoder_caps(2);
+        for factory in ["avenc_aac", "voaacenc", "faac"] {
+            let Some(encoder) = gst::ElementFactory::find(factory)
+                .and_then(|factory| factory.create().build().ok())
+            else {
+                continue;
+            };
+            let sink_caps = encoder.static_pad("sink").unwrap().query_caps(None);
+            assert!(
+                caps.can_intersect(&sink_caps),
+                "{factory} rejects configured caps {caps} (accepts {sink_caps})"
+            );
+        }
     }
 
     #[test]
