@@ -438,10 +438,11 @@ impl VideoEditState {
         if clip.mode != ZoomMode::Auto {
             return (scale, center);
         }
-        let Some((cursor_x, cursor_y, _)) = self
+        let cursor = self.cursor.clamped();
+        let Some((cursor_x, cursor_y)) = self
             .sidecar
             .as_ref()
-            .and_then(|sidecar| sidecar.interpolated_at(t))
+            .and_then(|sidecar| sidecar.motion_position_at(t, cursor.smooth, cursor.speed))
         else {
             return (scale, center);
         };

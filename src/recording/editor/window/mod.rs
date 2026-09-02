@@ -205,14 +205,25 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     ));
     workspace.append(&stage);
 
-    let sidebar = tool_sidebar::build_tool_sidebar(state.clone(), ping.clone());
+    let pause_playback_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let sidebar_pause_playback = {
+        let pause_playback_slot = pause_playback_slot.clone();
+        Rc::new(move || {
+            if let Some(pause_playback) = pause_playback_slot.borrow().as_ref() {
+                pause_playback();
+            }
+        }) as Rc<dyn Fn()>
+    };
+    let sidebar =
+        tool_sidebar::build_tool_sidebar(state.clone(), ping.clone(), sidebar_pause_playback);
     workspace.append(&sidebar.widget);
     root.append(&workspace);
 
-    let (timeline, paint) =
+    let (timeline, paint, pause_playback) =
         timeline_card::build_timeline_card(state.clone(), media.clone(), ping.clone());
     root.append(&timeline);
     *paint_slot.borrow_mut() = Some(paint);
+    *pause_playback_slot.borrow_mut() = Some(pause_playback);
     *refresh_slot.borrow_mut() = Some({
         let refresh_tools = tools.refresh;
         let refresh_sidebar = sidebar.refresh;

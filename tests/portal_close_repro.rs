@@ -19,7 +19,47 @@
 use ashpd::desktop::{screencast::Screencast, CreateSessionOptions, Session};
 use std::time::Duration;
 
+const PORTAL_DESTINATION: &str = "org.freedesktop.portal.Desktop";
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn portal_service_available() -> Result<bool, String> {
+    let conn = zbus::blocking::connection::Builder::session()
+        .map_err(|e| format!("session bus builder: {e}"))?
+        .method_timeout(Duration::from_secs(2))
+        .build()
+        .map_err(|e| format!("session bus connect: {e}"))?;
+
+    let has_owner = conn
+        .call_method(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            Some("org.freedesktop.DBus"),
+            "NameHasOwner",
+            &(PORTAL_DESTINATION),
+        )
+        .map_err(|e| format!("NameHasOwner: {e}"))?
+        .body()
+        .deserialize::<bool>()
+        .map_err(|e| format!("NameHasOwner response: {e}"))?;
+    if has_owner {
+        return Ok(true);
+    }
+
+    let activatable = conn
+        .call_method(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            Some("org.freedesktop.DBus"),
+            "ListActivatableNames",
+            &(),
+        )
+        .map_err(|e| format!("ListActivatableNames: {e}"))?
+        .body()
+        .deserialize::<Vec<String>>()
+        .map_err(|e| format!("ListActivatableNames response: {e}"))?;
+
+    Ok(activatable.iter().any(|name| name == PORTAL_DESTINATION))
+}
 
 fn create_session_on_fresh_connection(step: &str) -> Result<String, String> {
     let step = step.to_string();
@@ -61,6 +101,18 @@ fn create_session_on_fresh_connection(step: &str) -> Result<String, String> {
 
 #[test]
 fn sequential_portal_sessions_on_fresh_connections_do_not_hang() {
+    match portal_service_available() {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("skipping portal session regression: {PORTAL_DESTINATION} is not available");
+            return;
+        }
+        Err(error) => {
+            eprintln!("skipping portal session regression: cannot inspect session bus: {error}");
+            return;
+        }
+    }
+
     let take1 = create_session_on_fresh_connection("take-1");
     println!("take-1: {take1:?}");
     assert!(take1.is_ok(), "first portal session must work: {take1:?}");

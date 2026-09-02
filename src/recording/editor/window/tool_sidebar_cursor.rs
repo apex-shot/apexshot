@@ -13,7 +13,11 @@ struct CursorPanel {
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> CursorPanel {
+fn build_cursor_panel(
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
+) -> CursorPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -27,17 +31,6 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
     title.set_xalign(0.0);
     title.set_hexpand(true);
     header.append(&title);
-
-    let availability_hint = Label::new(None);
-    availability_hint.add_css_class("recording-editor-zoom-hint");
-    availability_hint.set_wrap(true);
-    availability_hint.set_max_width_chars(32);
-    availability_hint.set_halign(Align::Fill);
-    availability_hint.set_xalign(0.0);
-    availability_hint.set_margin_start(14);
-    availability_hint.set_margin_end(14);
-    availability_hint.set_margin_bottom(8);
-    availability_hint.set_visible(false);
 
     let tabs = GtkBox::new(Orientation::Horizontal, 0);
     tabs.add_css_class("recording-editor-cursor-tabs");
@@ -54,7 +47,7 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
     tabs.append(&effects_tab);
 
     let style = build_cursor_style_tab(state.clone(), on_change.clone());
-    let motion = build_cursor_motion_tab(state.clone(), on_change.clone());
+    let motion = build_cursor_motion_tab(state.clone(), on_change.clone(), pause_playback.clone());
     let effects = build_cursor_effects_tab(state.clone(), on_change.clone());
     style.widget.set_visible(true);
     motion.widget.set_visible(false);
@@ -73,10 +66,48 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
     scroll.set_hexpand(true);
     scroll.set_child(Some(&pages));
 
+    let unavailable = GtkBox::new(Orientation::Vertical, 10);
+    unavailable.add_css_class("recording-editor-cursor-unavailable");
+    unavailable.set_halign(Align::Fill);
+    unavailable.set_valign(Align::Fill);
+    unavailable.set_hexpand(true);
+    unavailable.set_vexpand(true);
+    unavailable.set_visible(false);
+
+    let unavailable_title = Label::new(Some("Cursor unavailable"));
+    unavailable_title.add_css_class("recording-editor-cursor-unavailable-title");
+    unavailable_title.set_xalign(0.0);
+    unavailable_title.set_wrap(true);
+
+    let unavailable_detail = Label::new(None);
+    unavailable_detail.add_css_class("recording-editor-cursor-unavailable-detail");
+    unavailable_detail.set_xalign(0.0);
+    unavailable_detail.set_wrap(true);
+    unavailable_detail.set_max_width_chars(30);
+
+    unavailable.append(&unavailable_title);
+    unavailable.append(&unavailable_detail);
+
+    let pointer_content = GtkBox::new(Orientation::Vertical, 0);
+    pointer_content.set_hexpand(true);
+    pointer_content.set_vexpand(true);
+    pointer_content.append(&tabs);
+    pointer_content.append(&scroll);
+
+    let pointer_overlay = Overlay::new();
+    pointer_overlay.add_css_class("recording-editor-cursor-overlay");
+    pointer_overlay.set_hexpand(true);
+    pointer_overlay.set_vexpand(true);
+    pointer_overlay.set_child(Some(&pointer_content));
+    pointer_overlay.add_overlay(&unavailable);
+
+    let block_unavailable_input = GestureClick::new();
+    block_unavailable_input.set_propagation_limit(gtk4::PropagationLimit::None);
+    block_unavailable_input.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    unavailable.add_controller(block_unavailable_input);
+
     panel.append(&header);
-    panel.append(&availability_hint);
-    panel.append(&tabs);
-    panel.append(&scroll);
+    panel.append(&pointer_overlay);
 
     style_tab.connect_toggled({
         let style = style.widget.clone();
@@ -122,6 +153,8 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
         let state = state.clone();
         let tabs = tabs.clone();
         let scroll = scroll.clone();
+        let unavailable = unavailable.clone();
+        let unavailable_detail = unavailable_detail.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
             let can_style = guard
@@ -135,20 +168,20 @@ fn build_cursor_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>
             drop(guard);
             tabs.set_sensitive(can_style);
             scroll.set_sensitive(can_style);
-            availability_hint.set_visible(!can_style);
+            unavailable.set_visible(!can_style);
             let (message, tooltip) = if inferred {
                 (
-                    "Cursor styling unavailable\nThe cursor is baked into this imported video.",
-                    "Its inferred path can still guide Auto Zoom, but replacement is disabled to prevent a duplicate cursor.",
+                    "The cursor is baked into this imported video.",
+                    "Cursor replacement is unavailable. Its inferred path can still guide Auto Zoom.",
                 )
             } else {
                 (
-                    "Cursor styling unavailable\nNo editable cursor data was found.",
+                    "No editable cursor data was found.",
                     "Cursor styling requires pointer data from an ApexShot recording.",
                 )
             };
-            availability_hint.set_text(message);
-            availability_hint.set_tooltip_text(Some(tooltip));
+            unavailable_detail.set_text(message);
+            unavailable.set_tooltip_text(Some(tooltip));
             refresh_style();
             refresh_motion();
             refresh_effects();
@@ -307,6 +340,7 @@ fn build_cursor_style_tab(
 fn build_cursor_motion_tab(
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
 ) -> CursorPanel {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
@@ -450,8 +484,10 @@ fn build_cursor_motion_tab(
         let state = state.clone();
         let on_change = on_change.clone();
         let syncing = syncing.clone();
+        let pause_playback = pause_playback.clone();
         move |_, active| {
             if !syncing.get() {
+                pause_playback();
                 state.lock().unwrap().cursor.hide_idle = active;
                 on_change();
             }
@@ -1147,8 +1183,11 @@ impl FillSlider {
         }
         let _ = cr.fill();
 
-        let fill_w = progress * w;
-        let show_fill = fill_w >= h;
+        // Allow the marker to overlay the value text, but stop at its right
+        // edge rather than running into the slider's rounded outer edge.
+        let tick_x = 1.5 + progress * (w - 15.5);
+        let fill_w = tick_x;
+        let show_fill = progress > 0.0;
         if show_fill {
             fill_slider_rounded_rect(cr, 0.0, 0.0, fill_w, h, radius);
             if light {
@@ -1158,23 +1197,6 @@ impl FillSlider {
             }
             let _ = cr.fill();
         }
-
-        let value_reserve = 40.0;
-        let tick_x = if show_fill {
-            (fill_w - 6.0).clamp(radius * 0.45, (w - value_reserve).max(radius * 0.45))
-        } else {
-            10.0
-        };
-        cr.set_line_width(1.5);
-        cr.set_line_cap(gtk4::cairo::LineCap::Round);
-        if light {
-            cr.set_source_rgba(0.15, 0.16, 0.18, 0.82 * enabled);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * enabled);
-        }
-        cr.move_to(tick_x, h * 0.28);
-        cr.line_to(tick_x, h * 0.72);
-        let _ = cr.stroke();
 
         if light {
             cr.set_source_rgba(0.15, 0.16, 0.18, 0.72 * enabled);
@@ -1195,6 +1217,19 @@ impl FillSlider {
             cr.move_to(w - 14.0 - ext.width(), h * 0.66);
             let _ = cr.show_text(&text);
         }
+
+        // Draw the marker after text so it can travel over the label/value
+        // instead of being trapped inside a reserved text gutter.
+        cr.set_line_width(1.5);
+        cr.set_line_cap(gtk4::cairo::LineCap::Round);
+        if light {
+            cr.set_source_rgba(0.15, 0.16, 0.18, 0.82 * enabled);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * enabled);
+        }
+        cr.move_to(tick_x, h * 0.28);
+        cr.line_to(tick_x, h * 0.72);
+        let _ = cr.stroke();
     }
 }
 

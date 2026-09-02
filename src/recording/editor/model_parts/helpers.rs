@@ -79,6 +79,8 @@ fn recenter_if_near_edge(
     let half_h = crop_h / 2.0;
     let margin_x = crop_w * 0.22;
     let margin_y = crop_h * 0.22;
+    let feather_x = crop_w * 0.12;
+    let feather_y = crop_h * 0.12;
     let left = view_center.0 - half_w;
     let right = view_center.0 + half_w;
     let top = view_center.1 - half_h;
@@ -87,19 +89,29 @@ fn recenter_if_near_edge(
     let mut cx = view_center.0;
     let mut cy = view_center.1;
     if cursor.0 < left + margin_x {
-        cx = cursor.0 - margin_x + half_w;
+        let offset = cursor.0 - (left + margin_x);
+        cx += feathered_camera_offset(offset, feather_x);
     } else if cursor.0 > right - margin_x {
-        cx = cursor.0 + margin_x - half_w;
+        let offset = cursor.0 - (right - margin_x);
+        cx += feathered_camera_offset(offset, feather_x);
     }
     if cursor.1 < top + margin_y {
-        cy = cursor.1 - margin_y + half_h;
+        let offset = cursor.1 - (top + margin_y);
+        cy += feathered_camera_offset(offset, feather_y);
     } else if cursor.1 > bottom - margin_y {
-        cy = cursor.1 + margin_y - half_h;
+        let offset = cursor.1 - (bottom - margin_y);
+        cy += feathered_camera_offset(offset, feather_y);
     }
     (
         cx.clamp(half_w, (frame_w - half_w).max(half_w)),
         cy.clamp(half_h, (frame_h - half_h).max(half_h)),
     )
+}
+
+fn feathered_camera_offset(offset: f64, feather: f64) -> f64 {
+    let amount = (offset.abs() / feather.max(1.0)).clamp(0.0, 1.0);
+    let smoothstep = amount * amount * (3.0 - 2.0 * amount);
+    offset * smoothstep
 }
 
 fn eased_value(

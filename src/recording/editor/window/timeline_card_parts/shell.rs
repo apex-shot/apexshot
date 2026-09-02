@@ -2,7 +2,7 @@ pub fn build_timeline_card(
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
     on_change: Rc<dyn Fn()>,
-) -> (GtkBox, Rc<dyn Fn()>) {
+) -> (GtkBox, Rc<dyn Fn()>, Rc<dyn Fn()>) {
     let shell = GtkBox::new(Orientation::Vertical, 0);
     shell.add_css_class("recording-editor-timeline-dock");
     shell.set_hexpand(true);
@@ -32,7 +32,7 @@ pub fn build_timeline_card(
     let hide = labeled_tool_button("view-conceal-symbolic", "Hide", "Hide cursor at playhead");
     let split = labeled_tool_button("edit-cut-symbolic", "Split", "Split at playhead");
     let detect = labeled_tool_button(
-        "view-reveal-symbolic",
+        icon_names::custom::WAND_SPARKLES_SYMBOLIC,
         "Detect",
         "Detect automatic zooms from clicks and cursor motion",
     );
@@ -256,6 +256,16 @@ pub fn build_timeline_card(
         })
     };
 
+    let pause: Rc<dyn Fn()> = {
+        let media = media.clone();
+        let playing = playing.clone();
+        let play_button = play_button.clone();
+        let paint = paint.clone();
+        Rc::new(move || {
+            pause_playback(&media, &playing, &play_button, &paint);
+        })
+    };
+
     scroll_adj.connect_value_changed({
         let state = state.clone();
         let redraw = redraw.clone();
@@ -354,6 +364,9 @@ pub fn build_timeline_card(
                 drop(guard);
                 let mut guard = state.lock().unwrap();
                 let changed = guard.redetect_zoom_clips();
+                if changed {
+                    crate::recording::editor::project::persist_video_session(&guard);
+                }
                 let auto_zooms = guard
                     .zoom_clips
                     .iter()
@@ -419,7 +432,9 @@ pub fn build_timeline_card(
                         }
                         let samples = sidecar.pointer.len();
                         guard.sidecar = Some(sidecar);
-                        guard.redetect_zoom_clips();
+                        if guard.redetect_zoom_clips() {
+                            crate::recording::editor::project::persist_video_session(&guard);
+                        }
                         let auto_zooms = guard
                             .zoom_clips
                             .iter()
@@ -577,6 +592,5 @@ pub fn build_timeline_card(
     card.append(&board);
     card.append(&well);
     shell.append(&card);
-    (shell, paint)
+    (shell, paint, pause)
 }
-

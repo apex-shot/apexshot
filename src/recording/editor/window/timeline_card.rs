@@ -1,3 +1,4 @@
+use crate::capture::editor::window::icon_names;
 use crate::recording::editor::model::{
     format_zoom_scale, playhead_for_replay, snap_range_to_target, snap_to_target,
     usable_media_timestamp_seconds, VideoEditState, ZoomMode, DEFAULT_CURSOR_HIDE_DURATION_SECONDS,

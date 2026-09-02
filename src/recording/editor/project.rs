@@ -887,6 +887,44 @@ mod tests {
     }
 
     #[test]
+    fn persist_replaces_removed_manual_zoom_with_auto_zoom() {
+        let dir = scratch("replace-manual-with-auto");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.zoom_clips.push(ZoomClip {
+            start: 1.0,
+            end: 2.8,
+            scale: 1.8,
+            center: (960.0, 540.0),
+            ease_ms: 400,
+            easing: ZoomEasing::Glide,
+            mode: ZoomMode::Manual,
+        });
+        persist_video_session(&state);
+
+        state.zoom_clips.clear();
+        state.zoom_clips.push(ZoomClip {
+            start: 4.0,
+            end: 6.0,
+            scale: 1.5,
+            center: (1200.0, 600.0),
+            ease_ms: 400,
+            easing: ZoomEasing::Glide,
+            mode: ZoomMode::Auto,
+        });
+        persist_video_session(&state);
+
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restore_into(&mut restored);
+        assert_eq!(restored.zoom_clips.len(), 1);
+        assert_eq!(restored.zoom_clips[0].mode, ZoomMode::Auto);
+        assert!((restored.zoom_clips[0].start - 4.0).abs() < 1e-9);
+
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn fingerprint_mismatch_returns_none() {
         let dir = scratch("fingerprint");
         let video = write_video(&dir, "clip.mp4", 16);

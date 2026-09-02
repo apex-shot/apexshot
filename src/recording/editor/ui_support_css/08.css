@@ -244,6 +244,18 @@
                 background: alpha(#111827, 0.06);
             }
 
+            .editor-theme-light .recording-editor-cursor-unavailable {
+                background: #f0f1f4;
+            }
+
+            .editor-theme-light .recording-editor-cursor-unavailable-title {
+                color: #b05c38;
+            }
+
+            .editor-theme-light .recording-editor-cursor-unavailable-detail {
+                color: alpha(#1d2129, 0.45);
+            }
+
             .editor-theme-light button.recording-editor-cursor-tab {
                 color: alpha(#1d2129, 0.52);
             }

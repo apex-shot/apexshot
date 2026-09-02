@@ -480,6 +480,77 @@ fn eval_zoom_eases_in_and_out() {
 }
 
 #[test]
+fn auto_zoom_camera_feathers_edge_following() {
+    let center = (960.0, 540.0);
+    let inner_right = center.0 + 1920.0 / 2.0 / 2.0 - 1920.0 / 2.0 * 0.22;
+    let barely_outside = recenter_if_near_edge(
+        center,
+        (inner_right + 1.0, center.1),
+        2.0,
+        1920.0,
+        1080.0,
+    );
+    assert!(barely_outside.0 > center.0);
+    assert!(
+        barely_outside.0 - center.0 < 0.01,
+        "camera should ease into following instead of matching cursor velocity immediately"
+    );
+
+    let farther_outside = recenter_if_near_edge(
+        center,
+        (inner_right + 57.6, center.1),
+        2.0,
+        1920.0,
+        1080.0,
+    );
+    assert!(farther_outside.0 > barely_outside.0);
+    assert!(farther_outside.0 - center.0 < 57.6);
+}
+
+#[test]
+fn auto_zoom_camera_tracks_the_smoothed_cursor_path() {
+    let mut state = VideoEditState::new(metadata());
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for (t, x) in [(0.0, 960.0), (0.4, 960.0), (0.5, 1900.0)] {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y: 540.0,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+    state.cursor.smooth = 1.0;
+    state.cursor.speed = MIN_CURSOR_SPEED;
+    state.zoom_clips.push(ZoomClip {
+        start: 0.0,
+        end: 2.0,
+        scale: 2.0,
+        center: (960.0, 540.0),
+        ease_ms: 0,
+        easing: ZoomEasing::Glide,
+        mode: ZoomMode::Auto,
+    });
+
+    let (scale, camera_center) = state.eval_zoom(0.5);
+    assert!((scale - 2.0).abs() < 1e-9);
+    assert!(
+        camera_center.0 < 1000.0,
+        "camera must not race ahead on the unsmoothed pointer path: {camera_center:?}"
+    );
+}
+
+#[test]
 fn selected_zoom_mode_and_scale_update_clip() {
     let mut state = VideoEditState::new(metadata());
     attach_pointer(&mut state, 960.0, 540.0);

@@ -6,12 +6,7 @@ pub fn toggle_playback(
     redraw: &Rc<dyn Fn()>,
 ) {
     if playing.get() {
-        if let Some(media_file) = media.borrow().as_ref() {
-            media_file.pause();
-        }
-        playing.set(false);
-        set_play_icon(play_button, "media-playback-start-symbolic");
-        redraw();
+        pause_playback(media, playing, play_button, &redraw);
         return;
     }
 
@@ -37,6 +32,23 @@ pub fn toggle_playback(
     playing.set(true);
     set_play_icon(play_button, "media-playback-pause-symbolic");
     redraw();
+}
+
+pub fn pause_playback(
+    media: &Rc<RefCell<Option<MediaFile>>>,
+    playing: &Rc<Cell<bool>>,
+    play_button: &Button,
+    refresh: &Rc<dyn Fn()>,
+) {
+    if !playing.get() && !media.borrow().as_ref().is_some_and(|media| media.is_playing()) {
+        return;
+    }
+    if let Some(media_file) = media.borrow().as_ref() {
+        media_file.pause();
+    }
+    playing.set(false);
+    set_play_icon(play_button, "media-playback-start-symbolic");
+    refresh();
 }
 
 pub fn set_play_icon(button: &Button, icon_name: &str) {

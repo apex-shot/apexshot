@@ -7,14 +7,16 @@ use crate::recording::editor::model::{
 };
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
-    GestureDrag, Grid, Image, Label, Orientation, PolicyType, ScrolledWindow, Switch, ToggleButton,
-    Widget, Window,
+    GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay, PolicyType,
+    ScrolledWindow, Switch, ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 pub(super) const TOOL_SIDEBAR_WIDTH: i32 = 288;
+
+pub(super) type PausePlayback = Rc<dyn Fn()>;
 
 pub(super) struct ToolSidebar {
     pub widget: GtkBox,
@@ -24,6 +26,7 @@ pub(super) struct ToolSidebar {
 pub(super) fn build_tool_sidebar(
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
 ) -> ToolSidebar {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-tool-sidebar");
@@ -31,10 +34,10 @@ pub(super) fn build_tool_sidebar(
     root.set_vexpand(true);
     root.set_size_request(TOOL_SIDEBAR_WIDTH, -1);
 
-    let cursor_panel = build_cursor_panel(state.clone(), on_change.clone());
-    let zoom_panel = build_zoom_panel(state.clone(), on_change.clone());
+    let cursor_panel = build_cursor_panel(state.clone(), on_change.clone(), pause_playback.clone());
+    let zoom_panel = build_zoom_panel(state.clone(), on_change.clone(), pause_playback.clone());
     let hide_panel = build_hide_panel(state.clone(), on_change.clone());
-    let clip_panel = build_clip_panel(state.clone(), on_change);
+    let clip_panel = build_clip_panel(state.clone(), on_change, pause_playback);
     root.append(&cursor_panel.widget);
     root.append(&zoom_panel.widget);
     root.append(&hide_panel.widget);
@@ -97,7 +100,11 @@ struct ZoomPanel {
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> ZoomPanel {
+fn build_zoom_panel(
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
+) -> ZoomPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -327,6 +334,7 @@ fn build_zoom_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let syncing = syncing.clone();
         move |_, active| {
             if !syncing.get() {
+                pause_playback();
                 let mut guard = state.lock().unwrap();
                 if !guard.zoom_locked {
                     guard.zoom_classic = active;
@@ -458,7 +466,11 @@ struct ClipPanel {
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> ClipPanel {
+fn build_clip_panel(
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
+) -> ClipPanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -562,8 +574,10 @@ fn build_clip_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
         let state = state.clone();
         let on_change = on_change.clone();
         let syncing = syncing.clone();
+        let pause_playback = pause_playback.clone();
         move |_, active| {
             if !syncing.get() {
+                pause_playback();
                 state.lock().unwrap().set_selected_clip_muted(active);
                 on_change();
             }

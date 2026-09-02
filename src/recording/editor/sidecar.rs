@@ -284,11 +284,7 @@ impl PointerSidecar {
 
     pub fn presented_at(&self, t: f64, motion: CursorMotion) -> Option<CursorFrame> {
         let (_, _, kind) = self.interpolated_at(t)?;
-        let (mut x, mut y) = if motion.smooth <= 0.01 {
-            self.interpolated_at(t).map(|(x, y, _)| (x, y))?
-        } else {
-            self.smoothed_at(t, motion.smooth, motion.speed)
-        };
+        let (mut x, mut y) = self.motion_position_at(t, motion.smooth, motion.speed)?;
         let (vx, vy) = self.velocity_at(t, motion.smooth, motion.speed);
         let travel = vx.hypot(vy);
         let still = (1.0 - (travel / 90.0).clamp(0.0, 1.0)).powi(2);
@@ -316,6 +312,19 @@ impl PointerSidecar {
             tilt,
             trail,
         })
+    }
+
+    /// Cursor position after applying the configured motion smoothing, without
+    /// decorative effects such as sway. Camera tracking uses this same path so
+    /// the viewport and rendered cursor never react to different pointer data.
+    pub fn motion_position_at(&self, t: f64, smooth: f64, speed: f64) -> Option<(f64, f64)> {
+        if smooth <= 0.01 {
+            self.interpolated_at(t).map(|(x, y, _)| (x, y))
+        } else if self.pointer.is_empty() {
+            None
+        } else {
+            Some(self.smoothed_at(t, smooth, speed))
+        }
     }
 
     fn velocity_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {

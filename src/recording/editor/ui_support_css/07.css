@@ -365,6 +365,27 @@
                 background: alpha(white, 0.06);
             }
 
+            .recording-editor-cursor-overlay {
+                overflow: hidden;
+            }
+
+            .recording-editor-cursor-unavailable {
+                padding: 14px 16px;
+                background: #111111;
+            }
+
+            .recording-editor-cursor-unavailable-title {
+                color: #b05c38;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .recording-editor-cursor-unavailable-detail {
+                color: alpha(white, 0.45);
+                font-size: 11px;
+                line-height: 1.35;
+            }
+
             button.recording-editor-cursor-tab {
                 min-height: 26px;
                 padding: 0 6px;
