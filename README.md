@@ -394,7 +394,7 @@ If you cloned the repository and want to install the development version:
 cd gnome-extension
 zip apexshot-gnome-integration.zip \
   extension.js metadata.json \
-  shell-overlay.js window-list.js preview-stacking.js
+  cursor-classifier.js shell-overlay.js window-list.js preview-stacking.js
 gnome-extensions install apexshot-gnome-integration.zip
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ```

@@ -161,6 +161,7 @@ pnpm check:gnome
 # Live-install into your session (works on GNOME 48–50):
 make -C gnome-extension install     # if a Makefile is present, otherwise:
 gnome-extensions pack gnome-extension --force \
+  --extra-source=cursor-classifier.js \
   --extra-source=shell-overlay.js \
   --extra-source=window-list.js \
   --extra-source=preview-stacking.js
@@ -178,7 +179,7 @@ apexshot` to follow extension logs.
 cd gnome-extension
 zip apexshot-gnome-integration.zip \
   extension.js metadata.json \
-  shell-overlay.js window-list.js preview-stacking.js
+  cursor-classifier.js shell-overlay.js window-list.js preview-stacking.js
 ```
 
 This is identical to what the release workflow does in

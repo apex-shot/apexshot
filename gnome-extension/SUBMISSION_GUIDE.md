@@ -8,13 +8,13 @@
 
 ## Building the package
 
-Only the five shipped files belong in the zip — no tests, no docs:
+Only the six shipped files belong in the zip — no tests, no docs:
 
 ```bash
 cd gnome-extension
 zip apexshot-gnome-integration.zip \
   extension.js metadata.json \
-  shell-overlay.js window-list.js preview-stacking.js
+  cursor-classifier.js shell-overlay.js window-list.js preview-stacking.js
 ```
 
 Before uploading, run the review checks locally:
@@ -73,7 +73,7 @@ gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 
 ```bash
 mkdir -p ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io
-cp extension.js metadata.json shell-overlay.js window-list.js preview-stacking.js \
+cp extension.js metadata.json cursor-classifier.js shell-overlay.js window-list.js preview-stacking.js \
   ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 journalctl /usr/bin/gnome-shell -f | grep apexshot

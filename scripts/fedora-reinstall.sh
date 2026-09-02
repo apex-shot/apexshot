@@ -334,6 +334,7 @@ install_system_files() {
     for ext_file in \
         metadata.json \
         extension.js \
+        cursor-classifier.js \
         shell-overlay.js \
         window-list.js \
         preview-stacking.js

@@ -121,12 +121,82 @@ impl Default for RecordingState {
     }
 }
 
+impl RecordingState {
+    pub(crate) fn from_app_config(config: &crate::config::AppConfig) -> Self {
+        Self {
+            rec_controls: config.rec_controls,
+            hidpi: config.rec_hidpi,
+            do_not_disturb: config.rec_notifications,
+            remember_selection: config.rec_remember_selection,
+            dim_screen: config.rec_dim_screen,
+            show_countdown: config.rec_countdown,
+            video_max_res: config.rec_video_max_res as usize,
+            video_fps: config.rec_video_fps as usize,
+            record_mono: config.rec_video_mono,
+            noise_suppression: config.rec_noise_suppression,
+            open_editor: config.rec_video_open_editor,
+            gif_fps: config.rec_gif_fps as f64,
+            gif_quality: config.rec_gif_quality,
+            optimize_gif: config.rec_gif_optimize,
+            gif_size_idx: config.rec_gif_size_idx as usize,
+            mic_toggle: config.rec_mic,
+            speaker_toggle: config.rec_speaker,
+            ..Self::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::RecordingState;
+    use crate::config::AppConfig;
 
     #[test]
     fn settings_dropdown_hover_starts_clear() {
         assert_eq!(RecordingState::default().hovered_settings_dropdown_item, -1);
+    }
+
+    #[test]
+    fn recording_setup_restores_saved_settings() {
+        let config = AppConfig {
+            rec_controls: false,
+            rec_hidpi: false,
+            rec_notifications: false,
+            rec_remember_selection: true,
+            rec_dim_screen: false,
+            rec_countdown: false,
+            rec_video_max_res: 2,
+            rec_video_fps: 3,
+            rec_video_mono: true,
+            rec_noise_suppression: true,
+            rec_video_open_editor: true,
+            rec_gif_fps: 24,
+            rec_gif_quality: 0.4,
+            rec_gif_optimize: false,
+            rec_gif_size_idx: 2,
+            rec_mic: true,
+            rec_speaker: true,
+            ..AppConfig::default()
+        };
+
+        let state = RecordingState::from_app_config(&config);
+
+        assert!(!state.rec_controls);
+        assert!(!state.hidpi);
+        assert!(!state.do_not_disturb);
+        assert!(state.remember_selection);
+        assert!(!state.dim_screen);
+        assert!(!state.show_countdown);
+        assert_eq!(state.video_max_res, 2);
+        assert_eq!(state.video_fps, 3);
+        assert!(state.record_mono);
+        assert!(state.noise_suppression);
+        assert!(state.open_editor);
+        assert_eq!(state.gif_fps, 24.0);
+        assert_eq!(state.gif_quality, 0.4);
+        assert!(!state.optimize_gif);
+        assert_eq!(state.gif_size_idx, 2);
+        assert!(state.mic_toggle);
+        assert!(state.speaker_toggle);
     }
 }

@@ -7,6 +7,8 @@ import Meta from 'gi://Meta';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {classifyCursorTracker} from './cursor-classifier.js';
+
 const DBUS_NAME = 'org.apexshot.ShellOverlay';
 const DBUS_PATH = '/org/apexshot/ShellOverlay';
 const DAEMON_BUS_NAME = 'org.apexshot.Daemon';
@@ -232,15 +234,7 @@ export class ShellOverlayService {
     }
 
     _updateCursorKind() {
-        if (!this._tracker || typeof this._tracker.get_cursor !== 'function') {
-            this._cursorKind = 'default';
-            return;
-        }
-        try {
-            this._cursorKind = classifyCursorFromId(this._tracker.get_cursor());
-        } catch (e) {
-            this._cursorKind = 'default';
-        }
+        this._cursorKind = classifyCursorTracker(this._tracker);
     }
 
     _setupClickTracking() {
@@ -438,31 +432,4 @@ export class ShellOverlayService {
             this._countdown = null;
         }
     }
-}
-
-function classifyCursorFromId(cursorId) {
-    const C = Meta.Cursor;
-    try {
-        if (cursorId === C.IBEAM || cursorId === C.TEXT)
-            return 'text';
-        if (cursorId === C.POINTING_HAND || cursorId === C.HAND ||
-            cursorId === C.DND_MOVE || cursorId === C.DND_COPY || cursorId === C.DND_ALIAS)
-            return 'hand';
-        if (cursorId === C.CROSSHAIR || cursorId === C.CROSS ||
-            cursorId === C.CELL || cursorId === C.CROSS_REVERSE)
-            return 'crosshair';
-        if (cursorId === C.WATCH || cursorId === C.WAIT || cursorId === C.PROGRESS)
-            return 'wait';
-        if (cursorId === C.NORTH_RESIZE || cursorId === C.SOUTH_RESIZE ||
-            cursorId === C.EAST_RESIZE || cursorId === C.WEST_RESIZE ||
-            cursorId === C.NORTH_EAST_RESIZE || cursorId === C.NORTH_WEST_RESIZE ||
-            cursorId === C.SOUTH_EAST_RESIZE || cursorId === C.SOUTH_WEST_RESIZE ||
-            cursorId === C.LEFT_SIDE || cursorId === C.RIGHT_SIDE ||
-            cursorId === C.TOP_SIDE || cursorId === C.BOTTOM_SIDE ||
-            cursorId === C.TOP_LEFT_CORNER || cursorId === C.TOP_RIGHT_CORNER ||
-            cursorId === C.BOTTOM_LEFT_CORNER || cursorId === C.BOTTOM_RIGHT_CORNER ||
-            cursorId === C.COL_RESIZE || cursorId === C.ROW_RESIZE)
-            return 'resize';
-    } catch (e) {}
-    return 'default';
 }

@@ -138,36 +138,41 @@ else
   echo "$PACKAGE_NAME is not currently installed; skipping removal."
 fi
 echo "Installing $newest_deb..."
-sudo apt install -y --reinstall --allow-downgrades "$newest_deb"
+apt_deb="$(mktemp --tmpdir --suffix=.deb apexshot-dev-deb.XXXXXX)"
+trap 'rm -f "$apt_deb"' EXIT
+install -m 0644 "$newest_deb" "$apt_deb"
+sudo apt install -y --reinstall --allow-downgrades "$apt_deb"
+rm -f "$apt_deb"
+trap - EXIT
 
 echo "Verifying installed binaries..."
 cmp "$ROOT_DIR/target/release/apexshot" /usr/bin/apexshot
 cmp "$ROOT_DIR/target/release/apexshot-capture" /usr/bin/apexshot-capture
 
 EXT_UUID="apexshot-gnome-integration@apexshot.github.io"
+SYSTEM_EXT="/usr/share/gnome-shell/extensions/$EXT_UUID"
 USER_EXT="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
-EXT_FILES=(metadata.json extension.js shell-overlay.js window-list.js preview-stacking.js)
-extension_changed=false
+EXT_FILES=(metadata.json extension.js cursor-classifier.js shell-overlay.js window-list.js preview-stacking.js)
+
+echo "Verifying packaged GNOME Shell extension..."
 for file in "${EXT_FILES[@]}"; do
-  if [[ ! -f "$USER_EXT/$file" ]] \
-    || ! cmp -s "$ROOT_DIR/gnome-extension/$file" "$USER_EXT/$file"; then
-    extension_changed=true
-    break
+  if ! cmp -s "$ROOT_DIR/gnome-extension/$file" "$SYSTEM_EXT/$file"; then
+    echo "error: installed GNOME extension file does not match source: $file" >&2
+    exit 1
   fi
 done
 
-if [[ "$extension_changed" == true ]]; then
-  echo "Updating GNOME Shell extension (source changed)..."
-  mkdir -p "$USER_EXT"
-  for file in "${EXT_FILES[@]}"; do
-    cp -a "$ROOT_DIR/gnome-extension/$file" "$USER_EXT/$file"
-  done
-  if command -v gnome-extensions >/dev/null 2>&1; then
-    gnome-extensions disable "$EXT_UUID" 2>/dev/null || true
-    gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
-  fi
-else
-  echo "GNOME Shell extension is unchanged; skipping copy and reload."
+echo "Refreshing live GNOME Shell extension..."
+if command -v gnome-extensions >/dev/null 2>&1; then
+  gnome-extensions disable "$EXT_UUID" 2>/dev/null || true
+fi
+mkdir -p "$USER_EXT"
+for file in "${EXT_FILES[@]}"; do
+  cp -a "$ROOT_DIR/gnome-extension/$file" "$USER_EXT/$file"
+  cmp "$ROOT_DIR/gnome-extension/$file" "$USER_EXT/$file"
+done
+if command -v gnome-extensions >/dev/null 2>&1; then
+  gnome-extensions enable "$EXT_UUID"
 fi
 
 echo "Installed $PACKAGE_NAME from $newest_deb"

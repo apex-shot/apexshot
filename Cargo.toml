@@ -169,6 +169,7 @@ assets = [
     ["native-host/io.github.codegoddy.apexshot.json", "etc/chromium/NativeMessagingHosts/", "644"],
     ["gnome-extension/metadata.json", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
     ["gnome-extension/extension.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
+    ["gnome-extension/cursor-classifier.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
     ["gnome-extension/shell-overlay.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
     ["gnome-extension/window-list.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
     ["gnome-extension/preview-stacking.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
