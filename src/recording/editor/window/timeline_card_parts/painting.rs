@@ -128,6 +128,7 @@ pub fn draw_video_clip(
     state: &Arc<Mutex<VideoEditState>>,
     hovered: Option<usize>,
     dragging: Option<usize>,
+    light: bool,
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -160,10 +161,11 @@ pub fn draw_video_clip(
             x0,
             x1,
             h,
-            clip_tone(selected, faint),
+            clip_tone(selected, faint, light),
             selected,
             hovered == Some(seg_idx),
             false,
+            light,
             label,
         );
     }
@@ -173,16 +175,36 @@ pub fn draw_video_clip(
             x0,
             x1,
             h,
-            clip_tone(true, false),
+            clip_tone(true, false, light),
             true,
             true,
             true,
+            light,
             bounds.get(seg_idx).map(|&(start, end)| (title, start, end)),
         );
     }
 }
 
-pub fn clip_tone(selected: bool, faint: bool) -> ClipTone {
+pub fn clip_tone(selected: bool, faint: bool, light: bool) -> ClipTone {
+    if light {
+        return if faint {
+            ClipTone {
+                fill: (0.78, 0.52, 0.14, 0.16),
+                handle: (0.48, 0.28, 0.03, 0.38),
+            }
+        } else if selected {
+            ClipTone {
+                fill: (0.78, 0.52, 0.14, 0.54),
+                handle: (0.48, 0.28, 0.03, 1.0),
+            }
+        } else {
+            ClipTone {
+                fill: (0.78, 0.52, 0.14, 0.38),
+                handle: (0.48, 0.28, 0.03, 0.88),
+            }
+        };
+    }
+
     if faint {
         ClipTone {
             fill: (0.78, 0.58, 0.18, 0.10),
@@ -210,6 +232,7 @@ pub fn draw_video_segment(
     selected: bool,
     show_handles: bool,
     lifted: bool,
+    light: bool,
     label: Option<(&str, f64, f64)>,
 ) {
     let clip_w = (x1 - x0).max(24.0);
@@ -218,7 +241,12 @@ pub fn draw_video_segment(
     draw_translucent_clip(cr, x0, y, clip_w, height, tone, show_handles);
     if selected {
         rounded_rect(cr, x0, y, clip_w, height, 5.0);
-        cr.set_source_rgba(0.98, 0.86, 0.42, 0.88);
+        let (r, g, b, a) = if light {
+            (0.45, 0.25, 0.02, 0.92)
+        } else {
+            (0.98, 0.86, 0.42, 0.88)
+        };
+        cr.set_source_rgba(r, g, b, a);
         cr.set_line_width(1.5);
         let _ = cr.stroke();
     }
@@ -229,7 +257,11 @@ pub fn draw_video_segment(
     let thumb = 28.0;
     if clip_w > 86.0 {
         rounded_rect(cr, x0 + 18.0, y + (height - thumb) / 2.0, thumb, thumb, 5.0);
-        cr.set_source_rgba(0.08, 0.08, 0.08, 0.55);
+        if light {
+            cr.set_source_rgba(0.20, 0.12, 0.02, 0.24);
+        } else {
+            cr.set_source_rgba(0.08, 0.08, 0.08, 0.55);
+        }
         let _ = cr.fill();
     }
     cr.select_font_face(
@@ -237,14 +269,22 @@ pub fn draw_video_segment(
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.88);
+    if light {
+        cr.set_source_rgba(0.16, 0.10, 0.02, 0.96);
+    } else {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.88);
+    }
     cr.set_font_size(12.0);
     let text_x = if clip_w > 86.0 { x0 + 54.0 } else { x0 + 18.0 };
     if clip_w > 72.0 {
         cr.move_to(text_x, y + height * 0.42);
         let _ = cr.show_text(title);
         cr.set_font_size(10.0);
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.48);
+        if light {
+            cr.set_source_rgba(0.16, 0.10, 0.02, 0.70);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.48);
+        }
         cr.move_to(text_x, y + height * 0.68);
         let _ = cr.show_text(&format_range(start, end));
     }
@@ -255,6 +295,7 @@ pub fn draw_zoom_clips(
     hovered: Option<usize>,
     hover_time: Option<f64>,
     dragging: Option<usize>,
+    light: bool,
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -273,17 +314,19 @@ pub fn draw_zoom_clips(
             continue;
         }
         draw_one_zoom(
-            &state, cr, w, h, index, start, end, hovered, dragging, false,
+            &state, cr, w, h, index, start, end, hovered, dragging, false, light,
         );
     }
     if let Some(index) = dragging {
         if let Some(&(_, start, end)) = clips.iter().find(|(i, _, _)| *i == index) {
-            draw_one_zoom(&state, cr, w, h, index, start, end, hovered, dragging, true);
+            draw_one_zoom(
+                &state, cr, w, h, index, start, end, hovered, dragging, true, light,
+            );
         }
     }
     if let Some(start) = hover_time {
         if let Some((start, end)) = suggested_zoom_range(&state, start) {
-            draw_zoom_suggestion(&state, cr, w, h, start, end);
+            draw_zoom_suggestion(&state, cr, w, h, start, end, light);
         }
     }
 }
@@ -299,21 +342,35 @@ pub fn draw_one_zoom(
     hovered: Option<usize>,
     dragging: Option<usize>,
     lifted: bool,
+    light: bool,
 ) {
     let x0 = state.time_to_x(start, w);
     let x1 = state.time_to_x(end, w);
     let clip_w = (x1 - x0).max(22.0);
     let selected = lifted || state.selected_zoom == Some(index);
     let faint = !lifted && (dragging.is_some() || (state.selected_zoom.is_some() && !selected));
-    let blue = ClipTone {
-        fill: if faint {
-            (0.27, 0.43, 0.82, 0.10)
-        } else if selected {
-            (0.30, 0.48, 0.86, 0.36)
-        } else {
-            (0.27, 0.43, 0.82, 0.26)
-        },
-        handle: (0.72, 0.84, 1.0, if faint { 0.30 } else { 0.98 }),
+    let blue = if light {
+        ClipTone {
+            fill: if faint {
+                (0.18, 0.37, 0.72, 0.14)
+            } else if selected {
+                (0.18, 0.37, 0.72, 0.54)
+            } else {
+                (0.18, 0.37, 0.72, 0.36)
+            },
+            handle: (0.10, 0.24, 0.52, if faint { 0.34 } else { 0.94 }),
+        }
+    } else {
+        ClipTone {
+            fill: if faint {
+                (0.27, 0.43, 0.82, 0.10)
+            } else if selected {
+                (0.30, 0.48, 0.86, 0.36)
+            } else {
+                (0.27, 0.43, 0.82, 0.26)
+            },
+            handle: (0.72, 0.84, 1.0, if faint { 0.30 } else { 0.98 }),
+        }
     };
     let y = if lifted { 1.0 } else { 7.0 };
     let height = h - 14.0;
@@ -327,7 +384,11 @@ pub fn draw_one_zoom(
         lifted || hovered == Some(index),
     );
     if clip_w > 40.0 {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
+        if light {
+            cr.set_source_rgba(0.05, 0.13, 0.31, 0.96);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
+        }
         cr.select_font_face(
             crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
@@ -363,6 +424,7 @@ pub fn draw_cursor_hide_clips(
     hovered: Option<usize>,
     hover_time: Option<f64>,
     dragging: Option<usize>,
+    light: bool,
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -381,17 +443,19 @@ pub fn draw_cursor_hide_clips(
             continue;
         }
         draw_one_hide(
-            &state, cr, w, h, index, start, end, hovered, dragging, false,
+            &state, cr, w, h, index, start, end, hovered, dragging, false, light,
         );
     }
     if let Some(index) = dragging {
         if let Some(&(_, start, end)) = clips.iter().find(|(i, _, _)| *i == index) {
-            draw_one_hide(&state, cr, w, h, index, start, end, hovered, dragging, true);
+            draw_one_hide(
+                &state, cr, w, h, index, start, end, hovered, dragging, true, light,
+            );
         }
     }
     if let Some(start) = hover_time {
         if let Some((start, end)) = suggested_hide_range(&state, start) {
-            draw_hide_suggestion(&state, cr, w, h, start, end);
+            draw_hide_suggestion(&state, cr, w, h, start, end, light);
         }
     }
 }
@@ -407,6 +471,7 @@ pub fn draw_one_hide(
     hovered: Option<usize>,
     dragging: Option<usize>,
     lifted: bool,
+    light: bool,
 ) {
     let x0 = state.time_to_x(start, w);
     let x1 = state.time_to_x(end, w);
@@ -414,15 +479,28 @@ pub fn draw_one_hide(
     let selected = lifted || state.selected_cursor_hide == Some(index);
     let faint =
         !lifted && (dragging.is_some() || (state.selected_cursor_hide.is_some() && !selected));
-    let rose = ClipTone {
-        fill: if faint {
-            (0.72, 0.28, 0.32, 0.10)
-        } else if selected {
-            (0.78, 0.32, 0.36, 0.36)
-        } else {
-            (0.72, 0.28, 0.32, 0.26)
-        },
-        handle: (1.0, 0.78, 0.80, if faint { 0.30 } else { 0.98 }),
+    let rose = if light {
+        ClipTone {
+            fill: if faint {
+                (0.66, 0.16, 0.23, 0.14)
+            } else if selected {
+                (0.66, 0.16, 0.23, 0.52)
+            } else {
+                (0.66, 0.16, 0.23, 0.34)
+            },
+            handle: (0.42, 0.05, 0.10, if faint { 0.34 } else { 0.94 }),
+        }
+    } else {
+        ClipTone {
+            fill: if faint {
+                (0.72, 0.28, 0.32, 0.10)
+            } else if selected {
+                (0.78, 0.32, 0.36, 0.36)
+            } else {
+                (0.72, 0.28, 0.32, 0.26)
+            },
+            handle: (1.0, 0.78, 0.80, if faint { 0.30 } else { 0.98 }),
+        }
     };
     let y = if lifted { 1.0 } else { 7.0 };
     let height = h - 14.0;
@@ -436,7 +514,11 @@ pub fn draw_one_hide(
         lifted || hovered == Some(index),
     );
     if clip_w > 40.0 {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
+        if light {
+            cr.set_source_rgba(0.30, 0.03, 0.07, 0.96);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
+        }
         cr.select_font_face(
             crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
@@ -465,6 +547,7 @@ pub fn draw_hide_suggestion(
     h: f64,
     start: f64,
     end: f64,
+    light: bool,
 ) {
     let x0 = state.time_to_x(start, w);
     let x1 = state.time_to_x(end, w);
@@ -472,15 +555,27 @@ pub fn draw_hide_suggestion(
     let y = 7.0;
     let height = h - 14.0;
     rounded_rect(cr, x0, y, clip_w, height, 5.0);
-    cr.set_source_rgba(0.78, 0.32, 0.36, 0.12);
+    if light {
+        cr.set_source_rgba(0.66, 0.16, 0.23, 0.20);
+    } else {
+        cr.set_source_rgba(0.78, 0.32, 0.36, 0.12);
+    }
     let _ = cr.fill_preserve();
-    cr.set_source_rgba(1.0, 0.78, 0.80, 0.38);
+    if light {
+        cr.set_source_rgba(0.42, 0.05, 0.10, 0.58);
+    } else {
+        cr.set_source_rgba(1.0, 0.78, 0.80, 0.38);
+    }
     cr.set_line_width(1.0);
     cr.set_dash(&[4.0, 3.0], 0.0);
     let _ = cr.stroke();
     cr.set_dash(&[], 0.0);
     if clip_w > 40.0 {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+        if light {
+            cr.set_source_rgba(0.30, 0.03, 0.07, 0.72);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+        }
         cr.select_font_face(
             crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
@@ -499,6 +594,7 @@ pub fn draw_zoom_suggestion(
     h: f64,
     start: f64,
     end: f64,
+    light: bool,
 ) {
     let x0 = state.time_to_x(start, w);
     let x1 = state.time_to_x(end, w);
@@ -506,15 +602,27 @@ pub fn draw_zoom_suggestion(
     let y = 7.0;
     let height = h - 14.0;
     rounded_rect(cr, x0, y, clip_w, height, 5.0);
-    cr.set_source_rgba(0.30, 0.48, 0.86, 0.12);
+    if light {
+        cr.set_source_rgba(0.18, 0.37, 0.72, 0.20);
+    } else {
+        cr.set_source_rgba(0.30, 0.48, 0.86, 0.12);
+    }
     let _ = cr.fill_preserve();
-    cr.set_source_rgba(0.72, 0.84, 1.0, 0.38);
+    if light {
+        cr.set_source_rgba(0.10, 0.24, 0.52, 0.58);
+    } else {
+        cr.set_source_rgba(0.72, 0.84, 1.0, 0.38);
+    }
     cr.set_line_width(1.0);
     cr.set_dash(&[4.0, 3.0], 0.0);
     let _ = cr.stroke();
     cr.set_dash(&[], 0.0);
     if clip_w > 40.0 {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+        if light {
+            cr.set_source_rgba(0.05, 0.13, 0.31, 0.72);
+        } else {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+        }
         cr.select_font_face(
             crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,

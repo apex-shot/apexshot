@@ -110,11 +110,12 @@ pub fn build_timeline_card(
         let state = state.clone();
         let hovered_video = hovered_video.clone();
         let dragging_video = dragging_video.clone();
-        move |_, cr, width, height| {
+        move |area, cr, width, height| {
             draw_video_clip(
                 &state,
                 hovered_video.get(),
                 dragging_video.get(),
+                widget_is_light(area),
                 cr,
                 width,
                 height,
@@ -131,12 +132,13 @@ pub fn build_timeline_card(
         let hovered_zoom = hovered_zoom.clone();
         let hover_zoom_time = hover_zoom_time.clone();
         let dragging_zoom = dragging_zoom.clone();
-        move |_, cr, width, height| {
+        move |area, cr, width, height| {
             draw_zoom_clips(
                 &state,
                 hovered_zoom.get(),
                 hover_zoom_time.get(),
                 dragging_zoom.get(),
+                widget_is_light(area),
                 cr,
                 width,
                 height,
@@ -153,12 +155,13 @@ pub fn build_timeline_card(
         let hovered_hide = hovered_hide.clone();
         let hover_hide_time = hover_hide_time.clone();
         let dragging_hide = dragging_hide.clone();
-        move |_, cr, width, height| {
+        move |area, cr, width, height| {
             draw_cursor_hide_clips(
                 &state,
                 hovered_hide.get(),
                 hover_hide_time.get(),
                 dragging_hide.get(),
+                widget_is_light(area),
                 cr,
                 width,
                 height,

@@ -705,12 +705,43 @@ fn build_settings_window(app: &Application) {
 }
 
 /// Wire every settings control so any edit flips Save from grey → orange (ready).
+/// Keep the settings page scrolling when the pointer is over a dropdown.
+///
+/// GTK's default ComboBoxText behavior treats wheel input as a selection
+/// change. In a scrolling preferences page that makes ordinary navigation
+/// accidentally alter a setting, so intercept it before the combo sees it and
+/// apply the delta to the containing scroller instead.
+fn install_combo_scroll_passthrough(combo: &gtk4::ComboBoxText) {
+    let controller = gtk4::EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
+    controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    controller.connect_scroll(move |controller, _, dy| {
+        if dy.abs() > f64::EPSILON {
+            if let Some(scroller) = controller
+                .widget()
+                .and_then(|widget| widget.ancestor(ScrolledWindow::static_type()))
+                .and_then(|widget| widget.downcast::<ScrolledWindow>().ok())
+            {
+                let adjustment = scroller.vadjustment();
+                let max_value =
+                    (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+                let next_value = (adjustment.value() + dy * adjustment.step_increment())
+                    .clamp(adjustment.lower(), max_value);
+                adjustment.set_value(next_value);
+            }
+        }
+
+        gtk4::glib::Propagation::Stop
+    });
+    combo.add_controller(controller);
+}
+
 fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>) {
     let wire_check = |check: &gtk4::CheckButton| {
         let mark_dirty = Rc::clone(&mark_dirty);
         check.connect_toggled(move |_| mark_dirty());
     };
     let wire_combo = |combo: &gtk4::ComboBoxText| {
+        install_combo_scroll_passthrough(combo);
         let mark_dirty = Rc::clone(&mark_dirty);
         combo.connect_changed(move |_| mark_dirty());
     };

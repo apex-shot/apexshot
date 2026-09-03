@@ -260,8 +260,6 @@ private:
 };
 
 /// Compact floating panel — does NOT cover the full screen (live desktop stays).
-/// Opaque (not WA_TranslucentBackground): translucent Tool/Dialog surfaces on
-/// GNOME Wayland sometimes linger as semi-transparent ghosts after hide().
 class PickerPanel : public QWidget
 {
 public:
@@ -272,8 +270,8 @@ public:
         , m_result(result)
         , m_dismissing(false)
     {
-        setAttribute(Qt::WA_TranslucentBackground, false);
-        setAttribute(Qt::WA_OpaquePaintEvent, true);
+        setAttribute(Qt::WA_TranslucentBackground);
+        setAttribute(Qt::WA_OpaquePaintEvent, false);
         setAttribute(Qt::WA_DeleteOnClose, false);
         setFocusPolicy(Qt::StrongFocus);
         setMouseTracking(true);
@@ -302,9 +300,6 @@ protected:
     {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
-
-        // Full opaque fill first so nothing under the window shows through.
-        p.fillRect(rect(), kBgRoot);
 
         const QRectF r = QRectF(rect()).adjusted(1, 1, -1, -1);
         QPainterPath panel;
@@ -356,8 +351,12 @@ public:
         setAlignment(Qt::AlignCenter);
         setCursor(Qt::PointingHandCursor);
         setStyleSheet(QStringLiteral(
-          "QLabel { color: rgba(255,255,255,0.55); background: transparent; "
-          "padding: 8px 16px; font-size: 12px; }"));
+          "QLabel { color: rgba(255,255,255,0.82); "
+          "background: rgba(255,255,255,16); "
+          "border: none; border-radius: 8px; "
+          "padding: 8px 18px; font-size: 12px; font-weight: 600; }"
+          "QLabel:hover { color: rgba(255,255,255,0.96); "
+          "background: rgba(255,255,255,28); }"));
     }
 
 protected:
@@ -366,20 +365,6 @@ protected:
         if (m_panel) {
             m_panel->dismissAndQuit(-1);
         }
-    }
-
-    void enterEvent(QEvent*) override
-    {
-        setStyleSheet(QStringLiteral(
-          "QLabel { color: rgba(255,255,255,0.9); background: transparent; "
-          "padding: 8px 16px; font-size: 12px; }"));
-    }
-
-    void leaveEvent(QEvent*) override
-    {
-        setStyleSheet(QStringLiteral(
-          "QLabel { color: rgba(255,255,255,0.55); background: transparent; "
-          "padding: 8px 16px; font-size: 12px; }"));
     }
 
 private:

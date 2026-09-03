@@ -6,7 +6,7 @@ pub fn toggle_playback(
     redraw: &Rc<dyn Fn()>,
 ) {
     if playing.get() {
-        pause_playback(media, playing, play_button, &redraw);
+        pause_playback(media, playing, play_button, redraw);
         return;
     }
 

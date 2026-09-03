@@ -4,9 +4,9 @@ pub fn labeled_tool_button(icon_name: &str, label: &str, tooltip: &str) -> Butto
     button.add_css_class("recording-editor-timeline-tool");
     button.set_tooltip_text(Some(tooltip));
     let row = GtkBox::new(Orientation::Horizontal, 6);
-    let icon = Image::from_icon_name(icon_name);
-    icon.set_pixel_size(14);
     let text = Label::new(Some(label));
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(18);
     row.append(&icon);
     row.append(&text);
     button.set_child(Some(&row));
@@ -38,4 +38,3 @@ pub fn format_mmss(seconds: f64) -> String {
     let total = seconds.max(0.0).floor() as u64;
     format!("{:02}:{:02}", total / 60, total % 60)
 }
-
