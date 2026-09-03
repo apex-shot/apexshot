@@ -539,6 +539,83 @@ update_gnome_extension() {
     fi
 }
 
+# --- Start updated application -----------------------------------------------
+
+# Run a command as the desktop user (not root) with session bus env when possible.
+run_as_desktop_user() {
+    if [[ $EUID -ne 0 ]]; then
+        "$@"
+        return $?
+    fi
+    local user="${SUDO_USER:-}"
+    if [[ -z "$user" || "$user" == "root" ]]; then
+        return 1
+    fi
+    local target_uid runtime_dir bus_address
+    target_uid=$(id -u "$user" 2>/dev/null || true)
+    runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${target_uid}}"
+    bus_address="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${runtime_dir}/bus}"
+    if command -v sudo >/dev/null 2>&1; then
+        sudo -u "$user" \
+            env \
+            DISPLAY="${DISPLAY:-}" \
+            WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+            XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-}" \
+            XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-}" \
+            XDG_RUNTIME_DIR="${runtime_dir}" \
+            DBUS_SESSION_BUS_ADDRESS="${bus_address}" \
+            "$@"
+    elif command -v runuser >/dev/null 2>&1; then
+        runuser -u "$user" -- \
+            env \
+            DISPLAY="${DISPLAY:-}" \
+            WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+            XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-}" \
+            XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-}" \
+            XDG_RUNTIME_DIR="${runtime_dir}" \
+            DBUS_SESSION_BUS_ADDRESS="${bus_address}" \
+            "$@"
+    else
+        return 1
+    fi
+}
+
+post_update_launch() {
+    step "Starting ApexShot"
+
+    if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+        info "No graphical session detected. Open ApexShot from the app menu after login."
+        return 0
+    fi
+
+    local bin="/usr/bin/apexshot"
+    if [[ ! -x "$bin" ]]; then
+        warn "apexshot binary not found; open it from the app menu after update."
+        return 0
+    fi
+
+    if ! run_as_desktop_user bash -c "
+        '${bin}' daemon >/dev/null 2>&1 &
+        sleep 0.6
+        '${bin}' >/dev/null 2>&1 &
+        true
+    "; then
+        if [[ $EUID -ne 0 ]]; then
+            nohup "$bin" daemon >/dev/null 2>&1 &
+            disown 2>/dev/null || true
+            sleep 0.6
+            nohup "$bin" >/dev/null 2>&1 &
+            disown 2>/dev/null || true
+            ok "Opened ApexShot (tray daemon + settings window)"
+        else
+            info "Could not launch GUI as a desktop user. Open ApexShot from the app menu."
+        fi
+        return 0
+    fi
+
+    ok "Opened ApexShot (tray daemon + settings window)"
+}
+
 summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
     echo -e "${GREEN}${BOLD}  ApexShot is up to date!${RESET}\n"
@@ -563,6 +640,7 @@ main() {
     update_from_release
     cleanup_shadowing_local_binaries
     update_gnome_extension
+    post_update_launch
     summary
 }
 

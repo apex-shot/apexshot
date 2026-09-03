@@ -231,8 +231,8 @@ pub fn generate_waveform(metadata: &VideoMetadata) -> anyhow::Result<PathBuf> {
 /// Extract one frame from `input` into `output` as a poster image.
 ///
 /// Same invocation shape as `generate_thumbnails` (fast input seek, single
-/// frame, no audio) but writes exactly one frame at full size so the caller can
-/// scale it however it likes. Used for the History window's recording cards.
+/// frame, no audio), but scales the result to the History cache width before
+/// writing it. The History thumbnail pipeline performs the final crop.
 pub fn extract_poster_frame(
     input: &Path,
     output: &Path,
@@ -243,17 +243,7 @@ pub fn extract_poster_frame(
             .with_context(|| format!("failed to create poster dir {}", parent.display()))?;
     }
 
-    let args = vec![
-        "-y".to_string(),
-        "-ss".to_string(),
-        format_seconds(timestamp_seconds),
-        "-i".to_string(),
-        input.to_string_lossy().to_string(),
-        "-an".to_string(),
-        "-frames:v".to_string(),
-        "1".to_string(),
-        output.to_string_lossy().to_string(),
-    ];
+    let args = poster_frame_args(input, output, timestamp_seconds);
     run_ffmpeg(args, output)?;
 
     // A seek past the end of a very short clip exits cleanly without writing
@@ -265,6 +255,22 @@ pub fn extract_poster_frame(
         ));
     }
     Ok(())
+}
+
+fn poster_frame_args(input: &Path, output: &Path, timestamp_seconds: f64) -> Vec<String> {
+    vec![
+        "-y".to_string(),
+        "-ss".to_string(),
+        format_seconds(timestamp_seconds),
+        "-i".to_string(),
+        input.to_string_lossy().to_string(),
+        "-an".to_string(),
+        "-frames:v".to_string(),
+        "1".to_string(),
+        "-vf".to_string(),
+        "scale=260:-2".to_string(),
+        output.to_string_lossy().to_string(),
+    ]
 }
 
 fn thumbnail_count(_duration_seconds: f64) -> usize {
@@ -780,6 +786,18 @@ mod tests {
             ["-ac", "1", "-c:a", "aac", "-b:a", "128k"]
         );
         assert_eq!(audio_args(AudioMode::Muted, true), ["-an"]);
+    }
+
+    #[test]
+    fn poster_frame_command_scales_before_writing() {
+        let args = poster_frame_args(
+            Path::new("/tmp/input.mp4"),
+            Path::new("/tmp/poster.png"),
+            1.0,
+        );
+
+        assert!(args.windows(2).any(|pair| pair == ["-vf", "scale=260:-2"]));
+        assert_eq!(args.last().map(String::as_str), Some("/tmp/poster.png"));
     }
 
     #[test]
