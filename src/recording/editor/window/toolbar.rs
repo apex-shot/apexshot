@@ -180,7 +180,7 @@ pub(super) fn build_traffic_lights(window: &ApplicationWindow) -> GtkBox {
     zoom.add_css_class("recording-editor-traffic-btn");
 
     for button in [&close, &minimize, &zoom] {
-        button.set_size_request(24, 24);
+        button.set_size_request(28, 28);
         button.set_valign(Align::Center);
     }
 

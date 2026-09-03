@@ -45,27 +45,27 @@
             }
 
             .editor-root button.recording-editor-traffic-btn {
-                min-width: 24px;
-                min-height: 24px;
+                min-width: 28px;
+                min-height: 28px;
                 padding: 0;
                 margin: 0;
                 border-radius: 999px;
                 background-color: transparent;
                 background-image: none;
-                color: rgba(255, 255, 255, 0.65);
+                color: rgba(255, 255, 255, 0.92);
                 border: none;
                 box-shadow: none;
                 outline: none;
             }
 
             .editor-root button.recording-editor-traffic-btn image {
-                -gtk-icon-size: 14px;
+                -gtk-icon-size: 16px;
             }
 
             .editor-root button.recording-editor-traffic-btn:hover {
                 background-color: rgba(255, 255, 255, 0.08);
                 background-image: none;
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
                 border-radius: 999px;
                 border: none;
                 box-shadow: none;
@@ -74,7 +74,7 @@
             .editor-root button.recording-editor-traffic-btn:active {
                 background-color: rgba(255, 255, 255, 0.08);
                 background-image: none;
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
                 border: none;
                 box-shadow: none;
             }
@@ -82,7 +82,7 @@
             .editor-root button.recording-editor-traffic-btn:focus {
                 background-color: transparent;
                 background-image: none;
-                color: rgba(255, 255, 255, 0.65);
+                color: rgba(255, 255, 255, 0.92);
                 border: none;
                 box-shadow: none;
                 outline: none;
@@ -90,13 +90,13 @@
 
             .editor-root button.recording-editor-traffic-btn:hover:focus {
                 background-color: rgba(255, 255, 255, 0.08);
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
             }
 
             .editor-root button.recording-editor-traffic-btn:hover image,
             .editor-root button.recording-editor-traffic-btn:active image,
             .editor-root button.recording-editor-traffic-btn:hover:focus image {
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
             }
 
             .editor-root button.recording-editor-traffic-close:hover,
@@ -151,28 +151,28 @@
             }
 
             .recent-captures-wm-btn {
-                min-width: 24px;
-                min-height: 24px;
+                min-width: 28px;
+                min-height: 28px;
                 padding: 0;
                 border-radius: 999px;
                 background: transparent;
-                color: alpha(white, 0.65);
+                color: alpha(white, 0.92);
                 transition: background 0.15s, color 0.15s;
             }
             .recent-captures-wm-btn image {
-                -gtk-icon-size: 14px;
+                -gtk-icon-size: 16px;
             }
             .recent-captures-wm-btn:hover {
                 background: rgba(255, 255, 255, 0.08);
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
             }
             .recent-captures-wm-btn:active {
                 background: rgba(255, 255, 255, 0.08);
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
             }
             .recent-captures-wm-btn:focus {
                 background: transparent;
-                color: alpha(white, 0.65);
+                color: alpha(white, 0.92);
                 outline: none;
             }
             .recent-captures-wm-close:hover,
@@ -1873,7 +1873,7 @@
 
             /* Window controls (traffic buttons) */
             .editor-root.editor-theme-light button.recording-editor-traffic-btn {
-                color: alpha(#1d2129, 0.65);
+                color: alpha(#1d2129, 0.82);
             }
             .editor-root.editor-theme-light button.recording-editor-traffic-btn:hover {
                 background-color: alpha(#111827, 0.10);
@@ -1885,7 +1885,7 @@
             }
             .editor-root.editor-theme-light button.recording-editor-traffic-btn:focus {
                 background-color: transparent;
-                color: alpha(#1d2129, 0.65);
+                color: alpha(#1d2129, 0.82);
                 outline: none;
             }
             .editor-root.editor-theme-light button.recording-editor-traffic-btn:hover:focus {

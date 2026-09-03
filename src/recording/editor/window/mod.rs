@@ -396,7 +396,7 @@ fn build_window_controls(
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
 ) -> (GtkBox, Label, Button, Button) {
-    const TRAFFIC_LIGHTS_WIDTH: i32 = 84;
+    const TRAFFIC_LIGHTS_WIDTH: i32 = 100;
     let bar = GtkBox::new(Orientation::Horizontal, 8);
     bar.add_css_class("recording-editor-window-controls");
     bar.set_hexpand(true);

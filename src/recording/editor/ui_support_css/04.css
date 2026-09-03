@@ -336,7 +336,7 @@
             }
 
             .editor-theme-light .recording-editor-traffic-btn {
-                color: alpha(#111827, 0.65);
+                color: alpha(#111827, 0.82);
             }
 
             .editor-theme-light .recording-editor-traffic-btn:hover {
@@ -351,7 +351,7 @@
 
             .editor-theme-light .recording-editor-traffic-btn:focus {
                 background: transparent;
-                color: alpha(#111827, 0.65);
+                color: alpha(#111827, 0.82);
                 outline: none;
             }
 

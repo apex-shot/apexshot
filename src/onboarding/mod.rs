@@ -124,7 +124,7 @@ fn build_onboarding_window(app: &Application) {
     // --- TOOLBAR ---
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
     toolbar.add_css_class("settings-window-controls");
-    toolbar.set_size_request(-1, 30);
+    toolbar.set_size_request(-1, 36);
 
     let drag_handle = GtkBox::new(Orientation::Horizontal, 0);
     drag_handle.set_hexpand(true);
@@ -146,7 +146,7 @@ fn build_onboarding_window(app: &Application) {
     min_btn.connect_clicked(move |_| win_clone.minimize());
 
     for button in [&close_btn, &min_btn] {
-        button.set_size_request(24, 24);
+        button.set_size_request(28, 28);
         button.set_valign(Align::Center);
     }
 

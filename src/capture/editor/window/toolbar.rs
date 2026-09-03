@@ -142,7 +142,7 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     traffic_zoom.add_css_class("recording-editor-traffic-btn");
 
     for button in [&traffic_close, &traffic_minimize, &traffic_zoom] {
-        button.set_size_request(24, 24);
+        button.set_size_request(28, 28);
         button.set_valign(Align::Center);
     }
 

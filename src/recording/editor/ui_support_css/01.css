@@ -179,7 +179,7 @@
 
             /* ── Title bar ── */
             .recording-editor-window-controls {
-                min-height: 28px;
+                min-height: 32px;
                 padding: 2px 8px 2px 10px;
                 background: #000000;
                 border-bottom: none;
@@ -188,7 +188,7 @@
             }
 
             .recording-editor-window-controls.editor-toolbar {
-                min-height: 28px;
+                min-height: 32px;
             }
 
             .recording-editor-title {
@@ -266,33 +266,33 @@
             }
 
             .recording-editor-traffic-lights {
-                min-height: 24px;
+                min-height: 28px;
                 margin: 0;
                 padding: 0;
             }
 
             .recording-editor-traffic-btn {
-                min-width: 24px;
-                min-height: 24px;
+                min-width: 28px;
+                min-height: 28px;
                 padding: 0;
                 margin: 0;
                 border-radius: 999px;
                 background: transparent;
                 background-image: none;
-                color: alpha(white, 0.65);
+                color: alpha(white, 0.92);
                 border: none;
                 box-shadow: none;
                 outline: none;
             }
 
             .recording-editor-traffic-btn image {
-                -gtk-icon-size: 14px;
+                -gtk-icon-size: 16px;
             }
 
             .recording-editor-traffic-btn:hover {
                 background: rgba(255, 255, 255, 0.08);
                 background-image: none;
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
                 border-radius: 999px;
                 border: none;
                 box-shadow: none;
@@ -301,14 +301,14 @@
             .recording-editor-traffic-btn:active {
                 background: rgba(255, 255, 255, 0.08);
                 background-image: none;
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
                 border: none;
                 box-shadow: none;
             }
 
             .recording-editor-traffic-btn:focus {
                 background: transparent;
-                color: alpha(white, 0.65);
+                color: alpha(white, 0.92);
                 border: none;
                 box-shadow: none;
                 outline: none;
@@ -316,13 +316,13 @@
 
             .recording-editor-traffic-btn:hover:focus {
                 background: rgba(255, 255, 255, 0.08);
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
             }
 
             .recording-editor-traffic-btn:hover image,
             .recording-editor-traffic-btn:active image,
             .recording-editor-traffic-btn:hover:focus image {
-                color: rgba(236, 236, 238, 0.95);
+                color: #ffffff;
             }
 
             .recording-editor-traffic-close:hover,
