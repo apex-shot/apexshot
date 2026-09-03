@@ -198,6 +198,10 @@ fn maybe_prompt_gnome_extension() {
     }
 }
 
+fn should_open_recording_editor(open_editor: bool) -> bool {
+    open_editor
+}
+
 #[derive(Debug)]
 pub struct PreparedOverlayRecordingRequest {
     pub updated_app_config: AppConfig,
@@ -816,8 +820,7 @@ pub fn run_overlay_recording_request_with_gtk(
                 .unwrap_or("recording");
             crate::utils::notify::desktop_notification("Recording saved", file_name);
 
-            let sidecar_exists = PointerSidecar::exists_next_to_video(&path);
-            if sidecar_exists || open_editor {
+            if should_open_recording_editor(open_editor) {
                 spawn_recording_editor_subprocess(path.clone());
             }
             Ok(path)
@@ -881,6 +884,12 @@ mod tests {
         let saved = slot.expect("first pointer track should remain stashed");
         assert_eq!(saved.t0_monotonic_us, 123);
         assert_eq!(saved.samples[0].1, 10);
+    }
+
+    #[test]
+    fn recording_editor_launch_respects_the_open_editor_setting() {
+        assert!(should_open_recording_editor(true));
+        assert!(!should_open_recording_editor(false));
     }
 
     #[test]
