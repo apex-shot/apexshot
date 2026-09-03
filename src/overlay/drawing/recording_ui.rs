@@ -54,11 +54,7 @@ pub(crate) fn draw_recording_panel(
         screen_width,
         screen_height,
     );
-    for panel in [
-        deck.left_toggle_rail,
-        deck.top_cluster,
-        deck.bottom_action_bar,
-    ] {
+    for panel in [deck.left_toggle_rail, deck.top_cluster] {
         super::draw_frosted_panel(
             context,
             panel.x,
@@ -279,6 +275,17 @@ pub(crate) fn draw_recording_panel(
             selected_record_type == Some(RecordingType::Gif),
         ),
     ] {
+        super::draw_frosted_panel(
+            context,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            10.0,
+            screen_width,
+            screen_height,
+            background,
+        );
         let hovered = hover_tile == Some(tile);
         if hovered {
             let hr = RectF {
