@@ -99,6 +99,16 @@ jobs:
       - name: Validate desktop + AppStream metadata
         run: scripts/validate-metadata.sh
 
+      - name: Reject nested gitlinks
+        run: |
+          set -euo pipefail
+          gitlinks=$(git ls-files -s | awk '$1=="160000"')
+          if [ -n "$gitlinks" ]; then
+            echo "Nested git repositories must not be committed. Add them to .gitignore instead:"
+            echo "$gitlinks"
+            exit 1
+          fi
+
   ci:
     name: Build & Test
     runs-on: ubuntu-latest

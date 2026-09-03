@@ -96,8 +96,9 @@ obs-studio/
 # Local research clones (not part of ApexShot)
 Kooha/
 spectacle/
-  webcut/
-  .antigravitycli/
+webcut/
+/Recordly/
+.antigravitycli/
 reinstall-dev-deb.sh
 # Agent local memory
 .agents/
