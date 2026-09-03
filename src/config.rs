@@ -34,6 +34,9 @@ pub struct AppConfig {
     pub screenshot_export_location: String,
     pub video_export_location: String,
     pub rec_filename_pattern: String,
+    /// When true, the video editor Save dialog reopens in the last export folder.
+    pub rec_remember_export_folder: bool,
+    pub last_video_export_dir: String,
     pub hide_desktop_icons_while_capturing: bool,
     pub after_capture_show_quick_access: bool,
     pub after_capture_copy_file_to_clipboard: bool,
@@ -61,6 +64,8 @@ pub struct AppConfig {
     pub rec_video_fps: u8,
     pub rec_video_mono: bool,
     pub rec_video_open_editor: bool,
+    /// webrtcdsp noise suppression on the recording mic (GStreamer audio path).
+    pub rec_noise_suppression: bool,
     // Recording GIF tab settings
     pub rec_gif_fps: u8,
     pub rec_gif_quality: f64,
@@ -170,6 +175,8 @@ impl Default for AppConfig {
             screenshot_export_location: String::new(),
             video_export_location: String::new(),
             rec_filename_pattern: "ApexShot Recording {Date} at {Time}".to_string(),
+            rec_remember_export_folder: true,
+            last_video_export_dir: String::new(),
             hide_desktop_icons_while_capturing: false,
             after_capture_show_quick_access: DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS,
             after_capture_copy_file_to_clipboard: DEFAULT_AFTER_CAPTURE_COPY_FILE_TO_CLIPBOARD,
@@ -195,6 +202,7 @@ impl Default for AppConfig {
             rec_video_fps: 1,     // 1 = 30fps
             rec_video_mono: false,
             rec_video_open_editor: false,
+            rec_noise_suppression: false,
             rec_gif_fps: 50,
             rec_gif_quality: 0.75,
             rec_gif_size_idx: 0,
@@ -289,6 +297,7 @@ impl AppConfig {
         self.export_location = self.export_location.trim().to_string();
         self.screenshot_export_location = self.screenshot_export_location.trim().to_string();
         self.video_export_location = self.video_export_location.trim().to_string();
+        self.last_video_export_dir = self.last_video_export_dir.trim().to_string();
         if self.screenshot_export_location.is_empty() && !self.export_location.is_empty() {
             self.screenshot_export_location = self.export_location.clone();
         }
@@ -347,6 +356,34 @@ impl AppConfig {
         // Tiers are compared case-insensitively; normalise once on the way in.
         self.cloud_plan_tier = self.cloud_plan_tier.trim().to_lowercase();
         self
+    }
+
+    pub fn video_editor_export_dir(&self, fallback: &std::path::Path) -> PathBuf {
+        if self.rec_remember_export_folder {
+            let last = self.last_video_export_dir.trim();
+            if !last.is_empty() {
+                let path = PathBuf::from(last);
+                if path.is_dir() {
+                    return path;
+                }
+            }
+        }
+        fallback.to_path_buf()
+    }
+
+    pub fn remember_video_export_dir(&mut self, file: &std::path::Path) -> bool {
+        if !self.rec_remember_export_folder {
+            return false;
+        }
+        let Some(dir) = file.parent().filter(|dir| !dir.as_os_str().is_empty()) else {
+            return false;
+        };
+        let next = dir.to_string_lossy().into_owned();
+        if self.last_video_export_dir == next {
+            return false;
+        }
+        self.last_video_export_dir = next;
+        true
     }
 }
 
@@ -827,10 +864,32 @@ mod tests {
         assert!(cfg.rec_notifications);
         assert!(cfg.rec_cursor);
         assert!(!cfg.rec_remember_selection);
+        assert!(cfg.rec_remember_export_folder);
+        assert!(cfg.last_video_export_dir.is_empty());
         assert!(cfg.rec_dim_screen);
         assert!(cfg.rec_countdown);
         assert!(cfg.last_selection_x.is_none());
         assert_eq!(cfg.rec_video_format, 0);
+    }
+
+    #[test]
+    fn video_editor_export_dir_respects_remember_toggle() {
+        let fallback = PathBuf::from("/tmp/source");
+        let mut cfg = AppConfig::default();
+        assert_eq!(cfg.video_editor_export_dir(&fallback), fallback);
+
+        let last = std::env::temp_dir();
+        cfg.last_video_export_dir = last.to_string_lossy().into_owned();
+        assert_eq!(cfg.video_editor_export_dir(&fallback), last);
+
+        cfg.rec_remember_export_folder = false;
+        assert_eq!(cfg.video_editor_export_dir(&fallback), fallback);
+        assert!(!cfg.remember_video_export_dir(&last.join("clip.mp4")));
+
+        cfg.rec_remember_export_folder = true;
+        cfg.last_video_export_dir.clear();
+        assert!(cfg.remember_video_export_dir(&last.join("clip.mp4")));
+        assert_eq!(cfg.last_video_export_dir, last.to_string_lossy());
     }
 
     #[test]

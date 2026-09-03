@@ -8,6 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+#[allow(dead_code)]
 pub(super) fn build_titlebar(
     window: &ApplicationWindow,
     state: Option<Arc<Mutex<VideoEditState>>>,
@@ -179,7 +180,7 @@ pub(super) fn build_traffic_lights(window: &ApplicationWindow) -> GtkBox {
     zoom.add_css_class("recording-editor-traffic-btn");
 
     for button in [&close, &minimize, &zoom] {
-        button.set_size_request(24, 24);
+        button.set_size_request(28, 28);
         button.set_valign(Align::Center);
     }
 
@@ -198,11 +199,7 @@ pub(super) fn build_traffic_lights(window: &ApplicationWindow) -> GtkBox {
 
     let window_zoom = window.clone();
     zoom.connect_clicked(move |_| {
-        if window_zoom.is_maximized() {
-            window_zoom.unmaximize();
-        } else {
-            window_zoom.maximize();
-        }
+        window_zoom.set_fullscreened(!window_zoom.is_fullscreen());
     });
 
     right_box

@@ -95,6 +95,27 @@ pub(super) fn ffmpeg_vaapi_args(width: u32, height: u32) -> Vec<String> {
     ]
 }
 
+fn video_capture_args(config: &super::RecordingConfig) -> Vec<String> {
+    let mut args = Vec::new();
+
+    if let (Some(x), Some(y), Some(width), Some(height)) =
+        (config.x, config.y, config.width, config.height)
+    {
+        args.push("-g".into());
+        args.push(format!("{},{} {}x{}", x, y, width, height));
+    }
+
+    args.push("-r".into());
+    args.push(config.fps.max(1).to_string());
+
+    if config.max_resolution.is_some() {
+        args.push("-F".into());
+        args.push(super::backend::wayland_video_filter(config.max_resolution));
+    }
+
+    args
+}
+
 pub(super) async fn record_with_wf_recorder(
     config: super::RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
@@ -110,17 +131,7 @@ pub(super) async fn record_with_wf_recorder(
     }
 
     let final_path = config.output_path.clone();
-    let mut args: Vec<String> = Vec::new();
-
-    if let (Some(x), Some(y), Some(width), Some(height)) =
-        (config.x, config.y, config.width, config.height)
-    {
-        args.push("-g".into());
-        args.push(format!("{},{} {}x{}", x, y, width, height));
-    }
-
-    args.push("-r".into());
-    args.push(config.fps.max(1).to_string());
+    let mut args = video_capture_args(&config);
 
     // wf-recorder records the cursor by default on current wlroots setups.
     // Older packaged versions do not recognize `--show-cursor`, and passing it
@@ -221,6 +232,14 @@ pub(super) async fn record_with_wf_recorder(
                 }
             }
         }
+    }
+
+    if matches!(
+        stop_action,
+        super::RecordingTerminalAction::Save | super::RecordingTerminalAction::Discard
+    ) {
+        super::control_session::release_recording_busy();
+        super::notify_daemon_event("recording_session_ended");
     }
 
     if let Some(pid) = child.id() {
@@ -386,6 +405,14 @@ pub(super) async fn record_gif_with_wf_recorder(
         }
     }
 
+    if matches!(
+        stop_action,
+        super::RecordingTerminalAction::Save | super::RecordingTerminalAction::Discard
+    ) {
+        super::control_session::release_recording_busy();
+        super::notify_daemon_event("recording_session_ended");
+    }
+
     if let Some(pid) = child.id() {
         let _ = std::process::Command::new("kill")
             .args(["-INT", &pid.to_string()])
@@ -460,4 +487,32 @@ pub(super) async fn record_gif_with_wf_recorder(
 
     println!("GIF saved to {:?}", final_path);
     Ok((final_path, stop_action))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_capture_args_include_selected_fps_and_resolution() {
+        let config = crate::recording::RecordingConfig {
+            x: Some(10),
+            y: Some(20),
+            width: Some(2560),
+            height: Some(1440),
+            fps: 60,
+            max_resolution: Some((1280, 720)),
+            ..crate::recording::RecordingConfig::default()
+        };
+
+        let args = video_capture_args(&config);
+
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-g", "10,20 2560x1440"]));
+        assert!(args.windows(2).any(|pair| pair == ["-r", "60"]));
+        assert!(args.windows(2).any(|pair| {
+            pair[0] == "-F" && pair[1].contains("min(iw,1280)") && pair[1].contains("min(ih,720)")
+        }));
+    }
 }

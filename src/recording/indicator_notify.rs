@@ -1,15 +1,12 @@
-//! Persistent “recording in progress” desktop notification.
+//! One-shot “recording in progress” desktop notification.
 //!
-//! While recording **without** the GNOME Shell extension panel UI, ApexShot
-//! keeps a system notification with a red record icon that blinks (by
-//! alternating the icon / title). Clicking the notification (default action)
-//! or the **Stop** button sends `StopSave` to the active in-process recording
-//! control session.
+//! Posted once when recording starts. Clicking the notification (default
+//! action) or the **Stop** button sends `StopSave` to the active in-process
+//! recording control session.
 //!
-//! On Ubuntu/GNOME with `org.apexshot.ShellOverlay` available, this indicator
-//! is **not** shown — the extension already provides a panel timer and stop
-//! affordance. Spamming critical notifications there also races GNOME's
-//! notification server (replace can fail and stack duplicates).
+//! Do not replace the banner on a timer: GNOME/Ubuntu re-shows the banner on
+//! every `Notify` replace, which looks like a blinking popup. Pause/resume
+//! still updates the existing id.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -22,16 +19,15 @@ use zbus::zvariant::Value;
 
 use super::control_session::{send_active_recording_command, RecordingControlCommand};
 
-const BLINK_INTERVAL: Duration = Duration::from_millis(800);
+/// Poll `active` so `hide_recording_indicator` can join without a D-Bus wake.
+const SHUTDOWN_POLL: Duration = Duration::from_millis(500);
 /// Never expire — notification stays until we close it or the user dismisses it.
 const PERSISTENT_TIMEOUT_MS: i32 = 0;
-const RECORD_ICON_ON: &str = "media-record";
-const RECORD_ICON_OFF: &str = "media-record-symbolic";
+const RECORD_ICON: &str = "media-record";
 
 struct IndicatorState {
     active: Arc<AtomicBool>,
     notification_id: Arc<AtomicU32>,
-    paused: Arc<AtomicBool>,
     /// Once the user dismisses the banner, do not recreate it for this session.
     user_dismissed: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
@@ -50,7 +46,7 @@ fn desktop_entry() -> &'static str {
     crate::app_identity::app_id()
 }
 
-/// Start (or re-assert) the persistent recording indicator.
+/// Start the recording indicator. Posted once per session.
 ///
 /// Every session gets this notification: it is the one stop affordance that
 /// needs no tray host and no shell extension.
@@ -62,12 +58,8 @@ pub fn show_recording_indicator() {
 
     if let Some(existing) = slot.as_ref() {
         if existing.active.load(Ordering::Relaxed) {
-            existing.paused.store(false, Ordering::Relaxed);
-            existing.user_dismissed.store(false, Ordering::Relaxed);
-            let id = existing.notification_id.load(Ordering::Relaxed);
-            if id != 0 {
-                let _ = post_notification_blocking(id, true, false);
-            }
+            // Already posted for this session. Replacing the banner on GNOME
+            // pops it again; leave the original in place.
             return;
         }
     }
@@ -75,18 +67,20 @@ pub fn show_recording_indicator() {
     if let Some(mut prev) = slot.take() {
         prev.active.store(false, Ordering::Relaxed);
         if let Some(join) = prev.join.take() {
-            let _ = join.join();
+            // Don't join on this thread: hide/show can run while the worker
+            // is still winding down and a join deadlock freezes Record.
+            thread::spawn(move || {
+                let _ = join.join();
+            });
         }
     }
 
     let active = Arc::new(AtomicBool::new(true));
     let notification_id = Arc::new(AtomicU32::new(0));
-    let paused = Arc::new(AtomicBool::new(false));
     let user_dismissed = Arc::new(AtomicBool::new(false));
 
     let active_w = active.clone();
     let id_w = notification_id.clone();
-    let paused_w = paused.clone();
     let dismissed_w = user_dismissed.clone();
     let join = thread::Builder::new()
         .name("apexshot-rec-indicator".into())
@@ -95,7 +89,7 @@ pub fn show_recording_indicator() {
                 .enable_all()
                 .build()
             {
-                rt.block_on(indicator_worker(active_w, id_w, paused_w, dismissed_w));
+                rt.block_on(indicator_worker(active_w, id_w, dismissed_w));
             } else {
                 eprintln!("[recording] indicator: failed to start tokio runtime");
             }
@@ -105,13 +99,12 @@ pub fn show_recording_indicator() {
     *slot = Some(IndicatorState {
         active,
         notification_id,
-        paused,
         user_dismissed,
         join,
     });
 }
 
-/// Reflect pause state on the indicator (stops blinking while paused).
+/// Reflect pause state on the existing indicator (does not create a new banner).
 pub fn set_recording_indicator_paused(is_paused: bool) {
     let slot = match indicator_slot().lock() {
         Ok(g) => g,
@@ -123,10 +116,12 @@ pub fn set_recording_indicator_paused(is_paused: bool) {
     if !state.active.load(Ordering::Relaxed) {
         return;
     }
-    state.paused.store(is_paused, Ordering::Relaxed);
+    if state.user_dismissed.load(Ordering::Relaxed) {
+        return;
+    }
     let id = state.notification_id.load(Ordering::Relaxed);
     if id != 0 {
-        let _ = post_notification_blocking(id, true, is_paused);
+        let _ = post_notification_blocking(id, is_paused);
     }
 }
 
@@ -145,14 +140,15 @@ pub fn hide_recording_indicator() {
         let _ = close_notification_blocking(id);
     }
     if let Some(join) = state.join.take() {
-        let _ = join.join();
+        thread::spawn(move || {
+            let _ = join.join();
+        });
     }
 }
 
 async fn indicator_worker(
     active: Arc<AtomicBool>,
     notification_id: Arc<AtomicU32>,
-    paused: Arc<AtomicBool>,
     user_dismissed: Arc<AtomicBool>,
 ) {
     let conn = match zbus::Connection::session().await {
@@ -203,8 +199,7 @@ async fn indicator_worker(
             }
         };
 
-    let mut blink_on = true;
-    match post_notification_async(&conn, 0, blink_on, false).await {
+    match post_notification_async(&conn, 0, false).await {
         Ok(id) => notification_id.store(id, Ordering::Relaxed),
         Err(e) => {
             eprintln!("[recording] indicator: Notify failed: {e}");
@@ -212,46 +207,11 @@ async fn indicator_worker(
         }
     }
 
-    let mut ticker = tokio::time::interval(BLINK_INTERVAL);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    ticker.tick().await;
-
     while active.load(Ordering::Relaxed) {
         tokio::select! {
-            _ = ticker.tick() => {
-                if !active.load(Ordering::Relaxed) {
-                    break;
-                }
-                if paused.load(Ordering::Relaxed) {
-                    continue;
-                }
-                if user_dismissed.load(Ordering::Relaxed) {
-                    // User closed the banner once — do not recreate (avoids
-                    // stacked critical notifications on GNOME).
-                    continue;
-                }
-                let id = notification_id.load(Ordering::Relaxed);
-                if id == 0 {
-                    // Closed out from under us without the signal path; do not
-                    // re-post (that is what caused multi-notification spam).
-                    continue;
-                }
-                blink_on = !blink_on;
-                match post_notification_async(&conn, id, blink_on, false).await {
-                    Ok(new_id) => {
-                        // Some servers return a new id when replace fails and
-                        // create a second banner. Prefer the returned id, but
-                        // if it differs and the old one was non-zero, close the
-                        // previous one so we never stack.
-                        if new_id != 0 && new_id != id {
-                            let _ = close_notification_async(&conn, id).await;
-                        }
-                        notification_id.store(new_id, Ordering::Relaxed);
-                    }
-                    Err(e) => {
-                        eprintln!("[recording] indicator: blink update failed: {e}");
-                    }
-                }
+            _ = tokio::time::sleep(SHUTDOWN_POLL) => {
+                // Periodic wake so hide_recording_indicator can join even if
+                // CloseNotification does not deliver NotificationClosed.
             }
             msg = action_stream.next() => {
                 let Some(Ok(msg)) = msg else {
@@ -301,30 +261,27 @@ async fn indicator_worker(
 
 fn shortcut_hint() -> String {
     let cfg = crate::config::load_config().sanitized();
-    let stop = if cfg.shortcut_recording_stop_save.trim().is_empty() {
-        "not set".to_string()
+    let stop = cfg.shortcut_recording_stop_save.trim();
+    if stop.is_empty() {
+        "Click Stop on this notification to finish".to_string()
     } else {
-        cfg.shortcut_recording_stop_save
-    };
-    format!("Click the red circle or Stop to finish · Shortcut: {stop}")
+        format!("Click Stop on this notification or press {stop} to finish")
+    }
 }
 
-fn notification_content(blink_on: bool, paused: bool) -> (String, String, &'static str) {
+fn notification_content(paused: bool) -> (String, String, &'static str) {
     let body = shortcut_hint();
     if paused {
-        ("⏸ Recording paused".to_string(), body, RECORD_ICON_ON)
-    } else if blink_on {
-        ("● Recording".to_string(), body, RECORD_ICON_ON)
+        ("Recording paused".to_string(), body, RECORD_ICON)
     } else {
-        ("○ Recording".to_string(), body, RECORD_ICON_OFF)
+        ("Recording".to_string(), body, RECORD_ICON)
     }
 }
 
 fn build_hints<'a>() -> HashMap<&'a str, Value<'a>> {
     let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
     hints.insert("desktop-entry", Value::from(desktop_entry()));
-    // Normal urgency: critical + blink replace races on GNOME and can stack
-    // duplicate banners. The panel path does not use this indicator at all.
+    // Normal urgency: critical banners on GNOME stay in the way and can stack.
     hints.insert("urgency", Value::U8(1));
     hints.insert("suppress-sound", Value::Bool(true));
     hints.insert("resident", Value::Bool(true));
@@ -334,10 +291,9 @@ fn build_hints<'a>() -> HashMap<&'a str, Value<'a>> {
 async fn post_notification_async(
     conn: &zbus::Connection,
     replaces_id: u32,
-    blink_on: bool,
     paused: bool,
 ) -> Result<u32, String> {
-    let (summary, body, icon) = notification_content(blink_on, paused);
+    let (summary, body, icon) = notification_content(paused);
     let hints = build_hints();
     // default = body/icon click; stop = explicit button
     let actions: &[&str] = &["default", "Stop recording", "stop", "Stop"];
@@ -365,13 +321,13 @@ async fn post_notification_async(
     reply.body().deserialize().map_err(|e| e.to_string())
 }
 
-fn post_notification_blocking(
-    replaces_id: u32,
-    blink_on: bool,
-    paused: bool,
-) -> Result<u32, String> {
+fn post_notification_blocking(replaces_id: u32, paused: bool) -> Result<u32, String> {
+    crate::utils::run_off_tokio(move || post_notification_on_thread(replaces_id, paused))
+}
+
+fn post_notification_on_thread(replaces_id: u32, paused: bool) -> Result<u32, String> {
     let conn = zbus::blocking::Connection::session().map_err(|e| e.to_string())?;
-    let (summary, body, icon) = notification_content(blink_on, paused);
+    let (summary, body, icon) = notification_content(paused);
     let hints = build_hints();
     let actions: &[&str] = &["default", "Stop recording", "stop", "Stop"];
 
@@ -411,6 +367,10 @@ async fn close_notification_async(conn: &zbus::Connection, id: u32) -> Result<()
 }
 
 fn close_notification_blocking(id: u32) -> Result<(), String> {
+    crate::utils::run_off_tokio(move || close_notification_on_thread(id))
+}
+
+fn close_notification_on_thread(id: u32) -> Result<(), String> {
     let conn = zbus::blocking::Connection::session().map_err(|e| e.to_string())?;
     conn.call_method(
         Some("org.freedesktop.Notifications"),
@@ -428,19 +388,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn notification_content_blinks_and_pauses() {
-        let (s_on, _, icon_on) = notification_content(true, false);
-        let (s_off, _, icon_off) = notification_content(false, false);
-        let (s_paused, _, _) = notification_content(true, true);
-        assert!(s_on.contains('●'));
-        assert!(s_off.contains('○'));
+    fn notification_content_recording_and_paused() {
+        let (s, body, icon) = notification_content(false);
+        let (s_paused, _, _) = notification_content(true);
+        assert_eq!(s, "Recording");
         assert!(s_paused.to_lowercase().contains("paused"));
-        assert_eq!(icon_on, RECORD_ICON_ON);
-        assert_eq!(icon_off, RECORD_ICON_OFF);
+        assert!(body.to_lowercase().contains("stop"));
+        assert!(!body.to_lowercase().contains("red circle"));
+        assert_eq!(icon, RECORD_ICON);
+    }
+
+    #[test]
+    fn shortcut_hint_does_not_mention_red_circle() {
+        let body = shortcut_hint();
+        assert!(!body.to_lowercase().contains("red circle"));
+        assert!(body.to_lowercase().contains("stop"));
     }
 
     #[test]
     fn hide_without_show_is_safe() {
         hide_recording_indicator();
+    }
+
+    #[test]
+    fn hide_inside_tokio_runtime_does_not_panic() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            hide_recording_indicator();
+        });
+    }
+
+    #[test]
+    fn close_notification_blocking_inside_tokio_does_not_panic() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let _ = close_notification_blocking(1);
+        });
     }
 }

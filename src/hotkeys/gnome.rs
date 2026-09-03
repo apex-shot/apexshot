@@ -95,11 +95,23 @@ pub(super) fn managed_gnome_path(binding: &super::config::HotkeyBinding, idx: us
 }
 
 pub(super) fn gnome_binding_command(exe: &Path, args: &[String]) -> String {
-    std::iter::once(exe.to_string_lossy().to_string())
+    let inner = std::iter::once(exe.to_string_lossy().to_string())
         .chain(args.iter().cloned())
         .map(|a| super::shell_quote(&a))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    // gsd-media-keys launches custom shortcuts with
+    // g_app_info_create_from_commandline + g_app_info_launch. If a unique GTK
+    // app (Settings, onboarding) already owns io.github.codegoddy.apexshot,
+    // GIO activates that instance and drops capture/record args — tray still
+    // works because it talks to the daemon over D-Bus. Wrap in `sh -c` so the
+    // launched executable is sh, not apexshot, and the real command always execs.
+    // Leave /bin/sh unquoted: g_app_info_create_from_commandline treats the
+    // first token as the executable and does not always strip quotes.
+    format!(
+        "/bin/sh -c {}",
+        super::shell_quote(&format!("exec {inner}"))
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

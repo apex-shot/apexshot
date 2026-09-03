@@ -78,7 +78,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     auto_label.set_xalign(0.0);
     auto_label.set_hexpand(true);
     let auto_help = Label::new(Some(
-        "When the selected destination is configured, upload each saved screenshot automatically.",
+        "Uploads each saved screenshot and copies the share link. Does nothing until you Connect.",
     ));
     auto_help.add_css_class("dim-label");
     auto_help.set_wrap(true);

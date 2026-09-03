@@ -182,7 +182,7 @@ pub fn build_history_window(app: &Application) {
     min_btn.connect_clicked(move |_| win_clone.minimize());
 
     for button in [&close_btn, &min_btn] {
-        button.set_size_request(24, 24);
+        button.set_size_request(28, 28);
         button.set_valign(Align::Center);
     }
 

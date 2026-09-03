@@ -94,12 +94,14 @@ pub(super) fn dispatch_daemon_action(
             tokio::task::spawn_blocking(capture_handlers::spawn_empty_image_editor_subprocess);
         }
         DaemonAction::StopRecordingSave => {
-            crate::gnome_shell::hide_recording_mask_best_effort();
-            if !crate::recording::send_active_recording_command(
+            let stopped = crate::recording::send_active_recording_command(
                 crate::recording::RecordingControlCommand::StopSave,
-            ) {
+            );
+            if !stopped {
                 eprintln!("[daemon] No active recording available for stop/save.");
+                idle_recording_tray(tray_handle, recording_tray_state);
             }
+            std::thread::spawn(crate::gnome_shell::hide_recording_mask_best_effort);
         }
 
         DaemonAction::ShowLastPreview => {
@@ -161,14 +163,6 @@ pub(super) fn dispatch_daemon_action(
         }
         DaemonAction::RecordingSessionStarted => {
             *recording_tray_state = Some(recording_handlers::RecordingTrayState::started());
-            if tray_handle.is_none() {
-                match spawn_daemon_tray(action_tx) {
-                    Ok(handle) => *tray_handle = Some(handle),
-                    Err(e) => {
-                        eprintln!("[daemon] Failed to show recording tray: {e}");
-                    }
-                }
-            }
             recording_handlers::update_recording_tray(tray_handle, recording_tray_state.as_ref());
         }
         DaemonAction::RecordingSessionPaused => {
@@ -196,8 +190,7 @@ pub(super) fn dispatch_daemon_action(
             }
         }
         DaemonAction::RecordingSessionEnded => {
-            *recording_tray_state = None;
-            recording_handlers::update_tray_recording_state(tray_handle, None);
+            idle_recording_tray(tray_handle, recording_tray_state);
         }
         DaemonAction::SetHotkeySuppressed(suppressed) => {
             HOTKEY_SUPPRESSED.store(suppressed, std::sync::atomic::Ordering::Relaxed);
@@ -213,4 +206,15 @@ pub(super) fn dispatch_daemon_action(
     }
 
     true
+}
+
+fn idle_recording_tray(
+    tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,
+    recording_tray_state: &mut Option<recording_handlers::RecordingTrayState>,
+) {
+    // Never shutdown/respawn the StatusNotifier item here. Stop used to fire
+    // session_ended twice (capture end, then mux end); tearing the tray down
+    // in the middle of a re-register left the icon gone.
+    *recording_tray_state = None;
+    recording_handlers::update_tray_recording_state(tray_handle, None);
 }

@@ -35,7 +35,10 @@ pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
         button.add_css_class("recent-captures-wm-close");
         button.add_css_class("recording-editor-traffic-close");
     }
-    button.set_size_request(24, 24);
+    if let Some(image) = button.child().and_downcast::<gtk4::Image>() {
+        image.set_pixel_size(16);
+    }
+    button.set_size_request(28, 28);
 
     button
 }

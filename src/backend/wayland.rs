@@ -2,11 +2,11 @@
 //!
 //! Still-image capture strategy (first match wins):
 //!
-//! 0. **KDE native** `org.kde.KWin.ScreenShot2` — preferred on Plasma Wayland
-//!    (same as Spectacle). No portal permission dialog.
+//! 0. **KDE native** `org.kde.KWin.ScreenShot2` — preferred on Plasma Wayland.
+//!    No portal permission dialog.
 //! 1. **wlroots native** `zwlr_screencopy_manager_v1` — Hyprland, Sway, Niri, …
-//! 2. **`org.freedesktop.portal.Screenshot`** — Flameshot-style single still
-//!    grab (GNOME and most desktops). Opt-in force-first via
+//! 2. **`org.freedesktop.portal.Screenshot`** — single still grab (GNOME and
+//!    most desktops). Opt-in force-first via
 //!    `APEXSHOT_WAYLAND_SCREENSHOT_PORTAL`.
 //! 3. **ScreenCast portal + PipeWire** — last-resort still fallback (heavy;
 //!    preferred for *recording*, not screenshots).
@@ -19,9 +19,12 @@ use super::{
     PixelFormat,
 };
 use ashpd::desktop::{
-    screencast::{CursorMode, Screencast, SourceType},
+    screencast::{
+        CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
+        StartCastOptions,
+    },
     screenshot::Screenshot,
-    PersistMode,
+    CreateSessionOptions, PersistMode,
 };
 use std::os::fd::OwnedFd;
 use std::path::PathBuf;
@@ -30,6 +33,50 @@ use std::time::Duration;
 pub struct WaylandBackend;
 
 const PORTAL_DIALOG_DISMISSAL_DELAY_MS: u64 = 650;
+
+/// Convert a Screenshot-portal `file://` URI into a local path.
+///
+/// ashpd 0.13's `Uri` is a validated string without path conversion, so
+/// decode the percent-escaped local-file form here.
+fn screenshot_uri_to_path(uri: &ashpd::Uri) -> DisplayResult<PathBuf> {
+    let raw = uri.as_str();
+    let after_scheme = raw.strip_prefix("file://").ok_or_else(|| {
+        DisplayError::PortalError(format!("Screenshot portal returned non-file URI: {raw}"))
+    })?;
+    let path_part = if let Some(rest) = after_scheme.strip_prefix('/') {
+        // Local file: no authority component.
+        format!("/{rest}")
+    } else {
+        // file://host/path — skip the authority.
+        match after_scheme.find('/') {
+            Some(position) => after_scheme[position..].to_string(),
+            None => {
+                return Err(DisplayError::PortalError(format!(
+                    "Screenshot portal returned non-file URI: {raw}"
+                )))
+            }
+        }
+    };
+    Ok(PathBuf::from(percent_decode(&path_part)))
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(&input[index + 1..index + 3], 16) {
+                decoded.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ScreenCast restore-token helpers
@@ -178,7 +225,7 @@ fn crop_capture(
 
 impl WaylandBackend {
     /// When set, try the Screenshot portal before compositor-native paths.
-    /// Useful for debugging / matching Flameshot exactly on a given desktop.
+    /// Useful for debugging the portal path on a given desktop.
     /// Always true under portal-only / Flatpak builds.
     fn should_force_screenshot_portal_first() -> bool {
         crate::app_identity::portal_only()
@@ -187,7 +234,7 @@ impl WaylandBackend {
 
     /// Preferred still-image path after native compositors fail.
     ///
-    /// Screenshot portal is a single D-Bus call (like Flameshot). ScreenCast +
+    /// Screenshot portal is a single D-Bus call. ScreenCast +
     /// PipeWire remains a last resort because it is much slower for freezes.
     fn capture_still_via_screenshot_portal() -> DisplayResult<CaptureData> {
         let start = std::time::Instant::now();
@@ -300,12 +347,7 @@ impl WaylandBackend {
             DisplayError::PortalError(format!("Screenshot portal response failed: {e}"))
         })?;
 
-        let path = response.uri().to_file_path().map_err(|_| {
-            DisplayError::PortalError(format!(
-                "Screenshot portal returned non-file URI: {}",
-                response.uri()
-            ))
-        })?;
+        let path = screenshot_uri_to_path(response.uri())?;
 
         let img = image::open(&path).map_err(|e| {
             DisplayError::CaptureError(format!(
@@ -351,13 +393,25 @@ impl WaylandBackend {
     ) -> DisplayResult<CaptureData> {
         let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
 
-        let screencast = Screencast::new().await.map_err(|e| {
-            DisplayError::PortalError(format!("Failed to create ScreenCast proxy: {e}"))
+        // Capture-private portal connection: Session.Close wedges the zbus
+        // machinery of the connection it traveled on, so captures must not
+        // reuse a process-global portal connection either.
+        let conn = zbus::Connection::session().await.map_err(|e| {
+            DisplayError::PortalError(format!("Failed to connect to session bus: {e}"))
         })?;
 
-        let session = screencast.create_session().await.map_err(|e| {
-            DisplayError::PortalError(format!("Failed to create ScreenCast session: {e}"))
-        })?;
+        let screencast = Screencast::with_connection(conn.clone())
+            .await
+            .map_err(|e| {
+                DisplayError::PortalError(format!("Failed to create ScreenCast proxy: {e}"))
+            })?;
+
+        let session = screencast
+            .create_session(CreateSessionOptions::default())
+            .await
+            .map_err(|e| {
+                DisplayError::PortalError(format!("Failed to create ScreenCast session: {e}"))
+            })?;
 
         let persist_mode = if interactive {
             PersistMode::DoNot
@@ -368,11 +422,12 @@ impl WaylandBackend {
         let select_request = screencast
             .select_sources(
                 &session,
-                CursorMode::Metadata,
-                target.source_type().into(),
-                false,
-                restore_token,
-                persist_mode,
+                SelectSourcesOptions::default()
+                    .set_cursor_mode(CursorMode::Metadata)
+                    .set_sources(ashpd::enumflags2::BitFlags::from(target.source_type()))
+                    .set_multiple(false)
+                    .set_restore_token(restore_token)
+                    .set_persist_mode(persist_mode),
             )
             .await
             .map_err(|e| DisplayError::PortalError(format!("Failed to select sources: {e}")))?;
@@ -381,9 +436,12 @@ impl WaylandBackend {
             DisplayError::PortalError(format!("Source selection cancelled/failed: {e}"))
         })?;
 
-        let start_request = screencast.start(&session, None).await.map_err(|e| {
-            DisplayError::PortalError(format!("Failed to start ScreenCast session: {e}"))
-        })?;
+        let start_request = screencast
+            .start(&session, None, StartCastOptions::default())
+            .await
+            .map_err(|e| {
+                DisplayError::PortalError(format!("Failed to start ScreenCast session: {e}"))
+            })?;
 
         let response = start_request
             .response()
@@ -416,13 +474,14 @@ impl WaylandBackend {
         }
 
         let pipewire_fd = screencast
-            .open_pipe_wire_remote(&session)
+            .open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())
             .await
             .map_err(|e| {
                 DisplayError::PortalError(format!("Failed to open PipeWire remote: {e}"))
             })?;
         let capture = capture_single_frame_from_pipewire(node_id, &pipewire_fd);
         let _ = session.close().await;
+        drop(conn);
 
         // For window captures, crop to the actual window dimensions if provided
         if target == CaptureTarget::Window {
@@ -714,7 +773,7 @@ impl WaylandBackend {
     /// Capture used for direct area crops / selection freezes on Wayland.
     ///
     /// Order: KDE native → wlr-screencopy (~50 ms) → Screenshot portal
-    /// (Flameshot-style) → ScreenCast last resort.
+    /// → ScreenCast last resort.
     pub fn capture_screen_for_selection_impl(&self) -> DisplayResult<CaptureData> {
         self.capture_screen_for_selection_at(None)
     }
@@ -792,12 +851,7 @@ pub async fn capture_fullscreen_via_screenshot_portal() -> DisplayResult<Capture
         DisplayError::PortalError(format!("Screenshot portal response failed: {e}"))
     })?;
 
-    let path = response.uri().to_file_path().map_err(|_| {
-        DisplayError::PortalError(format!(
-            "Screenshot portal returned non-file URI: {}",
-            response.uri()
-        ))
-    })?;
+    let path = screenshot_uri_to_path(response.uri())?;
 
     let img = image::open(&path).map_err(|e| {
         DisplayError::CaptureError(format!(

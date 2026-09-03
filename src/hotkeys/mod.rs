@@ -639,6 +639,67 @@ mod tests {
     }
 
     #[test]
+    fn gnome_binding_command_runs_through_sh_so_gio_cannot_activate_unique_app() {
+        let command = gnome_binding_command(
+            Path::new("/usr/bin/apexshot"),
+            &["capture".into(), "area".into()],
+        );
+        assert!(
+            command.starts_with("/bin/sh -c "),
+            "GNOME custom keybindings must launch sh, not apexshot directly: {command}"
+        );
+        assert!(command.contains("exec \\\"/usr/bin/apexshot\\\" \\\"capture\\\" \\\"area\\\""));
+        assert!(
+            !command.starts_with("\"/usr/bin/apexshot\"")
+                && !command.starts_with("/usr/bin/apexshot"),
+            "direct apexshot command is hijacked by a running Settings GApplication"
+        );
+    }
+
+    #[test]
+    fn merge_missing_defaults_does_not_reintroduce_conflicting_record_screen() {
+        let mut cfg = HotkeyConfig {
+            bindings: vec![HotkeyBinding {
+                name: Some("open_recording_ui".into()),
+                accelerator: "CTRL+ALT+R".into(),
+                args: vec!["record".into(), "ui".into()],
+            }],
+        };
+
+        assert!(merge_missing_default_hotkeys(&mut cfg));
+        assert!(cfg
+            .bindings
+            .iter()
+            .any(|binding| binding.name.as_deref() == Some("open_recording_ui")));
+        assert!(!cfg
+            .bindings
+            .iter()
+            .any(|binding| binding.name.as_deref() == Some("record_screen")));
+    }
+
+    #[test]
+    fn duplicate_accelerators_are_dropped_keeping_the_first_binding() {
+        let mut cfg = HotkeyConfig {
+            bindings: vec![
+                HotkeyBinding {
+                    name: Some("open_recording_ui".into()),
+                    accelerator: "CTRL+ALT+R".into(),
+                    args: vec!["record".into(), "ui".into()],
+                },
+                HotkeyBinding {
+                    name: Some("record_screen".into()),
+                    accelerator: "CTRL+ALT+R".into(),
+                    args: vec!["record".into(), "screen".into(), "--overlay-stop".into()],
+                },
+            ],
+        };
+
+        assert!(drop_duplicate_hotkey_accelerators(&mut cfg));
+        assert_eq!(cfg.bindings.len(), 1);
+        assert_eq!(cfg.bindings[0].name.as_deref(), Some("open_recording_ui"));
+    }
+
+    #[test]
     fn default_hotkeys_include_recording_stop_binding() {
         let cfg = HotkeyConfig::default();
         let names = cfg
@@ -648,6 +709,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(names.contains(&"recording_stop_save".to_string()));
+        assert!(names.contains(&"open_recording_ui".to_string()));
+        assert!(!names.contains(&"record_screen".to_string()));
         assert!(!names.contains(&"recording_pause_resume".to_string()));
         assert!(!names.contains(&"recording_restart".to_string()));
         assert!(!names.contains(&"recording_discard".to_string()));

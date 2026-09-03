@@ -282,7 +282,7 @@ jobs:
           cd gnome-extension
           zip apexshot-gnome-integration.zip \
             extension.js metadata.json \
-            shell-overlay.js window-list.js preview-stacking.js
+            cursor-classifier.js shell-overlay.js window-list.js preview-stacking.js
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

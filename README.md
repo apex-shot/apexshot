@@ -73,6 +73,7 @@ Works best today on:
 | Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). **Video recording is not supported** — use Spectacle or Kooha for screen recording |
 | openSUSE Tumbleweed / Leap (Wayland) | Development stage: RPM spec + `scripts/build-opensuse-rpm.sh` exist; **no published binary** yet (generic installer will refuse) |
 | NixOS / Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; packaging/testing pending |
+| SteamOS / Steam Deck (immutable Arch) | Not supported. The generic installer used to treat this as Arch because `pacman` exists; SteamOS is a read-only image, so that path fails on sudo, pacman keys, and PGP prompts, and any successful pacman install is wiped by the next SteamOS update. The installer now refuses instead. |
 | X11 on any distro | Experimental |
 
 If ApexShot breaks on your setup, please [open an issue](https://github.com/apex-shot/apexshot/issues/new/choose).
@@ -393,7 +394,7 @@ If you cloned the repository and want to install the development version:
 cd gnome-extension
 zip apexshot-gnome-integration.zip \
   extension.js metadata.json \
-  shell-overlay.js window-list.js preview-stacking.js
+  cursor-classifier.js shell-overlay.js window-list.js preview-stacking.js
 gnome-extensions install apexshot-gnome-integration.zip
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ```

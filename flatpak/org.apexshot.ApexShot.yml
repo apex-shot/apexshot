@@ -70,6 +70,8 @@ modules:
       - install -Dm644 flatpak/org.apexshot.ApexShot.desktop /app/share/applications/org.apexshot.ApexShot.desktop
       - install -Dm644 flatpak/org.apexshot.ApexShot.metainfo.xml /app/share/metainfo/org.apexshot.ApexShot.metainfo.xml
       - install -Dm644 packaging/apexshot.svg /app/share/icons/hicolor/scalable/apps/org.apexshot.ApexShot.svg
+      # Vendored UI font — runtimes only ship Noto/DejaVu; fontconfig picks up /app/share/fonts.
+      - install -Dm644 assets/fonts/InterVariable.ttf /app/share/fonts/InterVariable.ttf
     sources:
       # Development: build the working tree. For Flathub, replace with:
       #   type: archive + sha256 of a release tag, plus cargo-sources.json

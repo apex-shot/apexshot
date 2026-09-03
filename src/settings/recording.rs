@@ -1,5 +1,5 @@
 use crate::config::AppConfig;
-use gtk4::{prelude::*, Align, Box as GtkBox, Button, Entry, Label, Orientation};
+use gtk4::{prelude::*, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 
 #[allow(dead_code)]
 pub struct RecordingSettingsWidgets {
@@ -7,6 +7,7 @@ pub struct RecordingSettingsWidgets {
     pub video_export_location_entry: Entry,
     pub video_export_location_browse: Button,
     pub rec_filename_pattern_entry: Entry,
+    pub rec_remember_export_folder: CheckButton,
 }
 
 pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
@@ -90,6 +91,17 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     pattern_hbox.append(&pattern_vbox);
     location_frame.append(&build_row!(&pattern_hbox, false));
 
+    let rec_remember_export_folder = CheckButton::new();
+    rec_remember_export_folder.set_active(config.rec_remember_export_folder);
+    let remember_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    remember_hbox.set_hexpand(true);
+    let remember_label = Label::new(Some("Remember last export folder"));
+    remember_label.set_xalign(0.0);
+    remember_label.set_hexpand(true);
+    remember_hbox.append(&remember_label);
+    remember_hbox.append(&rec_remember_export_folder);
+    location_frame.append(&build_row!(&remember_hbox, false));
+
     section.append(&location_frame);
 
     RecordingSettingsWidgets {
@@ -97,5 +109,6 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         video_export_location_entry,
         video_export_location_browse,
         rec_filename_pattern_entry,
+        rec_remember_export_folder,
     }
 }

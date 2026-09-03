@@ -41,6 +41,7 @@ pub(super) fn recording_request_from_state(
         video_max_res: st.recording.video_max_res as u8,
         video_fps: st.recording.video_fps as u8,
         record_mono: st.recording.record_mono,
+        noise_suppression: st.recording.noise_suppression,
         open_editor: st.recording.open_editor,
         gif_fps: st.recording.gif_fps.round().clamp(5.0, 60.0) as u8,
         gif_quality: st.recording.gif_quality,

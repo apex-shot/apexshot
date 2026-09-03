@@ -6,7 +6,7 @@ use std::sync::Arc;
 /// Call `close()` on the returned handle to dismiss it.
 pub fn run_dim_overlay(close_flag: Arc<AtomicBool>) {
     let app = Application::builder()
-        .application_id(crate::app_identity::app_id())
+        .application_id("com.apexshot.recording")
         .build();
 
     let flag_clone = close_flag.clone();

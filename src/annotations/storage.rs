@@ -279,6 +279,50 @@ pub fn original_exists(image_path: &Path) -> bool {
     original_path_for_image(image_path).exists()
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageSessionSnapshot {
+    pub annotations: Vec<SerializableAnnotation>,
+    pub background: BackgroundSettings,
+    pub canvas_width: u32,
+    pub canvas_height: u32,
+}
+
+impl ImageSessionSnapshot {
+    pub fn from_editor(
+        canvas_width: u32,
+        canvas_height: u32,
+        actions: &[AnnotationAction],
+        background_style: &EditorBackgroundStyle,
+        background_padding: f64,
+        background_shadow: f64,
+        background_insert: f64,
+        auto_balance: bool,
+        background_alignment: EditorBackgroundAlignment,
+        background_corner_radius: f64,
+        background_aspect_ratio: EditorCropAspectRatio,
+    ) -> Self {
+        Self {
+            annotations: actions.iter().filter_map(action_to_serializable).collect(),
+            background: BackgroundSettings {
+                style: background_style_to_serializable(background_style),
+                padding: background_padding,
+                shadow: background_shadow,
+                insert: background_insert,
+                auto_balance,
+                alignment: background_alignment_to_serializable(background_alignment),
+                corner_radius: background_corner_radius,
+                aspect_ratio: crop_aspect_ratio_to_serializable(background_aspect_ratio),
+            },
+            canvas_width,
+            canvas_height,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.annotations.is_empty() && self.background == BackgroundSettings::default()
+    }
+}
+
 /// Convert editor AnnotationAction to serializable form
 fn action_to_serializable(action: &AnnotationAction) -> Option<SerializableAnnotation> {
     match action {
@@ -797,5 +841,144 @@ mod tests {
             )),
             EditorCropAspectRatio::TwentyOneNine
         );
+    }
+
+    fn scratch_png(name: &str) -> (PathBuf, image::RgbaImage) {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-image-session-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.png");
+        let image = image::RgbaImage::from_pixel(8, 8, image::Rgba([10, 20, 30, 255]));
+        image.save(&path).unwrap();
+        (path, image)
+    }
+
+    fn cleanup_png(path: &Path) {
+        let _ = delete_annotations(path);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    fn save_session(path: &Path, image: &image::RgbaImage, actions: &[AnnotationAction]) {
+        save_annotations(
+            path,
+            image.width(),
+            image.height(),
+            actions,
+            image,
+            &EditorBackgroundStyle::None,
+            24.0,
+            15.0,
+            0.0,
+            false,
+            EditorBackgroundAlignment::Center,
+            18.0,
+            EditorCropAspectRatio::Original,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn save_annotations_does_not_change_png_bytes() {
+        let (path, image) = scratch_png("no-flatten");
+        let before = std::fs::read(&path).unwrap();
+        let actions = [AnnotationAction::Line {
+            start: crate::capture::editor::types::Point { x: 1.0, y: 1.0 },
+            end: crate::capture::editor::types::Point { x: 4.0, y: 4.0 },
+            color: DrawColor::new(1.0, 0.0, 0.0, 1.0),
+            stroke_size: 2.0,
+            shadow: false,
+        }];
+        save_session(&path, &image, &actions);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        cleanup_png(&path);
+    }
+
+    #[test]
+    fn persist_then_load_restores_actions_and_original() {
+        let (path, image) = scratch_png("roundtrip");
+        let actions = [AnnotationAction::Box {
+            rect: crate::capture::editor::types::Rect {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            },
+            color: DrawColor::new(0.0, 1.0, 0.0, 1.0),
+            stroke_size: 2.0,
+            shadow: true,
+        }];
+        save_annotations(
+            &path,
+            image.width(),
+            image.height(),
+            &actions,
+            &image,
+            &EditorBackgroundStyle::None,
+            42.0,
+            15.0,
+            0.0,
+            false,
+            EditorBackgroundAlignment::Center,
+            18.0,
+            EditorCropAspectRatio::Original,
+        )
+        .unwrap();
+
+        let file = load_annotations(&path).unwrap().expect("sidecar");
+        assert_eq!(file.annotations.len(), 1);
+        assert!((file.background.padding - 42.0).abs() < f64::EPSILON);
+        let original = load_original_image(&path).unwrap().expect("original");
+        assert_eq!(original.dimensions(), image.dimensions());
+        cleanup_png(&path);
+    }
+
+    #[test]
+    fn empty_session_deletes_existing_sidecar() {
+        let (path, image) = scratch_png("delete-empty");
+        let actions = [AnnotationAction::Line {
+            start: crate::capture::editor::types::Point { x: 0.0, y: 0.0 },
+            end: crate::capture::editor::types::Point { x: 1.0, y: 1.0 },
+            color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+            stroke_size: 1.0,
+            shadow: false,
+        }];
+        save_session(&path, &image, &actions);
+        assert!(annotations_exist(&path));
+
+        let empty = ImageSessionSnapshot::from_editor(
+            image.width(),
+            image.height(),
+            &[],
+            &EditorBackgroundStyle::None,
+            24.0,
+            15.0,
+            0.0,
+            false,
+            EditorBackgroundAlignment::Center,
+            18.0,
+            EditorCropAspectRatio::Original,
+        );
+        assert!(empty.is_empty());
+        delete_annotations(&path).unwrap();
+        assert!(!annotations_exist(&path));
+        assert!(load_original_image(&path).unwrap().is_none());
+        cleanup_png(&path);
+    }
+
+    #[test]
+    fn hash_mismatch_does_not_panic() {
+        let (path, image) = scratch_png("hash");
+        save_session(&path, &image, &[]);
+        std::fs::write(&path, b"not-the-same-png-bytes").unwrap();
+        match load_annotations(&path) {
+            Err(AnnotationError::HashMismatch) => {}
+            other => panic!("expected hash mismatch, got {other:?}"),
+        }
+        cleanup_png(&path);
     }
 }

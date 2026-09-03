@@ -1,8 +1,8 @@
-//! Native PipeWire engine for screen capture — OBS-style.
+//! Native PipeWire engine for screen capture.
 //!
 //! Replaces the GStreamer `pipewiresrc` pipeline with direct `libpipewire` API.
 //!
-//! Architecture (mirrors OBS's `plugins/linux-pipewire/pipewire.c`):
+//! Architecture:
 //!
 //! 1. `PipeWireCapture` wraps the full PipeWire connection lifecycle:
 //!    `ThreadLoopRc` → `ContextRc` → `CoreRc` → `StreamRc`.
@@ -162,6 +162,21 @@ fn format_swaps_rb(format: spa::param::video::VideoFormat) -> bool {
 // Internal shared state
 // ---------------------------------------------------------------------------
 
+const CONTINUOUS_FRAME_QUEUE_CAPACITY: usize = 1;
+
+fn push_latest_continuous_frame(
+    frames: &mut std::collections::VecDeque<Vec<u8>>,
+    pixel_data: Vec<u8>,
+) -> usize {
+    let mut dropped = 0;
+    while frames.len() >= CONTINUOUS_FRAME_QUEUE_CAPACITY {
+        frames.pop_front();
+        dropped += 1;
+    }
+    frames.push_back(pixel_data);
+    dropped
+}
+
 struct StreamInner {
     format: Option<NegotiatedFormat>,
     raw_format: Option<spa::param::video::VideoInfoRaw>,
@@ -186,14 +201,29 @@ enum PipeWireCoreSource {
 
 pub struct PipeWireCapture {
     inner: Arc<Mutex<StreamInner>>,
-    _thread_loop: pw::thread_loop::ThreadLoopRc,
-    _context: pw::context::ContextRc,
-    _core: pw::core::CoreRc,
-    _stream: pw::stream::StreamRc,
     // Keep the listener alive for the lifetime of the capture. Dropping it
     // unregisters PipeWire callbacks, which means format negotiation can
     // succeed but no process callbacks arrive afterwards (empty 261-byte mp4s).
     _listener: pw::stream::StreamListener<Arc<Mutex<StreamInner>>>,
+    _stream: pw::stream::StreamRc,
+    _core: pw::core::CoreRc,
+    _context: pw::context::ContextRc,
+    // Destroyed last so disconnect/stop in Drop still have a live loop.
+    _thread_loop: pw::thread_loop::ThreadLoopRc,
+}
+
+fn teardown_pw_stream(thread_loop: &pw::thread_loop::ThreadLoopRc, stream: &pw::stream::StreamRc) {
+    {
+        let _lock = thread_loop.lock();
+        let _ = stream.disconnect();
+    }
+    thread_loop.stop();
+}
+
+impl Drop for PipeWireCapture {
+    fn drop(&mut self) {
+        teardown_pw_stream(&self._thread_loop, &self._stream);
+    }
 }
 
 impl PipeWireCapture {
@@ -217,8 +247,7 @@ impl PipeWireCapture {
     /// Connect to the default session PipeWire socket.
     ///
     /// Used by KDE-native `zkde_screencast_unstable_v1` streams, which publish
-    /// a node on the regular session graph (same approach as Spectacle's
-    /// `PipeWireRecord`) rather than a portal-scoped remote.
+    /// a node on the regular session graph rather than a portal-scoped remote.
     pub fn connect_default(
         node_id: u32,
         max_frames: Option<u64>,
@@ -249,6 +278,8 @@ impl PipeWireCapture {
                 .map_err(|e| PipeWireError::Init(format!("Failed to create thread loop: {e}")))?
         };
 
+        // Hold the loop lock while creating objects bound to it (PipeWire rule).
+        let _setup_lock = thread_loop.lock();
         let context = pw::context::ContextRc::new(&thread_loop, None)
             .map_err(|e| PipeWireError::Init(format!("Failed to create context: {e}")))?;
 
@@ -284,12 +315,13 @@ impl PipeWireCapture {
         )
         .map_err(|e| PipeWireError::Connect(format!("Failed to create stream: {e}")))?;
 
-        // Build format pod.
-        let pod_data = build_enum_format_pod(width_hint, height_hint);
-        let pod = spa::pod::Pod::from_bytes(&pod_data)
+        let format_bytes = build_enum_format_pod(width_hint, height_hint);
+        let buffers_bytes = build_shm_buffers_pod();
+        let format_pod = spa::pod::Pod::from_bytes(&format_bytes)
             .ok_or_else(|| PipeWireError::Connect("Failed to parse format pod".into()))?;
-        // pod is &Pod; create an array of &Pod for the connect call.
-        let mut params = [pod];
+        let buffers_pod = spa::pod::Pod::from_bytes(&buffers_bytes)
+            .ok_or_else(|| PipeWireError::Connect("Failed to parse buffers pod".into()))?;
+        let mut params = [format_pod, buffers_pod];
 
         let inner_clone = Arc::clone(&inner);
         let _listener = stream
@@ -377,34 +409,24 @@ impl PipeWireCapture {
                     return;
                 }
                 let chunk_size = datas[0].chunk().size() as usize;
-                if chunk_size == 0 {
+                let Some(pixel_data) = copy_cpu_frame(&mut datas[..], chunk_size) else {
                     return;
-                }
-
-                // Try DMA-BUF first (zero-copy from GPU), fall back to SHM.
-                let pixel_data = if datas[0].type_() == spa::buffer::DataType::DmaBuf {
-                    read_dmabuf_frame(datas, chunk_size)
-                } else if let Some(ref mem) = datas[0].data() {
-                    if chunk_size <= mem.len() {
-                        Some(mem[..chunk_size].to_vec())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
                 };
 
-                let Some(pixel_data) = pixel_data else { return };
-                guard.frames.push_back(pixel_data);
-
-                // Extract SPA_META_Cursor from the raw spa_buffer.
-                // The compositor sends this when CursorMode::Metadata is used.
-                // SAFETY: Buffer is alive during this callback.
-                let cursor = unsafe { extract_cursor_metadata(&buffer) };
-                if let Some(cur) = cursor {
-                    guard.cursor_queue.push_back(cur);
+                // A recording encoder can be slower than the compositor at
+                // large resolutions. Never retain every full RGBA frame while
+                // it catches up: a 1920x1200 frame is about 9 MiB, so an
+                // unbounded queue can OOM-kill the daemon (and its tray icon)
+                // within seconds. Recording needs the freshest frame, whereas
+                // finite still capture must preserve every requested frame.
+                if guard.max_frames.is_none() {
+                    let dropped = push_latest_continuous_frame(&mut guard.frames, pixel_data);
+                    for _ in 0..dropped {
+                        guard.cursor_queue.pop_front();
+                    }
+                } else {
+                    guard.frames.push_back(pixel_data);
                 }
-                // buffer returned to stream via Drop
             })
             .register()
             .map_err(|e| PipeWireError::Connect(format!("Failed to register listener: {e}")))?;
@@ -418,6 +440,7 @@ impl PipeWireCapture {
             )
             .map_err(|e| PipeWireError::Connect(format!("Failed to connect stream: {e}")))?;
 
+        drop(_setup_lock);
         thread_loop.start();
 
         let start = Instant::now();
@@ -429,6 +452,7 @@ impl PipeWireCapture {
                 }
             }
             if Instant::now().duration_since(start) > Duration::from_secs(5) {
+                teardown_pw_stream(&thread_loop, &stream);
                 return Err(PipeWireError::FormatNegotiation);
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -437,20 +461,22 @@ impl PipeWireCapture {
         {
             let guard = inner.lock().unwrap();
             if let Some(ref err) = guard.error {
+                teardown_pw_stream(&thread_loop, &stream);
                 return Err(PipeWireError::Stream(err.clone()));
             }
             if guard.format.is_none() {
+                teardown_pw_stream(&thread_loop, &stream);
                 return Err(PipeWireError::FormatNegotiation);
             }
         }
 
         Ok(PipeWireCapture {
             inner,
-            _thread_loop: thread_loop,
-            _context: context,
-            _core: core,
-            _stream: stream,
             _listener,
+            _stream: stream,
+            _core: core,
+            _context: context,
+            _thread_loop: thread_loop,
         })
     }
 
@@ -504,12 +530,12 @@ impl PipeWireCapture {
         guard.frames_consumed += 1;
         drop(guard);
 
-        Ok(Some(convert_to_rgba_frame(
+        Ok(convert_to_rgba_frame(
             &raw,
             &raw_format,
             color_space,
             cursor,
-        )))
+        ))
     }
 
     pub fn frames_consumed(&self) -> u64 {
@@ -529,20 +555,27 @@ impl PipeWireCapture {
 // DMA-BUF frame reading (zero-copy from GPU memory)
 // ---------------------------------------------------------------------------
 
-/// Read pixel data from a DMA-BUF buffer by mmap'ing the file descriptor.
-/// DMA-BUF buffers arrive as file descriptors pointing to GPU memory.
-/// mmap'ing them reads directly from GPU without a CPU copy through SHM.
-fn read_dmabuf_frame(datas: &[spa::buffer::Data], chunk_size: usize) -> Option<Vec<u8>> {
-    if datas.is_empty() {
+fn copy_cpu_frame(datas: &mut [spa::buffer::Data], chunk_size: usize) -> Option<Vec<u8>> {
+    if datas.is_empty() || chunk_size == 0 || chunk_size > 64 * 1024 * 1024 {
         return None;
     }
+    let data = &mut datas[0];
+    let kind = data.type_();
+    if let Some(mem) = data.data() {
+        if chunk_size <= mem.len() {
+            return Some(mem[..chunk_size].to_vec());
+        }
+    }
+    if kind == spa::buffer::DataType::MemFd {
+        return mmap_memfd(data.fd(), chunk_size);
+    }
+    None
+}
 
-    let fd = datas[0].fd();
+fn mmap_memfd(fd: i32, chunk_size: usize) -> Option<Vec<u8>> {
     if fd < 0 {
         return None;
     }
-
-    // mmap the DMA-BUF fd to read GPU memory.
     let ptr = unsafe {
         libc::mmap(
             std::ptr::null_mut(),
@@ -553,17 +586,12 @@ fn read_dmabuf_frame(datas: &[spa::buffer::Data], chunk_size: usize) -> Option<V
             0,
         )
     };
-
     if ptr == libc::MAP_FAILED {
-        eprintln!("[pipewire] DMA-BUF mmap failed, falling back to SHM");
         return None;
     }
-
-    // Copy out before unmapping.
-    let data = unsafe { std::slice::from_raw_parts(ptr as *const u8, chunk_size).to_vec() };
+    let copied = unsafe { std::slice::from_raw_parts(ptr as *const u8, chunk_size).to_vec() };
     unsafe { libc::munmap(ptr, chunk_size) };
-
-    Some(data)
+    Some(copied)
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +599,7 @@ fn read_dmabuf_frame(datas: &[spa::buffer::Data], chunk_size: usize) -> Option<V
 // ---------------------------------------------------------------------------
 
 // From pipewire spa/buffer/meta.h: SPA_META_Cursor = 5
+#[allow(dead_code)]
 const SPA_META_CURSOR: u32 = 5;
 
 // TODO: SPA_META_SyncTimeline = 9, SPA_DATA_SyncObj = 5.
@@ -591,6 +620,7 @@ const SPA_META_CURSOR: u32 = 5;
 ///
 /// # Safety
 /// `buffer` must be a valid, alive PipeWire buffer.
+#[allow(dead_code)]
 unsafe fn extract_cursor_metadata(buffer: &pw::buffer::Buffer) -> Option<CursorOverlay> {
     // Buffer layout: { buf: NonNull<pw_sys::pw_buffer>, stream: &Stream }
     // NonNull<T> is repr(transparent) over *const T, so offset 0 is the raw pointer.
@@ -695,12 +725,30 @@ fn composite_cursor_into_frame(
 // Frame format conversion
 // ---------------------------------------------------------------------------
 
+fn rgba_copy_plan(raw_len: usize, width: usize, height: usize, bpp: usize) -> Option<usize> {
+    if width == 0 || height == 0 || bpp == 0 {
+        return None;
+    }
+    let packed = width.checked_mul(bpp)?;
+    let min_len = packed.checked_mul(height)?;
+    if raw_len < min_len {
+        return None;
+    }
+    if raw_len.is_multiple_of(height) {
+        let stride = raw_len / height;
+        if stride >= packed {
+            return Some(stride);
+        }
+    }
+    Some(packed)
+}
+
 fn convert_to_rgba_frame(
     raw: &[u8],
     format: &spa::param::video::VideoInfoRaw,
     color_space: ColorSpace,
     cursor: Option<CursorOverlay>,
-) -> PipeWireFrame {
+) -> Option<PipeWireFrame> {
     let width = format.size().width as usize;
     let height = format.size().height as usize;
     let bpp = format_bpp(format.format()) as usize;
@@ -710,14 +758,14 @@ fn convert_to_rgba_frame(
         video_format,
         spa::param::video::VideoFormat::BGRA | spa::param::video::VideoFormat::RGBA
     );
-    let stride = width * bpp;
+    let stride = rgba_copy_plan(raw.len(), width, height, bpp)?;
     let row_len = width * 4;
 
     let mut pixels = Vec::with_capacity(row_len * height);
 
     for row in 0..height {
         let src_start = row * stride;
-        let src_row = &raw[src_start..src_start + width * bpp];
+        let src_row = raw.get(src_start..src_start + width * bpp)?;
         for px in src_row.chunks_exact(bpp) {
             if swaps_rb {
                 pixels.push(px[2]);
@@ -733,7 +781,6 @@ fn convert_to_rgba_frame(
         }
     }
 
-    // Composite cursor into frame if metadata was available.
     if let Some(ref cur) = cursor {
         composite_cursor_into_frame(
             &mut pixels,
@@ -744,19 +791,43 @@ fn convert_to_rgba_frame(
         );
     }
 
-    PipeWireFrame {
+    Some(PipeWireFrame {
         pixels,
         width: format.size().width,
         height: format.size().height,
         stride: row_len as u32,
         cursor,
         color_space,
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------
 // SPA pod construction
 // ---------------------------------------------------------------------------
+
+fn build_shm_buffers_pod() -> Vec<u8> {
+    use pw::spa::pod::{Object, Property, Value};
+    use pw::spa::utils::SpaTypes;
+
+    let mem_ptr = spa::buffer::DataType::MemPtr.as_raw();
+    let mem_fd = spa::buffer::DataType::MemFd.as_raw();
+    let data_type = (1 << mem_ptr) | (1 << mem_fd);
+    let obj = Object {
+        type_: SpaTypes::ObjectParamBuffers.as_raw(),
+        id: spa::param::ParamType::Buffers.as_raw(),
+        properties: vec![Property::new(
+            spa_sys::SPA_PARAM_BUFFERS_dataType,
+            Value::Int(data_type),
+        )],
+    };
+    pw::spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::with_capacity(256)),
+        &Value::Object(obj),
+    )
+    .unwrap()
+    .0
+    .into_inner()
+}
 
 fn build_enum_format_pod(width_hint: Option<u32>, height_hint: Option<u32>) -> Vec<u8> {
     use pw::spa::pod::Value;
@@ -916,6 +987,13 @@ mod tests {
     }
 
     #[test]
+    fn test_build_shm_buffers_pod_is_valid() {
+        let data = build_shm_buffers_pod();
+        assert!(!data.is_empty());
+        assert!(spa::pod::Pod::from_bytes(&data).is_some());
+    }
+
+    #[test]
     fn test_color_space_defaults() {
         let cs = ColorSpace::default();
         assert_eq!(cs.range, 1);
@@ -949,5 +1027,25 @@ mod tests {
         assert!(format_swaps_rb(spa::param::video::VideoFormat::BGRA));
         assert!(!format_swaps_rb(spa::param::video::VideoFormat::RGBA));
         assert_eq!(format_bpp(spa::param::video::VideoFormat::BGRA), 4);
+    }
+
+    #[test]
+    fn rgba_copy_plan_rejects_area_crop_hint_mismatch() {
+        let packed_1080p = 1920 * 1080 * 4;
+        assert_eq!(rgba_copy_plan(packed_1080p, 1920, 1080, 4), Some(1920 * 4));
+        assert_eq!(rgba_copy_plan(640 * 480 * 4, 1920, 1080, 4), None);
+        assert_eq!(rgba_copy_plan(0, 1920, 1080, 4), None);
+        let padded = 1920 * 4 + 64;
+        assert_eq!(rgba_copy_plan(padded * 1080, 1920, 1080, 4), Some(padded));
+    }
+
+    #[test]
+    fn continuous_capture_queue_keeps_only_the_freshest_full_frame() {
+        let mut frames = std::collections::VecDeque::new();
+        assert_eq!(push_latest_continuous_frame(&mut frames, vec![1]), 0);
+        assert_eq!(push_latest_continuous_frame(&mut frames, vec![2]), 1);
+        assert_eq!(push_latest_continuous_frame(&mut frames, vec![3]), 1);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames.front(), Some(&vec![3]));
     }
 }

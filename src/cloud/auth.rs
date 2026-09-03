@@ -166,14 +166,20 @@ pub fn login() -> Result<(), LoginError> {
                 // Caches email + plan tier (and syncs the pro-plan flag) so the
                 // entitlement is readable later without another request.
                 account.apply_to_config(&mut config);
+                config.cloud_auto_upload_after_capture = true;
                 save_config(&config)
                     .map_err(|e| LoginError::Server(format!("Failed to save config: {e}")))?;
 
                 println!("\n✓ Authentication complete.");
                 println!("✓ Logged in as {}", config.cloud_user_email);
+                println!("Your next screenshot will upload and copy a share link.");
                 if was_logged_in && config.cloud_user_email == previous_email {
                     println!("! You were already logged in to this account");
                 }
+                crate::utils::notify::desktop_notification_important(
+                    "You're connected",
+                    "Your next screenshot gets a share link.",
+                );
                 return Ok(());
             }
             Err(ureq::Error::Status(400, resp)) => {

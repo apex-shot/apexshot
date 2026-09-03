@@ -624,6 +624,10 @@ fn setup_editor_window_full(
             ));
         }
     }
+    let session_baseline = {
+        let st = state.lock().unwrap();
+        image_session_snapshot(&st)
+    };
     let transform = Arc::new(Mutex::new(ViewTransform::for_image(
         img_width as f64,
         img_height as f64,
@@ -2323,10 +2327,14 @@ fn setup_editor_window_full(
 
     let state_prefs = state.clone();
     let session_alive_prefs = session_alive.clone();
+    let path_persist = path.clone();
     window.connect_close_request(move |_| {
         // Superseded session: don't save stale preferences on close.
         if !session_alive_prefs.get() {
             return glib::Propagation::Proceed;
+        }
+        if !empty_drop_zone {
+            persist_image_session_on_close(&path_persist, &state_prefs, &session_baseline);
         }
         crate::gnome_integration::emit_tracked_window_closed(&tracked_window_id);
         let prefs = {
@@ -2336,6 +2344,47 @@ fn setup_editor_window_full(
         super::preferences::save_editor_prefs(&prefs);
         glib::Propagation::Proceed
     });
+}
+
+fn image_session_snapshot(state: &EditorState) -> crate::annotations::ImageSessionSnapshot {
+    crate::annotations::ImageSessionSnapshot::from_editor(
+        state.base_image.width(),
+        state.base_image.height(),
+        &state.actions,
+        &state.background_style,
+        state.background_padding,
+        state.background_shadow,
+        state.background_insert,
+        state.auto_balance,
+        state.background_alignment,
+        state.background_corner_radius,
+        state.background_aspect_ratio,
+    )
+}
+
+fn persist_image_session_on_close(
+    path: &std::path::Path,
+    state: &Arc<Mutex<EditorState>>,
+    baseline: &crate::annotations::ImageSessionSnapshot,
+) {
+    let st = state.lock().unwrap();
+    let current = image_session_snapshot(&st);
+    if current == *baseline {
+        return;
+    }
+    if current.is_empty()
+        && current.canvas_width == baseline.canvas_width
+        && current.canvas_height == baseline.canvas_height
+        && crate::annotations::annotations_exist(path)
+    {
+        if let Err(error) = crate::annotations::delete_annotations(path) {
+            eprintln!("[editor] Warning: Failed to delete annotations: {error}");
+        }
+        return;
+    }
+    if let Err(error) = events::persist_image_session(path, &st) {
+        eprintln!("[editor] Warning: Failed to save annotations: {error}");
+    }
 }
 
 #[cfg(test)]
@@ -2782,6 +2831,29 @@ mod tests {
                 )
                 && production_source.contains("pub(super) struct CanvasRenderCaches"),
             "PR 10.19 must install canvas draw via canvas_render; caches and draw body live there"
+        );
+    }
+
+    #[test]
+    fn close_persists_annotations_and_does_not_flatten() {
+        let source = include_str!("mod.rs");
+        let start = source
+            .find("fn persist_image_session_on_close(")
+            .expect("image close persist helper");
+        let rest = &source[start + 1..];
+        let end = rest
+            .find("\nfn ")
+            .or_else(|| rest.find("\n#[cfg(test)]"))
+            .map(|i| start + 1 + i)
+            .unwrap_or(source.len());
+        let handler = &source[start..end];
+        assert!(
+            handler.contains("persist_image_session"),
+            "Image close must write the annotation sidecar"
+        );
+        assert!(
+            !handler.contains("save_edited_image"),
+            "Image close must not flatten the PNG"
         );
     }
 }

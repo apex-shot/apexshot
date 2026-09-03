@@ -30,6 +30,9 @@ mod recording_handlers;
 mod scroll;
 
 pub(crate) use audio::{audio_meter_level, find_physical_input_device};
+pub use audio::{
+    begin_recording_audio_exclusive, end_recording_audio_exclusive, recording_audio_is_exclusive,
+};
 pub use capture_handlers::{copy_screenshot_to_clipboard, open_file};
 pub use recording_handlers::{
     notify_daemon_recording_ended, notify_daemon_recording_paused,
@@ -113,6 +116,12 @@ pub(super) static HOTKEY_SUPPRESSED: std::sync::atomic::AtomicBool =
 /// Returns true if hotkey activations are currently suppressed.
 pub fn is_hotkey_suppressed() -> bool {
     HOTKEY_SUPPRESSED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Release overlay mic/speaker meters before a recording capture starts, and
+/// keep them from reopening until [`end_recording_audio_exclusive`].
+pub fn release_audio_monitors_for_recording() {
+    audio::begin_recording_audio_exclusive();
 }
 
 /// Set hotkey suppression via D-Bus. Returns `true` if the daemon was found.
@@ -325,6 +334,25 @@ pub(super) fn spawn_daemon_tray(
         }
     });
     spawn_tray(tray_tx).context("Failed to spawn tray icon")
+}
+
+#[allow(dead_code)]
+pub(super) fn respawn_daemon_tray(
+    action_tx: &std::sync::mpsc::Sender<DaemonAction>,
+    tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,
+) {
+    if let Some(handle) = tray_handle.take() {
+        handle.shutdown();
+    }
+    match spawn_daemon_tray(action_tx) {
+        Ok(handle) => {
+            *tray_handle = Some(handle);
+            eprintln!("[daemon] Tray icon re-registered.");
+        }
+        Err(e) => {
+            eprintln!("[daemon] Failed to show recording tray: {e}");
+        }
+    }
 }
 
 /// A request for GTK work that must run on the main OS thread.
@@ -729,6 +757,21 @@ mod tests {
     use super::hotkey_listener::*;
     use super::*;
     use std::{path::Path, time::Duration};
+
+    #[test]
+    fn exclusive_recording_blocks_meter_restart() {
+        use std::sync::atomic::Ordering;
+        let previous = RECORDING_AUDIO_EXCLUSIVE.swap(true, Ordering::AcqRel);
+        touch_mic_monitor();
+        touch_speaker_monitor();
+        let mic_started = MIC_MONITOR_RUNNING.load(Ordering::Acquire);
+        let speaker_started = SPEAKER_MONITOR_RUNNING.load(Ordering::Acquire);
+        RECORDING_AUDIO_EXCLUSIVE.store(previous, Ordering::Release);
+        assert!(
+            !mic_started && !speaker_started,
+            "GetMicLevel must not reopen pulsesrc while recording owns the device"
+        );
+    }
 
     #[test]
     fn audio_monitor_idle_detection() {

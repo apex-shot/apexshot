@@ -1,6 +1,7 @@
 use gtk4::{prelude::*, Align, Box as GtkBox, Label, Orientation};
 
 use super::ui::{feature_card_list, tip_block};
+use crate::capture::editor::window::icon_names::custom;
 
 pub fn build(content: &GtkBox) {
     // Logo (using the same curved arch as welcome page)
@@ -46,14 +47,18 @@ pub fn build(content: &GtkBox) {
     content.append(&message);
 
     let checklist = feature_card_list(&[
-        ("✓", "Tray icon", "Right-click for Area, Screen, and Record"),
         (
-            "⌘",
+            custom::OVERLAPPING_WINDOWS_SYMBOLIC,
+            "Tray icon",
+            "Right-click for Area, Screen, and Record",
+        ),
+        (
+            custom::KEYBOARD_SHORTCUTS_SYMBOLIC,
             "Hotkeys",
             "Capture without opening Settings every time",
         ),
         (
-            "⚙",
+            custom::SETTINGS_SYMBOLIC,
             "App menu",
             "Open ApexShot anytime for Settings and preferences",
         ),

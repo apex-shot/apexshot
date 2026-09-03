@@ -1,0 +1,335 @@
+            }
+
+            button.recording-editor-player-play {
+                min-width: 28px;
+                min-height: 28px;
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                color: alpha(white, 0.82);
+            }
+
+            button.recording-editor-player-play:hover,
+            button.recording-editor-player-play:hover:focus,
+            button.recording-editor-player-play:active {
+                background: transparent;
+                color: #b05c38;
+            }
+
+            button.recording-editor-player-play image {
+                color: alpha(white, 0.82);
+            }
+
+            button.recording-editor-player-play:hover image,
+            button.recording-editor-player-play:hover:focus image,
+            button.recording-editor-player-play:active image {
+                color: #b05c38;
+            }
+
+            button.recording-editor-aspect-button {
+                min-height: 24px;
+                padding: 0 4px;
+                background: transparent;
+                border: none;
+                color: alpha(white, 0.6);
+                font-size: 11px;
+            }
+
+            button.recording-editor-aspect-button:hover {
+                background: transparent;
+                color: alpha(white, 0.88);
+            }
+
+            .recording-editor-aspect-label {
+                color: inherit;
+                font-size: 11px;
+            }
+
+            .recording-editor-video {
+                background: #000000;
+                border-radius: 4px;
+                border: none;
+                box-shadow: none;
+                margin: 0;
+                padding: 0;
+            }
+
+            .recording-editor-preview-clip {
+                overflow: hidden;
+            }
+
+            .recording-editor-empty-workspace {
+                min-height: 260px;
+            }
+
+            .recording-editor-empty-preview-hint {
+                color: alpha(white, 0.55);
+                font-size: 14px;
+            }
+
+            .recording-editor-empty-track-row {
+                background: #2c2c2c;
+                border-radius: 0;
+            }
+
+            .recording-editor-thumbnail-strip.recording-editor-empty-thumbnail-strip {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+            }
+
+            .recording-editor-empty-track-prompt {
+                color: alpha(white, 0.42);
+                font-size: 12px;
+            }
+
+            .recording-editor-dim-badge {
+                background: #b05c38;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 4px 10px;
+                border-radius: 4px;
+                border: 1px solid alpha(#111827, 0.08);
+            }
+
+            .recording-editor-dim-badge label,
+            .recording-editor-dim-badge {
+                color: #ffffff;
+            }
+
+            /* ── Bottom tools ── */
+            /* A third, deeper black than the #111111 preview/top so the
+               controls band reads as its own zone without a divider line.
+               The timeline card and strip paint translucent white on top of
+               it, so they lift back above it (~#141414 / ~#1d1d1d) and stay
+               visibly distinct from both this band and the top. */
+            .recording-editor-bottom-tools {
+                padding: 0;
+                margin: 0;
+                background-color: #0c0c0c;
+                border: none;
+                border-radius: 0 0 10px 10px;
+            }
+
+            /* ── Timeline ── */
+            .recording-editor-timeline {
+                min-height: 48px;
+                padding: 0;
+                background: #000000;
+                border-top: 1px solid alpha(white, 0.06);
+            }
+
+            .recording-editor-timeline-well {
+                min-height: 14px;
+                padding: 2px 8px 6px 0;
+            }
+
+            .recording-editor-timeline-scroll {
+                min-height: 10px;
+            }
+
+            .recording-editor-timeline-shell,
+            .recording-editor-timeline-card {
+                border-radius: 0;
+                background: transparent;
+                border: none;
+                padding: 0;
+            }
+
+            .recording-editor-transport {
+                min-height: 28px;
+                max-height: 28px;
+                padding: 0;
+                border-bottom: 1px solid alpha(white, 0.06);
+            }
+
+            button.recording-editor-tool-icon {
+                min-width: 20px;
+                min-height: 20px;
+                padding: 0;
+                margin: 0;
+                border: none;
+                border-radius: 0;
+                background: transparent;
+                color: alpha(white, 0.62);
+            }
+
+            button.recording-editor-tool-icon:hover,
+            button.recording-editor-tool-icon:hover:focus {
+                background: transparent;
+                color: #b05c38;
+            }
+
+            button.recording-editor-tool-icon image {
+                color: inherit;
+            }
+
+            button.recording-editor-tool-icon:hover image,
+            button.recording-editor-tool-icon-active,
+            button.recording-editor-tool-icon-active image {
+                color: #b05c38;
+                background: transparent;
+            }
+
+            .recording-editor-timeline-scale-control {
+                min-width: 132px;
+            }
+
+            .recording-editor-root scale.recording-editor-timeline-scale {
+                min-width: 72px;
+                min-height: 12px;
+                padding: 0;
+            }
+
+            .recording-editor-root scale.recording-editor-timeline-scale trough {
+                min-height: 3px;
+            }
+
+            .recording-editor-root scale.recording-editor-timeline-scale slider {
+                min-width: 10px;
+                min-height: 10px;
+                margin: 0;
+                background: #b05c38;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                outline: none;
+                -gtk-icon-shadow: none;
+            }
+
+            .recording-editor-timeline-board {
+                min-height: 0;
+            }
+
+            .recording-editor-rail-divider {
+                min-width: 1px;
+                max-width: 1px;
+                background: alpha(white, 0.12);
+            }
+
+            .recording-editor-track-row {
+                min-height: 36px;
+            }
+
+            .recording-editor-track-header {
+                min-width: 120px;
+                padding: 0 8px 0 2px;
+                border-right: none;
+            }
+
+            .recording-editor-transport-gutter {
+                min-height: 28px;
+                max-height: 28px;
+            }
+
+            .recording-editor-track-icon {
+                color: alpha(white, 0.55);
+            }
+
+            button.recording-editor-rail-action {
+                min-width: 18px;
+                min-height: 18px;
+                padding: 0;
+                margin: 0;
+                border: none;
+                border-radius: 0;
+                background: transparent;
+                color: alpha(white, 0.42);
+            }
+
+            button.recording-editor-rail-action:hover {
+                background: transparent;
+                color: alpha(white, 0.82);
+            }
+
+            button.recording-editor-rail-action:disabled {
+                opacity: 0.22;
+            }
+
+            .recording-editor-track-body,
+            .recording-editor-track-canvas,
+            .recording-editor-trim-area,
+            .recording-editor-waveform {
+                position: relative;
+                min-width: 0;
+                overflow: hidden;
+            }
+
+            .recording-editor-track-faded {
+                opacity: 0.3;
+            }
+
+            .recording-editor-track-locked {
+                background-image: repeating-linear-gradient(
+                    45deg,
+                    alpha(white, 0.07),
+                    alpha(white, 0.07) 2px,
+                    transparent 2px,
+                    transparent 6px
+                );
+                background-size: 6px 6px;
+            }
+
+            .editor-theme-light .recording-editor-track-locked {
+                background-image: repeating-linear-gradient(
+                    45deg,
+                    alpha(#111827, 0.10),
+                    alpha(#111827, 0.10) 2px,
+                    transparent 2px,
+                    transparent 6px
+                );
+            }
+
+            .editor-theme-light .recording-editor-rail-divider {
+                background: alpha(#111827, 0.14);
+            }
+
+            .editor-theme-light .recording-editor-track-icon {
+                color: alpha(#1d2129, 0.55);
+            }
+
+            .editor-theme-light button.recording-editor-rail-action {
+                color: alpha(#1d2129, 0.42);
+            }
+
+            .editor-theme-light button.recording-editor-rail-action:hover {
+                color: alpha(#1d2129, 0.82);
+                background: transparent;
+            }
+
+            .recording-editor-play-button,
+            .recording-editor-cut-button,
+            .recording-editor-revert-button {
+                min-width: 32px;
+                min-height: 32px;
+                border-radius: 999px;
+                background: alpha(white, 0.07);
+                color: white;
+                border: none;
+            }
+
+            .recording-editor-play-button-hero {
+                min-width: 40px;
+                min-height: 40px;
+                background: #b05c38;
+                color: #ffffff;
+            }
+
+            .recording-editor-play-button-hero image {
+                color: #ffffff;
+            }
+
+            .recording-editor-play-button-hero:hover {
+                background: #c06540;
+            }
+
+            .recording-editor-timeline-tools {
+                margin-left: 8px;
+            }
+
+            .recording-editor-play-button:hover,
+            .recording-editor-cut-button:hover,
+            .recording-editor-revert-button:hover,
+            .recording-editor-cut-button-active {
+                background: alpha(white, 0.14);

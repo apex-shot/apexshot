@@ -36,6 +36,7 @@ use interaction::SpacePanState;
 use keyboard::wire_window_keyboard;
 use motion::wire_canvas_motion;
 use options::{wire_tool_options, ToolOptionsParts};
+pub(super) use output::persist_image_session;
 use output::wire_output_lifecycle;
 use tools::{wire_tool_mode_switches, ToolModeButtons};
 use zoom::wire_zoom_controls;
@@ -238,14 +239,10 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         }
     });
 
-    let zoomed_state = Rc::new(Cell::new(false));
-    let zoomed_state_btn = zoomed_state.clone();
     let window_zoom = window.downgrade();
     traffic_zoom.connect_clicked(move |_| {
         if let Some(window) = window_zoom.upgrade() {
-            let next_zoomed = !zoomed_state_btn.get();
-            zoomed_state_btn.set(next_zoomed);
-            window.set_fullscreened(next_zoomed);
+            window.set_fullscreened(!window.is_fullscreen());
         }
     });
 

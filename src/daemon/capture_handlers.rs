@@ -475,7 +475,7 @@ pub(super) fn send_desktop_notification(summary: &str, body: &str) {
     crate::utils::notify::desktop_notification(summary, body);
 }
 
-/// Surface a capture failure to the user (Spectacle-style: failures are never silent).
+/// Surface a capture failure to the user. Failures are never silent.
 /// Cancel / launch-blocked paths should not call this.
 pub(super) fn notify_screenshot_capture_failed(context: &str, err: &impl std::fmt::Display) {
     let technical = err.to_string();
@@ -673,6 +673,7 @@ pub(super) fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonSta
         Ok(AreaCapturePathResult::RecordingRequested(request)) => {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
                 eprintln!("[daemon] Recording failed: {err}");
+                send_desktop_notification("Recording failed", &err.to_string());
                 // Show notification for GNOME extension not installed
                 if err
                     .to_string()

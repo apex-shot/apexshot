@@ -1,6 +1,5 @@
 use super::model::{
-    even_crop_rect, even_dimension, quality_to_crf, AudioMode, VideoBackground, VideoEditState,
-    VideoMetadata,
+    even_crop_rect, quality_to_crf, AudioMode, VideoBackground, VideoEditState, VideoMetadata,
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
@@ -232,8 +231,8 @@ pub fn generate_waveform(metadata: &VideoMetadata) -> anyhow::Result<PathBuf> {
 /// Extract one frame from `input` into `output` as a poster image.
 ///
 /// Same invocation shape as `generate_thumbnails` (fast input seek, single
-/// frame, no audio) but writes exactly one frame at full size so the caller can
-/// scale it however it likes. Used for the History window's recording cards.
+/// frame, no audio), but scales the result to the History cache width before
+/// writing it. The History thumbnail pipeline performs the final crop.
 pub fn extract_poster_frame(
     input: &Path,
     output: &Path,
@@ -244,17 +243,7 @@ pub fn extract_poster_frame(
             .with_context(|| format!("failed to create poster dir {}", parent.display()))?;
     }
 
-    let args = vec![
-        "-y".to_string(),
-        "-ss".to_string(),
-        format_seconds(timestamp_seconds),
-        "-i".to_string(),
-        input.to_string_lossy().to_string(),
-        "-an".to_string(),
-        "-frames:v".to_string(),
-        "1".to_string(),
-        output.to_string_lossy().to_string(),
-    ];
+    let args = poster_frame_args(input, output, timestamp_seconds);
     run_ffmpeg(args, output)?;
 
     // A seek past the end of a very short clip exits cleanly without writing
@@ -266,6 +255,22 @@ pub fn extract_poster_frame(
         ));
     }
     Ok(())
+}
+
+fn poster_frame_args(input: &Path, output: &Path, timestamp_seconds: f64) -> Vec<String> {
+    vec![
+        "-y".to_string(),
+        "-ss".to_string(),
+        format_seconds(timestamp_seconds),
+        "-i".to_string(),
+        input.to_string_lossy().to_string(),
+        "-an".to_string(),
+        "-frames:v".to_string(),
+        "1".to_string(),
+        "-vf".to_string(),
+        "scale=260:-2".to_string(),
+        output.to_string_lossy().to_string(),
+    ]
 }
 
 fn thumbnail_count(_duration_seconds: f64) -> usize {
@@ -310,8 +315,7 @@ pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
     }
 }
 
-pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
-    let output_path = state.export_path();
+pub fn run_trim_only(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -326,8 +330,7 @@ pub fn run_trim_only(state: &VideoEditState) -> anyhow::Result<PathBuf> {
     Ok(output_path)
 }
 
-pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
-    let output_path = state.export_path();
+pub fn run_convert(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -346,14 +349,18 @@ pub fn run_convert(state: &VideoEditState) -> anyhow::Result<PathBuf> {
 /// Uses stream-copy when quality/dimensions are unchanged; otherwise re-encodes.
 /// Falls back to convert if trim-only fails (e.g. awkward codecs/containers).
 pub fn export_edited(state: &VideoEditState) -> anyhow::Result<PathBuf> {
+    export_edited_to(state, state.export_path())
+}
+
+pub fn export_edited_to(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
     if state.needs_reencode() {
-        return run_convert(state);
+        return run_convert(state, output_path);
     }
-    match run_trim_only(state) {
+    match run_trim_only(state, output_path.clone()) {
         Ok(path) => Ok(path),
         Err(err) => {
             eprintln!("[video-editor] trim-only export failed ({err}); falling back to convert");
-            run_convert(state)
+            run_convert(state, output_path)
         }
     }
 }
@@ -376,7 +383,11 @@ fn build_single_trim_args(
         "copy".into(),
     ];
     // Apply audio mode (mute/mono work even with video stream copy)
-    match state.audio_mode {
+    match if state.muted_for_source(start) {
+        AudioMode::Muted
+    } else {
+        state.audio_mode
+    } {
         AudioMode::Muted => args.push("-an".into()),
         AudioMode::Mono => {
             args.extend([
@@ -416,7 +427,8 @@ fn build_single_convert_args(
         "-i".into(),
         state.metadata.path.to_string_lossy().into_owned(),
     ];
-    if let Some(filter) = convert_video_filter(state) {
+    let speed = state.speed_for_source(start);
+    if let Some(filter) = convert_video_filter(state, speed) {
         args.push("-vf".into());
         args.push(filter);
     }
@@ -428,7 +440,7 @@ fn build_single_convert_args(
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
     ]);
-    args.extend(convert_audio_args(state));
+    args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
     args
 }
@@ -446,8 +458,7 @@ fn build_composite_convert_args(
     ));
     let _ = std::fs::create_dir_all(&work_dir);
     let cmd_path = work_dir.join("zoom.cmd");
-    let cursor_path = work_dir.join("cursor.png");
-    let _ = write_cursor_png(&cursor_path);
+    let cursor_path = work_dir.join("cursor.rgba");
     let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end));
 
     let (base_w, base_h) = state.canvas_dimensions();
@@ -460,25 +471,33 @@ fn build_composite_convert_args(
         VideoBackground::None => "0x111111".to_string(),
     };
 
+    let (eff_w, eff_h) = state.effective_source_dimensions();
+    let draw_cursor = state
+        .sidecar
+        .as_ref()
+        .is_some_and(|sidecar| sidecar.can_render_cursor_overlay())
+        && super::cursor_export::write_rgba_track(state, start, end, base_w, base_h, &cursor_path)
+            .is_ok();
     let mut filter = format!(
-        "[0:v]sendcmd=f={},crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={base_w}:{base_h}:force_original_aspect_ratio=decrease,pad={base_w}:{base_h}:(ow-iw)/2:(oh-ih)/2:0x000000",
+        "[0:v]sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={base_w}:{base_h}:force_original_aspect_ratio=decrease,pad={base_w}:{base_h}:(ow-iw)/2:(oh-ih)/2:0x000000",
         escape_filter_path(&cmd_path),
-        src_w = state.metadata.width.max(2),
-        src_h = state.metadata.height.max(2),
+        static_crop_prefix(state),
+        src_w = eff_w.max(2),
+        src_h = eff_h.max(2),
     );
+    if draw_cursor {
+        filter.push_str("[base];[base][1:v]overlay=0:0:eof_action=pass:shortest=0:format=auto");
+    }
     if out_w != base_w || out_h != base_h {
         filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
+    }
+    let speed = state.speed_for_source(start);
+    if (speed - 1.0).abs() > 1e-6 {
+        filter.push_str(&format!(",setpts=PTS/{speed}"));
     }
     if let Some(pad) = lead_in_tpad(state) {
         filter.push(',');
         filter.push_str(&pad);
-    }
-    let draw_cursor = state
-        .sidecar
-        .as_ref()
-        .is_some_and(|sidecar| !sidecar.pointer.is_empty());
-    if draw_cursor {
-        filter.push_str("[v];[v][1:v]overlay@c=x=0:y=0:eof_action=pass");
     }
 
     let mut args = vec![
@@ -492,8 +511,14 @@ fn build_composite_convert_args(
     ];
     if draw_cursor {
         args.extend([
-            "-loop".into(),
-            "1".into(),
+            "-f".into(),
+            "rawvideo".into(),
+            "-pix_fmt".into(),
+            "rgba".into(),
+            "-video_size".into(),
+            format!("{base_w}x{base_h}"),
+            "-framerate".into(),
+            format!("{:.0}", super::cursor_export::fps()),
             "-i".into(),
             cursor_path.to_string_lossy().into_owned(),
         ]);
@@ -507,20 +532,26 @@ fn build_composite_convert_args(
         "-crf".into(),
         quality_to_crf(state.quality).to_string(),
     ]);
-    args.extend(convert_audio_args(state));
-    if draw_cursor {
-        args.push("-shortest".into());
-    }
+    args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
     args
+}
+
+/// `crop=w:h:x:y,` prepended before zoom cropping, or empty when uncropped.
+fn static_crop_prefix(state: &VideoEditState) -> String {
+    match state.crop {
+        Some(c) => format!("crop={}:{}:{}:{},", c.width, c.height, c.x, c.y),
+        None => String::new(),
+    }
 }
 
 fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
     let fps = 30.0;
     let duration = (end - start).max(0.0);
     let frames = ((duration * fps).ceil() as usize).max(1);
-    let src_w = state.metadata.width.max(2);
-    let src_h = state.metadata.height.max(2);
+    let (crop_x, crop_y, eff_w, eff_h) = state.crop_or_full();
+    let src_w = eff_w.max(2.0) as u32;
+    let src_h = eff_h.max(2.0) as u32;
     let (base_w, base_h) = state.canvas_dimensions();
     let (out_w, out_h) = state.padded_output_dimensions();
     let pad_x = ((out_w.saturating_sub(base_w)) / 2) as f64;
@@ -530,45 +561,14 @@ fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
         let local_t = index as f64 / fps;
         let source_t = start + local_t;
         let (scale, center) = state.eval_zoom(source_t);
+        let center = (center.0 - crop_x, center.1 - crop_y);
         let (x, y, w, h) = even_crop_rect(scale, center, src_w, src_h);
         lines.push_str(&format!(
             "{local_t:.3} crop@z w {w};\n{local_t:.3} crop@z h {h};\n{local_t:.3} crop@z x {x};\n{local_t:.3} crop@z y {y};\n"
         ));
-        if let Some(sidecar) = &state.sidecar {
-            if let Some((cx, cy, _)) = sidecar.interpolated_at(source_t) {
-                let pulse = sidecar.click_pulse_at(source_t);
-                let rel_x = ((cx - x as f64) / w as f64) * base_w as f64 + pad_x;
-                let rel_y = ((cy - y as f64) / h as f64) * base_h as f64 + pad_y;
-                let size = (16.0 * pulse).round();
-                lines.push_str(&format!(
-                    "{local_t:.3} overlay@c x {:.0};\n{local_t:.3} overlay@c y {:.0};\n",
-                    (rel_x - size * 0.1).round(),
-                    (rel_y - size * 0.1).round()
-                ));
-            }
-        }
     }
+    let _ = (pad_x, pad_y, base_w, base_h, out_w, out_h);
     lines
-}
-
-fn write_cursor_png(path: &Path) -> anyhow::Result<()> {
-    let mut img = image::RgbaImage::new(32, 32);
-    for y in 0..28 {
-        let width = (y / 2).min(10) as u32;
-        for x in 0..=width {
-            let edge = x == 0 || x == width || y == 0 || y == 27;
-            let pixel = if edge {
-                image::Rgba([20, 20, 24, 255])
-            } else {
-                image::Rgba([255, 255, 255, 255])
-            };
-            if x < 32 {
-                img.put_pixel(x, y as u32, pixel);
-            }
-        }
-    }
-    img.save(path)?;
-    Ok(())
 }
 
 fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
@@ -581,8 +581,17 @@ fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
     ))
 }
 
-fn convert_video_filter(state: &VideoEditState) -> Option<String> {
+fn convert_video_filter(state: &VideoEditState, speed: f64) -> Option<String> {
     let mut parts = Vec::new();
+    if let Some(crop) = state.crop {
+        parts.push(format!(
+            "crop={}:{}:{}:{}",
+            crop.width, crop.height, crop.x, crop.y
+        ));
+    }
+    if (speed - 1.0).abs() > 1e-6 {
+        parts.push(format!("setpts=PTS/{speed}"));
+    }
     if let Some(scale) = convert_scale_filter(state) {
         parts.push(scale);
     }
@@ -596,11 +605,27 @@ fn convert_video_filter(state: &VideoEditState) -> Option<String> {
     }
 }
 
-fn convert_audio_args(state: &VideoEditState) -> Vec<String> {
+fn convert_audio_args(state: &VideoEditState, speed: f64, source_start: f64) -> Vec<String> {
     let offset = state.timeline_offset_seconds;
-    if offset > 0.001 && state.metadata.has_audio && state.audio_mode != AudioMode::Muted {
-        let ms = (offset * 1000.0).round().max(1.0) as u64;
-        let mut args = match state.audio_mode {
+    let tempo = atempo_filter(speed);
+    let mode = if state.muted_for_source(source_start) {
+        AudioMode::Muted
+    } else {
+        state.audio_mode
+    };
+    if mode == AudioMode::Muted || !state.metadata.has_audio {
+        return audio_args(mode, state.metadata.has_audio);
+    }
+    if offset > 0.001 || tempo.is_some() {
+        let mut filters = Vec::new();
+        if let Some(tempo) = tempo {
+            filters.push(tempo);
+        }
+        if offset > 0.001 {
+            let ms = (offset * 1000.0).round().max(1.0) as u64;
+            filters.push(format!("adelay={ms}:all=1"));
+        }
+        let mut args = match mode {
             AudioMode::Mono => vec![
                 "-ac".into(),
                 "1".into(),
@@ -611,18 +636,35 @@ fn convert_audio_args(state: &VideoEditState) -> Vec<String> {
             ],
             _ => vec!["-c:a".into(), "aac".into(), "-b:a".into(), "192k".into()],
         };
-        args.extend(["-af".into(), format!("adelay={ms}:all=1")]);
+        args.extend(["-af".into(), filters.join(",")]);
         args
     } else {
-        audio_args(state.audio_mode, state.metadata.has_audio)
+        audio_args(mode, state.metadata.has_audio)
     }
+}
+
+fn atempo_filter(speed: f64) -> Option<String> {
+    if (speed - 1.0).abs() <= 1e-6 || !speed.is_finite() || speed <= 0.0 {
+        return None;
+    }
+    let mut remaining = speed;
+    let mut parts = Vec::new();
+    while remaining < 0.5 - 1e-9 {
+        parts.push("atempo=0.5".into());
+        remaining /= 0.5;
+    }
+    while remaining > 100.0 + 1e-9 {
+        parts.push("atempo=100".into());
+        remaining /= 100.0;
+    }
+    parts.push(format!("atempo={remaining}"));
+    Some(parts.join(","))
 }
 
 /// Scale the source into the output canvas and letterbox leftover space.
 fn convert_scale_filter(state: &VideoEditState) -> Option<String> {
     let (width, height) = state.canvas_dimensions();
-    let src_w = even_dimension(state.metadata.width.max(1));
-    let src_h = even_dimension(state.metadata.height.max(1));
+    let (src_w, src_h) = state.effective_source_dimensions();
     if width == src_w && height == src_h {
         return None;
     }
@@ -633,20 +675,24 @@ fn convert_scale_filter(state: &VideoEditState) -> Option<String> {
 
 fn run_multi_segment_trim(
     state: &VideoEditState,
-    segments: &[(f64, f64)],
+    _segments: &[(f64, f64)],
     output_path: &Path,
     convert: bool,
 ) -> anyhow::Result<()> {
     let tmp_dir = std::env::temp_dir().join(format!("apexshot-segments-{}", std::process::id()));
     std::fs::create_dir_all(&tmp_dir)?;
 
+    let placed = state.ordered_placed_segments();
     let mut segment_files = Vec::new();
-    for (i, &(start, end)) in segments.iter().enumerate() {
+    let mut cursor = 0.0;
+    for (i, &(comp, start, end)) in placed.iter().enumerate() {
         let seg_path = tmp_dir.join(format!("seg_{i:04}.mp4"));
         let mut segment_state = state.clone();
-        if i > 0 {
-            segment_state.timeline_offset_seconds = 0.0;
+        segment_state.timeline_offset_seconds = (comp - cursor).max(0.0);
+        if state.muted_for_source(start) {
+            segment_state.audio_mode = AudioMode::Muted;
         }
+        cursor = comp + (end - start).max(0.0) / state.speed_for_source(start);
         let args = if convert {
             build_single_convert_args(&segment_state, start, end, &seg_path)
         } else {
@@ -743,6 +789,18 @@ mod tests {
     }
 
     #[test]
+    fn poster_frame_command_scales_before_writing() {
+        let args = poster_frame_args(
+            Path::new("/tmp/input.mp4"),
+            Path::new("/tmp/poster.png"),
+            1.0,
+        );
+
+        assert!(args.windows(2).any(|pair| pair == ["-vf", "scale=260:-2"]));
+        assert_eq!(args.last().map(String::as_str), Some("/tmp/poster.png"));
+    }
+
+    #[test]
     fn trim_only_command_uses_stream_copy() {
         let s = state();
         let args = build_single_trim_args(
@@ -756,6 +814,27 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["-ss", "1.250"]));
         assert!(args.windows(2).any(|pair| pair == ["-to", "8.500"]));
         assert_eq!(args.last().map(String::as_str), Some("/tmp/output.mp4"));
+    }
+
+    #[test]
+    fn clip_mute_removes_audio_from_single_segment_commands() {
+        let mut s = state();
+        s.set_selected_clip_muted(true);
+        let trim = build_single_trim_args(
+            &s,
+            s.trim_start_seconds,
+            s.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        let convert = build_single_convert_args(
+            &s,
+            s.trim_start_seconds,
+            s.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+
+        assert!(trim.iter().any(|arg| arg == "-an"));
+        assert!(convert.iter().any(|arg| arg == "-an"));
     }
 
     #[test]
@@ -793,6 +872,8 @@ mod tests {
                 scale: 1.8,
                 center: (960.0, 540.0),
                 ease_ms: 200,
+                easing: crate::recording::editor::model::ZoomEasing::Glide,
+                mode: crate::recording::editor::model::ZoomMode::Auto,
             });
         assert!(state.needs_reencode());
         let args = build_single_convert_args(
@@ -805,7 +886,59 @@ mod tests {
         assert!(args
             .iter()
             .any(|arg| arg.contains("sendcmd") && arg.contains("crop@z")));
+        assert!(!args.iter().any(|arg| arg.contains("overlay@c")));
+        assert!(!args.iter().any(|arg| arg.contains("tmix")));
+        assert!(
+            !args.iter().any(|arg| arg == "-shortest"),
+            "cursor/zoom export must not cut the video to a shorter overlay track"
+        );
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
+    }
+
+    #[test]
+    fn composite_speed_is_applied_before_timeline_padding() {
+        let mut state = state();
+        state.timeline_offset_seconds = 2.0;
+        state.segment_starts[0] = 2.0;
+        state.set_selected_clip_speed(2.0);
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 2.0,
+                end: 3.8,
+                scale: 1.8,
+                center: (960.0, 540.0),
+                ease_ms: 200,
+                easing: crate::recording::editor::model::ZoomEasing::Glide,
+                mode: crate::recording::editor::model::ZoomMode::Manual,
+            });
+        let args = build_single_convert_args(
+            &state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        let graph = args
+            .windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].as_str())
+            .unwrap();
+
+        assert!(graph.contains("setpts=PTS/2,tpad=start_duration=2.000"));
+    }
+
+    #[test]
+    fn audio_speed_is_applied_before_timeline_delay() {
+        let mut state = state();
+        state.timeline_offset_seconds = 2.0;
+        let args = convert_audio_args(&state, 2.0, state.trim_start_seconds);
+        let filter = args
+            .windows(2)
+            .find(|pair| pair[0] == "-af")
+            .map(|pair| pair[1].as_str())
+            .unwrap();
+
+        assert_eq!(filter, "atempo=2,adelay=2000:all=1");
     }
 
     #[test]

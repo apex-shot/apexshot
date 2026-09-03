@@ -159,8 +159,8 @@ fn build_settings_window(app: &Application) {
         .application(app)
         .title("ApexShot Settings")
         .icon_name(crate::app_identity::icon_name())
-        .default_width(1020)
-        .default_height(840)
+        .default_width(900)
+        .default_height(635)
         .build();
 
     window.set_decorated(false);
@@ -203,7 +203,7 @@ fn build_settings_window(app: &Application) {
     min_btn.connect_clicked(move |_| win_clone.minimize());
 
     for button in [&close_btn, &min_btn] {
-        button.set_size_request(24, 24);
+        button.set_size_request(28, 28);
         button.set_valign(Align::Center);
     }
 
@@ -533,6 +533,7 @@ fn build_settings_window(app: &Application) {
         screenshot_format: screenshots.format_input.clone(),
         video_export_location: recordings.video_export_location_entry.clone(),
         rec_filename_pattern: recordings.rec_filename_pattern_entry.clone(),
+        rec_remember_export_folder: recordings.rec_remember_export_folder.clone(),
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),
@@ -704,12 +705,43 @@ fn build_settings_window(app: &Application) {
 }
 
 /// Wire every settings control so any edit flips Save from grey → orange (ready).
+/// Keep the settings page scrolling when the pointer is over a dropdown.
+///
+/// GTK's default ComboBoxText behavior treats wheel input as a selection
+/// change. In a scrolling preferences page that makes ordinary navigation
+/// accidentally alter a setting, so intercept it before the combo sees it and
+/// apply the delta to the containing scroller instead.
+fn install_combo_scroll_passthrough(combo: &gtk4::ComboBoxText) {
+    let controller = gtk4::EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
+    controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    controller.connect_scroll(move |controller, _, dy| {
+        if dy.abs() > f64::EPSILON {
+            if let Some(scroller) = controller
+                .widget()
+                .and_then(|widget| widget.ancestor(ScrolledWindow::static_type()))
+                .and_then(|widget| widget.downcast::<ScrolledWindow>().ok())
+            {
+                let adjustment = scroller.vadjustment();
+                let max_value =
+                    (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+                let next_value = (adjustment.value() + dy * adjustment.step_increment())
+                    .clamp(adjustment.lower(), max_value);
+                adjustment.set_value(next_value);
+            }
+        }
+
+        gtk4::glib::Propagation::Stop
+    });
+    combo.add_controller(controller);
+}
+
 fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>) {
     let wire_check = |check: &gtk4::CheckButton| {
         let mark_dirty = Rc::clone(&mark_dirty);
         check.connect_toggled(move |_| mark_dirty());
     };
     let wire_combo = |combo: &gtk4::ComboBoxText| {
+        install_combo_scroll_passthrough(combo);
         let mark_dirty = Rc::clone(&mark_dirty);
         combo.connect_changed(move |_| mark_dirty());
     };
@@ -735,6 +767,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_combo(&inputs.screenshot_format);
     wire_entry(&inputs.video_export_location);
     wire_entry(&inputs.rec_filename_pattern);
+    wire_check(&inputs.rec_remember_export_folder);
     wire_check(&inputs.screenshot_quick_access);
     wire_check(&inputs.screenshot_copy_to_clipboard);
     wire_check(&inputs.screenshot_save);

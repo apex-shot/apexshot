@@ -2,6 +2,7 @@ use gtk4::{prelude::*, Align, Button, Label};
 use std::process::Command;
 
 use super::ui::feature_card_list;
+use crate::capture::editor::window::icon_names::custom;
 
 // TODO: Update these URLs when extensions are published
 const GNOME_EXTENSION_URL: &str =
@@ -186,17 +187,17 @@ pub fn build_gnome(content: &gtk4::Box) {
 
     let features = feature_card_list(&[
         (
-            "▣",
+            custom::OVERLAPPING_WINDOWS_SYMBOLIC,
             "Floating preview windows",
             "Always-on-top previews that stay out of your way",
         ),
         (
-            "◇",
+            custom::SELECT_MODE_SYMBOLIC,
             "Quick access overlay",
             "Post-capture actions without hunting through menus",
         ),
         (
-            "●",
+            custom::RECORD_SCREEN_SYMBOLIC,
             "Recording status indicator",
             "Shell-managed controls while a recording is live",
         ),
@@ -273,17 +274,17 @@ pub fn build_chrome(content: &gtk4::Box) {
 
     let features = feature_card_list(&[
         (
-            "↓",
+            custom::SCREENSHOOTER_SYMBOLIC,
             "Full-page scroll capture",
             "Stitch long pages that a normal screenshot can't fit",
         ),
         (
-            "→",
+            custom::ARROW2_TOP_RIGHT_SYMBOLIC,
             "Sends directly to ApexShot",
             "Opens in the editor so you can annotate and share immediately",
         ),
         (
-            "◎",
+            custom::OVERLAPPING_WINDOWS_SYMBOLIC,
             "Works with your desktop app",
             "Native messaging keeps the browser and ApexShot in sync",
         ),

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+  <!-- XBackBone mark: four-lobe cloud (red / blue / green / yellow). -->
+  <path fill="#EE1C25" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"
+        d="M18 78 C6 68 6 46 24 40 C30 56 42 70 60 82 C44 88 28 88 18 78Z"/>
+  <path fill="#2D7BF6" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"
+        d="M36 80 C24 46 38 12 72 10 C102 8 110 42 98 80 C84 92 52 94 36 80Z"/>
+  <path fill="#16A34A" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"
+        d="M96 80 C92 46 106 20 132 24 C148 28 152 50 142 76 C130 88 108 90 96 80Z"/>
+  <path fill="#F5C518" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"
+        d="M138 78 C134 60 144 48 158 50 C170 52 172 70 164 82 C154 90 144 88 138 78Z"/>
+</svg>

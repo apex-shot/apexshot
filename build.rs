@@ -143,6 +143,7 @@ fn main() {
             "dismiss-regular",
             "eyedropper-regular",
             "save-regular",
+            "arrow-export-up-regular",
             "folder-open-regular",
         ],
     );

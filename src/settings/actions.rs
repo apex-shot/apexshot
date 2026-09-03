@@ -44,6 +44,7 @@ pub struct SaveInputs {
     pub screenshot_format: ComboBoxText,
     pub video_export_location: Entry,
     pub rec_filename_pattern: Entry,
+    pub rec_remember_export_folder: CheckButton,
     pub screenshot_quick_access: CheckButton,
     pub screenshot_copy_to_clipboard: CheckButton,
     pub screenshot_save: CheckButton,
@@ -164,6 +165,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.screenshot_export_location = inputs.screenshot_export_location.text().to_string();
     config.video_export_location = inputs.video_export_location.text().to_string();
     config.rec_filename_pattern = inputs.rec_filename_pattern.text().to_string();
+    config.rec_remember_export_folder = inputs.rec_remember_export_folder.is_active();
 
     config.after_capture_show_quick_access = inputs.screenshot_quick_access.is_active();
     config.after_capture_copy_file_to_clipboard = inputs.screenshot_copy_to_clipboard.is_active();

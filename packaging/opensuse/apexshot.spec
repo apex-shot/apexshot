@@ -78,6 +78,7 @@ extension_dir=%{buildroot}%{_datadir}/gnome-shell/extensions/apexshot-gnome-inte
 install -d "${extension_dir}"
 install -Dm0644 gnome-extension/metadata.json "${extension_dir}/metadata.json"
 install -Dm0644 gnome-extension/extension.js "${extension_dir}/extension.js"
+install -Dm0644 gnome-extension/cursor-classifier.js "${extension_dir}/cursor-classifier.js"
 install -Dm0644 gnome-extension/shell-overlay.js "${extension_dir}/shell-overlay.js"
 install -Dm0644 gnome-extension/window-list.js "${extension_dir}/window-list.js"
 install -Dm0644 gnome-extension/preview-stacking.js "${extension_dir}/preview-stacking.js"

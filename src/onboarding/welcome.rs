@@ -1,6 +1,7 @@
 use gtk4::{prelude::*, Align, Box as GtkBox, Label};
 
 use super::ui::feature_card_list;
+use crate::capture::editor::window::icon_names::custom;
 
 pub fn build(content: &GtkBox) {
     // Logo (using the same curved arch as about page)
@@ -51,22 +52,22 @@ pub fn build(content: &GtkBox) {
 
     let features = feature_card_list(&[
         (
-            "▢",
+            custom::SCREENSHOOTER_SYMBOLIC,
             "Area & fullscreen capture",
             "Grab a region, monitor, or the whole desktop in one hotkey",
         ),
         (
-            "✎",
+            custom::PENCIL_SYMBOLIC,
             "Built-in annotation editor",
             "Arrows, blur, text, and crop without leaving the app",
         ),
         (
-            "●",
+            custom::RECORD_SCREEN_SYMBOLIC,
             "Screen recording with audio",
             "MP4 or GIF with mic and system audio when your desktop allows it",
         ),
         (
-            "Aa",
+            custom::FONT_X_GENERIC_SYMBOLIC,
             "OCR text extraction",
             "Pull text and QR codes straight from a capture",
         ),

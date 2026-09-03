@@ -485,6 +485,13 @@ int main(int argc, char* argv[])
     }
 
     QApplication app(argc, argv);
+    // Match the Rust overlay/editor typography. Qt falls back to the system
+    // sans when the Inter family is unavailable.
+    {
+        QFont overlayFont = app.font();
+        overlayFont.setFamily(QStringLiteral("Inter"));
+        app.setFont(overlayFont);
+    }
     app.setApplicationName("ApexShot Capture");
     app.setDesktopFileName("io.github.codegoddy.apexshot");
     app.setWindowIcon(QIcon::fromTheme("io.github.codegoddy.apexshot"));
@@ -734,6 +741,9 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         return 2;
     }
 
+    // Every interactive overlay is scoped to one display. This includes the
+    // legacy direct area selector used by recording as well as screenshot and
+    // recording-UI entry points.
     const bool interactiveOverlayMode =
       !captureScreenMode && !recordControlsMode;
     if (interactiveOverlayMode) {
@@ -828,9 +838,11 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         }
     }
 
-    // 2) Pick monitor (metadata UI only — freeze already done).
+    // 2) Pick monitor (metadata UI only — freeze already done when enabled).
+    // The selected target is passed to CaptureOverlay, so both screenshot and
+    // recording actions open on the display chosen in the picker.
     QScreen* targetScreen = nullptr;
-    if (interactiveSelectorMode) {
+    if (interactiveOverlayMode) {
         targetScreen = MonitorPicker::selectTargetScreen();
         if (!targetScreen) {
             return 1; // cancelled

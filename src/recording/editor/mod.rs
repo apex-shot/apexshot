@@ -1,8 +1,13 @@
+pub mod cursor_export;
+pub mod cursor_sprite;
 pub mod ffmpeg;
+pub mod imported_pointer;
 pub mod model;
+pub mod project;
 pub mod sidecar;
 pub mod ui_support;
 mod window;
+pub mod zoom_suggest;
 
 use std::path::PathBuf;
 

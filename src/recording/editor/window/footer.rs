@@ -2,11 +2,11 @@ use super::dialogs;
 use crate::recording::editor::ffmpeg;
 use crate::recording::editor::model::{format_size, VideoEditState};
 use gtk4::{
-    glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Image, Label, Orientation,
-    Spinner,
+    gio, glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, FileChooserAction,
+    FileChooserNative, FileFilter, Image, Label, Orientation, ResponseType, Spinner,
 };
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -93,6 +93,83 @@ fn icon_action_button(icon_name: &str, tooltip: &str) -> Button {
     button
 }
 
+pub(super) fn build_upload_action(
+    state: Arc<Mutex<VideoEditState>>,
+    exporting: Rc<Cell<bool>>,
+) -> (Button, Spinner) {
+    let button = Button::new();
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-title-upload");
+    button.set_tooltip_text(Some("Export with your current settings, then upload"));
+    button.set_valign(Align::Center);
+    let icon = Image::from_icon_name(
+        crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
+    );
+    icon.set_pixel_size(16);
+    button.set_child(Some(&icon));
+
+    let spinner = Spinner::new();
+    spinner.set_size_request(12, 12);
+    spinner.set_visible(false);
+    spinner.set_valign(Align::Center);
+
+    wire_upload_button(
+        &button,
+        state,
+        vec![
+            button.clone().upcast::<gtk4::Widget>(),
+            spinner.clone().upcast(),
+        ],
+        spinner.clone(),
+        exporting,
+    );
+
+    (button, spinner)
+}
+
+pub(super) fn build_export_action(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    exporting: Rc<Cell<bool>>,
+) -> (Button, Spinner) {
+    let button = Button::new();
+    button.set_has_frame(false);
+    button.add_css_class("recording-editor-primary-button");
+    button.add_css_class("recording-editor-title-export");
+    button.set_tooltip_text(Some("Export the edited MP4"));
+    button.set_valign(Align::Center);
+
+    let content = GtkBox::new(Orientation::Horizontal, 4);
+    content.set_halign(Align::Center);
+    content.set_valign(Align::Center);
+    let icon =
+        Image::from_icon_name(crate::capture::editor::window::icon_names::ARROW_EXPORT_UP_REGULAR);
+    icon.set_pixel_size(12);
+    let label = Label::new(Some("Export"));
+    content.append(&icon);
+    content.append(&label);
+    button.set_child(Some(&content));
+
+    let spinner = Spinner::new();
+    spinner.set_size_request(12, 12);
+    spinner.set_visible(false);
+    spinner.set_valign(Align::Center);
+
+    wire_export_button(
+        &button,
+        window,
+        state,
+        vec![
+            button.clone().upcast::<gtk4::Widget>(),
+            spinner.clone().upcast(),
+        ],
+        spinner.clone(),
+        exporting,
+    );
+
+    (button, spinner)
+}
+
 pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, _trim_only: bool) {
     let state = state.lock().unwrap();
     let trim_only = !state.needs_reencode();
@@ -110,8 +187,9 @@ fn wire_upload_button(
     spinner: Spinner,
     exporting: Rc<Cell<bool>>,
 ) {
+    button.set_sensitive(state.lock().unwrap().has_source_video());
     button.connect_clicked(move |_| {
-        if exporting.get() {
+        if exporting.get() || !state.lock().unwrap().has_source_video() {
             return;
         }
 
@@ -206,65 +284,146 @@ fn wire_export_button(
     exporting: Rc<Cell<bool>>,
 ) {
     let window = window.clone();
+    button.set_sensitive(state.lock().unwrap().has_source_video());
     button.connect_clicked(move |_| {
-        if exporting.get() {
+        if exporting.get() || !state.lock().unwrap().has_source_video() {
             return;
         }
-        exporting.set(true);
-        spinner.set_visible(true);
-        spinner.start();
-        for control in &controls {
-            control.set_sensitive(false);
+        let suggested = state.lock().unwrap().export_path();
+        let suggested_dir = crate::config::load_config()
+            .video_editor_export_dir(suggested.parent().unwrap_or_else(|| Path::new("")));
+        let chooser = FileChooserNative::new(
+            Some("Export video"),
+            Some(&window),
+            FileChooserAction::Save,
+            Some("Export"),
+            Some("Cancel"),
+        );
+        let filter = FileFilter::new();
+        filter.set_name(Some("MP4 video"));
+        filter.add_mime_type("video/mp4");
+        filter.add_pattern("*.mp4");
+        chooser.add_filter(&filter);
+        if !suggested_dir.as_os_str().is_empty() {
+            let _ = chooser.set_current_folder(Some(&gio::File::for_path(&suggested_dir)));
+        }
+        if let Some(name) = suggested.file_name() {
+            chooser.set_current_name(&name.to_string_lossy());
         }
 
-        let state_snapshot = state.lock().unwrap().clone();
-        let (sender, receiver) = std::sync::mpsc::channel::<Result<PathBuf, String>>();
-        std::thread::spawn(move || {
-            let result = ffmpeg::export_edited(&state_snapshot);
-            let _ = sender.send(result.map_err(|err| err.to_string()));
-        });
-
+        let state = state.clone();
         let controls = controls.clone();
         let spinner = spinner.clone();
         let exporting = exporting.clone();
         let window = window.clone();
-        glib::timeout_add_local(Duration::from_millis(100), move || {
-            match receiver.try_recv() {
-                Ok(result) => {
-                    exporting.set(false);
-                    spinner.stop();
-                    spinner.set_visible(false);
-                    for control in &controls {
-                        control.set_sensitive(true);
+        chooser.connect_response(move |dialog, response| {
+            dialog.hide();
+            if response != ResponseType::Accept {
+                return;
+            }
+            let Some(mut path) = dialog.file().and_then(|file| file.path()) else {
+                return;
+            };
+            let is_mp4 = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
+            if !is_mp4 {
+                path.set_extension("mp4");
+            }
+
+            exporting.set(true);
+            spinner.set_visible(true);
+            spinner.start();
+            for control in &controls {
+                control.set_sensitive(false);
+            }
+
+            let state_snapshot = state.lock().unwrap().clone();
+            let (sender, receiver) = std::sync::mpsc::channel::<Result<PathBuf, String>>();
+            std::thread::spawn(move || {
+                let result = ffmpeg::export_edited_to(&state_snapshot, path);
+                let _ = sender.send(result.map_err(|err| err.to_string()));
+            });
+
+            let controls = controls.clone();
+            let spinner = spinner.clone();
+            let exporting = exporting.clone();
+            let window = window.clone();
+            glib::timeout_add_local(Duration::from_millis(100), move || {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        exporting.set(false);
+                        spinner.stop();
+                        spinner.set_visible(false);
+                        for control in &controls {
+                            control.set_sensitive(true);
+                        }
+                        match result {
+                            Ok(path) => {
+                                let mut config = crate::config::load_config();
+                                if config.remember_video_export_dir(&path) {
+                                    let _ = crate::config::save_config(&config);
+                                }
+                                dialogs::show_success(&window, path)
+                            }
+                            Err(err) => dialogs::show_error(
+                                &window,
+                                "Export failed",
+                                "ApexShot could not export this recording.",
+                                Some(&err),
+                            ),
+                        }
+                        glib::ControlFlow::Break
                     }
-                    match result {
-                        Ok(path) => dialogs::show_success(&window, path),
-                        Err(err) => dialogs::show_error(
+                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        exporting.set(false);
+                        spinner.stop();
+                        spinner.set_visible(false);
+                        for control in &controls {
+                            control.set_sensitive(true);
+                        }
+                        dialogs::show_error(
                             &window,
                             "Export failed",
-                            "ApexShot could not export this recording.",
-                            Some(&err),
-                        ),
+                            "ApexShot lost contact with the export worker.",
+                            None,
+                        );
+                        glib::ControlFlow::Break
                     }
-                    glib::ControlFlow::Break
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    exporting.set(false);
-                    spinner.stop();
-                    spinner.set_visible(false);
-                    for control in &controls {
-                        control.set_sensitive(true);
-                    }
-                    dialogs::show_error(
-                        &window,
-                        "Export failed",
-                        "ApexShot lost contact with the export worker.",
-                        None,
-                    );
-                    glib::ControlFlow::Break
-                }
-            }
+            });
         });
+        chooser.show();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn cloud_and_export_require_video_and_upload_applies_edits() {
+        let source = include_str!("footer.rs");
+        for fn_name in ["fn wire_upload_button", "fn wire_export_button"] {
+            let start = source.find(fn_name).expect(fn_name);
+            assert!(
+                source[start..].contains("has_source_video()"),
+                "{fn_name} must no-op when no video is loaded",
+            );
+        }
+        let upload = &source[source.find("fn wire_upload_button").expect("upload wire")..];
+        let export_pos = upload.find("export_edited").expect("export current edits");
+        let upload_pos = upload.find("upload_file").expect("cloud upload");
+        assert!(
+            export_pos < upload_pos,
+            "Cloud must export current editor edits before uploading",
+        );
+        let export = &source[source.find("fn wire_export_button").expect("export wire")..];
+        let save_pos = export.find("FileChooserAction::Save").expect("save dialog");
+        let write_pos = export.find("export_edited_to").expect("write chosen path");
+        assert!(
+            save_pos < write_pos,
+            "Export must ask for a save location before encoding",
+        );
+    }
 }

@@ -1,5 +1,6 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub(super) fn strip_deleted_suffix(path: &std::path::Path) -> PathBuf {
@@ -133,9 +134,9 @@ pub(super) fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
             args: vec!["show-last-preview".into()],
         },
         HotkeyBinding {
-            name: Some("record_screen".into()),
+            name: Some("open_recording_ui".into()),
             accelerator: "CTRL+ALT+R".into(),
-            args: vec!["record".into(), "screen".into(), "--overlay-stop".into()],
+            args: vec!["record".into(), "ui".into()],
         },
         HotkeyBinding {
             name: Some("recording_stop_save".into()),
@@ -145,21 +146,47 @@ pub(super) fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
     ]
 }
 
+pub(super) fn accelerator_key(accel: &str) -> String {
+    as_portal_trigger(accel).to_ascii_uppercase()
+}
+
 pub(super) fn merge_missing_default_hotkeys(cfg: &mut HotkeyConfig) -> bool {
     let mut changed = false;
+    let mut used_accels: HashSet<String> = cfg
+        .bindings
+        .iter()
+        .map(|binding| accelerator_key(&binding.accelerator))
+        .collect();
 
     for default_binding in default_hotkey_bindings() {
         let already_present = cfg.bindings.iter().any(|binding| {
             binding.name == default_binding.name || binding.args == default_binding.args
         });
-
-        if !already_present {
-            cfg.bindings.push(default_binding);
-            changed = true;
+        if already_present {
+            continue;
         }
+
+        let accel = accelerator_key(&default_binding.accelerator);
+        if !used_accels.insert(accel) {
+            continue;
+        }
+
+        cfg.bindings.push(default_binding);
+        changed = true;
     }
 
     changed
+}
+
+/// Keep the first binding when two actions share an accelerator.
+/// GNOME custom keybindings silently fail (or fire both) on duplicates, which
+/// is how `record_screen` + `open_recording_ui` both on Ctrl+Alt+R get stuck.
+pub(super) fn drop_duplicate_hotkey_accelerators(cfg: &mut HotkeyConfig) -> bool {
+    let mut seen = HashSet::new();
+    let before = cfg.bindings.len();
+    cfg.bindings
+        .retain(|binding| seen.insert(accelerator_key(&binding.accelerator)));
+    cfg.bindings.len() != before
 }
 
 impl Default for HotkeyConfig {
@@ -318,7 +345,9 @@ pub(super) fn load_or_create_config(
             .with_context(|| format!("Failed to read hotkey config at {}", path.display()))?;
         let mut cfg: HotkeyConfig = serde_yml::from_str(&raw)
             .with_context(|| format!("Failed to parse YAML hotkey config at {}", path.display()))?;
-        if merge_missing_default_hotkeys(&mut cfg) {
+        let merged = merge_missing_default_hotkeys(&mut cfg);
+        let deduped = drop_duplicate_hotkey_accelerators(&mut cfg);
+        if merged || deduped {
             save_hotkey_config(&path, &cfg)?;
         }
         return Ok((path, cfg));

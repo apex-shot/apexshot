@@ -1,3 +1,4 @@
+use apexshot::config::{load_config, AppConfig};
 use apexshot::{
     app_identity,
     backend::{CaptureData, DisplayBackend, WaylandBackend, X11Backend},
@@ -70,6 +71,23 @@ pub(crate) fn ensure_gio_desktop_env_for_capture() {
             std::process::id().to_string(),
         );
     }
+}
+
+fn screenshot_save_config_from(app_config: &AppConfig) -> SaveConfig {
+    let format = match app_config.screenshot_format.as_str() {
+        "JPEG" => ImageFormat::Jpeg { quality: 85 },
+        "WebP" => ImageFormat::WebP,
+        _ => ImageFormat::Png,
+    };
+    let mut config = SaveConfig::default()
+        .with_format(format)
+        .with_cursor(app_config.screenshot_show_cursor);
+
+    if !app_config.screenshot_export_location.is_empty() {
+        config = config.with_output_dir(&app_config.screenshot_export_location);
+    }
+
+    config
 }
 
 pub(crate) fn run_capture(args: &[String]) {
@@ -282,6 +300,21 @@ pub(crate) fn run_capture(args: &[String]) {
         "Format: {:?} ({} bpp)",
         capture.format, capture.format.bits_per_pixel
     );
+
+    // Build save config. The no-daemon path is also used immediately after an
+    // install, so it must honor screenshot settings just like the daemon does.
+    let app_config = load_config().sanitized();
+    let mut config = screenshot_save_config_from(&app_config);
+    if use_jpeg {
+        config = config.with_format(ImageFormat::Jpeg {
+            quality: jpeg_quality,
+        });
+    }
+    if !include_cursor {
+        config = config.with_cursor(false);
+    }
+    let include_cursor = config.include_cursor;
+
     if capture.cursor.is_some() {
         println!(
             "Cursor: captured ({})",
@@ -292,19 +325,6 @@ pub(crate) fn run_capture(args: &[String]) {
             }
         );
     }
-
-    // Build save config
-    let format = if use_jpeg {
-        ImageFormat::Jpeg {
-            quality: jpeg_quality,
-        }
-    } else {
-        ImageFormat::Png
-    };
-
-    let mut config = SaveConfig::default()
-        .with_format(format)
-        .with_cursor(include_cursor);
 
     if let Some(path) = output_path {
         config = config.with_output_dir(path);
@@ -740,5 +760,24 @@ mod tests {
             ocr_success_notification(&output(ContentSource::QrCode, false)),
             ("QR code decoded", "Content extracted")
         );
+    }
+
+    #[test]
+    fn fallback_capture_uses_screenshot_preferences() {
+        let app_config = AppConfig {
+            screenshot_export_location: "/tmp/screenshots".into(),
+            screenshot_format: "WebP".into(),
+            screenshot_show_cursor: false,
+            ..AppConfig::default()
+        };
+
+        let save_config = screenshot_save_config_from(&app_config);
+
+        assert_eq!(
+            save_config.output_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/screenshots"))
+        );
+        assert_eq!(save_config.format, ImageFormat::WebP);
+        assert!(!save_config.include_cursor);
     }
 }

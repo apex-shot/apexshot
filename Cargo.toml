@@ -20,7 +20,7 @@ path = "src/bin/test_rust_crosshair.rs"
 x11rb = { version = "0.13.2", features = ["all-extensions"] }
 zbus = "5.11.0"  # for dbus/portal communication
 tokio = { version = "1.47.1", features = ["full"] }
-ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast", "remote_desktop", "background", "screenshot"] }
 url = "2.5"
 
 # GUI overlay for area selection (X11)
@@ -119,6 +119,9 @@ license-file = ["LICENSE", "4"]
 #   wget, curl, unzip                          → in-app GNOME extension installer
 #   gstreamer1.0-{plugins-base,plugins-good,plugins-bad,libav,pipewire}
 #                                              → ScreenCast / PipeWire capture + encoding
+#   fonts-inter                                 → ApexShot UI font (Cairo overlays, editor,
+#                                                settings, Qt capture overlay). fontconfig
+#                                                falls back to the system sans if removed.
 #   tesseract-ocr, tesseract-ocr-eng           → OCR (text extraction) – English by default
 #   libqt5widgets5/dbus5/network5/x11extras5,
 #   libxtst6                                   → run-time libs for the bundled
@@ -126,7 +129,7 @@ license-file = ["LICENSE", "4"]
 #                                                (cargo-deb's $auto cannot
 #                                                introspect asset binaries, so
 #                                                these MUST be listed manually)
-depends = "$auto, wl-clipboard | xclip, pipewire-pulse | pulseaudio-utils, xdg-utils, libnotify-bin, ffmpeg, wget, curl, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-pipewire, tesseract-ocr, tesseract-ocr-eng, libqt5widgets5, libqt5dbus5, libqt5network5, libqt5x11extras5, libxtst6"
+depends = "$auto, wl-clipboard | xclip, pipewire-pulse | pulseaudio-utils, xdg-utils, libnotify-bin, ffmpeg, wget, curl, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-pipewire, fonts-inter, tesseract-ocr, tesseract-ocr-eng, libqt5widgets5, libqt5dbus5, libqt5network5, libqt5x11extras5, libxtst6"
 # Recommended (not required) — optional capture paths, GNOME polish, and
 # stack-specific helpers that we don't want to *force* onto users who
 # don't need them:
@@ -164,5 +167,11 @@ assets = [
     ["assets/sounds/pop.ogg", "usr/share/apexshot/sounds/", "644"],
     ["native-host/io.github.codegoddy.apexshot.json", "etc/opt/chrome/NativeMessagingHosts/", "644"],
     ["native-host/io.github.codegoddy.apexshot.json", "etc/chromium/NativeMessagingHosts/", "644"],
+    ["gnome-extension/metadata.json", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
+    ["gnome-extension/extension.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
+    ["gnome-extension/cursor-classifier.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
+    ["gnome-extension/shell-overlay.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
+    ["gnome-extension/window-list.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
+    ["gnome-extension/preview-stacking.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
 ]
 maintainer-scripts = "packaging/debian"

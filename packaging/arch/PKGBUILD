@@ -123,6 +123,7 @@ package() {
     install -d "$ext_dir"
     install -Dm644 "gnome-extension/metadata.json"  "$ext_dir/metadata.json"
     install -Dm644 "gnome-extension/extension.js"    "$ext_dir/extension.js"
+    install -Dm644 "gnome-extension/cursor-classifier.js" "$ext_dir/cursor-classifier.js"
     install -Dm644 "gnome-extension/shell-overlay.js" "$ext_dir/shell-overlay.js"
     install -Dm644 "gnome-extension/window-list.js" "$ext_dir/window-list.js"
     install -Dm644 "gnome-extension/preview-stacking.js" "$ext_dir/preview-stacking.js"

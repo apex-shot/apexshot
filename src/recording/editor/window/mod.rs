@@ -1,22 +1,32 @@
+#[allow(dead_code)]
+mod crop_dialog;
+#[allow(dead_code)]
 mod dialogs;
+#[allow(dead_code)]
 mod footer;
+#[allow(dead_code)]
 mod inspector;
+#[allow(dead_code)]
 mod media_library;
+#[allow(dead_code)]
 mod preview;
+#[allow(dead_code)]
 mod rail;
+#[allow(dead_code)]
 mod timeline;
+mod timeline_card;
+mod tool_section;
+mod tool_sidebar;
 mod toolbar;
 
 use super::ffmpeg;
-use super::model::{AudioMode, VideoEditState, VideoMetadata};
+use super::model::{AudioMode, EditorTool, VideoEditState, VideoMetadata};
+use super::project::{self, persist_video_session};
 use super::ui_support::install_recording_editor_css;
-use gtk4::gdk;
-use gtk4::gio;
-use gtk4::glib;
 use gtk4::{
-    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
-    DropTarget, FileChooserAction, FileChooserNative, FileFilter, Image, Label, Orientation,
-    Overlay, ResponseType, Revealer, Scale, Spinner,
+    gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
+    DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, GestureClick, Image,
+    Label, MediaFile, Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -92,10 +102,11 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         .application(application)
         .title("ApexShot Recording Editor")
         .icon_name(crate::app_identity::icon_name())
-        .default_width(1040)
-        .default_height(860)
+        .default_width(1400)
+        .default_height(900)
         .decorated(false)
         .build();
+    window.set_size_request(1400, 900);
     window.add_css_class("editor-window");
 
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -111,163 +122,331 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         root.add_css_class("editor-reduced-transparency");
     }
 
-    let overlay = Overlay::new();
-    if prefers_dark {
-        overlay.add_css_class("editor-theme-dark");
-    } else {
-        overlay.add_css_class("editor-theme-light");
-    }
-    if crate::capture::editor::ui_support::prefers_reduced_transparency() {
-        overlay.add_css_class("editor-reduced-transparency");
-    }
-    overlay.set_child(Some(&root));
-
-    let exporting = Rc::new(Cell::new(false));
-
-    // Drop feedback banner
-    let drop_banner = GtkBox::new(Orientation::Vertical, 0);
-    drop_banner.add_css_class("recording-editor-drop-banner");
-    drop_banner.set_can_target(false);
-    let drop_label = Label::new(Some("Drop video file to open"));
-    drop_label.add_css_class("recording-editor-drop-label");
-    drop_label.set_can_target(false);
-    drop_banner.append(&drop_label);
-    let drop_revealer = Revealer::new();
-    drop_revealer.set_can_target(false);
-    drop_revealer.set_halign(Align::Center);
-    drop_revealer.set_valign(Align::Start);
-    drop_revealer.set_child(Some(&drop_banner));
-    drop_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
-    drop_revealer.set_reveal_child(false);
-    overlay.add_overlay(&drop_revealer);
-
-    // Loading banner for async drop handling
-    let loading_box = GtkBox::new(Orientation::Horizontal, 8);
-    loading_box.add_css_class("recording-editor-drop-banner");
-    loading_box.set_can_target(false);
-    loading_box.set_halign(Align::Center);
-    let loading_spinner = Spinner::new();
-    loading_spinner.set_size_request(16, 16);
-    loading_spinner.set_can_target(false);
-    let loading_label = Label::new(Some("Loading video…"));
-    loading_label.add_css_class("recording-editor-drop-label");
-    loading_label.set_can_target(false);
-    loading_box.append(&loading_spinner);
-    loading_box.append(&loading_label);
-    let loading_revealer = Revealer::new();
-    loading_revealer.set_can_target(false);
-    loading_revealer.set_halign(Align::Center);
-    loading_revealer.set_valign(Align::Start);
-    loading_revealer.set_child(Some(&loading_box));
-    loading_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
-    loading_revealer.set_reveal_child(false);
-    overlay.add_overlay(&loading_revealer);
-
-    let loading = Rc::new(Cell::new(false));
-    let open_button_slot = Rc::new(RefCell::new(None::<Button>));
-
-    match initial_video {
-        InitialVideo::None => {
-            populate_empty_root(
-                &root,
-                &window,
-                exporting.clone(),
-                &loading_revealer,
-                &loading_spinner,
-                open_button_slot.clone(),
-                loading.clone(),
-            );
-        }
-        InitialVideo::AsyncLoad(path) => {
-            populate_empty_root(
-                &root,
-                &window,
-                exporting.clone(),
-                &loading_revealer,
-                &loading_spinner,
-                open_button_slot.clone(),
-                loading.clone(),
-            );
-            if let Some(btn) = open_button_slot.borrow().as_ref() {
-                btn.set_sensitive(false);
+    let state = match &initial_video {
+        InitialVideo::AsyncLoad(path) => match ffmpeg::probe_metadata(path) {
+            Ok(metadata) => {
+                let mut state = VideoEditState::new(metadata);
+                project::restore_into(&mut state);
+                if state.zoom_clips.is_empty() && state.suggest_zoom_clips() > 0 {
+                    state.selected_tool = EditorTool::Timeline;
+                }
+                Some(Arc::new(Mutex::new(state)))
             }
-            load_video_async(
-                path,
-                &root,
-                &window,
-                exporting.clone(),
-                &loading_revealer,
-                &loading_spinner,
-                open_button_slot.clone(),
-                loading.clone(),
-            );
-        }
-    }
-    crate::capture::editor::ui_support::install_edge_resize(&root, &window);
+            Err(err) => {
+                eprintln!(
+                    "[recording-editor] failed to probe {}: {err}",
+                    path.display()
+                );
+                None
+            }
+        },
+        InitialVideo::None => None,
+    };
+    let state = state.unwrap_or_else(|| Arc::new(Mutex::new(placeholder_edit_state())));
+    let media = Rc::new(RefCell::new(match &initial_video {
+        InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
+        InitialVideo::None => Some(MediaFile::new()),
+    }));
+    let exporting = Rc::new(Cell::new(false));
+    let (title_bar, title_label, upload_btn, export_btn) =
+        build_window_controls(&window, state.clone(), exporting.clone());
+    root.append(&title_bar);
 
-    // Drag-and-drop target for video files — attach to window so it doesn't eat events from root
+    let paint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let refresh_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let ping = {
+        let paint_slot = paint_slot.clone();
+        let refresh_slot = refresh_slot.clone();
+        let state = state.clone();
+        let title_label = title_label.clone();
+        let upload_btn = upload_btn.clone();
+        let export_btn = export_btn.clone();
+        let exporting = exporting.clone();
+        Rc::new(move || {
+            let (name, has_video) = {
+                let state = state.lock().unwrap();
+                (state.title.clone(), state.has_source_video())
+            };
+            title_label.set_text(&name);
+            title_label.set_tooltip_text(Some(&name));
+            let enabled = has_video && !exporting.get();
+            upload_btn.set_sensitive(enabled);
+            export_btn.set_sensitive(enabled);
+            if let Some(paint) = paint_slot.borrow().clone() {
+                paint();
+            }
+            if let Some(refresh) = refresh_slot.borrow().clone() {
+                refresh();
+            }
+        }) as Rc<dyn Fn()>
+    };
+
+    let workspace = GtkBox::new(Orientation::Horizontal, 8);
+    workspace.add_css_class("recording-editor-workspace");
+    workspace.set_hexpand(true);
+    workspace.set_vexpand(true);
+
+    let tools = tool_section::build_tool_section(state.clone(), ping.clone());
+    workspace.append(&tools.widget);
+
+    let stage = GtkBox::new(Orientation::Vertical, 0);
+    stage.add_css_class("recording-editor-stage");
+    stage.set_hexpand(true);
+    stage.set_vexpand(true);
+    let estimate_label = Label::new(None);
+    let preview_media = media.borrow().clone();
+    let (preview_widget, _, _) =
+        preview::build_preview_with_media(state.clone(), estimate_label, preview_media);
+    stage.append(&preview_widget);
+    stage.append(&preview::build_stage_tools(
+        &window,
+        state.clone(),
+        ping.clone(),
+    ));
+    workspace.append(&stage);
+
+    let pause_playback_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let sidebar_pause_playback = {
+        let pause_playback_slot = pause_playback_slot.clone();
+        Rc::new(move || {
+            if let Some(pause_playback) = pause_playback_slot.borrow().as_ref() {
+                pause_playback();
+            }
+        }) as Rc<dyn Fn()>
+    };
+    let sidebar =
+        tool_sidebar::build_tool_sidebar(state.clone(), ping.clone(), sidebar_pause_playback);
+    workspace.append(&sidebar.widget);
+    root.append(&workspace);
+
+    let (timeline, paint, pause_playback) =
+        timeline_card::build_timeline_card(state.clone(), media.clone(), ping.clone());
+    root.append(&timeline);
+    *paint_slot.borrow_mut() = Some(paint);
+    *pause_playback_slot.borrow_mut() = Some(pause_playback);
+    *refresh_slot.borrow_mut() = Some({
+        let refresh_tools = tools.refresh;
+        let refresh_sidebar = sidebar.refresh;
+        Rc::new(move || {
+            refresh_tools();
+            refresh_sidebar();
+        }) as Rc<dyn Fn()>
+    });
     let drop_target = DropTarget::new(gio::File::static_type(), gdk::DragAction::COPY);
-    let drop_revealer_enter = drop_revealer.clone();
-    let drop_revealer_leave = drop_revealer.clone();
-    let root_ref = root.clone();
-    let window_ref = window.clone();
-    let exporting_for_drop = exporting.clone();
-    let loading_revealer_drop = loading_revealer.clone();
-    let loading_spinner_drop = loading_spinner.clone();
-    let open_button_slot_drop = open_button_slot.clone();
-    let loading_drop = loading.clone();
-    let loading_drop_enter = loading.clone();
-    drop_target.connect_enter(move |_, _x, _y| {
-        if loading_drop_enter.get() {
-            return gdk::DragAction::empty();
+    drop_target.connect_drop({
+        let state = state.clone();
+        let media = media.clone();
+        let window = window.clone();
+        let ping = ping.clone();
+        move |_, value, _, _| {
+            let Ok(file) = value.get::<gio::File>() else {
+                return false;
+            };
+            let Some(path) = file.path() else {
+                return false;
+            };
+            load_preview_video(path, &state, &media, &window, &ping)
         }
-        drop_revealer_enter.set_reveal_child(true);
-        gdk::DragAction::COPY
     });
-    drop_target.connect_leave(move |_| {
-        drop_revealer_leave.set_reveal_child(false);
-    });
-    drop_target.connect_drop(move |_, value, _x, _y| {
-        drop_revealer.set_reveal_child(false);
-        if loading_drop.get() {
-            return false;
-        }
-        let Ok(file) = value.get::<gio::File>() else {
-            return false;
-        };
-        let Some(path) = file.path() else {
-            return false;
-        };
-        if !is_supported_video_path(&path) {
-            return false;
-        }
-        load_video_async(
-            path.to_path_buf(),
-            &root_ref,
-            &window_ref,
-            exporting_for_drop.clone(),
-            &loading_revealer_drop,
-            &loading_spinner_drop,
-            open_button_slot_drop.clone(),
-            loading_drop.clone(),
-        );
-        true
-    });
-    window.add_controller(drop_target);
+    preview_widget.add_controller(drop_target);
 
-    let exporting_for_close = exporting.clone();
-    window.connect_close_request(move |_| {
-        if exporting_for_close.get() {
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
+    let open_click = GestureClick::new();
+    open_click.set_button(1);
+    open_click.connect_released({
+        let state = state.clone();
+        let media = media.clone();
+        let window = window.clone();
+        let ping = ping.clone();
+        move |_, _, _, _| {
+            if state.lock().unwrap().metadata.duration_seconds > 0.0 {
+                return;
+            }
+            show_open_preview_video(&window, state.clone(), media.clone(), ping.clone());
         }
     });
+    preview_widget.add_controller(open_click);
+    ping();
 
-    window.set_child(Some(&overlay));
+    let shell = Overlay::new();
+    shell.add_css_class("recording-editor-shell");
+    shell.set_hexpand(true);
+    shell.set_vexpand(true);
+    if root.has_css_class("editor-theme-light") {
+        shell.add_css_class("editor-theme-light");
+    }
+    let scrim = GtkBox::new(Orientation::Vertical, 0);
+    scrim.add_css_class("recording-editor-modal-scrim");
+    scrim.set_halign(Align::Fill);
+    scrim.set_valign(Align::Fill);
+    scrim.set_hexpand(true);
+    scrim.set_vexpand(true);
+    scrim.set_visible(false);
+    scrim.set_can_target(true);
+    shell.set_child(Some(&root));
+    shell.add_overlay(&scrim);
+    shell.set_clip_overlay(&scrim, true);
+    crate::capture::editor::ui_support::install_edge_resize(&shell, &window);
+    window.set_child(Some(&shell));
+    wire_close_persist(&window, state.clone(), exporting.clone());
     window.present();
 }
 
+fn wire_close_persist(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    exporting: Rc<Cell<bool>>,
+) {
+    let force_close = Rc::new(Cell::new(false));
+    window.connect_close_request(move |window| {
+        if force_close.get() {
+            persist_video_session(&state.lock().unwrap());
+            return glib::Propagation::Proceed;
+        }
+        if !state.lock().unwrap().has_source_video() {
+            return glib::Propagation::Proceed;
+        }
+        if exporting.get() {
+            let window = window.clone();
+            let state = state.clone();
+            let force_close = force_close.clone();
+            dialogs::show_export_in_progress_close(&window, {
+                let window = window.clone();
+                move || {
+                    persist_video_session(&state.lock().unwrap());
+                    force_close.set(true);
+                    window.close();
+                }
+            });
+            return glib::Propagation::Stop;
+        }
+        persist_video_session(&state.lock().unwrap());
+        glib::Propagation::Proceed
+    });
+}
+
+fn load_preview_video(
+    path: PathBuf,
+    state: &Arc<Mutex<VideoEditState>>,
+    media: &Rc<RefCell<Option<MediaFile>>>,
+    window: &ApplicationWindow,
+    ping: &Rc<dyn Fn()>,
+) -> bool {
+    let Ok(metadata) = ffmpeg::probe_metadata(&path) else {
+        return false;
+    };
+    let mut next = VideoEditState::new(metadata);
+    project::restore_into(&mut next);
+    *state.lock().unwrap() = next;
+    let has_mouse_data = state.lock().unwrap().supports_auto_zoom();
+    if let Some(player) = media.borrow().as_ref() {
+        player.set_file(Some(&gio::File::for_path(&path)));
+    }
+    ping();
+    if !has_mouse_data {
+        dialogs::show_manual_zoom_notice(window);
+    }
+    true
+}
+
+fn show_open_preview_video(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    media: Rc<RefCell<Option<MediaFile>>>,
+    ping: Rc<dyn Fn()>,
+) {
+    let chooser = FileChooserNative::new(
+        Some("Open video"),
+        Some(window),
+        FileChooserAction::Open,
+        Some("Open"),
+        Some("Cancel"),
+    );
+    let filter = FileFilter::new();
+    filter.set_name(Some("Videos"));
+    filter.add_mime_type("video/mp4");
+    filter.add_pattern("*.mp4");
+    chooser.add_filter(&filter);
+    let window = window.clone();
+    chooser.connect_response(move |dialog, response| {
+        if response == ResponseType::Accept {
+            if let Some(path) = dialog.file().and_then(|file| file.path()) {
+                load_preview_video(path, &state, &media, &window, &ping);
+            }
+        }
+        dialog.hide();
+    });
+    chooser.show();
+}
+
+fn placeholder_edit_state() -> VideoEditState {
+    let mut state = VideoEditState::new(VideoMetadata {
+        path: PathBuf::from("Screen Recording.mp4"),
+        duration_seconds: 0.0,
+        width: 1920,
+        height: 1080,
+        file_size_bytes: 0,
+        has_audio: false,
+    });
+    state.title = "Drop a recording to begin".into();
+    state
+}
+
+fn build_window_controls(
+    window: &ApplicationWindow,
+    state: Arc<Mutex<VideoEditState>>,
+    exporting: Rc<Cell<bool>>,
+) -> (GtkBox, Label, Button, Button) {
+    const TRAFFIC_LIGHTS_WIDTH: i32 = 100;
+    let bar = GtkBox::new(Orientation::Horizontal, 8);
+    bar.add_css_class("recording-editor-window-controls");
+    bar.set_hexpand(true);
+    bar.set_vexpand(false);
+    bar.set_valign(Align::Start);
+
+    let left_balance = GtkBox::new(Orientation::Horizontal, 0);
+    left_balance.set_size_request(TRAFFIC_LIGHTS_WIDTH, -1);
+    bar.append(&left_balance);
+
+    let title_text = state.lock().unwrap().title.clone();
+    let title = Label::new(Some(&title_text));
+    title.add_css_class("recording-editor-title");
+    title.set_hexpand(true);
+    title.set_halign(Align::Center);
+    title.set_valign(Align::Center);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title.set_max_width_chars(64);
+    title.set_can_target(false);
+    bar.append(&title);
+
+    let (export, export_spinner) =
+        footer::build_export_action(window, state.clone(), exporting.clone());
+    let (upload, upload_spinner) = footer::build_upload_action(state, exporting);
+    let actions = GtkBox::new(Orientation::Horizontal, 8);
+    actions.add_css_class("recording-editor-title-actions");
+    actions.set_valign(Align::Center);
+    actions.append(&upload_spinner);
+    actions.append(&upload);
+    actions.append(&export_spinner);
+    actions.append(&export);
+    let lights = toolbar::build_traffic_lights(window);
+    lights.set_size_request(TRAFFIC_LIGHTS_WIDTH, -1);
+    lights.set_halign(Align::End);
+    lights.set_valign(Align::Center);
+    let right_balance = GtkBox::new(Orientation::Horizontal, 16);
+    right_balance.set_size_request(tool_sidebar::TOOL_SIDEBAR_WIDTH + TRAFFIC_LIGHTS_WIDTH, -1);
+    right_balance.set_hexpand(false);
+    let right_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    right_spacer.set_hexpand(true);
+    right_balance.append(&right_spacer);
+    right_balance.append(&actions);
+    right_balance.append(&lights);
+    bar.append(&right_balance);
+
+    crate::capture::editor::ui_support::install_window_drag(&bar, window);
+    (bar, title, upload, export)
+}
+
+#[allow(dead_code)]
 fn populate_loaded_root(
     root: &GtkBox,
     window: &ApplicationWindow,
@@ -314,6 +493,7 @@ fn populate_loaded_root(
     root.append(&timeline_widget);
 }
 
+#[allow(dead_code)]
 fn populate_empty_root(
     root: &GtkBox,
     window: &ApplicationWindow,
@@ -393,6 +573,7 @@ fn populate_empty_root(
     root.append(&build_empty_timeline());
 }
 
+#[allow(dead_code)]
 fn build_empty_preview_area() -> GtkBox {
     let frame = GtkBox::new(Orientation::Vertical, 0);
     frame.add_css_class("recording-editor-preview-frame");
@@ -414,6 +595,7 @@ fn build_empty_preview_area() -> GtkBox {
     frame
 }
 
+#[allow(dead_code)]
 fn build_empty_inspector() -> GtkBox {
     let inspector = GtkBox::new(Orientation::Vertical, 0);
     inspector.add_css_class("recording-editor-inspector");
@@ -424,6 +606,7 @@ fn build_empty_inspector() -> GtkBox {
     inspector
 }
 
+#[allow(dead_code)]
 fn build_empty_timeline() -> GtkBox {
     let timeline = GtkBox::new(Orientation::Vertical, 0);
     timeline.add_css_class("recording-editor-timeline");
@@ -564,6 +747,7 @@ fn build_empty_timeline() -> GtkBox {
     timeline
 }
 
+#[allow(dead_code)]
 fn empty_track_row(header_icon: Option<&str>, body: &impl IsA<gtk4::Widget>) -> (GtkBox, GtkBox) {
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-track-row");
@@ -590,6 +774,7 @@ fn empty_track_row(header_icon: Option<&str>, body: &impl IsA<gtk4::Widget>) -> 
     (row, body_wrap)
 }
 
+#[allow(dead_code)]
 fn empty_tool_button(icon_name: &str, tooltip: &str) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
@@ -602,6 +787,7 @@ fn empty_tool_button(icon_name: &str, tooltip: &str) -> Button {
     button
 }
 
+#[allow(dead_code)]
 fn draw_empty_ruler(cr: &gtk4::cairo::Context, width: i32, height: i32, scale: f64) {
     let w = width as f64;
     let h = height as f64;
@@ -652,6 +838,7 @@ fn draw_empty_ruler(cr: &gtk4::cairo::Context, width: i32, height: i32, scale: f
     }
 }
 
+#[allow(dead_code)]
 fn draw_empty_playhead(cr: &gtk4::cairo::Context, width: i32, height: i32) {
     let _ = width;
     let h = height as f64;
@@ -676,6 +863,7 @@ fn draw_empty_playhead(cr: &gtk4::cairo::Context, width: i32, height: i32) {
     let _ = cr.stroke();
 }
 
+#[allow(dead_code)]
 fn disabled_transport_button(icon_name: &str) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
@@ -688,6 +876,7 @@ fn disabled_transport_button(icon_name: &str) -> Button {
     button
 }
 
+#[allow(dead_code)]
 fn build_empty_footer() -> GtkBox {
     let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-footer");
@@ -717,6 +906,7 @@ fn build_empty_footer() -> GtkBox {
     footer
 }
 
+#[allow(dead_code)]
 fn show_open_video_dialog(
     root: &GtkBox,
     window: &ApplicationWindow,
@@ -770,6 +960,7 @@ fn show_open_video_dialog(
     chooser.show();
 }
 
+#[allow(dead_code)]
 fn load_video_async(
     path: PathBuf,
     root: &GtkBox,
@@ -821,12 +1012,11 @@ fn load_video_async(
             Ok(Ok((metadata, thumbnails, waveform))) => {
                 stop_loading();
 
-                let state = Arc::new(Mutex::new(VideoEditState::new(metadata)));
-                {
-                    let mut state = state.lock().unwrap();
-                    state.quality = 70;
-                    state.audio_mode = AudioMode::Unchanged;
-                }
+                let mut loaded = VideoEditState::new(metadata);
+                loaded.quality = 70;
+                loaded.audio_mode = AudioMode::Unchanged;
+                project::restore_into(&mut loaded);
+                let state = Arc::new(Mutex::new(loaded));
                 populate_loaded_root(
                     &root,
                     &window,
@@ -856,9 +1046,52 @@ fn load_video_async(
     });
 }
 
+#[allow(dead_code)]
 fn is_supported_video_path(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("mp4"))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn close_persists_project_and_does_not_export() {
+        let source = include_str!("mod.rs");
+        let start = source
+            .find("fn wire_close_persist(")
+            .expect("video close persist handler");
+        let rest = &source[start + 1..];
+        let end = rest
+            .find("\nfn ")
+            .map(|i| start + 1 + i)
+            .unwrap_or(source.len());
+        let handler = &source[start..end];
+        assert!(
+            handler.contains("persist_video_session"),
+            "Video close handler must persist the project sidecar"
+        );
+        assert!(
+            !handler.contains("export_edited_to"),
+            "Video close must not encode an MP4"
+        );
+    }
+
+    #[test]
+    fn light_theme_playhead_is_black_and_clips_have_no_lift_shadow() {
+        let painting = include_str!("timeline_card_parts/painting.rs");
+        assert!(
+            painting.contains("cr.set_source_rgba(0.07, 0.08, 0.09, alpha)"),
+            "Light-theme playhead must paint black"
+        );
+        assert!(
+            !painting.contains("0.0, 0.0, 0.0, 0.38"),
+            "Lifted clips must not draw a drop shadow"
+        );
+        assert!(
+            painting.contains("fn widget_is_light"),
+            "Timeline painting must detect the light theme"
+        );
+    }
 }

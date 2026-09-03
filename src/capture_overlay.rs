@@ -328,7 +328,10 @@ impl CaptureSessionCoordinator {
         &self,
         builtin_overlay_active: bool,
     ) -> Result<CaptureOverlayGuard<'_>, LaunchBlockedReason> {
-        let mut state = self.state.lock().expect("capture session mutex poisoned");
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if matches!(*state, CaptureSessionState::ApexOverlayActive) {
             return Err(LaunchBlockedReason::ApexOverlayAlreadyActive);
         }
@@ -349,7 +352,7 @@ impl Drop for CaptureOverlayGuard<'_> {
             .coordinator
             .state
             .lock()
-            .expect("capture session mutex poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *state = CaptureSessionState::Idle;
     }
 }
@@ -1230,6 +1233,8 @@ pub struct RecordingRequest {
     pub video_fps: u8,
     pub record_mono: bool,
     pub open_editor: bool,
+    #[serde(default)]
+    pub noise_suppression: bool,
     // GIF tab settings
     pub gif_fps: u8,
     pub gif_quality: f64,
@@ -1261,6 +1266,7 @@ impl Default for RecordingRequest {
             video_fps: 2,
             record_mono: false,
             open_editor: true,
+            noise_suppression: false,
             gif_fps: 50,
             gif_quality: 0.75,
             gif_size_idx: 0,
@@ -1941,6 +1947,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let video_fps = extract_int(json, "video_fps").unwrap_or(2) as u8; // Default matches the overlay constructor
     let record_mono = extract_bool(json, "record_mono").unwrap_or(false);
     let open_editor = extract_bool(json, "open_editor").unwrap_or(false);
+    let noise_suppression = extract_bool(json, "noise_suppression").unwrap_or(false);
     let gif_fps = extract_int(json, "gif_fps").unwrap_or(50).clamp(5, 60) as u8;
     let gif_quality = extract_float(json, "gif_quality")
         .unwrap_or(0.75)
@@ -1970,6 +1977,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         video_fps,
         record_mono,
         open_editor,
+        noise_suppression,
         gif_fps,
         gif_quality,
         gif_size_idx,

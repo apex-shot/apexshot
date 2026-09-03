@@ -271,7 +271,8 @@ fn handle_settings_menu_click(
                 0 => st.recording.settings_dropdown_open = Some(3),
                 1 => st.recording.settings_dropdown_open = Some(4),
                 2 => st.recording.record_mono = !st.recording.record_mono,
-                3 => st.recording.open_editor = !st.recording.open_editor,
+                3 => st.recording.noise_suppression = !st.recording.noise_suppression,
+                4 => st.recording.open_editor = !st.recording.open_editor,
                 _ => {}
             }
         } else if matches!(st.recording.settings_tab, SettingsTab::Gif) {

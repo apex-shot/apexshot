@@ -111,6 +111,64 @@ fn deb_package_includes_background_gradient_assets() {
 }
 
 #[test]
+fn deb_package_includes_gnome_extension() {
+    let cargo_toml = include_str!("../Cargo.toml");
+    for file in [
+        "metadata.json",
+        "extension.js",
+        "cursor-classifier.js",
+        "shell-overlay.js",
+        "window-list.js",
+        "preview-stacking.js",
+    ] {
+        let asset = format!("gnome-extension/{file}");
+        assert!(
+            cargo_toml.contains(&asset),
+            "release .deb must include {asset}"
+        );
+    }
+    assert!(
+        cargo_toml.contains(
+            "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/"
+        ),
+        "GNOME extension assets must be installed in the system extension directory"
+    );
+}
+
+#[test]
+fn dev_deb_reinstall_refreshes_gnome_extension() {
+    let reinstall_script = include_str!("../reinstall-dev-deb.sh");
+    for file in [
+        "metadata.json",
+        "extension.js",
+        "cursor-classifier.js",
+        "shell-overlay.js",
+        "window-list.js",
+        "preview-stacking.js",
+    ] {
+        assert!(
+            reinstall_script.contains(file),
+            "development .deb reinstall must refresh GNOME extension file {file}"
+        );
+    }
+
+    assert!(
+        reinstall_script.contains("mktemp")
+            && reinstall_script.contains("install -m 0644 \"$newest_deb\""),
+        "development .deb reinstall must stage a package readable by APT's sandbox"
+    );
+    assert!(
+        reinstall_script.contains("cmp \"$ROOT_DIR/gnome-extension/$file\"")
+            && reinstall_script.contains("$SYSTEM_EXT/$file"),
+        "development .deb reinstall must verify the packaged system extension"
+    );
+    assert!(
+        !reinstall_script.contains("extension_changed"),
+        "development .deb reinstall must always refresh and reload the live user extension"
+    );
+}
+
+#[test]
 fn arch_pkgbuild_version_matches_cargo_package_version() {
     let cargo_toml = include_str!("../Cargo.toml");
     let pkgbuild = include_str!("../packaging/arch/PKGBUILD");

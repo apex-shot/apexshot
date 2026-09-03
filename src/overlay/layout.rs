@@ -299,7 +299,7 @@ pub(crate) fn volume_from_pill_y(panel: RectF, pointer_y: f64) -> f64 {
 }
 
 pub(crate) const SETTINGS_MENU_WIDTH: f64 = 440.0;
-pub(crate) const SETTINGS_MENU_HEIGHT: f64 = 390.0;
+pub(crate) const SETTINGS_MENU_HEIGHT: f64 = 428.0;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SettingsMenuLayout {

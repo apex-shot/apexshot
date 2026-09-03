@@ -28,6 +28,15 @@ if ! cargo deb --version >/dev/null 2>&1; then
   exit 1
 fi
 
+# CI gates on `cargo fmt` and `cargo clippy`; make sure both are present.
+# Ubuntu ships clippy as "clippy" (24.04) or "rust-clippy" (newer releases).
+if ! command -v cargo-clippy >/dev/null 2>&1 || ! command -v cargo-fmt >/dev/null 2>&1; then
+  echo "Installing Rust lint/format tools (clippy, rustfmt)..."
+  CLIPPY_PKG="clippy"
+  apt-cache show clippy >/dev/null 2>&1 || CLIPPY_PKG="rust-clippy"
+  sudo apt-get install -y "$CLIPPY_PKG" rustfmt
+fi
+
 export CARGO_INCREMENTAL=1
 
 echo "Building ApexShot .deb..."
@@ -101,6 +110,26 @@ fi
 
 echo "Requesting sudo once for uninstall/install..."
 sudo -v
+
+# PackageKit is D-Bus activated on desktop systems and can hold dpkg's lock
+# while checking for updates. Stop it before changing the package database;
+# never remove the lock files themselves.
+echo "Stopping PackageKit so dpkg can acquire its lock..."
+sudo systemctl stop packagekit.service
+for lock_file in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock; do
+  for attempt in {1..20}; do
+    if ! sudo fuser "$lock_file" >/dev/null 2>&1; then
+      break
+    fi
+    if [ "$attempt" -eq 20 ]; then
+      echo "error: $lock_file is still held after stopping PackageKit" >&2
+      sudo fuser -v "$lock_file" >&2 || true
+      exit 1
+    fi
+    sleep 0.25
+  done
+done
+
 pkg_status="$(dpkg-query -W -f='${Status}' "$PACKAGE_NAME" 2>/dev/null || true)"
 if [ -n "$pkg_status" ]; then
   echo "Purging $PACKAGE_NAME (status: $pkg_status)..."
@@ -109,10 +138,41 @@ else
   echo "$PACKAGE_NAME is not currently installed; skipping removal."
 fi
 echo "Installing $newest_deb..."
-sudo apt install -y --reinstall --allow-downgrades "$newest_deb"
+apt_deb="$(mktemp --tmpdir --suffix=.deb apexshot-dev-deb.XXXXXX)"
+trap 'rm -f "$apt_deb"' EXIT
+install -m 0644 "$newest_deb" "$apt_deb"
+sudo apt install -y --reinstall --allow-downgrades "$apt_deb"
+rm -f "$apt_deb"
+trap - EXIT
 
 echo "Verifying installed binaries..."
 cmp "$ROOT_DIR/target/release/apexshot" /usr/bin/apexshot
 cmp "$ROOT_DIR/target/release/apexshot-capture" /usr/bin/apexshot-capture
+
+EXT_UUID="apexshot-gnome-integration@apexshot.github.io"
+SYSTEM_EXT="/usr/share/gnome-shell/extensions/$EXT_UUID"
+USER_EXT="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+EXT_FILES=(metadata.json extension.js cursor-classifier.js shell-overlay.js window-list.js preview-stacking.js)
+
+echo "Verifying packaged GNOME Shell extension..."
+for file in "${EXT_FILES[@]}"; do
+  if ! cmp -s "$ROOT_DIR/gnome-extension/$file" "$SYSTEM_EXT/$file"; then
+    echo "error: installed GNOME extension file does not match source: $file" >&2
+    exit 1
+  fi
+done
+
+echo "Refreshing live GNOME Shell extension..."
+if command -v gnome-extensions >/dev/null 2>&1; then
+  gnome-extensions disable "$EXT_UUID" 2>/dev/null || true
+fi
+mkdir -p "$USER_EXT"
+for file in "${EXT_FILES[@]}"; do
+  cp -a "$ROOT_DIR/gnome-extension/$file" "$USER_EXT/$file"
+  cmp "$ROOT_DIR/gnome-extension/$file" "$USER_EXT/$file"
+done
+if command -v gnome-extensions >/dev/null 2>&1; then
+  gnome-extensions enable "$EXT_UUID"
+fi
 
 echo "Installed $PACKAGE_NAME from $newest_deb"

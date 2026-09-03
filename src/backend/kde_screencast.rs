@@ -1,8 +1,6 @@
 //! KDE Plasma native screencast via `zkde_screencast_unstable_v1`.
 //!
-//! This is the same protocol Spectacle uses for screen recording on KWin
-//! (`VideoPlatformWayland` + `Screencasting`). Unlike the XDG ScreenCast
-//! portal path, it:
+//! Unlike the XDG ScreenCast portal path, it:
 //!
 //! - does **not** show a "Share this screen?" permission dialog
 //! - creates a PipeWire node directly on the session graph
@@ -65,7 +63,7 @@ impl KdeScreencastHandle {
 pub enum KdeScreencastTarget {
     /// Full single output (primary / first advertised).
     Output,
-    /// Logical workspace region (Spectacle `stream_region`).
+    /// Logical workspace region (`stream_region`).
     Region {
         x: i32,
         y: i32,
