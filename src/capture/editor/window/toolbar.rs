@@ -577,7 +577,7 @@ pub(super) fn build_toolbar_mode_controls(
     let color_group = GtkBox::new(Orientation::Horizontal, 0);
     color_group.add_css_class("editor-color-group");
 
-    // Color status chip - card-style: circle dot + stacked hex label + "Tab to copy" helper.
+    // Color status chip - card-style: rounded square swatch + stacked hex label + "Tab to copy" helper.
     let color_status = GtkBox::new(Orientation::Horizontal, 10);
     color_status.add_css_class("editor-toolbar-color-status");
     color_status.set_valign(gtk4::Align::Center);

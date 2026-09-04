@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::i18n::t;
 use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, Label, Orientation};
 
 #[allow(dead_code)]
@@ -40,7 +41,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     };
 
     // --- Tools Group ---
-    let tools_title = Label::new(Some("Drawing Tools"));
+    let tools_title = Label::new(Some(&t("Drawing Tools")));
     tools_title.add_css_class("settings-group-title");
     tools_title.set_xalign(0.0);
     tools_title.set_halign(Align::Start);
@@ -54,7 +55,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     inverse_arrow_check.set_active(config.annotate_inverse_arrow);
     let arrow_hbox = GtkBox::new(Orientation::Horizontal, 12);
     arrow_hbox.set_hexpand(true);
-    let arrow_option = Label::new(Some("Inverse arrow direction"));
+    let arrow_option = Label::new(Some(&t("Inverse arrow direction")));
     arrow_option.set_xalign(0.0);
     arrow_option.set_hexpand(true);
     arrow_hbox.append(&arrow_option);
@@ -66,7 +67,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     smooth_drawing_check.set_active(config.annotate_smooth_drawing);
     let pencil_hbox = GtkBox::new(Orientation::Horizontal, 12);
     pencil_hbox.set_hexpand(true);
-    let pencil_option = Label::new(Some("Smooth drawing"));
+    let pencil_option = Label::new(Some(&t("Smooth drawing")));
     pencil_option.set_xalign(0.0);
     pencil_option.set_hexpand(true);
     pencil_hbox.append(&pencil_option);
@@ -78,7 +79,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     draw_shadow_check.set_active(config.annotate_draw_shadow);
     let shadow_hbox = GtkBox::new(Orientation::Horizontal, 12);
     shadow_hbox.set_hexpand(true);
-    let shadow_option = Label::new(Some("Draw shadow on objects"));
+    let shadow_option = Label::new(Some(&t("Draw shadow on objects")));
     shadow_option.set_xalign(0.0);
     shadow_option.set_hexpand(true);
     shadow_hbox.append(&shadow_option);
@@ -88,7 +89,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     section.append(&tools_frame);
 
     // --- Canvas Group ---
-    let canvas_title = Label::new(Some("Canvas & Interface"));
+    let canvas_title = Label::new(Some(&t("Canvas & Interface")));
     canvas_title.add_css_class("settings-group-title");
     canvas_title.set_xalign(0.0);
     canvas_title.set_halign(Align::Start);
@@ -102,7 +103,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     auto_expand_check.set_active(config.annotate_auto_expand);
     let canvas_hbox = GtkBox::new(Orientation::Horizontal, 12);
     canvas_hbox.set_hexpand(true);
-    let canvas_option = Label::new(Some("Automatically expand canvas"));
+    let canvas_option = Label::new(Some(&t("Automatically expand canvas")));
     canvas_option.set_xalign(0.0);
     canvas_option.set_hexpand(true);
     canvas_hbox.append(&canvas_option);
@@ -114,7 +115,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     show_color_names_check.set_active(config.annotate_show_color_names);
     let access_hbox = GtkBox::new(Orientation::Horizontal, 12);
     access_hbox.set_hexpand(true);
-    let access_option = Label::new(Some("Show color names (Accessibility)"));
+    let access_option = Label::new(Some(&t("Show color names (Accessibility)")));
     access_option.set_xalign(0.0);
     access_option.set_hexpand(true);
     access_hbox.append(&access_option);
@@ -124,7 +125,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     section.append(&canvas_frame);
 
     // --- Window Group ---
-    let window_title = Label::new(Some("Window"));
+    let window_title = Label::new(Some(&t("Window")));
     window_title.add_css_class("settings-group-title");
     window_title.set_xalign(0.0);
     window_title.set_halign(Align::Start);
@@ -138,7 +139,7 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
     always_on_top_check.set_active(config.annotate_always_on_top);
     let on_top_hbox = GtkBox::new(Orientation::Horizontal, 12);
     on_top_hbox.set_hexpand(true);
-    let always_on_top_option = Label::new(Some("Always on top"));
+    let always_on_top_option = Label::new(Some(&t("Always on top")));
     always_on_top_option.set_xalign(0.0);
     always_on_top_option.set_hexpand(true);
     on_top_hbox.append(&always_on_top_option);

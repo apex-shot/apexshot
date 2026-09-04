@@ -1,0 +1,817 @@
+# ApexShot UI translations.
+# Language: Arabic
+msgid ""
+msgstr ""
+"Project-Id-Version: apexshot\n"
+"Language: ar\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "System default"
+msgstr "افتراضي النظام"
+
+msgid "Record shortcut"
+msgstr "تسجيل اختصار"
+
+msgid "Welcome to ApexShot"
+msgstr "مرحبًا بك في ApexShot"
+
+msgid "Version {version}"
+msgstr "الإصدار {version}"
+
+msgid "ApexShot Settings"
+msgstr "إعدادات ApexShot"
+
+msgid "Close"
+msgstr "إغلاق"
+
+msgid "Minimize"
+msgstr "تصغير"
+
+msgid "Save"
+msgstr "حفظ"
+
+msgid "Settings"
+msgstr "الإعدادات"
+
+msgid "Select screenshot save location"
+msgstr "اختر مجلد حفظ اللقطات"
+
+msgid "Select"
+msgstr "اختيار"
+
+msgid "Cancel"
+msgstr "إلغاء"
+
+msgid "Select video save location"
+msgstr "اختر مجلد حفظ الفيديو"
+
+msgid "General"
+msgstr "عام"
+
+msgid "Shortcuts"
+msgstr "الاختصارات"
+
+msgid "Quick Access"
+msgstr "الوصول السريع"
+
+msgid "Recording"
+msgstr "التسجيل"
+
+msgid "Screenshots"
+msgstr "اللقطات"
+
+msgid "Annotate"
+msgstr "التعليق"
+
+msgid "Cloud"
+msgstr "السحابة"
+
+msgid "Advanced"
+msgstr "متقدم"
+
+msgid "About"
+msgstr "حول"
+
+msgid "Saving…"
+msgstr "جارٍ الحفظ…"
+
+msgid "Settings saved"
+msgstr "تم حفظ الإعدادات"
+
+msgid "Save failed: {message}"
+msgstr "فشل الحفظ: {message}"
+
+msgid "After capture:"
+msgstr "بعد الالتقاط:"
+
+msgid ""
+"Here you can decide what should happen after taking a screenshot or recording your screen."
+msgstr "اختر ما يحدث بعد التقاط صورة أو تسجيل الشاشة."
+
+msgid "Screenshot"
+msgstr "لقطة"
+
+msgid "Action"
+msgstr "الإجراء"
+
+msgid "Export"
+msgstr "تصدير"
+
+msgid "Browse"
+msgstr "استعراض"
+
+msgid "Save location"
+msgstr "مكان الحفظ"
+
+msgid "File format"
+msgstr "صيغة الملف"
+
+msgid "File & Image (default)"
+msgstr "ملف وصورة (افتراضي)"
+
+msgid "Image Only"
+msgstr "صورة فقط"
+
+msgid "File Path Only"
+msgstr "مسار الملف فقط"
+
+msgid "Clipboard copy behavior"
+msgstr "سلوك النسخ إلى الحافظة"
+
+msgid "Choose whether screenshots copy as an image, a file URI, or both."
+msgstr "انسخ اللقطات كصورة أو مسار ملف أو كليهما."
+
+msgid "Off"
+msgstr "إيقاف"
+
+msgid "1 Second"
+msgstr "ثانية واحدة"
+
+msgid "3 Seconds"
+msgstr "3 ثوانٍ"
+
+msgid "5 Seconds"
+msgstr "5 ثوانٍ"
+
+msgid "10 Seconds"
+msgstr "10 ثوانٍ"
+
+msgid "Self-Timer interval"
+msgstr "المؤقت الذاتي"
+
+msgid "Include pointer when available"
+msgstr "تضمين المؤشر عند توفره"
+
+msgid ""
+"ApexShot includes the pointer only when the current capture flow provides cursor data."
+msgstr "يُدرج ApexShot المؤشر فقط إذا وفّر مسار الالتقاط بيانات المؤشر."
+
+msgid "Drawing Tools"
+msgstr "أدوات الرسم"
+
+msgid "Inverse arrow direction"
+msgstr "عكس اتجاه السهم"
+
+msgid "Smooth drawing"
+msgstr "رسم سلس"
+
+msgid "Draw shadow on objects"
+msgstr "رسم ظل على العناصر"
+
+msgid "Canvas & Interface"
+msgstr "اللوحة والواجهة"
+
+msgid "Automatically expand canvas"
+msgstr "توسيع اللوحة تلقائيًا"
+
+msgid "Show color names (Accessibility)"
+msgstr "إظهار أسماء الألوان (إمكانية الوصول)"
+
+msgid "Window"
+msgstr "النافذة"
+
+msgid "Always on top"
+msgstr "دائمًا في المقدمة"
+
+msgid "Set Shortcut"
+msgstr "تعيين الاختصار"
+
+msgid "Set"
+msgstr "تعيين"
+
+msgid "Preparing shortcut capture…"
+msgstr "جارٍ تجهيز التقاط الاختصار…"
+
+msgid "Press Esc to cancel or Backspace to disable the keyboard shortcut"
+msgstr "اضغط Esc للإلغاء أو Backspace لتعطيل الاختصار"
+
+msgid "Shortcut will be disabled"
+msgstr "سيتم تعطيل الاختصار"
+
+msgid ""
+"Shortcuts set here are the same hotkeys ApexShot uses. If one does not work, your desktop environment may already be using it. Open your system keyboard settings and disable conflicting shortcuts if you want to reuse them in ApexShot."
+msgstr ""
+"الاختصارات هنا هي مفاتيح ApexShot الفعلية. إن لم تعمل فقد يستخدمها سطح المكتب. عطّل التعارض من إعدادات لوحة مفاتيح النظام."
+
+msgid "Save Location"
+msgstr "مكان الحفظ"
+
+msgid "Recordings folder"
+msgstr "مجلد التسجيلات"
+
+msgid "Filename pattern"
+msgstr "نمط اسم الملف"
+
+msgid "Use {Date} and {Time} placeholders"
+msgstr "استخدم العنصرين {Date} و{Time}"
+
+msgid "Remember last export folder"
+msgstr "تذكّر آخر مجلد تصدير"
+
+msgid "Upload destination"
+msgstr "وجهة الرفع"
+
+msgid "ApexShot Cloud"
+msgstr "ApexShot Cloud"
+
+msgid "XBackBone (self-hosted)"
+msgstr "XBackBone (استضافة ذاتية)"
+
+msgid "Upload with"
+msgstr "الرفع عبر"
+
+msgid "Upload after capture"
+msgstr "الرفع بعد الالتقاط"
+
+msgid ""
+"Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
+msgstr "يرفع كل لقطة محفوظة وينسخ رابط المشاركة. لا يفعل شيئًا حتى تتصل."
+
+msgid "ApexShot Cloud account"
+msgstr "حساب ApexShot Cloud"
+
+msgid "Connected"
+msgstr "متصل"
+
+msgid "Not connected"
+msgstr "غير متصل"
+
+msgid "Signed in"
+msgstr "تم تسجيل الدخول"
+
+msgid "Run `apexshot login` in a terminal, or click Connect below."
+msgstr "شغّل `apexshot login` في الطرفية أو انقر اتصال أدناه."
+
+msgid "Connect account"
+msgstr "ربط الحساب"
+
+msgid "Logout"
+msgstr "تسجيل الخروج"
+
+msgid "XBackBone instance"
+msgstr "مثيل XBackBone"
+
+msgid "Instance URL"
+msgstr "عنوان المثيل"
+
+msgid "Show"
+msgstr "إظهار"
+
+msgid "API token"
+msgstr "رمز API"
+
+msgid ""
+"Generate a token in your XBackBone instance → Profile → Tokens, with the resource:upload ability."
+msgstr ""
+"أنشئ رمزًا في XBackBone ← الملف الشخصي ← Tokens بصلاحية resource:upload."
+
+msgid "Test connection"
+msgstr "اختبار الاتصال"
+
+msgid "Verify setup"
+msgstr "التحقق من الإعداد"
+
+msgid "Open XBackBone API docs"
+msgstr "فتح توثيق واجهة XBackBone"
+
+msgid "Documentation"
+msgstr "التوثيق"
+
+msgid "File Naming"
+msgstr "تسمية الملفات"
+
+msgid "Filename format"
+msgstr "صيغة الاسم"
+
+msgid "Add @2x suffix for HiDPI screenshots"
+msgstr "إضافة اللاحقة @2x للقطات HiDPI"
+
+msgid "Text Recognition (OCR)"
+msgstr "التعرف على النص (OCR)"
+
+msgid "English"
+msgstr "الإنجليزية"
+
+msgid "Spanish"
+msgstr "الإسبانية"
+
+msgid "French"
+msgstr "الفرنسية"
+
+msgid "German"
+msgstr "الألمانية"
+
+msgid "Italian"
+msgstr "الإيطالية"
+
+msgid "Portuguese"
+msgstr "البرتغالية"
+
+msgid "Chinese (Simplified)"
+msgstr "الصينية المبسطة"
+
+msgid "Japanese"
+msgstr "اليابانية"
+
+msgid "Russian"
+msgstr "الروسية"
+
+msgid "Primary language"
+msgstr "اللغة الأساسية"
+
+msgid "Preserve line breaks"
+msgstr "الإبقاء على فواصل الأسطر"
+
+msgid "Privacy"
+msgstr "الخصوصية"
+
+msgid "Share anonymous usage statistics"
+msgstr "مشاركة إحصاءات استخدام مجهولة"
+
+msgid ""
+"Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"نبضة يومية فقط: الإصدار والتوزيعة وسطح المكتب وعدّادات عامة. بلا لقطات أو بيانات شخصية. عطّلها بـ APEXSHOT_TELEMETRY=0."
+
+msgid "Language"
+msgstr "اللغة"
+
+msgid "Display language"
+msgstr "لغة العرض"
+
+msgid "System default uses your desktop language. Changes apply after Save."
+msgstr "افتراضي النظام يتبع لغة سطح المكتب. تُطبَّق التغييرات بعد الحفظ."
+
+msgid "Startup"
+msgstr "بدء التشغيل"
+
+msgid "Start at login"
+msgstr "التشغيل عند تسجيل الدخول"
+
+msgid "Sounds"
+msgstr "الأصوات"
+
+msgid "Play sounds"
+msgstr "تشغيل الأصوات"
+
+msgid "Shutter sound"
+msgstr "صوت الغالق"
+
+msgid "System tray"
+msgstr "شريط النظام"
+
+msgid "Show tray icon"
+msgstr "إظهار أيقونة الشريط"
+
+msgid "Overlay"
+msgstr "الطبقة"
+
+msgid "Position"
+msgstr "الموضع"
+
+msgid "Show on all displays"
+msgstr "الإظهار على كل الشاشات"
+
+msgid "Overlay size"
+msgstr "حجم الطبقة"
+
+msgid "Auto-close"
+msgstr "إغلاق تلقائي"
+
+msgid "Automatically close window"
+msgstr "إغلاق النافذة تلقائيًا"
+
+msgid "30 Seconds"
+msgstr "30 ثانية"
+
+msgid "1 Minute"
+msgstr "دقيقة واحدة"
+
+msgid "Interval"
+msgstr "الفاصل"
+
+msgid "Behaviors"
+msgstr "السلوك"
+
+msgid "Close window after dragging"
+msgstr "إغلاق النافذة بعد السحب"
+
+msgid "Close window after uploading"
+msgstr "إغلاق النافذة بعد الرفع"
+
+msgid "Check for Updates"
+msgstr "التحقق من التحديثات"
+
+msgid "What's New"
+msgstr "ما الجديد"
+
+msgid "Help Center"
+msgstr "مركز المساعدة"
+
+msgid "Send Feedback"
+msgstr "إرسال ملاحظات"
+
+msgid "Website"
+msgstr "الموقع"
+
+msgid "Support ApexShot"
+msgstr "ادعم ApexShot"
+
+msgid "ApexShot is free and open source. Donations keep development going."
+msgstr "ApexShot حر ومفتوح المصدر. التبرعات تبقي التطوير مستمرًا."
+
+msgid "Support on Ko-fi"
+msgstr "الدعم عبر Ko-fi"
+
+msgid "Cloud is a separate paid product"
+msgstr "السحابة منتج مدفوع منفصل"
+
+msgid "Opens ApexShot Cloud plans. This is not a donation."
+msgstr "يفتح خطط ApexShot Cloud. هذا ليس تبرعًا."
+
+msgid "Copyright © 2026 ApexShot. All rights reserved."
+msgstr "حقوق النشر © 2026 ApexShot. جميع الحقوق محفوظة."
+
+msgid "Terms of Service"
+msgstr "شروط الخدمة"
+
+msgid "Privacy Policy"
+msgstr "سياسة الخصوصية"
+
+msgid "ApexShot Setup"
+msgstr "إعداد ApexShot"
+
+msgid "← Back"
+msgstr "→ رجوع"
+
+msgid "Next →"
+msgstr "التالي ←"
+
+msgid "Start Using ApexShot"
+msgstr "ابدأ استخدام ApexShot"
+
+msgid "Extension Installed ✓"
+msgstr "تم تثبيت الامتداد ✓"
+
+msgid "GNOME Shell Extension Required"
+msgstr "امتداد GNOME Shell مطلوب"
+
+msgid ""
+"ApexShot requires GNOME Shell. Please install on a GNOME desktop to continue."
+msgstr "يتطلب ApexShot بيئة GNOME Shell. ثبّته على سطح مكتب GNOME للمتابعة."
+
+msgid "Exit"
+msgstr "خروج"
+
+msgid "Update GNOME Extension"
+msgstr "تحديث امتداد GNOME"
+
+msgid ""
+"An old version of the ApexShot extension is installed. It needs to be removed before installing the new version."
+msgstr "هناك إصدار قديم من الامتداد. أزله قبل تثبيت الإصدار الجديد."
+
+msgid "Remove Old Extension"
+msgstr "إزالة الامتداد القديم"
+
+msgid "GNOME Shell Extension"
+msgstr "امتداد GNOME Shell"
+
+msgid ""
+"On GNOME Wayland, the shell extension unlocks the polished capture experience:"
+msgstr "على GNOME Wayland يفتح الامتداد تجربة التقاط مصقولة:"
+
+msgid "Floating preview windows"
+msgstr "نوافذ معاينة عائمة"
+
+msgid "Always-on-top previews that stay out of your way"
+msgstr "معاينات فوق النوافذ دون إعاقة العمل"
+
+msgid "Quick access overlay"
+msgstr "طبقة الوصول السريع"
+
+msgid "Post-capture actions without hunting through menus"
+msgstr "إجراءات بعد الالتقاط دون البحث في القوائم"
+
+msgid "Recording status indicator"
+msgstr "مؤشر حالة التسجيل"
+
+msgid "Shell-managed controls while a recording is live"
+msgstr "عناصر تحكم يديرها الصدفة أثناء التسجيل"
+
+msgid "Install GNOME Extension"
+msgstr "تثبيت امتداد GNOME"
+
+msgid "Installing..."
+msgstr "جارٍ التثبيت..."
+
+msgid ""
+"Note: You may need to log out and back in for the extension to appear in GNOME."
+msgstr ""
+"ملاحظة: قد تحتاج إلى تسجيل الخروج ثم الدخول حتى يظهر الامتداد في GNOME."
+
+msgid "Or download manually from GitHub"
+msgstr "أو نزّل يدويًا من GitHub"
+
+msgid "Browser Extension"
+msgstr "امتداد المتصفح"
+
+msgid ""
+"Optional Chrome/Chromium add-on for full-page web captures that open straight in ApexShot."
+msgstr ""
+"إضافة اختيارية لـ Chrome/Chromium لالتقاط صفحات كاملة تفتح مباشرة في ApexShot."
+
+msgid "Full-page scroll capture"
+msgstr "التقاط صفحة كاملة بالتمرير"
+
+msgid "Stitch long pages that a normal screenshot can't fit"
+msgstr "يجمع الصفحات الطويلة التي لا تتسع في لقطة عادية"
+
+msgid "Sends directly to ApexShot"
+msgstr "يُرسل مباشرة إلى ApexShot"
+
+msgid "Opens in the editor so you can annotate and share immediately"
+msgstr "يُفتح في المحرر للتعليق والمشاركة فورًا"
+
+msgid "Works with your desktop app"
+msgstr "يعمل مع تطبيق سطح المكتب"
+
+msgid "Native messaging keeps the browser and ApexShot in sync"
+msgstr "الرسائل الأصلية تُزامن المتصفح مع ApexShot"
+
+msgid "Get Chrome Extension"
+msgstr "الحصول على امتداد Chrome"
+
+msgid ""
+"Optional. You can install this later from Settings or the Chrome Web Store."
+msgstr "اختياري. يمكنك تثبيته لاحقًا من الإعدادات أو متجر Chrome."
+
+msgid ""
+"Thanks for choosing ApexShot as your screenshot companion.\n"
+"Let's get you set up in just a few quick steps."
+msgstr ""
+"شكرًا لاختيار ApexShot.\n"
+"لنجهّزه في بضع خطوات."
+
+msgid "Area & fullscreen capture"
+msgstr "التقاط منطقة وملء الشاشة"
+
+msgid "Grab a region, monitor, or the whole desktop in one hotkey"
+msgstr "التقط منطقة أو شاشة أو سطح المكتب كله باختصار واحد"
+
+msgid "Built-in annotation editor"
+msgstr "محرر تعليقات مدمج"
+
+msgid "Arrows, blur, text, and crop without leaving the app"
+msgstr "أسهم وضبابية ونص واقتصاص دون مغادرة التطبيق"
+
+msgid "Screen recording with audio"
+msgstr "تسجيل الشاشة مع الصوت"
+
+msgid "MP4 or GIF with mic and system audio when your desktop allows it"
+msgstr "MP4 أو GIF مع الميكروفون وصوت النظام إن سمح سطح المكتب"
+
+msgid "OCR text extraction"
+msgstr "استخراج النص بالتعرف الضوئي"
+
+msgid "Pull text and QR codes straight from a capture"
+msgstr "استخرج النص ورموز QR مباشرة من اللقطة"
+
+msgid "Cloud Upload"
+msgstr "الرفع إلى السحابة"
+
+msgid "Available now · optional"
+msgstr "متاح الآن · اختياري"
+
+msgid ""
+"Share captures and recordings with a link, or keep everything on your own server."
+msgstr "شارك اللقطات والتسجيلات برابط، أو أبقِ كل شيء على خادمك."
+
+msgid "Sync across devices"
+msgstr "المزامنة عبر الأجهزة"
+
+msgid "Pull recent uploads when you're signed in"
+msgstr "يجلب الرفوعات الأخيرة عند تسجيل الدخول"
+
+msgid "Instant share links"
+msgstr "روابط مشاركة فورية"
+
+msgid "Copy a URL after capture without leaving the workflow"
+msgstr "انسخ رابطًا بعد الالتقاط دون مغادرة سير العمل"
+
+msgid "Storage you control"
+msgstr "تخزين تتحكم به"
+
+msgid "Hosted ApexShot Cloud or your own XBackBone instance"
+msgstr "سحابة ApexShot المستضافة أو مثيل XBackBone الخاص بك"
+
+msgid "Choose your cloud"
+msgstr "اختر سحابتك"
+
+msgid "Hosted by us, ready out of the box with device login."
+msgstr "نستضيفه نحن، جاهز مع تسجيل دخول الجهاز."
+
+msgid "XBackBone"
+msgstr "XBackBone"
+
+msgid "Self-host for full control of storage and URLs."
+msgstr "استضافة ذاتية للتحكم الكامل في التخزين والعناوين."
+
+msgid ""
+"Skip for now if you want. After you Connect, your next screenshot gets a share link. Configure later in Settings → Cloud."
+msgstr ""
+"يمكنك التخطي الآن. بعد الاتصال تحصل اللقطة التالية على رابط. اضبط لاحقًا من الإعدادات ← السحابة."
+
+msgid "How to capture"
+msgstr "كيفية الالتقاط"
+
+msgid ""
+"ApexShot runs in the background with a tray icon and hotkeys.\n"
+"After setup, you do not need to open Settings every time."
+msgstr ""
+"يعمل ApexShot في الخلفية بأيقونة شريط واختصارات.\n"
+"بعد الإعداد لا تحتاج فتح الإعدادات في كل مرة."
+
+msgid "Tray icon"
+msgstr "أيقونة الشريط"
+
+msgid "Right-click for Area, Screen, Window, and Record"
+msgstr "انقر باليمين: منطقة، شاشة، نافذة، تسجيل"
+
+msgid "App menu"
+msgstr "قائمة التطبيق"
+
+msgid "Opening ApexShot shows Settings; captures stay on tray and hotkeys"
+msgstr "فتح ApexShot يعرض الإعدادات؛ الالتقاط يبقى عبر الشريط والاختصارات"
+
+msgid "Hotkeys"
+msgstr "المفاتيح السريعة"
+
+msgid "Defaults below. Change them anytime in Settings → Shortcuts."
+msgstr "القيم الافتراضية أدناه. غيّرها متى شئت من الإعدادات ← الاختصارات."
+
+msgid "Shortcut"
+msgstr "اختصار"
+
+msgid "Area capture"
+msgstr "التقاط منطقة"
+
+msgid "Full screen"
+msgstr "ملء الشاشة"
+
+msgid "Record UI"
+msgstr "واجهة التسجيل"
+
+msgid "Take a test screenshot"
+msgstr "التقاط صورة تجريبية"
+
+msgid "Starts the tray daemon if needed, then takes a full screenshot"
+msgstr "يشغّل خدمة الشريط إن لزم ثم يلتقط الشاشة كاملة"
+
+msgid "Optional. You can skip this and try a capture after finishing setup."
+msgstr "اختياري. يمكنك التخطي وتجربة التقاط بعد إنهاء الإعداد."
+
+msgid "{shortcut} (default)"
+msgstr "{shortcut} (افتراضي)"
+
+msgid "You're all set!"
+msgstr "أصبحت جاهزًا!"
+
+msgid ""
+"The tray daemon starts when you finish so hotkeys and captures work right away."
+msgstr "تبدأ خدمة الشريط عند الانتهاء لتعمل الاختصارات واللقطات فورًا."
+
+msgid "Right-click for Area, Screen, and Record"
+msgstr "انقر باليمين: منطقة، شاشة، تسجيل"
+
+msgid "Capture without opening Settings every time"
+msgstr "التقط دون فتح الإعدادات في كل مرة"
+
+msgid "Open ApexShot anytime for Settings and preferences"
+msgstr "افتح ApexShot في أي وقت للإعدادات"
+
+msgid "Pro tip"
+msgstr "نصيحة"
+
+msgid ""
+"If a hotkey conflicts with your desktop, change it under Settings → Shortcuts."
+msgstr "إن تعارض اختصار مع سطح المكتب فغيّره من الإعدادات ← الاختصارات."
+
+msgid "Capture Area"
+msgstr "التقاط منطقة"
+
+msgid "Crosshair Capture"
+msgstr "التقاط بالمؤشر"
+
+msgid "Capture Screen"
+msgstr "التقاط الشاشة"
+
+msgid "Open Recording UI"
+msgstr "فتح واجهة التسجيل"
+
+msgid "Record Screen"
+msgstr "تسجيل الشاشة"
+
+msgid "Stop Recording"
+msgstr "إيقاف التسجيل"
+
+msgid "Video Editor"
+msgstr "محرر الفيديو"
+
+msgid "Image Editor"
+msgstr "محرر الصور"
+
+msgid "Open Last Capture"
+msgstr "فتح آخر لقطة"
+
+msgid "History"
+msgstr "السجل"
+
+msgid "Quit"
+msgstr "خروج"
+
+msgid "Camera"
+msgstr "كاميرا"
+
+msgid "Classic"
+msgstr "كلاسيكي"
+
+msgid "Pop"
+msgstr "بوب"
+
+msgid "None"
+msgstr "بدون"
+
+msgid "Left"
+msgstr "يسار"
+
+msgid "Right"
+msgstr "يمين"
+
+msgid "Hide"
+msgstr "إخفاء"
+
+msgid "Hide (stay in Tray)"
+msgstr "إخفاء (البقاء في الشريط)"
+
+msgid "Min"
+msgstr "أدنى"
+
+msgid "Def"
+msgstr "افتراضي"
+
+msgid "Max"
+msgstr "أقصى"
+
+msgid "Show Quick Access overlay"
+msgstr "إظهار طبقة الوصول السريع"
+
+msgid "Copy to clipboard"
+msgstr "نسخ إلى الحافظة"
+
+msgid "Open Annotate tool"
+msgstr "فتح أداة التعليق"
+
+msgid "Open Video Editor"
+msgstr "فتح محرر الفيديو"
+
+msgid "Open File:"
+msgstr "فتح ملف:"
+
+msgid "Open From Clipboard:"
+msgstr "فتح من الحافظة:"
+
+msgid "Restore Recently Closed File:"
+msgstr "استعادة آخر ملف مغلق:"
+
+msgid "Hide/Show Overlays:"
+msgstr "إخفاء/إظهار الطبقات:"
+
+msgid "Capture Area:"
+msgstr "التقاط منطقة:"
+
+msgid "Crosshair Capture:"
+msgstr "التقاط بالمؤشر:"
+
+msgid "Capture Previous Area:"
+msgstr "التقاط المنطقة السابقة:"
+
+msgid "Capture Full Screen:"
+msgstr "التقاط ملء الشاشة:"
+
+msgid "Show Last Preview:"
+msgstr "إظهار آخر معاينة:"
+
+msgid "Open Recording UI:"
+msgstr "فتح واجهة التسجيل:"
+
+msgid "Record Screen:"
+msgstr "تسجيل الشاشة:"
+
+msgid "Stop and Save Recording:"
+msgstr "إيقاف التسجيل وحفظه:"
+
+msgid "Only during recording"
+msgstr "أثناء التسجيل فقط"
+

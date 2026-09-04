@@ -161,6 +161,9 @@ pub struct AppConfig {
     /// Anonymous usage heartbeat (daemon). Opt out in Settings or via
     /// `APEXSHOT_TELEMETRY=0`. Default on to match install-script telemetry.
     pub telemetry_enabled: bool,
+    /// UI language. `system` follows the desktop locale; otherwise a catalog
+    /// code such as `es` or `pt_BR`.
+    pub ui_language: String,
 }
 
 impl Default for AppConfig {
@@ -283,6 +286,7 @@ impl Default for AppConfig {
             adv_filename_use_utc: false,
             // Flatpak: off until the user explicitly opts in (plan §10.3 / §9.4).
             telemetry_enabled: !cfg!(feature = "flatpak"),
+            ui_language: crate::i18n::SYSTEM_LANGUAGE.to_string(),
         }
     }
 }
@@ -355,6 +359,7 @@ impl AppConfig {
         self.xbackbone_api_token = self.xbackbone_api_token.trim().to_string();
         // Tiers are compared case-insensitively; normalise once on the way in.
         self.cloud_plan_tier = self.cloud_plan_tier.trim().to_lowercase();
+        self.ui_language = crate::i18n::sanitize_ui_language(&self.ui_language);
         self
     }
 

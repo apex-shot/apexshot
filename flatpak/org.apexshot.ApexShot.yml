@@ -70,6 +70,14 @@ modules:
       - install -Dm644 flatpak/org.apexshot.ApexShot.desktop /app/share/applications/org.apexshot.ApexShot.desktop
       - install -Dm644 flatpak/org.apexshot.ApexShot.metainfo.xml /app/share/metainfo/org.apexshot.ApexShot.metainfo.xml
       - install -Dm644 packaging/apexshot.svg /app/share/icons/hicolor/scalable/apps/org.apexshot.ApexShot.svg
+      - |
+        if [ -d target/locale ]; then
+          for mo in target/locale/*/LC_MESSAGES/apexshot.mo; do
+            [ -f "$mo" ] || continue
+            lang=$(basename "$(dirname "$(dirname "$mo")")")
+            install -Dm644 "$mo" "/app/share/locale/${lang}/LC_MESSAGES/apexshot.mo"
+          done
+        fi
       # Vendored UI font — runtimes only ship Noto/DejaVu; fontconfig picks up /app/share/fonts.
       - install -Dm644 assets/fonts/InterVariable.ttf /app/share/fonts/InterVariable.ttf
     sources:

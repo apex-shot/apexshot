@@ -550,8 +550,20 @@
                 border-top-color: alpha(#111827, 0.08);
             }
 
-            .settings-select {
+            button.settings-select {
                 min-width: 180px;
+                min-height: 32px;
+                padding: 6px 10px;
+                border-radius: 8px;
+            }
+
+            button.settings-select label {
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            button.settings-select .settings-select-arrow {
+                opacity: 0.55;
             }
 
             /* ── Dark-mode native widget overrides ── */
@@ -607,61 +619,29 @@
                 color: alpha(white, 0.35);
             }
 
-            .editor-root .settings-select {
+            .editor-root button.settings-select {
                 background-image: none;
                 background-color: alpha(white, 0.06);
                 color: #F1F1F3;
                 border: none;
             }
 
-            .editor-root .settings-select button {
-                background-image: none;
-                background-color: transparent;
-                color: #F1F1F3;
-                border: none;
+            .editor-root button.settings-select:hover {
+                background-color: alpha(white, 0.10);
             }
 
-            .editor-root .settings-select:focus {
-                border-color: alpha(#b05c38, 0.55);
-                outline: none;
+            .editor-root button.settings-select:active,
+            .editor-root button.settings-select:checked {
+                background-color: alpha(white, 0.12);
             }
 
-            .editor-root .settings-select:disabled {
+            .editor-root button.settings-select:disabled {
                 background-color: alpha(white, 0.03);
                 color: alpha(white, 0.42);
-                border-color: alpha(white, 0.08);
             }
 
-            .editor-root .settings-select:disabled button {
-                color: alpha(white, 0.42);
-            }
-
-            .editor-root .settings-select popover {
-                background-color: transparent;
-                border: none;
-                box-shadow: none;
-            }
-
-            .editor-root .settings-select popover contents {
-                background-color: #141414;
-                color: #F1F1F3;
-                border: 1px solid alpha(white, 0.12);
-                border-radius: 8px;
-                box-shadow: none;
-            }
-
-            .editor-root .settings-select popover list,
-            .editor-root .settings-select popover listview,
-            .editor-root .settings-select popover row,
-            .editor-root .settings-select popover modelbutton {
-                background-color: transparent;
-                color: #F1F1F3;
-            }
-
-            .editor-root .settings-select popover row:hover,
-            .editor-root .settings-select popover modelbutton:hover {
-                background-color: alpha(white, 0.08);
-                color: #F1F1F3;
+            .editor-root button.settings-select:disabled .settings-select-arrow {
+                opacity: 0.35;
             }
 
             .editor-root scale trough {
@@ -722,24 +702,29 @@
             /* ── Light-mode native widget overrides ── */
 
             .editor-root.editor-theme-light entry,
-            .editor-root.editor-theme-light .settings-select,
-            .editor-root.editor-theme-light .settings-select button {
+            .editor-root.editor-theme-light button.settings-select {
                 background-image: none;
                 background-color: #ffffff;
                 color: #17202a;
                 border-color: alpha(#111827, 0.18);
             }
 
-            .editor-root.editor-theme-light entry:focus,
-            .editor-root.editor-theme-light .settings-select:focus,
-            .editor-root.editor-theme-light .settings-select button:focus {
+            .editor-root.editor-theme-light button.settings-select:hover {
+                background-color: #f8fafc;
+            }
+
+            .editor-root.editor-theme-light button.settings-select:active,
+            .editor-root.editor-theme-light button.settings-select:checked {
+                background-color: #f1f5f9;
+            }
+
+            .editor-root.editor-theme-light entry:focus {
                 border-color: alpha(#b05c38, 0.55);
                 outline: none;
             }
 
             .editor-root.editor-theme-light entry:disabled,
-            .editor-root.editor-theme-light .settings-select:disabled,
-            .editor-root.editor-theme-light .settings-select button:disabled {
+            .editor-root.editor-theme-light button.settings-select:disabled {
                 background-color: alpha(#111827, 0.04);
                 color: alpha(#17202a, 0.48);
                 border-color: alpha(#111827, 0.10);
@@ -767,34 +752,6 @@
                 background-color: alpha(#111827, 0.04);
                 border-color: alpha(#111827, 0.12);
                 color: alpha(#17202a, 0.35);
-            }
-
-            .editor-root.editor-theme-light .settings-select popover {
-                background-color: transparent;
-                border: none;
-                box-shadow: none;
-            }
-
-            .editor-root.editor-theme-light .settings-select popover contents {
-                background-color: #f6f7fb;
-                color: #17202a;
-                border: 1px solid alpha(#111827, 0.12);
-                border-radius: 8px;
-                box-shadow: none;
-            }
-
-            .editor-root.editor-theme-light .settings-select popover list,
-            .editor-root.editor-theme-light .settings-select popover listview,
-            .editor-root.editor-theme-light .settings-select popover row,
-            .editor-root.editor-theme-light .settings-select popover modelbutton {
-                background-color: #ffffff;
-                color: #17202a;
-            }
-
-            .editor-root.editor-theme-light .settings-select popover row:hover,
-            .editor-root.editor-theme-light .settings-select popover modelbutton:hover {
-                background-color: alpha(#111827, 0.06);
-                color: #17202a;
             }
 
             .editor-root.editor-theme-light entry text {
@@ -1030,6 +987,14 @@
                 border: 1px solid alpha(white, 0.08);
             }
 
+            .shortcut-capture-dialog .titlebar {
+                min-height: 0;
+                padding: 0;
+                background: transparent;
+                box-shadow: none;
+                border: none;
+            }
+
             .shortcut-capture-title {
                 font-size: 16px;
                 font-weight: 600;
@@ -1081,36 +1046,39 @@
                 font-size: 13px;
             }
 
-            .shortcut-capture-primary-btn {
-                background: #b05c38;
-                color: white;
-                border-radius: 6px;
-                padding: 6px 16px;
+            .shortcut-capture-dialog button.shortcut-capture-primary-btn,
+            .shortcut-capture-dialog button.shortcut-capture-secondary-btn {
+                min-height: 26px;
+                min-width: 0;
+                padding: 2px 14px;
                 font-weight: 600;
                 font-size: 12px;
                 border: none;
+                border-radius: 6px;
+                outline: none;
+                box-shadow: none;
             }
 
-            .shortcut-capture-primary-btn:hover {
+            .shortcut-capture-dialog button.shortcut-capture-primary-btn {
+                background: #b05c38;
+                color: white;
+            }
+
+            .shortcut-capture-dialog button.shortcut-capture-primary-btn:hover {
                 background: #c06540;
             }
 
-            .shortcut-capture-primary-btn:disabled {
+            .shortcut-capture-dialog button.shortcut-capture-primary-btn:disabled {
                 background: alpha(white, 0.06);
                 color: rgba(255,255,255,0.35);
             }
 
-            .shortcut-capture-secondary-btn {
+            .shortcut-capture-dialog button.shortcut-capture-secondary-btn {
                 background: alpha(white, 0.06);
                 color: white;
-                border-radius: 6px;
-                padding: 6px 16px;
-                font-weight: 600;
-                font-size: 12px;
-                border: none;
             }
 
-            .shortcut-capture-secondary-btn:hover {
+            .shortcut-capture-dialog button.shortcut-capture-secondary-btn:hover {
                 background: alpha(white, 0.10);
             }
 
@@ -1164,27 +1132,27 @@
                 color: rgba(29, 33, 41, 0.55);
             }
 
-            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-primary-btn {
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn {
                 background: #b05c38;
                 color: white;
             }
 
-            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-primary-btn:hover {
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn:hover {
                 background: #c06540;
             }
 
-            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-primary-btn:disabled {
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn:disabled {
                 background: alpha(#111827, 0.06);
                 color: alpha(#17202a, 0.35);
             }
 
-            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-secondary-btn {
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-secondary-btn {
                 background: alpha(#111827, 0.04);
                 color: #17202a;
                 border: none;
             }
 
-            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-secondary-btn:hover {
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-secondary-btn:hover {
                 background: alpha(#111827, 0.08);
             }
 
@@ -2135,6 +2103,11 @@
                 color: white;
             }
 
+            .history-action-popover .settings-select-option-active {
+                background-color: alpha(white, 0.12);
+                color: white;
+            }
+
             .history-action-popover .history-action-btn:disabled {
                 background-color: transparent;
                 color: alpha(white, 0.35);
@@ -2233,6 +2206,11 @@
             }
 
             .editor-root.editor-theme-light .history-action-popover .history-action-btn:active {
+                background-color: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light .history-action-popover .settings-select-option-active {
                 background-color: alpha(#111827, 0.10);
                 color: #1d2129;
             }

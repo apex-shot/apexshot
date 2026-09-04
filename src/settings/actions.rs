@@ -3,13 +3,14 @@ use crate::{
     daemon::{set_daemon_tray_visibility, start_daemon_subprocess, stop_daemon_via_dbus},
 };
 use gtk4::prelude::*;
-use gtk4::{Button, CheckButton, ComboBoxText, Entry, Scale};
+use gtk4::{Button, CheckButton, Entry, Scale};
 
+use super::select::SettingsSelect;
 use super::windowing::{install_autostart_entry_smart, uninstall_autostart_entry};
 
 fn shortcut_label_value(label: Option<gtk4::glib::GString>) -> String {
     let label = label.unwrap_or_default();
-    if label == "Record shortcut" {
+    if crate::i18n::is_empty_shortcut_label(&label) {
         String::new()
     } else {
         label.to_string()
@@ -38,10 +39,10 @@ fn should_auto_respawn_daemon_for_save() -> bool {
 pub struct SaveInputs {
     pub start_at_login: CheckButton,
     pub play_sounds: CheckButton,
-    pub shutter_sound: ComboBoxText,
+    pub shutter_sound: SettingsSelect,
     pub show_menu_bar_icon: CheckButton,
     pub screenshot_export_location: Entry,
-    pub screenshot_format: ComboBoxText,
+    pub screenshot_format: SettingsSelect,
     pub video_export_location: Entry,
     pub rec_filename_pattern: Entry,
     pub rec_remember_export_folder: CheckButton,
@@ -52,15 +53,15 @@ pub struct SaveInputs {
     pub rec_copy_to_clipboard: CheckButton,
     pub rec_save: CheckButton,
     pub rec_open_video_editor: CheckButton,
-    pub quick_access_position: ComboBoxText,
+    pub quick_access_position: SettingsSelect,
     pub quick_access_multi_display: CheckButton,
     pub quick_access_overlay_size: Scale,
     pub quick_access_auto_close_enabled: CheckButton,
-    pub quick_access_auto_close_action: ComboBoxText,
-    pub quick_access_auto_close_interval: ComboBoxText,
+    pub quick_access_auto_close_action: SettingsSelect,
+    pub quick_access_auto_close_interval: SettingsSelect,
     pub quick_access_close_after_dragging: CheckButton,
     pub quick_access_close_after_uploading: CheckButton,
-    pub screenshot_timer_interval: ComboBoxText,
+    pub screenshot_timer_interval: SettingsSelect,
     pub screenshot_capture_cursor: CheckButton,
     pub annotate_inverse_arrow: CheckButton,
     pub annotate_smooth_drawing: CheckButton,
@@ -82,8 +83,8 @@ pub struct SaveInputs {
     pub shortcut_record_screen: Button,
     pub shortcut_recording_stop_save: Button,
     pub adv_retina_suffix: CheckButton,
-    pub adv_clipboard_mode: ComboBoxText,
-    pub adv_ocr_language: ComboBoxText,
+    pub adv_clipboard_mode: SettingsSelect,
+    pub adv_ocr_language: SettingsSelect,
     pub adv_ocr_keep_line_breaks: CheckButton,
     pub telemetry_enabled: CheckButton,
     pub cloud_apexshot: CheckButton,
@@ -91,18 +92,19 @@ pub struct SaveInputs {
     pub cloud_auto_upload: CheckButton,
     pub xbackbone_url: Entry,
     pub xbackbone_api_token: Entry,
+    pub ui_language: SettingsSelect,
 }
 
 pub fn install_checkbox_behaviors(
     play_sounds_check: &CheckButton,
-    shutter_sound_input: &ComboBoxText,
+    shutter_sound_input: &SettingsSelect,
     screenshot_quick_access_check: &CheckButton,
     screenshot_copy_to_clipboard_check: &CheckButton,
     screenshot_save_check: &CheckButton,
     screenshot_open_annotate_check: &CheckButton,
     quick_access_auto_close_enabled_check: &CheckButton,
-    quick_access_auto_close_action_input: &ComboBoxText,
-    quick_access_auto_close_interval_input: &ComboBoxText,
+    quick_access_auto_close_action_input: &SettingsSelect,
+    quick_access_auto_close_interval_input: &SettingsSelect,
 ) {
     let shutter_sound_input_toggle = shutter_sound_input.clone();
     play_sounds_check.connect_toggled(move |check| {
@@ -154,10 +156,20 @@ fn screenshot_or_general_shortcuts_configured(config: &crate::config::AppConfig)
         .is_empty()
 }
 
-pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
+pub struct SaveOutcome {
+    pub language_changed: bool,
+}
+
+pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     let previous_config = load_config().sanitized();
     let mut config = previous_config.clone();
     config.start_at_login = inputs.start_at_login.is_active();
+    config.ui_language = crate::i18n::sanitize_ui_language(
+        &inputs
+            .ui_language
+            .active_id()
+            .unwrap_or_else(|| crate::i18n::SYSTEM_LANGUAGE.to_string()),
+    );
     config.play_sounds = inputs.play_sounds.is_active();
     config.shutter_sound = combo_value(&inputs.shutter_sound, crate::config::DEFAULT_SHUTTER_SOUND);
     config.show_menu_bar_icon = inputs.show_menu_bar_icon.is_active();
@@ -183,8 +195,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.quick_access_auto_close_interval = inputs
         .quick_access_auto_close_interval
         .active_id()
-        .or_else(|| inputs.quick_access_auto_close_interval.active_text())
-        .unwrap_or_else(|| "30".into())
+        .unwrap_or_else(|| "30".to_string())
         .parse()
         .unwrap_or(30);
     config.quick_access_close_after_dragging = inputs.quick_access_close_after_dragging.is_active();
@@ -197,8 +208,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
     config.screenshot_timer_interval = inputs
         .screenshot_timer_interval
         .active_id()
-        .or_else(|| inputs.screenshot_timer_interval.active_text())
-        .unwrap_or_else(|| "5".into())
+        .unwrap_or_else(|| "5".to_string())
         .parse()
         .unwrap_or(5);
     config.screenshot_show_cursor = inputs.screenshot_capture_cursor.is_active();
@@ -258,6 +268,11 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         || previous_config.quick_access_close_after_uploading
             != config.quick_access_close_after_uploading;
 
+    let language_changed = previous_config.ui_language != config.ui_language;
+    if language_changed {
+        crate::i18n::init(&config.ui_language);
+    }
+
     let shortcuts_runtime_changed = previous_config.shortcut_open_file != config.shortcut_open_file
         || previous_config.shortcut_open_from_clipboard != config.shortcut_open_from_clipboard
         || previous_config.shortcut_restore_recently_closed
@@ -298,6 +313,14 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
 
     let allow_auto_respawn = should_auto_respawn_daemon_for_save();
     std::thread::spawn(move || {
+        if language_changed && allow_auto_respawn && stop_daemon_via_dbus() {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            if daemon_needed {
+                let _ = start_daemon_subprocess();
+            }
+            return;
+        }
+
         if quick_access_runtime_changed || shortcuts_runtime_changed {
             if allow_auto_respawn && stop_daemon_via_dbus() {
                 std::thread::sleep(std::time::Duration::from_millis(250));
@@ -321,15 +344,11 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<()> {
         }
     });
 
-    Ok(())
+    Ok(SaveOutcome { language_changed })
 }
 
-fn combo_value(combo: &ComboBoxText, fallback: &str) -> String {
-    combo
-        .active_id()
-        .or_else(|| combo.active_text())
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| fallback.to_string())
+fn combo_value(combo: &SettingsSelect, fallback: &str) -> String {
+    combo.active_id().unwrap_or_else(|| fallback.to_string())
 }
 
 #[cfg(test)]

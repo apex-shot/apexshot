@@ -1,4 +1,5 @@
 use crate::config::load_config;
+use crate::i18n::{self, t, tfmt};
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, FileChooserAction,
     FileChooserNative, Image, Label, Orientation, Overlay as GtkOverlay, ResponseType,
@@ -18,6 +19,7 @@ mod general;
 mod quick_access;
 mod recording;
 mod screenshots;
+pub(crate) mod select;
 mod shortcuts;
 pub(crate) mod ui_support;
 pub(crate) mod windowing;
@@ -152,12 +154,13 @@ fn build_settings_window(app: &Application) {
     install_settings_css();
 
     let config = load_config().sanitized();
+    i18n::apply_gtk_direction(&config.ui_language);
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("ApexShot Settings")
+        .title(t("ApexShot Settings"))
         .icon_name(crate::app_identity::icon_name())
         .default_width(900)
         .default_height(635)
@@ -189,14 +192,14 @@ fn build_settings_window(app: &Application) {
     drag_handle.set_vexpand(false);
     toolbar.append(&drag_handle);
 
-    let close_btn = traffic_light_button("traffic-light-red", "Close");
+    let close_btn = traffic_light_button("traffic-light-red", &t("Close"));
     close_btn.remove_css_class("recent-captures-wm-btn");
     close_btn.remove_css_class("recent-captures-wm-close");
     close_btn.add_css_class("recording-editor-traffic-btn");
     let win_clone = window.clone();
     close_btn.connect_clicked(move |_| win_clone.close());
 
-    let min_btn = traffic_light_button("traffic-light-yellow", "Minimize");
+    let min_btn = traffic_light_button("traffic-light-yellow", &t("Minimize"));
     min_btn.remove_css_class("recent-captures-wm-btn");
     min_btn.add_css_class("recording-editor-traffic-btn");
     let win_clone = window.clone();
@@ -214,12 +217,12 @@ fn build_settings_window(app: &Application) {
     toolbar.append(&right_box);
 
     // Grey until the user changes something; orange when there are unsaved edits.
-    let save_btn = Button::with_label("Save");
+    let save_btn = Button::with_label(&t("Save"));
     save_btn.add_css_class("settings-save-btn");
     save_btn.set_sensitive(false);
 
     // Keep mapped at opacity 0 so the first "Settings saved" reveal allocates correctly.
-    let toast = Label::new(Some(""));
+    let toast = Label::new(Some(&t("")));
     toast.add_css_class("settings-toast");
     toast.set_halign(Align::Center);
     toast.set_valign(Align::Start);
@@ -278,7 +281,7 @@ fn build_settings_window(app: &Application) {
     let sidebar_head = GtkBox::new(Orientation::Horizontal, 0);
     sidebar_head.set_size_request(-1, 46);
 
-    let sidebar_title = Label::new(Some("Settings"));
+    let sidebar_title = Label::new(Some(&t("Settings")));
     sidebar_title.add_css_class("settings-sidebar-title");
     sidebar_title.set_halign(Align::Start);
     sidebar_title.set_valign(Align::Center);
@@ -330,7 +333,7 @@ fn build_settings_window(app: &Application) {
         icon.set_pixel_size(16);
         icon.set_halign(Align::Start);
 
-        let label = Label::new(Some(label_text));
+        let label = Label::new(Some(&t(label_text)));
         label.add_css_class("settings-nav-label");
         label.set_halign(Align::Start);
 
@@ -404,11 +407,11 @@ fn build_settings_window(app: &Application) {
         .export_location_browse
         .connect_clicked(move |_| {
             let chooser = FileChooserNative::new(
-                Some("Select screenshot save location"),
+                Some(&t("Select screenshot save location")),
                 window_weak_picker.upgrade().as_ref(),
                 FileChooserAction::SelectFolder,
-                Some("Select"),
-                Some("Cancel"),
+                Some(&t("Select")),
+                Some(&t("Cancel")),
             );
             let export_location_entry_pick = screenshot_export_location_entry_pick.clone();
             chooser.connect_response(move |dialog, response| {
@@ -430,11 +433,11 @@ fn build_settings_window(app: &Application) {
         .video_export_location_browse
         .connect_clicked(move |_| {
             let chooser = FileChooserNative::new(
-                Some("Select video save location"),
+                Some(&t("Select video save location")),
                 window_weak_picker.upgrade().as_ref(),
                 FileChooserAction::SelectFolder,
-                Some("Select"),
-                Some("Cancel"),
+                Some(&t("Select")),
+                Some(&t("Cancel")),
             );
             let export_location_entry_pick = video_export_location_entry_pick.clone();
             chooser.connect_response(move |dialog, response| {
@@ -479,15 +482,15 @@ fn build_settings_window(app: &Application) {
         stack.add_titled(&scroller, Some(name), title);
     }
 
-    add_section(&stack, &general_tab_section, "0", "General");
-    add_section(&stack, &shortcuts.section, "1", "Shortcuts");
-    add_section(&stack, &quick_access.section, "2", "Quick Access");
-    add_section(&stack, &recordings.section, "3", "Recording");
-    add_section(&stack, &screenshots.section, "4", "Screenshots");
-    add_section(&stack, &annotate.section, "5", "Annotate");
-    add_section(&stack, &cloud.section, "6", "Cloud");
-    add_section(&stack, &advanced.section, "7", "Advanced");
-    add_section(&stack, &about.section, "8", "About");
+    add_section(&stack, &general_tab_section, "0", &t("General"));
+    add_section(&stack, &shortcuts.section, "1", &t("Shortcuts"));
+    add_section(&stack, &quick_access.section, "2", &t("Quick Access"));
+    add_section(&stack, &recordings.section, "3", &t("Recording"));
+    add_section(&stack, &screenshots.section, "4", &t("Screenshots"));
+    add_section(&stack, &annotate.section, "5", &t("Annotate"));
+    add_section(&stack, &cloud.section, "6", &t("Cloud"));
+    add_section(&stack, &advanced.section, "7", &t("Advanced"));
+    add_section(&stack, &about.section, "8", &t("About"));
 
     body_frame.append(&stack);
 
@@ -580,6 +583,7 @@ fn build_settings_window(app: &Application) {
         cloud_auto_upload: cloud.auto_upload_check.clone(),
         xbackbone_url: cloud.xb_url_entry.clone(),
         xbackbone_api_token: cloud.xb_token_entry.clone(),
+        ui_language: general.ui_language_input.clone(),
     });
 
     // Dirty flag: grey (not clickable) until a control changes, then orange + enabled.
@@ -591,12 +595,12 @@ fn build_settings_window(app: &Application) {
         let save_busy = Rc::clone(&save_busy);
         Rc::new(move || {
             if save_busy.get() {
-                save_btn.set_label("Saving…");
+                save_btn.set_label(&t("Saving…"));
                 save_btn.remove_css_class("settings-save-btn-ready");
                 save_btn.set_sensitive(false);
                 return;
             }
-            save_btn.set_label("Save");
+            save_btn.set_label(&t("Save"));
             if save_dirty.get() {
                 save_btn.add_css_class("settings-save-btn-ready");
                 save_btn.set_sensitive(true);
@@ -634,6 +638,7 @@ fn build_settings_window(app: &Application) {
         let save_dirty = Rc::clone(&save_dirty);
         let save_busy = Rc::clone(&save_busy);
         let apply_save_button_state = Rc::clone(&apply_save_button_state);
+        let window = window.clone();
         Rc::new(move || {
             if save_busy.get() || !save_dirty.get() {
                 return;
@@ -643,7 +648,7 @@ fn build_settings_window(app: &Application) {
             show_settings_toast(
                 &toast,
                 &toast_generation,
-                "Saving…",
+                &t("Saving…"),
                 SettingsToastKind::Neutral,
                 None,
             );
@@ -654,14 +659,23 @@ fn build_settings_window(app: &Application) {
             let save_dirty = Rc::clone(&save_dirty);
             let save_busy = Rc::clone(&save_busy);
             let apply_save_button_state = Rc::clone(&apply_save_button_state);
+            let window = window.clone();
             gtk4::glib::idle_add_local_once(move || {
                 match save_settings(&save_inputs) {
-                    Ok(_) => {
+                    Ok(outcome) => {
                         save_dirty.set(false);
+                        if outcome.language_changed {
+                            i18n::apply_gtk_direction(&crate::config::load_config().ui_language);
+                            if let Some(app) = window.application() {
+                                window.close();
+                                build_settings_window(&app);
+                                return;
+                            }
+                        }
                         show_settings_toast(
                             &toast,
                             &toast_generation,
-                            "Settings saved",
+                            &t("Settings saved"),
                             SettingsToastKind::Success,
                             Some(Duration::from_secs(2)),
                         );
@@ -673,7 +687,7 @@ fn build_settings_window(app: &Application) {
                         show_settings_toast(
                             &toast,
                             &toast_generation,
-                            &format!("Save failed: {message}"),
+                            &tfmt("Save failed: {message}", &[("message", &message)]),
                             SettingsToastKind::Error,
                             Some(Duration::from_secs(4)),
                         );
@@ -705,45 +719,14 @@ fn build_settings_window(app: &Application) {
 }
 
 /// Wire every settings control so any edit flips Save from grey → orange (ready).
-/// Keep the settings page scrolling when the pointer is over a dropdown.
-///
-/// GTK's default ComboBoxText behavior treats wheel input as a selection
-/// change. In a scrolling preferences page that makes ordinary navigation
-/// accidentally alter a setting, so intercept it before the combo sees it and
-/// apply the delta to the containing scroller instead.
-fn install_combo_scroll_passthrough(combo: &gtk4::ComboBoxText) {
-    let controller = gtk4::EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
-    controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
-    controller.connect_scroll(move |controller, _, dy| {
-        if dy.abs() > f64::EPSILON {
-            if let Some(scroller) = controller
-                .widget()
-                .and_then(|widget| widget.ancestor(ScrolledWindow::static_type()))
-                .and_then(|widget| widget.downcast::<ScrolledWindow>().ok())
-            {
-                let adjustment = scroller.vadjustment();
-                let max_value =
-                    (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
-                let next_value = (adjustment.value() + dy * adjustment.step_increment())
-                    .clamp(adjustment.lower(), max_value);
-                adjustment.set_value(next_value);
-            }
-        }
-
-        gtk4::glib::Propagation::Stop
-    });
-    combo.add_controller(controller);
-}
-
 fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>) {
     let wire_check = |check: &gtk4::CheckButton| {
         let mark_dirty = Rc::clone(&mark_dirty);
         check.connect_toggled(move |_| mark_dirty());
     };
-    let wire_combo = |combo: &gtk4::ComboBoxText| {
-        install_combo_scroll_passthrough(combo);
+    let wire_combo = |combo: &select::SettingsSelect| {
         let mark_dirty = Rc::clone(&mark_dirty);
-        combo.connect_changed(move |_| mark_dirty());
+        combo.connect_changed(move || mark_dirty());
     };
     let wire_entry = |entry: &gtk4::Entry| {
         let mark_dirty = Rc::clone(&mark_dirty);
@@ -762,6 +745,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_check(&inputs.start_at_login);
     wire_check(&inputs.play_sounds);
     wire_combo(&inputs.shutter_sound);
+    wire_combo(&inputs.ui_language);
     wire_check(&inputs.show_menu_bar_icon);
     wire_entry(&inputs.screenshot_export_location);
     wire_combo(&inputs.screenshot_format);

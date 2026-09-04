@@ -19,6 +19,7 @@ pub mod gnome_integration;
 pub mod gnome_shell;
 pub mod history;
 pub mod hotkeys;
+pub mod i18n;
 pub mod ocr;
 pub mod onboarding;
 pub mod overlay;

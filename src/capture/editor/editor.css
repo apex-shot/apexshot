@@ -426,7 +426,7 @@
             .editor-toolbar-color-status-swatch {
                 min-width: 12px;
                 min-height: 12px;
-                border-radius: 999px;
+                border-radius: 3px;
                 border: 1px solid alpha(white, 0.18);
                 background: #121212;
                 box-shadow: none;

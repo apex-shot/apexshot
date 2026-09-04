@@ -42,6 +42,7 @@ fn main() {
         let _ = dotenvy::from_path(&config_dir);
     }
 
+    apexshot::i18n::init_from_config();
     apexshot::recording::dnd::recover_stale_gnome_dnd();
 
     let args: Vec<String> = std::env::args().collect();
@@ -422,6 +423,7 @@ fn run_daemon_with_gtk_on_main_thread() {
     if let Err(e) = gtk4::init() {
         eprintln!("[daemon] GTK initialization failed: {e}");
     }
+    apexshot::i18n::apply_gtk_direction(&apexshot::config::load_config().ui_language);
 
     // Detect layer-shell support here on the GTK main thread (GTK is initialized).
     // gtk4_layer_shell::is_supported() must NOT be called from worker threads.

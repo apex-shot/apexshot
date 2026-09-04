@@ -1,0 +1,834 @@
+# ApexShot UI translations.
+# Language: German
+msgid ""
+msgstr ""
+"Project-Id-Version: apexshot\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "System default"
+msgstr "Systemstandard"
+
+msgid "Record shortcut"
+msgstr "Tastenkürzel aufnehmen"
+
+msgid "Welcome to ApexShot"
+msgstr "Willkommen bei ApexShot"
+
+msgid "Version {version}"
+msgstr "Version {version}"
+
+msgid "ApexShot Settings"
+msgstr "ApexShot-Einstellungen"
+
+msgid "Close"
+msgstr "Schließen"
+
+msgid "Minimize"
+msgstr "Minimieren"
+
+msgid "Save"
+msgstr "Speichern"
+
+msgid "Settings"
+msgstr "Einstellungen"
+
+msgid "Select screenshot save location"
+msgstr "Speicherort für Screenshots wählen"
+
+msgid "Select"
+msgstr "Auswählen"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Select video save location"
+msgstr "Speicherort für Videos wählen"
+
+msgid "General"
+msgstr "Allgemein"
+
+msgid "Shortcuts"
+msgstr "Tastenkürzel"
+
+msgid "Quick Access"
+msgstr "Schnellzugriff"
+
+msgid "Recording"
+msgstr "Aufnahme"
+
+msgid "Screenshots"
+msgstr "Screenshots"
+
+msgid "Annotate"
+msgstr "Annotieren"
+
+msgid "Cloud"
+msgstr "Cloud"
+
+msgid "Advanced"
+msgstr "Erweitert"
+
+msgid "About"
+msgstr "Info"
+
+msgid "Saving…"
+msgstr "Speichern…"
+
+msgid "Settings saved"
+msgstr "Einstellungen gespeichert"
+
+msgid "Save failed: {message}"
+msgstr "Speichern fehlgeschlagen: {message}"
+
+msgid "After capture:"
+msgstr "Nach der Aufnahme:"
+
+msgid ""
+"Here you can decide what should happen after taking a screenshot or recording your screen."
+msgstr ""
+"Legen Sie fest, was nach einem Screenshot oder einer Aufnahme passieren soll."
+
+msgid "Screenshot"
+msgstr "Screenshot"
+
+msgid "Action"
+msgstr "Aktion"
+
+msgid "Export"
+msgstr "Export"
+
+msgid "Browse"
+msgstr "Durchsuchen"
+
+msgid "Save location"
+msgstr "Speicherort"
+
+msgid "File format"
+msgstr "Dateiformat"
+
+msgid "File & Image (default)"
+msgstr "Datei und Bild (Standard)"
+
+msgid "Image Only"
+msgstr "Nur Bild"
+
+msgid "File Path Only"
+msgstr "Nur Dateipfad"
+
+msgid "Clipboard copy behavior"
+msgstr "Zwischenablage"
+
+msgid "Choose whether screenshots copy as an image, a file URI, or both."
+msgstr "Screenshots als Bild, Datei-URI oder beides kopieren."
+
+msgid "Off"
+msgstr "Aus"
+
+msgid "1 Second"
+msgstr "1 Sekunde"
+
+msgid "3 Seconds"
+msgstr "3 Sekunden"
+
+msgid "5 Seconds"
+msgstr "5 Sekunden"
+
+msgid "10 Seconds"
+msgstr "10 Sekunden"
+
+msgid "Self-Timer interval"
+msgstr "Selbstauslöser"
+
+msgid "Include pointer when available"
+msgstr "Zeiger einbeziehen, wenn verfügbar"
+
+msgid ""
+"ApexShot includes the pointer only when the current capture flow provides cursor data."
+msgstr ""
+"ApexShot bezieht den Zeiger nur ein, wenn der aktuelle Aufnahmepfad Cursordaten liefert."
+
+msgid "Drawing Tools"
+msgstr "Zeichenwerkzeuge"
+
+msgid "Inverse arrow direction"
+msgstr "Pfeilrichtung umkehren"
+
+msgid "Smooth drawing"
+msgstr "Weiches Zeichnen"
+
+msgid "Draw shadow on objects"
+msgstr "Schatten auf Objekten"
+
+msgid "Canvas & Interface"
+msgstr "Leinwand und Oberfläche"
+
+msgid "Automatically expand canvas"
+msgstr "Leinwand automatisch erweitern"
+
+msgid "Show color names (Accessibility)"
+msgstr "Farbnamen anzeigen (Barrierefreiheit)"
+
+msgid "Window"
+msgstr "Fenster"
+
+msgid "Always on top"
+msgstr "Immer im Vordergrund"
+
+msgid "Set Shortcut"
+msgstr "Tastenkürzel festlegen"
+
+msgid "Set"
+msgstr "Festlegen"
+
+msgid "Preparing shortcut capture…"
+msgstr "Tastenkürzel-Aufnahme wird vorbereitet…"
+
+msgid "Press Esc to cancel or Backspace to disable the keyboard shortcut"
+msgstr "Esc zum Abbrechen, Rücktaste zum Deaktivieren"
+
+msgid "Shortcut will be disabled"
+msgstr "Tastenkürzel wird deaktiviert"
+
+msgid ""
+"Shortcuts set here are the same hotkeys ApexShot uses. If one does not work, your desktop environment may already be using it. Open your system keyboard settings and disable conflicting shortcuts if you want to reuse them in ApexShot."
+msgstr ""
+"Diese Kürzel sind dieselben, die ApexShot verwendet. Funktioniert eines nicht, belegt es möglicherweise die Desktop-Umgebung. Deaktivieren Sie Konflikte in den Systemeinstellungen."
+
+msgid "Save Location"
+msgstr "Speicherort"
+
+msgid "Recordings folder"
+msgstr "Aufnahmeordner"
+
+msgid "Filename pattern"
+msgstr "Dateinamensmuster"
+
+msgid "Use {Date} and {Time} placeholders"
+msgstr "Platzhalter {Date} und {Time} verwenden"
+
+msgid "Remember last export folder"
+msgstr "Letzten Exportordner merken"
+
+msgid "Upload destination"
+msgstr "Upload-Ziel"
+
+msgid "ApexShot Cloud"
+msgstr "ApexShot Cloud"
+
+msgid "XBackBone (self-hosted)"
+msgstr "XBackBone (selbst gehostet)"
+
+msgid "Upload with"
+msgstr "Hochladen mit"
+
+msgid "Upload after capture"
+msgstr "Nach der Aufnahme hochladen"
+
+msgid ""
+"Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
+msgstr ""
+"Lädt jeden gespeicherten Screenshot hoch und kopiert den Link. Erst nach dem Verbinden."
+
+msgid "ApexShot Cloud account"
+msgstr "ApexShot-Cloud-Konto"
+
+msgid "Connected"
+msgstr "Verbunden"
+
+msgid "Not connected"
+msgstr "Nicht verbunden"
+
+msgid "Signed in"
+msgstr "Angemeldet"
+
+msgid "Run `apexshot login` in a terminal, or click Connect below."
+msgstr ""
+"Führen Sie `apexshot login` im Terminal aus oder klicken Sie auf Verbinden."
+
+msgid "Connect account"
+msgstr "Konto verbinden"
+
+msgid "Logout"
+msgstr "Abmelden"
+
+msgid "XBackBone instance"
+msgstr "XBackBone-Instanz"
+
+msgid "Instance URL"
+msgstr "Instanz-URL"
+
+msgid "Show"
+msgstr "Anzeigen"
+
+msgid "API token"
+msgstr "API-Token"
+
+msgid ""
+"Generate a token in your XBackBone instance → Profile → Tokens, with the resource:upload ability."
+msgstr ""
+"Erstellen Sie ein Token unter XBackBone → Profil → Tokens mit der Berechtigung resource:upload."
+
+msgid "Test connection"
+msgstr "Verbindung testen"
+
+msgid "Verify setup"
+msgstr "Einrichtung prüfen"
+
+msgid "Open XBackBone API docs"
+msgstr "XBackBone-API-Dokumentation öffnen"
+
+msgid "Documentation"
+msgstr "Dokumentation"
+
+msgid "File Naming"
+msgstr "Dateinamen"
+
+msgid "Filename format"
+msgstr "Namensformat"
+
+msgid "Add @2x suffix for HiDPI screenshots"
+msgstr "@2x-Suffix für HiDPI-Screenshots"
+
+msgid "Text Recognition (OCR)"
+msgstr "Texterkennung (OCR)"
+
+msgid "English"
+msgstr "Englisch"
+
+msgid "Spanish"
+msgstr "Spanisch"
+
+msgid "French"
+msgstr "Französisch"
+
+msgid "German"
+msgstr "Deutsch"
+
+msgid "Italian"
+msgstr "Italienisch"
+
+msgid "Portuguese"
+msgstr "Portugiesisch"
+
+msgid "Chinese (Simplified)"
+msgstr "Chinesisch (vereinfacht)"
+
+msgid "Japanese"
+msgstr "Japanisch"
+
+msgid "Russian"
+msgstr "Russisch"
+
+msgid "Primary language"
+msgstr "Hauptsprache"
+
+msgid "Preserve line breaks"
+msgstr "Zeilenumbrüche beibehalten"
+
+msgid "Privacy"
+msgstr "Datenschutz"
+
+msgid "Share anonymous usage statistics"
+msgstr "Anonyme Nutzungsstatistiken teilen"
+
+msgid ""
+"Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"Nur ein täglicher Impuls: Version, Distribution, Desktop und grobe Zähler. Keine Screenshots oder Personendaten. Abschalten mit APEXSHOT_TELEMETRY=0."
+
+msgid "Language"
+msgstr "Sprache"
+
+msgid "Display language"
+msgstr "Anzeigesprache"
+
+msgid "System default uses your desktop language. Changes apply after Save."
+msgstr ""
+"Systemstandard folgt der Desktop-Sprache. Änderungen gelten nach Speichern."
+
+msgid "Startup"
+msgstr "Start"
+
+msgid "Start at login"
+msgstr "Beim Anmelden starten"
+
+msgid "Sounds"
+msgstr "Töne"
+
+msgid "Play sounds"
+msgstr "Töne abspielen"
+
+msgid "Shutter sound"
+msgstr "Auslösegeräusch"
+
+msgid "System tray"
+msgstr "Systemleiste"
+
+msgid "Show tray icon"
+msgstr "Symbol in der Leiste anzeigen"
+
+msgid "Overlay"
+msgstr "Overlay"
+
+msgid "Position"
+msgstr "Position"
+
+msgid "Show on all displays"
+msgstr "Auf allen Bildschirmen anzeigen"
+
+msgid "Overlay size"
+msgstr "Overlay-Größe"
+
+msgid "Auto-close"
+msgstr "Automatisch schließen"
+
+msgid "Automatically close window"
+msgstr "Fenster automatisch schließen"
+
+msgid "30 Seconds"
+msgstr "30 Sekunden"
+
+msgid "1 Minute"
+msgstr "1 Minute"
+
+msgid "Interval"
+msgstr "Intervall"
+
+msgid "Behaviors"
+msgstr "Verhalten"
+
+msgid "Close window after dragging"
+msgstr "Fenster nach dem Ziehen schließen"
+
+msgid "Close window after uploading"
+msgstr "Fenster nach dem Hochladen schließen"
+
+msgid "Check for Updates"
+msgstr "Nach Updates suchen"
+
+msgid "What's New"
+msgstr "Neuigkeiten"
+
+msgid "Help Center"
+msgstr "Hilfe"
+
+msgid "Send Feedback"
+msgstr "Feedback senden"
+
+msgid "Website"
+msgstr "Website"
+
+msgid "Support ApexShot"
+msgstr "ApexShot unterstützen"
+
+msgid "ApexShot is free and open source. Donations keep development going."
+msgstr ""
+"ApexShot ist frei und quelloffen. Spenden halten die Entwicklung am Laufen."
+
+msgid "Support on Ko-fi"
+msgstr "Auf Ko-fi unterstützen"
+
+msgid "Cloud is a separate paid product"
+msgstr "Cloud ist ein separates kostenpflichtiges Produkt"
+
+msgid "Opens ApexShot Cloud plans. This is not a donation."
+msgstr "Öffnet ApexShot-Cloud-Tarife. Keine Spende."
+
+msgid "Copyright © 2026 ApexShot. All rights reserved."
+msgstr "Copyright © 2026 ApexShot. Alle Rechte vorbehalten."
+
+msgid "Terms of Service"
+msgstr "Nutzungsbedingungen"
+
+msgid "Privacy Policy"
+msgstr "Datenschutzrichtlinie"
+
+msgid "ApexShot Setup"
+msgstr "ApexShot-Einrichtung"
+
+msgid "← Back"
+msgstr "← Zurück"
+
+msgid "Next →"
+msgstr "Weiter →"
+
+msgid "Start Using ApexShot"
+msgstr "ApexShot jetzt nutzen"
+
+msgid "Extension Installed ✓"
+msgstr "Erweiterung installiert ✓"
+
+msgid "GNOME Shell Extension Required"
+msgstr "GNOME-Shell-Erweiterung erforderlich"
+
+msgid ""
+"ApexShot requires GNOME Shell. Please install on a GNOME desktop to continue."
+msgstr ""
+"ApexShot benötigt GNOME Shell. Installieren Sie es auf einem GNOME-Desktop."
+
+msgid "Exit"
+msgstr "Beenden"
+
+msgid "Update GNOME Extension"
+msgstr "GNOME-Erweiterung aktualisieren"
+
+msgid ""
+"An old version of the ApexShot extension is installed. It needs to be removed before installing the new version."
+msgstr ""
+"Eine alte Version der Erweiterung ist installiert. Entfernen Sie sie vor der Neuinstallation."
+
+msgid "Remove Old Extension"
+msgstr "Alte Erweiterung entfernen"
+
+msgid "GNOME Shell Extension"
+msgstr "GNOME-Shell-Erweiterung"
+
+msgid ""
+"On GNOME Wayland, the shell extension unlocks the polished capture experience:"
+msgstr ""
+"Unter GNOME Wayland schaltet die Erweiterung die ausgefeilte Aufnahme frei:"
+
+msgid "Floating preview windows"
+msgstr "Schwebende Vorschaufenster"
+
+msgid "Always-on-top previews that stay out of your way"
+msgstr "Vorschauen im Vordergrund, ohne zu stören"
+
+msgid "Quick access overlay"
+msgstr "Schnellzugriff-Overlay"
+
+msgid "Post-capture actions without hunting through menus"
+msgstr "Aktionen nach der Aufnahme, ohne Menüs zu suchen"
+
+msgid "Recording status indicator"
+msgstr "Aufnahmeanzeige"
+
+msgid "Shell-managed controls while a recording is live"
+msgstr "Von der Shell verwaltete Steuerelemente während der Aufnahme"
+
+msgid "Install GNOME Extension"
+msgstr "GNOME-Erweiterung installieren"
+
+msgid "Installing..."
+msgstr "Wird installiert..."
+
+msgid ""
+"Note: You may need to log out and back in for the extension to appear in GNOME."
+msgstr ""
+"Hinweis: Möglicherweise müssen Sie sich ab- und wieder anmelden, damit die Erweiterung in GNOME erscheint."
+
+msgid "Or download manually from GitHub"
+msgstr "Oder manuell von GitHub herunterladen"
+
+msgid "Browser Extension"
+msgstr "Browsererweiterung"
+
+msgid ""
+"Optional Chrome/Chromium add-on for full-page web captures that open straight in ApexShot."
+msgstr ""
+"Optionale Chrome/Chromium-Erweiterung für ganzseitige Web-Captures, die direkt in ApexShot öffnen."
+
+msgid "Full-page scroll capture"
+msgstr "Ganzseitige Scroll-Aufnahme"
+
+msgid "Stitch long pages that a normal screenshot can't fit"
+msgstr "Setzt lange Seiten zusammen, die nicht auf einen Screenshot passen"
+
+msgid "Sends directly to ApexShot"
+msgstr "Direkt an ApexShot senden"
+
+msgid "Opens in the editor so you can annotate and share immediately"
+msgstr "Öffnet den Editor zum sofortigen Annotieren und Teilen"
+
+msgid "Works with your desktop app"
+msgstr "Funktioniert mit der Desktop-App"
+
+msgid "Native messaging keeps the browser and ApexShot in sync"
+msgstr "Native Messaging hält Browser und ApexShot synchron"
+
+msgid "Get Chrome Extension"
+msgstr "Chrome-Erweiterung holen"
+
+msgid ""
+"Optional. You can install this later from Settings or the Chrome Web Store."
+msgstr ""
+"Optional. Sie können es später unter Einstellungen oder im Chrome Web Store installieren."
+
+msgid ""
+"Thanks for choosing ApexShot as your screenshot companion.\n"
+"Let's get you set up in just a few quick steps."
+msgstr ""
+"Danke, dass Sie ApexShot gewählt haben.\n"
+"Wir richten es in wenigen Schritten ein."
+
+msgid "Area & fullscreen capture"
+msgstr "Bereichs- und Vollbildaufnahme"
+
+msgid "Grab a region, monitor, or the whole desktop in one hotkey"
+msgstr "Bereich, Monitor oder ganzen Desktop mit einem Kürzel"
+
+msgid "Built-in annotation editor"
+msgstr "Integrierter Annotationseditor"
+
+msgid "Arrows, blur, text, and crop without leaving the app"
+msgstr "Pfeile, Unschärfe, Text und Zuschnitt ohne die App zu verlassen"
+
+msgid "Screen recording with audio"
+msgstr "Bildschirmaufnahme mit Ton"
+
+msgid "MP4 or GIF with mic and system audio when your desktop allows it"
+msgstr "MP4 oder GIF mit Mikrofon und Systemton, wenn der Desktop es zulässt"
+
+msgid "OCR text extraction"
+msgstr "OCR-Textextraktion"
+
+msgid "Pull text and QR codes straight from a capture"
+msgstr "Text und QR-Codes direkt aus einer Aufnahme"
+
+msgid "Cloud Upload"
+msgstr "Cloud-Upload"
+
+msgid "Available now · optional"
+msgstr "Jetzt verfügbar · optional"
+
+msgid ""
+"Share captures and recordings with a link, or keep everything on your own server."
+msgstr ""
+"Teilen Sie Aufnahmen per Link oder behalten Sie alles auf dem eigenen Server."
+
+msgid "Sync across devices"
+msgstr "Geräteübergreifend synchronisieren"
+
+msgid "Pull recent uploads when you're signed in"
+msgstr "Aktuelle Uploads laden, wenn Sie angemeldet sind"
+
+msgid "Instant share links"
+msgstr "Sofortige Freigabelinks"
+
+msgid "Copy a URL after capture without leaving the workflow"
+msgstr "URL nach der Aufnahme kopieren, ohne den Ablauf zu verlassen"
+
+msgid "Storage you control"
+msgstr "Speicher, den Sie kontrollieren"
+
+msgid "Hosted ApexShot Cloud or your own XBackBone instance"
+msgstr "Gehostete ApexShot Cloud oder eigene XBackBone-Instanz"
+
+msgid "Choose your cloud"
+msgstr "Cloud wählen"
+
+msgid "Hosted by us, ready out of the box with device login."
+msgstr "Von uns gehostet, sofort einsatzbereit mit Geräteanmeldung."
+
+msgid "XBackBone"
+msgstr "XBackBone"
+
+msgid "Self-host for full control of storage and URLs."
+msgstr "Selbst hosten für volle Kontrolle über Speicher und URLs."
+
+msgid ""
+"Skip for now if you want. After you Connect, your next screenshot gets a share link. Configure later in Settings → Cloud."
+msgstr ""
+"Sie können überspringen. Nach dem Verbinden erhält der nächste Screenshot einen Link. Später unter Einstellungen → Cloud."
+
+msgid "How to capture"
+msgstr "So nehmen Sie auf"
+
+msgid ""
+"ApexShot runs in the background with a tray icon and hotkeys.\n"
+"After setup, you do not need to open Settings every time."
+msgstr ""
+"ApexShot läuft im Hintergrund mit Leistensymbol und Kürzeln.\n"
+"Nach der Einrichtung müssen Sie Einstellungen nicht jedes Mal öffnen."
+
+msgid "Tray icon"
+msgstr "Leistensymbol"
+
+msgid "Right-click for Area, Screen, Window, and Record"
+msgstr "Rechtsklick: Bereich, Bildschirm, Fenster und Aufnahme"
+
+msgid "App menu"
+msgstr "App-Menü"
+
+msgid "Opening ApexShot shows Settings; captures stay on tray and hotkeys"
+msgstr ""
+"ApexShot öffnet die Einstellungen; Aufnahmen bleiben über Leiste und Kürzel"
+
+msgid "Hotkeys"
+msgstr "Tastenkürzel"
+
+msgid "Defaults below. Change them anytime in Settings → Shortcuts."
+msgstr ""
+"Standardwerte unten. Jederzeit unter Einstellungen → Tastenkürzel ändern."
+
+msgid "Shortcut"
+msgstr "Kürzel"
+
+msgid "Area capture"
+msgstr "Bereichsaufnahme"
+
+msgid "Full screen"
+msgstr "Vollbild"
+
+msgid "Record UI"
+msgstr "Aufnahmeoberfläche"
+
+msgid "Take a test screenshot"
+msgstr "Test-Screenshot aufnehmen"
+
+msgid "Starts the tray daemon if needed, then takes a full screenshot"
+msgstr ""
+"Startet bei Bedarf den Leisten-Dienst und macht einen Vollbild-Screenshot"
+
+msgid "Optional. You can skip this and try a capture after finishing setup."
+msgstr ""
+"Optional. Sie können überspringen und nach der Einrichtung eine Aufnahme testen."
+
+msgid "{shortcut} (default)"
+msgstr "{shortcut} (Standard)"
+
+msgid "You're all set!"
+msgstr "Sie sind startklar!"
+
+msgid ""
+"The tray daemon starts when you finish so hotkeys and captures work right away."
+msgstr ""
+"Der Leisten-Dienst startet am Ende, damit Kürzel und Aufnahmen sofort funktionieren."
+
+msgid "Right-click for Area, Screen, and Record"
+msgstr "Rechtsklick: Bereich, Bildschirm und Aufnahme"
+
+msgid "Capture without opening Settings every time"
+msgstr "Aufnehmen, ohne jedes Mal Einstellungen zu öffnen"
+
+msgid "Open ApexShot anytime for Settings and preferences"
+msgstr "Öffnen Sie ApexShot jederzeit für Einstellungen"
+
+msgid "Pro tip"
+msgstr "Tipp"
+
+msgid ""
+"If a hotkey conflicts with your desktop, change it under Settings → Shortcuts."
+msgstr ""
+"Bei Konflikten mit dem Desktop unter Einstellungen → Tastenkürzel ändern."
+
+msgid "Capture Area"
+msgstr "Bereich aufnehmen"
+
+msgid "Crosshair Capture"
+msgstr "Fadenkreuz-Aufnahme"
+
+msgid "Capture Screen"
+msgstr "Bildschirm aufnehmen"
+
+msgid "Open Recording UI"
+msgstr "Aufnahmeoberfläche öffnen"
+
+msgid "Record Screen"
+msgstr "Bildschirm aufnehmen"
+
+msgid "Stop Recording"
+msgstr "Aufnahme stoppen"
+
+msgid "Video Editor"
+msgstr "Videoeditor"
+
+msgid "Image Editor"
+msgstr "Bildeditor"
+
+msgid "Open Last Capture"
+msgstr "Letzte Aufnahme öffnen"
+
+msgid "History"
+msgstr "Verlauf"
+
+msgid "Quit"
+msgstr "Beenden"
+
+msgid "Camera"
+msgstr "Kamera"
+
+msgid "Classic"
+msgstr "Klassisch"
+
+msgid "Pop"
+msgstr "Pop"
+
+msgid "None"
+msgstr "Keiner"
+
+msgid "Left"
+msgstr "Links"
+
+msgid "Right"
+msgstr "Rechts"
+
+msgid "Hide"
+msgstr "Ausblenden"
+
+msgid "Hide (stay in Tray)"
+msgstr "Ausblenden (in der Leiste behalten)"
+
+msgid "Min"
+msgstr "Min"
+
+msgid "Def"
+msgstr "Std"
+
+msgid "Max"
+msgstr "Max"
+
+msgid "Show Quick Access overlay"
+msgstr "Schnellzugriff-Overlay zeigen"
+
+msgid "Copy to clipboard"
+msgstr "In die Zwischenablage kopieren"
+
+msgid "Open Annotate tool"
+msgstr "Annotationswerkzeug öffnen"
+
+msgid "Open Video Editor"
+msgstr "Videoeditor öffnen"
+
+msgid "Open File:"
+msgstr "Datei öffnen:"
+
+msgid "Open From Clipboard:"
+msgstr "Aus Zwischenablage öffnen:"
+
+msgid "Restore Recently Closed File:"
+msgstr "Zuletzt geschlossene Datei wiederherstellen:"
+
+msgid "Hide/Show Overlays:"
+msgstr "Overlays ein-/ausblenden:"
+
+msgid "Capture Area:"
+msgstr "Bereich aufnehmen:"
+
+msgid "Crosshair Capture:"
+msgstr "Fadenkreuz-Aufnahme:"
+
+msgid "Capture Previous Area:"
+msgstr "Vorherigen Bereich aufnehmen:"
+
+msgid "Capture Full Screen:"
+msgstr "Vollbild aufnehmen:"
+
+msgid "Show Last Preview:"
+msgstr "Letzte Vorschau zeigen:"
+
+msgid "Open Recording UI:"
+msgstr "Aufnahmeoberfläche öffnen:"
+
+msgid "Record Screen:"
+msgstr "Bildschirm aufnehmen:"
+
+msgid "Stop and Save Recording:"
+msgstr "Aufnahme stoppen und speichern:"
+
+msgid "Only during recording"
+msgstr "Nur während der Aufnahme"
+

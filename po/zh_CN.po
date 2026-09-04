@@ -1,0 +1,811 @@
+# ApexShot UI translations.
+# Language: Chinese (Simplified)
+msgid ""
+msgstr ""
+"Project-Id-Version: apexshot\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "System default"
+msgstr "跟随系统"
+
+msgid "Record shortcut"
+msgstr "录制快捷键"
+
+msgid "Welcome to ApexShot"
+msgstr "欢迎使用 ApexShot"
+
+msgid "Version {version}"
+msgstr "版本 {version}"
+
+msgid "ApexShot Settings"
+msgstr "ApexShot 设置"
+
+msgid "Close"
+msgstr "关闭"
+
+msgid "Minimize"
+msgstr "最小化"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Select screenshot save location"
+msgstr "选择截图保存位置"
+
+msgid "Select"
+msgstr "选择"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Select video save location"
+msgstr "选择视频保存位置"
+
+msgid "General"
+msgstr "通用"
+
+msgid "Shortcuts"
+msgstr "快捷键"
+
+msgid "Quick Access"
+msgstr "快捷操作"
+
+msgid "Recording"
+msgstr "录制"
+
+msgid "Screenshots"
+msgstr "截图"
+
+msgid "Annotate"
+msgstr "标注"
+
+msgid "Cloud"
+msgstr "云"
+
+msgid "Advanced"
+msgstr "高级"
+
+msgid "About"
+msgstr "关于"
+
+msgid "Saving…"
+msgstr "正在保存…"
+
+msgid "Settings saved"
+msgstr "设置已保存"
+
+msgid "Save failed: {message}"
+msgstr "保存失败：{message}"
+
+msgid "After capture:"
+msgstr "截图之后："
+
+msgid ""
+"Here you can decide what should happen after taking a screenshot or recording your screen."
+msgstr "选择截图或录屏之后要执行的操作。"
+
+msgid "Screenshot"
+msgstr "截图"
+
+msgid "Action"
+msgstr "操作"
+
+msgid "Export"
+msgstr "导出"
+
+msgid "Browse"
+msgstr "浏览"
+
+msgid "Save location"
+msgstr "保存位置"
+
+msgid "File format"
+msgstr "文件格式"
+
+msgid "File & Image (default)"
+msgstr "文件和图像（默认）"
+
+msgid "Image Only"
+msgstr "仅图像"
+
+msgid "File Path Only"
+msgstr "仅文件路径"
+
+msgid "Clipboard copy behavior"
+msgstr "剪贴板复制方式"
+
+msgid "Choose whether screenshots copy as an image, a file URI, or both."
+msgstr "选择将截图复制为图像、文件路径，或两者。"
+
+msgid "Off"
+msgstr "关"
+
+msgid "1 Second"
+msgstr "1 秒"
+
+msgid "3 Seconds"
+msgstr "3 秒"
+
+msgid "5 Seconds"
+msgstr "5 秒"
+
+msgid "10 Seconds"
+msgstr "10 秒"
+
+msgid "Self-Timer interval"
+msgstr "自拍倒计时"
+
+msgid "Include pointer when available"
+msgstr "在可用时包含指针"
+
+msgid ""
+"ApexShot includes the pointer only when the current capture flow provides cursor data."
+msgstr "仅当当前截图流程提供光标数据时，ApexShot 才会包含指针。"
+
+msgid "Drawing Tools"
+msgstr "绘图工具"
+
+msgid "Inverse arrow direction"
+msgstr "反转箭头方向"
+
+msgid "Smooth drawing"
+msgstr "平滑绘制"
+
+msgid "Draw shadow on objects"
+msgstr "为对象绘制阴影"
+
+msgid "Canvas & Interface"
+msgstr "画布与界面"
+
+msgid "Automatically expand canvas"
+msgstr "自动扩展画布"
+
+msgid "Show color names (Accessibility)"
+msgstr "显示颜色名称（无障碍）"
+
+msgid "Window"
+msgstr "窗口"
+
+msgid "Always on top"
+msgstr "始终置顶"
+
+msgid "Set Shortcut"
+msgstr "设置快捷键"
+
+msgid "Set"
+msgstr "设置"
+
+msgid "Preparing shortcut capture…"
+msgstr "正在准备录制快捷键…"
+
+msgid "Press Esc to cancel or Backspace to disable the keyboard shortcut"
+msgstr "按 Esc 取消，或按退格键停用快捷键"
+
+msgid "Shortcut will be disabled"
+msgstr "将停用该快捷键"
+
+msgid ""
+"Shortcuts set here are the same hotkeys ApexShot uses. If one does not work, your desktop environment may already be using it. Open your system keyboard settings and disable conflicting shortcuts if you want to reuse them in ApexShot."
+msgstr "这里的快捷键就是 ApexShot 实际使用的热键。若无效，可能被桌面环境占用。请在系统键盘设置中关闭冲突项。"
+
+msgid "Save Location"
+msgstr "保存位置"
+
+msgid "Recordings folder"
+msgstr "录制文件夹"
+
+msgid "Filename pattern"
+msgstr "文件名模板"
+
+msgid "Use {Date} and {Time} placeholders"
+msgstr "使用 {Date} 和 {Time} 占位符"
+
+msgid "Remember last export folder"
+msgstr "记住上次导出文件夹"
+
+msgid "Upload destination"
+msgstr "上传目标"
+
+msgid "ApexShot Cloud"
+msgstr "ApexShot Cloud"
+
+msgid "XBackBone (self-hosted)"
+msgstr "XBackBone（自托管）"
+
+msgid "Upload with"
+msgstr "上传方式"
+
+msgid "Upload after capture"
+msgstr "截图后上传"
+
+msgid ""
+"Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
+msgstr "上传每张已保存截图并复制分享链接。连接账号前不会执行。"
+
+msgid "ApexShot Cloud account"
+msgstr "ApexShot Cloud 账号"
+
+msgid "Connected"
+msgstr "已连接"
+
+msgid "Not connected"
+msgstr "未连接"
+
+msgid "Signed in"
+msgstr "已登录"
+
+msgid "Run `apexshot login` in a terminal, or click Connect below."
+msgstr "在终端运行 `apexshot login`，或点击下方的连接。"
+
+msgid "Connect account"
+msgstr "连接账号"
+
+msgid "Logout"
+msgstr "退出登录"
+
+msgid "XBackBone instance"
+msgstr "XBackBone 实例"
+
+msgid "Instance URL"
+msgstr "实例 URL"
+
+msgid "Show"
+msgstr "显示"
+
+msgid "API token"
+msgstr "API 令牌"
+
+msgid ""
+"Generate a token in your XBackBone instance → Profile → Tokens, with the resource:upload ability."
+msgstr "在 XBackBone 实例 → 个人资料 → 令牌中生成令牌，并授予 resource:upload 权限。"
+
+msgid "Test connection"
+msgstr "测试连接"
+
+msgid "Verify setup"
+msgstr "验证设置"
+
+msgid "Open XBackBone API docs"
+msgstr "打开 XBackBone API 文档"
+
+msgid "Documentation"
+msgstr "文档"
+
+msgid "File Naming"
+msgstr "文件命名"
+
+msgid "Filename format"
+msgstr "文件名格式"
+
+msgid "Add @2x suffix for HiDPI screenshots"
+msgstr "为 HiDPI 截图添加 @2x 后缀"
+
+msgid "Text Recognition (OCR)"
+msgstr "文字识别 (OCR)"
+
+msgid "English"
+msgstr "英语"
+
+msgid "Spanish"
+msgstr "西班牙语"
+
+msgid "French"
+msgstr "法语"
+
+msgid "German"
+msgstr "德语"
+
+msgid "Italian"
+msgstr "意大利语"
+
+msgid "Portuguese"
+msgstr "葡萄牙语"
+
+msgid "Chinese (Simplified)"
+msgstr "简体中文"
+
+msgid "Japanese"
+msgstr "日语"
+
+msgid "Russian"
+msgstr "俄语"
+
+msgid "Primary language"
+msgstr "主要语言"
+
+msgid "Preserve line breaks"
+msgstr "保留换行"
+
+msgid "Privacy"
+msgstr "隐私"
+
+msgid "Share anonymous usage statistics"
+msgstr "分享匿名使用统计"
+
+msgid ""
+"Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
+msgstr "仅每日心跳：应用版本、发行版、桌面和粗略功能计数。不含截图或个人数据。可用 APEXSHOT_TELEMETRY=0 关闭。"
+
+msgid "Language"
+msgstr "语言"
+
+msgid "Display language"
+msgstr "界面语言"
+
+msgid "System default uses your desktop language. Changes apply after Save."
+msgstr "“跟随系统”使用桌面语言。更改在保存后生效。"
+
+msgid "Startup"
+msgstr "启动"
+
+msgid "Start at login"
+msgstr "登录时启动"
+
+msgid "Sounds"
+msgstr "声音"
+
+msgid "Play sounds"
+msgstr "播放声音"
+
+msgid "Shutter sound"
+msgstr "快门声"
+
+msgid "System tray"
+msgstr "系统托盘"
+
+msgid "Show tray icon"
+msgstr "显示托盘图标"
+
+msgid "Overlay"
+msgstr "浮层"
+
+msgid "Position"
+msgstr "位置"
+
+msgid "Show on all displays"
+msgstr "在所有显示器上显示"
+
+msgid "Overlay size"
+msgstr "浮层大小"
+
+msgid "Auto-close"
+msgstr "自动关闭"
+
+msgid "Automatically close window"
+msgstr "自动关闭窗口"
+
+msgid "30 Seconds"
+msgstr "30 秒"
+
+msgid "1 Minute"
+msgstr "1 分钟"
+
+msgid "Interval"
+msgstr "间隔"
+
+msgid "Behaviors"
+msgstr "行为"
+
+msgid "Close window after dragging"
+msgstr "拖动后关闭窗口"
+
+msgid "Close window after uploading"
+msgstr "上传后关闭窗口"
+
+msgid "Check for Updates"
+msgstr "检查更新"
+
+msgid "What's New"
+msgstr "更新说明"
+
+msgid "Help Center"
+msgstr "帮助中心"
+
+msgid "Send Feedback"
+msgstr "发送反馈"
+
+msgid "Website"
+msgstr "网站"
+
+msgid "Support ApexShot"
+msgstr "支持 ApexShot"
+
+msgid "ApexShot is free and open source. Donations keep development going."
+msgstr "ApexShot 是免费开源软件。捐赠帮助开发继续。"
+
+msgid "Support on Ko-fi"
+msgstr "在 Ko-fi 上支持"
+
+msgid "Cloud is a separate paid product"
+msgstr "云服务是单独的付费产品"
+
+msgid "Opens ApexShot Cloud plans. This is not a donation."
+msgstr "打开 ApexShot Cloud 套餐。这不是捐赠。"
+
+msgid "Copyright © 2026 ApexShot. All rights reserved."
+msgstr "Copyright © 2026 ApexShot。保留所有权利。"
+
+msgid "Terms of Service"
+msgstr "服务条款"
+
+msgid "Privacy Policy"
+msgstr "隐私政策"
+
+msgid "ApexShot Setup"
+msgstr "ApexShot 设置向导"
+
+msgid "← Back"
+msgstr "← 返回"
+
+msgid "Next →"
+msgstr "下一步 →"
+
+msgid "Start Using ApexShot"
+msgstr "开始使用 ApexShot"
+
+msgid "Extension Installed ✓"
+msgstr "扩展已安装 ✓"
+
+msgid "GNOME Shell Extension Required"
+msgstr "需要 GNOME Shell 扩展"
+
+msgid ""
+"ApexShot requires GNOME Shell. Please install on a GNOME desktop to continue."
+msgstr "ApexShot 需要 GNOME Shell。请在 GNOME 桌面上安装后继续。"
+
+msgid "Exit"
+msgstr "退出"
+
+msgid "Update GNOME Extension"
+msgstr "更新 GNOME 扩展"
+
+msgid ""
+"An old version of the ApexShot extension is installed. It needs to be removed before installing the new version."
+msgstr "已安装旧版扩展。安装新版本前需要先移除。"
+
+msgid "Remove Old Extension"
+msgstr "移除旧扩展"
+
+msgid "GNOME Shell Extension"
+msgstr "GNOME Shell 扩展"
+
+msgid ""
+"On GNOME Wayland, the shell extension unlocks the polished capture experience:"
+msgstr "在 GNOME Wayland 上，扩展可解锁完整的截图体验："
+
+msgid "Floating preview windows"
+msgstr "浮动预览窗口"
+
+msgid "Always-on-top previews that stay out of your way"
+msgstr "置顶预览，不挡操作"
+
+msgid "Quick access overlay"
+msgstr "快捷操作浮层"
+
+msgid "Post-capture actions without hunting through menus"
+msgstr "截图后操作，不必翻菜单"
+
+msgid "Recording status indicator"
+msgstr "录制状态指示"
+
+msgid "Shell-managed controls while a recording is live"
+msgstr "录制进行时由 Shell 管理的控件"
+
+msgid "Install GNOME Extension"
+msgstr "安装 GNOME 扩展"
+
+msgid "Installing..."
+msgstr "正在安装..."
+
+msgid ""
+"Note: You may need to log out and back in for the extension to appear in GNOME."
+msgstr "注意：可能需要注销并重新登录，扩展才会出现在 GNOME 中。"
+
+msgid "Or download manually from GitHub"
+msgstr "或从 GitHub 手动下载"
+
+msgid "Browser Extension"
+msgstr "浏览器扩展"
+
+msgid ""
+"Optional Chrome/Chromium add-on for full-page web captures that open straight in ApexShot."
+msgstr "可选的 Chrome/Chromium 扩展，用于整页网页截图并直接在 ApexShot 中打开。"
+
+msgid "Full-page scroll capture"
+msgstr "整页滚动截图"
+
+msgid "Stitch long pages that a normal screenshot can't fit"
+msgstr "拼接普通截图装不下的长页面"
+
+msgid "Sends directly to ApexShot"
+msgstr "直接发送到 ApexShot"
+
+msgid "Opens in the editor so you can annotate and share immediately"
+msgstr "在编辑器中打开，可立即标注和分享"
+
+msgid "Works with your desktop app"
+msgstr "与桌面应用配合使用"
+
+msgid "Native messaging keeps the browser and ApexShot in sync"
+msgstr "原生消息通道让浏览器与 ApexShot 保持同步"
+
+msgid "Get Chrome Extension"
+msgstr "获取 Chrome 扩展"
+
+msgid ""
+"Optional. You can install this later from Settings or the Chrome Web Store."
+msgstr "可选。之后可从设置或 Chrome 网上应用店安装。"
+
+msgid ""
+"Thanks for choosing ApexShot as your screenshot companion.\n"
+"Let's get you set up in just a few quick steps."
+msgstr ""
+"感谢选择 ApexShot。\n"
+"只需几步即可完成设置。"
+
+msgid "Area & fullscreen capture"
+msgstr "区域与全屏截图"
+
+msgid "Grab a region, monitor, or the whole desktop in one hotkey"
+msgstr "一键截取区域、显示器或整个桌面"
+
+msgid "Built-in annotation editor"
+msgstr "内置标注编辑器"
+
+msgid "Arrows, blur, text, and crop without leaving the app"
+msgstr "箭头、模糊、文字和裁剪，无需离开应用"
+
+msgid "Screen recording with audio"
+msgstr "带音频的屏幕录制"
+
+msgid "MP4 or GIF with mic and system audio when your desktop allows it"
+msgstr "在桌面允许时录制带麦克风和系统音频的 MP4 或 GIF"
+
+msgid "OCR text extraction"
+msgstr "OCR 文字提取"
+
+msgid "Pull text and QR codes straight from a capture"
+msgstr "直接从截图提取文字和二维码"
+
+msgid "Cloud Upload"
+msgstr "云上传"
+
+msgid "Available now · optional"
+msgstr "现已可用 · 可选"
+
+msgid ""
+"Share captures and recordings with a link, or keep everything on your own server."
+msgstr "用链接分享截图和录像，或全部放在自己的服务器上。"
+
+msgid "Sync across devices"
+msgstr "跨设备同步"
+
+msgid "Pull recent uploads when you're signed in"
+msgstr "登录后拉取最近上传"
+
+msgid "Instant share links"
+msgstr "即时分享链接"
+
+msgid "Copy a URL after capture without leaving the workflow"
+msgstr "截图后复制链接，无需离开流程"
+
+msgid "Storage you control"
+msgstr "由你掌控的存储"
+
+msgid "Hosted ApexShot Cloud or your own XBackBone instance"
+msgstr "托管的 ApexShot Cloud 或你自己的 XBackBone 实例"
+
+msgid "Choose your cloud"
+msgstr "选择云服务"
+
+msgid "Hosted by us, ready out of the box with device login."
+msgstr "由我们托管，开箱即用，支持设备登录。"
+
+msgid "XBackBone"
+msgstr "XBackBone"
+
+msgid "Self-host for full control of storage and URLs."
+msgstr "自托管以完全控制存储和 URL。"
+
+msgid ""
+"Skip for now if you want. After you Connect, your next screenshot gets a share link. Configure later in Settings → Cloud."
+msgstr "可以先跳过。连接后，下一张截图会得到分享链接。稍后在 设置 → 云 中配置。"
+
+msgid "How to capture"
+msgstr "如何截图"
+
+msgid ""
+"ApexShot runs in the background with a tray icon and hotkeys.\n"
+"After setup, you do not need to open Settings every time."
+msgstr ""
+"ApexShot 在后台运行，带托盘图标和热键。\n"
+"设置完成后不必每次都打开设置。"
+
+msgid "Tray icon"
+msgstr "托盘图标"
+
+msgid "Right-click for Area, Screen, Window, and Record"
+msgstr "右键：区域、屏幕、窗口和录制"
+
+msgid "App menu"
+msgstr "应用菜单"
+
+msgid "Opening ApexShot shows Settings; captures stay on tray and hotkeys"
+msgstr "打开 ApexShot 会显示设置；截图仍通过托盘和热键完成"
+
+msgid "Hotkeys"
+msgstr "热键"
+
+msgid "Defaults below. Change them anytime in Settings → Shortcuts."
+msgstr "下方为默认值。随时可在 设置 → 快捷键 中更改。"
+
+msgid "Shortcut"
+msgstr "快捷键"
+
+msgid "Area capture"
+msgstr "区域截图"
+
+msgid "Full screen"
+msgstr "全屏"
+
+msgid "Record UI"
+msgstr "录制界面"
+
+msgid "Take a test screenshot"
+msgstr "拍一张测试截图"
+
+msgid "Starts the tray daemon if needed, then takes a full screenshot"
+msgstr "如需要则启动托盘守护进程，然后拍摄全屏截图"
+
+msgid "Optional. You can skip this and try a capture after finishing setup."
+msgstr "可选。可以跳过，完成设置后再试截图。"
+
+msgid "{shortcut} (default)"
+msgstr "{shortcut}（默认）"
+
+msgid "You're all set!"
+msgstr "全部完成！"
+
+msgid ""
+"The tray daemon starts when you finish so hotkeys and captures work right away."
+msgstr "完成后会启动托盘守护进程，热键和截图即可使用。"
+
+msgid "Right-click for Area, Screen, and Record"
+msgstr "右键：区域、屏幕和录制"
+
+msgid "Capture without opening Settings every time"
+msgstr "截图不必每次打开设置"
+
+msgid "Open ApexShot anytime for Settings and preferences"
+msgstr "随时打开 ApexShot 进入设置"
+
+msgid "Pro tip"
+msgstr "小提示"
+
+msgid ""
+"If a hotkey conflicts with your desktop, change it under Settings → Shortcuts."
+msgstr "若热键与桌面冲突，请在 设置 → 快捷键 中更改。"
+
+msgid "Capture Area"
+msgstr "截取区域"
+
+msgid "Crosshair Capture"
+msgstr "准星截图"
+
+msgid "Capture Screen"
+msgstr "截取全屏"
+
+msgid "Open Recording UI"
+msgstr "打开录制界面"
+
+msgid "Record Screen"
+msgstr "录制屏幕"
+
+msgid "Stop Recording"
+msgstr "停止录制"
+
+msgid "Video Editor"
+msgstr "视频编辑器"
+
+msgid "Image Editor"
+msgstr "图像编辑器"
+
+msgid "Open Last Capture"
+msgstr "打开上次截图"
+
+msgid "History"
+msgstr "历史记录"
+
+msgid "Quit"
+msgstr "退出"
+
+msgid "Camera"
+msgstr "相机"
+
+msgid "Classic"
+msgstr "经典"
+
+msgid "Pop"
+msgstr "Pop"
+
+msgid "None"
+msgstr "无"
+
+msgid "Left"
+msgstr "左侧"
+
+msgid "Right"
+msgstr "右侧"
+
+msgid "Hide"
+msgstr "隐藏"
+
+msgid "Hide (stay in Tray)"
+msgstr "隐藏（留在托盘）"
+
+msgid "Min"
+msgstr "最小"
+
+msgid "Def"
+msgstr "默认"
+
+msgid "Max"
+msgstr "最大"
+
+msgid "Show Quick Access overlay"
+msgstr "显示快捷操作浮层"
+
+msgid "Copy to clipboard"
+msgstr "复制到剪贴板"
+
+msgid "Open Annotate tool"
+msgstr "打开标注工具"
+
+msgid "Open Video Editor"
+msgstr "打开视频编辑器"
+
+msgid "Open File:"
+msgstr "打开文件："
+
+msgid "Open From Clipboard:"
+msgstr "从剪贴板打开："
+
+msgid "Restore Recently Closed File:"
+msgstr "恢复最近关闭的文件："
+
+msgid "Hide/Show Overlays:"
+msgstr "隐藏/显示浮层："
+
+msgid "Capture Area:"
+msgstr "截取区域："
+
+msgid "Crosshair Capture:"
+msgstr "准星截图："
+
+msgid "Capture Previous Area:"
+msgstr "截取上一区域："
+
+msgid "Capture Full Screen:"
+msgstr "截取全屏："
+
+msgid "Show Last Preview:"
+msgstr "显示上次预览："
+
+msgid "Open Recording UI:"
+msgstr "打开录制界面："
+
+msgid "Record Screen:"
+msgstr "录制屏幕："
+
+msgid "Stop and Save Recording:"
+msgstr "停止并保存录制："
+
+msgid "Only during recording"
+msgstr "仅在录制期间"
+

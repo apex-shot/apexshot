@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::i18n::t;
 use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, Grid, Label, Orientation};
 
 #[allow(dead_code)]
@@ -21,14 +22,14 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     after_capture_section.set_row_spacing(8);
     after_capture_section.set_column_spacing(10);
 
-    let after_capture_title = Label::new(Some("After capture:"));
+    let after_capture_title = Label::new(Some(&t("After capture:")));
     after_capture_title.add_css_class("settings-group-title");
     after_capture_title.set_size_request(165, -1);
     after_capture_title.set_xalign(1.0);
 
-    let after_capture_description = Label::new(Some(
+    let after_capture_description = Label::new(Some(&t(
         "Here you can decide what should happen after taking a screenshot or recording your screen.",
-    ));
+    )));
     after_capture_description.add_css_class("dim-label");
     after_capture_description.set_wrap(true);
     after_capture_description.set_xalign(0.0);
@@ -44,7 +45,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     after_capture_header_row.set_column_spacing(18);
     after_capture_header_row.set_hexpand(true);
 
-    let screenshot_header = Label::new(Some("Screenshot"));
+    let screenshot_header = Label::new(Some(&t("Screenshot")));
     screenshot_header.add_css_class("settings-table-header");
     screenshot_header.set_halign(Align::Center);
     let screenshot_header_cell = GtkBox::new(Orientation::Horizontal, 0);
@@ -52,7 +53,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     screenshot_header_cell.set_halign(Align::Center);
     screenshot_header_cell.append(&screenshot_header);
 
-    let recording_header = Label::new(Some("Recording"));
+    let recording_header = Label::new(Some(&t("Recording")));
     recording_header.add_css_class("settings-table-header");
     recording_header.set_halign(Align::Center);
     let recording_header_cell = GtkBox::new(Orientation::Horizontal, 0);
@@ -60,7 +61,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     recording_header_cell.set_halign(Align::Center);
     recording_header_cell.append(&recording_header);
 
-    let action_header = Label::new(Some("Action"));
+    let action_header = Label::new(Some(&t("Action")));
     action_header.add_css_class("settings-table-header");
     action_header.set_halign(Align::Start);
     action_header.set_xalign(0.0);
@@ -130,7 +131,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
             recording_cell.append(&recording_check);
         }
 
-        let action_label = Label::new(Some(action));
+        let action_label = Label::new(Some(&t(action)));
         action_label.set_xalign(0.0);
         action_label.set_halign(Align::Start);
 

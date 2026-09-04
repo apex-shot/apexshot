@@ -70,6 +70,7 @@ wayland-protocols-wlr = "0.3.10"
 libc = "0.2.182"
 wayland-protocols-plasma = { version = "0.3.12", features = ["client"] }
 ksni = "0.2"
+gettext-rs = { version = "0.7", features = ["gettext-system"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"  # better test output
@@ -152,6 +153,14 @@ assets = [
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/apexshot.svg", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg", "644"],
     ["packaging/apexshot.svg", "usr/share/pixmaps/apexshot.svg", "644"],
+    ["target/locale/es/LC_MESSAGES/apexshot.mo", "usr/share/locale/es/LC_MESSAGES/", "644"],
+    ["target/locale/fr/LC_MESSAGES/apexshot.mo", "usr/share/locale/fr/LC_MESSAGES/", "644"],
+    ["target/locale/de/LC_MESSAGES/apexshot.mo", "usr/share/locale/de/LC_MESSAGES/", "644"],
+    ["target/locale/pt_BR/LC_MESSAGES/apexshot.mo", "usr/share/locale/pt_BR/LC_MESSAGES/", "644"],
+    ["target/locale/zh_CN/LC_MESSAGES/apexshot.mo", "usr/share/locale/zh_CN/LC_MESSAGES/", "644"],
+    ["target/locale/ja/LC_MESSAGES/apexshot.mo", "usr/share/locale/ja/LC_MESSAGES/", "644"],
+    ["target/locale/ru/LC_MESSAGES/apexshot.mo", "usr/share/locale/ru/LC_MESSAGES/", "644"],
+    ["target/locale/ar/LC_MESSAGES/apexshot.mo", "usr/share/locale/ar/LC_MESSAGES/", "644"],
     ["src/capture/editor/background-images/gradient-01.jpg", "usr/share/apexshot/background-images/", "644"],
     ["src/capture/editor/background-images/gradient-02.jpg", "usr/share/apexshot/background-images/", "644"],
     ["src/capture/editor/background-images/gradient-03.jpg", "usr/share/apexshot/background-images/", "644"],

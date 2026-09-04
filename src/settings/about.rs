@@ -1,3 +1,4 @@
+use crate::i18n::{t, tfmt};
 use gtk4::{prelude::*, Align, Box as GtkBox, Button, Label, Orientation, Separator};
 
 const KOFI_URL: &str = "https://ko-fi.com/codegoddy";
@@ -55,7 +56,10 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     title.set_markup("Apex<span weight='light' alpha='50%'>s h o t</span>");
     title.add_css_class("about-app-name");
 
-    let version = Label::new(Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))));
+    let version = Label::new(Some(&tfmt(
+        "Version {version}",
+        &[("version", env!("CARGO_PKG_VERSION"))],
+    )));
     version.add_css_class("about-version-label");
 
     header_vbox.append(&drawing_area);
@@ -67,7 +71,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     let update_vbox = GtkBox::new(Orientation::Vertical, 12);
     update_vbox.set_margin_top(40);
 
-    let check_btn = Button::with_label("Check for Updates");
+    let check_btn = Button::with_label(&t("Check for Updates"));
     check_btn.add_css_class("primary-settings-button");
     check_btn.set_width_request(200);
     check_btn.set_halign(Align::Center);
@@ -75,7 +79,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         open_in_browser("https://github.com/apex-shot/apexshot/releases");
     });
 
-    let whats_new_btn = Button::with_label("What's New");
+    let whats_new_btn = Button::with_label(&t("What's New"));
     whats_new_btn.add_css_class("secondary-settings-button");
     whats_new_btn.set_width_request(200);
     whats_new_btn.set_halign(Align::Center);
@@ -105,9 +109,9 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         btn
     };
 
-    links_grid.attach(&create_link("Help Center"), 0, 0, 1, 1);
-    links_grid.attach(&create_link("Send Feedback"), 1, 0, 1, 1);
-    links_grid.attach(&create_link("Website"), 0, 1, 1, 1);
+    links_grid.attach(&create_link(&t("Help Center")), 0, 0, 1, 1);
+    links_grid.attach(&create_link(&t("Send Feedback")), 1, 0, 1, 1);
+    links_grid.attach(&create_link(&t("Website")), 0, 1, 1, 1);
     section.append(&links_grid);
 
     // --- 4. SUPPORT ---
@@ -116,20 +120,20 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     support_vbox.set_halign(Align::Center);
     support_vbox.set_hexpand(true);
 
-    let support_title = Label::new(Some("Support ApexShot"));
+    let support_title = Label::new(Some(&t("Support ApexShot")));
     support_title.add_css_class("about-support-title");
     support_title.set_halign(Align::Center);
 
-    let support_copy = Label::new(Some(
+    let support_copy = Label::new(Some(&t(
         "ApexShot is free and open source. Donations keep development going.",
-    ));
+    )));
     support_copy.add_css_class("about-support-copy");
     support_copy.set_wrap(true);
     support_copy.set_justify(gtk4::Justification::Center);
     support_copy.set_max_width_chars(40);
     support_copy.set_halign(Align::Center);
 
-    let kofi_btn = Button::with_label("Support on Ko-fi");
+    let kofi_btn = Button::with_label(&t("Support on Ko-fi"));
     kofi_btn.add_css_class("secondary-settings-button");
     kofi_btn.set_width_request(200);
     kofi_btn.set_halign(Align::Center);
@@ -138,10 +142,12 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         open_in_browser(KOFI_URL);
     });
 
-    let cloud_note = Button::with_label("Cloud is a separate paid product");
+    let cloud_note = Button::with_label(&t("Cloud is a separate paid product"));
     cloud_note.add_css_class("about-link-button");
     cloud_note.set_halign(Align::Center);
-    cloud_note.set_tooltip_text(Some("Opens ApexShot Cloud plans. This is not a donation."));
+    cloud_note.set_tooltip_text(Some(&t(
+        "Opens ApexShot Cloud plans. This is not a donation.",
+    )));
     cloud_note.connect_clicked(|_| {
         open_in_browser(CLOUD_PLANS_URL);
     });
@@ -157,15 +163,15 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     footer_vbox.set_margin_top(40);
     footer_vbox.set_opacity(0.5);
 
-    let copyright = Label::new(Some("Copyright © 2026 ApexShot. All rights reserved."));
+    let copyright = Label::new(Some(&t("Copyright © 2026 ApexShot. All rights reserved.")));
     copyright.add_css_class("settings-sub-option-hint");
     copyright.set_halign(Align::Center);
 
     let legal_hbox = GtkBox::new(Orientation::Horizontal, 12);
     legal_hbox.set_halign(Align::Center);
-    let tos = Label::new(Some("Terms of Service"));
+    let tos = Label::new(Some(&t("Terms of Service")));
     tos.add_css_class("settings-sub-option-hint");
-    let privacy = Label::new(Some("Privacy Policy"));
+    let privacy = Label::new(Some(&t("Privacy Policy")));
     privacy.add_css_class("settings-sub-option-hint");
 
     legal_hbox.append(&tos);

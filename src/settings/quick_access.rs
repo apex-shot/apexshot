@@ -1,18 +1,20 @@
 use crate::config::AppConfig;
+use crate::i18n::t;
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Label, Orientation, PositionType,
-    Scale,
+    prelude::*, Align, Box as GtkBox, CheckButton, Label, Orientation, PositionType, Scale,
 };
+
+use super::select::SettingsSelect;
 
 #[allow(dead_code)]
 pub struct QuickAccessSettingsWidgets {
     pub section: GtkBox,
-    pub position_input: ComboBoxText,
+    pub position_input: SettingsSelect,
     pub multi_display_check: CheckButton,
     pub overlay_size_input: Scale,
     pub auto_close_enabled_check: CheckButton,
-    pub auto_close_action_input: ComboBoxText,
-    pub auto_close_interval_input: ComboBoxText,
+    pub auto_close_action_input: SettingsSelect,
+    pub auto_close_interval_input: SettingsSelect,
     pub close_after_dragging_check: CheckButton,
     pub close_after_uploading_check: CheckButton,
 }
@@ -45,7 +47,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     };
 
     // --- Overlay Group ---
-    let overlay_title = Label::new(Some("Overlay"));
+    let overlay_title = Label::new(Some(&t("Overlay")));
     overlay_title.add_css_class("settings-group-title");
     overlay_title.set_xalign(0.0);
     overlay_title.set_halign(Align::Start);
@@ -55,19 +57,17 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     let overlay_frame = build_frame();
 
     // Position
-    let position_input = ComboBoxText::new();
-    position_input.add_css_class("settings-select");
-    for pos in ["Left", "Right"] {
-        position_input.append(Some(pos), pos);
-    }
-    position_input.set_active_id(Some(&config.quick_access_position));
+    let position_input = SettingsSelect::new(
+        ["Left", "Right"].map(|pos| (pos, t(pos))),
+        &config.quick_access_position,
+    );
     let pos_hbox = GtkBox::new(Orientation::Horizontal, 12);
     pos_hbox.set_hexpand(true);
-    let pos_label = Label::new(Some("Position"));
+    let pos_label = Label::new(Some(&t("Position")));
     pos_label.set_xalign(0.0);
     pos_label.set_hexpand(true);
     pos_hbox.append(&pos_label);
-    pos_hbox.append(&position_input);
+    pos_hbox.append(position_input.widget());
     overlay_frame.append(&build_row!(&pos_hbox, false));
 
     // Multi-display
@@ -75,7 +75,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     multi_display_check.set_active(config.quick_access_multi_display);
     let multi_hbox = GtkBox::new(Orientation::Horizontal, 12);
     multi_hbox.set_hexpand(true);
-    let multi_option = Label::new(Some("Show on all displays"));
+    let multi_option = Label::new(Some(&t("Show on all displays")));
     multi_option.set_xalign(0.0);
     multi_option.set_hexpand(true);
     multi_hbox.append(&multi_option);
@@ -100,7 +100,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
         ("Def", Align::Center),
         ("Max", Align::End),
     ] {
-        let caption = Label::new(Some(text));
+        let caption = Label::new(Some(&t(text)));
         caption.add_css_class("settings-scale-caption");
         caption.set_hexpand(true);
         caption.set_halign(align);
@@ -110,7 +110,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
 
     let size_hbox = GtkBox::new(Orientation::Horizontal, 12);
     size_hbox.set_hexpand(true);
-    let size_label = Label::new(Some("Overlay size"));
+    let size_label = Label::new(Some(&t("Overlay size")));
     size_label.set_xalign(0.0);
     size_label.set_hexpand(true);
     size_hbox.append(&size_label);
@@ -120,7 +120,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     section.append(&overlay_frame);
 
     // --- Auto-close Group ---
-    let auto_close_title = Label::new(Some("Auto-close"));
+    let auto_close_title = Label::new(Some(&t("Auto-close")));
     auto_close_title.add_css_class("settings-group-title");
     auto_close_title.set_xalign(0.0);
     auto_close_title.set_halign(Align::Start);
@@ -134,7 +134,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     auto_close_enabled_check.set_active(config.quick_access_auto_close_enabled);
     let auto_close_hbox = GtkBox::new(Orientation::Horizontal, 12);
     auto_close_hbox.set_hexpand(true);
-    let auto_close_option = Label::new(Some("Automatically close window"));
+    let auto_close_option = Label::new(Some(&t("Automatically close window")));
     auto_close_option.set_xalign(0.0);
     auto_close_option.set_hexpand(true);
     auto_close_hbox.append(&auto_close_option);
@@ -142,48 +142,43 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     auto_close_frame.append(&build_row!(&auto_close_hbox, false));
 
     // Action
-    let auto_close_action_input = ComboBoxText::new();
-    auto_close_action_input.add_css_class("settings-select");
-    for (id, lbl) in [("Close", "Close"), ("Hide", "Hide (stay in Tray)")] {
-        auto_close_action_input.append(Some(id), lbl);
-    }
-    auto_close_action_input.set_active_id(Some(&config.quick_access_auto_close_action));
+    let auto_close_action_input = SettingsSelect::new(
+        [("Close", t("Close")), ("Hide", t("Hide (stay in Tray)"))],
+        &config.quick_access_auto_close_action,
+    );
     let action_hbox = GtkBox::new(Orientation::Horizontal, 12);
     action_hbox.set_hexpand(true);
-    let action_label = Label::new(Some("Action"));
+    let action_label = Label::new(Some(&t("Action")));
     action_label.add_css_class("settings-sub-option");
     action_label.set_xalign(0.0);
     action_label.set_hexpand(true);
     action_hbox.append(&action_label);
-    action_hbox.append(&auto_close_action_input);
+    action_hbox.append(auto_close_action_input.widget());
     auto_close_frame.append(&build_row!(&action_hbox, true));
 
     // Interval
-    let auto_close_interval_input = ComboBoxText::new();
-    auto_close_interval_input.add_css_class("settings-select");
-    for (id, lbl) in [
-        ("5", "5 Seconds"),
-        ("10", "10 Seconds"),
-        ("30", "30 Seconds"),
-        ("60", "1 Minute"),
-    ] {
-        auto_close_interval_input.append(Some(id), lbl);
-    }
-    auto_close_interval_input
-        .set_active_id(Some(&config.quick_access_auto_close_interval.to_string()));
+    let auto_close_interval_input = SettingsSelect::new(
+        [
+            ("5", t("5 Seconds")),
+            ("10", t("10 Seconds")),
+            ("30", t("30 Seconds")),
+            ("60", t("1 Minute")),
+        ],
+        &config.quick_access_auto_close_interval.to_string(),
+    );
     let interval_hbox = GtkBox::new(Orientation::Horizontal, 12);
     interval_hbox.set_hexpand(true);
-    let interval_label = Label::new(Some("Interval"));
+    let interval_label = Label::new(Some(&t("Interval")));
     interval_label.add_css_class("settings-sub-option");
     interval_label.set_xalign(0.0);
     interval_label.set_hexpand(true);
     interval_hbox.append(&interval_label);
-    interval_hbox.append(&auto_close_interval_input);
+    interval_hbox.append(auto_close_interval_input.widget());
     auto_close_frame.append(&build_row!(&interval_hbox, false));
     section.append(&auto_close_frame);
 
     // --- Behaviors Group ---
-    let behaviors_title = Label::new(Some("Behaviors"));
+    let behaviors_title = Label::new(Some(&t("Behaviors")));
     behaviors_title.add_css_class("settings-group-title");
     behaviors_title.set_xalign(0.0);
     behaviors_title.set_halign(Align::Start);
@@ -197,7 +192,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     close_after_dragging_check.set_active(config.quick_access_close_after_dragging);
     let drag_hbox = GtkBox::new(Orientation::Horizontal, 12);
     drag_hbox.set_hexpand(true);
-    let drag_option = Label::new(Some("Close window after dragging"));
+    let drag_option = Label::new(Some(&t("Close window after dragging")));
     drag_option.set_xalign(0.0);
     drag_option.set_hexpand(true);
     drag_hbox.append(&drag_option);
@@ -209,7 +204,7 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     close_after_uploading_check.set_active(config.quick_access_close_after_uploading);
     let upload_hbox = GtkBox::new(Orientation::Horizontal, 12);
     upload_hbox.set_hexpand(true);
-    let upload_option = Label::new(Some("Close window after uploading"));
+    let upload_option = Label::new(Some(&t("Close window after uploading")));
     upload_option.set_xalign(0.0);
     upload_option.set_hexpand(true);
     upload_hbox.append(&upload_option);

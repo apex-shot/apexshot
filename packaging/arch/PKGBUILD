@@ -141,6 +141,14 @@ package() {
     for snd in assets/sounds/*.ogg; do
         [ -f "$snd" ] && install -Dm644 "$snd" "$snd_dir/$(basename "$snd")"
     done
+
+    if [[ -d target/locale ]]; then
+        for mo in target/locale/*/LC_MESSAGES/apexshot.mo; do
+            [[ -f "$mo" ]] || continue
+            lang=$(basename "$(dirname "$(dirname "$mo")")")
+            install -Dm644 "$mo" "$pkgdir/usr/share/locale/${lang}/LC_MESSAGES/apexshot.mo"
+        done
+    fi
 }
 
 # vim:set ts=2 sw=2 et:

@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::i18n::t;
 use gtk4::{prelude::*, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 
 #[allow(dead_code)]
@@ -41,7 +42,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     };
 
     // --- Save Location Group ---
-    let location_title = Label::new(Some("Save Location"));
+    let location_title = Label::new(Some(&t("Save Location")));
     location_title.add_css_class("settings-group-title");
     location_title.set_xalign(0.0);
     location_title.set_halign(Align::Start);
@@ -55,11 +56,11 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     video_export_location_entry.set_width_chars(28);
     video_export_location_entry.set_placeholder_text(Some("Choose a folder"));
     video_export_location_entry.set_text(&config.video_export_location);
-    let video_export_location_browse = Button::with_label("Browse");
+    let video_export_location_browse = Button::with_label(&t("Browse"));
 
     let export_hbox = GtkBox::new(Orientation::Horizontal, 12);
     export_hbox.set_hexpand(true);
-    let export_label = Label::new(Some("Recordings folder"));
+    let export_label = Label::new(Some(&t("Recordings folder")));
     export_label.set_xalign(0.0);
     export_label.set_hexpand(true);
     let entry_row = GtkBox::new(Orientation::Horizontal, 8);
@@ -77,10 +78,10 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     rec_filename_pattern_entry.set_text(&config.rec_filename_pattern);
     let pattern_hbox = GtkBox::new(Orientation::Horizontal, 12);
     pattern_hbox.set_hexpand(true);
-    let pattern_label = Label::new(Some("Filename pattern"));
+    let pattern_label = Label::new(Some(&t("Filename pattern")));
     pattern_label.set_xalign(0.0);
     pattern_label.set_hexpand(true);
-    let pattern_hint = Label::new(Some("Use {Date} and {Time} placeholders"));
+    let pattern_hint = Label::new(Some(&t("Use {Date} and {Time} placeholders")));
     pattern_hint.add_css_class("settings-sub-option");
     pattern_hint.set_xalign(0.0);
     pattern_hbox.append(&pattern_label);
@@ -95,7 +96,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     rec_remember_export_folder.set_active(config.rec_remember_export_folder);
     let remember_hbox = GtkBox::new(Orientation::Horizontal, 12);
     remember_hbox.set_hexpand(true);
-    let remember_label = Label::new(Some("Remember last export folder"));
+    let remember_label = Label::new(Some(&t("Remember last export folder")));
     remember_label.set_xalign(0.0);
     remember_label.set_hexpand(true);
     remember_hbox.append(&remember_label);

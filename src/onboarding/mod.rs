@@ -9,6 +9,7 @@ mod howto;
 mod ui;
 mod welcome;
 
+use crate::i18n::{self, t};
 use crate::settings::ui_support::{install_settings_css, traffic_light_button};
 use crate::settings::windowing::install_window_drag;
 
@@ -63,6 +64,7 @@ impl OnboardingStep {
     }
 }
 
+#[derive(Clone)]
 pub struct OnboardingWidgets {
     pub window: ApplicationWindow,
     content_box: GtkBox,
@@ -101,10 +103,12 @@ fn build_onboarding_window(app: &Application) {
     });
 
     install_settings_css();
+    let language = crate::config::load_config().ui_language;
+    i18n::apply_gtk_direction(&language);
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("ApexShot Setup")
+        .title(t("ApexShot Setup"))
         .default_width(720)
         .default_height(560)
         .decorated(false)
@@ -132,14 +136,14 @@ fn build_onboarding_window(app: &Application) {
     drag_handle.set_vexpand(false);
     toolbar.append(&drag_handle);
 
-    let close_btn = traffic_light_button("traffic-light-red", "Close");
+    let close_btn = traffic_light_button("traffic-light-red", &t("Close"));
     close_btn.remove_css_class("recent-captures-wm-btn");
     close_btn.remove_css_class("recent-captures-wm-close");
     close_btn.add_css_class("recording-editor-traffic-btn");
     let win_clone = window.clone();
     close_btn.connect_clicked(move |_| win_clone.close());
 
-    let min_btn = traffic_light_button("traffic-light-yellow", "Minimize");
+    let min_btn = traffic_light_button("traffic-light-yellow", &t("Minimize"));
     min_btn.remove_css_class("recent-captures-wm-btn");
     min_btn.add_css_class("recording-editor-traffic-btn");
     let win_clone = window.clone();
@@ -207,6 +211,8 @@ fn build_onboarding_window(app: &Application) {
 }
 
 fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
+    widgets.window.set_title(Some(&t("ApexShot Setup")));
+
     // Clear content
     while let Some(child) = widgets.content_box.first_child() {
         widgets.content_box.remove(&child);
@@ -226,7 +232,10 @@ fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
     // Build step content
     match step {
         OnboardingStep::Welcome => {
-            welcome::build(&widgets.content_box);
+            let widgets_clone = widgets.clone();
+            welcome::build(&widgets.content_box, move || {
+                show_step(&widgets_clone, OnboardingStep::Welcome);
+            });
         }
         OnboardingStep::HowToUse => {
             howto::build(&widgets.content_box);
@@ -270,16 +279,10 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
 
     // Top navigation - Back button (left side)
     if let Some(prev_step) = step.prev() {
-        let back_btn = Button::with_label("← Back");
+        let back_btn = Button::with_label(&t("← Back"));
         back_btn.add_css_class("secondary-settings-button");
         back_btn.add_css_class("onboarding-back-button");
-        let widgets_clone = OnboardingWidgets {
-            window: widgets.window.clone(),
-            content_box: widgets.content_box.clone(),
-            nav_box: widgets.nav_box.clone(),
-            top_nav_box: widgets.top_nav_box.clone(),
-            progress_box: widgets.progress_box.clone(),
-        };
+        let widgets_clone = widgets.clone();
         back_btn.connect_clicked(move |_| {
             show_step(&widgets_clone, prev_step);
         });
@@ -293,22 +296,16 @@ fn build_navigation(widgets: &OnboardingWidgets, step: OnboardingStep) {
 
     // Next/Finish button (bottom right)
     if let Some(next_step) = step.next() {
-        let next_btn = Button::with_label("Next →");
+        let next_btn = Button::with_label(&t("Next →"));
         next_btn.add_css_class("settings-primary-btn");
-        let widgets_clone = OnboardingWidgets {
-            window: widgets.window.clone(),
-            content_box: widgets.content_box.clone(),
-            nav_box: widgets.nav_box.clone(),
-            top_nav_box: widgets.top_nav_box.clone(),
-            progress_box: widgets.progress_box.clone(),
-        };
+        let widgets_clone = widgets.clone();
         next_btn.connect_clicked(move |_| {
             show_step(&widgets_clone, next_step);
         });
         widgets.nav_box.append(&next_btn);
     } else {
         // Final step - "Start Using ApexShot"
-        let finish_btn = Button::with_label("Start Using ApexShot");
+        let finish_btn = Button::with_label(&t("Start Using ApexShot"));
         finish_btn.add_css_class("settings-primary-btn");
         let window = widgets.window.clone();
         finish_btn.connect_clicked(move |_| {

@@ -1,4 +1,5 @@
 use super::windowing::prefers_dark_glass_theme;
+use crate::i18n::{empty_shortcut_label, t};
 use crate::{config::AppConfig, daemon::set_daemon_hotkey_suppressed};
 use gtk4::{
     gdk, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Dialog, EventControllerKey,
@@ -125,7 +126,7 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
         let dialog = Dialog::builder()
             .transient_for(&parent)
             .modal(true)
-            .title("Set Shortcut")
+            .title(t("Set Shortcut"))
             .deletable(false)
             .default_width(400)
             .default_height(290)
@@ -136,19 +137,22 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
         }
 
         let header = GtkBox::new(Orientation::Horizontal, 12);
-        header.set_margin_top(8);
-        header.set_margin_bottom(8);
-        header.set_margin_start(8);
-        header.set_margin_end(8);
+        header.set_margin_top(10);
+        header.set_margin_bottom(10);
+        header.set_margin_start(14);
+        header.set_margin_end(14);
 
-        let cancel_btn = Button::with_label("Cancel");
+        let cancel_btn = Button::with_label(&t("Cancel"));
         cancel_btn.add_css_class("shortcut-capture-secondary-btn");
-        let title = Label::new(Some("Set Shortcut"));
+        cancel_btn.set_valign(Align::Center);
+        let title = Label::new(Some(&t("Set Shortcut")));
         title.add_css_class("shortcut-capture-title");
         title.set_hexpand(true);
         title.set_halign(Align::Center);
-        let set_btn = Button::with_label("Set");
+        title.set_valign(Align::Center);
+        let set_btn = Button::with_label(&t("Set"));
         set_btn.add_css_class("shortcut-capture-primary-btn");
+        set_btn.set_valign(Align::Center);
         set_btn.set_sensitive(false);
 
         header.append(&cancel_btn);
@@ -179,7 +183,7 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
 
         let arming_box = GtkBox::new(Orientation::Vertical, 14);
         arming_box.set_vexpand(true);
-        let arming_label = Label::new(Some("Preparing shortcut capture…"));
+        let arming_label = Label::new(Some(&t("Preparing shortcut capture…")));
         arming_label.add_css_class("shortcut-capture-hint");
         arming_label.set_xalign(0.0);
         arming_box.append(&arming_label);
@@ -187,12 +191,12 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
 
         let listening_box = GtkBox::new(Orientation::Vertical, 14);
         listening_box.set_vexpand(true);
-        let listening_icon = Label::new(Some("⌄"));
+        let listening_icon = Label::new(Some(&t("⌄")));
         listening_icon.add_css_class("shortcut-capture-listening-icon");
         listening_box.append(&listening_icon);
-        let listening_hint = Label::new(Some(
+        let listening_hint = Label::new(Some(&t(
             "Press Esc to cancel or Backspace to disable the keyboard shortcut",
-        ));
+        )));
         listening_hint.set_wrap(true);
         listening_hint.set_xalign(0.0);
         listening_hint.add_css_class("shortcut-capture-hint");
@@ -241,7 +245,7 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
                         while let Some(child) = keycaps_for_keys.first_child() {
                             keycaps_for_keys.remove(&child);
                         }
-                        let cleared = Label::new(Some("Shortcut will be disabled"));
+                        let cleared = Label::new(Some(&t("Shortcut will be disabled")));
                         cleared.add_css_class("shortcut-capture-cleared-label");
                         keycaps_for_keys.append(&cleared);
                         stack_for_keys.set_visible_child_name("captured");
@@ -259,7 +263,7 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
                             keycap.add_css_class("shortcut-capture-keycap");
                             keycaps_for_keys.append(&keycap);
                             if idx + 1 != parts.len() {
-                                let plus = Label::new(Some("+"));
+                                let plus = Label::new(Some(&t("+")));
                                 plus.add_css_class("shortcut-capture-plus");
                                 keycaps_for_keys.append(&plus);
                             }
@@ -287,7 +291,7 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
             if response == ResponseType::Accept {
                 if let Some(text) = captured_for_response.borrow().clone() {
                     if text.is_empty() {
-                        button_for_response.set_label("Record shortcut");
+                        button_for_response.set_label(&empty_shortcut_label());
                     } else {
                         button_for_response.set_label(&text);
                     }
@@ -353,9 +357,9 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
     let section = GtkBox::new(Orientation::Vertical, 0);
     section.set_hexpand(true);
 
-    let tip = Label::new(Some(
+    let tip = Label::new(Some(&t(
         "Shortcuts set here are the same hotkeys ApexShot uses. If one does not work, your desktop environment may already be using it. Open your system keyboard settings and disable conflicting shortcuts if you want to reuse them in ApexShot.",
-    ));
+    )));
     tip.set_wrap(true);
     tip.set_xalign(0.0);
     tip.add_css_class("settings-sub-option-hint");
@@ -393,7 +397,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         let img = Image::from_icon_name(icon);
         img.set_pixel_size(20);
 
-        let lbl = Label::new(Some(label_text));
+        let lbl = Label::new(Some(&t(label_text)));
         lbl.add_css_class("settings-group-title");
 
         hbox.append(&img);
@@ -413,13 +417,13 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         let text_box = GtkBox::new(Orientation::Vertical, 4);
         text_box.set_hexpand(true);
 
-        let lbl = Label::new(Some(label_text));
+        let lbl = Label::new(Some(&t(label_text)));
         lbl.set_xalign(0.0);
         lbl.set_hexpand(true);
         text_box.append(&lbl);
 
         if let Some(hint) = hint_text {
-            let hint_lbl = Label::new(Some(hint));
+            let hint_lbl = Label::new(Some(&t(hint)));
             hint_lbl.set_xalign(0.0);
             hint_lbl.set_hexpand(true);
             hint_lbl.add_css_class("settings-sub-option-hint");
@@ -428,8 +432,9 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
 
         let btn = Button::new();
         btn.add_css_class("shortcuts-record-btn");
+        let empty = empty_shortcut_label();
         btn.set_label(if current_val.is_empty() {
-            "Record shortcut"
+            empty.as_str()
         } else {
             current_val
         });

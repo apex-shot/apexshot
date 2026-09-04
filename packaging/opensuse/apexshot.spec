@@ -91,6 +91,14 @@ for snd in assets/sounds/*.ogg; do
     install -Dm0644 "${snd}" "%{buildroot}%{_datadir}/apexshot/sounds/$(basename "${snd}")"
 done
 
+if [ -d target/locale ]; then
+    for mo in target/locale/*/LC_MESSAGES/apexshot.mo; do
+        [ -f "$mo" ] || continue
+        lang=$(basename "$(dirname "$(dirname "$mo")")")
+        install -Dm0644 "$mo" "%{buildroot}%{_datadir}/locale/${lang}/LC_MESSAGES/apexshot.mo"
+    done
+fi
+
 %fdupes %{buildroot}%{_datadir}
 
 %post
@@ -113,6 +121,7 @@ done
 %{_datadir}/icons/hicolor/scalable/apps/apexshot.svg
 %{_datadir}/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg
 %{_datadir}/pixmaps/apexshot.svg
+%{_datadir}/locale/*/LC_MESSAGES/apexshot.mo
 %dir %{_sysconfdir}/opt
 %dir %{_sysconfdir}/opt/chrome
 %dir %{_sysconfdir}/opt/chrome/NativeMessagingHosts

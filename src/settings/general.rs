@@ -1,12 +1,16 @@
 use crate::config::{AppConfig, DEFAULT_SHUTTER_SOUND};
-use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Label, Orientation};
+use crate::i18n::t;
+use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, Label, Orientation};
+
+use super::select::{language_combo, SettingsSelect};
 
 pub struct GeneralSettingsWidgets {
     pub section: GtkBox,
     pub start_at_login_check: CheckButton,
     pub play_sounds_check: CheckButton,
-    pub shutter_sound_input: ComboBoxText,
+    pub shutter_sound_input: SettingsSelect,
     pub show_icon_check: CheckButton,
+    pub ui_language_input: SettingsSelect,
 }
 
 pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
@@ -40,7 +44,37 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     };
 
     // --- Startup Group ---
-    let startup_title = Label::new(Some("Startup"));
+    let language_title = Label::new(Some(&t("Language")));
+    language_title.add_css_class("settings-group-title");
+    language_title.set_xalign(0.0);
+    language_title.set_halign(Align::Start);
+    language_title.set_margin_bottom(8);
+    section.append(&language_title);
+
+    let language_frame = build_frame();
+    let ui_language_input = language_combo(&config.ui_language);
+    let language_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    language_hbox.set_hexpand(true);
+    language_hbox.set_valign(Align::Center);
+    let language_option = Label::new(Some(&t("Display language")));
+    language_option.set_xalign(0.0);
+    language_option.set_hexpand(true);
+    let language_help = Label::new(Some(&t(
+        "System default uses your desktop language. Changes apply after Save.",
+    )));
+    language_help.add_css_class("dim-label");
+    language_help.set_wrap(true);
+    language_help.set_xalign(0.0);
+    let language_col = GtkBox::new(Orientation::Vertical, 4);
+    language_col.set_hexpand(true);
+    language_col.append(&language_option);
+    language_col.append(&language_help);
+    language_hbox.append(&language_col);
+    language_hbox.append(ui_language_input.widget());
+    language_frame.append(&build_row!(&language_hbox, false));
+    section.append(&language_frame);
+
+    let startup_title = Label::new(Some(&t("Startup")));
     startup_title.add_css_class("settings-group-title");
     startup_title.set_xalign(0.0);
     startup_title.set_halign(Align::Start);
@@ -53,7 +87,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     start_at_login_check.set_active(config.start_at_login);
     let startup_hbox = GtkBox::new(Orientation::Horizontal, 12);
     startup_hbox.set_hexpand(true);
-    let startup_option = Label::new(Some("Start at login"));
+    let startup_option = Label::new(Some(&t("Start at login")));
     startup_option.set_xalign(0.0);
     startup_option.set_hexpand(true);
     startup_hbox.append(&startup_option);
@@ -62,7 +96,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     section.append(&startup_frame);
 
     // --- Sounds Group ---
-    let sound_title = Label::new(Some("Sounds"));
+    let sound_title = Label::new(Some(&t("Sounds")));
     sound_title.add_css_class("settings-group-title");
     sound_title.set_xalign(0.0);
     sound_title.set_halign(Align::Start);
@@ -75,36 +109,35 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     play_sounds_check.set_active(config.play_sounds);
     let sounds_hbox = GtkBox::new(Orientation::Horizontal, 12);
     sounds_hbox.set_hexpand(true);
-    let sound_option = Label::new(Some("Play sounds"));
+    let sound_option = Label::new(Some(&t("Play sounds")));
     sound_option.set_xalign(0.0);
     sound_option.set_hexpand(true);
     sounds_hbox.append(&sound_option);
     sounds_hbox.append(&play_sounds_check);
     sounds_frame.append(&build_row!(&sounds_hbox, false));
 
-    let shutter_sound_input = ComboBoxText::new();
-    shutter_sound_input.add_css_class("settings-select");
-    for sound in ["Camera", "Classic", "Pop", "None"] {
-        shutter_sound_input.append(Some(sound), sound);
-    }
-    if !shutter_sound_input.set_active_id(Some(&config.shutter_sound)) {
-        shutter_sound_input.set_active_id(Some(DEFAULT_SHUTTER_SOUND));
+    let shutter_sound_input = SettingsSelect::new(
+        ["Camera", "Classic", "Pop", "None"].map(|sound| (sound, t(sound))),
+        &config.shutter_sound,
+    );
+    if shutter_sound_input.active_id().as_deref() != Some(config.shutter_sound.as_str()) {
+        shutter_sound_input.set_active_id(DEFAULT_SHUTTER_SOUND);
     }
     shutter_sound_input.set_sensitive(config.play_sounds);
 
     let shutter_hbox = GtkBox::new(Orientation::Horizontal, 12);
     shutter_hbox.set_hexpand(true);
-    let shutter_title = Label::new(Some("Shutter sound"));
+    let shutter_title = Label::new(Some(&t("Shutter sound")));
     shutter_title.add_css_class("settings-sub-option");
     shutter_title.set_xalign(0.0);
     shutter_title.set_hexpand(true);
     shutter_hbox.append(&shutter_title);
-    shutter_hbox.append(&shutter_sound_input);
+    shutter_hbox.append(shutter_sound_input.widget());
     sounds_frame.append(&build_row!(&shutter_hbox, true));
     section.append(&sounds_frame);
 
     // --- System Tray Group ---
-    let tray_title = Label::new(Some("System tray"));
+    let tray_title = Label::new(Some(&t("System tray")));
     tray_title.add_css_class("settings-group-title");
     tray_title.set_xalign(0.0);
     tray_title.set_halign(Align::Start);
@@ -116,7 +149,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     show_icon_check.set_active(config.show_menu_bar_icon);
     let tray_hbox = GtkBox::new(Orientation::Horizontal, 12);
     tray_hbox.set_hexpand(true);
-    let tray_option = Label::new(Some("Show tray icon"));
+    let tray_option = Label::new(Some(&t("Show tray icon")));
     tray_option.set_xalign(0.0);
     tray_option.set_hexpand(true);
     tray_hbox.append(&tray_option);
@@ -130,6 +163,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
         play_sounds_check,
         shutter_sound_input,
         show_icon_check,
+        ui_language_input,
     }
 }
 

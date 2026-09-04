@@ -161,25 +161,57 @@ impl ksni::Tray for ApexShotTray {
             };
         }
         vec![
-            item!("Capture Area", idle, TrayAction::CaptureArea),
-            item!("Crosshair Capture", idle, TrayAction::CaptureCrosshair),
-            item!("Capture Screen", idle, TrayAction::CaptureScreen),
-            MenuItem::Separator,
-            item!("Open Recording UI", idle, TrayAction::OpenRecordingUi),
-            item!("Record Screen", idle, TrayAction::RecordScreen),
             item!(
-                "Stop Recording",
+                &crate::i18n::t("Capture Area"),
+                idle,
+                TrayAction::CaptureArea
+            ),
+            item!(
+                &crate::i18n::t("Crosshair Capture"),
+                idle,
+                TrayAction::CaptureCrosshair
+            ),
+            item!(
+                &crate::i18n::t("Capture Screen"),
+                idle,
+                TrayAction::CaptureScreen
+            ),
+            MenuItem::Separator,
+            item!(
+                &crate::i18n::t("Open Recording UI"),
+                idle,
+                TrayAction::OpenRecordingUi
+            ),
+            item!(
+                &crate::i18n::t("Record Screen"),
+                idle,
+                TrayAction::RecordScreen
+            ),
+            item!(
+                &crate::i18n::t("Stop Recording"),
                 self.recording,
                 TrayAction::StopRecordingSave
             ),
-            item!("Video Editor", idle, TrayAction::OpenVideoEditor),
-            item!("Image Editor", idle, TrayAction::OpenImageEditor),
+            item!(
+                &crate::i18n::t("Video Editor"),
+                idle,
+                TrayAction::OpenVideoEditor
+            ),
+            item!(
+                &crate::i18n::t("Image Editor"),
+                idle,
+                TrayAction::OpenImageEditor
+            ),
             MenuItem::Separator,
-            item!("Open Last Capture", idle, TrayAction::OpenLastCapture),
-            item!("History", idle, TrayAction::OpenHistory),
-            item!("Settings", idle, TrayAction::OpenSettings),
+            item!(
+                &crate::i18n::t("Open Last Capture"),
+                idle,
+                TrayAction::OpenLastCapture
+            ),
+            item!(&crate::i18n::t("History"), idle, TrayAction::OpenHistory),
+            item!(&crate::i18n::t("Settings"), idle, TrayAction::OpenSettings),
             MenuItem::Separator,
-            item!("Quit", true, TrayAction::Quit),
+            item!(&crate::i18n::t("Quit"), true, TrayAction::Quit),
         ]
     }
 }

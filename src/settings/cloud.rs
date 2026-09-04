@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::i18n::t;
 use gtk4::prelude::*;
 use gtk4::{glib, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 use std::process::Command;
@@ -43,7 +44,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     };
 
     // --- Destination group ---
-    let dest_title = Label::new(Some("Upload destination"));
+    let dest_title = Label::new(Some(&t("Upload destination")));
     dest_title.add_css_class("settings-group-title");
     dest_title.set_xalign(0.0);
     dest_title.set_halign(Align::Start);
@@ -52,15 +53,15 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
 
     let dest_frame = build_frame();
 
-    let apexshot_check = CheckButton::with_label("ApexShot Cloud");
-    let xbackbone_check = CheckButton::with_label("XBackBone (self-hosted)");
+    let apexshot_check = CheckButton::with_label(&t("ApexShot Cloud"));
+    let xbackbone_check = CheckButton::with_label(&t("XBackBone (self-hosted)"));
     let is_xb = config.cloud_destination == "xbackbone";
     apexshot_check.set_active(!is_xb);
     xbackbone_check.set_active(is_xb);
 
     let dest_hbox = GtkBox::new(Orientation::Horizontal, 12);
     dest_hbox.set_hexpand(true);
-    let dest_label = Label::new(Some("Upload with"));
+    let dest_label = Label::new(Some(&t("Upload with")));
     dest_label.set_xalign(0.0);
     dest_label.set_hexpand(true);
     let dest_actions = GtkBox::new(Orientation::Vertical, 8);
@@ -74,12 +75,12 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     auto_upload_check.set_active(config.cloud_auto_upload_after_capture);
     let auto_hbox = GtkBox::new(Orientation::Horizontal, 12);
     auto_hbox.set_hexpand(true);
-    let auto_label = Label::new(Some("Upload after capture"));
+    let auto_label = Label::new(Some(&t("Upload after capture")));
     auto_label.set_xalign(0.0);
     auto_label.set_hexpand(true);
-    let auto_help = Label::new(Some(
+    let auto_help = Label::new(Some(&t(
         "Uploads each saved screenshot and copies the share link. Does nothing until you Connect.",
-    ));
+    )));
     auto_help.add_css_class("dim-label");
     auto_help.set_wrap(true);
     auto_help.set_xalign(0.0);
@@ -142,7 +143,7 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
     let container = GtkBox::new(Orientation::Vertical, 0);
     container.set_hexpand(true);
 
-    let title = Label::new(Some("ApexShot Cloud account"));
+    let title = Label::new(Some(&t("ApexShot Cloud account")));
     title.add_css_class("settings-group-title");
     title.set_xalign(0.0);
     title.set_halign(Align::Start);
@@ -172,23 +173,27 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
     avatar.set_valign(Align::Center);
     avatar.set_visible(is_connected);
 
+    let connected = t("Connected");
+    let not_connected = t("Not connected");
     let status_label = Label::new(Some(if is_connected {
-        "Connected"
+        connected.as_str()
     } else {
-        "Not connected"
+        not_connected.as_str()
     }));
     status_label.add_css_class("cloud-user-name");
     status_label.set_xalign(0.0);
     status_label.set_halign(Align::Start);
 
+    let signed_in = t("Signed in");
+    let connect_hint = t("Run `apexshot login` in a terminal, or click Connect below.");
     let email_label = Label::new(Some(if is_connected {
         if config.cloud_user_email.is_empty() {
-            "Signed in"
+            signed_in.as_str()
         } else {
             config.cloud_user_email.as_str()
         }
     } else {
-        "Run `apexshot login` in a terminal, or click Connect below."
+        connect_hint.as_str()
     }));
     email_label.add_css_class("cloud-user-email");
     email_label.set_xalign(0.0);
@@ -200,10 +205,10 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
     status_row.append(&avatar);
     status_row.append(&info_box);
 
-    let connect_btn = Button::with_label("Connect account");
+    let connect_btn = Button::with_label(&t("Connect account"));
     connect_btn.add_css_class("settings-primary-btn");
     connect_btn.set_visible(!is_connected);
-    let logout_btn = Button::with_label("Logout");
+    let logout_btn = Button::with_label(&t("Logout"));
     logout_btn.set_visible(is_connected);
     status_row.append(&connect_btn);
     status_row.append(&logout_btn);
@@ -308,7 +313,7 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     let container = GtkBox::new(Orientation::Vertical, 0);
     container.set_hexpand(true);
 
-    let title = Label::new(Some("XBackBone instance"));
+    let title = Label::new(Some(&t("XBackBone instance")));
     title.add_css_class("settings-group-title");
     title.set_xalign(0.0);
     title.set_halign(Align::Start);
@@ -329,7 +334,7 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
 
     let url_hbox = GtkBox::new(Orientation::Horizontal, 12);
     url_hbox.set_hexpand(true);
-    let url_label = Label::new(Some("Instance URL"));
+    let url_label = Label::new(Some(&t("Instance URL")));
     url_label.set_xalign(0.0);
     url_label.set_hexpand(true);
     url_hbox.append(&url_label);
@@ -345,7 +350,7 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     token_entry.set_text(&config.xbackbone_api_token);
     token_entry.set_input_purpose(gtk4::InputPurpose::Password);
 
-    let show_check = CheckButton::with_label("Show");
+    let show_check = CheckButton::with_label(&t("Show"));
     {
         let token_clone = token_entry.clone();
         show_check.connect_toggled(move |check| {
@@ -359,7 +364,7 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
 
     let token_hbox = GtkBox::new(Orientation::Horizontal, 12);
     token_hbox.set_hexpand(true);
-    let token_label = Label::new(Some("API token"));
+    let token_label = Label::new(Some(&t("API token")));
     token_label.set_xalign(0.0);
     token_label.set_hexpand(true);
     token_hbox.append(&token_label);
@@ -367,9 +372,9 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     frame.append(&build_table_row(&token_hbox));
 
     // Helper text + docs link.
-    let hint = Label::new(Some(
-        "Generate a token in your XBackBone instance \u{2192} Profile \u{2192} Tokens, with the resource:upload ability.",
-    ));
+    let hint = Label::new(Some(&t(
+        "Generate a token in your XBackBone instance → Profile → Tokens, with the resource:upload ability.",
+    )));
     hint.add_css_class("settings-sub-option-hint");
     hint.set_xalign(0.0);
     hint.set_halign(Align::Start);
@@ -378,15 +383,15 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     frame.append(&build_table_row(&hint));
 
     // Test connection row.
-    let test_btn = Button::with_label("Test connection");
-    let status_label = Label::new(Some(""));
+    let test_btn = Button::with_label(&t("Test connection"));
+    let status_label = Label::new(Some(&t("")));
     status_label.set_xalign(0.0);
     status_label.set_halign(Align::Start);
     status_label.add_css_class("settings-sub-option-hint");
 
     let test_hbox = GtkBox::new(Orientation::Horizontal, 12);
     test_hbox.set_hexpand(true);
-    let test_label = Label::new(Some("Verify setup"));
+    let test_label = Label::new(Some(&t("Verify setup")));
     test_label.set_xalign(0.0);
     test_label.set_hexpand(true);
     test_hbox.append(&test_label);
@@ -401,7 +406,7 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     frame.append(&build_table_row(&status_hbox));
 
     // Open API docs link.
-    let docs_btn = Button::with_label("Open XBackBone API docs");
+    let docs_btn = Button::with_label(&t("Open XBackBone API docs"));
     {
         docs_btn.connect_clicked(|_| {
             std::thread::spawn(move || {
@@ -411,7 +416,7 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     }
     let docs_hbox = GtkBox::new(Orientation::Horizontal, 12);
     docs_hbox.set_hexpand(true);
-    let docs_label = Label::new(Some("Documentation"));
+    let docs_label = Label::new(Some(&t("Documentation")));
     docs_label.set_xalign(0.0);
     docs_label.set_hexpand(true);
     docs_hbox.append(&docs_label);

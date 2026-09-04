@@ -2,6 +2,7 @@ use gtk4::{prelude::*, Align, Box as GtkBox, Label, Orientation};
 
 use super::ui::{feature_card_list, tip_block};
 use crate::capture::editor::window::icon_names::custom;
+use crate::i18n::{self, t};
 
 pub fn build(content: &GtkBox) {
     // Logo (using the same curved arch as welcome page)
@@ -31,14 +32,14 @@ pub fn build(content: &GtkBox) {
     content.append(&drawing_area);
 
     let title = Label::new(None);
-    title.set_markup("<span size='x-large' weight='bold'>You're all set!</span>");
+    title.set_markup(&i18n::markup_title("You're all set!"));
     title.set_halign(Align::Center);
     title.set_margin_bottom(8);
     content.append(&title);
 
-    let message = Label::new(Some(
+    let message = Label::new(Some(&t(
         "The tray daemon starts when you finish so hotkeys and captures work right away.",
-    ));
+    )));
     message.set_halign(Align::Center);
     message.set_wrap(true);
     message.set_justify(gtk4::Justification::Center);
@@ -46,21 +47,27 @@ pub fn build(content: &GtkBox) {
     message.add_css_class("settings-sub-option");
     content.append(&message);
 
+    let tray_title = t("Tray icon");
+    let tray_body = t("Right-click for Area, Screen, and Record");
+    let hotkeys_title = t("Hotkeys");
+    let hotkeys_body = t("Capture without opening Settings every time");
+    let menu_title = t("App menu");
+    let menu_body = t("Open ApexShot anytime for Settings and preferences");
     let checklist = feature_card_list(&[
         (
             custom::OVERLAPPING_WINDOWS_SYMBOLIC,
-            "Tray icon",
-            "Right-click for Area, Screen, and Record",
+            tray_title.as_str(),
+            tray_body.as_str(),
         ),
         (
             custom::KEYBOARD_SHORTCUTS_SYMBOLIC,
-            "Hotkeys",
-            "Capture without opening Settings every time",
+            hotkeys_title.as_str(),
+            hotkeys_body.as_str(),
         ),
         (
             custom::SETTINGS_SYMBOLIC,
-            "App menu",
-            "Open ApexShot anytime for Settings and preferences",
+            menu_title.as_str(),
+            menu_body.as_str(),
         ),
     ]);
     checklist.set_margin_top(18);
@@ -69,9 +76,9 @@ pub fn build(content: &GtkBox) {
     let tip_wrap = GtkBox::new(Orientation::Vertical, 0);
     tip_wrap.set_margin_top(18);
     tip_wrap.set_halign(Align::Center);
-    tip_wrap.append(&tip_block(
-        "Pro tip",
-        "If a hotkey conflicts with your desktop, change it under Settings → Shortcuts.",
-    ));
+    let tip_title = t("Pro tip");
+    let tip_body =
+        t("If a hotkey conflicts with your desktop, change it under Settings → Shortcuts.");
+    tip_wrap.append(&tip_block(&tip_title, &tip_body));
     content.append(&tip_wrap);
 }

@@ -1,0 +1,813 @@
+# ApexShot UI translations.
+# Language: Japanese
+msgid ""
+msgstr ""
+"Project-Id-Version: apexshot\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "System default"
+msgstr "システムのデフォルト"
+
+msgid "Record shortcut"
+msgstr "ショートカットを記録"
+
+msgid "Welcome to ApexShot"
+msgstr "ApexShot へようこそ"
+
+msgid "Version {version}"
+msgstr "バージョン {version}"
+
+msgid "ApexShot Settings"
+msgstr "ApexShot の設定"
+
+msgid "Close"
+msgstr "閉じる"
+
+msgid "Minimize"
+msgstr "最小化"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Select screenshot save location"
+msgstr "スクリーンショットの保存先"
+
+msgid "Select"
+msgstr "選択"
+
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgid "Select video save location"
+msgstr "動画の保存先"
+
+msgid "General"
+msgstr "一般"
+
+msgid "Shortcuts"
+msgstr "ショートカット"
+
+msgid "Quick Access"
+msgstr "クイックアクセス"
+
+msgid "Recording"
+msgstr "録画"
+
+msgid "Screenshots"
+msgstr "スクリーンショット"
+
+msgid "Annotate"
+msgstr "注釈"
+
+msgid "Cloud"
+msgstr "クラウド"
+
+msgid "Advanced"
+msgstr "詳細"
+
+msgid "About"
+msgstr "情報"
+
+msgid "Saving…"
+msgstr "保存中…"
+
+msgid "Settings saved"
+msgstr "設定を保存しました"
+
+msgid "Save failed: {message}"
+msgstr "保存に失敗しました: {message}"
+
+msgid "After capture:"
+msgstr "キャプチャ後:"
+
+msgid ""
+"Here you can decide what should happen after taking a screenshot or recording your screen."
+msgstr "スクリーンショットや録画のあとに行う操作を選びます。"
+
+msgid "Screenshot"
+msgstr "スクリーンショット"
+
+msgid "Action"
+msgstr "操作"
+
+msgid "Export"
+msgstr "書き出し"
+
+msgid "Browse"
+msgstr "参照"
+
+msgid "Save location"
+msgstr "保存先"
+
+msgid "File format"
+msgstr "ファイル形式"
+
+msgid "File & Image (default)"
+msgstr "ファイルと画像（デフォルト）"
+
+msgid "Image Only"
+msgstr "画像のみ"
+
+msgid "File Path Only"
+msgstr "ファイルパスのみ"
+
+msgid "Clipboard copy behavior"
+msgstr "クリップボードへのコピー"
+
+msgid "Choose whether screenshots copy as an image, a file URI, or both."
+msgstr "画像、ファイル URI、または両方としてコピーします。"
+
+msgid "Off"
+msgstr "オフ"
+
+msgid "1 Second"
+msgstr "1 秒"
+
+msgid "3 Seconds"
+msgstr "3 秒"
+
+msgid "5 Seconds"
+msgstr "5 秒"
+
+msgid "10 Seconds"
+msgstr "10 秒"
+
+msgid "Self-Timer interval"
+msgstr "セルフタイマー"
+
+msgid "Include pointer when available"
+msgstr "可能な場合はポインターを含める"
+
+msgid ""
+"ApexShot includes the pointer only when the current capture flow provides cursor data."
+msgstr "現在のキャプチャ経路がカーソルデータを提供する場合のみポインターを含めます。"
+
+msgid "Drawing Tools"
+msgstr "描画ツール"
+
+msgid "Inverse arrow direction"
+msgstr "矢印の向きを反転"
+
+msgid "Smooth drawing"
+msgstr "なめらかな描画"
+
+msgid "Draw shadow on objects"
+msgstr "オブジェクトに影を付ける"
+
+msgid "Canvas & Interface"
+msgstr "キャンバスとインターフェース"
+
+msgid "Automatically expand canvas"
+msgstr "キャンバスを自動で広げる"
+
+msgid "Show color names (Accessibility)"
+msgstr "色名を表示（アクセシビリティ）"
+
+msgid "Window"
+msgstr "ウィンドウ"
+
+msgid "Always on top"
+msgstr "常に最前面"
+
+msgid "Set Shortcut"
+msgstr "ショートカットを設定"
+
+msgid "Set"
+msgstr "設定"
+
+msgid "Preparing shortcut capture…"
+msgstr "ショートカットの記録を準備しています…"
+
+msgid "Press Esc to cancel or Backspace to disable the keyboard shortcut"
+msgstr "Esc でキャンセル、Backspace でショートカットを無効化"
+
+msgid "Shortcut will be disabled"
+msgstr "ショートカットは無効になります"
+
+msgid ""
+"Shortcuts set here are the same hotkeys ApexShot uses. If one does not work, your desktop environment may already be using it. Open your system keyboard settings and disable conflicting shortcuts if you want to reuse them in ApexShot."
+msgstr ""
+"ここで設定したショートカットが ApexShot のホットキーです。動かない場合はデスクトップ環境が使っている可能性があります。システムのキーボード設定で競合を解除してください。"
+
+msgid "Save Location"
+msgstr "保存先"
+
+msgid "Recordings folder"
+msgstr "録画フォルダー"
+
+msgid "Filename pattern"
+msgstr "ファイル名パターン"
+
+msgid "Use {Date} and {Time} placeholders"
+msgstr "{Date} と {Time} を使います"
+
+msgid "Remember last export folder"
+msgstr "前回の書き出しフォルダーを覚える"
+
+msgid "Upload destination"
+msgstr "アップロード先"
+
+msgid "ApexShot Cloud"
+msgstr "ApexShot Cloud"
+
+msgid "XBackBone (self-hosted)"
+msgstr "XBackBone（セルフホスト）"
+
+msgid "Upload with"
+msgstr "アップロード方法"
+
+msgid "Upload after capture"
+msgstr "キャプチャ後にアップロード"
+
+msgid ""
+"Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
+msgstr "保存した各ショットをアップロードし、共有リンクをコピーします。接続するまでは何もしません。"
+
+msgid "ApexShot Cloud account"
+msgstr "ApexShot Cloud アカウント"
+
+msgid "Connected"
+msgstr "接続済み"
+
+msgid "Not connected"
+msgstr "未接続"
+
+msgid "Signed in"
+msgstr "サインイン済み"
+
+msgid "Run `apexshot login` in a terminal, or click Connect below."
+msgstr "端末で `apexshot login` を実行するか、下の接続をクリックしてください。"
+
+msgid "Connect account"
+msgstr "アカウントを接続"
+
+msgid "Logout"
+msgstr "ログアウト"
+
+msgid "XBackBone instance"
+msgstr "XBackBone インスタンス"
+
+msgid "Instance URL"
+msgstr "インスタンス URL"
+
+msgid "Show"
+msgstr "表示"
+
+msgid "API token"
+msgstr "API トークン"
+
+msgid ""
+"Generate a token in your XBackBone instance → Profile → Tokens, with the resource:upload ability."
+msgstr "XBackBone の プロフィール → Tokens で resource:upload 権限のトークンを発行します。"
+
+msgid "Test connection"
+msgstr "接続をテスト"
+
+msgid "Verify setup"
+msgstr "設定を確認"
+
+msgid "Open XBackBone API docs"
+msgstr "XBackBone API ドキュメントを開く"
+
+msgid "Documentation"
+msgstr "ドキュメント"
+
+msgid "File Naming"
+msgstr "ファイル名"
+
+msgid "Filename format"
+msgstr "ファイル名の形式"
+
+msgid "Add @2x suffix for HiDPI screenshots"
+msgstr "HiDPI ショットに @2x を付ける"
+
+msgid "Text Recognition (OCR)"
+msgstr "文字認識 (OCR)"
+
+msgid "English"
+msgstr "英語"
+
+msgid "Spanish"
+msgstr "スペイン語"
+
+msgid "French"
+msgstr "フランス語"
+
+msgid "German"
+msgstr "ドイツ語"
+
+msgid "Italian"
+msgstr "イタリア語"
+
+msgid "Portuguese"
+msgstr "ポルトガル語"
+
+msgid "Chinese (Simplified)"
+msgstr "中国語（簡体字）"
+
+msgid "Japanese"
+msgstr "日本語"
+
+msgid "Russian"
+msgstr "ロシア語"
+
+msgid "Primary language"
+msgstr "主な言語"
+
+msgid "Preserve line breaks"
+msgstr "改行を保持"
+
+msgid "Privacy"
+msgstr "プライバシー"
+
+msgid "Share anonymous usage statistics"
+msgstr "匿名の利用統計を共有"
+
+msgid ""
+"Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"日次のハートビートのみ（バージョン、ディストロ、デスクトップ、機能回数）。スクリーンショットや個人データは送りません。APEXSHOT_TELEMETRY=0 で無効。"
+
+msgid "Language"
+msgstr "言語"
+
+msgid "Display language"
+msgstr "表示言語"
+
+msgid "System default uses your desktop language. Changes apply after Save."
+msgstr "システムのデフォルトはデスクトップの言語です。変更は保存後に反映されます。"
+
+msgid "Startup"
+msgstr "起動"
+
+msgid "Start at login"
+msgstr "ログイン時に起動"
+
+msgid "Sounds"
+msgstr "サウンド"
+
+msgid "Play sounds"
+msgstr "サウンドを再生"
+
+msgid "Shutter sound"
+msgstr "シャッター音"
+
+msgid "System tray"
+msgstr "システムトレイ"
+
+msgid "Show tray icon"
+msgstr "トレイアイコンを表示"
+
+msgid "Overlay"
+msgstr "オーバーレイ"
+
+msgid "Position"
+msgstr "位置"
+
+msgid "Show on all displays"
+msgstr "すべてのディスプレイに表示"
+
+msgid "Overlay size"
+msgstr "オーバーレイのサイズ"
+
+msgid "Auto-close"
+msgstr "自動で閉じる"
+
+msgid "Automatically close window"
+msgstr "ウィンドウを自動で閉じる"
+
+msgid "30 Seconds"
+msgstr "30 秒"
+
+msgid "1 Minute"
+msgstr "1 分"
+
+msgid "Interval"
+msgstr "間隔"
+
+msgid "Behaviors"
+msgstr "動作"
+
+msgid "Close window after dragging"
+msgstr "ドラッグ後にウィンドウを閉じる"
+
+msgid "Close window after uploading"
+msgstr "アップロード後にウィンドウを閉じる"
+
+msgid "Check for Updates"
+msgstr "更新を確認"
+
+msgid "What's New"
+msgstr "新着情報"
+
+msgid "Help Center"
+msgstr "ヘルプセンター"
+
+msgid "Send Feedback"
+msgstr "フィードバックを送る"
+
+msgid "Website"
+msgstr "ウェブサイト"
+
+msgid "Support ApexShot"
+msgstr "ApexShot を支援"
+
+msgid "ApexShot is free and open source. Donations keep development going."
+msgstr "ApexShot は無料のオープンソースです。寄付が開発を支えます。"
+
+msgid "Support on Ko-fi"
+msgstr "Ko-fi で支援"
+
+msgid "Cloud is a separate paid product"
+msgstr "クラウドは別の有料製品です"
+
+msgid "Opens ApexShot Cloud plans. This is not a donation."
+msgstr "ApexShot Cloud のプランを開きます。寄付ではありません。"
+
+msgid "Copyright © 2026 ApexShot. All rights reserved."
+msgstr "Copyright © 2026 ApexShot. All rights reserved."
+
+msgid "Terms of Service"
+msgstr "利用規約"
+
+msgid "Privacy Policy"
+msgstr "プライバシーポリシー"
+
+msgid "ApexShot Setup"
+msgstr "ApexShot のセットアップ"
+
+msgid "← Back"
+msgstr "← 戻る"
+
+msgid "Next →"
+msgstr "次へ →"
+
+msgid "Start Using ApexShot"
+msgstr "ApexShot を使い始める"
+
+msgid "Extension Installed ✓"
+msgstr "拡張をインストール済み ✓"
+
+msgid "GNOME Shell Extension Required"
+msgstr "GNOME Shell 拡張が必要です"
+
+msgid ""
+"ApexShot requires GNOME Shell. Please install on a GNOME desktop to continue."
+msgstr "ApexShot には GNOME Shell が必要です。GNOME デスクトップにインストールしてください。"
+
+msgid "Exit"
+msgstr "終了"
+
+msgid "Update GNOME Extension"
+msgstr "GNOME 拡張を更新"
+
+msgid ""
+"An old version of the ApexShot extension is installed. It needs to be removed before installing the new version."
+msgstr "古い拡張がインストールされています。新しい版の前に削除してください。"
+
+msgid "Remove Old Extension"
+msgstr "古い拡張を削除"
+
+msgid "GNOME Shell Extension"
+msgstr "GNOME Shell 拡張"
+
+msgid ""
+"On GNOME Wayland, the shell extension unlocks the polished capture experience:"
+msgstr "GNOME Wayland では、拡張が洗練されたキャプチャ体験を有効にします:"
+
+msgid "Floating preview windows"
+msgstr "フローティングプレビュー"
+
+msgid "Always-on-top previews that stay out of your way"
+msgstr "最前面に出すプレビューで邪魔になりません"
+
+msgid "Quick access overlay"
+msgstr "クイックアクセスオーバーレイ"
+
+msgid "Post-capture actions without hunting through menus"
+msgstr "メニューを探さずにキャプチャ後の操作"
+
+msgid "Recording status indicator"
+msgstr "録画ステータス"
+
+msgid "Shell-managed controls while a recording is live"
+msgstr "録画中はシェルがコントロールを管理します"
+
+msgid "Install GNOME Extension"
+msgstr "GNOME 拡張をインストール"
+
+msgid "Installing..."
+msgstr "インストール中..."
+
+msgid ""
+"Note: You may need to log out and back in for the extension to appear in GNOME."
+msgstr "注: 拡張が GNOME に表示されるにはログアウト／ログインが必要な場合があります。"
+
+msgid "Or download manually from GitHub"
+msgstr "または GitHub から手動ダウンロード"
+
+msgid "Browser Extension"
+msgstr "ブラウザ拡張"
+
+msgid ""
+"Optional Chrome/Chromium add-on for full-page web captures that open straight in ApexShot."
+msgstr "ページ全体をキャプチャし、ApexShot で開く任意の Chrome/Chromium 拡張です。"
+
+msgid "Full-page scroll capture"
+msgstr "ページ全体のスクロールキャプチャ"
+
+msgid "Stitch long pages that a normal screenshot can't fit"
+msgstr "通常のショットに収まらない長いページをつなぎます"
+
+msgid "Sends directly to ApexShot"
+msgstr "ApexShot に直接送信"
+
+msgid "Opens in the editor so you can annotate and share immediately"
+msgstr "エディターで開き、すぐ注釈と共有ができます"
+
+msgid "Works with your desktop app"
+msgstr "デスクトップアプリと連携"
+
+msgid "Native messaging keeps the browser and ApexShot in sync"
+msgstr "ネイティブメッセージングでブラウザと ApexShot を同期"
+
+msgid "Get Chrome Extension"
+msgstr "Chrome 拡張を入手"
+
+msgid ""
+"Optional. You can install this later from Settings or the Chrome Web Store."
+msgstr "任意です。あとから設定または Chrome ウェブストアからインストールできます。"
+
+msgid ""
+"Thanks for choosing ApexShot as your screenshot companion.\n"
+"Let's get you set up in just a few quick steps."
+msgstr ""
+"ApexShot をお選びいただきありがとうございます。\n"
+"いくつかの手順でセットアップします。"
+
+msgid "Area & fullscreen capture"
+msgstr "範囲と全画面キャプチャ"
+
+msgid "Grab a region, monitor, or the whole desktop in one hotkey"
+msgstr "ホットキー一つで範囲・モニタ・デスクトップ全体"
+
+msgid "Built-in annotation editor"
+msgstr "内蔵の注釈エディター"
+
+msgid "Arrows, blur, text, and crop without leaving the app"
+msgstr "矢印・ぼかし・テキスト・切り抜きをアプリ内で"
+
+msgid "Screen recording with audio"
+msgstr "音声付き画面録画"
+
+msgid "MP4 or GIF with mic and system audio when your desktop allows it"
+msgstr "デスクトップが許可すればマイクとシステム音声付きの MP4/GIF"
+
+msgid "OCR text extraction"
+msgstr "OCR テキスト抽出"
+
+msgid "Pull text and QR codes straight from a capture"
+msgstr "キャプチャからテキストと QR を取り出す"
+
+msgid "Cloud Upload"
+msgstr "クラウドアップロード"
+
+msgid "Available now · optional"
+msgstr "利用可能 · 任意"
+
+msgid ""
+"Share captures and recordings with a link, or keep everything on your own server."
+msgstr "リンクで共有するか、自分のサーバーに置きます。"
+
+msgid "Sync across devices"
+msgstr "デバイス間で同期"
+
+msgid "Pull recent uploads when you're signed in"
+msgstr "サインイン中は最近のアップロードを取得"
+
+msgid "Instant share links"
+msgstr "すぐ共有できるリンク"
+
+msgid "Copy a URL after capture without leaving the workflow"
+msgstr "キャプチャ後にフローを離れず URL をコピー"
+
+msgid "Storage you control"
+msgstr "自分で管理する保存先"
+
+msgid "Hosted ApexShot Cloud or your own XBackBone instance"
+msgstr "ホスト型 ApexShot Cloud か自分の XBackBone"
+
+msgid "Choose your cloud"
+msgstr "クラウドを選ぶ"
+
+msgid "Hosted by us, ready out of the box with device login."
+msgstr "こちらでホスト。デバイスログインですぐ使えます。"
+
+msgid "XBackBone"
+msgstr "XBackBone"
+
+msgid "Self-host for full control of storage and URLs."
+msgstr "ストレージと URL を完全に管理するならセルフホスト。"
+
+msgid ""
+"Skip for now if you want. After you Connect, your next screenshot gets a share link. Configure later in Settings → Cloud."
+msgstr "今はスキップできます。接続後、次のショットに共有リンクが付きます。あとで 設定 → クラウド。"
+
+msgid "How to capture"
+msgstr "キャプチャ方法"
+
+msgid ""
+"ApexShot runs in the background with a tray icon and hotkeys.\n"
+"After setup, you do not need to open Settings every time."
+msgstr ""
+"ApexShot はトレイアイコンとホットキーでバックグラウンド動作します。\n"
+"セットアップ後は毎回設定を開く必要はありません。"
+
+msgid "Tray icon"
+msgstr "トレイアイコン"
+
+msgid "Right-click for Area, Screen, Window, and Record"
+msgstr "右クリックで範囲・画面・ウィンドウ・録画"
+
+msgid "App menu"
+msgstr "アプリメニュー"
+
+msgid "Opening ApexShot shows Settings; captures stay on tray and hotkeys"
+msgstr "ApexShot を開くと設定です。キャプチャはトレイとホットキーのまま"
+
+msgid "Hotkeys"
+msgstr "ホットキー"
+
+msgid "Defaults below. Change them anytime in Settings → Shortcuts."
+msgstr "以下はデフォルト。設定 → ショートカット でいつでも変更できます。"
+
+msgid "Shortcut"
+msgstr "ショートカット"
+
+msgid "Area capture"
+msgstr "範囲キャプチャ"
+
+msgid "Full screen"
+msgstr "全画面"
+
+msgid "Record UI"
+msgstr "録画 UI"
+
+msgid "Take a test screenshot"
+msgstr "テストショットを撮る"
+
+msgid "Starts the tray daemon if needed, then takes a full screenshot"
+msgstr "必要ならトレイデーモンを起動し、全画面ショットを撮ります"
+
+msgid "Optional. You can skip this and try a capture after finishing setup."
+msgstr "任意です。スキップして、セットアップ後にキャプチャを試せます。"
+
+msgid "{shortcut} (default)"
+msgstr "{shortcut}（デフォルト）"
+
+msgid "You're all set!"
+msgstr "準備完了です！"
+
+msgid ""
+"The tray daemon starts when you finish so hotkeys and captures work right away."
+msgstr "完了時にトレイデーモンが起動し、ホットキーとキャプチャがすぐ使えます。"
+
+msgid "Right-click for Area, Screen, and Record"
+msgstr "右クリックで範囲・画面・録画"
+
+msgid "Capture without opening Settings every time"
+msgstr "毎回設定を開かずにキャプチャ"
+
+msgid "Open ApexShot anytime for Settings and preferences"
+msgstr "設定はいつでも ApexShot から"
+
+msgid "Pro tip"
+msgstr "ヒント"
+
+msgid ""
+"If a hotkey conflicts with your desktop, change it under Settings → Shortcuts."
+msgstr "ホットキーがデスクトップとぶつかる場合は 設定 → ショートカット で変更。"
+
+msgid "Capture Area"
+msgstr "範囲をキャプチャ"
+
+msgid "Crosshair Capture"
+msgstr "クロスヘアキャプチャ"
+
+msgid "Capture Screen"
+msgstr "画面をキャプチャ"
+
+msgid "Open Recording UI"
+msgstr "録画 UI を開く"
+
+msgid "Record Screen"
+msgstr "画面を録画"
+
+msgid "Stop Recording"
+msgstr "録画を停止"
+
+msgid "Video Editor"
+msgstr "動画エディター"
+
+msgid "Image Editor"
+msgstr "画像エディター"
+
+msgid "Open Last Capture"
+msgstr "最後のキャプチャを開く"
+
+msgid "History"
+msgstr "履歴"
+
+msgid "Quit"
+msgstr "終了"
+
+msgid "Camera"
+msgstr "カメラ"
+
+msgid "Classic"
+msgstr "クラシック"
+
+msgid "Pop"
+msgstr "ポップ"
+
+msgid "None"
+msgstr "なし"
+
+msgid "Left"
+msgstr "左"
+
+msgid "Right"
+msgstr "右"
+
+msgid "Hide"
+msgstr "隠す"
+
+msgid "Hide (stay in Tray)"
+msgstr "隠す（トレイに残す）"
+
+msgid "Min"
+msgstr "最小"
+
+msgid "Def"
+msgstr "標準"
+
+msgid "Max"
+msgstr "最大"
+
+msgid "Show Quick Access overlay"
+msgstr "クイックアクセスを表示"
+
+msgid "Copy to clipboard"
+msgstr "クリップボードにコピー"
+
+msgid "Open Annotate tool"
+msgstr "注釈ツールを開く"
+
+msgid "Open Video Editor"
+msgstr "動画エディターを開く"
+
+msgid "Open File:"
+msgstr "ファイルを開く:"
+
+msgid "Open From Clipboard:"
+msgstr "クリップボードから開く:"
+
+msgid "Restore Recently Closed File:"
+msgstr "最近閉じたファイルを復元:"
+
+msgid "Hide/Show Overlays:"
+msgstr "オーバーレイの表示切替:"
+
+msgid "Capture Area:"
+msgstr "範囲をキャプチャ:"
+
+msgid "Crosshair Capture:"
+msgstr "クロスヘアキャプチャ:"
+
+msgid "Capture Previous Area:"
+msgstr "前回の範囲をキャプチャ:"
+
+msgid "Capture Full Screen:"
+msgstr "全画面をキャプチャ:"
+
+msgid "Show Last Preview:"
+msgstr "最後のプレビューを表示:"
+
+msgid "Open Recording UI:"
+msgstr "録画 UI を開く:"
+
+msgid "Record Screen:"
+msgstr "画面を録画:"
+
+msgid "Stop and Save Recording:"
+msgstr "録画を停止して保存:"
+
+msgid "Only during recording"
+msgstr "録画中のみ"
+

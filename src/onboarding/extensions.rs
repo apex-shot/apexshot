@@ -3,6 +3,7 @@ use std::process::Command;
 
 use super::ui::feature_card_list;
 use crate::capture::editor::window::icon_names::custom;
+use crate::i18n::{self, t};
 
 // TODO: Update these URLs when extensions are published
 const GNOME_EXTENSION_URL: &str =
@@ -100,7 +101,7 @@ fn install_extension(button: gtk4::glib::SendWeakRef<Button>) {
 
         gtk4::glib::MainContext::default().invoke(move || {
             if let Some(button) = button.upgrade() {
-                button.set_label("Extension Installed ✓");
+                button.set_label(&t("Extension Installed ✓"));
                 button.set_sensitive(false);
             }
         });
@@ -111,22 +112,21 @@ pub fn build_gnome(content: &gtk4::Box) {
     // Check if running GNOME
     if !is_gnome() {
         let title = Label::new(None);
-        title
-            .set_markup("<span size='x-large' weight='bold'>GNOME Shell Extension Required</span>");
+        title.set_markup(&i18n::markup_title("GNOME Shell Extension Required"));
         title.set_halign(Align::Center);
         title.set_margin_bottom(8);
         content.append(&title);
 
-        let desc = Label::new(Some(
+        let desc = Label::new(Some(&t(
             "ApexShot requires GNOME Shell. Please install on a GNOME desktop to continue.",
-        ));
+        )));
         desc.set_halign(Align::Center);
         desc.set_wrap(true);
         desc.set_width_request(500);
         desc.add_css_class("settings-sub-option");
         content.append(&desc);
 
-        let exit_btn = Button::with_label("Exit");
+        let exit_btn = Button::with_label(&t("Exit"));
         exit_btn.add_css_class("settings-primary-btn");
         exit_btn.set_halign(Align::Center);
         exit_btn.set_margin_top(32);
@@ -142,21 +142,21 @@ pub fn build_gnome(content: &gtk4::Box) {
     let has_old_extension = is_old_extension_installed();
     if has_old_extension {
         let title = Label::new(None);
-        title.set_markup("<span size='x-large' weight='bold'>Update GNOME Extension</span>");
+        title.set_markup(&i18n::markup_title("Update GNOME Extension"));
         title.set_halign(Align::Center);
         title.set_margin_bottom(8);
         content.append(&title);
 
-        let desc = Label::new(Some(
+        let desc = Label::new(Some(&t(
             "An old version of the ApexShot extension is installed. It needs to be removed before installing the new version.",
-        ));
+        )));
         desc.set_halign(Align::Center);
         desc.set_wrap(true);
         desc.set_width_request(500);
         desc.add_css_class("settings-sub-option");
         content.append(&desc);
 
-        let remove_btn = Button::with_label("Remove Old Extension");
+        let remove_btn = Button::with_label(&t("Remove Old Extension"));
         remove_btn.add_css_class("settings-primary-btn");
         remove_btn.set_halign(Align::Center);
         remove_btn.set_margin_top(32);
@@ -169,15 +169,15 @@ pub fn build_gnome(content: &gtk4::Box) {
 
     // Title
     let title = Label::new(None);
-    title.set_markup("<span size='x-large' weight='bold'>GNOME Shell Extension</span>");
+    title.set_markup(&i18n::markup_title("GNOME Shell Extension"));
     title.set_halign(Align::Center);
     title.set_margin_bottom(8);
     content.append(&title);
 
     // Description
-    let desc = Label::new(Some(
+    let desc = Label::new(Some(&t(
         "On GNOME Wayland, the shell extension unlocks the polished capture experience:",
-    ));
+    )));
     desc.set_halign(Align::Center);
     desc.set_wrap(true);
     desc.set_justify(gtk4::Justification::Center);
@@ -185,21 +185,27 @@ pub fn build_gnome(content: &gtk4::Box) {
     desc.add_css_class("settings-sub-option");
     content.append(&desc);
 
+    let preview_title = t("Floating preview windows");
+    let preview_body = t("Always-on-top previews that stay out of your way");
+    let overlay_title = t("Quick access overlay");
+    let overlay_body = t("Post-capture actions without hunting through menus");
+    let rec_title = t("Recording status indicator");
+    let rec_body = t("Shell-managed controls while a recording is live");
     let features = feature_card_list(&[
         (
             custom::OVERLAPPING_WINDOWS_SYMBOLIC,
-            "Floating preview windows",
-            "Always-on-top previews that stay out of your way",
+            preview_title.as_str(),
+            preview_body.as_str(),
         ),
         (
             custom::SELECT_MODE_SYMBOLIC,
-            "Quick access overlay",
-            "Post-capture actions without hunting through menus",
+            overlay_title.as_str(),
+            overlay_body.as_str(),
         ),
         (
             custom::RECORD_SCREEN_SYMBOLIC,
-            "Recording status indicator",
-            "Shell-managed controls while a recording is live",
+            rec_title.as_str(),
+            rec_body.as_str(),
         ),
     ]);
     features.set_margin_top(18);
@@ -209,10 +215,12 @@ pub fn build_gnome(content: &gtk4::Box) {
     let is_installed = is_extension_installed();
 
     // Install button
+    let installed_label = t("Extension Installed ✓");
+    let install_label = t("Install GNOME Extension");
     let install_btn = Button::with_label(if is_installed {
-        "Extension Installed ✓"
+        installed_label.as_str()
     } else {
-        "Install GNOME Extension"
+        install_label.as_str()
     });
     install_btn.add_css_class("settings-primary-btn");
     install_btn.set_halign(Align::Center);
@@ -222,7 +230,7 @@ pub fn build_gnome(content: &gtk4::Box) {
         let install_btn_weak = gtk4::glib::SendWeakRef::from(install_btn.downgrade());
 
         install_btn.connect_clicked(move |btn| {
-            btn.set_label("Installing...");
+            btn.set_label(&t("Installing..."));
             btn.set_sensitive(false);
             install_extension(install_btn_weak.clone());
         });
@@ -232,9 +240,9 @@ pub fn build_gnome(content: &gtk4::Box) {
     content.append(&install_btn);
 
     // Note about logout
-    let note = Label::new(Some(
+    let note = Label::new(Some(&t(
         "Note: You may need to log out and back in for the extension to appear in GNOME.",
-    ));
+    )));
     note.set_halign(Align::Center);
     note.set_wrap(true);
     note.set_width_request(500);
@@ -243,7 +251,7 @@ pub fn build_gnome(content: &gtk4::Box) {
     content.append(&note);
 
     // Manual download link
-    let manual_link = Button::with_label("Or download manually from GitHub");
+    let manual_link = Button::with_label(&t("Or download manually from GitHub"));
     manual_link.add_css_class("secondary-settings-button");
     manual_link.set_halign(Align::Center);
     manual_link.set_margin_top(16);
@@ -256,15 +264,15 @@ pub fn build_gnome(content: &gtk4::Box) {
 pub fn build_chrome(content: &gtk4::Box) {
     // Title
     let title = Label::new(None);
-    title.set_markup("<span size='x-large' weight='bold'>Browser Extension</span>");
+    title.set_markup(&i18n::markup_title("Browser Extension"));
     title.set_halign(Align::Center);
     title.set_margin_bottom(8);
     content.append(&title);
 
     // Description
-    let desc = Label::new(Some(
+    let desc = Label::new(Some(&t(
         "Optional Chrome/Chromium add-on for full-page web captures that open straight in ApexShot.",
-    ));
+    )));
     desc.set_halign(Align::Center);
     desc.set_wrap(true);
     desc.set_justify(gtk4::Justification::Center);
@@ -272,28 +280,34 @@ pub fn build_chrome(content: &gtk4::Box) {
     desc.add_css_class("settings-sub-option");
     content.append(&desc);
 
+    let scroll_title = t("Full-page scroll capture");
+    let scroll_body = t("Stitch long pages that a normal screenshot can't fit");
+    let send_title = t("Sends directly to ApexShot");
+    let send_body = t("Opens in the editor so you can annotate and share immediately");
+    let desktop_title = t("Works with your desktop app");
+    let desktop_body = t("Native messaging keeps the browser and ApexShot in sync");
     let features = feature_card_list(&[
         (
             custom::SCREENSHOOTER_SYMBOLIC,
-            "Full-page scroll capture",
-            "Stitch long pages that a normal screenshot can't fit",
+            scroll_title.as_str(),
+            scroll_body.as_str(),
         ),
         (
             custom::ARROW2_TOP_RIGHT_SYMBOLIC,
-            "Sends directly to ApexShot",
-            "Opens in the editor so you can annotate and share immediately",
+            send_title.as_str(),
+            send_body.as_str(),
         ),
         (
             custom::OVERLAPPING_WINDOWS_SYMBOLIC,
-            "Works with your desktop app",
-            "Native messaging keeps the browser and ApexShot in sync",
+            desktop_title.as_str(),
+            desktop_body.as_str(),
         ),
     ]);
     features.set_margin_top(18);
     content.append(&features);
 
     // Install button
-    let install_btn = Button::with_label("Get Chrome Extension");
+    let install_btn = Button::with_label(&t("Get Chrome Extension"));
     install_btn.add_css_class("settings-primary-btn");
     install_btn.set_halign(Align::Center);
     install_btn.set_margin_top(28);
@@ -302,9 +316,9 @@ pub fn build_chrome(content: &gtk4::Box) {
     });
     content.append(&install_btn);
 
-    let skip_hint = Label::new(Some(
+    let skip_hint = Label::new(Some(&t(
         "Optional. You can install this later from Settings or the Chrome Web Store.",
-    ));
+    )));
     skip_hint.set_halign(Align::Center);
     skip_hint.set_wrap(true);
     skip_hint.set_width_request(480);

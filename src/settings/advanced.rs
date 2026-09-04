@@ -1,11 +1,14 @@
 use crate::config::AppConfig;
-use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, ComboBoxText, Label, Orientation};
+use crate::i18n::t;
+use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, Label, Orientation};
+
+use super::select::SettingsSelect;
 
 #[allow(dead_code)]
 pub struct AdvancedSettingsWidgets {
     pub section: GtkBox,
     pub retina_suffix_check: CheckButton,
-    pub ocr_lang_input: ComboBoxText,
+    pub ocr_lang_input: SettingsSelect,
     pub ocr_line_breaks_check: CheckButton,
     pub telemetry_enabled_check: CheckButton,
 }
@@ -41,7 +44,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     };
 
     // --- File Naming Group ---
-    let filename_title = Label::new(Some("File Naming"));
+    let filename_title = Label::new(Some(&t("File Naming")));
     filename_title.add_css_class("settings-group-title");
     filename_title.set_xalign(0.0);
     filename_title.set_halign(Align::Start);
@@ -55,9 +58,9 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     format_hbox.set_hexpand(true);
     let format_vbox = GtkBox::new(Orientation::Vertical, 4);
     format_vbox.set_hexpand(true);
-    let lbl_format = Label::new(Some("Filename format"));
+    let lbl_format = Label::new(Some(&t("Filename format")));
     lbl_format.set_xalign(0.0);
-    let format_hint = Label::new(Some("ApexShot-YYYY-MM-DD_HH-MM-SS.png"));
+    let format_hint = Label::new(Some(&t("ApexShot-YYYY-MM-DD_HH-MM-SS.png")));
     format_hint.add_css_class("settings-sub-option");
     format_hint.set_xalign(0.0);
     format_vbox.append(&lbl_format);
@@ -70,7 +73,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     retina_suffix_check.set_active(config.adv_retina_suffix);
     let retina_hbox = GtkBox::new(Orientation::Horizontal, 12);
     retina_hbox.set_hexpand(true);
-    let lbl_retina = Label::new(Some("Add @2x suffix for HiDPI screenshots"));
+    let lbl_retina = Label::new(Some(&t("Add @2x suffix for HiDPI screenshots")));
     lbl_retina.set_xalign(0.0);
     lbl_retina.set_hexpand(true);
     retina_hbox.append(&lbl_retina);
@@ -80,7 +83,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     section.append(&filename_frame);
 
     // --- Text Recognition Group ---
-    let ocr_title = Label::new(Some("Text Recognition (OCR)"));
+    let ocr_title = Label::new(Some(&t("Text Recognition (OCR)")));
     ocr_title.add_css_class("settings-group-title");
     ocr_title.set_xalign(0.0);
     ocr_title.set_halign(Align::Start);
@@ -90,26 +93,28 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     let ocr_frame = build_frame();
 
     // OCR Language
-    let ocr_lang_input = ComboBoxText::new();
-    ocr_lang_input.add_css_class("settings-select");
-    ocr_lang_input.append(Some("eng"), "English");
-    ocr_lang_input.append(Some("spa"), "Spanish");
-    ocr_lang_input.append(Some("fra"), "French");
-    ocr_lang_input.append(Some("deu"), "German");
-    ocr_lang_input.append(Some("ita"), "Italian");
-    ocr_lang_input.append(Some("por"), "Portuguese");
-    ocr_lang_input.append(Some("chi_sim"), "Chinese (Simplified)");
-    ocr_lang_input.append(Some("jpn"), "Japanese");
-    ocr_lang_input.append(Some("rus"), "Russian");
-    ocr_lang_input.set_active_id(Some(&config.adv_ocr_language));
+    let ocr_lang_input = SettingsSelect::new(
+        [
+            ("eng", t("English")),
+            ("spa", t("Spanish")),
+            ("fra", t("French")),
+            ("deu", t("German")),
+            ("ita", t("Italian")),
+            ("por", t("Portuguese")),
+            ("chi_sim", t("Chinese (Simplified)")),
+            ("jpn", t("Japanese")),
+            ("rus", t("Russian")),
+        ],
+        &config.adv_ocr_language,
+    );
 
     let ocr_lang_hbox = GtkBox::new(Orientation::Horizontal, 12);
     ocr_lang_hbox.set_hexpand(true);
-    let lbl_lang = Label::new(Some("Primary language"));
+    let lbl_lang = Label::new(Some(&t("Primary language")));
     lbl_lang.set_xalign(0.0);
     lbl_lang.set_hexpand(true);
     ocr_lang_hbox.append(&lbl_lang);
-    ocr_lang_hbox.append(&ocr_lang_input);
+    ocr_lang_hbox.append(ocr_lang_input.widget());
     ocr_frame.append(&build_row!(&ocr_lang_hbox, false));
 
     // Keep line breaks
@@ -117,7 +122,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     ocr_line_breaks_check.set_active(config.adv_ocr_keep_line_breaks);
     let ocr_breaks_hbox = GtkBox::new(Orientation::Horizontal, 12);
     ocr_breaks_hbox.set_hexpand(true);
-    let lbl_breaks = Label::new(Some("Preserve line breaks"));
+    let lbl_breaks = Label::new(Some(&t("Preserve line breaks")));
     lbl_breaks.set_xalign(0.0);
     lbl_breaks.set_hexpand(true);
     ocr_breaks_hbox.append(&lbl_breaks);
@@ -127,7 +132,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     section.append(&ocr_frame);
 
     // --- Privacy Group ---
-    let privacy_title = Label::new(Some("Privacy"));
+    let privacy_title = Label::new(Some(&t("Privacy")));
     privacy_title.add_css_class("settings-group-title");
     privacy_title.set_xalign(0.0);
     privacy_title.set_halign(Align::Start);
@@ -142,11 +147,11 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     telemetry_hbox.set_hexpand(true);
     let telemetry_vbox = GtkBox::new(Orientation::Vertical, 4);
     telemetry_vbox.set_hexpand(true);
-    let lbl_telemetry = Label::new(Some("Share anonymous usage statistics"));
+    let lbl_telemetry = Label::new(Some(&t("Share anonymous usage statistics")));
     lbl_telemetry.set_xalign(0.0);
-    let telemetry_hint = Label::new(Some(
+    let telemetry_hint = Label::new(Some(&t(
         "Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0.",
-    ));
+    )));
     telemetry_hint.add_css_class("settings-sub-option");
     telemetry_hint.set_xalign(0.0);
     telemetry_hint.set_wrap(true);
