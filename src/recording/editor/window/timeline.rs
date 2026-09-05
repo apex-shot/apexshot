@@ -1,4 +1,5 @@
 use super::footer;
+use crate::i18n::{t, tfmt};
 use crate::recording::editor::model::{ProjectMedia, ProjectMediaKind, VideoEditState};
 use gtk4::gdk;
 use gtk4::glib;

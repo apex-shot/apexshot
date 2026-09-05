@@ -3,6 +3,7 @@
 use gtk4::{prelude::*, Box as GtkBox};
 
 use super::shell::{append_inspector_section, build_tool_inspector};
+use crate::i18n::t;
 
 pub(super) struct PenInspectorInputs<'a> {
     pub pen_inspector_list: &'a GtkBox,
@@ -15,7 +16,7 @@ pub(super) fn build_pen_inspector(input: PenInspectorInputs<'_>) -> GtkBox {
         .add_css_class("editor-inspector-option-list");
     append_inspector_section(
         &pen_inspector_content,
-        "Thickness",
+        &t("Thickness"),
         input.pen_inspector_list.upcast_ref(),
     );
     pen_inspector
@@ -37,17 +38,17 @@ pub(super) fn build_arrow_inspector(input: ArrowInspectorInputs<'_>) -> GtkBox {
         .add_css_class("editor-inspector-option-list");
     append_inspector_section(
         &arrow_inspector_content,
-        "Style",
+        &t("Style"),
         input.arrow_style_list.upcast_ref(),
     );
     append_inspector_section(
         &arrow_inspector_content,
-        "Thickness",
+        &t("Thickness"),
         input.arrow_thickness_list.upcast_ref(),
     );
     append_inspector_section(
         &arrow_inspector_content,
-        "Behavior",
+        &t("Behavior"),
         input.arrow_behavior_group.upcast_ref(),
     );
     arrow_inspector
@@ -64,7 +65,7 @@ pub(super) fn build_line_inspector(input: LineInspectorInputs<'_>) -> GtkBox {
         .add_css_class("editor-inspector-option-list");
     append_inspector_section(
         &line_inspector_content,
-        "Thickness",
+        &t("Thickness"),
         input.line_inspector_list.upcast_ref(),
     );
     line_inspector
@@ -81,7 +82,7 @@ pub(super) fn build_highlighter_inspector(input: HighlighterInspectorInputs<'_>)
         .add_css_class("editor-inspector-option-list");
     append_inspector_section(
         &highlighter_inspector_content,
-        "Thickness",
+        &t("Thickness"),
         input.highlighter_inspector_list.upcast_ref(),
     );
     highlighter_inspector

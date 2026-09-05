@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::config::AppConfig;
+use crate::i18n::{t, tfmt};
 
 /// Still-image extensions ApexShot writes (see `capture::ImageFormat`).
 pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp"];
@@ -139,7 +140,7 @@ fn sort_newest_first(entries: &mut [CaptureEntry]) {
 /// date once "N days ago" stops being useful.
 pub fn format_relative_time(modified: Option<SystemTime>, now: SystemTime) -> String {
     let Some(modified) = modified else {
-        return "Date unknown".to_string();
+        return t("Date unknown");
     };
 
     // A capture stamped in the future (clock skew, copied file) reads as new.
@@ -149,10 +150,10 @@ pub fn format_relative_time(modified: Option<SystemTime>, now: SystemTime) -> St
         .unwrap_or(0);
 
     match elapsed {
-        0..=59 => "Just now".to_string(),
+        0..=59 => t("Just now"),
         60..=3_599 => plural(elapsed / 60, "minute"),
         3_600..=86_399 => plural(elapsed / 3_600, "hour"),
-        86_400..=172_799 => "Yesterday".to_string(),
+        86_400..=172_799 => t("Yesterday"),
         172_800..=604_799 => plural(elapsed / 86_400, "day"),
         _ => chrono::DateTime::<chrono::Local>::from(modified)
             .format("%b %-d, %Y")
@@ -162,9 +163,12 @@ pub fn format_relative_time(modified: Option<SystemTime>, now: SystemTime) -> St
 
 fn plural(count: u64, unit: &str) -> String {
     if count == 1 {
-        format!("1 {unit} ago")
+        tfmt("1 {unit} ago", &[("unit", &t(unit))])
     } else {
-        format!("{count} {unit}s ago")
+        tfmt(
+            "{count} {unit}s ago",
+            &[("count", &count.to_string()), ("unit", &t(unit))],
+        )
     }
 }
 

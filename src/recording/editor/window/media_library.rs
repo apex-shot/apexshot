@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 
+use crate::i18n::t;
+
 #[derive(Clone)]
 pub(super) struct EmptyOpenHooks {
     pub on_click: Rc<dyn Fn()>,
@@ -43,10 +45,10 @@ pub(super) fn build_media_library(
 
     let tabs = GtkBox::new(Orientation::Horizontal, 0);
     tabs.add_css_class("recording-editor-media-tabs");
-    let video = kind_tab("camera-video-symbolic", "Video");
-    let audio = kind_tab("audio-x-generic-symbolic", "Audio");
-    let image = kind_tab("image-x-generic-symbolic", "Image");
-    let zoom = kind_tab("zoom-in-symbolic", "Zoom");
+    let video = kind_tab("camera-video-symbolic", &t("Video"));
+    let audio = kind_tab("audio-x-generic-symbolic", &t("Audio"));
+    let image = kind_tab("image-x-generic-symbolic", &t("Image"));
+    let zoom = kind_tab("zoom-in-symbolic", &t("Zoom"));
     video.add_css_class("recording-editor-media-tab-active");
     tabs.append(&video);
     tabs.append(&audio);
@@ -69,7 +71,7 @@ pub(super) fn build_media_library(
     list.set_hexpand(true);
     list.set_valign(Align::Start);
 
-    let empty = Label::new(Some("No media"));
+    let empty = Label::new(Some(&t("No media")));
     empty.add_css_class("recording-editor-media-empty");
     empty.set_halign(Align::Start);
     empty.set_xalign(0.0);
@@ -227,7 +229,7 @@ fn build_upload_dropzone() -> Button {
     button.set_has_frame(false);
     button.add_css_class("recording-editor-media-upload");
     button.set_hexpand(true);
-    button.set_tooltip_text(Some("Drag here or click to upload"));
+    button.set_tooltip_text(Some(&t("Drag here or click to upload")));
 
     let content = GtkBox::new(Orientation::Vertical, 4);
     content.set_halign(Align::Center);
@@ -237,10 +239,10 @@ fn build_upload_dropzone() -> Button {
     icon.add_css_class("recording-editor-media-upload-icon");
     icon.set_pixel_size(18);
 
-    let title = Label::new(Some("Drag here"));
+    let title = Label::new(Some(&t("Drag here")));
     title.add_css_class("recording-editor-media-upload-title");
 
-    let hint = Label::new(Some("Or click to upload"));
+    let hint = Label::new(Some(&t("Or click to upload")));
     hint.add_css_class("recording-editor-media-upload-hint");
 
     content.append(&icon);
@@ -357,7 +359,7 @@ fn populate_list(
     }
     if filter == LibraryFilter::Zoom {
         empty.set_visible(zooms.is_empty());
-        empty.set_text("No zooms");
+        empty.set_text(&t("No zooms"));
         for (index, clip) in zooms.iter().enumerate() {
             list.append(&build_zoom_row(index, clip));
         }
@@ -399,7 +401,12 @@ fn build_zoom_row(index: usize, clip: &ZoomClip) -> GtkBox {
     thumb.append(&icon);
     row.append(&thumb);
 
-    let name = Label::new(Some(&format!("Zoom {} · {:.1}×", index + 1, clip.scale)));
+    let name = Label::new(Some(&format!(
+        "{} {} · {:.1}×",
+        t("Zoom"),
+        index + 1,
+        clip.scale
+    )));
     name.add_css_class("recording-editor-media-title");
     name.set_xalign(0.0);
     name.set_hexpand(true);
@@ -506,7 +513,7 @@ fn import_into_project(
     reload: Rc<dyn Fn()>,
     kind: LibraryFilter,
 ) {
-    let Some(chooser) = media_chooser(button, kind, "Add to project", "Add") else {
+    let Some(chooser) = media_chooser(button, kind, &t("Add to project"), &t("Add")) else {
         return;
     };
     chooser.connect_response(move |chooser, response| {
@@ -537,7 +544,7 @@ fn import_into_project(
 }
 
 fn import_into_library(button: &Button, kind: LibraryFilter) {
-    let Some(chooser) = media_chooser(button, kind, "Upload media", "Open") else {
+    let Some(chooser) = media_chooser(button, kind, &t("Upload media"), &t("Open")) else {
         return;
     };
     chooser.show();
@@ -551,12 +558,13 @@ fn media_chooser(
 ) -> Option<gtk4::FileChooserNative> {
     let root = button.root()?;
     let window = root.downcast::<gtk4::Window>().ok();
+    let cancel = t("Cancel");
     let chooser = gtk4::FileChooserNative::new(
         Some(title),
         window.as_ref(),
         gtk4::FileChooserAction::Open,
         Some(accept),
-        Some("Cancel"),
+        Some(&cancel),
     );
     chooser.set_select_multiple(true);
     chooser.add_filter(&media_filter(kind));
@@ -567,12 +575,12 @@ fn media_filter(kind: LibraryFilter) -> gtk4::FileFilter {
     let filter = gtk4::FileFilter::new();
     match kind {
         LibraryFilter::Video => {
-            filter.set_name(Some("Video"));
+            filter.set_name(Some(&t("Video")));
             filter.add_mime_type("video/mp4");
             filter.add_pattern("*.mp4");
         }
         LibraryFilter::Audio => {
-            filter.set_name(Some("Audio"));
+            filter.set_name(Some(&t("Audio")));
             for mime in [
                 "audio/mpeg",
                 "audio/wav",
@@ -587,7 +595,7 @@ fn media_filter(kind: LibraryFilter) -> gtk4::FileFilter {
             }
         }
         LibraryFilter::Image => {
-            filter.set_name(Some("Images"));
+            filter.set_name(Some(&t("Images")));
             for mime in ["image/png", "image/jpeg", "image/webp"] {
                 filter.add_mime_type(mime);
             }
@@ -596,7 +604,7 @@ fn media_filter(kind: LibraryFilter) -> gtk4::FileFilter {
             }
         }
         LibraryFilter::Zoom => {
-            filter.set_name(Some("Media"));
+            filter.set_name(Some(&t("Media")));
         }
     }
     filter

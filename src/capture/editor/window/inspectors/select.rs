@@ -3,6 +3,7 @@
 use gtk4::{prelude::*, Box as GtkBox, Label};
 
 use super::shell::{append_inspector_section, build_tool_inspector};
+use crate::i18n::t;
 
 pub(super) struct SelectInspectorInputs<'a> {
     pub select_status_label: &'a Label,
@@ -15,22 +16,22 @@ pub(super) fn build_select_inspector(input: SelectInspectorInputs<'_>) -> GtkBox
     let (select_inspector, select_inspector_content) = build_tool_inspector();
     append_inspector_section(
         &select_inspector_content,
-        "Selection",
+        &t("Selection"),
         input.select_status_label.upcast_ref(),
     );
     append_inspector_section(
         &select_inspector_content,
-        "Details",
+        &t("Details"),
         input.select_detail_label.upcast_ref(),
     );
     append_inspector_section(
         &select_inspector_content,
-        "Geometry",
+        &t("Geometry"),
         input.select_geometry_label.upcast_ref(),
     );
     append_inspector_section(
         &select_inspector_content,
-        "Actions",
+        &t("Actions"),
         input.select_hint_label.upcast_ref(),
     );
     select_inspector

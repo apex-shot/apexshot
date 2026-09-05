@@ -652,6 +652,13 @@ mod tests {
 
     #[test]
     fn gnome_mask_enabled_for_gnome_wayland() {
+        if crate::app_identity::portal_only() {
+            assert!(!should_use_gnome_shell_mask(
+                Some("wayland-0"),
+                Some("ubuntu:GNOME")
+            ));
+            return;
+        }
         assert!(should_use_gnome_shell_mask(
             Some("wayland-0"),
             Some("ubuntu:GNOME")

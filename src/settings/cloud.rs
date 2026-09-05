@@ -345,7 +345,7 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     let token_entry = Entry::new();
     token_entry.set_hexpand(true);
     token_entry.set_width_chars(32);
-    token_entry.set_placeholder_text(Some("Paste your XBackBone API token"));
+    token_entry.set_placeholder_text(Some(&t("Paste your XBackBone API token")));
     token_entry.set_visibility(false);
     token_entry.set_text(&config.xbackbone_api_token);
     token_entry.set_input_purpose(gtk4::InputPurpose::Password);

@@ -1,4 +1,5 @@
 use crate::config::load_config;
+use crate::i18n::t;
 use gdk4x11::X11Surface;
 use gtk4::gdk::Key;
 use gtk4::{
@@ -265,7 +266,7 @@ fn setup_preview_window(
     probe.log("before-window-build");
     let appwin = ApplicationWindow::builder()
         .application(app)
-        .title("ApexShot Preview")
+        .title(t("ApexShot Preview"))
         .icon_name(crate::app_identity::icon_name())
         .default_width(preview_width)
         .default_height(preview_height)
@@ -353,33 +354,35 @@ fn setup_preview_window(
 
     let (edit_btn, _) = icon_button(
         crate::capture::editor::window::icon_names::custom::PENCIL_SYMBOLIC,
-        "Edit",
+        &t("Edit"),
     );
     let (copy_btn, _) = icon_button(
         crate::capture::editor::window::icon_names::custom::COPY_SYMBOLIC,
-        "Copy",
+        &t("Copy"),
     );
     let (save_btn, _) = icon_button(
         crate::capture::editor::window::icon_names::SAVE_REGULAR,
-        "Save",
+        &t("Save"),
     );
     let (upload_btn, _) = icon_button(
         crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
-        "Upload to cloud",
+        &t("Upload to cloud"),
     );
-    let (pin_btn, pin_icon) =
-        icon_button(crate::capture::editor::window::icon_names::VIEW_PIN, "Pin");
+    let (pin_btn, pin_icon) = icon_button(
+        crate::capture::editor::window::icon_names::VIEW_PIN,
+        &t("Pin"),
+    );
 
     // Floating close button – centered, revealed on hover over the image
     let close_btn = Button::new();
     close_btn.set_widget_name("preview-close-btn");
     close_btn.set_focusable(false);
     close_btn.set_has_frame(false);
-    close_btn.set_tooltip_text(Some("Close"));
+    close_btn.set_tooltip_text(Some(&t("Close")));
     close_btn.set_halign(Align::Center);
     close_btn.set_valign(Align::Center);
     close_btn.set_opacity(0.0); // hidden until hover
-    let close_label = gtk4::Label::new(Some("Dismiss"));
+    let close_label = gtk4::Label::new(Some(&t("Dismiss")));
     close_label.add_css_class("preview-close-label");
     close_btn.set_child(Some(&close_label));
 
@@ -708,7 +711,7 @@ fn setup_preview_window(
             let config = load_config();
             if !crate::cloud::upload::is_configured(&config) {
                 let (title, body) = crate::cloud::upload::not_configured_notification(&config);
-                crate::utils::notify::desktop_notification_important(title, body);
+                crate::utils::notify::desktop_notification_important(&title, &body);
                 return;
             }
 

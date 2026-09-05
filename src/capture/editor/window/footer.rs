@@ -1,6 +1,7 @@
 use gtk4::{prelude::*, Box as GtkBox, Button, Label, Orientation};
 
 use super::super::ui_support::footer_icon_button;
+use crate::i18n::t;
 
 pub(super) struct FooterParts {
     pub zoom_button: Button,
@@ -50,7 +51,7 @@ fn build_zoom_row(label: &str, shortcut: &str) -> (Button, GtkBox) {
 pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> FooterParts {
     let zoom_button = Button::new();
     zoom_button.set_has_frame(false);
-    zoom_button.set_tooltip_text(Some("Zoom controls"));
+    zoom_button.set_tooltip_text(Some(&t("Zoom controls")));
     zoom_button.add_css_class("editor-footer-zoom-button");
 
     let zoom_label = Label::new(Some("100%"));
@@ -88,10 +89,10 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     let zoom_list = GtkBox::new(Orientation::Vertical, 0);
     zoom_list.add_css_class("editor-footer-zoom-list");
 
-    let (zoom_in_btn, _) = build_zoom_row("Zoom In", "Ctrl +");
-    let (zoom_out_btn, _) = build_zoom_row("Zoom Out", "Ctrl -");
+    let (zoom_in_btn, _) = build_zoom_row(&t("Zoom In"), "Ctrl +");
+    let (zoom_out_btn, _) = build_zoom_row(&t("Zoom Out"), "Ctrl -");
     let (fit_to_screen_btn, _) = build_zoom_row("Fit to Screen", "Ctrl 0");
-    let (zoom_to_selection_btn, _) = build_zoom_row("Zoom to Selection", "Ctrl 2");
+    let (zoom_to_selection_btn, _) = build_zoom_row(&t("Zoom to Selection"), "Ctrl 2");
 
     let sep1 = GtkBox::new(Orientation::Horizontal, 0);
     sep1.add_css_class("editor-footer-zoom-separator");
@@ -105,10 +106,10 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     zoom_popup.append(&sep1);
     zoom_popup.append(&zoom_list);
 
-    let (copy_btn, _) = footer_icon_button(copy_icon_name, "Copy file URI");
-    let (upload_btn, _) = footer_icon_button(upload_icon_name, "Upload to cloud");
+    let (copy_btn, _) = footer_icon_button(copy_icon_name, &t("Copy file URI"));
+    let (upload_btn, _) = footer_icon_button(upload_icon_name, &t("Upload to cloud"));
 
-    let save_btn = Button::with_label("Done");
+    let save_btn = Button::with_label(&t("Done"));
     save_btn.set_has_frame(false);
     save_btn.add_css_class("editor-done-button");
     save_btn.add_css_class("body");

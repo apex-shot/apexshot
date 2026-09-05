@@ -395,8 +395,8 @@ pub fn refuse_fedora_recording() -> anyhow::Result<()> {
     eprintln!("[recording] {FEDORA_RECORDING_UNSUPPORTED_MSG}");
     // Notify on a plain OS thread so zbus blocking does not nest inside Tokio
     // (daemon hotkeys run on the async runtime).
-    let summary = "Recording not supported".to_string();
-    let body = FEDORA_RECORDING_UNSUPPORTED_MSG.to_string();
+    let summary = crate::i18n::t("Recording not supported");
+    let body = crate::i18n::t(FEDORA_RECORDING_UNSUPPORTED_MSG);
     let _ = std::thread::spawn(move || {
         crate::utils::notify::desktop_notification(&summary, &body);
     })

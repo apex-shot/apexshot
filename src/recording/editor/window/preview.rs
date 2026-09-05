@@ -14,6 +14,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::t;
+
 pub(super) fn build_preview(
     state: Arc<Mutex<VideoEditState>>,
     estimate_label: Label,
@@ -127,7 +129,7 @@ fn build_preview_inner(
     });
     overlay.add_overlay(&cursor_layer);
 
-    let empty_hint = Label::new(Some("Click to open a video, or drop one here"));
+    let empty_hint = Label::new(Some(&t("Click to open a video, or drop one here")));
     empty_hint.add_css_class("recording-editor-empty-preview-hint");
     empty_hint.set_halign(Align::Center);
     empty_hint.set_valign(Align::Center);
@@ -331,7 +333,7 @@ pub(super) fn build_stage_tools(
     let aspect = Button::new();
     aspect.set_has_frame(false);
     aspect.add_css_class("recording-editor-stage-chip");
-    aspect.set_tooltip_text(Some("Change aspect ratio"));
+    aspect.set_tooltip_text(Some(&t("Change aspect ratio")));
     let aspect_label = Label::new(Some(initial));
     aspect_label.add_css_class("recording-editor-stage-chip-label");
     aspect.set_child(Some(&aspect_label));
@@ -377,11 +379,11 @@ pub(super) fn build_stage_tools(
     let crop = Button::new();
     crop.set_has_frame(false);
     crop.add_css_class("recording-editor-stage-chip");
-    crop.set_tooltip_text(Some("Crop video"));
+    crop.set_tooltip_text(Some(&t("Crop video")));
     let crop_row = GtkBox::new(Orientation::Horizontal, 6);
     let crop_icon = Image::from_icon_name("image-crop-symbolic");
     crop_icon.set_pixel_size(13);
-    let crop_label = Label::new(Some("Crop video"));
+    let crop_label = Label::new(Some(&t("Crop video")));
     crop_label.add_css_class("recording-editor-stage-chip-label");
     crop_row.append(&crop_icon);
     crop_row.append(&crop_label);
@@ -435,7 +437,7 @@ fn append_stage_aspect_item(
 pub(super) fn build_empty_player_bar() -> GtkBox {
     let player = build_player_bar(false);
     player.clock.set_text("00:00:00.000 / 00:00:00.000");
-    player.aspect_label.set_text("Original");
+    player.aspect_label.set_text(&t("Original"));
     player.bar
 }
 
@@ -472,7 +474,7 @@ fn build_player_bar(enabled: bool) -> PlayerBar {
     play_button.set_child(Some(&play_icon));
     play_button.set_valign(Align::Center);
     play_button.set_halign(Align::Center);
-    play_button.set_tooltip_text(Some("Play"));
+    play_button.set_tooltip_text(Some(&t("Play")));
     play_button.set_sensitive(enabled);
 
     let right = GtkBox::new(Orientation::Horizontal, 0);
@@ -484,13 +486,13 @@ fn build_player_bar(enabled: bool) -> PlayerBar {
     aspect_button.set_has_frame(false);
     aspect_button.add_css_class("recording-editor-aspect-button");
     aspect_button.set_sensitive(enabled);
-    aspect_button.set_tooltip_text(Some("Change video size"));
+    aspect_button.set_tooltip_text(Some(&t("Change video size")));
 
     let aspect_row = GtkBox::new(Orientation::Horizontal, 4);
     let aspect_icon = Image::from_icon_name(aspect_ratio_icon("Original"));
     aspect_icon.set_pixel_size(14);
     aspect_icon.add_css_class("recording-editor-aspect-item-icon");
-    let aspect_label = Label::new(Some("Original"));
+    let aspect_label = Label::new(Some(&t("Original")));
     aspect_label.add_css_class("recording-editor-aspect-label");
     aspect_row.append(&aspect_icon);
     aspect_row.append(&aspect_label);

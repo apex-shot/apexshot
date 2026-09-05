@@ -8,6 +8,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::t;
+
 const ACCENT: (f64, f64, f64) = (0.690, 0.361, 0.220);
 const HANDLE_RADIUS: f64 = 28.0;
 const EDGE_INSET: f64 = 40.0;
@@ -80,7 +82,7 @@ pub(super) fn show_crop(
     close.set_has_frame(false);
     close.set_can_focus(false);
     close.add_css_class("recording-editor-crop-close");
-    close.set_tooltip_text(Some("Close"));
+    close.set_tooltip_text(Some(&t("Close")));
     close.set_valign(Align::Center);
     let close_icon = Image::from_icon_name("window-close-symbolic");
     close_icon.set_pixel_size(16);
@@ -88,7 +90,7 @@ pub(super) fn show_crop(
     let dialog_close = dialog.clone();
     close.connect_clicked(move |_| dialog_close.close());
 
-    let title = Label::new(Some("Crop video"));
+    let title = Label::new(Some(&t("Crop video")));
     title.add_css_class("recording-editor-crop-name");
     title.set_hexpand(true);
     title.set_halign(Align::Center);
@@ -318,12 +320,12 @@ pub(super) fn show_crop(
     draw_area.add_controller(press);
     draw_area.add_controller(drag);
 
-    let reset = Button::with_label("Reset");
+    let reset = Button::with_label(&t("Reset"));
     reset.set_has_frame(false);
     reset.set_can_focus(false);
     reset.add_css_class("recording-editor-secondary-button");
 
-    let done = Button::with_label("Done");
+    let done = Button::with_label(&t("Done"));
     done.set_has_frame(false);
     done.set_can_focus(false);
     done.add_css_class("recording-editor-primary-button");

@@ -705,9 +705,17 @@ mod tests {
         if Command::new("ffmpeg").arg("-version").output().is_err() {
             return;
         }
-        let path = std::env::temp_dir().join(format!(
-            "apexshot-imported-pointer-{}.mp4",
-            std::process::id()
+        // The ffmpeg child must see the fixture too. Cargo's sandbox can
+        // isolate `/tmp`, while the workspace target directory is shared.
+        let fixture_dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("test-fixtures");
+        std::fs::create_dir_all(&fixture_dir).unwrap();
+        let path = fixture_dir.join(format!(
+            "apexshot-imported-pointer-{}-{:?}.mp4",
+            std::process::id(),
+            std::thread::current().id()
         ));
         let raw_path = path.with_extension("gray");
         let mut frames = Vec::with_capacity(160 * 120 * 24);

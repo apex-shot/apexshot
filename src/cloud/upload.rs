@@ -45,7 +45,7 @@ pub fn upload_file(config: &AppConfig, path: &Path) -> Result<UploadResult, Uplo
     Destination::from_config(config).upload(config, path)
 }
 
-pub fn not_configured_notification(config: &AppConfig) -> (&'static str, &'static str) {
+pub fn not_configured_notification(config: &AppConfig) -> (String, String) {
     Destination::from_config(config).not_configured_notification(config)
 }
 
@@ -81,13 +81,14 @@ fn upload_file_with_notifications_replacing(
             if let Err(e) = crate::utils::clipboard::copy_text_to_clipboard(&result.share_url) {
                 eprintln!("[cloud] Failed to copy share link to clipboard: {e}");
             } else {
-                body = format!("Copied to clipboard\n{}", result.share_url);
+                body =
+                    crate::i18n::tfmt("Copied to clipboard\n{url}", &[("url", &result.share_url)]);
             }
             // Always include the URL in the body so the toast is useful even if
             // the user misses the clipboard.
             let _ = crate::utils::notify::desktop_notification_replace(
                 replaces_notification_id,
-                "Upload complete",
+                &crate::i18n::t("Upload complete"),
                 &body,
             );
             Ok(result)
@@ -96,7 +97,7 @@ fn upload_file_with_notifications_replacing(
             eprintln!("[cloud] Upload failed: {e}");
             let _ = crate::utils::notify::desktop_notification_replace(
                 replaces_notification_id,
-                "Upload failed",
+                &crate::i18n::t("Upload failed"),
                 &e.to_string(),
             );
             Err(e)

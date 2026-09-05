@@ -39,7 +39,7 @@ msgid "Select screenshot save location"
 msgstr "اختر مجلد حفظ اللقطات"
 
 msgid "Select"
-msgstr "اختيار"
+msgstr "تحديد"
 
 msgid "Cancel"
 msgstr "إلغاء"
@@ -815,3 +815,1327 @@ msgstr "إيقاف التسجيل وحفظه:"
 msgid "Only during recording"
 msgstr "أثناء التسجيل فقط"
 
+
+msgid "+ Add current color"
+msgstr "+ إضافة اللون الحالي"
+
+msgid "1 : 1 (Square)"
+msgstr "1 : 1 (مربع)"
+
+msgid "1 {unit} ago"
+msgstr "منذ 1 {unit}"
+
+msgid "1, 2, 3, 4..."
+msgstr "1، 2، 3، 4..."
+
+msgid "1080p"
+msgstr "1080p"
+
+msgid "16 : 10"
+msgstr "16:10"
+
+msgid "16 : 9"
+msgstr "16:9"
+
+msgid "2 : 3"
+msgstr "2 : 3"
+
+msgid "2.35 : 1"
+msgstr "2.35 : 1"
+
+msgid "3 : 2"
+msgstr "3 : 2"
+
+msgid "4 : 3"
+msgstr "4 : 3"
+
+msgid "480 x auto"
+msgstr "480 × تلقائي"
+
+msgid "5 : 4 (10 : 8)"
+msgstr "5 : 4 (10 : 8)"
+
+msgid "640 x auto"
+msgstr "640 × تلقائي"
+
+msgid "7 : 5"
+msgstr "7 : 5"
+
+msgid "720p"
+msgstr "720p"
+
+msgid "800 x auto"
+msgstr "800 × تلقائي"
+
+msgid "9 : 16"
+msgstr "9:16"
+
+msgid "A, B, C, D..."
+msgstr "أ، ب، ج، د..."
+
+msgid "Actions"
+msgstr "الإجراءات"
+
+msgid "Add"
+msgstr "إضافة"
+
+msgid "Add a Manual zoom, or analyze visible cursor motion from the timeline"
+msgstr "أضف تكبيرًا يدويًّا، أو قم بتحليل حركة المؤشر المرئية من المخطط الزمني"
+
+msgid "Add to project"
+msgstr "إضافة إلى المشروع"
+
+msgid "Add wallpaper"
+msgstr "إضافة خلفية"
+
+msgid "Add zoom at playhead"
+msgstr "إضافة تكبير عند مؤشر التشغيل"
+
+msgid "Added {auto_zooms} Auto Zooms from {samples} cursor-motion samples."
+msgstr "تمت إضافة {auto_zooms} من {samples} عينة لحركة المؤشر."
+
+msgid "Adwaita"
+msgstr "أدوايتا"
+
+msgid "Alignment"
+msgstr "المحاذاة"
+
+msgid "An error occurred while taking a screenshot."
+msgstr "حدث خطأ أثناء التقاط لقطة شاشة."
+
+msgid "Analyzing visible cursor motion…"
+msgstr "جاري تحليل حركة المؤشر المرئية…"
+
+msgid "Animation"
+msgstr "الرسوم المتحركة"
+
+msgid "ApexShot Editor"
+msgstr "محرر ApexShot"
+
+msgid "ApexShot History"
+msgstr "تاريخ ApexShot"
+
+msgid "ApexShot Preview"
+msgstr "معاينة ApexShot"
+
+msgid "ApexShot Recording"
+msgstr "تسجيل ApexShot"
+
+msgid "ApexShot Recording Countdown"
+msgstr "العد التنازلي لتسجيل ApexShot"
+
+msgid "ApexShot Recording Editor"
+msgstr "محرر التسجيلات ApexShot"
+
+msgid "ApexShot Recording Mask"
+msgstr "قناع التسجيل ApexShot"
+
+msgid "ApexShot could not export this recording."
+msgstr "تعذر على ApexShot تصدير هذا التسجيل."
+
+msgid "ApexShot could not open this video file."
+msgstr "تعذر على ApexShot فتح ملف الفيديو هذا."
+
+msgid "ApexShot lost contact with the export worker."
+msgstr "فقدت شركة «ApexShot» الاتصال بموظف التصدير."
+
+msgid "ApexShot lost contact with the upload worker."
+msgstr "فقدت ApexShot الاتصال بعامل التحميل."
+
+msgid "ApexShot-YYYY-MM-DD_HH-MM-SS.png"
+msgstr "ApexShot-YYYY-MM-DD_HH-MM-SS.png"
+
+msgid "Apply selection"
+msgstr "تطبيق التحديد"
+
+msgid "Area"
+msgstr "المساحة"
+
+msgid "Arrow"
+msgstr "السهم"
+
+msgid "Arrow style"
+msgstr "نمط السهم"
+
+msgid "Aspect Ratio"
+msgstr "نسبة العرض إلى الارتفاع"
+
+msgid "Audio"
+msgstr "الصوت"
+
+msgid "Auto"
+msgstr "تلقائي"
+
+msgid "Auto Zoom detection complete"
+msgstr "اكتمل اكتشاف التكبير التلقائي"
+
+msgid "Auto-balance"
+msgstr "التوازن التلقائي"
+
+msgid "Background"
+msgstr "الخلفية"
+
+msgid "Before recording"
+msgstr "قبل التسجيل"
+
+msgid "Behavior"
+msgstr "السلوك"
+
+msgid "Black"
+msgstr "أسود"
+
+msgid "Blackout"
+msgstr "انقطاع التيار الكهربائي"
+
+msgid "Blackout has no intensity control"
+msgstr "لا تتوفر في وضع «Blackout» إمكانية التحكم في شدة الإضاءة"
+
+msgid "Blur"
+msgstr "تشويش"
+
+msgid "Blurred"
+msgstr "غير واضح"
+
+msgid "CLICK EFFECT"
+msgstr "تأثير النقر"
+
+msgid "Camera recenters when the cursor nears the edge of the zoomed view"
+msgstr "تقوم الكاميرا بإعادة التمركز عندما يقترب المؤشر من حافة العرض المكبّر"
+
+msgid "Captures you take will show up here."
+msgstr "ستظهر الصور التي تلتقطها هنا."
+
+msgid "Change aspect ratio"
+msgstr "تغيير نسبة العرض إلى الارتفاع"
+
+msgid "Change video size"
+msgstr "تغيير حجم الفيديو"
+
+msgid "Choose a color for the active tool"
+msgstr "اختر لونًا للأداة النشطة"
+
+msgid "Choose a folder"
+msgstr "اختر مجلدًا"
+
+msgid "Choose click color"
+msgstr "اختر لون النقر"
+
+msgid "Classic Animation"
+msgstr "الرسوم المتحركة الكلاسيكية"
+
+msgid "Clean up microphone noise"
+msgstr "إزالة الضوضاء من الميكروفون"
+
+msgid "Click a display · Esc to cancel · {keys}"
+msgstr "انقر على شاشة · اضغط على مفتاح Esc للإلغاء · {keys}"
+
+msgid "Click color"
+msgstr "انقر على اللون"
+
+msgid "Click to open a video, or drop one here"
+msgstr "انقر لفتح مقطع فيديو، أو اسحب مقطع فيديو إلى هنا"
+
+msgid "Clip"
+msgstr "مقطع"
+
+msgid "Clipboard does not contain an image to open"
+msgstr "لا يحتوي الحافظة على صورة لفتحها"
+
+msgid "Clipboard image unavailable"
+msgstr "الصورة الموجودة في الحافظة غير متوفرة"
+
+msgid "Close anyway"
+msgstr "أغلق على أي حال"
+
+msgid "Closing now stops the encode. Your edit session is kept."
+msgstr ""
+"سيؤدي الإغلاق الآن إلى إيقاف عملية الترميز. وسيتم الاحتفاظ بجلسة التحرير الخاصة بك."
+
+msgid "Cloud upload not configured"
+msgstr "لم يتم تكوين التحميل إلى السحابة"
+
+msgid "Color"
+msgstr "اللون"
+
+msgid "Color picker"
+msgstr "أداة اختيار الألوان"
+
+msgid "Colors"
+msgstr "الألوان"
+
+msgid ""
+"Connect ApexShot Cloud in Settings → Cloud, or switch destination to XBackBone and configure it."
+msgstr ""
+"قم بربط ApexShot Cloud من خلال «الإعدادات» → «السحابة»، أو قم بتغيير الوجهة إلى XBackBone وقم بتكوينها."
+
+msgid ""
+"Connect your ApexShot Cloud account to browse everything you have uploaded, right here in History."
+msgstr ""
+"اربط حسابك على ApexShot Cloud لتتمكن من تصفح كل ما قمت بتحميله، هنا في قسم «السجل»."
+
+msgid "Content copied to clipboard"
+msgstr "تم نسخ المحتوى إلى الحافظة"
+
+msgid "Content extracted"
+msgstr "المحتوى المستخرج"
+
+msgid "Content extracted, but clipboard copy was unavailable"
+msgstr "تم استخراج المحتوى، لكن النسخ إلى الحافظة لم يكن متاحًا"
+
+msgid "Controls"
+msgstr "عناصر التحكم"
+
+msgid "Copied"
+msgstr "تم النسخ"
+
+msgid ""
+"Copied to clipboard\n"
+"{url}"
+msgstr ""
+"تم نسخ الرابط إلى الحافظة\n"
+"{url}"
+
+msgid "Copy"
+msgstr "نسخ"
+
+msgid "Copy failed"
+msgstr "فشل النسخ"
+
+msgid "Copy file URI"
+msgstr "نسخ عنوان URI للملف"
+
+msgid "Copy link"
+msgstr "نسخ الرابط"
+
+msgid "Copy the recording path to the clipboard"
+msgstr "انسخ مسار التسجيل إلى الحافظة"
+
+msgid "Corners"
+msgstr "الزوايا"
+
+msgid "Could not delete {name}: {message}"
+msgstr "تعذر حذف {name}: {message}"
+
+msgid "Could not load your cloud uploads"
+msgstr "تعذر تحميل ملفاتك التي تم رفعها إلى السحابة"
+
+msgid "Could not save edits: {error}"
+msgstr "تعذر حفظ التعديلات: {error}"
+
+msgid "Countdown"
+msgstr "العد التنازلي"
+
+msgid "Crop"
+msgstr "المحصول"
+
+msgid "Crop video"
+msgstr "قص الفيديو"
+
+msgid "Current tool does not support size changes"
+msgstr "الأداة الحالية لا تدعم تغيير الحجم"
+
+msgid "Cursor"
+msgstr "المؤشر"
+
+msgid "Cursor analysis could not place Auto Zooms"
+msgstr "لم يتمكن تحليل المؤشر من تحديد مواقع ميزات التكبير التلقائي"
+
+msgid "Cursor analysis stopped"
+msgstr "توقف تحليل المؤشر"
+
+msgid "Cursor is hidden for this range in preview and export"
+msgstr "يتم إخفاء المؤشر عن هذا النطاق في المعاينة والتصدير"
+
+msgid ""
+"Cursor motion was found, but Manual zooms already cover the detected moments."
+msgstr ""
+"تم رصد حركة المؤشر، لكن عمليات التكبير/التصغير اليدوية تغطي بالفعل اللحظات التي تم رصدها."
+
+msgid ""
+"Cursor motion was found, but no purposeful pauses were clear enough to place zooms."
+msgstr ""
+"تم رصد حركة المؤشر، لكن لم تكن هناك أي توقفات مقصودة واضحة بما يكفي لوضع علامات تكبير."
+
+msgid ""
+"Cursor replacement is unavailable. Its inferred path can still guide Auto Zoom."
+msgstr ""
+"لا تتوفر ميزة استبدال المؤشر. ومع ذلك، يمكن أن يسترشد «التكبير التلقائي» بمساره المفترض."
+
+msgid "Cursor styling requires pointer data from an ApexShot recording."
+msgstr "يتطلب تصميم المؤشر الحصول على بيانات المؤشر من تسجيل ApexShot."
+
+msgid "Cursor unavailable"
+msgstr "المؤشر غير متاح"
+
+msgid "Curved"
+msgstr "منحني"
+
+msgid "Cut mode — click timeline to place cuts"
+msgstr "وضع القطع — انقر على المخطط الزمني لوضع نقاط القطع"
+
+msgid "Date unknown"
+msgstr "التاريخ غير معروف"
+
+msgid "Delete"
+msgstr "حذف"
+
+msgid "Delete clip"
+msgstr "حذف المقطع"
+
+msgid "Delete hide"
+msgstr "حذف إخفاء"
+
+msgid "Delete selected"
+msgstr "حذف المحدد"
+
+msgid "Delete zoom"
+msgstr "حذف التكبير/التصغير"
+
+msgid "Delete zoom or cut"
+msgstr "حذف التكبير أو القص"
+
+msgid "Delete {name}?"
+msgstr "هل تريد حذف {name}؟"
+
+msgid "Deleted {name}"
+msgstr "تم حذف {name}"
+
+msgid "Details"
+msgstr "التفاصيل"
+
+msgid "Detect"
+msgstr "الكشف"
+
+msgid "Detect automatic zooms from clicks and cursor motion"
+msgstr "الكشف عن عمليات التكبير/التصغير التلقائية من خلال النقرات وحركة المؤشر"
+
+msgid "Detect text"
+msgstr "الكشف عن النص"
+
+msgid "Dim screen"
+msgstr "شاشة خافتة"
+
+msgid "Dimensions"
+msgstr "الأبعاد"
+
+msgid "Dismiss"
+msgstr "إغلاق"
+
+msgid "Display scale resolution"
+msgstr "دقة مقياس العرض"
+
+msgid "Display {number}"
+msgstr "عرض {number}"
+
+msgid "Do Not Disturb"
+msgstr "\"لا تزعج\""
+
+msgid "Done"
+msgstr "تم"
+
+msgid "Dot"
+msgstr "نقطة"
+
+msgid "Double"
+msgstr "مزدوج"
+
+msgid "Download Extension"
+msgstr "تنزيل الملحق"
+
+msgid "Drag here"
+msgstr "اسحب إلى هنا"
+
+msgid "Drag here or click to upload"
+msgstr "اسحب إلى هنا أو انقر لتحميل الملف"
+
+msgid "Drop a recording to begin"
+msgstr "قم بإرفاق تسجيل لبدء العملية"
+
+msgid "Drop an image here"
+msgstr "ضع صورة هنا"
+
+msgid "Duration"
+msgstr "المدة"
+
+msgid "Ease"
+msgstr "السهولة"
+
+msgid "Easing"
+msgstr "التخفيف"
+
+msgid "Echo"
+msgstr "إيكو"
+
+msgid "Edit"
+msgstr "تحرير"
+
+msgid "Edit quality, resolution and audio after recording"
+msgstr "تعديل الجودة والدقة والصوت بعد التسجيل"
+
+msgid "Effects"
+msgstr "الآثار"
+
+msgid "Empty"
+msgstr "فارغ"
+
+msgid "End {time}"
+msgstr "نهاية {time}"
+
+msgid "Estimated export size"
+msgstr "الحجم التقديري للصادرات"
+
+msgid "Everything you have uploaded to ApexShot Cloud"
+msgstr "كل ما قمت بتحميله إلى ApexShot Cloud"
+
+msgid "Export complete"
+msgstr "اكتمل التصدير"
+
+msgid "Export failed"
+msgstr "فشل التصدير"
+
+msgid "Export is still running."
+msgstr "لا يزال التصدير جارياً."
+
+msgid "Export the edited MP4"
+msgstr "تصدير ملف MP4 الذي تم تحريره"
+
+msgid "Export video"
+msgstr "تصدير الفيديو"
+
+msgid "Export with your current settings, then upload"
+msgstr "قم بالتصدير باستخدام إعداداتك الحالية، ثم قم بالتحميل"
+
+msgid "Extra Large"
+msgstr "كبير جدًا"
+
+msgid "FRAME"
+msgstr "الإطار"
+
+msgid "Failed to open video"
+msgstr "فشل فتح الفيديو"
+
+msgid "Fancy"
+msgstr "فاخر"
+
+msgid "File copied to clipboard"
+msgstr "تم نسخ الملف إلى الحافظة"
+
+msgid "Focus"
+msgstr "التركيز"
+
+msgid "Focus background intensity"
+msgstr "تركيز شدة الخلفية"
+
+msgid "Focused"
+msgstr "مركّز"
+
+msgid "Font"
+msgstr "الخط"
+
+msgid "Font family"
+msgstr "عائلة الخطوط"
+
+msgid "Frame rate"
+msgstr "معدل الإطارات"
+
+msgid "Freeform"
+msgstr "شكل حر"
+
+msgid "Fullscreen"
+msgstr "شاشة كاملة"
+
+msgid "GIF"
+msgstr "GIF"
+
+msgid ""
+"GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first."
+msgstr "ملحق GNOME Shell غير مثبت. يرجى تثبيت ملحق ApexShot لـ GNOME أولاً."
+
+msgid "Geometry"
+msgstr "الهندسة"
+
+msgid "Glide"
+msgstr "الانزلاق"
+
+msgid "Got it"
+msgstr "فهمت"
+
+msgid "Gradient"
+msgstr "التدرج"
+
+msgid "Gradients"
+msgstr "التدرجات"
+
+msgid "HEIGHT"
+msgstr "الارتفاع"
+
+msgid "HEX"
+msgstr "HEX"
+
+msgid "HiDPI"
+msgstr "HiDPI"
+
+msgid "Hide cursor"
+msgstr "إخفاء المؤشر"
+
+msgid "Hide cursor at playhead"
+msgstr "إخفاء المؤشر عند رأس التشغيل"
+
+msgid "Hide track"
+msgstr "إخفاء المسار"
+
+msgid "Hide video"
+msgstr "إخفاء الفيديو"
+
+msgid "Hide when idle"
+msgstr "إخفاء الشاشة عند عدم الاستخدام"
+
+msgid "Hide zoom"
+msgstr "إخفاء التكبير/التصغير"
+
+msgid "High"
+msgstr "مرتفع"
+
+msgid "Highlighter"
+msgstr "قلم تمييز"
+
+msgid "Idle delay"
+msgstr "تأخير الخمول"
+
+msgid "Image"
+msgstr "صورة"
+
+msgid "Image copied to clipboard"
+msgstr "تم نسخ الصورة إلى الحافظة"
+
+msgid "Images"
+msgstr "الصور"
+
+msgid "Insert"
+msgstr "إدراج"
+
+msgid "Inspector"
+msgstr "المفتش"
+
+msgid "Intensity"
+msgstr "الشدة"
+
+msgid "Intensity {percent}%"
+msgstr "الشدة {percent}%"
+
+msgid "Just now"
+msgstr "قبل قليل"
+
+msgid "Keep editing"
+msgstr "استمر في التحرير"
+
+msgid "Keyboard shortcuts"
+msgstr "اختصارات لوحة المفاتيح"
+
+msgid "Large"
+msgstr "كبير"
+
+msgid "Line"
+msgstr "خط"
+
+msgid "Linear"
+msgstr "خطي"
+
+msgid "Load more"
+msgstr "تحميل المزيد"
+
+msgid "Loading image…"
+msgstr "جاري تحميل الصورة…"
+
+msgid "Loading your cloud uploads…"
+msgstr "جاري تحميل ملفاتك إلى السحابة…"
+
+msgid "Loading…"
+msgstr "جاري التحميل…"
+
+msgid "Lock audio"
+msgstr "قفل الصوت"
+
+msgid "Lock track"
+msgstr "تثبيت المسار"
+
+msgid "Lock video"
+msgstr "قفل الفيديو"
+
+msgid "Lock zoom"
+msgstr "تثبيت التكبير/التصغير"
+
+msgid "Low"
+msgstr "منخفض"
+
+msgid "MP4 files"
+msgstr "ملفات MP4"
+
+msgid "MP4 video"
+msgstr "فيديو بتنسيق MP4"
+
+msgid "Manual"
+msgstr "دليل الاستخدام"
+
+msgid "Maximum resolution"
+msgstr "الدقة القصوى"
+
+msgid "Media"
+msgstr "وسائل الإعلام"
+
+msgid "Medium"
+msgstr "متوسط"
+
+msgid "Method"
+msgstr "الطريقة"
+
+msgid "Mic"
+msgstr "ميكروفون"
+
+msgid "Minimal"
+msgstr "الحد الأدنى"
+
+msgid "Motion"
+msgstr "الاقتراح"
+
+msgid "Move mode — drag a segment to reorder it"
+msgstr "وضع التحريك — اسحب مقطعًا لإعادة ترتيبه"
+
+msgid "Mute"
+msgstr "كتم الصوت"
+
+msgid "My colors"
+msgstr "ألواني"
+
+msgid "No Auto Zooms added"
+msgstr "لم تتم إضافة أي تقريب تلقائي"
+
+msgid ""
+"No Auto Zooms were added. Manual zooms are preserved, and overlapping detections are skipped."
+msgstr ""
+"لم تتم إضافة أي عمليات تكبير تلقائية. تم الاحتفاظ بعمليات التكبير اليدوية، وتم تخطي حالات الكشف المتداخلة."
+
+msgid "No audio"
+msgstr "لا يوجد صوت"
+
+msgid "No clear clicks or purposeful pointer pauses were found."
+msgstr "لم يتم العثور على أي نقرات واضحة أو توقفات متعمدة للمؤشر."
+
+msgid "No cursor samples were captured. Zoom centers will use the frame center."
+msgstr "لم يتم التقاط أي عينات للمؤشر. وستستخدم نقاط التكبير مركز الإطار."
+
+msgid "No editable cursor data was found."
+msgstr "لم يتم العثور على أي بيانات قابلة للتحرير خاصة بالمؤشر."
+
+msgid "No geometry"
+msgstr "لا توجد هندسة"
+
+msgid "No media"
+msgstr "لا توجد وسائط"
+
+msgid "No object selected"
+msgstr "لم يتم تحديد أي عنصر"
+
+msgid "No pointer data found"
+msgstr "لم يتم العثور على بيانات المؤشر"
+
+msgid "No recordings yet"
+msgstr "لا توجد تسجيلات حتى الآن"
+
+msgid "No screenshots yet"
+msgstr "لا توجد لقطات شاشة حتى الآن"
+
+msgid "No video edits to remove"
+msgstr "لا توجد تعديلات في الفيديو يجب إزالتها"
+
+msgid "No zooms"
+msgstr "بدون تكبير"
+
+msgid "Noise suppression"
+msgstr "قمع الضوضاء"
+
+msgid "Notifications"
+msgstr "الإشعارات"
+
+msgid "Number"
+msgstr "الرقم"
+
+msgid "Number Options"
+msgstr "خيارات الأرقام"
+
+msgid "OCR"
+msgstr "OCR"
+
+msgid "OCR complete"
+msgstr "اكتمل التعرف الضوئي على الحروف (OCR)"
+
+msgid "OCR failed"
+msgstr "فشل التعرف الضوئي على الحروف (OCR)"
+
+msgid "Obfuscate method"
+msgstr "طريقة التعتيم"
+
+msgid ""
+"On KDE Plasma, the compositor refused the screenshot. Enable KWin's screenshot plugin (System Settings → Desktop Effects, or set screenshotEnabled=true under [Plugins] in ~/.config/kwinrc) and try again."
+msgstr ""
+"في KDE Plasma، رفض برنامج التجميع التقاط لقطة الشاشة. قم بتمكين المكون الإضافي لالتقاط لقطات الشاشة في KWin (إعدادات النظام → تأثيرات سطح المكتب، أو اضبط screenshotEnabled=true ضمن [Plugins] في ~/.config/kwinrc) وحاول مرة أخرى."
+
+msgid "Opacity"
+msgstr "العتامة"
+
+msgid "Open"
+msgstr "فتح"
+
+msgid "Open Folder"
+msgstr "فتح المجلد"
+
+msgid ""
+"Open Zoom and choose Detect to analyze visible cursor motion, or use Manual mode to place zooms yourself."
+msgstr ""
+"افتح ميزة «التكبير» واختر «الكشف» لتحليل حركة المؤشر المرئية، أو استخدم «الوضع اليدوي» لتحديد نقاط التكبير بنفسك."
+
+msgid "Open color picker"
+msgstr "فتح أداة اختيار الألوان"
+
+msgid "Open in browser"
+msgstr "فتح في المتصفح"
+
+msgid "Open in editor"
+msgstr "فتح في المحرر"
+
+msgid "Open video"
+msgstr "تشغيل الفيديو"
+
+msgid "Open video editor"
+msgstr "فتح محرر الفيديو"
+
+msgid "Opened in your browser"
+msgstr "تم فتحه في متصفحك"
+
+msgid "Opened {name}"
+msgstr "تم افتتاح {name}"
+
+msgid "Opening {name} in the {editor}"
+msgstr "فتح {name} في {editor}"
+
+msgid "Optimize GIF"
+msgstr "تحسين ملف GIF"
+
+msgid "Or click to upload"
+msgstr "أو انقر لتحميل الملف"
+
+msgid "Original"
+msgstr "الأصل"
+
+msgid "Output size"
+msgstr "حجم المخرجات"
+
+msgid "PNG, JPEG, or WebP"
+msgstr "PNG أو JPEG أو WebP"
+
+msgid "PRESET"
+msgstr "الإعداد المسبق"
+
+msgid "Padding"
+msgstr "الحشو"
+
+msgid "Palette"
+msgstr "لوحة الألوان"
+
+msgid "Paste your XBackBone API token"
+msgstr "الصق رمز الوصول الخاص بـ XBackBone API"
+
+msgid "Pick from screen"
+msgstr "اختر من الشاشة"
+
+msgid "Pin"
+msgstr "تثبيت"
+
+msgid "Pixelate"
+msgstr "تحويل الصورة إلى بكسلات"
+
+msgid "Play"
+msgstr "تشغيل"
+
+msgid "Pointer track missing"
+msgstr "مسار المؤشر مفقود"
+
+msgid "Pointer track unavailable"
+msgstr "مسار المؤشر غير متاح"
+
+msgid "Primary"
+msgstr "الابتدائي"
+
+msgid "QR code decoded"
+msgstr "تم فك تشفير رمز الاستجابة السريعة"
+
+msgid "Quality"
+msgstr "الجودة"
+
+msgid "Ratio"
+msgstr "النسبة"
+
+msgid "Record audio in mono"
+msgstr "تسجيل الصوت بصوت أحادي"
+
+msgid "Recording failed"
+msgstr "فشل التسجيل"
+
+msgid "Recording not saved"
+msgstr "لم يتم حفظ التسجيل"
+
+msgid "Recording not supported"
+msgstr "التسجيل غير مدعوم"
+
+msgid "Recording path copied"
+msgstr "تم نسخ مسار التسجيل"
+
+msgid "Recording saved"
+msgstr "تم حفظ التسجيل"
+
+msgid "Recording setup"
+msgstr "إعدادات التسجيل"
+
+msgid ""
+"Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor."
+msgstr ""
+"سيستمر التسجيل مع إخفاء مؤشر نظام التشغيل. قم بتمكين ملحق ApexShot لـ GNOME في المحرر."
+
+msgid "Recordings"
+msgstr "التسجيلات"
+
+msgid "Reduce file size and upload time"
+msgstr "تقليل حجم الملف ووقت التحميل"
+
+msgid "Refresh"
+msgstr "تحديث"
+
+msgid "Remember last area"
+msgstr "تذكر المنطقة الأخيرة"
+
+msgid "Remove audio track"
+msgstr "إزالة المسار الصوتي"
+
+msgid "Remove custom color"
+msgstr "إزالة اللون المخصص"
+
+msgid "Remove track"
+msgstr "إزالة المسار"
+
+msgid "Remove video track"
+msgstr "إزالة مسار الفيديو"
+
+msgid "Remove zoom track"
+msgstr "إزالة مسار التكبير/التصغير"
+
+msgid "Rename video"
+msgstr "إعادة تسمية مقطع الفيديو"
+
+msgid "Reset"
+msgstr "إعادة الضبط"
+
+msgid "Reset video edits"
+msgstr "إعادة تعيين تعديلات الفيديو"
+
+msgid "Retry"
+msgstr "إعادة المحاولة"
+
+msgid "Reverse direction"
+msgstr "عكس الاتجاه"
+
+msgid "Revert cuts"
+msgstr "إلغاء التخفيضات"
+
+msgid "Ripple"
+msgstr "ريبل"
+
+msgid "Save is disabled in After capture settings"
+msgstr "خيار \"حفظ\" معطل في إعدادات \"بعد الالتقاط\""
+
+msgid "Saved {file} ({size})"
+msgstr "تم حفظ {file} ({size})"
+
+msgid "Screen Recording"
+msgstr "تسجيل الشاشة"
+
+msgid "Screen recordings you make will show up here."
+msgstr "ستظهر هنا مقاطع تسجيل الشاشة التي تقوم بتسجيلها."
+
+msgid "Screenshot failed"
+msgstr "فشلت عملية التقاط لقطة الشاشة"
+
+msgid "Screenshot not saved"
+msgstr "لم يتم حفظ لقطة الشاشة"
+
+msgid "Scroll"
+msgstr "التمرير"
+
+msgid "Scroll Capture"
+msgstr "التقاط التمرير"
+
+msgid "Scroll capture requires the ApexShot"
+msgstr "يتطلب التقاط شاشة التمرير استخدام برنامج ApexShot"
+
+msgid "Search isn't available for Cloud"
+msgstr "البحث غير متاح في السحابة"
+
+msgid "Search recordings"
+msgstr "البحث في التسجيلات"
+
+msgid "Search screenshots"
+msgstr "البحث عن لقطات الشاشة"
+
+msgid "Select a Window"
+msgstr "اختر نافذة"
+
+msgid "Select a display"
+msgstr "اختر شاشة"
+
+msgid "Select a video, begin your creation."
+msgstr "اختر مقطع فيديو، وابدأ في إنشاء عملك."
+
+msgid ""
+"Select a zoom to adjust it; timeline detection uses clicks and pointer pauses"
+msgstr ""
+"اختر مستوى التكبير/التصغير لتعديله؛ حيث يعتمد الكشف عن الخط الزمني على النقرات وتوقفات المؤشر"
+
+msgid "Select any annotation on the canvas to inspect it."
+msgstr "حدد أي تعليق توضيحي على اللوحة لفحصه."
+
+msgid "Selection"
+msgstr "الاختيار"
+
+msgid "Set a fixed focus point for this zoom"
+msgstr "اضبط نقطة تركيز ثابتة لهذا الزوم"
+
+msgid ""
+"Set the instance URL and API token in Settings → Cloud, or switch to ApexShot Cloud and sign in."
+msgstr ""
+"قم بتعيين عنوان URL للمثيل ورمز API في «الإعدادات» → «السحابة»، أو انتقل إلى ApexShot Cloud وقم بتسجيل الدخول."
+
+msgid "Shadow"
+msgstr "الظل"
+
+msgid "Share link copied to clipboard"
+msgstr "تم نسخ رابط المشاركة إلى الحافظة"
+
+msgid "Share link: {url}"
+msgstr "رابط المشاركة: {url}"
+
+msgid "Show in files"
+msgstr "إظهار في الملفات"
+
+msgid "Show less"
+msgstr "إظهار أقل"
+
+msgid "Show more"
+msgstr "عرض المزيد"
+
+msgid "Show video"
+msgstr "عرض الفيديو"
+
+msgid "Show zoom"
+msgstr "عرض التكبير"
+
+msgid "Showing {name} in your files"
+msgstr "يظهر {name} في ملفاتك"
+
+msgid "Shown over the recording in preview and export"
+msgstr "يظهر فوق التسجيل في وضع المعاينة والتصدير"
+
+msgid "Sign in"
+msgstr "تسجيل الدخول"
+
+msgid "Sign in to ApexShot Cloud"
+msgstr "تسجيل الدخول إلى ApexShot Cloud"
+
+msgid "Size"
+msgstr "الحجم"
+
+msgid "Skip back 1s"
+msgstr "الرجوع 1 ثانية إلى الوراء"
+
+msgid "Skip forward 1s"
+msgstr "تخطي 1 ثانية إلى الأمام"
+
+msgid "Small"
+msgstr "صغير"
+
+msgid "Smooth"
+msgstr "سلس"
+
+msgid "Smoothing"
+msgstr "التنعيم"
+
+msgid "Snappy"
+msgstr "مقتضب"
+
+msgid "Softer follow"
+msgstr "متابعة أكثر رقة"
+
+msgid "Speaker"
+msgstr "المتحدث"
+
+msgid "Speed"
+msgstr "السرعة"
+
+msgid "Split"
+msgstr "سبليت"
+
+msgid "Split at playhead"
+msgstr "تقسيم عند مؤشر التشغيل"
+
+msgid "Spotlight"
+msgstr "تحت الأضواء"
+
+msgid "Square"
+msgstr "مربع"
+
+msgid "Standard"
+msgstr "قياسي"
+
+msgid "Start"
+msgstr "ابدأ"
+
+msgid "Start with:"
+msgstr "ابدأ بـ:"
+
+msgid "Start {time}"
+msgstr "البدء في {time}"
+
+msgid "Stroke Thickness"
+msgstr "سماكة الخط"
+
+msgid "Stroke size"
+msgstr "حجم الخط"
+
+msgid "Style"
+msgstr "النمط"
+
+msgid "Sway"
+msgstr "سواي"
+
+msgid "Tahoe"
+msgstr "تاهو"
+
+msgid "Tahoe Inverted"
+msgstr "تاهو المقلوب"
+
+msgid "Text"
+msgstr "النص"
+
+msgid "Text copied to clipboard"
+msgstr "تم نسخ النص إلى الحافظة"
+
+msgid "Text extracted"
+msgstr "النص المستخرج"
+
+msgid "Text extracted, but clipboard copy was unavailable"
+msgstr "تم استخراج النص، لكن النسخ إلى الحافظة لم يكن متاحًا"
+
+msgid "Text size"
+msgstr "حجم النص"
+
+msgid ""
+"The analysis worker stopped unexpectedly. Manual Zoom is still available."
+msgstr ""
+"توقف برنامج التحليل بشكل غير متوقع. لا تزال ميزة التكبير/التصغير اليدوي متاحة."
+
+msgid "The cursor is baked into this imported video."
+msgstr "تم دمج المؤشر في هذا الفيديو المستورد."
+
+msgid "The video editor only supports MP4 recordings"
+msgstr "يدعم محرر الفيديو التسجيلات بصيغة MP4 فقط"
+
+msgid "Thick"
+msgstr "سميك"
+
+msgid "Thickness"
+msgstr "السماكة"
+
+msgid "Thin"
+msgstr "رقيق"
+
+msgid "This page covers ApexShot Cloud"
+msgstr "تتناول هذه الصفحة خدمة ApexShot Cloud"
+
+msgid "This permanently removes the file from disk."
+msgstr "يؤدي هذا إلى إزالة الملف نهائيًا من القرص."
+
+msgid "This upload has no link to open"
+msgstr "لا يوجد رابط لفتح هذا الملف المُرفوع"
+
+msgid "This upload has no share link"
+msgstr "لا يوجد رابط مشاركة لهذا الملف المُحمَّل"
+
+msgid "Tighter, faster"
+msgstr "أكثر إحكامًا، وأسرع"
+
+msgid "Tilt"
+msgstr "الميل"
+
+msgid "Timer"
+msgstr "المؤقت"
+
+msgid "Tool options coming soon"
+msgstr "خيارات الأدوات ستتوفر قريبًا"
+
+msgid "Trail"
+msgstr "المسار"
+
+msgid "URL copied to clipboard"
+msgstr "تم نسخ عنوان URL إلى الحافظة"
+
+msgid "Unlock audio"
+msgstr "تشغيل الصوت"
+
+msgid "Unlock video"
+msgstr "فتح الفيديو"
+
+msgid "Unlock zoom"
+msgstr "إلغاء قفل ميزة التكبير/التصغير"
+
+msgid "Unmute"
+msgstr "إلغاء كتم الصوت"
+
+msgid "Untitled"
+msgstr "بدون عنوان"
+
+msgid "Upload complete"
+msgstr "اكتمل التحميل"
+
+msgid "Upload failed"
+msgstr "فشل التحميل"
+
+msgid "Upload failed: {message}"
+msgstr "فشل التحميل: {message}"
+
+msgid "Upload media"
+msgstr "تحميل ملفات الوسائط"
+
+msgid "Upload to cloud"
+msgstr "التحميل إلى السحابة"
+
+msgid "Uploaded {name}"
+msgstr "تم تحميل {name}"
+
+msgid "Uploading…"
+msgstr "جاري التحميل…"
+
+msgid "Use the Thickness panel for highlighter"
+msgstr "استخدم لوحة «السماكة» لأداة التمييز"
+
+msgid "Very Thick"
+msgstr "سميك جدًّا"
+
+msgid "Video"
+msgstr "فيديو"
+
+msgid ""
+"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
+msgstr ""
+"لا يدعم نظام Fedora تسجيل الفيديو. أما لقطات الشاشة فلا تزال تعمل. لتسجيل الشاشة، استخدم برنامج Spectacle أو Kooha."
+
+msgid "Videos"
+msgstr "مقاطع الفيديو"
+
+msgid "WIDTH"
+msgstr "العرض"
+
+msgid "Waiting for sign-in…"
+msgstr "في انتظار تسجيل الدخول…"
+
+msgid "Wallpaper"
+msgstr "خلفية"
+
+msgid "Waveform unavailable"
+msgstr "شكل الموجة غير متوفر"
+
+msgid "While recording"
+msgstr "أثناء التسجيل"
+
+msgid "White"
+msgstr "أبيض"
+
+msgid "XBackBone upload not configured"
+msgstr "لم يتم تكوين تحميل XBackBone"
+
+msgid "Yaru"
+msgstr "يارو"
+
+msgid "Yesterday"
+msgstr "أمس"
+
+msgid "You have not uploaded anything to ApexShot Cloud yet."
+msgstr "لم تقم بعد بتحميل أي شيء إلى ApexShot Cloud."
+
+msgid "You're connected"
+msgstr "أنت متصل"
+
+msgid "Your next screenshot gets a share link."
+msgstr "ستظهر رابط مشاركة مع لقطة الشاشة التالية."
+
+msgid ""
+"Your uploads currently go to a self-hosted XBackBone instance. Switch your upload destination to ApexShot Cloud in Settings to browse those uploads here."
+msgstr ""
+"يتم حاليًا تحميل ملفاتك إلى نسخة XBackBone مستضافة ذاتيًا. قم بتغيير وجهة التحميل إلى ApexShot Cloud من خلال «الإعدادات» لتتمكن من تصفح تلك الملفات هنا."
+
+msgid "Zoom"
+msgstr "تكبير"
+
+msgid "Zoom In"
+msgstr "تكبير"
+
+msgid "Zoom Out"
+msgstr "تصغير العرض"
+
+msgid "Zoom controls"
+msgstr "عناصر التحكم في برنامج Zoom"
+
+msgid "Zoom in timeline"
+msgstr "تكبير الخط الزمني"
+
+msgid "Zoom out timeline"
+msgstr "تصغير المخطط الزمني"
+
+msgid "Zoom to Selection"
+msgstr "تكبير المنطقة المحددة"
+
+msgid "a, b, c, d..."
+msgstr "أ، ب، ج، د..."
+
+msgid "browser extension."
+msgstr "ملحق متصفح."
+
+msgid "i, ii, iii, iv..."
+msgstr "1، 2، 3، 4..."
+
+msgid "macOS"
+msgstr "macOS"
+
+msgid "{count} {unit}s ago"
+msgstr "منذ {count} {unit}s"
+
+msgid "{name} is no longer on disk"
+msgstr "{name} لم يعد موجودًا على القرص"
+
+msgid "{name} was already gone"
+msgstr "كان {name} قد رحل بالفعل"
+
+msgid "＋ Add to My Colors"
+msgstr "＋ إضافة إلى «ألواني»"
+
+msgid "Box"
+msgstr "المربع"
+
+msgid "Circle"
+msgstr "دائرة"
+
+msgid "Obfuscate"
+msgstr "طمس"
+
+msgid "Pen"
+msgstr "قلم"
+
+msgid "Choose the solid color used when Background is set to plain color"
+msgstr "اختر اللون المستخدم عند ضبط الخلفية على لون موحّد"

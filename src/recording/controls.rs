@@ -85,8 +85,8 @@ impl PointerTrackSession {
                     "[recording] StartPointerTrack failed ({err}); continuing without sidecar"
                 );
                 crate::utils::notify::desktop_notification(
-                    "Pointer track unavailable",
-                    "Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor.",
+                    &crate::i18n::t("Pointer track unavailable"),
+                    &crate::i18n::t("Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor."),
                 );
                 Self {
                     started: false,
@@ -112,8 +112,8 @@ impl PointerTrackSession {
                 if result.samples.is_empty() {
                     eprintln!("[recording] StopPointerTrack returned no pointer samples");
                     crate::utils::notify::desktop_notification(
-                        "Pointer track missing",
-                        "No cursor samples were captured. Zoom centers will use the frame center.",
+                        &crate::i18n::t("Pointer track missing"),
+                        &crate::i18n::t("No cursor samples were captured. Zoom centers will use the frame center."),
                     );
                 }
                 let mut sidecar = PointerSidecar::new(result.t0_monotonic_us, self.region);
@@ -808,8 +808,8 @@ pub fn run_overlay_recording_request_with_gtk(
                     "[recording] Recording discarded because Save is disabled in after-capture settings"
                 );
                 crate::utils::notify::desktop_notification(
-                    "Recording not saved",
-                    "Save is disabled in After capture settings",
+                    &crate::i18n::t("Recording not saved"),
+                    &crate::i18n::t("Save is disabled in After capture settings"),
                 );
                 return Ok(path);
             }
@@ -818,7 +818,10 @@ pub fn run_overlay_recording_request_with_gtk(
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("recording");
-            crate::utils::notify::desktop_notification("Recording saved", file_name);
+            crate::utils::notify::desktop_notification(
+                &crate::i18n::t("Recording saved"),
+                file_name,
+            );
 
             if should_open_recording_editor(open_editor) {
                 spawn_recording_editor_subprocess(path.clone());
@@ -828,7 +831,10 @@ pub fn run_overlay_recording_request_with_gtk(
         Err(err) => {
             crate::gnome_shell::hide_recording_mask_best_effort();
             super::notify_recording_session_ended_best_effort();
-            crate::utils::notify::desktop_notification("Recording failed", &err.to_string());
+            crate::utils::notify::desktop_notification(
+                &crate::i18n::t("Recording failed"),
+                &err.to_string(),
+            );
             Err(anyhow::anyhow!("Recording failed: {err}"))
         }
     }

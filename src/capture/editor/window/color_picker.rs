@@ -11,6 +11,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::t;
+
 use super::super::color::{
     custom_color_slots_css, load_persisted_custom_slot_colors, move_custom_color_between_slots,
     parse_alpha_percent, parse_channel_u8, parse_hex_rgb, picker_dynamic_css,
@@ -83,7 +85,7 @@ pub fn build_color_picker(
     color_picker_trigger.set_has_frame(false);
     color_picker_trigger.set_focusable(false);
     color_picker_trigger.set_can_target(false);
-    color_picker_trigger.set_tooltip_text(Some("Colors"));
+    color_picker_trigger.set_tooltip_text(Some(&t("Colors")));
     color_picker_trigger.set_icon_name("");
     color_picker_trigger.set_hexpand(true);
     color_picker_trigger.set_vexpand(true);
@@ -214,7 +216,7 @@ pub fn build_color_picker(
         remove_btn.set_has_frame(false);
         remove_btn.set_focusable(false);
         remove_btn.set_visible(false);
-        remove_btn.set_tooltip_text(Some("Remove custom color"));
+        remove_btn.set_tooltip_text(Some(&t("Remove custom color")));
         remove_btn.set_halign(gtk4::Align::End);
         remove_btn.set_valign(gtk4::Align::Start);
         remove_btn.set_margin_top(-3);
@@ -265,7 +267,7 @@ pub fn build_color_picker(
     let universal_color_btn = Button::new();
     universal_color_btn.set_has_frame(false);
     universal_color_btn.set_focusable(false);
-    universal_color_btn.set_tooltip_text(Some("Color picker"));
+    universal_color_btn.set_tooltip_text(Some(&t("Color picker")));
     universal_color_btn.add_css_class("editor-universal-color-button");
     let universal_color_wheel = GtkBox::new(Orientation::Horizontal, 0);
     universal_color_wheel.set_size_request(22, 22);
@@ -275,7 +277,7 @@ pub fn build_color_picker(
     let universal_arrow_btn = Button::new();
     universal_arrow_btn.set_has_frame(false);
     universal_arrow_btn.set_focusable(false);
-    universal_arrow_btn.set_tooltip_text(Some("Open color picker"));
+    universal_arrow_btn.set_tooltip_text(Some(&t("Open color picker")));
     universal_arrow_btn.add_css_class("editor-universal-arrow-button");
     let universal_arrow_icon = Image::from_icon_name(icon_names::GO_NEXT);
     universal_arrow_icon.set_pixel_size(12);
@@ -389,7 +391,7 @@ pub fn build_color_picker(
     gtk4::prelude::EditableExt::set_alignment(&hex_entry, 0.5);
     hex_entry.add_css_class("editor-hex-entry");
 
-    let hex_label = Label::new(Some("HEX"));
+    let hex_label = Label::new(Some(&t("HEX")));
     hex_label.add_css_class("editor-color-field-label");
     hex_label.set_halign(gtk4::Align::Center);
     hex_label.set_xalign(0.5);
@@ -504,7 +506,7 @@ pub fn build_color_picker(
     rgba_row.append(&a_col);
 
     // Add to colors button
-    let add_to_colors_btn = Button::with_label("\u{FF0B} Add to My Colors");
+    let add_to_colors_btn = Button::with_label(&t("＋ Add to My Colors"));
     add_to_colors_btn.set_has_frame(false);
     add_to_colors_btn.set_hexpand(false);
     add_to_colors_btn.set_halign(gtk4::Align::Start);

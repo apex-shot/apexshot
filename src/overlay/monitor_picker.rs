@@ -17,6 +17,8 @@ use gtk4::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::i18n::{t, tfmt};
+
 /// Metadata about a connected monitor (for logging / capture targeting).
 #[derive(Debug, Clone)]
 pub struct MonitorChoice {
@@ -36,7 +38,10 @@ impl MonitorChoice {
             .connector()
             .map(|s| s.to_string())
             .or_else(|| monitor.model().map(|s| s.to_string()))
-            .unwrap_or_else(|| format!("Display {}", index + 1));
+            .unwrap_or_else(|| {
+                let number = (index + 1).to_string();
+                tfmt("Display {number}", &[("number", &number)])
+            });
         Self {
             index,
             x: geometry.x(),
@@ -134,7 +139,7 @@ fn select_monitor_interactive(
     // Transient floating panel — does not cover the desktop (live desktop stays).
     // Compositors place the modal on the active/focused display.
     let panel = Window::builder()
-        .title("Select a display")
+        .title(t("Select a display"))
         .decorated(false)
         .resizable(false)
         .modal(true)
@@ -149,14 +154,16 @@ fn select_monitor_interactive(
     root.set_margin_end(36);
     root.add_css_class("apexshot-monitor-picker-root");
 
-    let title = Label::new(Some("Select a display"));
+    let title = Label::new(Some(&t("Select a display")));
     title.add_css_class("apexshot-monitor-picker-title");
     title.set_halign(Align::Center);
     root.append(&title);
 
     let n_keys = monitors.len().min(9);
-    let hint = Label::new(Some(&format!(
-        "Click a display  ·  Esc to cancel  ·  1–{n_keys}"
+    let key_range = format!("1–{n_keys}");
+    let hint = Label::new(Some(&tfmt(
+        "Click a display · Esc to cancel · {keys}",
+        &[("keys", &key_range)],
     )));
     hint.add_css_class("apexshot-monitor-picker-hint");
     hint.set_halign(Align::Center);
@@ -193,7 +200,7 @@ fn select_monitor_interactive(
     }
     root.append(&row);
 
-    let cancel = Button::with_label("Cancel");
+    let cancel = Button::with_label(&t("Cancel"));
     cancel.add_css_class("apexshot-monitor-picker-cancel");
     cancel.set_halign(Align::Center);
     cancel.set_margin_top(12);
@@ -344,7 +351,7 @@ fn build_monitor_card(display_ord: usize, choice: &MonitorChoice) -> Button {
         let spacer = Label::new(None);
         spacer.set_hexpand(true);
         badge_row.append(&spacer);
-        let primary = Label::new(Some("Primary"));
+        let primary = Label::new(Some(&t("Primary")));
         primary.add_css_class("apexshot-monitor-primary-chip");
         primary.set_halign(Align::End);
         badge_row.append(&primary);
@@ -358,7 +365,11 @@ fn build_monitor_card(display_ord: usize, choice: &MonitorChoice) -> Button {
 
     col.append(&glyph);
 
-    let title = Label::new(Some(&format!("Display {}", display_ord + 1)));
+    let display_number = (display_ord + 1).to_string();
+    let title = Label::new(Some(&tfmt(
+        "Display {number}",
+        &[("number", &display_number)],
+    )));
     title.add_css_class("apexshot-monitor-card-title");
     title.set_halign(Align::Start);
     title.set_xalign(0.0);

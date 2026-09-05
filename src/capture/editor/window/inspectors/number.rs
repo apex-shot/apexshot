@@ -3,6 +3,7 @@
 use gtk4::{prelude::*, Box as GtkBox};
 
 use super::shell::{append_inspector_section, build_tool_inspector};
+use crate::i18n::t;
 
 pub(super) struct NumberInspectorInputs<'a> {
     pub number_options_list: &'a GtkBox,
@@ -20,17 +21,17 @@ pub(super) fn build_number_inspector(input: NumberInspectorInputs<'_>) -> GtkBox
         .add_css_class("editor-inspector-option-list");
     append_inspector_section(
         &number_inspector_content,
-        "Style",
+        &t("Style"),
         input.number_options_list.upcast_ref(),
     );
     append_inspector_section(
         &number_inspector_content,
-        "Start",
+        &t("Start"),
         input.number_start_row.upcast_ref(),
     );
     append_inspector_section(
         &number_inspector_content,
-        "Size",
+        &t("Size"),
         input.number_size_list.upcast_ref(),
     );
     number_inspector

@@ -30,6 +30,7 @@ use crate::cloud::listing::{
 };
 use crate::config::{is_cloud_logged_in, load_config, AppConfig};
 use crate::history::thumbnails::{self, ThumbnailReady, ThumbnailRequest, ThumbnailSource};
+use crate::i18n::t;
 
 use super::actions;
 use super::local_page::{CARD_THUMB_HEIGHT, CARD_THUMB_WIDTH};
@@ -69,11 +70,11 @@ pub fn build_cloud_page(toast: HistoryToast) -> super::HistoryPage {
     column.set_margin_start(28);
     column.set_margin_end(28);
 
-    let title = Label::new(Some("Cloud"));
+    let title = Label::new(Some(&t("Cloud")));
     title.add_css_class("recent-captures-title");
     title.set_halign(Align::Start);
 
-    let subtitle = Label::new(Some("Everything you have uploaded to ApexShot Cloud"));
+    let subtitle = Label::new(Some(&t("Everything you have uploaded to ApexShot Cloud")));
     subtitle.add_css_class("history-page-subtitle");
     subtitle.set_halign(Align::Start);
     subtitle.set_margin_bottom(18);
@@ -108,7 +109,7 @@ pub fn build_cloud_page(toast: HistoryToast) -> super::HistoryPage {
     super::HistoryPage {
         widget: scroller.upcast(),
         refresh,
-        search_placeholder: "Search isn't available for Cloud",
+        search_placeholder: t("Search isn't available for Cloud"),
         searchable: false,
     }
 }
@@ -148,12 +149,11 @@ impl CloudPage {
 
     fn show_signed_out(self: &Rc<Self>) {
         let state = empty_state(
-            "Sign in to ApexShot Cloud",
-            "Connect your ApexShot Cloud account to browse everything you have uploaded, \
-             right here in History.",
+            &t("Sign in to ApexShot Cloud"),
+            &t("Connect your ApexShot Cloud account to browse everything you have uploaded, right here in History."),
         );
 
-        let sign_in = Button::with_label("Sign in");
+        let sign_in = Button::with_label(&t("Sign in"));
         sign_in.add_css_class("recent-captures-primary-button");
         sign_in.set_halign(Align::Center);
         sign_in.set_margin_top(20);
@@ -162,7 +162,7 @@ impl CloudPage {
             let page = Rc::clone(self);
             sign_in.connect_clicked(move |btn| {
                 crate::settings::cloud::spawn_apexshot_login();
-                btn.set_label("Waiting for sign-in\u{2026}");
+                btn.set_label(&t("Waiting for sign-in…"));
                 btn.set_sensitive(false);
                 page.start_login_polling();
             });
@@ -201,9 +201,8 @@ impl CloudPage {
 
     fn show_xbackbone_notice(self: &Rc<Self>) {
         let state = empty_state(
-            "This page covers ApexShot Cloud",
-            "Your uploads currently go to a self-hosted XBackBone instance. Switch your upload \
-             destination to ApexShot Cloud in Settings to browse those uploads here.",
+            &t("This page covers ApexShot Cloud"),
+            &t("Your uploads currently go to a self-hosted XBackBone instance. Switch your upload destination to ApexShot Cloud in Settings to browse those uploads here."),
         );
         self.body.append(&state);
     }
@@ -214,9 +213,9 @@ impl CloudPage {
         // Replace whatever partial grid chrome was already in the body (the
         // "Loading…" status line, an empty grid) with a clean error state.
         clear_box(&self.body);
-        let state = empty_state("Could not load your cloud uploads", message);
+        let state = empty_state(&t("Could not load your cloud uploads"), message);
 
-        let retry = Button::with_label("Retry");
+        let retry = Button::with_label(&t("Retry"));
         retry.add_css_class("recent-captures-secondary-button");
         retry.set_halign(Align::Center);
         retry.set_margin_top(20);
@@ -249,13 +248,13 @@ impl CloudPage {
 
         // A status line doubles as the empty-state message once the first page
         // has come back with nothing.
-        let status = Label::new(Some("Loading your cloud uploads\u{2026}"));
+        let status = Label::new(Some(&t("Loading your cloud uploads…")));
         status.add_css_class("recent-captures-empty-detail");
         status.set_halign(Align::Center);
         status.set_margin_top(16);
         status.set_margin_bottom(8);
 
-        let load_more = Button::with_label("Load more");
+        let load_more = Button::with_label(&t("Load more"));
         load_more.add_css_class("recent-captures-secondary-button");
         load_more.add_css_class("history-load-more");
         load_more.set_halign(Align::Center);
@@ -409,7 +408,7 @@ impl GridContext {
         if self.grid.first_child().is_none() {
             self.status.set_visible(true);
             self.status
-                .set_text("You have not uploaded anything to ApexShot Cloud yet.");
+                .set_text(&t("You have not uploaded anything to ApexShot Cloud yet."));
         } else {
             self.status.set_visible(false);
         }
@@ -505,7 +504,7 @@ impl GridContext {
             clickable.connect_clicked(move |_| match url.as_deref() {
                 Some(url) => report(&toast, actions::open_in_browser(url)),
                 None => toast.show(
-                    "This upload has no share link",
+                    &t("This upload has no share link"),
                     ToastKind::Error,
                     Some(TOAST_ERROR),
                 ),
@@ -698,10 +697,12 @@ fn show_cloud_popover(
         btn
     };
 
-    let open_btn = add_action("Open in browser");
-    let copy_btn = add_action("Copy link");
+    let open_btn = add_action(&t("Open in browser"));
+    let copy_btn = add_action(&t("Copy link"));
 
     popover.set_child(Some(&menu));
+    // Match the context-menu width to the card that opened it.
+    popover.set_size_request(anchor.width(), -1);
 
     match share_url {
         Some(url) => {

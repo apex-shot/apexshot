@@ -14,6 +14,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::t;
+
 pub(super) const TOOL_SIDEBAR_WIDTH: i32 = 288;
 
 pub(super) type PausePlayback = Rc<dyn Fn()>;
@@ -113,7 +115,7 @@ fn build_zoom_panel(
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-zoom-header");
     header.set_hexpand(true);
-    let title = Label::new(Some("Zoom"));
+    let title = Label::new(Some(&t("Zoom")));
     title.add_css_class("recording-editor-zoom-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
@@ -128,13 +130,13 @@ fn build_zoom_panel(
     mode_row.set_hexpand(true);
     mode_row.set_homogeneous(true);
     let auto_available = state.lock().unwrap().supports_auto_zoom();
-    let auto_btn = ToggleButton::with_label("Auto");
+    let auto_btn = ToggleButton::with_label(&t("Auto"));
     auto_btn.add_css_class("recording-editor-zoom-mode-btn");
     auto_btn.set_has_frame(false);
     auto_btn.set_hexpand(true);
     auto_btn.set_sensitive(auto_available);
     auto_btn.set_active(auto_available);
-    let manual_btn = ToggleButton::with_label("Manual");
+    let manual_btn = ToggleButton::with_label(&t("Manual"));
     manual_btn.add_css_class("recording-editor-zoom-mode-btn");
     manual_btn.set_has_frame(false);
     manual_btn.set_hexpand(true);
@@ -145,10 +147,10 @@ fn build_zoom_panel(
     mode_row.append(&auto_btn);
     mode_row.append(&manual_btn);
 
-    let mode_hint = Label::new(Some(if auto_available {
-        "Camera recenters when the cursor nears the edge of the zoomed view"
+    let mode_hint = Label::new(Some(&if auto_available {
+        t("Camera recenters when the cursor nears the edge of the zoomed view")
     } else {
-        "Set a fixed focus point for this zoom"
+        t("Set a fixed focus point for this zoom")
     }));
     mode_hint.add_css_class("recording-editor-zoom-hint");
     mode_hint.set_wrap(true);
@@ -190,11 +192,11 @@ fn build_zoom_panel(
     let animation_header = GtkBox::new(Orientation::Horizontal, 8);
     animation_header.add_css_class("recording-editor-zoom-section-row");
     animation_header.set_hexpand(true);
-    let animation_label = Label::new(Some("Animation"));
+    let animation_label = Label::new(Some(&t("Animation")));
     animation_label.add_css_class("recording-editor-zoom-kicker");
     animation_label.set_xalign(0.0);
     animation_label.set_hexpand(true);
-    let reset = Button::with_label("Reset");
+    let reset = Button::with_label(&t("Reset"));
     reset.add_css_class("recording-editor-zoom-reset");
     reset.set_has_frame(false);
     reset.set_halign(Align::End);
@@ -204,7 +206,7 @@ fn build_zoom_panel(
     let classic_row = GtkBox::new(Orientation::Horizontal, 8);
     classic_row.add_css_class("recording-editor-zoom-classic");
     classic_row.set_hexpand(true);
-    let classic_label = Label::new(Some("Classic Animation"));
+    let classic_label = Label::new(Some(&t("Classic Animation")));
     classic_label.add_css_class("recording-editor-zoom-classic-label");
     classic_label.set_xalign(0.0);
     classic_label.set_hexpand(true);
@@ -215,7 +217,7 @@ fn build_zoom_panel(
     classic_row.append(&classic_label);
     classic_row.append(&classic);
 
-    let easing_label = Label::new(Some("Easing"));
+    let easing_label = Label::new(Some(&t("Easing")));
     easing_label.add_css_class("recording-editor-zoom-kicker");
     easing_label.add_css_class("recording-editor-zoom-easing-kicker");
     easing_label.set_xalign(0.0);
@@ -226,7 +228,7 @@ fn build_zoom_panel(
     let easing_buttons: Vec<(ZoomEasing, ToggleButton)> = ZoomEasing::ALL
         .iter()
         .map(|&easing| {
-            let button = ToggleButton::with_label(easing.label());
+            let button = ToggleButton::with_label(&t(easing.label()));
             button.add_css_class("recording-editor-zoom-easing-btn");
             button.set_has_frame(false);
             button.set_hexpand(true);
@@ -252,7 +254,7 @@ fn build_zoom_panel(
             button.set_group(Some(&first_easing));
         }
     }
-    let ease_row = cursor_slider_row("Ease");
+    let ease_row = cursor_slider_row(&t("Ease"));
     ease_row.widget.add_css_class("recording-editor-zoom-ease");
     ease_row
         .scale
@@ -274,7 +276,7 @@ fn build_zoom_panel(
         }
     });
 
-    let footer_delete = delete_tool_button("Delete zoom");
+    let footer_delete = delete_tool_button(&t("Delete zoom"));
 
     body.append(&mode_row);
     body.append(&mode_hint);
@@ -403,10 +405,10 @@ fn build_zoom_panel(
                 } else {
                     ZoomMode::Manual
                 };
-                mode_hint.set_text(match mode {
-                    ZoomMode::Manual => "Set a fixed focus point for this zoom",
+                mode_hint.set_text(&match mode {
+                    ZoomMode::Manual => t("Set a fixed focus point for this zoom"),
                     ZoomMode::Auto => {
-                        "Camera recenters when the cursor nears the edge of the zoomed view"
+                        t("Camera recenters when the cursor nears the edge of the zoomed view")
                     }
                 });
                 match mode {
@@ -415,10 +417,10 @@ fn build_zoom_panel(
                 }
                 classic_row.set_visible(mode == ZoomMode::Auto);
             } else {
-                mode_hint.set_text(if auto_available {
-                    "Select a zoom to adjust it; timeline detection uses clicks and pointer pauses"
+                mode_hint.set_text(&if auto_available {
+                    t("Select a zoom to adjust it; timeline detection uses clicks and pointer pauses")
                 } else {
-                    "Add a Manual zoom, or analyze visible cursor motion from the timeline"
+                    t("Add a Manual zoom, or analyze visible cursor motion from the timeline")
                 });
                 if !auto_available {
                     manual_btn.set_active(true);
@@ -479,7 +481,7 @@ fn build_clip_panel(
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-zoom-header");
     header.set_hexpand(true);
-    let title = Label::new(Some("Clip"));
+    let title = Label::new(Some(&t("Clip")));
     title.add_css_class("recording-editor-zoom-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
@@ -489,7 +491,7 @@ fn build_clip_panel(
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
 
-    let speed_label = Label::new(Some("Speed"));
+    let speed_label = Label::new(Some(&t("Speed")));
     speed_label.add_css_class("recording-editor-zoom-kicker");
     speed_label.set_xalign(0.0);
 
@@ -528,7 +530,7 @@ fn build_clip_panel(
     let audio_header = GtkBox::new(Orientation::Horizontal, 8);
     audio_header.add_css_class("recording-editor-zoom-section-row");
     audio_header.set_hexpand(true);
-    let audio_label = Label::new(Some("Audio"));
+    let audio_label = Label::new(Some(&t("Audio")));
     audio_label.add_css_class("recording-editor-zoom-kicker");
     audio_label.set_xalign(0.0);
     audio_header.append(&audio_label);
@@ -536,7 +538,7 @@ fn build_clip_panel(
     let mute_row = GtkBox::new(Orientation::Horizontal, 8);
     mute_row.add_css_class("recording-editor-zoom-classic");
     mute_row.set_hexpand(true);
-    let mute_label = Label::new(Some("Mute"));
+    let mute_label = Label::new(Some(&t("Mute")));
     mute_label.add_css_class("recording-editor-zoom-classic-label");
     mute_label.set_xalign(0.0);
     mute_label.set_hexpand(true);
@@ -560,7 +562,7 @@ fn build_clip_panel(
     scroll.set_hexpand(true);
     scroll.set_child(Some(&body));
 
-    let footer_delete = delete_tool_button("Delete clip");
+    let footer_delete = delete_tool_button(&t("Delete clip"));
     let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-zoom-footer");
     footer.set_hexpand(true);
@@ -643,7 +645,7 @@ fn build_hide_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-zoom-header");
     header.set_hexpand(true);
-    let title = Label::new(Some("Hide cursor"));
+    let title = Label::new(Some(&t("Hide cursor")));
     title.add_css_class("recording-editor-zoom-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
@@ -652,9 +654,9 @@ fn build_hide_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
-    let hint = Label::new(Some(
+    let hint = Label::new(Some(&t(
         "Cursor is hidden for this range in preview and export",
-    ));
+    )));
     hint.add_css_class("recording-editor-zoom-hint");
     hint.set_wrap(true);
     hint.set_xalign(0.0);
@@ -668,7 +670,7 @@ fn build_hide_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     scroll.set_hexpand(true);
     scroll.set_child(Some(&body));
 
-    let footer_delete = delete_tool_button("Delete hide");
+    let footer_delete = delete_tool_button(&t("Delete hide"));
     footer_delete.connect_clicked({
         let state = state.clone();
         let on_change = on_change.clone();

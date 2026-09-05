@@ -8,12 +8,13 @@
 use std::path::{Path, PathBuf};
 
 use super::scan::{CaptureEntry, MediaKind};
+use crate::i18n::{t, tfmt};
 
 /// Hand the file to the desktop's default application.
 pub fn open_in_default_app(entry: &CaptureEntry) -> Result<String, String> {
     ensure_exists(&entry.path)?;
     crate::daemon::open_file(entry.path.clone())?;
-    Ok(format!("Opened {}", entry.display_name))
+    Ok(tfmt("Opened {name}", &[("name", &entry.display_name)]))
 }
 
 /// Open the capture in the matching ApexShot editor.
@@ -31,7 +32,7 @@ pub fn open_in_apexshot_editor(entry: &CaptureEntry) -> Result<String, String> {
 
     // The recording editor only re-encodes MP4; GIF/WebM have no editor path.
     if entry.kind == MediaKind::Video && !has_extension(&entry.path, "mp4") {
-        return Err("The video editor only supports MP4 recordings".to_string());
+        return Err(t("The video editor only supports MP4 recordings"));
     }
 
     let exe = std::env::current_exe().map_err(|e| format!("Could not find ApexShot: {e}"))?;
@@ -41,7 +42,10 @@ pub fn open_in_apexshot_editor(entry: &CaptureEntry) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Could not open the {editor}: {e}"))?;
 
-    Ok(format!("Opening {} in the {editor}", entry.display_name))
+    Ok(tfmt(
+        "Opening {name} in the {editor}",
+        &[("name", &entry.display_name), ("editor", editor)],
+    ))
 }
 
 /// Copy a still to the clipboard as an image, a recording as a file reference.
@@ -51,11 +55,11 @@ pub fn copy_to_clipboard(entry: &CaptureEntry) -> Result<String, String> {
     match entry.kind {
         MediaKind::Image => {
             crate::utils::clipboard::copy_image_to_clipboard(&entry.path)?;
-            Ok("Image copied to clipboard".to_string())
+            Ok(t("Image copied to clipboard"))
         }
         MediaKind::Video => {
             crate::utils::clipboard::copy_uri_to_clipboard(&entry.path)?;
-            Ok("File copied to clipboard".to_string())
+            Ok(t("File copied to clipboard"))
         }
     }
 }
@@ -64,20 +68,20 @@ pub fn copy_to_clipboard(entry: &CaptureEntry) -> Result<String, String> {
 pub fn copy_link_to_clipboard(link: &str) -> Result<String, String> {
     let link = link.trim();
     if link.is_empty() {
-        return Err("This upload has no share link".to_string());
+        return Err(t("This upload has no share link"));
     }
     crate::utils::clipboard::copy_text_to_clipboard(link)?;
-    Ok("Share link copied to clipboard".to_string())
+    Ok(t("Share link copied to clipboard"))
 }
 
 /// Open a URL in the user's browser.
 pub fn open_in_browser(url: &str) -> Result<String, String> {
     let url = url.trim();
     if url.is_empty() {
-        return Err("This upload has no link to open".to_string());
+        return Err(t("This upload has no link to open"));
     }
     crate::utils::open::open_url(url)?;
-    Ok("Opened in your browser".to_string())
+    Ok(t("Opened in your browser"))
 }
 
 /// Show the file in the desktop's file manager, selecting it where the file
@@ -106,7 +110,10 @@ pub fn reveal_in_file_manager(entry: &CaptureEntry) -> Result<String, String> {
                 .spawn()
                 .is_ok();
             if spawned {
-                return Ok(format!("Showing {} in your files", entry.display_name));
+                return Ok(tfmt(
+                    "Showing {name} in your files",
+                    &[("name", &entry.display_name)],
+                ));
             }
         }
     }
@@ -129,20 +136,24 @@ pub fn upload_to_cloud(entry: &CaptureEntry) -> Result<String, String> {
     }
 
     crate::cloud::upload::upload_file_with_notifications(&config, &entry.path)
-        .map(|_| format!("Uploaded {}", entry.display_name))
-        .map_err(|e| format!("Upload failed: {e}"))
+        .map(|_| tfmt("Uploaded {name}", &[("name", &entry.display_name)]))
+        .map_err(|e| tfmt("Upload failed: {message}", &[("message", &e.to_string())]))
 }
 
 /// Permanently remove a capture from disk. The window asks for confirmation
 /// before this runs.
 pub fn delete_capture(entry: &CaptureEntry) -> Result<String, String> {
     match std::fs::remove_file(&entry.path) {
-        Ok(()) => Ok(format!("Deleted {}", entry.display_name)),
+        Ok(()) => Ok(tfmt("Deleted {name}", &[("name", &entry.display_name)])),
         // Already gone is the outcome the user asked for.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Ok(format!("{} was already gone", entry.display_name))
-        }
-        Err(e) => Err(format!("Could not delete {}: {e}", entry.display_name)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(tfmt(
+            "{name} was already gone",
+            &[("name", &entry.display_name)],
+        )),
+        Err(e) => Err(tfmt(
+            "Could not delete {name}: {message}",
+            &[("name", &entry.display_name), ("message", &e.to_string())],
+        )),
     }
 }
 
@@ -150,12 +161,11 @@ fn ensure_exists(path: &Path) -> Result<(), String> {
     if path.is_file() {
         return Ok(());
     }
-    Err(format!(
-        "{} is no longer on disk",
-        path.file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.display().to_string())
-    ))
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.display().to_string());
+    Err(tfmt("{name} is no longer on disk", &[("name", &name)]))
 }
 
 fn has_extension(path: &Path, extension: &str) -> bool {

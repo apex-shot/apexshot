@@ -55,7 +55,7 @@ pub fn build_screenshots_section(config: &AppConfig) -> ScreenshotsSettingsWidge
     let export_location_entry = Entry::new();
     export_location_entry.set_hexpand(true);
     export_location_entry.set_width_chars(28);
-    export_location_entry.set_placeholder_text(Some("Choose a folder"));
+    export_location_entry.set_placeholder_text(Some(&t("Choose a folder")));
     export_location_entry.set_text(&config.screenshot_export_location);
     let export_location_browse = Button::with_label(&t("Browse"));
 

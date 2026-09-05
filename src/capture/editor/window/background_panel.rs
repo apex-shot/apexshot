@@ -9,6 +9,8 @@ use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::t;
+
 use super::super::render::rgba_image_to_surface;
 use super::super::state::EditorState;
 use super::super::types::{BackgroundAlignment, BackgroundStyle, CropAspectRatio};
@@ -354,7 +356,7 @@ fn build_background_gradient_preview_button(
     button.add_css_class("editor-background-gradient-button");
     button.add_css_class(density.preview_size_class);
     button.add_css_class(BACKGROUND_GRADIENT_PREVIEW_CLASSES[index]);
-    button.set_tooltip_text(Some("Gradient"));
+    button.set_tooltip_text(Some(&t("Gradient")));
 
     let preview_area = DrawingArea::new();
     preview_area.add_css_class("editor-background-gradient-preview-area");
@@ -429,7 +431,7 @@ fn build_background_add_wallpaper_button(density: BackgroundSidebarDensity) -> B
     button.set_size_request(density.preview_button_size, density.preview_button_size);
     button.add_css_class("editor-background-add-button");
     button.add_css_class(density.preview_size_class);
-    button.set_tooltip_text(Some("Add wallpaper"));
+    button.set_tooltip_text(Some(&t("Add wallpaper")));
 
     let plus_label = Label::new(Some("+"));
     plus_label.add_css_class("editor-background-add-label");
@@ -622,7 +624,7 @@ pub(super) fn build_background_panel(
     let background_sidebar_options = GtkBox::new(Orientation::Vertical, density.content_spacing);
     background_sidebar_options.add_css_class("editor-background-sidebar-options");
 
-    let background_none_btn = Button::with_label("None");
+    let background_none_btn = Button::with_label(&t("None"));
     background_none_btn.set_has_frame(false);
     background_none_btn.set_halign(gtk4::Align::Fill);
     background_none_btn.set_hexpand(false);
@@ -654,13 +656,13 @@ pub(super) fn build_background_panel(
     gradients_section.add_css_class("editor-background-gradients-section");
 
     let gradients_header = GtkBox::new(Orientation::Horizontal, 0);
-    let gradients_title = Label::new(Some("Gradients"));
+    let gradients_title = Label::new(Some(&t("Gradients")));
     gradients_title.add_css_class("editor-background-section-title");
     gradients_title.set_xalign(0.0);
     gradients_title.set_hexpand(true);
 
     let gradients_collapsed = Rc::new(Cell::new(true));
-    let gradients_toggle_btn = Button::with_label("Show more");
+    let gradients_toggle_btn = Button::with_label(&t("Show more"));
     gradients_toggle_btn.set_has_frame(false);
     gradients_toggle_btn.add_css_class("editor-background-section-action-button");
 
@@ -725,10 +727,10 @@ pub(super) fn build_background_panel(
         move |_| {
             let is_collapsed = gradients_collapsed.get();
             gradients_collapsed.set(!is_collapsed);
-            gradients_toggle_btn.set_label(if !is_collapsed {
-                "Show more"
+            gradients_toggle_btn.set_label(&if !is_collapsed {
+                t("Show more")
             } else {
-                "Show less"
+                t("Show less")
             });
             rebuild_gradients_grid(
                 &gradients_grid,
@@ -792,7 +794,7 @@ pub(super) fn build_background_panel(
     let wallpaper_section = GtkBox::new(Orientation::Vertical, density.section_spacing);
     wallpaper_section.add_css_class("editor-background-wallpaper-section");
 
-    let wallpaper_title = Label::new(Some("Wallpaper"));
+    let wallpaper_title = Label::new(Some(&t("Wallpaper")));
     wallpaper_title.add_css_class("editor-background-section-title");
     wallpaper_title.set_xalign(0.0);
 
@@ -813,8 +815,8 @@ pub(super) fn build_background_panel(
     let label = wallpaper_path
         .file_name()
         .and_then(|f| f.to_str())
-        .map(|s| format!("Wallpaper: {s}"))
-        .unwrap_or_else(|| "Wallpaper".to_string());
+        .map(|s| format!("{}: {s}", t("Wallpaper")))
+        .unwrap_or_else(|| t("Wallpaper"));
     wallpaper_previews
         .borrow_mut()
         .push((label, surface, wallpaper_path));
@@ -887,8 +889,8 @@ pub(super) fn build_background_panel(
                                     let label = path
                                         .file_name()
                                         .and_then(|file_name| file_name.to_str())
-                                        .map(|file_name| format!("Wallpaper: {file_name}"))
-                                        .unwrap_or_else(|| "Wallpaper".to_string());
+                                        .map(|file_name| format!("{}: {file_name}", t("Wallpaper")))
+                                        .unwrap_or_else(|| t("Wallpaper"));
                                     wallpaper_previews.borrow_mut().push((
                                         label,
                                         Some(surface),
@@ -933,7 +935,7 @@ pub(super) fn build_background_panel(
     let blurred_section = GtkBox::new(Orientation::Vertical, density.section_spacing);
     blurred_section.add_css_class("editor-background-blurred-section");
 
-    let blurred_title = Label::new(Some("Blurred"));
+    let blurred_title = Label::new(Some(&t("Blurred")));
     blurred_title.add_css_class("editor-background-section-title");
     blurred_title.set_xalign(0.0);
 
@@ -981,7 +983,7 @@ pub(super) fn build_background_panel(
     let padding_section = GtkBox::new(Orientation::Vertical, 4);
     padding_section.add_css_class("editor-background-padding-section");
 
-    let padding_title = Label::new(Some("Padding"));
+    let padding_title = Label::new(Some(&t("Padding")));
     padding_title.add_css_class("editor-background-section-title");
     padding_title.set_xalign(0.0);
 
@@ -1043,7 +1045,7 @@ pub(super) fn build_background_panel(
     insert_section.set_size_request(density.compact_slider_width, -1);
     left_column_group.add_widget(&insert_section);
 
-    let insert_title = Label::new(Some("Insert"));
+    let insert_title = Label::new(Some(&t("Insert")));
     insert_title.add_css_class("editor-background-section-title");
     insert_title.set_xalign(0.0);
 
@@ -1096,7 +1098,7 @@ pub(super) fn build_background_panel(
     auto_balance_section.set_halign(gtk4::Align::Fill);
     right_column_group.add_widget(&auto_balance_section);
 
-    let auto_balance_title = Label::new(Some("Auto-balance"));
+    let auto_balance_title = Label::new(Some(&t("Auto-balance")));
     auto_balance_title.add_css_class("editor-background-section-title");
     auto_balance_title.set_xalign(0.0);
 
@@ -1137,7 +1139,7 @@ pub(super) fn build_background_panel(
     shadow_section.set_size_request(density.compact_slider_width, -1);
     left_column_group.add_widget(&shadow_section);
 
-    let shadow_title = Label::new(Some("Shadow"));
+    let shadow_title = Label::new(Some(&t("Shadow")));
     shadow_title.add_css_class("editor-background-section-title");
     shadow_title.set_xalign(0.0);
 
@@ -1174,7 +1176,7 @@ pub(super) fn build_background_panel(
     alignment_section.set_halign(gtk4::Align::Fill);
     alignment_section.set_hexpand(false);
 
-    let alignment_title = Label::new(Some("Alignment"));
+    let alignment_title = Label::new(Some(&t("Alignment")));
     alignment_title.add_css_class("editor-background-section-title");
     alignment_title.set_xalign(0.0);
 
@@ -1323,7 +1325,7 @@ pub(super) fn build_background_panel(
     ratio_section.set_halign(gtk4::Align::Fill);
     ratio_section.set_hexpand(false);
 
-    let ratio_title = Label::new(Some("Ratio"));
+    let ratio_title = Label::new(Some(&t("Ratio")));
     ratio_title.add_css_class("editor-background-section-title");
     ratio_title.set_xalign(0.0);
 
@@ -1343,7 +1345,7 @@ pub(super) fn build_background_panel(
     ratio_section.append(&ratio_title);
     ratio_section.append(&ratio_dropdown_row);
 
-    let corners_title = Label::new(Some("Corners"));
+    let corners_title = Label::new(Some(&t("Corners")));
     corners_title.add_css_class("editor-background-section-title");
     corners_title.set_xalign(0.0);
 

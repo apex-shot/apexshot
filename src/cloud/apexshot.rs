@@ -53,10 +53,10 @@ pub(crate) fn is_configured(config: &AppConfig) -> bool {
     !config.cloud_api_token.is_empty() && !resolve_cloud_backend_url(config).is_empty()
 }
 
-pub(crate) fn not_configured_notification(_config: &AppConfig) -> (&'static str, &'static str) {
+pub(crate) fn not_configured_notification(_config: &AppConfig) -> (String, String) {
     (
-        "Cloud upload not configured",
-        "Connect ApexShot Cloud in Settings → Cloud, or switch destination to XBackBone and configure it.",
+        crate::i18n::t("Cloud upload not configured"),
+        crate::i18n::t("Connect ApexShot Cloud in Settings → Cloud, or switch destination to XBackBone and configure it."),
     )
 }
 

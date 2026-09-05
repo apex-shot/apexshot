@@ -13,6 +13,7 @@ use super::super::{
     },
 };
 use super::icon_names;
+use crate::i18n::t;
 
 pub(super) struct ToolbarBaseParts {
     pub root: GtkBox,
@@ -130,14 +131,14 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     root.add_css_class("editor-toolbar");
 
     // Window controls on the right (created here, placed in right controls)
-    let traffic_close = traffic_light_button("traffic-light-red", "Close");
+    let traffic_close = traffic_light_button("traffic-light-red", &t("Close"));
     traffic_close.remove_css_class("recent-captures-wm-btn");
     traffic_close.remove_css_class("recent-captures-wm-close");
     traffic_close.add_css_class("recording-editor-traffic-btn");
-    let traffic_minimize = traffic_light_button("traffic-light-yellow", "Minimize");
+    let traffic_minimize = traffic_light_button("traffic-light-yellow", &t("Minimize"));
     traffic_minimize.remove_css_class("recent-captures-wm-btn");
     traffic_minimize.add_css_class("recording-editor-traffic-btn");
-    let traffic_zoom = traffic_light_button("traffic-light-green", "Zoom");
+    let traffic_zoom = traffic_light_button("traffic-light-green", &t("Zoom"));
     traffic_zoom.remove_css_class("recent-captures-wm-btn");
     traffic_zoom.add_css_class("recording-editor-traffic-btn");
 
@@ -146,20 +147,20 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         button.set_valign(Align::Center);
     }
 
-    let select_btn = icon_tool_button(icon_names::custom::SELECT_MODE_SYMBOLIC, "Select");
-    let crop_btn = icon_tool_button(icon_names.crop, "Crop");
-    let background_btn = icon_tool_button(icon_names::custom::IMAGE_ALT_SYMBOLIC, "Background");
-    let draw_btn = icon_tool_button(icon_names.draw, "Pen");
+    let select_btn = icon_tool_button(icon_names::custom::SELECT_MODE_SYMBOLIC, &t("Select"));
+    let crop_btn = icon_tool_button(icon_names.crop, &t("Crop"));
+    let background_btn = icon_tool_button(icon_names::custom::IMAGE_ALT_SYMBOLIC, &t("Background"));
+    let draw_btn = icon_tool_button(icon_names.draw, &t("Pen"));
 
-    let arrow_btn = icon_tool_button(icon_names.arrow, "Arrow");
-    let line_btn = icon_tool_button(icon_names.line, "Line");
-    let box_btn = icon_tool_button(icon_names.box_, "Box");
-    let circle_btn = icon_tool_button(icon_names.circle, "Circle");
-    let text_btn = icon_tool_button(icon_names.text, "Text");
-    let number_btn = icon_tool_button(icon_names.number, "Number");
-    let highlighter_btn = icon_tool_button(icon_names.highlighter, "Highlighter");
-    let obfuscate_btn = icon_tool_button(icon_names.obfuscate, "Obfuscate");
-    let focus_btn = icon_tool_button(icon_names.focus, "Focus");
+    let arrow_btn = icon_tool_button(icon_names.arrow, &t("Arrow"));
+    let line_btn = icon_tool_button(icon_names.line, &t("Line"));
+    let box_btn = icon_tool_button(icon_names.box_, &t("Box"));
+    let circle_btn = icon_tool_button(icon_names.circle, &t("Circle"));
+    let text_btn = icon_tool_button(icon_names.text, &t("Text"));
+    let number_btn = icon_tool_button(icon_names.number, &t("Number"));
+    let highlighter_btn = icon_tool_button(icon_names.highlighter, &t("Highlighter"));
+    let obfuscate_btn = icon_tool_button(icon_names.obfuscate, &t("Obfuscate"));
+    let focus_btn = icon_tool_button(icon_names.focus, &t("Focus"));
 
     let sep_1 = GtkBox::new(Orientation::Vertical, 0);
     sep_1.add_css_class("editor-tools-divider");
@@ -203,7 +204,7 @@ pub(super) fn build_obfuscate_method_controls() -> (GtkBox, Button, Popover, Gtk
     obfuscate_method_button.set_focusable(false);
     obfuscate_method_button.add_css_class("editor-tool-button");
     obfuscate_method_button.add_css_class("flat");
-    obfuscate_method_button.set_tooltip_text(Some("Obfuscate method"));
+    obfuscate_method_button.set_tooltip_text(Some(&t("Obfuscate method")));
 
     let obfuscate_method_icon = Image::from_icon_name(icon_names::VIEW_GRID);
     obfuscate_method_button.set_child(Some(&obfuscate_method_icon));
@@ -244,7 +245,7 @@ fn build_pen_weight_dropdown() -> (GtkBox, Button, Popover, GtkBox) {
     pen_weight_button.set_focusable(false);
     pen_weight_button.add_css_class("editor-tool-button");
     pen_weight_button.add_css_class("flat");
-    pen_weight_button.set_tooltip_text(Some("Stroke Thickness"));
+    pen_weight_button.set_tooltip_text(Some(&t("Stroke Thickness")));
 
     let pen_weight_icon = Image::from_icon_name(PenWeight::Medium.icon_name());
     pen_weight_icon.set_pixel_size(PenWeight::Medium.icon_pixel_size());
@@ -286,7 +287,7 @@ fn build_stroke_size_dropdown() -> (GtkBox, Button, Popover, GtkBox) {
     stroke_size_button.set_focusable(false);
     stroke_size_button.add_css_class("editor-tool-button");
     stroke_size_button.add_css_class("flat");
-    stroke_size_button.set_tooltip_text(Some("Stroke Thickness"));
+    stroke_size_button.set_tooltip_text(Some(&t("Stroke Thickness")));
 
     let stroke_size_icon = Image::from_icon_name(PenWeight::Medium.icon_name());
     stroke_size_icon.set_pixel_size(PenWeight::Medium.icon_pixel_size());
@@ -328,7 +329,7 @@ fn build_arrow_style_controls() -> (GtkBox, Button, Popover, GtkBox) {
     arrow_style_button.set_focusable(false);
     arrow_style_button.add_css_class("editor-tool-button");
     arrow_style_button.add_css_class("flat");
-    arrow_style_button.set_tooltip_text(Some("Arrow style"));
+    arrow_style_button.set_tooltip_text(Some(&t("Arrow style")));
 
     let standard_arrow_icon = arrow_style_toolbar_icon(ArrowStyle::Standard);
     let arrow_style_icon = tool_icon_widget(
@@ -387,7 +388,7 @@ fn build_number_options_dropdown() -> (
     number_options_button.set_focusable(false);
     number_options_button.add_css_class("editor-tool-button");
     number_options_button.add_css_class("flat");
-    number_options_button.set_tooltip_text(Some("Number Options"));
+    number_options_button.set_tooltip_text(Some(&t("Number Options")));
 
     let btn_box = GtkBox::new(Orientation::Horizontal, 2);
     let btn_label = Label::new(Some("123"));
@@ -423,7 +424,7 @@ fn build_number_options_dropdown() -> (
         check_icon.set_visible(style == NumberingStyle::default());
         check_icon.add_css_class("editor-number-style-check");
 
-        let label = Label::new(Some(style.label()));
+        let label = Label::new(Some(&t(style.label())));
         label.set_hexpand(true);
         label.set_halign(gtk4::Align::Start);
 
@@ -455,7 +456,7 @@ fn build_number_options_dropdown() -> (
     start_box.set_margin_end(4);
     start_box.add_css_class("editor-number-start-row");
 
-    let start_label = Label::new(Some("Start with:"));
+    let start_label = Label::new(Some(&t("Start with:")));
     start_label.add_css_class("editor-number-start-label");
 
     let number_start_entry = Entry::new();
@@ -491,7 +492,7 @@ fn build_number_options_dropdown() -> (
     let size_btn_box = GtkBox::new(Orientation::Horizontal, 8);
     size_btn_box.set_margin_start(4);
     size_btn_box.set_margin_end(4);
-    let size_label = Label::new(Some("Size"));
+    let size_label = Label::new(Some(&t("Size")));
     size_label.set_hexpand(true);
     size_label.set_halign(gtk4::Align::Start);
     let size_arrow = Image::from_icon_name(icon_names::CHEVRON_RIGHT_REGULAR);
@@ -515,7 +516,7 @@ fn build_number_options_dropdown() -> (
 
     for size in NumberSize::ALL {
         let btn = Button::builder()
-            .label(size.label())
+            .label(t(size.label()))
             .has_frame(false)
             .css_classes([
                 "editor-popover-list-item",
@@ -606,7 +607,7 @@ pub(super) fn build_toolbar_mode_controls(
     size_slider.set_size_request(100, -1);
     size_slider.set_halign(gtk4::Align::Center);
     size_slider.set_valign(gtk4::Align::Center);
-    size_slider.set_tooltip_text(Some("Stroke size"));
+    size_slider.set_tooltip_text(Some(&t("Stroke size")));
 
     let size_group = GtkBox::new(Orientation::Horizontal, 0);
     size_group.add_css_class("editor-tools-group");
@@ -620,7 +621,7 @@ pub(super) fn build_toolbar_mode_controls(
     text_size_button.add_css_class("editor-tool-button");
     text_size_button.add_css_class("flat");
     text_size_button.add_css_class("editor-text-size-button");
-    text_size_button.set_tooltip_text(Some("Text size"));
+    text_size_button.set_tooltip_text(Some(&t("Text size")));
 
     let text_size_button_box = GtkBox::new(Orientation::Horizontal, 2);
     text_size_button_box.set_halign(gtk4::Align::Center);
@@ -664,7 +665,7 @@ pub(super) fn build_toolbar_mode_controls(
     font_family_button.set_focusable(false);
     font_family_button.add_css_class("editor-tool-button");
     font_family_button.add_css_class("flat");
-    font_family_button.set_tooltip_text(Some("Font family"));
+    font_family_button.set_tooltip_text(Some(&t("Font family")));
 
     let font_family_button_box = GtkBox::new(Orientation::Horizontal, 2);
     font_family_button_box.set_halign(gtk4::Align::Center);
@@ -762,7 +763,7 @@ pub(super) fn build_toolbar_mode_controls(
         let icon = Image::from_icon_name(weight.icon_name());
         icon.set_pixel_size(weight.icon_pixel_size());
 
-        let label_widget = Label::new(Some(weight.label()));
+        let label_widget = Label::new(Some(&t(weight.label())));
 
         btn_box.append(&icon);
         btn_box.append(&label_widget);
@@ -789,7 +790,7 @@ pub(super) fn build_toolbar_mode_controls(
 
         let style_icon = arrow_style_toolbar_icon(style);
         let icon = tool_icon_widget(style_icon.clone(), toolbar_icon_size(&style_icon));
-        let label_widget = Label::new(Some(style.display_name()));
+        let label_widget = Label::new(Some(&t(style.display_name())));
 
         btn_box.append(&icon);
         btn_box.append(&label_widget);
@@ -978,7 +979,7 @@ pub(super) fn build_toolbar_right_controls(
 ) -> ToolbarRightParts {
     let undo_btn = icon_tool_button(undo_icon_name, "Undo");
     let redo_btn = icon_tool_button(redo_icon_name, "Redo");
-    let delete_selected_btn = icon_tool_button(delete_icon_name, "Delete selected");
+    let delete_selected_btn = icon_tool_button(delete_icon_name, &t("Delete selected"));
     undo_btn.set_sensitive(false);
     redo_btn.set_sensitive(false);
     delete_selected_btn.set_sensitive(false);
@@ -1095,12 +1096,11 @@ pub(super) fn build_toolbar_tool_updater(
                 | Tool::Highlighter
                 | Tool::Focus
         );
-        background_tab_btn.set_label(
-            primary_surface
-                .map(|(label, _)| label)
-                .unwrap_or("Background"),
-        );
-        colors_tab_btn.set_label("Colors");
+        let primary_label = primary_surface
+            .map(|(label, _)| t(label))
+            .unwrap_or_else(|| t("Background"));
+        background_tab_btn.set_label(&primary_label);
+        colors_tab_btn.set_label(&t("Colors"));
         inspector_tabs.set_visible(primary_surface.is_some() || colors_mode);
         background_tab_btn.set_visible(primary_surface.is_some());
         colors_tab_btn.set_visible(colors_mode);

@@ -53,7 +53,7 @@ pub(super) fn dispatch_daemon_action(
                         eprintln!("[daemon] Clipboard import failed: {err}");
                         let (summary, body) =
                             capture_handlers::clipboard_missing_image_notification();
-                        capture_handlers::send_desktop_notification(summary, body);
+                        capture_handlers::send_desktop_notification(&summary, &body);
                     }
                 }
             });

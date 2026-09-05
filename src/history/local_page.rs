@@ -20,6 +20,7 @@ use gtk4::{
 use super::scan::{self, CaptureEntry, MediaKind};
 use super::thumbnails::{self, ThumbnailReady, ThumbnailRequest, ThumbnailSource};
 use super::window::{HistoryToast, ToastKind};
+use crate::i18n::{t, tfmt};
 
 /// On-card thumbnail display size — smaller than the baked 260×150 (same
 /// aspect ratio) so the grid reads like a file manager's icon view. The
@@ -80,14 +81,15 @@ pub fn build_local_page(
     // the window's header bar, GNOME-Settings-style, not on the page itself.
     let header = GtkBox::new(Orientation::Vertical, 0);
 
-    let title = Label::new(Some(match kind {
-        MediaKind::Image => "Screenshots",
-        MediaKind::Video => "Recordings",
-    }));
+    let title_text = match kind {
+        MediaKind::Image => t("Screenshots"),
+        MediaKind::Video => t("Recordings"),
+    };
+    let title = Label::new(Some(&title_text));
     title.add_css_class("recent-captures-title");
     title.set_halign(Align::Start);
 
-    let subtitle = Label::new(Some("Loading…"));
+    let subtitle = Label::new(Some(&t("Loading…")));
     subtitle.add_css_class("history-page-subtitle");
     subtitle.set_halign(Align::Start);
     subtitle.set_margin_bottom(18);
@@ -160,8 +162,8 @@ pub fn build_local_page(
         widget: scroller.upcast(),
         refresh,
         search_placeholder: match kind {
-            MediaKind::Image => "Search screenshots",
-            MediaKind::Video => "Search recordings",
+            MediaKind::Image => t("Search screenshots"),
+            MediaKind::Video => t("Search recordings"),
         },
         searchable: true,
     }
@@ -187,16 +189,18 @@ fn build_empty_state(kind: MediaKind) -> GtkBox {
     icon.set_halign(Align::Center);
     empty.append(&icon);
 
-    let title = Label::new(Some(match kind {
-        MediaKind::Image => "No screenshots yet",
-        MediaKind::Video => "No recordings yet",
-    }));
+    let title_text = match kind {
+        MediaKind::Image => t("No screenshots yet"),
+        MediaKind::Video => t("No recordings yet"),
+    };
+    let title = Label::new(Some(&title_text));
     title.add_css_class("recent-captures-empty-title");
 
-    let detail = Label::new(Some(match kind {
-        MediaKind::Image => "Captures you take will show up here.",
-        MediaKind::Video => "Screen recordings you make will show up here.",
-    }));
+    let detail_text = match kind {
+        MediaKind::Image => t("Captures you take will show up here."),
+        MediaKind::Video => t("Screen recordings you make will show up here."),
+    };
+    let detail = Label::new(Some(&detail_text));
     detail.add_css_class("recent-captures-empty-detail");
     detail.set_halign(Align::Center);
 
@@ -224,7 +228,7 @@ fn reload(state: &Rc<PageState>) {
     state.empty_state.set_visible(false);
     state.grid.set_visible(true);
     state.subtitle.set_visible(true);
-    state.subtitle.set_text("Loading…");
+    state.subtitle.set_text(&t("Loading…"));
 
     let kind = state.kind;
     let (scan_tx, scan_rx) = mpsc::channel::<Vec<CaptureEntry>>();
@@ -542,19 +546,24 @@ fn show_action_popover(
         btn
     };
 
-    let open_btn = add_action("Open", false);
-    let editor_btn = add_action("Open in editor", false);
-    let copy_btn = add_action("Copy", false);
-    let reveal_btn = add_action("Show in files", false);
-    let upload_btn = add_action("Upload to cloud", false);
+    let open_btn = add_action(&t("Open"), false);
+    let editor_btn = add_action(&t("Open in editor"), false);
+    let copy_btn = add_action(&t("Copy"), false);
+    let reveal_btn = add_action(&t("Show in files"), false);
+    let upload_btn = add_action(&t("Upload to cloud"), false);
 
     let separator = gtk4::Separator::new(Orientation::Horizontal);
     separator.add_css_class("history-action-separator");
     menu.append(&separator);
 
-    let delete_btn = add_action("Delete", true);
+    let delete_btn = add_action(&t("Delete"), true);
 
     popover.set_child(Some(&menu));
+
+    // Keep the action menu flush with the card that opened it. This also
+    // prevents the shared popover style from making small card menus wider
+    // than their trigger.
+    popover.set_size_request(anchor.width(), -1);
 
     // Simple, synchronous actions report their outcome and close the popover.
     let wire_simple =
@@ -583,7 +592,7 @@ fn show_action_popover(
         let popover = popover.clone();
         upload_btn.connect_clicked(move |_| {
             popover.popdown();
-            state.toast.show("Uploading…", ToastKind::Neutral, None);
+            state.toast.show(&t("Uploading…"), ToastKind::Neutral, None);
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
             let entry_bg = entry.clone();
             std::thread::spawn(move || {
@@ -634,14 +643,14 @@ fn confirm_delete(state: &Rc<PageState>, entry: &CaptureEntry) {
         .modal(true)
         .message_type(gtk4::MessageType::Warning)
         .buttons(gtk4::ButtonsType::None)
-        .text(format!("Delete {}?", entry.display_name))
-        .secondary_text("This permanently removes the file from disk.")
+        .text(tfmt("Delete {name}?", &[("name", &entry.display_name)]))
+        .secondary_text(t("This permanently removes the file from disk."))
         .build();
     if let Some(window) = root {
         dialog.set_transient_for(Some(&window));
     }
-    dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
-    let delete_response = dialog.add_button("Delete", gtk4::ResponseType::Accept);
+    dialog.add_button(&t("Cancel"), gtk4::ResponseType::Cancel);
+    let delete_response = dialog.add_button(&t("Delete"), gtk4::ResponseType::Accept);
     delete_response.add_css_class("recent-captures-primary-button");
 
     let state = Rc::clone(state);

@@ -84,7 +84,7 @@ pub fn rebuild_extra_video_tracks(
         let (row, _) = track_row(Some(&header), &strip);
         row.add_css_class("recording-editor-empty-track-row");
         header.delete.set_sensitive(true);
-        header.delete.set_tooltip_text(Some("Remove video track"));
+        header.delete.set_tooltip_text(Some(&t("Remove video track")));
         header.delete.connect_clicked({
             let state = state.clone();
             let estimate_label = estimate_label.clone();
@@ -127,7 +127,7 @@ pub fn extra_video_strip(state: &Arc<Mutex<VideoEditState>>, item: &ProjectMedia
     clip.set_hexpand(true);
     clip.set_vexpand(true);
     let title = if item.display_name.trim().is_empty() {
-        "Video".to_string()
+        t("Video")
     } else {
         item.display_name.clone()
     };
@@ -230,11 +230,11 @@ pub fn build_rail_header(kind: RailKind) -> RailChrome {
     type_icon.set_valign(Align::Center);
     row.append(&type_icon);
 
-    let lock = rail_icon_button("changes-allow-symbolic", "Lock track");
+    let lock = rail_icon_button("changes-allow-symbolic", &t("Lock track"));
     row.append(&lock);
 
     let hide = if matches!(kind, RailKind::Video | RailKind::Zoom) {
-        let hide = rail_icon_button("view-reveal-symbolic", "Hide track");
+        let hide = rail_icon_button("view-reveal-symbolic", &t("Hide track"));
         row.append(&hide);
         Some(hide)
     } else {
@@ -242,14 +242,14 @@ pub fn build_rail_header(kind: RailKind) -> RailChrome {
     };
 
     let mute = if matches!(kind, RailKind::Video | RailKind::Audio) {
-        let mute = rail_icon_button("audio-volume-high-symbolic", "Mute");
+        let mute = rail_icon_button("audio-volume-high-symbolic", &t("Mute"));
         row.append(&mute);
         Some(mute)
     } else {
         None
     };
 
-    let delete = rail_icon_button("user-trash-symbolic", "Remove track");
+    let delete = rail_icon_button("user-trash-symbolic", &t("Remove track"));
     row.append(&delete);
 
     RailChrome {
@@ -281,10 +281,10 @@ pub fn apply_rail_state(
             "changes-allow-symbolic"
         },
     );
-    video.lock.set_tooltip_text(Some(if state.video_locked {
-        "Unlock video"
+    video.lock.set_tooltip_text(Some(&if state.video_locked {
+        t("Unlock video")
     } else {
-        "Lock video"
+        t("Lock video")
     }));
     if let Some(hide) = &video.hide {
         set_rail_icon(
@@ -295,10 +295,10 @@ pub fn apply_rail_state(
                 "view-reveal-symbolic"
             },
         );
-        hide.set_tooltip_text(Some(if state.video_hidden {
-            "Show video"
+        hide.set_tooltip_text(Some(&if state.video_hidden {
+            t("Show video")
         } else {
-            "Hide video"
+            t("Hide video")
         }));
     }
     if let Some(mute) = &video.mute {
@@ -312,17 +312,17 @@ pub fn apply_rail_state(
             },
         );
         mute.set_sensitive(state.has_audio_track() && !state.audio_locked);
-        mute.set_tooltip_text(Some(if muted { "Unmute" } else { "Mute" }));
+        mute.set_tooltip_text(Some(&if muted { t("Unmute") } else { t("Mute") }));
     }
     video
         .delete
         .set_sensitive(!state.video_locked && state.video_has_edits());
     video
         .delete
-        .set_tooltip_text(Some(if state.video_has_edits() {
-            "Reset video edits"
+        .set_tooltip_text(Some(&if state.video_has_edits() {
+            t("Reset video edits")
         } else {
-            "No video edits to remove"
+            t("No video edits to remove")
         }));
 
     audio_row.set_visible(state.has_audio_track());
@@ -334,10 +334,10 @@ pub fn apply_rail_state(
             "changes-allow-symbolic"
         },
     );
-    audio.lock.set_tooltip_text(Some(if state.audio_locked {
-        "Unlock audio"
+    audio.lock.set_tooltip_text(Some(&if state.audio_locked {
+        t("Unlock audio")
     } else {
-        "Lock audio"
+        t("Lock audio")
     }));
     if let Some(mute) = &audio.mute {
         let muted = state.is_muted();
@@ -350,10 +350,10 @@ pub fn apply_rail_state(
             },
         );
         mute.set_sensitive(!state.audio_locked);
-        mute.set_tooltip_text(Some(if muted { "Unmute" } else { "Mute" }));
+        mute.set_tooltip_text(Some(&if muted { t("Unmute") } else { t("Mute") }));
     }
     audio.delete.set_sensitive(!state.audio_locked);
-    audio.delete.set_tooltip_text(Some("Remove audio track"));
+    audio.delete.set_tooltip_text(Some(&t("Remove audio track")));
 
     zoom_row.set_visible(state.has_zoom_track());
     set_rail_icon(
@@ -364,10 +364,10 @@ pub fn apply_rail_state(
             "changes-allow-symbolic"
         },
     );
-    zoom.lock.set_tooltip_text(Some(if state.zoom_locked {
-        "Unlock zoom"
+    zoom.lock.set_tooltip_text(Some(&if state.zoom_locked {
+        t("Unlock zoom")
     } else {
-        "Lock zoom"
+        t("Lock zoom")
     }));
     if let Some(hide) = &zoom.hide {
         set_rail_icon(
@@ -378,15 +378,15 @@ pub fn apply_rail_state(
                 "view-reveal-symbolic"
             },
         );
-        hide.set_tooltip_text(Some(if state.zoom_hidden {
-            "Show zoom"
+        hide.set_tooltip_text(Some(&if state.zoom_hidden {
+            t("Show zoom")
         } else {
-            "Hide zoom"
+            t("Hide zoom")
         }));
     }
     zoom.delete
         .set_sensitive(!state.zoom_locked && state.has_zoom_track());
-    zoom.delete.set_tooltip_text(Some("Remove zoom track"));
+    zoom.delete.set_tooltip_text(Some(&t("Remove zoom track")));
 
     set_track_body_look(video_body, state.video_hidden, state.video_locked);
     set_track_body_look(audio_body, state.is_muted(), state.audio_locked);

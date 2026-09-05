@@ -72,6 +72,7 @@ pub(super) fn wire_tool_mode_switches(
     let buttons_select = tool_buttons.to_vec();
     let apply_crop_btn_select = apply_crop.clone();
     let update_toolbar_for_tool_select = update_toolbar_for_tool.clone();
+    let sync_picker_for_active_tool_select = sync_picker_for_active_tool.clone();
     let sync_size_control_select = sync_size_control.clone();
     let sync_select_inspector_select = sync_select_inspector.clone();
     let rebuild_effects_async_select = rebuild_effects_async.clone();
@@ -85,6 +86,7 @@ pub(super) fn wire_tool_mode_switches(
             rebuild_effects_async_select();
         }
         update_toolbar_for_tool_select(Tool::Select);
+        sync_picker_for_active_tool_select();
         sync_select_inspector_select();
         sync_size_control_select();
         set_crop_apply_button_state(&apply_crop_btn_select, false, false);
@@ -171,6 +173,7 @@ pub(super) fn wire_tool_mode_switches(
     let buttons_pen = tool_buttons.to_vec();
     let apply_crop_pen = apply_crop.clone();
     let update_toolbar_pen = update_toolbar_for_tool.clone();
+    let sync_picker_for_active_tool_pen = sync_picker_for_active_tool.clone();
     let sync_size_pen = sync_size_control.clone();
     let rebuild_pen = rebuild_effects_async.clone();
     let window_pen = window.clone();
@@ -184,6 +187,7 @@ pub(super) fn wire_tool_mode_switches(
             rebuild_pen();
         }
         update_toolbar_pen(Tool::Pen);
+        sync_picker_for_active_tool_pen();
         sync_size_pen();
         set_crop_apply_button_state(&apply_crop_pen, false, false);
         {
@@ -203,6 +207,7 @@ pub(super) fn wire_tool_mode_switches(
         state,
         drawing_area,
         update_toolbar_for_tool,
+        sync_picker_for_active_tool,
         sync_size_control,
         rebuild_effects_async,
     );
@@ -214,6 +219,7 @@ pub(super) fn wire_tool_mode_switches(
         state,
         drawing_area,
         update_toolbar_for_tool,
+        sync_picker_for_active_tool,
         sync_size_control,
         rebuild_effects_async,
     );
@@ -225,6 +231,7 @@ pub(super) fn wire_tool_mode_switches(
         state,
         drawing_area,
         update_toolbar_for_tool,
+        sync_picker_for_active_tool,
         sync_size_control,
         rebuild_effects_async,
     );
@@ -236,6 +243,7 @@ pub(super) fn wire_tool_mode_switches(
         state,
         drawing_area,
         update_toolbar_for_tool,
+        sync_picker_for_active_tool,
         sync_size_control,
         rebuild_effects_async,
     );
@@ -247,6 +255,7 @@ pub(super) fn wire_tool_mode_switches(
         state,
         drawing_area,
         update_toolbar_for_tool,
+        sync_picker_for_active_tool,
         sync_size_control,
         rebuild_effects_async,
     );
@@ -256,6 +265,7 @@ pub(super) fn wire_tool_mode_switches(
     let buttons_obfuscate = tool_buttons.to_vec();
     let apply_crop_btn_obfuscate = apply_crop.clone();
     let update_toolbar_for_tool_obfuscate = update_toolbar_for_tool.clone();
+    let sync_picker_for_active_tool_obfuscate = sync_picker_for_active_tool.clone();
     let sync_size_control_obfuscate = sync_size_control.clone();
     let rebuild_effects_async_obfuscate = rebuild_effects_async.clone();
     obfuscate.connect_clicked(move |_| {
@@ -274,6 +284,7 @@ pub(super) fn wire_tool_mode_switches(
             }
         }
         update_toolbar_for_tool_obfuscate(Tool::Obfuscate);
+        sync_picker_for_active_tool_obfuscate();
         sync_size_control_obfuscate();
         set_crop_apply_button_state(&apply_crop_btn_obfuscate, false, false);
         if let Some(area) = drawing_area_obfuscate.upgrade() {
@@ -289,6 +300,7 @@ pub(super) fn wire_tool_mode_switches(
         state,
         drawing_area,
         update_toolbar_for_tool,
+        sync_picker_for_active_tool,
         sync_size_control,
         rebuild_effects_async,
     );
@@ -298,6 +310,7 @@ pub(super) fn wire_tool_mode_switches(
     let buttons_number = tool_buttons.to_vec();
     let apply_crop_btn_number = apply_crop.clone();
     let update_toolbar_for_tool_number = update_toolbar_for_tool.clone();
+    let sync_picker_for_active_tool_number = sync_picker_for_active_tool.clone();
     let sync_size_control_number = sync_size_control.clone();
     let rebuild_effects_async_number = rebuild_effects_async.clone();
     number.connect_clicked(move |_| {
@@ -316,6 +329,7 @@ pub(super) fn wire_tool_mode_switches(
         }
         set_active_tool_button(&buttons_number, tool_button_index(next_tool.0));
         update_toolbar_for_tool_number(next_tool.0);
+        sync_picker_for_active_tool_number();
         sync_size_control_number();
         set_crop_apply_button_state(&apply_crop_btn_number, false, false);
         if let Some(area) = drawing_area_number.upgrade() {
@@ -328,6 +342,7 @@ pub(super) fn wire_tool_mode_switches(
     let buttons_highlighter = tool_buttons.to_vec();
     let apply_crop_btn_highlighter = apply_crop.clone();
     let update_toolbar_for_tool_highlighter = update_toolbar_for_tool.clone();
+    let sync_picker_for_active_tool_highlighter = sync_picker_for_active_tool.clone();
     let sync_size_control_highlighter = sync_size_control.clone();
     let window_highlighter = window.clone();
     let rebuild_effects_async_highlighter = rebuild_effects_async.clone();
@@ -351,6 +366,7 @@ pub(super) fn wire_tool_mode_switches(
             set_window_cursor_name(&window_highlighter, Some("default"));
         }
         update_toolbar_for_tool_highlighter(next_tool);
+        sync_picker_for_active_tool_highlighter();
         sync_size_control_highlighter();
         set_crop_apply_button_state(&apply_crop_btn_highlighter, false, false);
         if let Some(area) = drawing_area_highlighter.upgrade() {
@@ -368,6 +384,7 @@ fn wire_standard_tool(
     state: &Arc<Mutex<EditorState>>,
     drawing_area: &DrawingArea,
     update_toolbar_for_tool: &Rc<dyn Fn(Tool)>,
+    sync_picker_for_active_tool: &Rc<dyn Fn()>,
     sync_size_control: &Rc<dyn Fn()>,
     rebuild_effects_async: &Rc<dyn Fn()>,
 ) {
@@ -376,6 +393,7 @@ fn wire_standard_tool(
     let tool_buttons = tool_buttons.to_vec();
     let apply_crop = apply_crop.clone();
     let update_toolbar_for_tool = update_toolbar_for_tool.clone();
+    let sync_picker_for_active_tool = sync_picker_for_active_tool.clone();
     let sync_size_control = sync_size_control.clone();
     let rebuild_effects_async = rebuild_effects_async.clone();
     button.connect_clicked(move |_| {
@@ -384,6 +402,7 @@ fn wire_standard_tool(
             rebuild_effects_async();
         }
         update_toolbar_for_tool(tool);
+        sync_picker_for_active_tool();
         sync_size_control();
         set_crop_apply_button_state(&apply_crop, false, false);
         if let Some(area) = drawing_area.upgrade() {
@@ -406,5 +425,24 @@ mod tests {
                 && source.contains("any(EditorState::action_requires_effect_rebuild)"),
             "crop, number, highlighter, and obfuscation must retain their distinct tool-mode policies"
         );
+    }
+
+    #[test]
+    fn tool_mode_switches_refresh_contextual_colors() {
+        let source = include_str!("tools.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        for switch in [
+            "update_toolbar_for_tool_select(Tool::Select);\n        sync_picker_for_active_tool_select();",
+            "update_toolbar_pen(Tool::Pen);\n        sync_picker_for_active_tool_pen();",
+            "update_toolbar_for_tool_obfuscate(Tool::Obfuscate);\n        sync_picker_for_active_tool_obfuscate();",
+            "update_toolbar_for_tool_number(next_tool.0);\n        sync_picker_for_active_tool_number();",
+            "update_toolbar_for_tool_highlighter(next_tool);\n        sync_picker_for_active_tool_highlighter();",
+            "update_toolbar_for_tool(tool);\n        sync_picker_for_active_tool();",
+        ] {
+            assert!(
+                production_source.contains(switch),
+                "tool switch must refresh the active color context: {switch}"
+            );
+        }
     }
 }

@@ -811,3 +811,1315 @@ msgstr "録画を停止して保存:"
 msgid "Only during recording"
 msgstr "録画中のみ"
 
+
+msgid "+ Add current color"
+msgstr "+ 現在の色を追加"
+
+msgid "1 : 1 (Square)"
+msgstr "1 : 1（正方形）"
+
+msgid "1 {unit} ago"
+msgstr "1 {unit} 前"
+
+msgid "1, 2, 3, 4..."
+msgstr "1、2、3、4……"
+
+msgid "1080p"
+msgstr "1080p"
+
+msgid "16 : 10"
+msgstr "16 : 10"
+
+msgid "16 : 9"
+msgstr "16：9"
+
+msgid "2 : 3"
+msgstr "2 : 3"
+
+msgid "2.35 : 1"
+msgstr "2.35 : 1"
+
+msgid "3 : 2"
+msgstr "3 : 2"
+
+msgid "4 : 3"
+msgstr "4 : 3"
+
+msgid "480 x auto"
+msgstr "480 × 自動"
+
+msgid "5 : 4 (10 : 8)"
+msgstr "5 対 4（10 対 8）"
+
+msgid "640 x auto"
+msgstr "640 × 自動"
+
+msgid "7 : 5"
+msgstr "7 : 5"
+
+msgid "720p"
+msgstr "720p"
+
+msgid "800 x auto"
+msgstr "800 × 自動"
+
+msgid "9 : 16"
+msgstr "9 : 16"
+
+msgid "A, B, C, D..."
+msgstr "A、B、C、D……"
+
+msgid "Actions"
+msgstr "アクション"
+
+msgid "Add"
+msgstr "追加"
+
+msgid "Add a Manual zoom, or analyze visible cursor motion from the timeline"
+msgstr "手動ズームを追加するか、タイムラインからカーソルの動きを解析する"
+
+msgid "Add to project"
+msgstr "プロジェクトに追加"
+
+msgid "Add wallpaper"
+msgstr "壁紙を追加する"
+
+msgid "Add zoom at playhead"
+msgstr "再生位置にズームを追加"
+
+msgid "Added {auto_zooms} Auto Zooms from {samples} cursor-motion samples."
+msgstr "{auto_zooms} を追加しました。{samples} カーソル移動サンプルから自動ズームが行われます。"
+
+msgid "Adwaita"
+msgstr "アドヴァイタ"
+
+msgid "Alignment"
+msgstr "アライメント"
+
+msgid "An error occurred while taking a screenshot."
+msgstr "スクリーンショットの撮影中にエラーが発生しました。"
+
+msgid "Analyzing visible cursor motion…"
+msgstr "カーソルの動きを分析中…"
+
+msgid "Animation"
+msgstr "アニメーション"
+
+msgid "ApexShot Editor"
+msgstr "ApexShot エディター"
+
+msgid "ApexShot History"
+msgstr "ApexShotの沿革"
+
+msgid "ApexShot Preview"
+msgstr "ApexShot プレビュー"
+
+msgid "ApexShot Recording"
+msgstr "ApexShotの録画"
+
+msgid "ApexShot Recording Countdown"
+msgstr "ApexShot 録画カウントダウン"
+
+msgid "ApexShot Recording Editor"
+msgstr "ApexShot 録画エディタ"
+
+msgid "ApexShot Recording Mask"
+msgstr "ApexShot レコーディングマスク"
+
+msgid "ApexShot could not export this recording."
+msgstr "ApexShotはこの録画をエクスポートできませんでした。"
+
+msgid "ApexShot could not open this video file."
+msgstr "ApexShotはこの動画ファイルを開くことができませんでした。"
+
+msgid "ApexShot lost contact with the export worker."
+msgstr "ApexShotは、輸出担当者と連絡が取れなくなった。"
+
+msgid "ApexShot lost contact with the upload worker."
+msgstr "ApexShot がアップロードワーカーとの接続を失いました。"
+
+msgid "ApexShot-YYYY-MM-DD_HH-MM-SS.png"
+msgstr "ApexShot-YYYY-MM-DD_HH-MM-SS.png"
+
+msgid "Apply selection"
+msgstr "選択内容を適用する"
+
+msgid "Area"
+msgstr "エリア"
+
+msgid "Arrow"
+msgstr "矢印"
+
+msgid "Arrow style"
+msgstr "矢印スタイル"
+
+msgid "Aspect Ratio"
+msgstr "アスペクト比"
+
+msgid "Audio"
+msgstr "音声"
+
+msgid "Auto"
+msgstr "自動車"
+
+msgid "Auto Zoom detection complete"
+msgstr "自動ズームの検出が完了しました"
+
+msgid "Auto-balance"
+msgstr "自動バランス"
+
+msgid "Background"
+msgstr "背景"
+
+msgid "Before recording"
+msgstr "録音の前に"
+
+msgid "Behavior"
+msgstr "行動"
+
+msgid "Black"
+msgstr "黒"
+
+msgid "Blackout"
+msgstr "停電"
+
+msgid "Blackout has no intensity control"
+msgstr "「ブラックアウト」には輝度調整機能がありません"
+
+msgid "Blur"
+msgstr "ぼやけ"
+
+msgid "Blurred"
+msgstr "ぼやけた"
+
+msgid "CLICK EFFECT"
+msgstr "クリック効果"
+
+msgid "Camera recenters when the cursor nears the edge of the zoomed view"
+msgstr "カーソルがズーム表示の端に近づくと、カメラの位置が中央に戻ります"
+
+msgid "Captures you take will show up here."
+msgstr "撮影した写真はここに表示されます。"
+
+msgid "Change aspect ratio"
+msgstr "アスペクト比を変更する"
+
+msgid "Change video size"
+msgstr "動画のサイズを変更する"
+
+msgid "Choose a color for the active tool"
+msgstr "アクティブなツールの色を選択してください"
+
+msgid "Choose a folder"
+msgstr "フォルダを選択してください"
+
+msgid "Choose click color"
+msgstr "クリックの色を選択してください"
+
+msgid "Classic Animation"
+msgstr "クラシックアニメ"
+
+msgid "Clean up microphone noise"
+msgstr "マイクのノイズを除去する"
+
+msgid "Click a display · Esc to cancel · {keys}"
+msgstr "表示をクリック · Esc キーでキャンセル · {keys}"
+
+msgid "Click color"
+msgstr "色をクリック"
+
+msgid "Click to open a video, or drop one here"
+msgstr "クリックして動画を開くか、ここに動画をドラッグ＆ドロップしてください"
+
+msgid "Clip"
+msgstr "クリップ"
+
+msgid "Clipboard does not contain an image to open"
+msgstr "クリップボードには開く画像が含まれていません"
+
+msgid "Clipboard image unavailable"
+msgstr "クリップボードの画像が利用できません"
+
+msgid "Close anyway"
+msgstr "とにかく閉じる"
+
+msgid "Closing now stops the encode. Your edit session is kept."
+msgstr "「閉じる」をクリックすると、エンコードが停止します。編集セッションは保持されます。"
+
+msgid "Cloud upload not configured"
+msgstr "クラウドへのアップロードが設定されていません"
+
+msgid "Color"
+msgstr "色"
+
+msgid "Color picker"
+msgstr "カラーピッカー"
+
+msgid "Colors"
+msgstr "色"
+
+msgid ""
+"Connect ApexShot Cloud in Settings → Cloud, or switch destination to XBackBone and configure it."
+msgstr "「設定」→「クラウド」でApexShot Cloudを接続するか、保存先をXBackBoneに切り替えて設定を行ってください。"
+
+msgid ""
+"Connect your ApexShot Cloud account to browse everything you have uploaded, right here in History."
+msgstr "ApexShot Cloud アカウントを連携すると、「履歴」画面でアップロードしたすべてのコンテンツを確認できます。"
+
+msgid "Content copied to clipboard"
+msgstr "コンテンツがクリップボードにコピーされました"
+
+msgid "Content extracted"
+msgstr "抽出されたコンテンツ"
+
+msgid "Content extracted, but clipboard copy was unavailable"
+msgstr "コンテンツは抽出されましたが、クリップボードへのコピーはできませんでした"
+
+msgid "Controls"
+msgstr "操作方法"
+
+msgid "Copied"
+msgstr "コピーしました"
+
+msgid ""
+"Copied to clipboard\n"
+"{url}"
+msgstr ""
+"クリップボードにコピーされました\n"
+"{url}"
+
+msgid "Copy"
+msgstr "コピー"
+
+msgid "Copy failed"
+msgstr "コピーに失敗しました"
+
+msgid "Copy file URI"
+msgstr "ファイルのURIをコピー"
+
+msgid "Copy link"
+msgstr "リンクをコピー"
+
+msgid "Copy the recording path to the clipboard"
+msgstr "録画パスをクリップボードにコピーする"
+
+msgid "Corners"
+msgstr "コーナー"
+
+msgid "Could not delete {name}: {message}"
+msgstr "{name} を削除できませんでした: {message}"
+
+msgid "Could not load your cloud uploads"
+msgstr "クラウドへのアップロードを読み込めませんでした"
+
+msgid "Could not save edits: {error}"
+msgstr "編集内容を保存できませんでした：{error}"
+
+msgid "Countdown"
+msgstr "カウントダウン"
+
+msgid "Crop"
+msgstr "トリミング"
+
+msgid "Crop video"
+msgstr "動画をトリミングする"
+
+msgid "Current tool does not support size changes"
+msgstr "現在のツールではサイズの変更に対応していません"
+
+msgid "Cursor"
+msgstr "カーソル"
+
+msgid "Cursor analysis could not place Auto Zooms"
+msgstr "カーソル分析では、自動ズームの位置を特定できませんでした"
+
+msgid "Cursor analysis stopped"
+msgstr "カーソル解析が停止しました"
+
+msgid "Cursor is hidden for this range in preview and export"
+msgstr "プレビューおよびエクスポート時、この範囲のカーソルは非表示になります"
+
+msgid ""
+"Cursor motion was found, but Manual zooms already cover the detected moments."
+msgstr "カーソルの動きは検出されましたが、手動ズームによってすでに検出された瞬間はカバーされています。"
+
+msgid ""
+"Cursor motion was found, but no purposeful pauses were clear enough to place zooms."
+msgstr "カーソルの動きは確認されたが、ズームを挿入できるほど明確な意図的な間が見られなかった。"
+
+msgid ""
+"Cursor replacement is unavailable. Its inferred path can still guide Auto Zoom."
+msgstr "カーソルの置換は利用できません。ただし、その推定パスは引き続き自動ズームの目安となります。"
+
+msgid "Cursor styling requires pointer data from an ApexShot recording."
+msgstr "カーソルのスタイル設定には、ApexShotの記録データに含まれるポインタデータが必要です。"
+
+msgid "Cursor unavailable"
+msgstr "カーソルが使用できません"
+
+msgid "Curved"
+msgstr "湾曲した"
+
+msgid "Cut mode — click timeline to place cuts"
+msgstr "カットモード — タイムラインをクリックしてカットを配置します"
+
+msgid "Date unknown"
+msgstr "日付不明"
+
+msgid "Delete"
+msgstr "削除"
+
+msgid "Delete clip"
+msgstr "クリップを削除"
+
+msgid "Delete hide"
+msgstr "削除 非表示"
+
+msgid "Delete selected"
+msgstr "選択した項目を削除"
+
+msgid "Delete zoom"
+msgstr "ズームを解除"
+
+msgid "Delete zoom or cut"
+msgstr "ズームまたは切り取りを削除"
+
+msgid "Delete {name}?"
+msgstr "{name}を削除しますか？"
+
+msgid "Deleted {name}"
+msgstr "{name} を削除しました"
+
+msgid "Details"
+msgstr "詳細"
+
+msgid "Detect"
+msgstr "検出"
+
+msgid "Detect automatic zooms from clicks and cursor motion"
+msgstr "クリックやカーソルの動きから自動ズームを検出する"
+
+msgid "Detect text"
+msgstr "テキストを検出する"
+
+msgid "Dim screen"
+msgstr "画面が暗い"
+
+msgid "Dimensions"
+msgstr "寸法"
+
+msgid "Dismiss"
+msgstr "閉じる"
+
+msgid "Display scale resolution"
+msgstr "表示スケールの分解能"
+
+msgid "Display {number}"
+msgstr "{number}を表示"
+
+msgid "Do Not Disturb"
+msgstr "「お邪魔しないで」"
+
+msgid "Done"
+msgstr "完了"
+
+msgid "Dot"
+msgstr "ドット"
+
+msgid "Double"
+msgstr "ダブル"
+
+msgid "Download Extension"
+msgstr "拡張機能をダウンロード"
+
+msgid "Drag here"
+msgstr "ここにドラッグしてください"
+
+msgid "Drag here or click to upload"
+msgstr "ここにドラッグするか、クリックしてアップロードしてください"
+
+msgid "Drop a recording to begin"
+msgstr "録音ファイルをドロップして開始してください"
+
+msgid "Drop an image here"
+msgstr "ここに画像をドラッグ＆ドロップしてください"
+
+msgid "Duration"
+msgstr "所要時間"
+
+msgid "Ease"
+msgstr "手軽さ"
+
+msgid "Easing"
+msgstr "緩和"
+
+msgid "Echo"
+msgstr "エコー"
+
+msgid "Edit"
+msgstr "編集"
+
+msgid "Edit quality, resolution and audio after recording"
+msgstr "録画後に画質、解像度、音声を編集する"
+
+msgid "Effects"
+msgstr "効果"
+
+msgid "Empty"
+msgstr "空"
+
+msgid "End {time}"
+msgstr "終了 {time}"
+
+msgid "Estimated export size"
+msgstr "輸出規模の見込み"
+
+msgid "Everything you have uploaded to ApexShot Cloud"
+msgstr "ApexShot Cloudにアップロードしたすべてのデータ"
+
+msgid "Export complete"
+msgstr "エクスポートが完了しました"
+
+msgid "Export failed"
+msgstr "エクスポートに失敗しました"
+
+msgid "Export is still running."
+msgstr "エクスポートは現在も実行中です。"
+
+msgid "Export the edited MP4"
+msgstr "編集したMP4をエクスポートする"
+
+msgid "Export video"
+msgstr "動画をエクスポートする"
+
+msgid "Export with your current settings, then upload"
+msgstr "現在の設定のままエクスポートしてから、アップロードしてください"
+
+msgid "Extra Large"
+msgstr "特大"
+
+msgid "FRAME"
+msgstr "FRAME"
+
+msgid "Failed to open video"
+msgstr "動画を openings できませんでした"
+
+msgid "Fancy"
+msgstr "ファンシー"
+
+msgid "File copied to clipboard"
+msgstr "ファイルがクリップボードにコピーされました"
+
+msgid "Focus"
+msgstr "焦点"
+
+msgid "Focus background intensity"
+msgstr "フォーカスの背景輝度"
+
+msgid "Focused"
+msgstr "集中した"
+
+msgid "Font"
+msgstr "フォント"
+
+msgid "Font family"
+msgstr "フォントファミリー"
+
+msgid "Frame rate"
+msgstr "フレームレート"
+
+msgid "Freeform"
+msgstr "フリーフォーム"
+
+msgid "Fullscreen"
+msgstr "全画面表示"
+
+msgid "GIF"
+msgstr "GIF"
+
+msgid ""
+"GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first."
+msgstr "GNOME Shell 拡張機能がインストールされていません。まず、ApexShot GNOME 拡張機能をインストールしてください。"
+
+msgid "Geometry"
+msgstr "幾何学"
+
+msgid "Glide"
+msgstr "グライド"
+
+msgid "Got it"
+msgstr "了解しました"
+
+msgid "Gradient"
+msgstr "勾配"
+
+msgid "Gradients"
+msgstr "グラデーション"
+
+msgid "HEIGHT"
+msgstr "高さ"
+
+msgid "HEX"
+msgstr "HEX"
+
+msgid "HiDPI"
+msgstr "HiDPI"
+
+msgid "Hide cursor"
+msgstr "カーソルを非表示にする"
+
+msgid "Hide cursor at playhead"
+msgstr "再生位置でカーソルを非表示にする"
+
+msgid "Hide track"
+msgstr "トラックを非表示にする"
+
+msgid "Hide video"
+msgstr "動画を非表示にする"
+
+msgid "Hide when idle"
+msgstr "アイドル時に非表示にする"
+
+msgid "Hide zoom"
+msgstr "ズームを非表示にする"
+
+msgid "High"
+msgstr "高い"
+
+msgid "Highlighter"
+msgstr "蛍光ペン"
+
+msgid "Idle delay"
+msgstr "アイドル遅延"
+
+msgid "Image"
+msgstr "画像"
+
+msgid "Image copied to clipboard"
+msgstr "画像がクリップボードにコピーされました"
+
+msgid "Images"
+msgstr "画像"
+
+msgid "Insert"
+msgstr "挿入"
+
+msgid "Inspector"
+msgstr "検査官"
+
+msgid "Intensity"
+msgstr "強度"
+
+msgid "Intensity {percent}%"
+msgstr "強度 {percent}%"
+
+msgid "Just now"
+msgstr "ついさっき"
+
+msgid "Keep editing"
+msgstr "編集を続ける"
+
+msgid "Keyboard shortcuts"
+msgstr "キーボードショートカット"
+
+msgid "Large"
+msgstr "大"
+
+msgid "Line"
+msgstr "行"
+
+msgid "Linear"
+msgstr "線形"
+
+msgid "Load more"
+msgstr "さらに表示"
+
+msgid "Loading image…"
+msgstr "画像を読み込み中…"
+
+msgid "Loading your cloud uploads…"
+msgstr "クラウドへのアップロードを読み込んでいます…"
+
+msgid "Loading…"
+msgstr "読み込み中…"
+
+msgid "Lock audio"
+msgstr "音声をロックする"
+
+msgid "Lock track"
+msgstr "トラックのロック"
+
+msgid "Lock video"
+msgstr "動画をロックする"
+
+msgid "Lock zoom"
+msgstr "ズームを固定"
+
+msgid "Low"
+msgstr "低"
+
+msgid "MP4 files"
+msgstr "MP4ファイル"
+
+msgid "MP4 video"
+msgstr "MP4動画"
+
+msgid "Manual"
+msgstr "マニュアル"
+
+msgid "Maximum resolution"
+msgstr "最大解像度"
+
+msgid "Media"
+msgstr "メディア"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "Method"
+msgstr "方法"
+
+msgid "Mic"
+msgstr "マイク"
+
+msgid "Minimal"
+msgstr "ミニマル"
+
+msgid "Motion"
+msgstr "動議"
+
+msgid "Move mode — drag a segment to reorder it"
+msgstr "移動モード — セグメントをドラッグして順序を変更します"
+
+msgid "Mute"
+msgstr "ミュート"
+
+msgid "My colors"
+msgstr "私の色"
+
+msgid "No Auto Zooms added"
+msgstr "自動ズームは追加されていません"
+
+msgid ""
+"No Auto Zooms were added. Manual zooms are preserved, and overlapping detections are skipped."
+msgstr "自動ズームは追加されませんでした。手動ズームは保持され、重複する検出はスキップされます。"
+
+msgid "No audio"
+msgstr "音声なし"
+
+msgid "No clear clicks or purposeful pointer pauses were found."
+msgstr "明確なクリック音や、意図的なポインタの停止は確認されなかった。"
+
+msgid "No cursor samples were captured. Zoom centers will use the frame center."
+msgstr "カーソルサンプルは取得されませんでした。ズームの中心にはフレームの中心が使用されます。"
+
+msgid "No editable cursor data was found."
+msgstr "編集可能なカーソルデータが見つかりませんでした。"
+
+msgid "No geometry"
+msgstr "幾何学なし"
+
+msgid "No media"
+msgstr "メディアなし"
+
+msgid "No object selected"
+msgstr "選択されたオブジェクトはありません"
+
+msgid "No pointer data found"
+msgstr "ポインタデータが見つかりませんでした"
+
+msgid "No recordings yet"
+msgstr "まだ録音はありません"
+
+msgid "No screenshots yet"
+msgstr "スクリーンショットはまだありません"
+
+msgid "No video edits to remove"
+msgstr "削除すべき動画の編集部分はありません"
+
+msgid "No zooms"
+msgstr "ズームなし"
+
+msgid "Noise suppression"
+msgstr "ノイズ抑制"
+
+msgid "Notifications"
+msgstr "通知"
+
+msgid "Number"
+msgstr "番号"
+
+msgid "Number Options"
+msgstr "番号の選択肢"
+
+msgid "OCR"
+msgstr "OCR"
+
+msgid "OCR complete"
+msgstr "OCR処理完了"
+
+msgid "OCR failed"
+msgstr "OCRが失敗しました"
+
+msgid "Obfuscate method"
+msgstr "オブファスケーティング手法"
+
+msgid ""
+"On KDE Plasma, the compositor refused the screenshot. Enable KWin's screenshot plugin (System Settings → Desktop Effects, or set screenshotEnabled=true under [Plugins] in ~/.config/kwinrc) and try again."
+msgstr ""
+"KDE Plasma では、コンポジターがスクリーンショットの取得を拒否しました。KWin のスクリーンショットプラグインを有効にして（「システム設定」→「デスクトップエフェクト」、または ~/.config/kwinrc の [Plugins] セクションで screenshotEnabled=true を設定）、もう一度お試しください。"
+
+msgid "Opacity"
+msgstr "不透明度"
+
+msgid "Open"
+msgstr "開く"
+
+msgid "Open Folder"
+msgstr "フォルダを開く"
+
+msgid ""
+"Open Zoom and choose Detect to analyze visible cursor motion, or use Manual mode to place zooms yourself."
+msgstr "Zoomを開き、「検出」を選択してカーソルの動きを自動で分析するか、または「手動」モードを使用して自分でズーム位置を設定してください。"
+
+msgid "Open color picker"
+msgstr "カラーピッカーを開く"
+
+msgid "Open in browser"
+msgstr "ブラウザで開く"
+
+msgid "Open in editor"
+msgstr "エディタで開く"
+
+msgid "Open video"
+msgstr "動画を再生"
+
+msgid "Open video editor"
+msgstr "動画編集ソフトを開く"
+
+msgid "Opened in your browser"
+msgstr "ブラウザで開きました"
+
+msgid "Opened {name}"
+msgstr "{name}がオープンしました"
+
+msgid "Opening {name} in the {editor}"
+msgstr "{name}で{editor}を開く"
+
+msgid "Optimize GIF"
+msgstr "GIFを最適化"
+
+msgid "Or click to upload"
+msgstr "または、クリックしてアップロードしてください"
+
+msgid "Original"
+msgstr "原文"
+
+msgid "Output size"
+msgstr "出力サイズ"
+
+msgid "PNG, JPEG, or WebP"
+msgstr "PNG、JPEG、またはWebP"
+
+msgid "PRESET"
+msgstr "プリセット"
+
+msgid "Padding"
+msgstr "パディング"
+
+msgid "Palette"
+msgstr "パレット"
+
+msgid "Paste your XBackBone API token"
+msgstr "XBackBone APIトークンを貼り付けてください"
+
+msgid "Pick from screen"
+msgstr "画面から選択"
+
+msgid "Pin"
+msgstr "ピン"
+
+msgid "Pixelate"
+msgstr "ピクセル化"
+
+msgid "Play"
+msgstr "再生"
+
+msgid "Pointer track missing"
+msgstr "ポインタの軌跡が見つかりません"
+
+msgid "Pointer track unavailable"
+msgstr "ポインタトラックが利用できません"
+
+msgid "Primary"
+msgstr "初等"
+
+msgid "QR code decoded"
+msgstr "QRコードの読み取り完了"
+
+msgid "Quality"
+msgstr "品質"
+
+msgid "Ratio"
+msgstr "比率"
+
+msgid "Record audio in mono"
+msgstr "オーディオをモノラルで録音する"
+
+msgid "Recording failed"
+msgstr "記録に失敗しました"
+
+msgid "Recording not saved"
+msgstr "録画が保存されませんでした"
+
+msgid "Recording not supported"
+msgstr "録音はサポートされていません"
+
+msgid "Recording path copied"
+msgstr "記録パスをコピーしました"
+
+msgid "Recording saved"
+msgstr "記録が保存されました"
+
+msgid "Recording setup"
+msgstr "録音の設定"
+
+msgid ""
+"Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor."
+msgstr "OSのカーソルを非表示にしたまま、録画を続行します。エディタでApexShot GNOME拡張機能を有効にしてください。"
+
+msgid "Recordings"
+msgstr "録音"
+
+msgid "Reduce file size and upload time"
+msgstr "ファイルサイズとアップロード時間を短縮する"
+
+msgid "Refresh"
+msgstr "更新"
+
+msgid "Remember last area"
+msgstr "前のエリアを覚えていますか"
+
+msgid "Remove audio track"
+msgstr "オーディオトラックを削除する"
+
+msgid "Remove custom color"
+msgstr "カスタムカラーを削除する"
+
+msgid "Remove track"
+msgstr "トラックを削除する"
+
+msgid "Remove video track"
+msgstr "ビデオトラックを削除する"
+
+msgid "Remove zoom track"
+msgstr "ズームトラックを削除する"
+
+msgid "Rename video"
+msgstr "動画の名前を変更する"
+
+msgid "Reset"
+msgstr "リセット"
+
+msgid "Reset video edits"
+msgstr "動画の編集内容をリセットする"
+
+msgid "Retry"
+msgstr "再試行"
+
+msgid "Reverse direction"
+msgstr "進行方向を逆にする"
+
+msgid "Revert cuts"
+msgstr "削減を撤回する"
+
+msgid "Ripple"
+msgstr "リップル"
+
+msgid "Save is disabled in After capture settings"
+msgstr "「キャプチャ後の設定」では、「保存」が無効になっています"
+
+msgid "Saved {file} ({size})"
+msgstr "{file} ({size}) を保存しました"
+
+msgid "Screen Recording"
+msgstr "画面録画"
+
+msgid "Screen recordings you make will show up here."
+msgstr "録画した画面はここに表示されます。"
+
+msgid "Screenshot failed"
+msgstr "スクリーンショットの取得に失敗しました"
+
+msgid "Screenshot not saved"
+msgstr "スクリーンショットが保存されませんでした"
+
+msgid "Scroll"
+msgstr "スクロール"
+
+msgid "Scroll Capture"
+msgstr "スクロールキャプチャ"
+
+msgid "Scroll capture requires the ApexShot"
+msgstr "スクロールのキャプチャにはApexShotが必要です"
+
+msgid "Search isn't available for Cloud"
+msgstr "Cloudでは検索機能は利用できません"
+
+msgid "Search recordings"
+msgstr "録画を検索"
+
+msgid "Search screenshots"
+msgstr "スクリーンショットを検索"
+
+msgid "Select a Window"
+msgstr "ウィンドウを選択してください"
+
+msgid "Select a display"
+msgstr "表示方法を選択してください"
+
+msgid "Select a video, begin your creation."
+msgstr "動画を選んで、制作を始めましょう。"
+
+msgid ""
+"Select a zoom to adjust it; timeline detection uses clicks and pointer pauses"
+msgstr "ズームレベルを選択して調整してください。タイムラインの検出には、クリックやポインタの停止が使用されます。"
+
+msgid "Select any annotation on the canvas to inspect it."
+msgstr "キャンバス上の任意の注釈を選択して、その詳細を確認してください。"
+
+msgid "Selection"
+msgstr "選択"
+
+msgid "Set a fixed focus point for this zoom"
+msgstr "このズームのフォーカスポイントを固定する"
+
+msgid ""
+"Set the instance URL and API token in Settings → Cloud, or switch to ApexShot Cloud and sign in."
+msgstr "「設定」→「Cloud」でインスタンスのURLとAPIトークンを設定するか、ApexShot Cloudに切り替えてログインしてください。"
+
+msgid "Shadow"
+msgstr "シャドウ"
+
+msgid "Share link copied to clipboard"
+msgstr "リンクがクリップボードにコピーされました"
+
+msgid "Share link: {url}"
+msgstr "リンクを共有：{url}"
+
+msgid "Show in files"
+msgstr "ファイル内で表示"
+
+msgid "Show less"
+msgstr "表示を縮小"
+
+msgid "Show more"
+msgstr "もっと見る"
+
+msgid "Show video"
+msgstr "動画を再生"
+
+msgid "Show zoom"
+msgstr "ズーム表示"
+
+msgid "Showing {name} in your files"
+msgstr "ファイル内の {name} を表示しています"
+
+msgid "Shown over the recording in preview and export"
+msgstr "プレビューおよびエクスポート時に、録画映像の上に表示されます"
+
+msgid "Sign in"
+msgstr "ログイン"
+
+msgid "Sign in to ApexShot Cloud"
+msgstr "ApexShot Cloud にログインしてください"
+
+msgid "Size"
+msgstr "サイズ"
+
+msgid "Skip back 1s"
+msgstr "1秒前に戻る"
+
+msgid "Skip forward 1s"
+msgstr "1秒先へスキップ"
+
+msgid "Small"
+msgstr "小"
+
+msgid "Smooth"
+msgstr "滑らか"
+
+msgid "Smoothing"
+msgstr "平滑化"
+
+msgid "Snappy"
+msgstr "スナッピー"
+
+msgid "Softer follow"
+msgstr "よりソフトなフォロー"
+
+msgid "Speaker"
+msgstr "講演者"
+
+msgid "Speed"
+msgstr "速度"
+
+msgid "Split"
+msgstr "スプリット"
+
+msgid "Split at playhead"
+msgstr "再生位置で分割"
+
+msgid "Spotlight"
+msgstr "スポットライト"
+
+msgid "Square"
+msgstr "スクエア"
+
+msgid "Standard"
+msgstr "標準"
+
+msgid "Start"
+msgstr "開始"
+
+msgid "Start with:"
+msgstr "まずは以下から始めましょう："
+
+msgid "Start {time}"
+msgstr "開始 {time}"
+
+msgid "Stroke Thickness"
+msgstr "ストロークの太さ"
+
+msgid "Stroke size"
+msgstr "ストロークサイズ"
+
+msgid "Style"
+msgstr "スタイル"
+
+msgid "Sway"
+msgstr "スウェイ"
+
+msgid "Tahoe"
+msgstr "タホ"
+
+msgid "Tahoe Inverted"
+msgstr "タホの逆さ映り"
+
+msgid "Text"
+msgstr "テキスト"
+
+msgid "Text copied to clipboard"
+msgstr "テキストがクリップボードにコピーされました"
+
+msgid "Text extracted"
+msgstr "抽出されたテキスト"
+
+msgid "Text extracted, but clipboard copy was unavailable"
+msgstr "テキストは抽出されましたが、クリップボードへのコピーはできませんでした"
+
+msgid "Text size"
+msgstr "文字サイズ"
+
+msgid ""
+"The analysis worker stopped unexpectedly. Manual Zoom is still available."
+msgstr "分析ワーカーが予期せず停止しました。手動ズームは引き続きご利用いただけます。"
+
+msgid "The cursor is baked into this imported video."
+msgstr "このインポートされた動画には、カーソルが埋め込まれています。"
+
+msgid "The video editor only supports MP4 recordings"
+msgstr "この動画編集ソフトは、MP4形式の録画ファイルのみに対応しています"
+
+msgid "Thick"
+msgstr "厚い"
+
+msgid "Thickness"
+msgstr "厚さ"
+
+msgid "Thin"
+msgstr "薄い"
+
+msgid "This page covers ApexShot Cloud"
+msgstr "このページでは、ApexShot Cloudについて解説しています"
+
+msgid "This permanently removes the file from disk."
+msgstr "これにより、ファイルがディスクから完全に削除されます。"
+
+msgid "This upload has no link to open"
+msgstr "このアップロードには、開くためのリンクがありません"
+
+msgid "This upload has no share link"
+msgstr "このアップロードには共有リンクがありません"
+
+msgid "Tighter, faster"
+msgstr "よりタイトに、より速く"
+
+msgid "Tilt"
+msgstr "チルト"
+
+msgid "Timer"
+msgstr "タイマー"
+
+msgid "Tool options coming soon"
+msgstr "ツールのオプションは近日公開予定です"
+
+msgid "Trail"
+msgstr "トレイル"
+
+msgid "URL copied to clipboard"
+msgstr "URLがクリップボードにコピーされました"
+
+msgid "Unlock audio"
+msgstr "音声のロックを解除"
+
+msgid "Unlock video"
+msgstr "動画のロックを解除"
+
+msgid "Unlock zoom"
+msgstr "ズームのロックを解除"
+
+msgid "Unmute"
+msgstr "ミュート解除"
+
+msgid "Untitled"
+msgstr "無題"
+
+msgid "Upload complete"
+msgstr "アップロードが完了しました"
+
+msgid "Upload failed"
+msgstr "アップロードに失敗しました"
+
+msgid "Upload failed: {message}"
+msgstr "アップロードに失敗しました：{message}"
+
+msgid "Upload media"
+msgstr "メディアをアップロードする"
+
+msgid "Upload to cloud"
+msgstr "クラウドにアップロード"
+
+msgid "Uploaded {name}"
+msgstr "{name} をアップロードしました"
+
+msgid "Uploading…"
+msgstr "アップロード中…"
+
+msgid "Use the Thickness panel for highlighter"
+msgstr "蛍光ペンの設定には「太さ」パネルを使用します"
+
+msgid "Very Thick"
+msgstr "とても分厚い"
+
+msgid "Video"
+msgstr "動画"
+
+msgid ""
+"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
+msgstr ""
+"Fedora では動画の録画はサポートされていません。スクリーンショットの撮影は可能です。画面録画を行う場合は、Spectacle または Kooha をご利用ください。"
+
+msgid "Videos"
+msgstr "動画"
+
+msgid "WIDTH"
+msgstr "幅"
+
+msgid "Waiting for sign-in…"
+msgstr "サインインを待機中…"
+
+msgid "Wallpaper"
+msgstr "壁紙"
+
+msgid "Waveform unavailable"
+msgstr "波形が表示されません"
+
+msgid "While recording"
+msgstr "録音中に"
+
+msgid "White"
+msgstr "白"
+
+msgid "XBackBone upload not configured"
+msgstr "XBackBoneのアップロードが設定されていません"
+
+msgid "Yaru"
+msgstr "ヤル"
+
+msgid "Yesterday"
+msgstr "昨日"
+
+msgid "You have not uploaded anything to ApexShot Cloud yet."
+msgstr "ApexShot Cloudにはまだ何もアップロードされていません。"
+
+msgid "You're connected"
+msgstr "接続されています"
+
+msgid "Your next screenshot gets a share link."
+msgstr "次のスクリーンショットには、共有用リンクが付きます。"
+
+msgid ""
+"Your uploads currently go to a self-hosted XBackBone instance. Switch your upload destination to ApexShot Cloud in Settings to browse those uploads here."
+msgstr ""
+"現在、アップロードされたファイルは、自社ホスト型のXBackBoneインスタンスに保存されています。「設定」でアップロード先をApexShot Cloudに変更すると、こちらでそれらのアップロードを確認できるようになります。"
+
+msgid "Zoom"
+msgstr "ズーム"
+
+msgid "Zoom In"
+msgstr "拡大"
+
+msgid "Zoom Out"
+msgstr "ズームアウト"
+
+msgid "Zoom controls"
+msgstr "Zoomの操作方法"
+
+msgid "Zoom in timeline"
+msgstr "タイムラインを拡大する"
+
+msgid "Zoom out timeline"
+msgstr "タイムラインを縮小する"
+
+msgid "Zoom to Selection"
+msgstr "選択範囲を拡大"
+
+msgid "a, b, c, d..."
+msgstr "a、b、c、d……"
+
+msgid "browser extension."
+msgstr "ブラウザ拡張機能。"
+
+msgid "i, ii, iii, iv..."
+msgstr "i、ii、iii、iv…"
+
+msgid "macOS"
+msgstr "macOS"
+
+msgid "{count} {unit}s ago"
+msgstr "{count} {unit}s前"
+
+msgid "{name} is no longer on disk"
+msgstr "{name} はディスク上に存在しません"
+
+msgid "{name} was already gone"
+msgstr "{name}はすでにいなくなっていた"
+
+msgid "＋ Add to My Colors"
+msgstr "＋ 「マイカラー」に追加"
+
+msgid "Box"
+msgstr "ボックス"
+
+msgid "Circle"
+msgstr "サークル"
+
+msgid "Obfuscate"
+msgstr "難読化"
+
+msgid "Pen"
+msgstr "ペン"
+
+msgid "Choose the solid color used when Background is set to plain color"
+msgstr "「背景」が「単色」に設定されている場合に使用する単色を選択してください"

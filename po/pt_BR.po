@@ -825,3 +825,1337 @@ msgstr "Parar e salvar gravação:"
 msgid "Only during recording"
 msgstr "Somente durante a gravação"
 
+
+msgid "+ Add current color"
+msgstr "+ Adicionar a cor atual"
+
+msgid "1 : 1 (Square)"
+msgstr "1 : 1 (quadrado)"
+
+msgid "1 {unit} ago"
+msgstr "1 {unit} atrás"
+
+msgid "1, 2, 3, 4..."
+msgstr "1, 2, 3, 4..."
+
+msgid "1080p"
+msgstr "1080p"
+
+msgid "16 : 10"
+msgstr "16:10"
+
+msgid "16 : 9"
+msgstr "16:9"
+
+msgid "2 : 3"
+msgstr "2 : 3"
+
+msgid "2.35 : 1"
+msgstr "2,35 : 1"
+
+msgid "3 : 2"
+msgstr "3 a 2"
+
+msgid "4 : 3"
+msgstr "4 a 3"
+
+msgid "480 x auto"
+msgstr "480 x automático"
+
+msgid "5 : 4 (10 : 8)"
+msgstr "5 a 4 (10 a 8)"
+
+msgid "640 x auto"
+msgstr "640 x automático"
+
+msgid "7 : 5"
+msgstr "7 : 5"
+
+msgid "720p"
+msgstr "720p"
+
+msgid "800 x auto"
+msgstr "800 x automático"
+
+msgid "9 : 16"
+msgstr "9:16"
+
+msgid "A, B, C, D..."
+msgstr "A, B, C, D..."
+
+msgid "Actions"
+msgstr "Ações"
+
+msgid "Add"
+msgstr "Adicionar"
+
+msgid "Add a Manual zoom, or analyze visible cursor motion from the timeline"
+msgstr ""
+"Adicione um zoom manual ou analise o movimento visível do cursor na linha do tempo"
+
+msgid "Add to project"
+msgstr "Adicionar ao projeto"
+
+msgid "Add wallpaper"
+msgstr "Adicionar papel de parede"
+
+msgid "Add zoom at playhead"
+msgstr "Adicionar zoom no indicador de reprodução"
+
+msgid "Added {auto_zooms} Auto Zooms from {samples} cursor-motion samples."
+msgstr ""
+"Adicionados {auto_zooms} ampliações automáticas a partir de {samples} amostras de movimento do cursor."
+
+msgid "Adwaita"
+msgstr "Adwaita"
+
+msgid "Alignment"
+msgstr "Alinhamento"
+
+msgid "An error occurred while taking a screenshot."
+msgstr "Ocorreu um erro ao fazer uma captura de tela."
+
+msgid "Analyzing visible cursor motion…"
+msgstr "Analisando o movimento visível do cursor…"
+
+msgid "Animation"
+msgstr "Animação"
+
+msgid "ApexShot Editor"
+msgstr "Editor do ApexShot"
+
+msgid "ApexShot History"
+msgstr "História do ApexShot"
+
+msgid "ApexShot Preview"
+msgstr "Prévia do ApexShot"
+
+msgid "ApexShot Recording"
+msgstr "Gravação do ApexShot"
+
+msgid "ApexShot Recording Countdown"
+msgstr "Contagem regressiva para a gravação do ApexShot"
+
+msgid "ApexShot Recording Editor"
+msgstr "Editor de gravações do ApexShot"
+
+msgid "ApexShot Recording Mask"
+msgstr "Máscara de gravação ApexShot"
+
+msgid "ApexShot could not export this recording."
+msgstr "O ApexShot não conseguiu exportar essa gravação."
+
+msgid "ApexShot could not open this video file."
+msgstr "O ApexShot não conseguiu abrir este arquivo de vídeo."
+
+msgid "ApexShot lost contact with the export worker."
+msgstr "A ApexShot perdeu contato com o funcionário da área de exportação."
+
+msgid "ApexShot lost contact with the upload worker."
+msgstr "O ApexShot perdeu contato com o processador de upload."
+
+msgid "ApexShot-YYYY-MM-DD_HH-MM-SS.png"
+msgstr "ApexShot-AAAA-MM-DD_HH-MM-SS.png"
+
+msgid "Apply selection"
+msgstr "Aplicar seleção"
+
+msgid "Area"
+msgstr "Área"
+
+msgid "Arrow"
+msgstr "Seta"
+
+msgid "Arrow style"
+msgstr "Estilo de seta"
+
+msgid "Aspect Ratio"
+msgstr "Proporção da tela"
+
+msgid "Audio"
+msgstr "Áudio"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Auto Zoom detection complete"
+msgstr "Detecção de zoom automático concluída"
+
+msgid "Auto-balance"
+msgstr "Equilíbrio automático"
+
+msgid "Background"
+msgstr "Contexto"
+
+msgid "Before recording"
+msgstr "Antes da gravação"
+
+msgid "Behavior"
+msgstr "Comportamento"
+
+msgid "Black"
+msgstr "Preto"
+
+msgid "Blackout"
+msgstr "Apagão"
+
+msgid "Blackout has no intensity control"
+msgstr "O modo “Blackout” não possui controle de intensidade"
+
+msgid "Blur"
+msgstr "Desfoque"
+
+msgid "Blurred"
+msgstr "Desfocado"
+
+msgid "CLICK EFFECT"
+msgstr "EFEITO DE CLIQUE"
+
+msgid "Camera recenters when the cursor nears the edge of the zoomed view"
+msgstr ""
+"A câmera se recentra quando o cursor se aproxima da borda da imagem ampliada"
+
+msgid "Captures you take will show up here."
+msgstr "As capturas que você fizer aparecerão aqui."
+
+msgid "Change aspect ratio"
+msgstr "Alterar a proporção da imagem"
+
+msgid "Change video size"
+msgstr "Alterar o tamanho do vídeo"
+
+msgid "Choose a color for the active tool"
+msgstr "Escolha uma cor para a ferramenta ativa"
+
+msgid "Choose a folder"
+msgstr "Escolha uma pasta"
+
+msgid "Choose click color"
+msgstr "Escolha a cor do clique"
+
+msgid "Classic Animation"
+msgstr "Animação Clássica"
+
+msgid "Clean up microphone noise"
+msgstr "Eliminar ruídos do microfone"
+
+msgid "Click a display · Esc to cancel · {keys}"
+msgstr "Clique em uma tela · Esc para cancelar · {keys}"
+
+msgid "Click color"
+msgstr "Clique na cor"
+
+msgid "Click to open a video, or drop one here"
+msgstr "Clique para abrir um vídeo ou arraste um para cá"
+
+msgid "Clip"
+msgstr "Clipe"
+
+msgid "Clipboard does not contain an image to open"
+msgstr "A área de transferência não contém nenhuma imagem para abrir"
+
+msgid "Clipboard image unavailable"
+msgstr "Imagem da área de transferência indisponível"
+
+msgid "Close anyway"
+msgstr "Fechar mesmo assim"
+
+msgid "Closing now stops the encode. Your edit session is kept."
+msgstr "Fechar agora interrompe a codificação. Sua sessão de edição é mantida."
+
+msgid "Cloud upload not configured"
+msgstr "O upload para a nuvem não está configurado"
+
+msgid "Color"
+msgstr "Cor"
+
+msgid "Color picker"
+msgstr "Seletor de cores"
+
+msgid "Colors"
+msgstr "Cores"
+
+msgid ""
+"Connect ApexShot Cloud in Settings → Cloud, or switch destination to XBackBone and configure it."
+msgstr ""
+"Conecte o ApexShot Cloud em Configurações → Nuvem ou alterne o destino para o XBackBone e configure-o."
+
+msgid ""
+"Connect your ApexShot Cloud account to browse everything you have uploaded, right here in History."
+msgstr ""
+"Conecte sua conta do ApexShot Cloud para ver tudo o que você enviou, bem aqui no Histórico."
+
+msgid "Content copied to clipboard"
+msgstr "Conteúdo copiado para a área de transferência"
+
+msgid "Content extracted"
+msgstr "Conteúdo extraído"
+
+msgid "Content extracted, but clipboard copy was unavailable"
+msgstr ""
+"O conteúdo foi extraído, mas não foi possível copiá-lo para a área de transferência"
+
+msgid "Controls"
+msgstr "Controles"
+
+msgid "Copied"
+msgstr "Copiado"
+
+msgid ""
+"Copied to clipboard\n"
+"{url}"
+msgstr ""
+"Copiado para a área de transferência\n"
+"{url}"
+
+msgid "Copy"
+msgstr "Copiar"
+
+msgid "Copy failed"
+msgstr "Falha na cópia"
+
+msgid "Copy file URI"
+msgstr "Copiar o URI do arquivo"
+
+msgid "Copy link"
+msgstr "Copiar link"
+
+msgid "Copy the recording path to the clipboard"
+msgstr "Copiar o caminho da gravação para a área de transferência"
+
+msgid "Corners"
+msgstr "Cantos"
+
+msgid "Could not delete {name}: {message}"
+msgstr "Não foi possível excluir {name}: {message}"
+
+msgid "Could not load your cloud uploads"
+msgstr "Não foi possível carregar seus arquivos enviados para a nuvem"
+
+msgid "Could not save edits: {error}"
+msgstr "Não foi possível salvar as alterações: {error}"
+
+msgid "Countdown"
+msgstr "Contagem regressiva"
+
+msgid "Crop"
+msgstr "Cultura"
+
+msgid "Crop video"
+msgstr "Cortar vídeo"
+
+msgid "Current tool does not support size changes"
+msgstr "A ferramenta atual não permite alterações de tamanho"
+
+msgid "Cursor"
+msgstr "Cursor"
+
+msgid "Cursor analysis could not place Auto Zooms"
+msgstr "A análise do cursor não conseguiu localizar os “Auto Zooms”"
+
+msgid "Cursor analysis stopped"
+msgstr "A análise do cursor foi interrompida"
+
+msgid "Cursor is hidden for this range in preview and export"
+msgstr "O cursor fica oculto para esse intervalo na visualização e na exportação"
+
+msgid ""
+"Cursor motion was found, but Manual zooms already cover the detected moments."
+msgstr ""
+"Foi detectado movimento do cursor, mas os ampliações manuais já abrangem os momentos detectados."
+
+msgid ""
+"Cursor motion was found, but no purposeful pauses were clear enough to place zooms."
+msgstr ""
+"Foi detectado movimento do cursor, mas nenhuma pausa intencional foi clara o suficiente para inserir ampliações."
+
+msgid ""
+"Cursor replacement is unavailable. Its inferred path can still guide Auto Zoom."
+msgstr ""
+"A substituição do cursor não está disponível. Seu trajeto inferido ainda pode orientar o Zoom Automático."
+
+msgid "Cursor styling requires pointer data from an ApexShot recording."
+msgstr ""
+"A personalização do cursor requer dados do ponteiro provenientes de uma gravação do ApexShot."
+
+msgid "Cursor unavailable"
+msgstr "Cursor indisponível"
+
+msgid "Curved"
+msgstr "Curvado"
+
+msgid "Cut mode — click timeline to place cuts"
+msgstr "Modo de corte — clique na linha do tempo para inserir cortes"
+
+msgid "Date unknown"
+msgstr "Data desconhecida"
+
+msgid "Delete"
+msgstr "Excluir"
+
+msgid "Delete clip"
+msgstr "Excluir clipe"
+
+msgid "Delete hide"
+msgstr "Excluir, ocultar"
+
+msgid "Delete selected"
+msgstr "Excluir os itens selecionados"
+
+msgid "Delete zoom"
+msgstr "Excluir zoom"
+
+msgid "Delete zoom or cut"
+msgstr "Excluir zoom ou recortar"
+
+msgid "Delete {name}?"
+msgstr "Excluir {name}?"
+
+msgid "Deleted {name}"
+msgstr "Excluído {name}"
+
+msgid "Details"
+msgstr "Detalhes"
+
+msgid "Detect"
+msgstr "Detectar"
+
+msgid "Detect automatic zooms from clicks and cursor motion"
+msgstr ""
+"Detectar ampliações automáticas a partir de cliques e movimentos do cursor"
+
+msgid "Detect text"
+msgstr "Detectar texto"
+
+msgid "Dim screen"
+msgstr "Tela escura"
+
+msgid "Dimensions"
+msgstr "Dimensões"
+
+msgid "Dismiss"
+msgstr "Ignorar"
+
+msgid "Display scale resolution"
+msgstr "Resolução da escala de exibição"
+
+msgid "Display {number}"
+msgstr "Exibir {number}"
+
+msgid "Do Not Disturb"
+msgstr "Não perturbe"
+
+msgid "Done"
+msgstr "Concluído"
+
+msgid "Dot"
+msgstr "Ponto"
+
+msgid "Double"
+msgstr "Duplo"
+
+msgid "Download Extension"
+msgstr "Baixar extensão"
+
+msgid "Drag here"
+msgstr "Arraste até aqui"
+
+msgid "Drag here or click to upload"
+msgstr "Arraste aqui ou clique para fazer o upload"
+
+msgid "Drop a recording to begin"
+msgstr "Arraste uma gravação para começar"
+
+msgid "Drop an image here"
+msgstr "Arraste uma imagem para cá"
+
+msgid "Duration"
+msgstr "Duração"
+
+msgid "Ease"
+msgstr "Facilidade"
+
+msgid "Easing"
+msgstr "Flexibilização"
+
+msgid "Echo"
+msgstr "Eco"
+
+msgid "Edit"
+msgstr "Editar"
+
+msgid "Edit quality, resolution and audio after recording"
+msgstr "Editar a qualidade, a resolução e o áudio após a gravação"
+
+msgid "Effects"
+msgstr "Efeitos"
+
+msgid "Empty"
+msgstr "Vazio"
+
+msgid "End {time}"
+msgstr "Fim {time}"
+
+msgid "Estimated export size"
+msgstr "Volume estimado de exportação"
+
+msgid "Everything you have uploaded to ApexShot Cloud"
+msgstr "Tudo o que você enviou para o ApexShot Cloud"
+
+msgid "Export complete"
+msgstr "Exportação concluída"
+
+msgid "Export failed"
+msgstr "Falha na exportação"
+
+msgid "Export is still running."
+msgstr "A exportação ainda está em andamento."
+
+msgid "Export the edited MP4"
+msgstr "Exportar o MP4 editado"
+
+msgid "Export video"
+msgstr "Exportar vídeo"
+
+msgid "Export with your current settings, then upload"
+msgstr "Exporte com suas configurações atuais e, em seguida, faça o upload"
+
+msgid "Extra Large"
+msgstr "Extragrande"
+
+msgid "FRAME"
+msgstr "QUADRO"
+
+msgid "Failed to open video"
+msgstr "Não foi possível abrir o vídeo"
+
+msgid "Fancy"
+msgstr "Chique"
+
+msgid "File copied to clipboard"
+msgstr "Arquivo copiado para a área de transferência"
+
+msgid "Focus"
+msgstr "Foco"
+
+msgid "Focus background intensity"
+msgstr "Intensidade do fundo do foco"
+
+msgid "Focused"
+msgstr "Focado"
+
+msgid "Font"
+msgstr "Fonte"
+
+msgid "Font family"
+msgstr "Família de fontes"
+
+msgid "Frame rate"
+msgstr "Taxa de quadros"
+
+msgid "Freeform"
+msgstr "Forma livre"
+
+msgid "Fullscreen"
+msgstr "Tela cheia"
+
+msgid "GIF"
+msgstr "GIF"
+
+msgid ""
+"GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first."
+msgstr ""
+"A extensão do GNOME Shell não está instalada. Instale primeiro a extensão ApexShot para o GNOME."
+
+msgid "Geometry"
+msgstr "Geometria"
+
+msgid "Glide"
+msgstr "Deslizar"
+
+msgid "Got it"
+msgstr "Entendi"
+
+msgid "Gradient"
+msgstr "Gradiente"
+
+msgid "Gradients"
+msgstr "Gradientes"
+
+msgid "HEIGHT"
+msgstr "ALTURA"
+
+msgid "HEX"
+msgstr "HEX"
+
+msgid "HiDPI"
+msgstr "HiDPI"
+
+msgid "Hide cursor"
+msgstr "Ocultar o cursor"
+
+msgid "Hide cursor at playhead"
+msgstr "Ocultar o cursor na posição do indicador de reprodução"
+
+msgid "Hide track"
+msgstr "Ocultar faixa"
+
+msgid "Hide video"
+msgstr "Ocultar vídeo"
+
+msgid "Hide when idle"
+msgstr "Ocultar quando inativo"
+
+msgid "Hide zoom"
+msgstr "Ocultar zoom"
+
+msgid "High"
+msgstr "Alto"
+
+msgid "Highlighter"
+msgstr "Marcador"
+
+msgid "Idle delay"
+msgstr "Atraso em modo inativo"
+
+msgid "Image"
+msgstr "Imagem"
+
+msgid "Image copied to clipboard"
+msgstr "Imagem copiada para a área de transferência"
+
+msgid "Images"
+msgstr "Imagens"
+
+msgid "Insert"
+msgstr "Inserir"
+
+msgid "Inspector"
+msgstr "Inspetor"
+
+msgid "Intensity"
+msgstr "Intensidade"
+
+msgid "Intensity {percent}%"
+msgstr "Intensidade {percent}%"
+
+msgid "Just now"
+msgstr "Agora mesmo"
+
+msgid "Keep editing"
+msgstr "Continue editando"
+
+msgid "Keyboard shortcuts"
+msgstr "Atalhos de teclado"
+
+msgid "Large"
+msgstr "Grande"
+
+msgid "Line"
+msgstr "Linha"
+
+msgid "Linear"
+msgstr "Linear"
+
+msgid "Load more"
+msgstr "Carregar mais"
+
+msgid "Loading image…"
+msgstr "Carregando imagem…"
+
+msgid "Loading your cloud uploads…"
+msgstr "Carregando seus arquivos enviados para a nuvem…"
+
+msgid "Loading…"
+msgstr "Carregando…"
+
+msgid "Lock audio"
+msgstr "Bloquear áudio"
+
+msgid "Lock track"
+msgstr "Trilha de bloqueio"
+
+msgid "Lock video"
+msgstr "Bloquear vídeo"
+
+msgid "Lock zoom"
+msgstr "Bloquear zoom"
+
+msgid "Low"
+msgstr "Baixo"
+
+msgid "MP4 files"
+msgstr "Arquivos MP4"
+
+msgid "MP4 video"
+msgstr "Vídeo em MP4"
+
+msgid "Manual"
+msgstr "Manual"
+
+msgid "Maximum resolution"
+msgstr "Resolução máxima"
+
+msgid "Media"
+msgstr "Mídia"
+
+msgid "Medium"
+msgstr "Médio"
+
+msgid "Method"
+msgstr "Método"
+
+msgid "Mic"
+msgstr "Mic"
+
+msgid "Minimal"
+msgstr "Mínimo"
+
+msgid "Motion"
+msgstr "Moção"
+
+msgid "Move mode — drag a segment to reorder it"
+msgstr "Modo de movimentação — arraste um segmento para reordená-lo"
+
+msgid "Mute"
+msgstr "Silenciar"
+
+msgid "My colors"
+msgstr "Minhas cores"
+
+msgid "No Auto Zooms added"
+msgstr "Nenhum zoom automático foi adicionado"
+
+msgid ""
+"No Auto Zooms were added. Manual zooms are preserved, and overlapping detections are skipped."
+msgstr ""
+"Não foram adicionados zooms automáticos. Os zooms manuais foram preservados, e as detecções sobrepostas foram ignoradas."
+
+msgid "No audio"
+msgstr "Sem áudio"
+
+msgid "No clear clicks or purposeful pointer pauses were found."
+msgstr ""
+"Não foram encontrados cliques nítidos nem pausas intencionais do ponteiro."
+
+msgid "No cursor samples were captured. Zoom centers will use the frame center."
+msgstr ""
+"Não foram capturadas amostras do cursor. Os centros de zoom usarão o centro do quadro."
+
+msgid "No editable cursor data was found."
+msgstr "Não foram encontrados dados editáveis do cursor."
+
+msgid "No geometry"
+msgstr "Sem geometria"
+
+msgid "No media"
+msgstr "Sem mídia"
+
+msgid "No object selected"
+msgstr "Nenhum objeto selecionado"
+
+msgid "No pointer data found"
+msgstr "Não foram encontrados dados de ponteiro"
+
+msgid "No recordings yet"
+msgstr "Ainda não há gravações"
+
+msgid "No screenshots yet"
+msgstr "Ainda não há capturas de tela"
+
+msgid "No video edits to remove"
+msgstr "Não há edições de vídeo a serem removidas"
+
+msgid "No zooms"
+msgstr "Sem zoom"
+
+msgid "Noise suppression"
+msgstr "Supressão de ruído"
+
+msgid "Notifications"
+msgstr "Notificações"
+
+msgid "Number"
+msgstr "Número"
+
+msgid "Number Options"
+msgstr "Opções de números"
+
+msgid "OCR"
+msgstr "OCR"
+
+msgid "OCR complete"
+msgstr "OCR concluído"
+
+msgid "OCR failed"
+msgstr "Falha no OCR"
+
+msgid "Obfuscate method"
+msgstr "Método de ofuscação"
+
+msgid ""
+"On KDE Plasma, the compositor refused the screenshot. Enable KWin's screenshot plugin (System Settings → Desktop Effects, or set screenshotEnabled=true under [Plugins] in ~/.config/kwinrc) and try again."
+msgstr ""
+"No KDE Plasma, o compositor rejeitou a captura de tela. Ative o plug-in de captura de tela do KWin (Configurações do Sistema → Efeitos da Área de Trabalho ou defina screenshotEnabled=true na seção [Plugins] do arquivo ~/.config/kwinrc) e tente novamente."
+
+msgid "Opacity"
+msgstr "Opacidade"
+
+msgid "Open"
+msgstr "Abrir"
+
+msgid "Open Folder"
+msgstr "Abrir pasta"
+
+msgid ""
+"Open Zoom and choose Detect to analyze visible cursor motion, or use Manual mode to place zooms yourself."
+msgstr ""
+"Abra o Zoom e selecione “Detectar” para analisar o movimento visível do cursor ou use o modo “Manual” para definir os ampliações você mesmo."
+
+msgid "Open color picker"
+msgstr "Abrir o seletor de cores"
+
+msgid "Open in browser"
+msgstr "Abrir no navegador"
+
+msgid "Open in editor"
+msgstr "Abrir no editor"
+
+msgid "Open video"
+msgstr "Abrir vídeo"
+
+msgid "Open video editor"
+msgstr "Abrir o editor de vídeo"
+
+msgid "Opened in your browser"
+msgstr "Aberto no seu navegador"
+
+msgid "Opened {name}"
+msgstr "Inaugurado {name}"
+
+msgid "Opening {name} in the {editor}"
+msgstr "Abrindo {name} no {editor}"
+
+msgid "Optimize GIF"
+msgstr "Otimizar GIF"
+
+msgid "Or click to upload"
+msgstr "Ou clique para fazer o upload"
+
+msgid "Original"
+msgstr "Original"
+
+msgid "Output size"
+msgstr "Tamanho da saída"
+
+msgid "PNG, JPEG, or WebP"
+msgstr "PNG, JPEG ou WebP"
+
+msgid "PRESET"
+msgstr "PRÉ-CONFIGURAÇÃO"
+
+msgid "Padding"
+msgstr "Estofamento"
+
+msgid "Palette"
+msgstr "Paleta"
+
+msgid "Paste your XBackBone API token"
+msgstr "Cole seu token da API do XBackBone"
+
+msgid "Pick from screen"
+msgstr "Selecione na tela"
+
+msgid "Pin"
+msgstr "Fixar"
+
+msgid "Pixelate"
+msgstr "Pixelizar"
+
+msgid "Play"
+msgstr "Jogar"
+
+msgid "Pointer track missing"
+msgstr "Falta a trilha do ponteiro"
+
+msgid "Pointer track unavailable"
+msgstr "Faixa do ponteiro indisponível"
+
+msgid "Primary"
+msgstr "Primário"
+
+msgid "QR code decoded"
+msgstr "Código QR decodificado"
+
+msgid "Quality"
+msgstr "Qualidade"
+
+msgid "Ratio"
+msgstr "Relação"
+
+msgid "Record audio in mono"
+msgstr "Gravar áudio em mono"
+
+msgid "Recording failed"
+msgstr "Falha na gravação"
+
+msgid "Recording not saved"
+msgstr "A gravação não foi salva"
+
+msgid "Recording not supported"
+msgstr "Gravação não suportada"
+
+msgid "Recording path copied"
+msgstr "Caminho de gravação copiado"
+
+msgid "Recording saved"
+msgstr "Gravação salva"
+
+msgid "Recording setup"
+msgstr "Configuração de gravação"
+
+msgid ""
+"Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor."
+msgstr ""
+"A gravação continuará com o cursor do sistema operacional oculto. Ative a extensão ApexShot do GNOME para o editor."
+
+msgid "Recordings"
+msgstr "Gravações"
+
+msgid "Reduce file size and upload time"
+msgstr "Reduzir o tamanho do arquivo e o tempo de envio"
+
+msgid "Refresh"
+msgstr "Atualizar"
+
+msgid "Remember last area"
+msgstr "Lembre-se da última área"
+
+msgid "Remove audio track"
+msgstr "Remover trilha de áudio"
+
+msgid "Remove custom color"
+msgstr "Remover cor personalizada"
+
+msgid "Remove track"
+msgstr "Remover faixa"
+
+msgid "Remove video track"
+msgstr "Remover trilha de vídeo"
+
+msgid "Remove zoom track"
+msgstr "Remover a trilha de zoom"
+
+msgid "Rename video"
+msgstr "Renomear vídeo"
+
+msgid "Reset"
+msgstr "Redefinir"
+
+msgid "Reset video edits"
+msgstr "Redefinir edições de vídeo"
+
+msgid "Retry"
+msgstr "Tentar novamente"
+
+msgid "Reverse direction"
+msgstr "Inverter a direção"
+
+msgid "Revert cuts"
+msgstr "Revogar os cortes"
+
+msgid "Ripple"
+msgstr "Ripple"
+
+msgid "Save is disabled in After capture settings"
+msgstr "A opção “Salvar” está desativada nas configurações “Após a captura”"
+
+msgid "Saved {file} ({size})"
+msgstr "Armazenado {file} ({size})"
+
+msgid "Screen Recording"
+msgstr "Gravação de tela"
+
+msgid "Screen recordings you make will show up here."
+msgstr "As gravações de tela que você fizer aparecerão aqui."
+
+msgid "Screenshot failed"
+msgstr "Falha na captura de tela"
+
+msgid "Screenshot not saved"
+msgstr "A captura de tela não foi salva"
+
+msgid "Scroll"
+msgstr "Rolar a tela"
+
+msgid "Scroll Capture"
+msgstr "Captura de rolagem"
+
+msgid "Scroll capture requires the ApexShot"
+msgstr "A captura de rolagem requer o ApexShot"
+
+msgid "Search isn't available for Cloud"
+msgstr "A função de pesquisa não está disponível na nuvem"
+
+msgid "Search recordings"
+msgstr "Pesquisar gravações"
+
+msgid "Search screenshots"
+msgstr "Pesquisar capturas de tela"
+
+msgid "Select a Window"
+msgstr "Selecione uma janela"
+
+msgid "Select a display"
+msgstr "Selecione uma tela"
+
+msgid "Select a video, begin your creation."
+msgstr "Escolha um vídeo e comece a criar."
+
+msgid ""
+"Select a zoom to adjust it; timeline detection uses clicks and pointer pauses"
+msgstr ""
+"Selecione um nível de zoom para ajustá-lo; a detecção da linha do tempo utiliza cliques e pausas do ponteiro"
+
+msgid "Select any annotation on the canvas to inspect it."
+msgstr "Selecione qualquer anotação na tela para examiná-la."
+
+msgid "Selection"
+msgstr "Seleção"
+
+msgid "Set a fixed focus point for this zoom"
+msgstr "Defina um ponto de foco fixo para este zoom"
+
+msgid ""
+"Set the instance URL and API token in Settings → Cloud, or switch to ApexShot Cloud and sign in."
+msgstr ""
+"Defina a URL da instância e o token da API em Configurações → Nuvem ou alterne para o ApexShot Cloud e faça login."
+
+msgid "Shadow"
+msgstr "Sombra"
+
+msgid "Share link copied to clipboard"
+msgstr "Link para compartilhar copiado para a área de transferência"
+
+msgid "Share link: {url}"
+msgstr "Compartilhar link: {url}"
+
+msgid "Show in files"
+msgstr "Mostrar nos arquivos"
+
+msgid "Show less"
+msgstr "Mostrar menos"
+
+msgid "Show more"
+msgstr "Mostrar mais"
+
+msgid "Show video"
+msgstr "Exibir vídeo"
+
+msgid "Show zoom"
+msgstr "Mostrar zoom"
+
+msgid "Showing {name} in your files"
+msgstr "Exibindo {name} em seus arquivos"
+
+msgid "Shown over the recording in preview and export"
+msgstr "Exibido sobre a gravação na visualização e na exportação"
+
+msgid "Sign in"
+msgstr "Entrar"
+
+msgid "Sign in to ApexShot Cloud"
+msgstr "Faça login no ApexShot Cloud"
+
+msgid "Size"
+msgstr "Tamanho"
+
+msgid "Skip back 1s"
+msgstr "Voltar 1s"
+
+msgid "Skip forward 1s"
+msgstr "Avançar 1s"
+
+msgid "Small"
+msgstr "Pequeno"
+
+msgid "Smooth"
+msgstr "Suave"
+
+msgid "Smoothing"
+msgstr "Suavização"
+
+msgid "Snappy"
+msgstr "Ágil"
+
+msgid "Softer follow"
+msgstr "Acompanhamento mais suave"
+
+msgid "Speaker"
+msgstr "Palestrante"
+
+msgid "Speed"
+msgstr "Velocidade"
+
+msgid "Split"
+msgstr "Divisão"
+
+msgid "Split at playhead"
+msgstr "Dividir no ponto de reprodução"
+
+msgid "Spotlight"
+msgstr "Em destaque"
+
+msgid "Square"
+msgstr "Quadrado"
+
+msgid "Standard"
+msgstr "Padrão"
+
+msgid "Start"
+msgstr "Início"
+
+msgid "Start with:"
+msgstr "Comece com:"
+
+msgid "Start {time}"
+msgstr "Início às {time}"
+
+msgid "Stroke Thickness"
+msgstr "Espessura do traço"
+
+msgid "Stroke size"
+msgstr "Tamanho do traço"
+
+msgid "Style"
+msgstr "Estilo"
+
+msgid "Sway"
+msgstr "Sway"
+
+msgid "Tahoe"
+msgstr "Tahoe"
+
+msgid "Tahoe Inverted"
+msgstr "Tahoe Invertido"
+
+msgid "Text"
+msgstr "Texto"
+
+msgid "Text copied to clipboard"
+msgstr "Texto copiado para a área de transferência"
+
+msgid "Text extracted"
+msgstr "Texto extraído"
+
+msgid "Text extracted, but clipboard copy was unavailable"
+msgstr ""
+"O texto foi extraído, mas não foi possível copiá-lo para a área de transferência"
+
+msgid "Text size"
+msgstr "Tamanho do texto"
+
+msgid ""
+"The analysis worker stopped unexpectedly. Manual Zoom is still available."
+msgstr ""
+"O processador de análise parou inesperadamente. O zoom manual ainda está disponível."
+
+msgid "The cursor is baked into this imported video."
+msgstr "O cursor está incorporado a este vídeo importado."
+
+msgid "The video editor only supports MP4 recordings"
+msgstr "O editor de vídeo é compatível apenas com gravações em MP4"
+
+msgid "Thick"
+msgstr "Espesso"
+
+msgid "Thickness"
+msgstr "Espessura"
+
+msgid "Thin"
+msgstr "Fino"
+
+msgid "This page covers ApexShot Cloud"
+msgstr "Esta página trata do ApexShot Cloud"
+
+msgid "This permanently removes the file from disk."
+msgstr "Isso remove definitivamente o arquivo do disco."
+
+msgid "This upload has no link to open"
+msgstr "Este arquivo enviado não possui nenhum link para abrir"
+
+msgid "This upload has no share link"
+msgstr "Este arquivo enviado não possui link para compartilhamento"
+
+msgid "Tighter, faster"
+msgstr "Mais firme, mais rápido"
+
+msgid "Tilt"
+msgstr "Inclinação"
+
+msgid "Timer"
+msgstr "Temporizador"
+
+msgid "Tool options coming soon"
+msgstr "Opções de ferramentas em breve"
+
+msgid "Trail"
+msgstr "Trilha"
+
+msgid "URL copied to clipboard"
+msgstr "URL copiado para a área de transferência"
+
+msgid "Unlock audio"
+msgstr "Desbloquear áudio"
+
+msgid "Unlock video"
+msgstr "Desbloquear vídeo"
+
+msgid "Unlock zoom"
+msgstr "Desbloquear o zoom"
+
+msgid "Unmute"
+msgstr "Ativar som"
+
+msgid "Untitled"
+msgstr "Sem título"
+
+msgid "Upload complete"
+msgstr "Upload concluído"
+
+msgid "Upload failed"
+msgstr "Falha no envio"
+
+msgid "Upload failed: {message}"
+msgstr "Falha no envio: {message}"
+
+msgid "Upload media"
+msgstr "Carregar arquivos de mídia"
+
+msgid "Upload to cloud"
+msgstr "Enviar para a nuvem"
+
+msgid "Uploaded {name}"
+msgstr "Enviado {name}"
+
+msgid "Uploading…"
+msgstr "Carregando…"
+
+msgid "Use the Thickness panel for highlighter"
+msgstr "Use o painel “Espessura” para o marcador"
+
+msgid "Very Thick"
+msgstr "Muito espesso"
+
+msgid "Video"
+msgstr "Vídeo"
+
+msgid ""
+"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
+msgstr ""
+"A gravação de vídeo não é compatível com o Fedora. As capturas de tela continuam funcionando. Para gravar a tela, use o Spectacle ou o Kooha."
+
+msgid "Videos"
+msgstr "Vídeos"
+
+msgid "WIDTH"
+msgstr "LARGURA"
+
+msgid "Waiting for sign-in…"
+msgstr "Aguardando o login…"
+
+msgid "Wallpaper"
+msgstr "Papel de parede"
+
+msgid "Waveform unavailable"
+msgstr "Forma de onda indisponível"
+
+msgid "While recording"
+msgstr "Durante a gravação"
+
+msgid "White"
+msgstr "Branco"
+
+msgid "XBackBone upload not configured"
+msgstr "O upload do XBackBone não está configurado"
+
+msgid "Yaru"
+msgstr "Yaru"
+
+msgid "Yesterday"
+msgstr "Ontem"
+
+msgid "You have not uploaded anything to ApexShot Cloud yet."
+msgstr "Você ainda não enviou nada para o ApexShot Cloud."
+
+msgid "You're connected"
+msgstr "Você está conectado"
+
+msgid "Your next screenshot gets a share link."
+msgstr "Sua próxima captura de tela terá um link para compartilhar."
+
+msgid ""
+"Your uploads currently go to a self-hosted XBackBone instance. Switch your upload destination to ApexShot Cloud in Settings to browse those uploads here."
+msgstr ""
+"Atualmente, seus arquivos enviados são direcionados para uma instância do XBackBone hospedada por você mesmo. Altere o destino dos envios para o ApexShot Cloud em “Configurações” para visualizar esses arquivos aqui."
+
+msgid "Zoom"
+msgstr "Zoom"
+
+msgid "Zoom In"
+msgstr "Ampliar"
+
+msgid "Zoom Out"
+msgstr "Amenizar o zoom"
+
+msgid "Zoom controls"
+msgstr "Controles de zoom"
+
+msgid "Zoom in timeline"
+msgstr "Ampliar a linha do tempo"
+
+msgid "Zoom out timeline"
+msgstr "Diminuir o zoom da linha do tempo"
+
+msgid "Zoom to Selection"
+msgstr "Ampliar para a seleção"
+
+msgid "a, b, c, d..."
+msgstr "a, b, c, d..."
+
+msgid "browser extension."
+msgstr "extensão do navegador."
+
+msgid "i, ii, iii, iv..."
+msgstr "i, ii, iii, iv..."
+
+msgid "macOS"
+msgstr "macOS"
+
+msgid "{count} {unit}s ago"
+msgstr "{count} {unit}s atrás"
+
+msgid "{name} is no longer on disk"
+msgstr "{name} não está mais no disco"
+
+msgid "{name} was already gone"
+msgstr "{name} já tinha ido embora"
+
+msgid "＋ Add to My Colors"
+msgstr "＋ Adicionar às Minhas Cores"
+
+msgid "Box"
+msgstr "Caixa"
+
+msgid "Circle"
+msgstr "Círculo"
+
+msgid "Obfuscate"
+msgstr "Ocultar"
+
+msgid "Pen"
+msgstr "Caneta"
+
+msgid "Choose the solid color used when Background is set to plain color"
+msgstr ""
+"Escolha a cor sólida a ser usada quando a opção “Fundo” estiver definida como “cor lisa”"

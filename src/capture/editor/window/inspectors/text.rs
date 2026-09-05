@@ -3,6 +3,7 @@
 use gtk4::{prelude::*, Box as GtkBox};
 
 use super::shell::{append_inspector_section, build_tool_inspector};
+use crate::i18n::t;
 
 pub(super) struct TextInspectorInputs<'a> {
     pub text_size_list: &'a GtkBox,
@@ -19,12 +20,12 @@ pub(super) fn build_text_inspector(input: TextInspectorInputs<'_>) -> GtkBox {
         .add_css_class("editor-inspector-option-list");
     append_inspector_section(
         &text_inspector_content,
-        "Size",
+        &t("Size"),
         input.text_size_list.upcast_ref(),
     );
     append_inspector_section(
         &text_inspector_content,
-        "Font",
+        &t("Font"),
         input.font_family_list.upcast_ref(),
     );
     text_inspector

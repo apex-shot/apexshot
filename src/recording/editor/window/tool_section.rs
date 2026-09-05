@@ -4,6 +4,8 @@ use gtk4::{prelude::*, Align, Box as GtkBox, Image, Orientation, ToggleButton};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::t;
+
 pub(super) struct ToolSection {
     pub widget: GtkBox,
     pub refresh: Rc<dyn Fn()>,
@@ -23,7 +25,7 @@ pub(super) fn build_tool_section(
     let cursor = ToggleButton::new();
     cursor.add_css_class("recording-editor-tool-section-btn");
     cursor.set_has_frame(false);
-    cursor.set_tooltip_text(Some("Cursor"));
+    cursor.set_tooltip_text(Some(&t("Cursor")));
     cursor.set_halign(Align::Center);
     let icon = Image::from_icon_name(icon_names::POINTER_PRIMARY_CLICK);
     icon.set_pixel_size(18);

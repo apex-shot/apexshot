@@ -4,6 +4,7 @@ use super::icons::{draw_toolbar_icon, ToolbarIcon, TOOLBAR_ICONS, TOOLBAR_LABELS
 use super::layout::*;
 use super::recording::state::OverlayIntent;
 use super::state::{OverlayMode, SelectorState};
+use crate::i18n::t;
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
@@ -184,7 +185,7 @@ pub(crate) fn draw_feature_toolbar(
     for (index, icon) in TOOLBAR_ICONS.iter().enumerate() {
         let cell = layout.item_cells[index];
         let center_x = cell.x + cell.width / 2.0;
-        let label = TOOLBAR_LABELS[index];
+        let label = t(TOOLBAR_LABELS[index]);
         let is_hovered = hover_tool_index == Some(index);
         let is_active = index == active_tool_index
             || (index == super::icons::TOOLBAR_TIMER_INDEX && timer_tool_active);
@@ -235,11 +236,11 @@ pub(crate) fn draw_feature_toolbar(
         );
         context.set_font_size(9.5);
         context.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
-        if let Ok(extents) = context.text_extents(label) {
+        if let Ok(extents) = context.text_extents(&label) {
             let text_x = center_x - extents.width() / 2.0 - extents.x_bearing() + 0.6;
             let text_y = cell.y + 50.0 + 0.8;
             context.move_to(text_x, text_y);
-            let _ = context.show_text(label);
+            let _ = context.show_text(&label);
         }
 
         if is_active {
@@ -247,11 +248,11 @@ pub(crate) fn draw_feature_toolbar(
         } else {
             context.set_source_rgba(244.0 / 255.0, 244.0 / 255.0, 244.0 / 255.0, icon_alpha);
         }
-        if let Ok(extents) = context.text_extents(label) {
+        if let Ok(extents) = context.text_extents(&label) {
             let text_x = center_x - extents.width() / 2.0 - extents.x_bearing();
             let text_y = cell.y + 50.0;
             context.move_to(text_x, text_y);
-            let _ = context.show_text(label);
+            let _ = context.show_text(&label);
         }
 
         if index == super::icons::TOOLBAR_TIMER_INDEX && timer_tool_active {
@@ -281,6 +282,7 @@ pub(crate) fn draw_feature_toolbar(
 
     let size_text = format!("{}×{}", selection_width as i32, selection_height as i32);
     let size_center_x = size_panel_x + size_panel_width / 2.0;
+    let frame_label = t("FRAME");
 
     context.select_font_face(
         crate::typography::UI_FONT_FAMILY,
@@ -289,19 +291,19 @@ pub(crate) fn draw_feature_toolbar(
     );
     context.set_font_size(9.6);
     context.set_source_rgba(0.0, 0.0, 0.0, 0.50);
-    if let Ok(extents) = context.text_extents("FRAME") {
+    if let Ok(extents) = context.text_extents(&frame_label) {
         let text_x = size_center_x - extents.width() / 2.0 - extents.x_bearing() + 0.6;
         let text_y = size_panel_y + 17.0 + 0.8;
         context.move_to(text_x, text_y);
-        let _ = context.show_text("FRAME");
+        let _ = context.show_text(&frame_label);
     }
 
     context.set_source_rgba(1.0, 224.0 / 255.0, 196.0 / 255.0, 0.84);
-    if let Ok(extents) = context.text_extents("FRAME") {
+    if let Ok(extents) = context.text_extents(&frame_label) {
         let text_x = size_center_x - extents.width() / 2.0 - extents.x_bearing();
         let text_y = size_panel_y + 17.0;
         context.move_to(text_x, text_y);
-        let _ = context.show_text("FRAME");
+        let _ = context.show_text(&frame_label);
     }
 
     context.select_font_face(
@@ -552,8 +554,8 @@ pub(super) fn draw_aspect_ratio_menu(
             },
         );
         context.set_font_size(13.3);
-        let label = ASPECT_RATIO_OPTIONS[i];
-        if let Ok(extents) = context.text_extents(label) {
+        let label = t(ASPECT_RATIO_OPTIONS[i]);
+        if let Ok(extents) = context.text_extents(&label) {
             let label_x = item_rect.x + 30.0 - extents.x_bearing();
             let label_y =
                 item_rect.y + item_rect.height / 2.0 - extents.height() / 2.0 - extents.y_bearing();
@@ -564,7 +566,7 @@ pub(super) fn draw_aspect_ratio_menu(
             };
             context.set_source_rgba(label_color.0, label_color.1, label_color.2, label_color.3);
             context.move_to(label_x, label_y);
-            let _ = context.show_text(label);
+            let _ = context.show_text(&label);
         }
 
         item_rects.push(item_rect);

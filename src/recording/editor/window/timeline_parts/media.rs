@@ -20,14 +20,14 @@ pub fn build_waveform_body(
     area.set_size_request(0, 36);
     let pixbuf = waveform.and_then(|path| gtk4::gdk_pixbuf::Pixbuf::from_file(path).ok());
     let empty_label = if state.lock().unwrap().metadata.has_audio {
-        "Waveform unavailable"
+        t("Waveform unavailable")
     } else {
-        "No audio"
+        t("No audio")
     };
     area.set_draw_func({
         let state = state.clone();
         move |_, cr, width, height| {
-            draw_waveform_image(&state, pixbuf.as_ref(), empty_label, cr, width, height);
+            draw_waveform_image(&state, pixbuf.as_ref(), &empty_label, cr, width, height);
         }
     });
     area

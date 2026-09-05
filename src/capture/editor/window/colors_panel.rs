@@ -8,6 +8,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::t;
+
 use super::super::color::{
     draw_color_to_hex, draw_color_to_rgba_u8, palette_index_for_color, parse_alpha_percent,
     parse_channel_u8, parse_hex_rgb, picker_dynamic_css, save_persisted_custom_slot_colors,
@@ -58,7 +60,7 @@ pub fn build_colors_panel(
     content.set_hexpand(false);
     content.set_halign(gtk4::Align::Fill);
 
-    let helper = Label::new(Some("Choose a color for the active tool"));
+    let helper = Label::new(Some(&t("Choose a color for the active tool")));
     helper.add_css_class("editor-colors-panel-helper");
     helper.set_wrap(true);
     helper.set_max_width_chars(26);
@@ -139,7 +141,7 @@ pub fn build_colors_panel(
     gtk4::prelude::EditableExt::set_alignment(&hex_entry, 0.5);
     hex_entry.add_css_class("editor-hex-entry");
 
-    let hex_label = Label::new(Some("HEX"));
+    let hex_label = Label::new(Some(&t("HEX")));
     hex_label.add_css_class("editor-color-field-label");
     hex_label.set_halign(gtk4::Align::Center);
     hex_label.set_xalign(0.5);
@@ -242,7 +244,7 @@ pub fn build_colors_panel(
     palette_section.set_hexpand(true);
     palette_section.set_halign(gtk4::Align::Fill);
 
-    let palette_title = Label::new(Some("Palette"));
+    let palette_title = Label::new(Some(&t("Palette")));
     palette_title.add_css_class("editor-background-section-title");
     palette_title.set_xalign(0.0);
 
@@ -286,7 +288,7 @@ pub fn build_colors_panel(
     custom_section.set_hexpand(true);
     custom_section.set_halign(gtk4::Align::Fill);
 
-    let custom_title = Label::new(Some("My colors"));
+    let custom_title = Label::new(Some(&t("My colors")));
     custom_title.add_css_class("editor-background-section-title");
     custom_title.set_xalign(0.0);
 
@@ -346,7 +348,7 @@ pub fn build_colors_panel(
             remove_btn.set_has_frame(false);
             remove_btn.set_focusable(false);
             remove_btn.set_visible(false);
-            remove_btn.set_tooltip_text(Some("Remove custom color"));
+            remove_btn.set_tooltip_text(Some(&t("Remove custom color")));
             remove_btn.set_halign(gtk4::Align::End);
             remove_btn.set_valign(gtk4::Align::Start);
             remove_btn.set_margin_top(-3);
@@ -426,14 +428,14 @@ pub fn build_colors_panel(
     actions.set_halign(gtk4::Align::Fill);
     actions.set_hexpand(true);
 
-    let add_current_color_btn = Button::with_label("+ Add current color");
+    let add_current_color_btn = Button::with_label(&t("+ Add current color"));
     add_current_color_btn.set_has_frame(false);
     add_current_color_btn.set_halign(gtk4::Align::Fill);
     add_current_color_btn.set_hexpand(true);
     add_current_color_btn.add_css_class("editor-add-to-colors-button");
     add_current_color_btn.add_css_class("editor-colors-panel-action-button");
 
-    let pick_from_screen_btn = Button::with_label("Pick from screen");
+    let pick_from_screen_btn = Button::with_label(&t("Pick from screen"));
     pick_from_screen_btn.set_has_frame(false);
     pick_from_screen_btn.set_halign(gtk4::Align::Fill);
     pick_from_screen_btn.set_hexpand(true);
@@ -734,11 +736,12 @@ pub fn build_colors_panel(
                 (selected_tool, active_color)
             };
 
-            helper.set_label(if selected_tool == Tool::Background {
-                "Choose the solid color used when Background is set to plain color"
+            let helper_text = if selected_tool == Tool::Background {
+                t("Choose the solid color used when Background is set to plain color")
             } else {
-                "Choose a color for the active tool"
-            });
+                t("Choose a color for the active tool")
+            };
+            helper.set_label(&helper_text);
 
             set_active_color_button(&palette_buttons, palette_index_for_color(active_color));
             let picker = PickerColorState::from_color(active_color);

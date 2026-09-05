@@ -177,8 +177,8 @@ pub fn login() -> Result<(), LoginError> {
                     println!("! You were already logged in to this account");
                 }
                 crate::utils::notify::desktop_notification_important(
-                    "You're connected",
-                    "Your next screenshot gets a share link.",
+                    &crate::i18n::t("You're connected"),
+                    &crate::i18n::t("Your next screenshot gets a share link."),
                 );
                 return Ok(());
             }

@@ -34,10 +34,10 @@ pub(crate) fn is_configured(config: &AppConfig) -> bool {
     !config.xbackbone_url.is_empty() && !config.xbackbone_api_token.is_empty()
 }
 
-pub(crate) fn not_configured_notification(_config: &AppConfig) -> (&'static str, &'static str) {
+pub(crate) fn not_configured_notification(_config: &AppConfig) -> (String, String) {
     (
-        "XBackBone upload not configured",
-        "Set the instance URL and API token in Settings \u{2192} Cloud, or switch to ApexShot Cloud and sign in.",
+        crate::i18n::t("XBackBone upload not configured"),
+        crate::i18n::t("Set the instance URL and API token in Settings → Cloud, or switch to ApexShot Cloud and sign in."),
     )
 }
 

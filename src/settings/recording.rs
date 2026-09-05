@@ -54,7 +54,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     let video_export_location_entry = Entry::new();
     video_export_location_entry.set_hexpand(true);
     video_export_location_entry.set_width_chars(28);
-    video_export_location_entry.set_placeholder_text(Some("Choose a folder"));
+    video_export_location_entry.set_placeholder_text(Some(&t("Choose a folder")));
     video_export_location_entry.set_text(&config.video_export_location);
     let video_export_location_browse = Button::with_label(&t("Browse"));
 
@@ -74,7 +74,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     let rec_filename_pattern_entry = Entry::new();
     rec_filename_pattern_entry.set_hexpand(true);
     rec_filename_pattern_entry.set_width_chars(28);
-    rec_filename_pattern_entry.set_placeholder_text(Some("Filename pattern"));
+    rec_filename_pattern_entry.set_placeholder_text(Some(&t("Filename pattern")));
     rec_filename_pattern_entry.set_text(&config.rec_filename_pattern);
     let pattern_hbox = GtkBox::new(Orientation::Horizontal, 12);
     pattern_hbox.set_hexpand(true);

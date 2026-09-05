@@ -17,6 +17,8 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::i18n::t;
+
 fn is_supported_image_path(path: &std::path::Path) -> bool {
     matches!(
         path.extension()
@@ -170,15 +172,15 @@ pub(super) fn install_empty_drop_zone(
     drop_icon.set_pixel_size(42);
     drop_icon.set_halign(Align::Center);
 
-    let drop_title = Label::new(Some("Drop an image here"));
+    let drop_title = Label::new(Some(&t("Drop an image here")));
     drop_title.add_css_class("recording-editor-empty-title");
     drop_title.set_halign(Align::Center);
 
-    let drop_hint = Label::new(Some("PNG, JPEG, or WebP"));
+    let drop_hint = Label::new(Some(&t("PNG, JPEG, or WebP")));
     drop_hint.add_css_class("recording-editor-empty-hint");
     drop_hint.set_halign(Align::Center);
 
-    let open_btn = Button::with_label("Open Folder");
+    let open_btn = Button::with_label(&t("Open Folder"));
     open_btn.set_has_frame(false);
     open_btn.add_css_class("recording-editor-primary-button");
     open_btn.add_css_class("recording-editor-empty-open-button");
@@ -200,7 +202,7 @@ pub(super) fn install_empty_drop_zone(
     let loading_spinner = Spinner::new();
     loading_spinner.set_size_request(16, 16);
     loading_spinner.set_can_target(false);
-    let loading_label = Label::new(Some("Loading image…"));
+    let loading_label = Label::new(Some(&t("Loading image…")));
     loading_label.add_css_class("recording-editor-drop-label");
     loading_label.set_can_target(false);
     loading_box.append(&loading_spinner);

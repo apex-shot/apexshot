@@ -136,8 +136,9 @@ pub fn draw_video_clip(
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
+    let fallback_title = t("Screen Recording");
     let title = if state.title.trim().is_empty() {
-        "Screen Recording"
+        fallback_title.as_str()
     } else {
         state.title.as_str()
     };
@@ -398,12 +399,12 @@ pub fn draw_one_zoom(
         cr.move_to(x0 + 14.0, y + height * 0.62);
         let label = if clip_w > 92.0 {
             let mode = match state.zoom_clips[index].mode {
-                crate::recording::editor::model::ZoomMode::Auto => "Auto",
-                crate::recording::editor::model::ZoomMode::Manual => "Manual",
+                crate::recording::editor::model::ZoomMode::Auto => t("Auto"),
+                crate::recording::editor::model::ZoomMode::Manual => t("Manual"),
             };
             format!("{mode}  {}", format_zoom_scale(state.zoom_clips[index].scale))
         } else {
-            "Zoom".into()
+            t("Zoom")
         };
         let _ = cr.show_text(&label);
     }
@@ -526,7 +527,8 @@ pub fn draw_one_hide(
         );
         cr.set_font_size(11.0);
         cr.move_to(x0 + 14.0, y + height * 0.62);
-        let _ = cr.show_text("Hide");
+        let hide_label = t("Hide");
+        let _ = cr.show_text(&hide_label);
     }
 }
 
@@ -583,7 +585,8 @@ pub fn draw_hide_suggestion(
         );
         cr.set_font_size(11.0);
         cr.move_to(x0 + 14.0, y + height * 0.62);
-        let _ = cr.show_text("Hide");
+        let hide_label = t("Hide");
+        let _ = cr.show_text(&hide_label);
     }
 }
 
@@ -630,7 +633,8 @@ pub fn draw_zoom_suggestion(
         );
         cr.set_font_size(11.0);
         cr.move_to(x0 + 14.0, y + height * 0.62);
-        let _ = cr.show_text("Zoom");
+        let zoom_label = t("Zoom");
+        let _ = cr.show_text(&zoom_label);
     }
 }
 

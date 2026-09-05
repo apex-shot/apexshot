@@ -14,6 +14,7 @@ mod text;
 use gtk4::{prelude::*, Box as GtkBox, Button, Label, Orientation, Stack};
 
 use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
+use crate::i18n::t;
 
 use crop::{build_crop_inspector, CropInspectorInputs};
 use number::{build_number_inspector, NumberInspectorInputs};
@@ -119,11 +120,11 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     inspector_tabs.set_hexpand(false);
     inspector_tabs.set_halign(gtk4::Align::Fill);
 
-    let background_tab_btn = Button::with_label("Background");
+    let background_tab_btn = Button::with_label(&t("Background"));
     background_tab_btn.set_has_frame(false);
     background_tab_btn.add_css_class("editor-inspector-tab-button");
 
-    let colors_tab_btn = Button::with_label("Colors");
+    let colors_tab_btn = Button::with_label(&t("Colors"));
     colors_tab_btn.set_has_frame(false);
     colors_tab_btn.add_css_class("editor-inspector-tab-button");
 

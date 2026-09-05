@@ -15,6 +15,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 
+use crate::i18n::{t, tfmt};
+
 mod shell {
     use super::*;
     include!("timeline_card_parts/shell.rs");

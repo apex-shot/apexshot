@@ -1,3 +1,4 @@
+use crate::i18n::{t, tfmt};
 use crate::recording::editor::model::format_size;
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Popover,
@@ -92,15 +93,15 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
     let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     let (wrapper, root) = dialog_card();
 
-    let title = Label::new(Some("Export complete"));
+    let title = Label::new(Some(&t("Export complete")));
     title.add_css_class("recording-editor-dialog-title");
     title.set_xalign(0.0);
 
     let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("file");
-    let body = Label::new(Some(&format!(
-        "Saved {} ({})",
-        file_name,
-        format_size(size)
+    let size_text = format_size(size);
+    let body = Label::new(Some(&tfmt(
+        "Saved {file} ({size})",
+        &[("file", file_name), ("size", &size_text)],
     )));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);
@@ -110,11 +111,11 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
     button_row.set_hexpand(true);
     button_row.set_margin_top(8);
 
-    let open_folder = Button::with_label("Open Folder");
+    let open_folder = Button::with_label(&t("Open Folder"));
     open_folder.set_has_frame(false);
     open_folder.add_css_class("recording-editor-secondary-button");
 
-    let close = Button::with_label("Close");
+    let close = Button::with_label(&t("Close"));
     close.set_has_frame(false);
     close.add_css_class("recording-editor-primary-button");
 
@@ -143,16 +144,16 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
 pub(super) fn show_manual_zoom_notice(parent: &ApplicationWindow) {
     let (wrapper, root) = dialog_card();
 
-    let title = Label::new(Some("No pointer data found"));
+    let title = Label::new(Some(&t("No pointer data found")));
     title.add_css_class("recording-editor-dialog-title");
     title.set_xalign(0.0);
-    let body = Label::new(Some(
+    let body = Label::new(Some(&t(
         "Open Zoom and choose Detect to analyze visible cursor motion, or use Manual mode to place zooms yourself.",
-    ));
+    )));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);
     constrain_dialog_body(&body);
-    let close = Button::with_label("Got it");
+    let close = Button::with_label(&t("Got it"));
     close.set_has_frame(false);
     close.add_css_class("recording-editor-primary-button");
     close.set_halign(Align::End);
@@ -190,7 +191,7 @@ pub(super) fn show_error(
     button_row.set_halign(Align::End);
     button_row.set_margin_top(8);
 
-    let close = Button::with_label("Close");
+    let close = Button::with_label(&t("Close"));
     close.set_has_frame(false);
     close.add_css_class("recording-editor-primary-button");
     button_row.append(&close);
@@ -209,12 +210,12 @@ pub(super) fn show_export_in_progress_close(
 ) {
     let (wrapper, root) = dialog_card();
 
-    let title = Label::new(Some("Export is still running."));
+    let title = Label::new(Some(&t("Export is still running.")));
     title.add_css_class("recording-editor-dialog-title");
     title.set_xalign(0.0);
-    let body = Label::new(Some(
+    let body = Label::new(Some(&t(
         "Closing now stops the encode. Your edit session is kept.",
-    ));
+    )));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);
     constrain_dialog_body(&body);
@@ -223,10 +224,10 @@ pub(super) fn show_export_in_progress_close(
     button_row.set_halign(Align::End);
     button_row.set_margin_top(8);
 
-    let keep = Button::with_label("Keep editing");
+    let keep = Button::with_label(&t("Keep editing"));
     keep.set_has_frame(false);
     keep.add_css_class("recording-editor-secondary-button");
-    let close_anyway = Button::with_label("Close anyway");
+    let close_anyway = Button::with_label(&t("Close anyway"));
     close_anyway.set_has_frame(false);
     close_anyway.add_css_class("recording-editor-primary-button");
     button_row.append(&keep);

@@ -327,11 +327,14 @@ pub fn draw_trim_handle(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f6
 
 pub fn update_time_labels(start_label: &Label, end_label: &Label, state: &Arc<Mutex<VideoEditState>>) {
     let state = state.lock().unwrap();
-    start_label.set_text(&format!(
-        "Start {}",
-        format_duration(state.trim_start_seconds)
+    start_label.set_text(&tfmt(
+        "Start {time}",
+        &[("time", &format_duration(state.trim_start_seconds))],
     ));
-    end_label.set_text(&format!("End {}", format_duration(state.trim_end_seconds)));
+    end_label.set_text(&tfmt(
+        "End {time}",
+        &[("time", &format_duration(state.trim_end_seconds))],
+    ));
 }
 
 pub fn nearest_cut_index(

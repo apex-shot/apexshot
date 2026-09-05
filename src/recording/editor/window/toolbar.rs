@@ -8,6 +8,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::t;
+
 #[allow(dead_code)]
 pub(super) fn build_titlebar(
     window: &ApplicationWindow,
@@ -23,7 +25,7 @@ pub(super) fn build_titlebar(
         .as_ref()
         .map(|state| state.lock().unwrap().title.clone())
         .filter(|title| !title.trim().is_empty())
-        .unwrap_or_else(|| "Untitled".to_string());
+        .unwrap_or_else(|| t("Untitled"));
     let current_name = Rc::new(RefCell::new(name.clone()));
     let editing = Rc::new(Cell::new(false));
     let can_rename = state.is_some();
@@ -48,7 +50,7 @@ pub(super) fn build_titlebar(
     let edit = Button::new();
     edit.set_has_frame(false);
     edit.add_css_class("recording-editor-title-edit");
-    edit.set_tooltip_text(Some("Rename video"));
+    edit.set_tooltip_text(Some(&t("Rename video")));
     edit.set_sensitive(can_rename);
     edit.set_halign(Align::Center);
     edit.set_valign(Align::Center);
@@ -164,18 +166,18 @@ pub(super) fn build_titlebar(
 
 pub(super) fn build_traffic_lights(window: &ApplicationWindow) -> GtkBox {
     let close =
-        crate::capture::editor::ui_support::traffic_light_button("traffic-light-red", "Close");
+        crate::capture::editor::ui_support::traffic_light_button("traffic-light-red", &t("Close"));
     close.remove_css_class("recent-captures-wm-btn");
     close.remove_css_class("recent-captures-wm-close");
     close.add_css_class("recording-editor-traffic-btn");
     let minimize = crate::capture::editor::ui_support::traffic_light_button(
         "traffic-light-yellow",
-        "Minimize",
+        &t("Minimize"),
     );
     minimize.remove_css_class("recent-captures-wm-btn");
     minimize.add_css_class("recording-editor-traffic-btn");
     let zoom =
-        crate::capture::editor::ui_support::traffic_light_button("traffic-light-green", "Zoom");
+        crate::capture::editor::ui_support::traffic_light_button("traffic-light-green", &t("Zoom"));
     zoom.remove_css_class("recent-captures-wm-btn");
     zoom.add_css_class("recording-editor-traffic-btn");
 

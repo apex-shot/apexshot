@@ -35,6 +35,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::i18n::t;
+
 pub fn open_empty() -> anyhow::Result<()> {
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
@@ -100,7 +102,7 @@ enum InitialVideo {
 fn build_window(application: &Application, initial_video: InitialVideo) {
     let window = ApplicationWindow::builder()
         .application(application)
-        .title("ApexShot Recording Editor")
+        .title(t("ApexShot Recording Editor"))
         .icon_name(crate::app_identity::icon_name())
         .default_width(1400)
         .default_height(900)
@@ -354,15 +356,18 @@ fn show_open_preview_video(
     media: Rc<RefCell<Option<MediaFile>>>,
     ping: Rc<dyn Fn()>,
 ) {
+    let title = t("Open video");
+    let open = t("Open");
+    let cancel = t("Cancel");
     let chooser = FileChooserNative::new(
-        Some("Open video"),
+        Some(&title),
         Some(window),
         FileChooserAction::Open,
-        Some("Open"),
-        Some("Cancel"),
+        Some(&open),
+        Some(&cancel),
     );
     let filter = FileFilter::new();
-    filter.set_name(Some("Videos"));
+    filter.set_name(Some(&t("Videos")));
     filter.add_mime_type("video/mp4");
     filter.add_pattern("*.mp4");
     chooser.add_filter(&filter);
@@ -387,7 +392,7 @@ fn placeholder_edit_state() -> VideoEditState {
         file_size_bytes: 0,
         has_audio: false,
     });
-    state.title = "Drop a recording to begin".into();
+    state.title = t("Drop a recording to begin");
     state
 }
 
@@ -640,8 +645,8 @@ fn build_empty_timeline() -> GtkBox {
     let scale_row = GtkBox::new(Orientation::Horizontal, 6);
     scale_row.add_css_class("recording-editor-timeline-scale-control");
     scale_row.set_hexpand(false);
-    let zoom_out = empty_tool_button("zoom-out-symbolic", "Zoom out timeline");
-    let zoom_in = empty_tool_button("zoom-in-symbolic", "Zoom in timeline");
+    let zoom_out = empty_tool_button("zoom-out-symbolic", &t("Zoom out timeline"));
+    let zoom_in = empty_tool_button("zoom-in-symbolic", &t("Zoom in timeline"));
     let scale = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 10.0);
     scale.add_css_class("recording-editor-timeline-scale");
     scale.set_draw_value(false);
@@ -699,7 +704,7 @@ fn build_empty_timeline() -> GtkBox {
     let prompt_icon = Image::from_icon_name("video-x-generic-symbolic");
     prompt_icon.set_pixel_size(14);
     prompt_icon.add_css_class("recording-editor-empty-track-prompt");
-    let prompt_label = Label::new(Some("Select a video, begin your creation."));
+    let prompt_label = Label::new(Some(&t("Select a video, begin your creation.")));
     prompt_label.add_css_class("recording-editor-empty-track-prompt");
     prompt.append(&prompt_icon);
     prompt.append(&prompt_label);
@@ -892,7 +897,7 @@ fn build_empty_footer() -> GtkBox {
         crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
     );
     upload.add_css_class("recording-editor-inspector-icon");
-    let done = Button::with_label("Done");
+    let done = Button::with_label(&t("Done"));
     done.set_has_frame(false);
     done.add_css_class("recording-editor-primary-button");
     done.set_sensitive(false);
@@ -916,16 +921,19 @@ fn show_open_video_dialog(
     open_button_slot: Rc<RefCell<Option<Button>>>,
     loading: Rc<Cell<bool>>,
 ) {
+    let title = t("Open video");
+    let open = t("Open");
+    let cancel = t("Cancel");
     let chooser = FileChooserNative::new(
-        Some("Open video"),
+        Some(&title),
         Some(window),
         FileChooserAction::Open,
-        Some("Open"),
-        Some("Cancel"),
+        Some(&open),
+        Some(&cancel),
     );
 
     let filter = FileFilter::new();
-    filter.set_name(Some("MP4 files"));
+    filter.set_name(Some(&t("MP4 files")));
     filter.add_mime_type("video/mp4");
     filter.add_pattern("*.mp4");
     chooser.add_filter(&filter);
@@ -1031,8 +1039,8 @@ fn load_video_async(
                 stop_loading();
                 dialogs::show_error(
                     &window,
-                    "Failed to open video",
-                    "ApexShot could not open this video file.",
+                    &t("Failed to open video"),
+                    &t("ApexShot could not open this video file."),
                     Some(&err),
                 );
                 glib::ControlFlow::Break

@@ -282,10 +282,17 @@ mod tests {
         send_active_recording_command, RecordingBusyGuard, RecordingControlCommand,
         RecordingControlServer,
     };
+    use std::sync::{Mutex, OnceLock};
     use tokio::sync::mpsc;
+
+    fn recording_busy_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn recording_busy_flag_is_exclusive() {
+        let _serial = recording_busy_test_lock().lock().unwrap();
         end_recording_busy();
         let first = RecordingBusyGuard::acquire().expect("first acquire");
         assert!(RecordingBusyGuard::acquire().is_err());
@@ -296,6 +303,7 @@ mod tests {
 
     #[test]
     fn early_release_allows_a_new_recording_without_old_guard_clobbering_it() {
+        let _serial = recording_busy_test_lock().lock().unwrap();
         end_recording_busy();
         let first = RecordingBusyGuard::acquire().expect("first acquire");
         release_recording_busy();

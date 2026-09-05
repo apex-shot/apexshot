@@ -2066,7 +2066,9 @@
             }
 
             .history-action-popover contents {
-                min-width: 210px;
+                /* Popovers are sized from their trigger in code. A fixed
+                   content minimum made them wider than that trigger. */
+                min-width: 0;
                 background-color: #1d1d1d;
                 color: #F1F1F3;
                 border: 1px solid alpha(white, 0.12);
@@ -2229,4 +2231,3 @@
                 background-color: alpha(#e34a4a, 0.12);
                 color: #8a2822;
             }
-            

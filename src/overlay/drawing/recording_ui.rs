@@ -6,6 +6,7 @@ use super::super::recording::layout::{
 };
 use super::super::recording::state::SettingsTab;
 use crate::capture_overlay::RecordingType;
+use crate::i18n::t;
 
 pub(crate) fn draw_recording_panel(
     context: &gtk4::cairo::Context,
@@ -151,7 +152,7 @@ pub(crate) fn draw_recording_panel(
             width: size.width,
             height: 12.0,
         },
-        "FRAME",
+        &t("FRAME"),
         9.6,
         true,
         (1.0, 224.0 / 255.0, 196.0 / 255.0, 0.80),
@@ -226,7 +227,7 @@ pub(crate) fn draw_recording_panel(
                 width: rect.width,
                 height: 18.0,
             },
-            label,
+            &t(label),
             10.7,
             hovered || *active,
             color,
@@ -359,16 +360,17 @@ pub(crate) fn draw_recording_panel(
             gtk4::cairo::FontWeight::Bold,
         );
         context.set_font_size(15.7);
+        let label = t(label);
         context.set_source_rgba(0.0, 0.0, 0.0, shadow_alpha);
         context.move_to(rect.x + 50.6, rect.y + 30.8);
-        let _ = context.show_text(label);
+        let _ = context.show_text(&label);
         if selected {
             context.set_source_rgba(1.0, 232.0 / 255.0, 214.0 / 255.0, icon_alpha);
         } else {
             context.set_source_rgba(245.0 / 255.0, 245.0 / 255.0, 246.0 / 255.0, icon_alpha);
         }
         context.move_to(rect.x + 50.0, rect.y + 30.0);
-        let _ = context.show_text(label);
+        let _ = context.show_text(&label);
     }
 
     // Recording crop menu dropdown

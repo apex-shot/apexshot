@@ -2,6 +2,7 @@ use super::super::background::BackgroundFrame;
 use super::super::layout::*;
 use super::super::recording::layout::compute_dropdown_popup_y;
 use super::super::recording::state::SettingsTab;
+use crate::i18n::t;
 use std::f64::consts::PI;
 
 pub(crate) fn draw_checkbox(
@@ -135,16 +136,17 @@ pub(crate) fn draw_settings_menu(
     );
     context.set_font_size(14.0);
     context.set_source_rgba(241.0 / 255.0, 241.0 / 255.0, 243.0 / 255.0, 230.0 / 255.0);
-    if let Ok(extents) = context.text_extents("Recording setup") {
+    let recording_setup = t("Recording setup");
+    if let Ok(extents) = context.text_extents(&recording_setup) {
         context.move_to(
             menu_x + 18.0 - extents.x_bearing(),
             menu_y + 27.0 - extents.height() / 2.0 - extents.y_bearing(),
         );
-        context.show_text("Recording setup").ok();
+        context.show_text(&recording_setup).ok();
     }
 
     // Tabs
-    let tabs = ["General", "Video", "GIF"];
+    let tabs = [t("General"), t("Video"), t("GIF")];
     let tab_container_x = menu_x + 18.0;
     let tab_container_y = menu_y + 50.0;
     let tab_container_w = menu_w - 36.0;
@@ -207,12 +209,12 @@ pub(crate) fn draw_settings_menu(
             tab_text_color.2,
             tab_text_color.3,
         );
-        if let Ok(extents) = context.text_extents(tab_label) {
+        if let Ok(extents) = context.text_extents(tab_label.as_str()) {
             context.move_to(
                 tr.x + tr.width / 2.0 - extents.width() / 2.0 - extents.x_bearing(),
                 tr.y + tr.height / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
             );
-            context.show_text(tab_label).ok();
+            context.show_text(tab_label.as_str()).ok();
         }
     }
 
@@ -340,12 +342,16 @@ pub(crate) fn draw_settings_general_tab(
         }};
     }
 
-    s!("Controls", "Keyboard shortcuts", rec_controls);
-    s!("HiDPI", "Display scale resolution", hidpi);
-    s!("Notifications", "Do Not Disturb", do_not_disturb);
-    s!("Selection", "Remember last area", remember_selection);
-    s!("Dim screen", "While recording", dim_screen);
-    s!("Countdown", "Before recording", show_countdown);
+    s!(&t("Controls"), &t("Keyboard shortcuts"), rec_controls);
+    s!(&t("HiDPI"), &t("Display scale resolution"), hidpi);
+    s!(&t("Notifications"), &t("Do Not Disturb"), do_not_disturb);
+    s!(
+        &t("Selection"),
+        &t("Remember last area"),
+        remember_selection
+    );
+    s!(&t("Dim screen"), &t("While recording"), dim_screen);
+    s!(&t("Countdown"), &t("Before recording"), show_countdown);
     let _ = y;
     let _ = idx;
 }
@@ -500,30 +506,18 @@ pub(crate) fn draw_settings_video_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
-    draw_text(
-        context,
-        "Maximum resolution",
-        label_x,
-        row1 + 25.0,
-        true,
-        0.9,
-    );
-    draw_text(
-        context,
-        "Reduce file size and upload time",
-        label_x,
-        row1 + 48.0,
-        false,
-        0.55,
-    );
-    let res_options = ["Original", "1080p", "720p"];
+    let max_res = t("Maximum resolution");
+    let max_res_desc = t("Reduce file size and upload time");
+    draw_text(context, &max_res, label_x, row1 + 25.0, true, 0.9);
+    draw_text(context, &max_res_desc, label_x, row1 + 48.0, false, 0.55);
+    let res_options = [t("Original"), t("1080p"), t("720p")];
     draw_dropdown_button(
         context,
         control_right - 136.0,
         row1 + 22.0,
         136.0,
         30.0,
-        res_options[video_max_res],
+        &res_options[video_max_res],
         hovered_item == 3,
     );
 
@@ -533,7 +527,8 @@ pub(crate) fn draw_settings_video_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
-    draw_text(context, "Frame rate", label_x, row2 + 31.0, true, 0.9);
+    let frame_rate = t("Frame rate");
+    draw_text(context, &frame_rate, label_x, row2 + 31.0, true, 0.9);
     let fps_options = ["24", "30", "50", "60"];
     draw_dropdown_button(
         context,
@@ -551,14 +546,8 @@ pub(crate) fn draw_settings_video_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
-    draw_text(
-        context,
-        "Record audio in mono",
-        label_x,
-        row3 + 31.0,
-        true,
-        0.9,
-    );
+    let record_mono_label = t("Record audio in mono");
+    draw_text(context, &record_mono_label, label_x, row3 + 31.0, true, 0.9);
     draw_checkbox(
         context,
         control_right - 18.0,
@@ -577,17 +566,12 @@ pub(crate) fn draw_settings_video_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
+    let noise_label = t("Noise suppression");
+    let noise_desc = t("Clean up microphone noise");
+    draw_text(context, &noise_label, label_x, row4 + 31.0, true, 0.9);
     draw_text(
         context,
-        "Noise suppression",
-        label_x,
-        row4 + 31.0,
-        true,
-        0.9,
-    );
-    draw_text(
-        context,
-        "Clean up microphone noise",
+        &noise_desc,
         label_x + 160.0,
         row4 + 31.0,
         false,
@@ -611,17 +595,12 @@ pub(crate) fn draw_settings_video_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
+    let open_editor_label = t("Open video editor");
+    let open_editor_desc = t("Edit quality, resolution and audio after recording");
+    draw_text(context, &open_editor_label, label_x, row5 + 27.0, true, 0.9);
     draw_text(
         context,
-        "Open video editor",
-        label_x,
-        row5 + 27.0,
-        true,
-        0.9,
-    );
-    draw_text(
-        context,
-        "Edit quality, resolution and audio after recording",
+        &open_editor_desc,
         label_x,
         row5 + 50.0,
         false,
@@ -695,7 +674,8 @@ pub(crate) fn draw_settings_gif_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
-    draw_label(context, "Frame rate", row1 + 37.0);
+    let gif_frame_rate = t("Frame rate");
+    draw_label(context, &gif_frame_rate, row1 + 37.0);
     let fps_label = format!("{:.0}", gif_fps);
     context.set_source_rgba(1.0, 1.0, 1.0, 15.0 / 255.0);
     super::rounded_rect_path(context, menu_x + 140.0, row1 + 17.0, 45.0, 30.0, 6.0);
@@ -736,7 +716,8 @@ pub(crate) fn draw_settings_gif_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
-    draw_label(context, "Quality", row2 + 29.0);
+    let quality_label = t("Quality");
+    draw_label(context, &quality_label, row2 + 29.0);
     let q_slider_x = menu_x + 160.0;
     let q_slider_w = control_right - q_slider_x;
     let q_track_y = row2 + 27.0;
@@ -770,13 +751,15 @@ pub(crate) fn draw_settings_gif_tab(
     context.fill().ok();
     context.set_font_size(10.7);
     context.set_source_rgba(1.0, 1.0, 1.0, 120.0 / 255.0);
-    if let Ok(_ext) = context.text_extents("Low") {
+    let low_label = t("Low");
+    let high_label = t("High");
+    if let Ok(_ext) = context.text_extents(&low_label) {
         context.move_to(q_slider_x, row2 + 57.0);
-        context.show_text("Low").ok();
+        context.show_text(&low_label).ok();
     }
-    if let Ok(_ext) = context.text_extents("High") {
-        context.move_to(q_slider_x + q_slider_w - 22.0, row2 + 57.0);
-        context.show_text("High").ok();
+    if let Ok(ext) = context.text_extents(&high_label) {
+        context.move_to(q_slider_x + q_slider_w - ext.width(), row2 + 57.0);
+        context.show_text(&high_label).ok();
     }
     let row3 = row2 + row_heights[1];
     if hovered_item == 5 {
@@ -784,7 +767,8 @@ pub(crate) fn draw_settings_gif_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
-    draw_label(context, "Optimize GIF", row3 + 32.0);
+    let optimize_gif_label = t("Optimize GIF");
+    draw_label(context, &optimize_gif_label, row3 + 32.0);
     draw_checkbox(
         context,
         control_right - 18.0,
@@ -802,15 +786,21 @@ pub(crate) fn draw_settings_gif_tab(
         context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
         context.fill().ok();
     }
-    draw_label(context, "Output size", row4 + 38.0);
-    let size_options = ["800 x auto", "640 x auto", "480 x auto", "Original"];
+    let output_size = t("Output size");
+    draw_label(context, &output_size, row4 + 38.0);
+    let size_options = [
+        t("800 x auto"),
+        t("640 x auto"),
+        t("480 x auto"),
+        t("Original"),
+    ];
     draw_dropdown_button(
         context,
         control_right - 180.0,
         row4 + 17.0,
         180.0,
         30.0,
-        size_options[gif_size_idx],
+        &size_options[gif_size_idx],
         hovered_item == 6,
     );
 }
@@ -894,12 +884,13 @@ pub(crate) fn draw_settings_dropdown_popup(
         );
         context.set_font_size(13.3);
         context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-        if let Ok(extents) = context.text_extents(opt) {
+        let opt_label = t(opt);
+        if let Ok(extents) = context.text_extents(&opt_label) {
             context.move_to(
                 r.x + 10.0 - extents.x_bearing(),
                 r.y + item_h / 2.0 - extents.height() / 2.0 - extents.y_bearing(),
             );
-            context.show_text(opt).ok();
+            context.show_text(&opt_label).ok();
         }
         if i == current_val {
             let cx = r.x + r.width - 16.0;

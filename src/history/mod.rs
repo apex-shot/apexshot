@@ -34,7 +34,7 @@ pub struct HistoryPage {
     /// Reload the page's contents; wired to the header-bar refresh button.
     pub refresh: Rc<dyn Fn()>,
     /// Placeholder the shared search entry shows while this page is visible.
-    pub search_placeholder: &'static str,
+    pub search_placeholder: String,
     /// Whether the shared search entry filters this page.
     pub searchable: bool,
 }

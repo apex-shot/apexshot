@@ -915,8 +915,8 @@ mod tests {
         assert_eq!(
             clipboard_missing_image_notification(),
             (
-                "Clipboard image unavailable",
-                "Clipboard does not contain an image to open"
+                "Clipboard image unavailable".to_string(),
+                "Clipboard does not contain an image to open".to_string()
             )
         );
     }

@@ -809,3 +809,1314 @@ msgstr "停止并保存录制："
 msgid "Only during recording"
 msgstr "仅在录制期间"
 
+
+msgid "+ Add current color"
+msgstr "+ 添加当前颜色"
+
+msgid "1 : 1 (Square)"
+msgstr "1 : 1（正方形）"
+
+msgid "1 {unit} ago"
+msgstr "1 {unit} 之前"
+
+msgid "1, 2, 3, 4..."
+msgstr "1、2、3、4……"
+
+msgid "1080p"
+msgstr "1080p"
+
+msgid "16 : 10"
+msgstr "16 : 10"
+
+msgid "16 : 9"
+msgstr "16 : 9"
+
+msgid "2 : 3"
+msgstr "2 : 3"
+
+msgid "2.35 : 1"
+msgstr "2.35 : 1"
+
+msgid "3 : 2"
+msgstr "3 : 2"
+
+msgid "4 : 3"
+msgstr "4 : 3"
+
+msgid "480 x auto"
+msgstr "480 x 自动"
+
+msgid "5 : 4 (10 : 8)"
+msgstr "5 : 4 (10 : 8)"
+
+msgid "640 x auto"
+msgstr "640 x 自动"
+
+msgid "7 : 5"
+msgstr "7 : 5"
+
+msgid "720p"
+msgstr "720p"
+
+msgid "800 x auto"
+msgstr "800 x 自动"
+
+msgid "9 : 16"
+msgstr "9 : 16"
+
+msgid "A, B, C, D..."
+msgstr "A、B、C、D……"
+
+msgid "Actions"
+msgstr "操作"
+
+msgid "Add"
+msgstr "添加"
+
+msgid "Add a Manual zoom, or analyze visible cursor motion from the timeline"
+msgstr "添加手动缩放功能，或分析时间轴上光标的可见移动轨迹"
+
+msgid "Add to project"
+msgstr "添加到项目"
+
+msgid "Add wallpaper"
+msgstr "添加壁纸"
+
+msgid "Add zoom at playhead"
+msgstr "在播放头处添加缩放功能"
+
+msgid "Added {auto_zooms} Auto Zooms from {samples} cursor-motion samples."
+msgstr "添加了 {auto_zooms} 个自动缩放，来自 {samples} 个光标移动样本。"
+
+msgid "Adwaita"
+msgstr "阿德瓦伊塔"
+
+msgid "Alignment"
+msgstr "对齐"
+
+msgid "An error occurred while taking a screenshot."
+msgstr "截图时发生错误。"
+
+msgid "Analyzing visible cursor motion…"
+msgstr "正在分析光标的可见移动……"
+
+msgid "Animation"
+msgstr "动画"
+
+msgid "ApexShot Editor"
+msgstr "ApexShot 编辑器"
+
+msgid "ApexShot History"
+msgstr "ApexShot 发展历程"
+
+msgid "ApexShot Preview"
+msgstr "《ApexShot》预览"
+
+msgid "ApexShot Recording"
+msgstr "ApexShot 录制"
+
+msgid "ApexShot Recording Countdown"
+msgstr "ApexShot 录制倒计时"
+
+msgid "ApexShot Recording Editor"
+msgstr "ApexShot 录像编辑器"
+
+msgid "ApexShot Recording Mask"
+msgstr "ApexShot 录制遮罩"
+
+msgid "ApexShot could not export this recording."
+msgstr "ApexShot 无法导出此录制内容。"
+
+msgid "ApexShot could not open this video file."
+msgstr "ApexShot 无法打开此视频文件。"
+
+msgid "ApexShot lost contact with the export worker."
+msgstr "ApexShot 与该外派员工失去了联系。"
+
+msgid "ApexShot lost contact with the upload worker."
+msgstr "ApexShot 与上传进程失去了联系。"
+
+msgid "ApexShot-YYYY-MM-DD_HH-MM-SS.png"
+msgstr "ApexShot-YYYY-MM-DD_HH-MM-SS.png"
+
+msgid "Apply selection"
+msgstr "应用选择"
+
+msgid "Area"
+msgstr "区域"
+
+msgid "Arrow"
+msgstr "箭头"
+
+msgid "Arrow style"
+msgstr "箭头样式"
+
+msgid "Aspect Ratio"
+msgstr "宽高比"
+
+msgid "Audio"
+msgstr "音频"
+
+msgid "Auto"
+msgstr "汽车"
+
+msgid "Auto Zoom detection complete"
+msgstr "自动变焦检测完成"
+
+msgid "Auto-balance"
+msgstr "自动平衡"
+
+msgid "Background"
+msgstr "背景"
+
+msgid "Before recording"
+msgstr "录制前"
+
+msgid "Behavior"
+msgstr "行为"
+
+msgid "Black"
+msgstr "黑色"
+
+msgid "Blackout"
+msgstr "停电"
+
+msgid "Blackout has no intensity control"
+msgstr "“Blackout” 没有亮度调节功能"
+
+msgid "Blur"
+msgstr "Blur"
+
+msgid "Blurred"
+msgstr "模糊的"
+
+msgid "CLICK EFFECT"
+msgstr "点击效果"
+
+msgid "Camera recenters when the cursor nears the edge of the zoomed view"
+msgstr "当光标接近缩放视图的边缘时，相机将重新居中"
+
+msgid "Captures you take will show up here."
+msgstr "您拍摄的照片将显示在此处。"
+
+msgid "Change aspect ratio"
+msgstr "更改宽高比"
+
+msgid "Change video size"
+msgstr "更改视频尺寸"
+
+msgid "Choose a color for the active tool"
+msgstr "为当前选中的工具选择一种颜色"
+
+msgid "Choose a folder"
+msgstr "选择一个文件夹"
+
+msgid "Choose click color"
+msgstr "选择点击颜色"
+
+msgid "Classic Animation"
+msgstr "经典动画"
+
+msgid "Clean up microphone noise"
+msgstr "消除麦克风噪音"
+
+msgid "Click a display · Esc to cancel · {keys}"
+msgstr "点击显示内容 · 按 Esc 键取消 · {keys}"
+
+msgid "Click color"
+msgstr "点击颜色"
+
+msgid "Click to open a video, or drop one here"
+msgstr "点击打开视频，或将视频拖放到此处"
+
+msgid "Clip"
+msgstr "片段"
+
+msgid "Clipboard does not contain an image to open"
+msgstr "剪贴板中没有要打开的图片"
+
+msgid "Clipboard image unavailable"
+msgstr "剪贴板中的图片不可用"
+
+msgid "Close anyway"
+msgstr "不管怎样，还是关闭吧"
+
+msgid "Closing now stops the encode. Your edit session is kept."
+msgstr "现在关闭将停止编码。您的编辑会话将被保留。"
+
+msgid "Cloud upload not configured"
+msgstr "未配置云端上传"
+
+msgid "Color"
+msgstr "颜色"
+
+msgid "Color picker"
+msgstr "颜色选择器"
+
+msgid "Colors"
+msgstr "颜色"
+
+msgid ""
+"Connect ApexShot Cloud in Settings → Cloud, or switch destination to XBackBone and configure it."
+msgstr "在“设置”→“云”中连接 ApexShot Cloud，或将目标切换为 XBackBone 并进行配置。"
+
+msgid ""
+"Connect your ApexShot Cloud account to browse everything you have uploaded, right here in History."
+msgstr "将您的 ApexShot Cloud 账户连接起来，即可在此处的“历史记录”中浏览您上传的所有内容。"
+
+msgid "Content copied to clipboard"
+msgstr "内容已复制到剪贴板"
+
+msgid "Content extracted"
+msgstr "内容已提取"
+
+msgid "Content extracted, but clipboard copy was unavailable"
+msgstr "已提取内容，但无法复制到剪贴板"
+
+msgid "Controls"
+msgstr "控制"
+
+msgid "Copied"
+msgstr "已复制"
+
+msgid ""
+"Copied to clipboard\n"
+"{url}"
+msgstr ""
+"已复制到剪贴板\n"
+"{url}"
+
+msgid "Copy"
+msgstr "复制"
+
+msgid "Copy failed"
+msgstr "复制失败"
+
+msgid "Copy file URI"
+msgstr "复制文件 URI"
+
+msgid "Copy link"
+msgstr "复制链接"
+
+msgid "Copy the recording path to the clipboard"
+msgstr "将录制路径复制到剪贴板"
+
+msgid "Corners"
+msgstr "角落"
+
+msgid "Could not delete {name}: {message}"
+msgstr "无法删除 {name}：{message}"
+
+msgid "Could not load your cloud uploads"
+msgstr "无法加载您的云端上传内容"
+
+msgid "Could not save edits: {error}"
+msgstr "无法保存修改：{error}"
+
+msgid "Countdown"
+msgstr "倒计时"
+
+msgid "Crop"
+msgstr "裁剪"
+
+msgid "Crop video"
+msgstr "裁剪视频"
+
+msgid "Current tool does not support size changes"
+msgstr "当前工具不支持调整尺寸"
+
+msgid "Cursor"
+msgstr "光标"
+
+msgid "Cursor analysis could not place Auto Zooms"
+msgstr "光标分析无法定位“自动缩放”功能"
+
+msgid "Cursor analysis stopped"
+msgstr "光标分析已停止"
+
+msgid "Cursor is hidden for this range in preview and export"
+msgstr "在预览和导出时，此范围内的光标被隐藏"
+
+msgid ""
+"Cursor motion was found, but Manual zooms already cover the detected moments."
+msgstr "检测到了光标移动，但手动缩放功能已涵盖了检测到的这些时刻。"
+
+msgid ""
+"Cursor motion was found, but no purposeful pauses were clear enough to place zooms."
+msgstr "虽然检测到了光标移动，但没有发现足够明显的有意停顿，无法据此设置缩放点。"
+
+msgid ""
+"Cursor replacement is unavailable. Its inferred path can still guide Auto Zoom."
+msgstr "无法替换光标。但其推断出的路径仍可引导“自动缩放”功能。"
+
+msgid "Cursor styling requires pointer data from an ApexShot recording."
+msgstr "光标样式需要来自 ApexShot 录制的指针数据。"
+
+msgid "Cursor unavailable"
+msgstr "光标不可用"
+
+msgid "Curved"
+msgstr "弯曲的"
+
+msgid "Cut mode — click timeline to place cuts"
+msgstr "剪切模式 — 点击时间轴进行剪切"
+
+msgid "Date unknown"
+msgstr "日期不详"
+
+msgid "Delete"
+msgstr "删除"
+
+msgid "Delete clip"
+msgstr "删除片段"
+
+msgid "Delete hide"
+msgstr "删除 隐藏"
+
+msgid "Delete selected"
+msgstr "删除所选内容"
+
+msgid "Delete zoom"
+msgstr "删除缩放"
+
+msgid "Delete zoom or cut"
+msgstr "删除、缩放或裁剪"
+
+msgid "Delete {name}?"
+msgstr "删除 {name}？"
+
+msgid "Deleted {name}"
+msgstr "已删除 {name}"
+
+msgid "Details"
+msgstr "详情"
+
+msgid "Detect"
+msgstr "检测"
+
+msgid "Detect automatic zooms from clicks and cursor motion"
+msgstr "根据点击和光标移动检测自动缩放"
+
+msgid "Detect text"
+msgstr "检测文本"
+
+msgid "Dim screen"
+msgstr "屏幕变暗"
+
+msgid "Dimensions"
+msgstr "尺寸"
+
+msgid "Dismiss"
+msgstr "关闭"
+
+msgid "Display scale resolution"
+msgstr "显示刻度分辨率"
+
+msgid "Display {number}"
+msgstr "显示 {number}"
+
+msgid "Do Not Disturb"
+msgstr "请勿打扰"
+
+msgid "Done"
+msgstr "完成"
+
+msgid "Dot"
+msgstr "点"
+
+msgid "Double"
+msgstr "双倍"
+
+msgid "Download Extension"
+msgstr "下载扩展程序"
+
+msgid "Drag here"
+msgstr "拖动到此处"
+
+msgid "Drag here or click to upload"
+msgstr "拖拽至此或点击上传"
+
+msgid "Drop a recording to begin"
+msgstr "上传一段录音即可开始"
+
+msgid "Drop an image here"
+msgstr "将图片拖放到此处"
+
+msgid "Duration"
+msgstr "时长"
+
+msgid "Ease"
+msgstr "轻松"
+
+msgid "Easing"
+msgstr "宽松"
+
+msgid "Echo"
+msgstr "回声"
+
+msgid "Edit"
+msgstr "编辑"
+
+msgid "Edit quality, resolution and audio after recording"
+msgstr "录制后编辑画质、分辨率和音频"
+
+msgid "Effects"
+msgstr "效果"
+
+msgid "Empty"
+msgstr "空"
+
+msgid "End {time}"
+msgstr "结束 {time}"
+
+msgid "Estimated export size"
+msgstr "预计出口规模"
+
+msgid "Everything you have uploaded to ApexShot Cloud"
+msgstr "您上传到 ApexShot Cloud 的所有内容"
+
+msgid "Export complete"
+msgstr "导出完成"
+
+msgid "Export failed"
+msgstr "导出失败"
+
+msgid "Export is still running."
+msgstr "导出仍在进行中。"
+
+msgid "Export the edited MP4"
+msgstr "导出编辑后的 MP4 文件"
+
+msgid "Export video"
+msgstr "导出视频"
+
+msgid "Export with your current settings, then upload"
+msgstr "使用当前设置导出，然后上传"
+
+msgid "Extra Large"
+msgstr "特大号"
+
+msgid "FRAME"
+msgstr "FRAME"
+
+msgid "Failed to open video"
+msgstr "无法打开视频"
+
+msgid "Fancy"
+msgstr "Fancy"
+
+msgid "File copied to clipboard"
+msgstr "文件已复制到剪贴板"
+
+msgid "Focus"
+msgstr "焦点"
+
+msgid "Focus background intensity"
+msgstr "对焦背景亮度"
+
+msgid "Focused"
+msgstr "专注的"
+
+msgid "Font"
+msgstr "字体"
+
+msgid "Font family"
+msgstr "字体家族"
+
+msgid "Frame rate"
+msgstr "帧率"
+
+msgid "Freeform"
+msgstr "自由形式"
+
+msgid "Fullscreen"
+msgstr "全屏"
+
+msgid "GIF"
+msgstr "GIF"
+
+msgid ""
+"GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first."
+msgstr "未安装 GNOME Shell 扩展。请先安装 ApexShot GNOME 扩展。"
+
+msgid "Geometry"
+msgstr "几何学"
+
+msgid "Glide"
+msgstr "滑行"
+
+msgid "Got it"
+msgstr "明白了"
+
+msgid "Gradient"
+msgstr "梯度"
+
+msgid "Gradients"
+msgstr "渐变"
+
+msgid "HEIGHT"
+msgstr "高度"
+
+msgid "HEX"
+msgstr "HEX"
+
+msgid "HiDPI"
+msgstr "HiDPI"
+
+msgid "Hide cursor"
+msgstr "隐藏光标"
+
+msgid "Hide cursor at playhead"
+msgstr "在播放头处隐藏光标"
+
+msgid "Hide track"
+msgstr "隐藏音轨"
+
+msgid "Hide video"
+msgstr "隐藏视频"
+
+msgid "Hide when idle"
+msgstr "空闲时隐藏"
+
+msgid "Hide zoom"
+msgstr "隐藏缩放"
+
+msgid "High"
+msgstr "高"
+
+msgid "Highlighter"
+msgstr "荧光笔"
+
+msgid "Idle delay"
+msgstr "空闲延迟"
+
+msgid "Image"
+msgstr "图片"
+
+msgid "Image copied to clipboard"
+msgstr "图片已复制到剪贴板"
+
+msgid "Images"
+msgstr "图片"
+
+msgid "Insert"
+msgstr "插入"
+
+msgid "Inspector"
+msgstr "督察"
+
+msgid "Intensity"
+msgstr "强度"
+
+msgid "Intensity {percent}%"
+msgstr "强度 {percent}%"
+
+msgid "Just now"
+msgstr "刚才"
+
+msgid "Keep editing"
+msgstr "继续编辑"
+
+msgid "Keyboard shortcuts"
+msgstr "键盘快捷键"
+
+msgid "Large"
+msgstr "大"
+
+msgid "Line"
+msgstr "行"
+
+msgid "Linear"
+msgstr "线性"
+
+msgid "Load more"
+msgstr "加载更多"
+
+msgid "Loading image…"
+msgstr "正在加载图片……"
+
+msgid "Loading your cloud uploads…"
+msgstr "正在加载您的云端上传内容……"
+
+msgid "Loading…"
+msgstr "正在加载……"
+
+msgid "Lock audio"
+msgstr "锁定音频"
+
+msgid "Lock track"
+msgstr "锁定轨道"
+
+msgid "Lock video"
+msgstr "锁定视频"
+
+msgid "Lock zoom"
+msgstr "锁定缩放"
+
+msgid "Low"
+msgstr "低"
+
+msgid "MP4 files"
+msgstr "MP4 文件"
+
+msgid "MP4 video"
+msgstr "MP4视频"
+
+msgid "Manual"
+msgstr "手册"
+
+msgid "Maximum resolution"
+msgstr "最高分辨率"
+
+msgid "Media"
+msgstr "媒体"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "Method"
+msgstr "方法"
+
+msgid "Mic"
+msgstr "麦克风"
+
+msgid "Minimal"
+msgstr "极简"
+
+msgid "Motion"
+msgstr "动议"
+
+msgid "Move mode — drag a segment to reorder it"
+msgstr "移动模式——拖动一个线段以调整其顺序"
+
+msgid "Mute"
+msgstr "静音"
+
+msgid "My colors"
+msgstr "我的颜色"
+
+msgid "No Auto Zooms added"
+msgstr "未添加自动缩放功能"
+
+msgid ""
+"No Auto Zooms were added. Manual zooms are preserved, and overlapping detections are skipped."
+msgstr "未添加任何自动缩放。手动缩放被保留，且跳过了重叠的检测结果。"
+
+msgid "No audio"
+msgstr "无音频"
+
+msgid "No clear clicks or purposeful pointer pauses were found."
+msgstr "未发现明显的点击声或有意为之的光标停顿。"
+
+msgid "No cursor samples were captured. Zoom centers will use the frame center."
+msgstr "未捕获光标样本。缩放中心将使用画面中心。"
+
+msgid "No editable cursor data was found."
+msgstr "未找到可编辑的光标数据。"
+
+msgid "No geometry"
+msgstr "无几何图形"
+
+msgid "No media"
+msgstr "无媒体"
+
+msgid "No object selected"
+msgstr "未选择任何对象"
+
+msgid "No pointer data found"
+msgstr "未找到指针数据"
+
+msgid "No recordings yet"
+msgstr "尚无录音"
+
+msgid "No screenshots yet"
+msgstr "尚无截图"
+
+msgid "No video edits to remove"
+msgstr "无需进行任何视频剪辑"
+
+msgid "No zooms"
+msgstr "不支持变焦"
+
+msgid "Noise suppression"
+msgstr "噪声抑制"
+
+msgid "Notifications"
+msgstr "通知"
+
+msgid "Number"
+msgstr "数字"
+
+msgid "Number Options"
+msgstr "数字选项"
+
+msgid "OCR"
+msgstr "OCR"
+
+msgid "OCR complete"
+msgstr "OCR 已完成"
+
+msgid "OCR failed"
+msgstr "OCR 识别失败"
+
+msgid "Obfuscate method"
+msgstr "混淆方法"
+
+msgid ""
+"On KDE Plasma, the compositor refused the screenshot. Enable KWin's screenshot plugin (System Settings → Desktop Effects, or set screenshotEnabled=true under [Plugins] in ~/.config/kwinrc) and try again."
+msgstr ""
+"在 KDE Plasma 上，合成器拒绝了截图请求。请启用 KWin 的截图插件（系统设置 → 桌面特效，或在 ~/.config/kwinrc 文件的 [Plugins] 部分将 screenshotEnabled 设为 true），然后重试。"
+
+msgid "Opacity"
+msgstr "不透明度"
+
+msgid "Open"
+msgstr "打开"
+
+msgid "Open Folder"
+msgstr "打开文件夹"
+
+msgid ""
+"Open Zoom and choose Detect to analyze visible cursor motion, or use Manual mode to place zooms yourself."
+msgstr "打开“缩放”功能并选择“检测”以分析可见的光标移动，或者使用“手动”模式自行设置缩放位置。"
+
+msgid "Open color picker"
+msgstr "打开颜色选择器"
+
+msgid "Open in browser"
+msgstr "在浏览器中打开"
+
+msgid "Open in editor"
+msgstr "在编辑器中打开"
+
+msgid "Open video"
+msgstr "打开视频"
+
+msgid "Open video editor"
+msgstr "打开视频编辑器"
+
+msgid "Opened in your browser"
+msgstr "已在您的浏览器中打开"
+
+msgid "Opened {name}"
+msgstr "已打开 {name}"
+
+msgid "Opening {name} in the {editor}"
+msgstr "在 {name} 中打开 {editor}"
+
+msgid "Optimize GIF"
+msgstr "优化GIF"
+
+msgid "Or click to upload"
+msgstr "或者点击上传"
+
+msgid "Original"
+msgstr "原文"
+
+msgid "Output size"
+msgstr "输出尺寸"
+
+msgid "PNG, JPEG, or WebP"
+msgstr "PNG、JPEG 或 WebP"
+
+msgid "PRESET"
+msgstr "预设"
+
+msgid "Padding"
+msgstr "填充"
+
+msgid "Palette"
+msgstr "调色板"
+
+msgid "Paste your XBackBone API token"
+msgstr "粘贴您的 XBackBone API 令牌"
+
+msgid "Pick from screen"
+msgstr "从屏幕中选择"
+
+msgid "Pin"
+msgstr "Pin"
+
+msgid "Pixelate"
+msgstr "像素化"
+
+msgid "Play"
+msgstr "播放"
+
+msgid "Pointer track missing"
+msgstr "缺少指针轨迹"
+
+msgid "Pointer track unavailable"
+msgstr "无法获取指针轨迹"
+
+msgid "Primary"
+msgstr "小学"
+
+msgid "QR code decoded"
+msgstr "二维码已解码"
+
+msgid "Quality"
+msgstr "质量"
+
+msgid "Ratio"
+msgstr "比率"
+
+msgid "Record audio in mono"
+msgstr "以单声道录制音频"
+
+msgid "Recording failed"
+msgstr "录制失败"
+
+msgid "Recording not saved"
+msgstr "录音未保存"
+
+msgid "Recording not supported"
+msgstr "不支持录音"
+
+msgid "Recording path copied"
+msgstr "已复制录制路径"
+
+msgid "Recording saved"
+msgstr "录音已保存"
+
+msgid "Recording setup"
+msgstr "录音设置"
+
+msgid ""
+"Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor."
+msgstr "录制将在隐藏操作系统光标的情况下继续进行。请为编辑器启用 ApexShot GNOME 扩展。"
+
+msgid "Recordings"
+msgstr "录音"
+
+msgid "Reduce file size and upload time"
+msgstr "减小文件大小并缩短上传时间"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Remember last area"
+msgstr "记住上一个区域"
+
+msgid "Remove audio track"
+msgstr "删除音频轨道"
+
+msgid "Remove custom color"
+msgstr "删除自定义颜色"
+
+msgid "Remove track"
+msgstr "删除曲目"
+
+msgid "Remove video track"
+msgstr "删除视频轨道"
+
+msgid "Remove zoom track"
+msgstr "删除缩放轨道"
+
+msgid "Rename video"
+msgstr "重命名视频"
+
+msgid "Reset"
+msgstr "重置"
+
+msgid "Reset video edits"
+msgstr "重置视频编辑"
+
+msgid "Retry"
+msgstr "重试"
+
+msgid "Reverse direction"
+msgstr "反向"
+
+msgid "Revert cuts"
+msgstr "撤销削减"
+
+msgid "Ripple"
+msgstr "瑞波"
+
+msgid "Save is disabled in After capture settings"
+msgstr "“保存”选项在“捕获后设置”中已禁用"
+
+msgid "Saved {file} ({size})"
+msgstr "已保存 {file} ({size})"
+
+msgid "Screen Recording"
+msgstr "屏幕录制"
+
+msgid "Screen recordings you make will show up here."
+msgstr "您录制的屏幕录像将显示在此处。"
+
+msgid "Screenshot failed"
+msgstr "截图失败"
+
+msgid "Screenshot not saved"
+msgstr "截图未保存"
+
+msgid "Scroll"
+msgstr "滚动"
+
+msgid "Scroll Capture"
+msgstr "滚动截图"
+
+msgid "Scroll capture requires the ApexShot"
+msgstr "滚动截图需要使用 ApexShot"
+
+msgid "Search isn't available for Cloud"
+msgstr "云端不支持搜索功能"
+
+msgid "Search recordings"
+msgstr "搜索录音"
+
+msgid "Search screenshots"
+msgstr "搜索截图"
+
+msgid "Select a Window"
+msgstr "选择一个窗口"
+
+msgid "Select a display"
+msgstr "选择显示方式"
+
+msgid "Select a video, begin your creation."
+msgstr "选择一个视频，开始创作吧。"
+
+msgid ""
+"Select a zoom to adjust it; timeline detection uses clicks and pointer pauses"
+msgstr "选择一个缩放级别进行调整；时间轴检测通过点击和光标暂停来实现"
+
+msgid "Select any annotation on the canvas to inspect it."
+msgstr "在画布上选择任意一个注释，即可查看其详细信息。"
+
+msgid "Selection"
+msgstr "选择"
+
+msgid "Set a fixed focus point for this zoom"
+msgstr "为该变焦镜头设置固定对焦点"
+
+msgid ""
+"Set the instance URL and API token in Settings → Cloud, or switch to ApexShot Cloud and sign in."
+msgstr "请在“设置”→“云”中设置实例 URL 和 API 令牌，或者切换到 ApexShot Cloud 并登录。"
+
+msgid "Shadow"
+msgstr "影子"
+
+msgid "Share link copied to clipboard"
+msgstr "分享链接已复制到剪贴板"
+
+msgid "Share link: {url}"
+msgstr "分享链接：{url}"
+
+msgid "Show in files"
+msgstr "在文件中显示"
+
+msgid "Show less"
+msgstr "显示更少"
+
+msgid "Show more"
+msgstr "显示更多"
+
+msgid "Show video"
+msgstr "播放视频"
+
+msgid "Show zoom"
+msgstr "显示缩放"
+
+msgid "Showing {name} in your files"
+msgstr "在您的文件中显示 {name}"
+
+msgid "Shown over the recording in preview and export"
+msgstr "在预览和导出时显示在录制内容上方"
+
+msgid "Sign in"
+msgstr "登录"
+
+msgid "Sign in to ApexShot Cloud"
+msgstr "登录 ApexShot Cloud"
+
+msgid "Size"
+msgstr "尺寸"
+
+msgid "Skip back 1s"
+msgstr "向后跳过 1 秒"
+
+msgid "Skip forward 1s"
+msgstr "快进1秒"
+
+msgid "Small"
+msgstr "小"
+
+msgid "Smooth"
+msgstr "流畅"
+
+msgid "Smoothing"
+msgstr "平滑处理"
+
+msgid "Snappy"
+msgstr "干脆利落"
+
+msgid "Softer follow"
+msgstr "更柔和的跟进"
+
+msgid "Speaker"
+msgstr "演讲者"
+
+msgid "Speed"
+msgstr "速度"
+
+msgid "Split"
+msgstr "Split"
+
+msgid "Split at playhead"
+msgstr "在播放头处分割"
+
+msgid "Spotlight"
+msgstr "焦点"
+
+msgid "Square"
+msgstr "正方形"
+
+msgid "Standard"
+msgstr "标准"
+
+msgid "Start"
+msgstr "开始"
+
+msgid "Start with:"
+msgstr "从以下内容开始："
+
+msgid "Start {time}"
+msgstr "开始 {time}"
+
+msgid "Stroke Thickness"
+msgstr "笔画粗细"
+
+msgid "Stroke size"
+msgstr "笔画大小"
+
+msgid "Style"
+msgstr "风格"
+
+msgid "Sway"
+msgstr "Sway"
+
+msgid "Tahoe"
+msgstr "塔霍"
+
+msgid "Tahoe Inverted"
+msgstr "倒置的塔霍湖"
+
+msgid "Text"
+msgstr "文本"
+
+msgid "Text copied to clipboard"
+msgstr "文本已复制到剪贴板"
+
+msgid "Text extracted"
+msgstr "提取的文本"
+
+msgid "Text extracted, but clipboard copy was unavailable"
+msgstr "已提取文本，但无法复制到剪贴板"
+
+msgid "Text size"
+msgstr "文字大小"
+
+msgid ""
+"The analysis worker stopped unexpectedly. Manual Zoom is still available."
+msgstr "分析任务意外停止。手动缩放功能仍然可用。"
+
+msgid "The cursor is baked into this imported video."
+msgstr "光标已渲染到这段导入的视频中。"
+
+msgid "The video editor only supports MP4 recordings"
+msgstr "视频编辑器仅支持MP4格式的视频文件"
+
+msgid "Thick"
+msgstr "厚"
+
+msgid "Thickness"
+msgstr "厚度"
+
+msgid "Thin"
+msgstr "薄"
+
+msgid "This page covers ApexShot Cloud"
+msgstr "本页面介绍 ApexShot Cloud"
+
+msgid "This permanently removes the file from disk."
+msgstr "这将永久地从磁盘中删除该文件。"
+
+msgid "This upload has no link to open"
+msgstr "此上传内容没有可打开的链接"
+
+msgid "This upload has no share link"
+msgstr "此上传内容没有分享链接"
+
+msgid "Tighter, faster"
+msgstr "更紧凑、更快"
+
+msgid "Tilt"
+msgstr "倾斜"
+
+msgid "Timer"
+msgstr "计时器"
+
+msgid "Tool options coming soon"
+msgstr "工具选项即将推出"
+
+msgid "Trail"
+msgstr "小径"
+
+msgid "URL copied to clipboard"
+msgstr "URL 已复制到剪贴板"
+
+msgid "Unlock audio"
+msgstr "解锁音频"
+
+msgid "Unlock video"
+msgstr "解锁视频"
+
+msgid "Unlock zoom"
+msgstr "解锁缩放功能"
+
+msgid "Unmute"
+msgstr "取消静音"
+
+msgid "Untitled"
+msgstr "无标题"
+
+msgid "Upload complete"
+msgstr "上传完成"
+
+msgid "Upload failed"
+msgstr "上传失败"
+
+msgid "Upload failed: {message}"
+msgstr "上传失败：{message}"
+
+msgid "Upload media"
+msgstr "上传媒体文件"
+
+msgid "Upload to cloud"
+msgstr "上传到云端"
+
+msgid "Uploaded {name}"
+msgstr "已上传 {name}"
+
+msgid "Uploading…"
+msgstr "正在上传……"
+
+msgid "Use the Thickness panel for highlighter"
+msgstr "使用“线宽”面板设置荧光笔"
+
+msgid "Very Thick"
+msgstr "非常厚"
+
+msgid "Video"
+msgstr "视频"
+
+msgid ""
+"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
+msgstr "Fedora 不支持视频录制。截图功能仍可正常使用。如需录屏，请使用 Spectacle 或 Kooha。"
+
+msgid "Videos"
+msgstr "视频"
+
+msgid "WIDTH"
+msgstr "宽度"
+
+msgid "Waiting for sign-in…"
+msgstr "正在等待登录……"
+
+msgid "Wallpaper"
+msgstr "壁纸"
+
+msgid "Waveform unavailable"
+msgstr "无法显示波形"
+
+msgid "While recording"
+msgstr "录制时"
+
+msgid "White"
+msgstr "白色"
+
+msgid "XBackBone upload not configured"
+msgstr "XBackBone 上传未配置"
+
+msgid "Yaru"
+msgstr "Yaru"
+
+msgid "Yesterday"
+msgstr "昨天"
+
+msgid "You have not uploaded anything to ApexShot Cloud yet."
+msgstr "您尚未向 ApexShot Cloud 上传任何内容。"
+
+msgid "You're connected"
+msgstr "您已连接"
+
+msgid "Your next screenshot gets a share link."
+msgstr "您的下一张截图将生成一个分享链接。"
+
+msgid ""
+"Your uploads currently go to a self-hosted XBackBone instance. Switch your upload destination to ApexShot Cloud in Settings to browse those uploads here."
+msgstr ""
+"您当前上传的内容存储在自托管的 XBackBone 实例中。请在“设置”中将上传目标切换为 ApexShot Cloud，即可在此浏览这些上传内容。"
+
+msgid "Zoom"
+msgstr "Zoom"
+
+msgid "Zoom In"
+msgstr "放大"
+
+msgid "Zoom Out"
+msgstr "缩小"
+
+msgid "Zoom controls"
+msgstr "缩放控件"
+
+msgid "Zoom in timeline"
+msgstr "放大时间轴"
+
+msgid "Zoom out timeline"
+msgstr "缩小时间轴"
+
+msgid "Zoom to Selection"
+msgstr "放大至选定区域"
+
+msgid "a, b, c, d..."
+msgstr "a、b、c、d……"
+
+msgid "browser extension."
+msgstr "浏览器扩展程序。"
+
+msgid "i, ii, iii, iv..."
+msgstr "i、ii、iii、iv……"
+
+msgid "macOS"
+msgstr "macOS"
+
+msgid "{count} {unit}s ago"
+msgstr "{count} {unit} 之前"
+
+msgid "{name} is no longer on disk"
+msgstr "{name} 已不在磁盘上"
+
+msgid "{name} was already gone"
+msgstr "{name} 已经走了"
+
+msgid "＋ Add to My Colors"
+msgstr "＋ 添加到“我的颜色”"
+
+msgid "Box"
+msgstr "框"
+
+msgid "Circle"
+msgstr "圆"
+
+msgid "Obfuscate"
+msgstr "混淆"
+
+msgid "Pen"
+msgstr "笔"
+
+msgid "Choose the solid color used when Background is set to plain color"
+msgstr "当“背景”设置为“纯色”时，选择要使用的纯色"

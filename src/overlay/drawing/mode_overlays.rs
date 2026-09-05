@@ -1,6 +1,7 @@
 use super::super::background::BackgroundFrame;
 use super::super::layout::*;
 use super::super::recording::state::OverlayIntent;
+use crate::i18n::t;
 use std::f64::consts::PI;
 
 fn draw_popup_panel(
@@ -96,7 +97,7 @@ pub(super) fn draw_countdown_bubble(
         context.set_font_size(if hovered_cancel { 13.0 } else { 22.0 });
         context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
         let text = if hovered_cancel {
-            "Cancel".to_string()
+            t("Cancel")
         } else {
             countdown_value.to_string()
         };
@@ -141,7 +142,7 @@ pub(super) fn draw_countdown_bubble(
         }
 
         let text = if hovered_cancel {
-            "Cancel".to_string()
+            t("Cancel")
         } else {
             countdown_value.to_string()
         };
@@ -215,7 +216,8 @@ pub(super) fn draw_scroll_popup(
     context.set_font_size(13.0);
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
     context.move_to(popup_x + 20.0, popup_y + 30.0);
-    let _ = context.show_text("Scroll Capture");
+    let title = t("Scroll Capture");
+    let _ = context.show_text(&title);
 
     // Body text
     context.select_font_face(
@@ -226,9 +228,11 @@ pub(super) fn draw_scroll_popup(
     context.set_font_size(12.0);
     context.set_source_rgba(1.0, 1.0, 1.0, 180.0 / 255.0);
     context.move_to(popup_x + 20.0, popup_y + 55.0);
-    let _ = context.show_text("Scroll capture requires the ApexShot");
+    let body_line1 = t("Scroll capture requires the ApexShot");
+    let _ = context.show_text(&body_line1);
     context.move_to(popup_x + 20.0, popup_y + 73.0);
-    let _ = context.show_text("browser extension.");
+    let body_line2 = t("browser extension.");
+    let _ = context.show_text(&body_line2);
 
     // CTA button — match the glass/orange accent style instead of a flat block.
     let btn_w = layout.download.width;
@@ -271,12 +275,12 @@ pub(super) fn draw_scroll_popup(
     );
     context.set_font_size(13.0);
     context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-    let btn_text = "Download Extension";
-    if let Ok(extents) = context.text_extents(btn_text) {
+    let btn_text = t("Download Extension");
+    if let Ok(extents) = context.text_extents(&btn_text) {
         let text_x = btn_x + (btn_w - extents.width()) / 2.0 - extents.x_bearing();
         let text_y = btn_y + (btn_h - extents.height()) / 2.0 - extents.y_bearing();
         context.move_to(text_x, text_y);
-        let _ = context.show_text(btn_text);
+        let _ = context.show_text(&btn_text);
     }
 
     let _ = context.restore();
@@ -400,7 +404,8 @@ pub(super) fn draw_window_picker(
         popup_x + 18.0,
         popup_y + crate::overlay::layout::WINDOW_PICKER_PAD + 14.0,
     );
-    let _ = context.show_text("Select a Window");
+    let select_window = t("Select a Window");
+    let _ = context.show_text(&select_window);
 
     let mut curr_y = picker.list_y;
 
@@ -433,8 +438,9 @@ pub(super) fn draw_window_picker(
         };
 
         // Class label (bold)
+        let window_fallback = t("Window");
         let class_label = if win.class.is_empty() {
-            "Window"
+            window_fallback.as_str()
         } else {
             &win.class
         };
@@ -452,7 +458,7 @@ pub(super) fn draw_window_picker(
 
         // Window title (truncated to fit)
         let title = if win.title.is_empty() {
-            "Untitled".to_string()
+            t("Untitled")
         } else {
             win.title.clone()
         };

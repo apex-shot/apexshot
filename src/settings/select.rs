@@ -129,7 +129,10 @@ impl SettingsSelect {
             let popover = popover.clone();
             let button_for_width = button.clone();
             button.connect_clicked(move |_| {
-                let width = button_for_width.width().max(180);
+                // The menu is an extension of its trigger, so keep their
+                // outside widths aligned instead of letting the shared
+                // History popover surface choose a wider minimum.
+                let width = button_for_width.width();
                 popover.set_size_request(width, -1);
                 popover.popup();
             });
@@ -198,6 +201,10 @@ mod tests {
         assert!(
             production_source.contains("set_valign(Align::Center)"),
             "settings dropdown still stretches with the row"
+        );
+        assert!(
+            production_source.contains("button_for_width.width()"),
+            "settings dropdown menu should match its trigger width"
         );
     }
 }

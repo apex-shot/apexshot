@@ -406,6 +406,15 @@ fn run_tesseract_with_psm(
 /// Falls back to (or uses solely) the neural OCR engine otherwise.
 /// QR codes are decoded directly.
 fn run_ocr_pipeline(rgba_image: &RgbaImage, config: &OcrConfig) -> OcrResult<OcrOutput> {
+    // A completely uniform image cannot contain readable text or a QR code.
+    // Return before initializing an OCR engine (or downloading its model).
+    let Some(first_pixel) = rgba_image.pixels().next() else {
+        return Err(OcrError::NoTextDetected);
+    };
+    if rgba_image.pixels().all(|pixel| pixel == first_pixel) {
+        return Err(OcrError::NoTextDetected);
+    }
+
     // Try QR code detection first
     if let Some(decoded) = qr::detect_and_decode(rgba_image) {
         let mut copied_to_clipboard = false;
@@ -1236,24 +1245,10 @@ level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theigh
 
         let config = OcrConfig::default().with_clipboard(false);
 
-        // Should fail because there's no meaningful text (may return NoTextDetected, LowConfidence, or InitializationError if Tesseract is unavailable).
-        // With aggressive 4x upscale + no-noise-removal, Tesseract may also hallucinate a single
-        // character from edge artifacts — accept any result to avoid false positives here.
+        // A uniform image cannot contain text, and must avoid OCR-engine startup.
         let result = extract_text(&capture, &config);
-        if let Ok(output) = &result {
-            eprintln!(
-                "Warning: Tesseract hallucinated text on blank image (confidence={:?}, text={:?})",
-                output.source, output.text
-            );
-        }
         assert!(
-            matches!(
-                result,
-                Err(OcrError::NoTextDetected)
-                    | Err(OcrError::LowConfidence(_, _))
-                    | Err(OcrError::InitializationError(_))
-                    | Ok(_)
-            ),
+            matches!(result, Err(OcrError::NoTextDetected)),
             "unexpected result for empty image: {:?}",
             result
         );

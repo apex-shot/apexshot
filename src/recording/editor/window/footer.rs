@@ -11,6 +11,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::i18n::{t, tfmt};
+
 pub(super) fn build_inspector_actions(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
@@ -24,17 +26,17 @@ pub(super) fn build_inspector_actions(
 
     let copy = icon_action_button(
         crate::capture::editor::window::icon_names::custom::COPY_SYMBOLIC,
-        "Copy the recording path to the clipboard",
+        &t("Copy the recording path to the clipboard"),
     );
     let upload = icon_action_button(
         crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
-        "Export with your current settings, then upload",
+        &t("Export with your current settings, then upload"),
     );
-    let done = Button::with_label("Done");
+    let done = Button::with_label(&t("Done"));
     done.set_has_frame(false);
     done.add_css_class("recording-editor-primary-button");
     done.set_halign(Align::End);
-    done.set_tooltip_text(Some("Export the edited MP4"));
+    done.set_tooltip_text(Some(&t("Export the edited MP4")));
     let spinner = Spinner::new();
     spinner.set_visible(false);
 
@@ -49,9 +51,12 @@ pub(super) fn build_inspector_actions(
         move |_| {
             let path = state.lock().unwrap().metadata.path.clone();
             if let Err(err) = crate::utils::clipboard::copy_uri_to_clipboard(&path) {
-                crate::utils::notify::desktop_notification("Copy failed", &err.to_string());
+                crate::utils::notify::desktop_notification(&t("Copy failed"), &err.to_string());
             } else {
-                crate::utils::notify::desktop_notification("Copied", "Recording path copied");
+                crate::utils::notify::desktop_notification(
+                    &t("Copied"),
+                    &t("Recording path copied"),
+                );
             }
         }
     });
@@ -100,7 +105,7 @@ pub(super) fn build_upload_action(
     let button = Button::new();
     button.set_has_frame(false);
     button.add_css_class("recording-editor-title-upload");
-    button.set_tooltip_text(Some("Export with your current settings, then upload"));
+    button.set_tooltip_text(Some(&t("Export with your current settings, then upload")));
     button.set_valign(Align::Center);
     let icon = Image::from_icon_name(
         crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
@@ -136,7 +141,7 @@ pub(super) fn build_export_action(
     button.set_has_frame(false);
     button.add_css_class("recording-editor-primary-button");
     button.add_css_class("recording-editor-title-export");
-    button.set_tooltip_text(Some("Export the edited MP4"));
+    button.set_tooltip_text(Some(&t("Export the edited MP4")));
     button.set_valign(Align::Center);
 
     let content = GtkBox::new(Orientation::Horizontal, 4);
@@ -145,7 +150,7 @@ pub(super) fn build_export_action(
     let icon =
         Image::from_icon_name(crate::capture::editor::window::icon_names::ARROW_EXPORT_UP_REGULAR);
     icon.set_pixel_size(12);
-    let label = Label::new(Some("Export"));
+    let label = Label::new(Some(&t("Export")));
     content.append(&icon);
     content.append(&label);
     button.set_child(Some(&content));
@@ -177,7 +182,7 @@ pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>,
         "~{}",
         format_size(state.estimated_size_bytes(trim_only)),
     ));
-    label.set_tooltip_text(Some("Estimated export size"));
+    label.set_tooltip_text(Some(&t("Estimated export size")));
 }
 
 fn wire_upload_button(
@@ -196,7 +201,7 @@ fn wire_upload_button(
         let config = crate::config::load_config();
         if !crate::cloud::upload::is_configured(&config) {
             let (title, body) = crate::cloud::upload::not_configured_notification(&config);
-            crate::utils::notify::desktop_notification(title, body);
+            crate::utils::notify::desktop_notification(&title, &body);
             return;
         }
 
@@ -240,18 +245,18 @@ fn wire_upload_button(
                             {
                                 eprintln!("Failed to copy share link to clipboard: {e}");
                                 crate::utils::notify::desktop_notification(
-                                    "Upload complete",
-                                    &format!("Share link: {share_url}"),
+                                    &t("Upload complete"),
+                                    &tfmt("Share link: {url}", &[("url", &share_url)]),
                                 );
                             } else {
                                 crate::utils::notify::desktop_notification(
-                                    "Upload complete",
-                                    "Share link copied to clipboard",
+                                    &t("Upload complete"),
+                                    &t("Share link copied to clipboard"),
                                 );
                             }
                         }
                         Err(err) => {
-                            crate::utils::notify::desktop_notification("Upload failed", &err);
+                            crate::utils::notify::desktop_notification(&t("Upload failed"), &err);
                         }
                     }
                     glib::ControlFlow::Break
@@ -265,8 +270,8 @@ fn wire_upload_button(
                         control.set_sensitive(true);
                     }
                     crate::utils::notify::desktop_notification(
-                        "Upload failed",
-                        "ApexShot lost contact with the upload worker.",
+                        &t("Upload failed"),
+                        &t("ApexShot lost contact with the upload worker."),
                     );
                     glib::ControlFlow::Break
                 }
@@ -292,15 +297,18 @@ fn wire_export_button(
         let suggested = state.lock().unwrap().export_path();
         let suggested_dir = crate::config::load_config()
             .video_editor_export_dir(suggested.parent().unwrap_or_else(|| Path::new("")));
+        let title = t("Export video");
+        let export = t("Export");
+        let cancel = t("Cancel");
         let chooser = FileChooserNative::new(
-            Some("Export video"),
+            Some(&title),
             Some(&window),
             FileChooserAction::Save,
-            Some("Export"),
-            Some("Cancel"),
+            Some(&export),
+            Some(&cancel),
         );
         let filter = FileFilter::new();
-        filter.set_name(Some("MP4 video"));
+        filter.set_name(Some(&t("MP4 video")));
         filter.add_mime_type("video/mp4");
         filter.add_pattern("*.mp4");
         chooser.add_filter(&filter);
@@ -369,8 +377,8 @@ fn wire_export_button(
                             }
                             Err(err) => dialogs::show_error(
                                 &window,
-                                "Export failed",
-                                "ApexShot could not export this recording.",
+                                &t("Export failed"),
+                                &t("ApexShot could not export this recording."),
                                 Some(&err),
                             ),
                         }
@@ -386,8 +394,8 @@ fn wire_export_button(
                         }
                         dialogs::show_error(
                             &window,
-                            "Export failed",
-                            "ApexShot lost contact with the export worker.",
+                            &t("Export failed"),
+                            &t("ApexShot lost contact with the export worker."),
                             None,
                         );
                         glib::ControlFlow::Break

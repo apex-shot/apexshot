@@ -26,7 +26,7 @@ fn build_cursor_panel(
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-zoom-header");
     header.set_hexpand(true);
-    let title = Label::new(Some("Cursor"));
+    let title = Label::new(Some(&t("Cursor")));
     title.add_css_class("recording-editor-zoom-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
@@ -36,9 +36,9 @@ fn build_cursor_panel(
     tabs.add_css_class("recording-editor-cursor-tabs");
     tabs.set_hexpand(true);
     tabs.set_homogeneous(true);
-    let style_tab = cursor_tab_button("Style");
-    let motion_tab = cursor_tab_button("Motion");
-    let effects_tab = cursor_tab_button("Effects");
+    let style_tab = cursor_tab_button(&t("Style"));
+    let motion_tab = cursor_tab_button(&t("Motion"));
+    let effects_tab = cursor_tab_button(&t("Effects"));
     motion_tab.set_group(Some(&style_tab));
     effects_tab.set_group(Some(&style_tab));
     style_tab.set_active(true);
@@ -74,7 +74,7 @@ fn build_cursor_panel(
     unavailable.set_vexpand(true);
     unavailable.set_visible(false);
 
-    let unavailable_title = Label::new(Some("Cursor unavailable"));
+    let unavailable_title = Label::new(Some(&t("Cursor unavailable")));
     unavailable_title.add_css_class("recording-editor-cursor-unavailable-title");
     unavailable_title.set_xalign(0.0);
     unavailable_title.set_wrap(true);
@@ -171,17 +171,17 @@ fn build_cursor_panel(
             unavailable.set_visible(!can_style);
             let (message, tooltip) = if inferred {
                 (
-                    "The cursor is baked into this imported video.",
-                    "Cursor replacement is unavailable. Its inferred path can still guide Auto Zoom.",
+                    t("The cursor is baked into this imported video."),
+                    t("Cursor replacement is unavailable. Its inferred path can still guide Auto Zoom."),
                 )
             } else {
                 (
-                    "No editable cursor data was found.",
-                    "Cursor styling requires pointer data from an ApexShot recording.",
+                    t("No editable cursor data was found."),
+                    t("Cursor styling requires pointer data from an ApexShot recording."),
                 )
             };
-            unavailable_detail.set_text(message);
-            unavailable.set_tooltip_text(Some(tooltip));
+            unavailable_detail.set_text(&message);
+            unavailable.set_tooltip_text(Some(&tooltip));
             refresh_style();
             refresh_motion();
             refresh_effects();
@@ -227,7 +227,7 @@ fn build_cursor_style_tab(
     body.add_css_class("recording-editor-cursor-tab-body");
     body.set_hexpand(true);
 
-    let hint = Label::new(Some("Shown over the recording in preview and export"));
+    let hint = Label::new(Some(&t("Shown over the recording in preview and export")));
     hint.add_css_class("recording-editor-zoom-hint");
     hint.set_wrap(true);
     hint.set_xalign(0.0);
@@ -258,7 +258,7 @@ fn build_cursor_style_tab(
             preview.set_draw_func(move |_, cr, width, height| {
                 cursor_sprite::draw_centered(cr, width as f64, height as f64, theme);
             });
-            let name = Label::new(Some(theme.label()));
+            let name = Label::new(Some(&t(theme.label())));
             name.add_css_class("recording-editor-cursor-card-label");
             name.set_xalign(0.5);
             column.append(&preview);
@@ -288,8 +288,8 @@ fn build_cursor_style_tab(
     }
     body.append(&grid);
 
-    let size_row = cursor_slider_row("Size");
-    let shadow_row = cursor_slider_row("Shadow");
+    let size_row = cursor_slider_row(&t("Size"));
+    let shadow_row = cursor_slider_row(&t("Shadow"));
     size_row.scale.set_range(MIN_CURSOR_SIZE, MAX_CURSOR_SIZE);
     size_row.scale.set_increments(0.05, 0.25);
     shadow_row.scale.set_range(0.0, 1.0);
@@ -347,7 +347,7 @@ fn build_cursor_motion_tab(
     body.add_css_class("recording-editor-cursor-tab-body");
     body.set_hexpand(true);
 
-    let preset_label = Label::new(Some("PRESET"));
+    let preset_label = Label::new(Some(&t("PRESET")));
     preset_label.add_css_class("recording-editor-zoom-kicker");
     preset_label.set_xalign(0.0);
     body.append(&preset_label);
@@ -356,17 +356,17 @@ fn build_cursor_motion_tab(
     presets.add_css_class("recording-editor-motion-preset-row");
     presets.set_hexpand(true);
     presets.set_homogeneous(true);
-    let focused_btn = motion_preset_card("Focused", "Tighter, faster");
-    let smooth_btn = motion_preset_card("Smooth", "Softer follow");
+    let focused_btn = motion_preset_card(&t("Focused"), &t("Tighter, faster"));
+    let smooth_btn = motion_preset_card(&t("Smooth"), &t("Softer follow"));
     presets.append(&focused_btn);
     presets.append(&smooth_btn);
     body.append(&presets);
 
-    let smooth_row = cursor_slider_row("Smoothing");
-    let speed_row = cursor_slider_row("Speed");
-    let trail_row = cursor_slider_row("Trail");
-    let tilt_row = cursor_slider_row("Tilt");
-    let sway_row = cursor_slider_row("Sway");
+    let smooth_row = cursor_slider_row(&t("Smoothing"));
+    let speed_row = cursor_slider_row(&t("Speed"));
+    let trail_row = cursor_slider_row(&t("Trail"));
+    let tilt_row = cursor_slider_row(&t("Tilt"));
+    let sway_row = cursor_slider_row(&t("Sway"));
     smooth_row.scale.set_range(0.0, 1.0);
     smooth_row.scale.set_increments(0.05, 0.1);
     speed_row
@@ -388,7 +388,7 @@ fn build_cursor_motion_tab(
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
     idle_row.set_hexpand(true);
-    let idle_label = Label::new(Some("Hide when idle"));
+    let idle_label = Label::new(Some(&t("Hide when idle")));
     idle_label.add_css_class("recording-editor-zoom-classic-label");
     idle_label.set_xalign(0.0);
     idle_label.set_hexpand(true);
@@ -400,7 +400,7 @@ fn build_cursor_motion_tab(
     idle_row.append(&idle_switch);
     body.append(&idle_row);
 
-    let idle_delay_row = cursor_slider_row("Idle delay");
+    let idle_delay_row = cursor_slider_row(&t("Idle delay"));
     idle_delay_row.scale.set_range(120.0, 4000.0);
     idle_delay_row.scale.set_increments(40.0, 200.0);
     body.append(&idle_delay_row.widget);
@@ -609,7 +609,7 @@ fn build_cursor_effects_tab(
     }
     body.append(&live);
 
-    let click_label = Label::new(Some("CLICK EFFECT"));
+    let click_label = Label::new(Some(&t("CLICK EFFECT")));
     click_label.add_css_class("recording-editor-zoom-kicker");
     click_label.set_xalign(0.0);
     body.append(&click_label);
@@ -633,7 +633,7 @@ fn build_cursor_effects_tab(
     let color_row = GtkBox::new(Orientation::Horizontal, 8);
     color_row.add_css_class("recording-editor-click-color-row");
     color_row.set_hexpand(true);
-    let color_label = Label::new(Some("Color"));
+    let color_label = Label::new(Some(&t("Color")));
     color_label.add_css_class("recording-editor-zoom-classic-label");
     color_label.set_xalign(0.0);
     color_label.set_hexpand(true);
@@ -641,7 +641,7 @@ fn build_cursor_effects_tab(
     let swatch = Button::new();
     swatch.add_css_class("recording-editor-click-color-swatch");
     swatch.set_has_frame(false);
-    swatch.set_tooltip_text(Some("Choose click color"));
+    swatch.set_tooltip_text(Some(&t("Choose click color")));
     let swatch_paint = DrawingArea::new();
     swatch_paint.set_content_width(28);
     swatch_paint.set_content_height(22);
@@ -685,10 +685,10 @@ fn build_cursor_effects_tab(
     }
     body.append(&dots);
 
-    let size_row = cursor_slider_row("Size");
-    let opacity_row = cursor_slider_row("Opacity");
-    let duration_row = cursor_slider_row("Duration");
-    let intensity_row = cursor_slider_row("Intensity");
+    let size_row = cursor_slider_row(&t("Size"));
+    let opacity_row = cursor_slider_row(&t("Opacity"));
+    let duration_row = cursor_slider_row(&t("Duration"));
+    let intensity_row = cursor_slider_row(&t("Intensity"));
     size_row.scale.set_range(MIN_CLICK_SCALE, MAX_CLICK_SCALE);
     size_row.scale.set_increments(0.05, 0.1);
     opacity_row.scale.set_range(0.0, 1.0);
@@ -892,7 +892,7 @@ fn open_click_color_dialog(
     let parent = widget
         .root()
         .and_then(|root| root.downcast::<Window>().ok());
-    let dialog = ColorChooserDialog::new(Some("Click color"), parent.as_ref());
+    let dialog = ColorChooserDialog::new(Some(&t("Click color")), parent.as_ref());
     dialog.set_modal(true);
     dialog.set_use_alpha(false);
     dialog.set_rgba(&initial);
@@ -966,7 +966,7 @@ fn click_effect_card(effect: ClickEffect) -> ToggleButton {
         draw_click_effect_icon(widget, cr, width as f64, height as f64, effect);
     });
     column.append(&preview);
-    let name = Label::new(Some(effect.label()));
+    let name = Label::new(Some(&t(effect.label())));
     name.add_css_class("recording-editor-click-effect-label");
     name.set_xalign(0.5);
     column.append(&name);

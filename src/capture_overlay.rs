@@ -1056,12 +1056,12 @@ fn strip_overlay_exit_prefix(detail: &str) -> &str {
 pub fn user_facing_capture_failure_message(err: &str) -> String {
     let detail = err.trim();
     let mut body = if detail.is_empty() {
-        "An error occurred while taking a screenshot.".to_string()
+        crate::i18n::t("An error occurred while taking a screenshot.")
     } else {
         let cleaned = strip_overlay_exit_prefix(detail);
         // Generic exit-code form with no extra detail → plain message.
         if cleaned.starts_with("apexshot-capture ") && cleaned.contains("exited with code") {
-            "An error occurred while taking a screenshot.".to_string()
+            crate::i18n::t("An error occurred while taking a screenshot.")
         } else {
             cleaned.to_string()
         }
@@ -1071,11 +1071,10 @@ pub fn user_facing_capture_failure_message(err: &str) -> String {
     if on_kde {
         let kwin_missing = !crate::backend::kde_screenshot::is_kwin_screenshot_available();
         if kwin_missing || looks_like_portal_rejection(err) {
-            body.push_str(
-                "\n\nOn KDE Plasma, the compositor refused the screenshot. \
-Enable KWin's screenshot plugin (System Settings → Desktop Effects, or set \
-screenshotEnabled=true under [Plugins] in ~/.config/kwinrc) and try again.",
-            );
+            body.push_str("\n\n");
+            body.push_str(&crate::i18n::t(
+                "On KDE Plasma, the compositor refused the screenshot. Enable KWin's screenshot plugin (System Settings → Desktop Effects, or set screenshotEnabled=true under [Plugins] in ~/.config/kwinrc) and try again.",
+            ));
         }
     }
 

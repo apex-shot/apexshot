@@ -75,7 +75,7 @@ pub(super) fn wire_output_lifecycle(
         let config = crate::config::load_config();
         if !crate::cloud::upload::is_configured(&config) {
             let (title, body) = crate::cloud::upload::not_configured_notification(&config);
-            crate::utils::notify::desktop_notification_important(title, body);
+            crate::utils::notify::desktop_notification_important(&title, &body);
             return;
         }
 
@@ -84,8 +84,11 @@ pub(super) fn wire_output_lifecycle(
             if let Err(error) = save_edited_image(&path_upload, &state) {
                 eprintln!("[editor] Failed to save edits before upload: {error}");
                 crate::utils::notify::desktop_notification_important(
-                    "Upload failed",
-                    &format!("Could not save edits: {error}"),
+                    &crate::i18n::t("Upload failed"),
+                    &crate::i18n::tfmt(
+                        "Could not save edits: {error}",
+                        &[("error", &error.to_string())],
+                    ),
                 );
                 return;
             }

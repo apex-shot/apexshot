@@ -1,3 +1,4 @@
+use crate::i18n::t;
 use gdk4x11::X11Surface;
 use gtk4::cairo;
 use gtk4::gdk::{self, Key};
@@ -427,7 +428,7 @@ fn setup_window(
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("ApexShot Recording")
+        .title(t("ApexShot Recording"))
         .default_width(bar_w_i)
         .default_height(bar_h_i)
         .decorated(false)
@@ -776,7 +777,7 @@ fn setup_countdown_window(
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("ApexShot Recording Countdown")
+        .title(t("ApexShot Recording Countdown"))
         .default_width(win_w)
         .default_height(win_h)
         .decorated(false)
@@ -1116,7 +1117,7 @@ fn build_dim_window(
 ) -> Option<ApplicationWindow> {
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("ApexShot Recording Mask")
+        .title(t("ApexShot Recording Mask"))
         .default_width(width)
         .default_height(height)
         .decorated(false)

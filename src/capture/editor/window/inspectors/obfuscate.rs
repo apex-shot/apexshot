@@ -3,6 +3,7 @@
 use gtk4::{prelude::*, Box as GtkBox};
 
 use super::shell::{append_inspector_section, build_tool_inspector};
+use crate::i18n::t;
 
 pub(super) struct ObfuscateInspectorInputs<'a> {
     pub obfuscate_method_list: &'a GtkBox,
@@ -15,7 +16,7 @@ pub(super) fn build_obfuscate_inspector(input: ObfuscateInspectorInputs<'_>) -> 
         .add_css_class("editor-inspector-option-list");
     append_inspector_section(
         &obfuscate_inspector_content,
-        "Method",
+        &t("Method"),
         input.obfuscate_method_list.upcast_ref(),
     );
     obfuscate_inspector

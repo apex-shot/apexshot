@@ -15,6 +15,7 @@ use gtk4::{
     Label, Orientation, Overlay as GtkOverlay, ScrolledWindow,
 };
 
+use crate::i18n::t;
 use crate::settings::ui_support::{install_settings_css, traffic_light_button};
 use crate::settings::windowing::{
     install_edge_resize, install_window_drag, prefers_dark_glass_theme,
@@ -101,7 +102,7 @@ pub fn build_history_window(app: &Application) {
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("ApexShot History")
+        .title(t("ApexShot History"))
         .icon_name(crate::app_identity::icon_name())
         .default_width(1020)
         .default_height(840)
@@ -164,18 +165,18 @@ pub fn build_history_window(app: &Application) {
 
     let refresh_btn = Button::from_icon_name("view-refresh-symbolic");
     refresh_btn.add_css_class("history-header-refresh");
-    refresh_btn.set_tooltip_text(Some("Refresh"));
+    refresh_btn.set_tooltip_text(Some(&t("Refresh")));
     refresh_btn.set_valign(Align::Center);
     toolbar.append(&refresh_btn);
 
-    let close_btn = traffic_light_button("traffic-light-red", "Close");
+    let close_btn = traffic_light_button("traffic-light-red", &t("Close"));
     close_btn.remove_css_class("recent-captures-wm-btn");
     close_btn.remove_css_class("recent-captures-wm-close");
     close_btn.add_css_class("recording-editor-traffic-btn");
     let win_clone = window.clone();
     close_btn.connect_clicked(move |_| win_clone.close());
 
-    let min_btn = traffic_light_button("traffic-light-yellow", "Minimize");
+    let min_btn = traffic_light_button("traffic-light-yellow", &t("Minimize"));
     min_btn.remove_css_class("recent-captures-wm-btn");
     min_btn.add_css_class("recording-editor-traffic-btn");
     let win_clone = window.clone();
@@ -254,7 +255,7 @@ pub fn build_history_window(app: &Application) {
     let sidebar_head = GtkBox::new(Orientation::Horizontal, 0);
     sidebar_head.set_size_request(-1, 46);
 
-    let sidebar_title = Label::new(Some("History"));
+    let sidebar_title = Label::new(Some(&t("History")));
     sidebar_title.add_css_class("settings-sidebar-title");
     sidebar_title.set_halign(Align::Start);
     sidebar_title.set_valign(Align::Center);
@@ -267,9 +268,9 @@ pub fn build_history_window(app: &Application) {
 
     use crate::capture::editor::window::icon_names::custom;
     let labels = [
-        ("Screenshots", custom::SCREENSHOOTER_SYMBOLIC),
-        ("Recordings", custom::RECORD_SCREEN_SYMBOLIC),
-        ("Cloud", custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
+        (t("Screenshots"), custom::SCREENSHOOTER_SYMBOLIC),
+        (t("Recordings"), custom::RECORD_SCREEN_SYMBOLIC),
+        (t("Cloud"), custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
     ];
 
     let stack = gtk4::Stack::new();
@@ -356,14 +357,14 @@ pub fn build_history_window(app: &Application) {
     // shared search entry takes each page's placeholder and sensitivity.
     let refresh_hooks: Rc<Vec<Rc<dyn Fn()>>> =
         Rc::new(pages.iter().map(|page| Rc::clone(&page.refresh)).collect());
-    let search_meta: Vec<(bool, &'static str)> = pages
+    let search_meta: Vec<(bool, String)> = pages
         .iter()
-        .map(|page| (page.searchable, page.search_placeholder))
+        .map(|page| (page.searchable, page.search_placeholder.clone()))
         .collect();
 
-    stack.add_titled(&pages[0].widget, Some("0"), "Screenshots");
-    stack.add_titled(&pages[1].widget, Some("1"), "Recordings");
-    stack.add_titled(&pages[2].widget, Some("2"), "Cloud");
+    stack.add_titled(&pages[0].widget, Some("0"), &t("Screenshots"));
+    stack.add_titled(&pages[1].widget, Some("1"), &t("Recordings"));
+    stack.add_titled(&pages[2].widget, Some("2"), &t("Cloud"));
 
     {
         let stack = stack.clone();
@@ -388,8 +389,8 @@ pub fn build_history_window(app: &Application) {
     stack.connect_visible_child_name_notify(move |s| {
         if let Some(name) = s.visible_child_name() {
             if let Ok(idx) = name.parse::<usize>() {
-                if let Some(&(searchable, placeholder)) = search_meta.get(idx) {
-                    search_for_switch.set_sensitive(searchable);
+                if let Some((searchable, placeholder)) = search_meta.get(idx) {
+                    search_for_switch.set_sensitive(*searchable);
                     search_for_switch.set_placeholder_text(Some(placeholder));
                 }
                 for (i, (item, icon, label)) in nav_items_clone.iter().enumerate() {

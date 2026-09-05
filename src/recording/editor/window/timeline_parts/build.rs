@@ -24,13 +24,13 @@ pub fn build_timeline(
     // Create buttons and modes first
     let cut_button = icon_tool_button(
         "edit-cut-symbolic",
-        "Cut mode — click timeline to place cuts",
+        &t("Cut mode — click timeline to place cuts"),
     );
     let cut_mode = Rc::new(Cell::new(false));
 
     let move_button = icon_tool_button(
         "view-sort-ascending-symbolic",
-        "Move mode — drag a segment to reorder it",
+        &t("Move mode — drag a segment to reorder it"),
     );
     let move_mode = Rc::new(Cell::new(false));
 
@@ -76,7 +76,7 @@ pub fn build_timeline(
         }
     });
 
-    let revert_button = icon_tool_button("edit-undo-symbolic", "Revert cuts");
+    let revert_button = icon_tool_button("edit-undo-symbolic", &t("Revert cuts"));
 
     let media_play = media.clone();
     let play_button_ref = play_button.clone();
@@ -713,7 +713,7 @@ pub fn build_timeline(
         glib::ControlFlow::Continue
     });
 
-    let delete_button = icon_tool_button("edit-delete-symbolic", "Delete zoom or cut");
+    let delete_button = icon_tool_button("edit-delete-symbolic", &t("Delete zoom or cut"));
     delete_button.connect_clicked({
         let state = state.clone();
         let estimate_label = estimate_label.clone();

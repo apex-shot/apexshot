@@ -202,8 +202,8 @@ pub(super) fn save_and_open(
             "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
         );
         send_desktop_notification(
-            "Screenshot not saved",
-            "Save is disabled in After capture settings",
+            &crate::i18n::t("Screenshot not saved"),
+            &crate::i18n::t("Save is disabled in After capture settings"),
         );
         return true;
     }
@@ -234,8 +234,8 @@ pub(super) fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mu
             "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
         );
         send_desktop_notification(
-            "Screenshot not saved",
-            "Save is disabled in After capture settings",
+            &crate::i18n::t("Screenshot not saved"),
+            &crate::i18n::t("Save is disabled in After capture settings"),
         );
         return;
     }
@@ -309,11 +309,14 @@ pub(super) fn run_ocr_and_report(capture: crate::backend::CaptureData) {
                 eprintln!("[daemon] QR code decoded");
                 crate::usage_telemetry::record_ocr();
                 if result.copied_to_clipboard {
-                    send_desktop_notification("QR code decoded", "URL copied to clipboard");
+                    send_desktop_notification(
+                        &crate::i18n::t("QR code decoded"),
+                        &crate::i18n::t("URL copied to clipboard"),
+                    );
                 } else {
                     send_desktop_notification(
-                        "QR code decoded",
-                        "Content extracted, but clipboard copy was unavailable",
+                        &crate::i18n::t("QR code decoded"),
+                        &crate::i18n::t("Content extracted, but clipboard copy was unavailable"),
                     );
                 }
             }
@@ -321,18 +324,21 @@ pub(super) fn run_ocr_and_report(capture: crate::backend::CaptureData) {
                 eprintln!("[daemon] OCR successful (confidence: {}%)", confidence);
                 crate::usage_telemetry::record_ocr();
                 if result.copied_to_clipboard {
-                    send_desktop_notification("OCR complete", "Text copied to clipboard");
+                    send_desktop_notification(
+                        &crate::i18n::t("OCR complete"),
+                        &crate::i18n::t("Text copied to clipboard"),
+                    );
                 } else {
                     send_desktop_notification(
-                        "OCR complete",
-                        "Text extracted, but clipboard copy was unavailable",
+                        &crate::i18n::t("OCR complete"),
+                        &crate::i18n::t("Text extracted, but clipboard copy was unavailable"),
                     );
                 }
             }
         },
         Err(err) => {
             eprintln!("[daemon] OCR failed: {err}");
-            send_desktop_notification("OCR failed", &err.to_string());
+            send_desktop_notification(&crate::i18n::t("OCR failed"), &err.to_string());
         }
     }
 }
@@ -341,10 +347,10 @@ pub(super) fn last_capture_target(path: Option<&std::path::Path>) -> Option<std:
     path.map(std::path::Path::to_path_buf)
 }
 
-pub(super) fn clipboard_missing_image_notification() -> (&'static str, &'static str) {
+pub(super) fn clipboard_missing_image_notification() -> (String, String) {
     (
-        "Clipboard image unavailable",
-        "Clipboard does not contain an image to open",
+        crate::i18n::t("Clipboard image unavailable"),
+        crate::i18n::t("Clipboard does not contain an image to open"),
     )
 }
 
@@ -481,7 +487,7 @@ pub(super) fn notify_screenshot_capture_failed(context: &str, err: &impl std::fm
     let technical = err.to_string();
     eprintln!("[daemon] {context} capture failed: {technical}");
     let body = user_facing_capture_failure_message(&technical);
-    send_desktop_notification("Screenshot failed", &body);
+    send_desktop_notification(&crate::i18n::t("Screenshot failed"), &body);
 }
 
 /// Spawn `apexshot preview <path>` as a subprocess so it gets its own GTK context.
@@ -673,15 +679,15 @@ pub(super) fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonSta
         Ok(AreaCapturePathResult::RecordingRequested(request)) => {
             if let Err(err) = run_overlay_recording_request_with_gtk(request, gtk_tx.clone()) {
                 eprintln!("[daemon] Recording failed: {err}");
-                send_desktop_notification("Recording failed", &err.to_string());
+                send_desktop_notification(&crate::i18n::t("Recording failed"), &err.to_string());
                 // Show notification for GNOME extension not installed
                 if err
                     .to_string()
                     .contains("GNOME Shell extension is not installed")
                 {
                     send_desktop_notification(
-                        "Recording failed",
-                        "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
+                        &crate::i18n::t("Recording failed"),
+                        &crate::i18n::t("GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first."),
                     );
                 }
             }

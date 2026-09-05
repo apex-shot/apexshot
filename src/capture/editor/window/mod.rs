@@ -8,6 +8,8 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+
+use crate::i18n::t;
 use std::time::{SystemTime, UNIX_EPOCH};
 use x11rb::{connection::Connection, protocol::xproto, protocol::xproto::ConnectionExt};
 
@@ -137,23 +139,26 @@ fn selected_action_detail(action: &AnnotationAction) -> String {
             ..
         } => format!(
             "{} · {}px · #{}",
-            style.display_name(),
+            t(style.display_name()),
             *stroke_size as i32,
             draw_color_to_hex(*color)
         ),
         AnnotationAction::Text {
             text, color, font, ..
-        } => format!(
-            "{}pt {} · #{} · {}",
-            font.size as i32,
-            font.family,
-            draw_color_to_hex(*color),
-            if text.is_empty() {
-                "Empty"
-            } else {
-                text.as_str()
-            }
-        ),
+        } => {
+            let empty = t("Empty");
+            format!(
+                "{}pt {} · #{} · {}",
+                font.size as i32,
+                font.family,
+                draw_color_to_hex(*color),
+                if text.is_empty() {
+                    empty.as_str()
+                } else {
+                    text.as_str()
+                }
+            )
+        }
         AnnotationAction::Number {
             number,
             color,
@@ -163,19 +168,20 @@ fn selected_action_detail(action: &AnnotationAction) -> String {
         } => format!(
             "{} · {} · #{}",
             style.format(*number),
-            size.label(),
+            t(size.label()),
             draw_color_to_hex(*color)
         ),
         AnnotationAction::Obfuscate { method, amount, .. } => {
             format!(
                 "{} · {}%",
-                method.display_name(),
+                t(method.display_name()),
                 (*amount * 100.0).round() as i32
             )
         }
-        AnnotationAction::Focus { intensity, .. } => {
-            format!("Intensity {}%", (*intensity * 100.0).round() as i32)
-        }
+        AnnotationAction::Focus { intensity, .. } => crate::i18n::tfmt(
+            "Intensity {percent}%",
+            &[("percent", &(*intensity * 100.0).round().to_string())],
+        ),
     }
 }
 
@@ -671,12 +677,12 @@ fn setup_editor_window_full(
         for controller in stale {
             existing.remove_controller(&controller);
         }
-        existing.set_title(Some("ApexShot Editor"));
+        existing.set_title(Some(&t("ApexShot Editor")));
         existing
     } else {
         ApplicationWindow::builder()
             .application(app)
-            .title("ApexShot Editor")
+            .title(t("ApexShot Editor"))
             .icon_name(crate::app_identity::icon_name())
             .default_width(default_width)
             .default_height(default_height)
@@ -854,7 +860,7 @@ fn setup_editor_window_full(
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let label_widget = Label::new(Some(crop_type.label()));
+        let label_widget = Label::new(Some(&t(crop_type.label())));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
         let check_icon = Label::new(Some("✓"));
@@ -895,7 +901,7 @@ fn setup_editor_window_full(
     w_box.add_css_class("editor-dimension-box");
     let crop_width_value = Label::new(Some("—"));
     crop_width_value.add_css_class("editor-crop-dimensions-value");
-    let w_sub_label = Label::new(Some("WIDTH"));
+    let w_sub_label = Label::new(Some(&t("WIDTH")));
     w_sub_label.add_css_class("editor-dimension-label");
     w_box.append(&crop_width_value);
     w_box.append(&w_sub_label);
@@ -911,7 +917,7 @@ fn setup_editor_window_full(
     h_box.add_css_class("editor-dimension-box");
     let crop_height_value = Label::new(Some("—"));
     crop_height_value.add_css_class("editor-crop-dimensions-value");
-    let h_sub_label = Label::new(Some("HEIGHT"));
+    let h_sub_label = Label::new(Some(&t("HEIGHT")));
     h_sub_label.add_css_class("editor-dimension-label");
     h_box.append(&crop_height_value);
     h_box.append(&h_sub_label);
@@ -925,7 +931,7 @@ fn setup_editor_window_full(
     crop_actions_group.set_halign(gtk4::Align::Fill);
     crop_actions_group.set_hexpand(true);
 
-    let crop_apply_btn = Button::with_label("Apply selection");
+    let crop_apply_btn = Button::with_label(&t("Apply selection"));
     crop_apply_btn.set_has_frame(false);
     crop_apply_btn.set_halign(gtk4::Align::Fill);
     crop_apply_btn.set_hexpand(true);
@@ -933,7 +939,7 @@ fn setup_editor_window_full(
     crop_apply_btn.add_css_class("editor-colors-panel-action-button");
     crop_apply_btn.set_sensitive(false);
 
-    let crop_reset_btn = Button::with_label("Reset");
+    let crop_reset_btn = Button::with_label(&t("Reset"));
     crop_reset_btn.set_has_frame(false);
     crop_reset_btn.set_halign(gtk4::Align::Fill);
     crop_reset_btn.set_hexpand(true);
@@ -952,7 +958,7 @@ fn setup_editor_window_full(
 
         let style_icon = arrow_style_toolbar_icon(style);
         let icon = tool_icon_widget(style_icon.clone(), toolbar_icon_size(&style_icon));
-        let label_widget = Label::new(Some(style.display_name()));
+        let label_widget = Label::new(Some(&t(style.display_name())));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
         let check_icon = Label::new(Some("✓"));
@@ -993,7 +999,7 @@ fn setup_editor_window_full(
         btn_box.set_margin_bottom(4);
 
         let icon = build_arrow_thickness_preview(weight, !prefers_dark);
-        let label_widget = Label::new(Some(label));
+        let label_widget = Label::new(Some(&t(label)));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
         let check_icon = Label::new(Some("✓"));
@@ -1022,7 +1028,7 @@ fn setup_editor_window_full(
 
     let arrow_behavior_group = GtkBox::new(Orientation::Vertical, 0);
     arrow_behavior_group.add_css_class("editor-inspector-toggle-row");
-    let inverse_direction_toggle = CheckButton::with_label("Reverse direction");
+    let inverse_direction_toggle = CheckButton::with_label(&t("Reverse direction"));
     arrow_behavior_group.append(&inverse_direction_toggle);
 
     let pen_inspector_list = GtkBox::new(Orientation::Vertical, 0);
@@ -1034,7 +1040,7 @@ fn setup_editor_window_full(
     detect_text_row.set_margin_end(8);
     detect_text_row.set_margin_top(4);
     detect_text_row.set_margin_bottom(4);
-    let detect_text_label = Label::new(Some("Detect text"));
+    let detect_text_label = Label::new(Some(&t("Detect text")));
     detect_text_label.set_hexpand(true);
     detect_text_label.set_xalign(0.0);
     let detect_text_check = Label::new(Some("✓"));
@@ -1062,7 +1068,7 @@ fn setup_editor_window_full(
             btn_box.set_margin_bottom(4);
 
             let icon = build_arrow_thickness_preview(weight, !prefers_dark);
-            let label_widget = Label::new(Some(weight.label()));
+            let label_widget = Label::new(Some(&t(weight.label())));
             label_widget.set_hexpand(true);
             label_widget.set_xalign(0.0);
             let check_icon = Label::new(Some("✓"));
@@ -1104,7 +1110,7 @@ fn setup_editor_window_full(
         btn_box.set_margin_bottom(4);
 
         let icon = build_arrow_thickness_preview(weight, !prefers_dark);
-        let label_widget = Label::new(Some(label));
+        let label_widget = Label::new(Some(&t(label)));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
         let check_icon = Label::new(Some("✓"));
@@ -1147,7 +1153,7 @@ fn setup_editor_window_full(
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let label = Label::new(Some(style.label()));
+        let label = Label::new(Some(&t(style.label())));
         label.set_hexpand(true);
         label.set_xalign(0.0);
 
@@ -1186,7 +1192,7 @@ fn setup_editor_window_full(
 
     let number_start_row = GtkBox::new(Orientation::Horizontal, 8);
     number_start_row.add_css_class("editor-number-start-row");
-    let number_start_label = Label::new(Some("Start with:"));
+    let number_start_label = Label::new(Some(&t("Start with:")));
     number_start_label.add_css_class("editor-number-start-label");
     number_start_label.set_hexpand(true);
     number_start_label.set_xalign(0.0);
@@ -1203,7 +1209,7 @@ fn setup_editor_window_full(
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let label = Label::new(Some(size.label()));
+        let label = Label::new(Some(&t(size.label())));
         label.set_hexpand(true);
         label.set_xalign(0.0);
 
@@ -1375,11 +1381,11 @@ fn setup_editor_window_full(
     placeholder_inspector.set_hexpand(false);
     placeholder_inspector.set_vexpand(true);
 
-    let placeholder_title = Label::new(Some("Inspector"));
+    let placeholder_title = Label::new(Some(&t("Inspector")));
     placeholder_title.add_css_class("editor-inspector-title");
     placeholder_title.set_xalign(0.0);
 
-    let placeholder = Label::new(Some("Tool options coming soon"));
+    let placeholder = Label::new(Some(&t("Tool options coming soon")));
     placeholder.add_css_class("editor-inspector-placeholder");
     placeholder.set_wrap(true);
     placeholder.set_xalign(0.0);
@@ -1429,9 +1435,10 @@ fn setup_editor_window_full(
                 select_detail_label.set_label(&selected_action_detail(&action));
                 select_geometry_label.set_label(&selected_action_geometry(&action));
             } else {
-                select_status_label.set_label("No object selected");
-                select_detail_label.set_label("Select any annotation on the canvas to inspect it.");
-                select_geometry_label.set_label("No geometry");
+                select_status_label.set_label(&t("No object selected"));
+                select_detail_label
+                    .set_label(&t("Select any annotation on the canvas to inspect it."));
+                select_geometry_label.set_label(&t("No geometry"));
             }
         }
     });
@@ -1892,7 +1899,7 @@ fn setup_editor_window_full(
         btn_box.set_margin_top(4);
         btn_box.set_margin_bottom(4);
 
-        let label_widget = Label::new(Some(label));
+        let label_widget = Label::new(Some(&t(label)));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
 
@@ -2110,7 +2117,7 @@ fn setup_editor_window_full(
             if selected_tool == Tool::Highlighter {
                 size_group.set_visible(true);
                 size_group.add_css_class("size-group-inactive");
-                size_slider.set_tooltip_text(Some("Use the Thickness panel for highlighter"));
+                size_slider.set_tooltip_text(Some(&t("Use the Thickness panel for highlighter")));
                 size_slider.set_sensitive(false);
                 return;
             }
@@ -2119,7 +2126,8 @@ fn setup_editor_window_full(
 
             let Some(mode) = mode else {
                 size_group.add_css_class("size-group-inactive");
-                size_slider.set_tooltip_text(Some("Current tool does not support size changes"));
+                size_slider
+                    .set_tooltip_text(Some(&t("Current tool does not support size changes")));
                 size_slider.set_sensitive(false);
                 return;
             };
@@ -2133,7 +2141,7 @@ fn setup_editor_window_full(
                 SizeControlMode::Stroke => {
                     size_slider.set_range(MIN_STROKE_SIZE, MAX_STROKE_SIZE);
                     size_slider.set_value(value);
-                    size_slider.set_tooltip_text(Some("Stroke size"));
+                    size_slider.set_tooltip_text(Some(&t("Stroke size")));
                 }
                 SizeControlMode::Obfuscate => {
                     use super::color::{MAX_OBFUSCATE_AMOUNT, MIN_OBFUSCATE_AMOUNT};
@@ -2147,7 +2155,7 @@ fn setup_editor_window_full(
                         size_group.set_visible(true);
                         size_group.add_css_class("size-group-inactive");
                         size_slider.set_sensitive(false);
-                        size_slider.set_tooltip_text(Some("Blackout has no intensity control"));
+                        size_slider.set_tooltip_text(Some(&t("Blackout has no intensity control")));
                     } else {
                         size_group.set_visible(true);
                         size_group.remove_css_class("size-group-inactive");
@@ -2169,7 +2177,7 @@ fn setup_editor_window_full(
                     size_slider.set_sensitive(true);
                     size_slider.set_range(MIN_FOCUS_INTENSITY, MAX_FOCUS_INTENSITY);
                     size_slider.set_value(value);
-                    size_slider.set_tooltip_text(Some("Focus background intensity"));
+                    size_slider.set_tooltip_text(Some(&t("Focus background intensity")));
                 }
             }
         }
@@ -2675,7 +2683,7 @@ mod tests {
         assert!(
             production_source.contains("fn build_arrow_thickness_preview(weight: super::pen_weight::PenWeight, light: bool) -> DrawingArea")
                 && production_source.contains("let icon = build_arrow_thickness_preview(weight, !prefers_dark);")
-                && !production_source.contains("let icon = Image::from_icon_name(weight.icon_name());\n        icon.set_pixel_size(weight.icon_pixel_size());\n        let label_widget = Label::new(Some(label));"),
+                && !production_source.contains("let icon = Image::from_icon_name(weight.icon_name());\n        icon.set_pixel_size(weight.icon_pixel_size());\n        let label_widget = Label::new(Some(&t(label)));"),
             "Arrow thickness inspector options should use dedicated stroke previews instead of stock symbolic icons",
         );
     }
@@ -2710,7 +2718,8 @@ mod tests {
                 && production_source.contains("\"editor-arrow-inspector-option\"")
                 && production_source.contains("sync_arrow_option_selection(&pen_inspector_list, selected_pen_thickness);")
                 && production_source.contains("sync_arrow_option_selection(&line_inspector_list, selected_thickness);")
-                && production_source.contains("let detect_text_label = Label::new(Some(\"Detect text\"));")
+                && production_source
+                    .contains("let detect_text_label = Label::new(Some(&t(\"Detect text\")));")
                 && production_source.contains("sync_arrow_option_selection(&highlighter_inspector_list, selected_highlighter_option);"),
             "Pen, Line, and Highlighter inspectors should expose thickness sections using the same active row styling as the Arrow inspector",
         );
@@ -2777,11 +2786,12 @@ mod tests {
         let production_source = production_editor_window_source();
         assert!(
             production_source.contains("let number_start_row = GtkBox::new(Orientation::Horizontal, 8);")
-                && production_source.contains("let number_start_label = Label::new(Some(\"Start with:\"));")
+                && production_source
+                    .contains("let number_start_label = Label::new(Some(&t(\"Start with:\")));")
                 && production_source.contains("number_start_row.append(&number_dec_btn);")
                 && production_source.contains("number_start_row.append(&number_start_entry);")
                 && production_source.contains("number_start_row.append(&number_inc_btn);")
-                && production_source.contains("append_inspector_section(\n        &number_inspector_content,\n        \"Start\",")
+                && production_source.contains("append_inspector_section(\n        &number_inspector_content,\n        &t(\"Start\"),")
                 && production_source.contains("number_start_row.upcast_ref()"),
             "Number inspector should expose the starting number controls inside the sidebar",
         );

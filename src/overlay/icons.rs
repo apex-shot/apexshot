@@ -204,11 +204,12 @@ pub(crate) fn draw_toolbar_icon(
             );
             context.set_font_size(6.5);
             context.set_source_rgba(0.0, 0.0, 0.0, 180.0 / 255.0);
-            if let Ok(extents) = context.text_extents("GIF") {
+            let gif_label = crate::i18n::t("GIF");
+            if let Ok(extents) = context.text_extents(&gif_label) {
                 let text_x = cx - extents.width() / 2.0 - extents.x_bearing();
                 let text_y = cy - extents.height() / 2.0 - extents.y_bearing() + 0.5;
                 context.move_to(text_x, text_y);
-                let _ = context.show_text("GIF");
+                let _ = context.show_text(&gif_label);
             }
         }
     }

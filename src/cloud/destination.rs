@@ -33,7 +33,7 @@ impl Destination {
         }
     }
 
-    pub fn not_configured_notification(self, config: &AppConfig) -> (&'static str, &'static str) {
+    pub fn not_configured_notification(self, config: &AppConfig) -> (String, String) {
         match self {
             Destination::ApexShot => apexshot::not_configured_notification(config),
             Destination::XBackbone => xbackbone::not_configured_notification(config),
