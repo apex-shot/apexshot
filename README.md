@@ -97,23 +97,25 @@ support is improving over time.
 
 ### Screenshots
 - **Multiple Capture Modes** — Full screen, area selection, window capture, and crosshair mode
-  ![Crosshair capture to preview overlay](media/capture-workflow.gif)
-  ![Capture area selection](media/capture-area.png)
+  ![ApexShot area selection overlay](media/capture-area.png)
 - **Image Editor** — Annotate with arrows, shapes, text, blur, pixelate, highlighter, and more. Open from the tray menu or CLI (`apexshot image-editor`) and load any PNG/JPEG/WebP via drag-and-drop or the file chooser. The Done button saves the edited image and follows your General settings — copy to clipboard (image, file path, or both) and quick access overlay.
 - **OCR** — Extract text from images using Tesseract and ocrs dual-engine OCR
 - **QR Code Detection** — Automatically detect and copy QR codes from screenshots
 
 ### Screen Recording
 - **Flexible Recording** — Area or full-screen recording with MP4/GIF output
-  ![Video recording UI](media/video-recording.png)
+  ![ApexShot recording area overlay](media/video-recording.png)
 - **Audio Monitoring** — Real-time mic and speaker level monitoring via PipeWire
 - **Recording Controls** — Pause, resume, and stop recording with on-screen controls
 - **Video Editor** — Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings. Open from the tray menu, CLI (`apexshot video-editor`), or a global hotkey. Supports drag-and-drop and file chooser for loading videos.
-  ![Video editor UI](media/video-editor.png)
+  ![ApexShot video editor](media/video-editor.png)
 
 ### Integration
 - **Daemon Mode** — Background service with system tray and global hotkeys for instant capture
-  ![Settings and tray](media/setting-tray.png)
+- **Settings** — Language, start at login, shutter sounds, shortcuts, recording, screenshots, annotation, and cloud
+  ![ApexShot settings window](media/settings.png)
+- **History** — Browse screenshots, recordings, and cloud uploads from one window
+  ![ApexShot history window](media/history.png)
 - **Display Support** — Ubuntu GNOME Wayland, Arch Linux GNOME Wayland, and Hyprland Wayland are the known-good targets. Other Wayland desktops and X11 paths are implemented but need more manual testing.
 - **Browser Integration** — Full-page scroll capture via Chrome/Chromium extension
 - **GNOME Integration** — Always-on-top previews and shell-managed recording overlays
