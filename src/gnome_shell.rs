@@ -625,6 +625,18 @@ pub fn get_pointer_snapshot() -> anyhow::Result<(i32, i32, String, bool)> {
     })
 }
 
+pub fn get_monitor_geometry_at(x: i32, y: i32) -> anyhow::Result<(i32, i32, u32, u32)> {
+    with_shell_overlay_proxy(move |proxy| {
+        let (monitor_x, monitor_y, width, height, valid) = proxy
+            .call::<_, _, (i32, i32, i32, i32, bool)>("GetMonitorGeometryAt", &(x, y))
+            .context("GetMonitorGeometryAt failed")?;
+        if !valid || width <= 0 || height <= 0 {
+            anyhow::bail!("GNOME Shell did not find a monitor at ({x},{y})");
+        }
+        Ok((monitor_x, monitor_y, width as u32, height as u32))
+    })
+}
+
 pub fn print_pointer_debug() -> anyhow::Result<()> {
     if !current_session_supports_gnome_shell_overlay() {
         anyhow::bail!("pointer debug requires GNOME Wayland");

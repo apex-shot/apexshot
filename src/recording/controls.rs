@@ -62,9 +62,37 @@ struct PointerTrackSession {
     region: CaptureRegion,
 }
 
+fn pointer_capture_region(
+    config: &super::RecordingConfig,
+    fullscreen_monitor: Option<CaptureRegion>,
+) -> CaptureRegion {
+    let configured = CaptureRegion::from_capture(config.x, config.y, config.width, config.height);
+    if configured.is_area() {
+        return configured;
+    }
+
+    fullscreen_monitor.unwrap_or(configured)
+}
+
+fn shell_fullscreen_pointer_region(params: &RecordingControlsParams) -> Option<CaptureRegion> {
+    if !params.is_fullscreen || params.capture_w <= 0 || params.capture_h <= 0 {
+        return None;
+    }
+    let center_x = params.capture_x.saturating_add(params.capture_w / 2);
+    let center_y = params.capture_y.saturating_add(params.capture_h / 2);
+    crate::gnome_shell::get_monitor_geometry_at(center_x, center_y)
+        .map(|(x, y, w, h)| CaptureRegion { x, y, w, h })
+        .map_err(|err| {
+            eprintln!(
+                "[recording] GNOME monitor geometry unavailable; using legacy fullscreen pointer coordinates ({err})"
+            );
+            err
+        })
+        .ok()
+}
+
 impl PointerTrackSession {
-    fn start(config: &super::RecordingConfig) -> Self {
-        let region = CaptureRegion::from_capture(config.x, config.y, config.width, config.height);
+    fn start(config: &super::RecordingConfig, region: CaptureRegion) -> Self {
         if !config.pointer_track {
             return Self {
                 started: false,
@@ -650,7 +678,24 @@ async fn run_recording_with_shell_mask(
 
     super::notify_daemon_event("recording_session_started");
     let final_outcome = loop {
-        let pointer_track = PointerTrackSession::start(&config);
+        let fullscreen_monitor = if config.pointer_track && params.is_fullscreen {
+            let monitor_params = params.clone();
+            match tokio::task::spawn_blocking(move || {
+                shell_fullscreen_pointer_region(&monitor_params)
+            })
+            .await
+            {
+                Ok(region) => region,
+                Err(err) => {
+                    eprintln!("[recording] GNOME monitor lookup failed: {err}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let pointer_region = pointer_capture_region(&config, fullscreen_monitor);
+        let pointer_track = PointerTrackSession::start(&config, pointer_region);
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         control_server.set_command_sender(command_tx);
         let outcome =
@@ -899,6 +944,31 @@ mod tests {
     }
 
     #[test]
+    fn selected_area_pointer_region_takes_precedence_over_monitor_geometry() {
+        let mut config = super::RecordingConfig::default();
+        config.x = Some(250);
+        config.y = Some(-40);
+        config.width = Some(640);
+        config.height = Some(360);
+        let monitor = CaptureRegion {
+            x: 0,
+            y: -200,
+            w: 1920,
+            h: 1080,
+        };
+
+        assert_eq!(
+            pointer_capture_region(&config, Some(monitor)),
+            CaptureRegion {
+                x: 250,
+                y: -40,
+                w: 640,
+                h: 360,
+            }
+        );
+    }
+
+    #[test]
     fn prepare_overlay_recording_request_maps_video_settings() {
         let request = RecordingRequest {
             x: 10,
@@ -1080,7 +1150,7 @@ mod tests {
     #[test]
     fn prepare_overlay_recording_request_uses_full_monitor_bounds_for_fullscreen_capture() {
         let request = RecordingRequest {
-            x: 0,
+            x: -1920,
             y: 32,
             width: 1920,
             height: 1048,
@@ -1102,7 +1172,7 @@ mod tests {
         assert_eq!(
             prepared.controls_params,
             Some(RecordingControlsParams {
-                capture_x: 0,
+                capture_x: -1920,
                 capture_y: 32,
                 capture_w: 1920,
                 capture_h: 1048,
@@ -1114,6 +1184,16 @@ mod tests {
                 countdown_seconds: 3,
                 session_id: None,
             })
+        );
+        let monitor = CaptureRegion {
+            x: -1920,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        };
+        assert_eq!(
+            pointer_capture_region(&prepared.recording_config, Some(monitor)),
+            monitor
         );
     }
 

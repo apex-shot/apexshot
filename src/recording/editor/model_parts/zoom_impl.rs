@@ -210,15 +210,32 @@ impl VideoEditState {
         let segments = self.ordered_placed_segments();
         let mut added = 0;
         for suggestion in suggestions {
-            let Some(&(composition_start, source_start, source_end)) =
-                segments.iter().find(|&&(_, start, end)| {
-                    suggestion.center_time >= start && suggestion.center_time <= end
+            // At an exact cut both neighboring source ranges contain the
+            // timestamp. Match segment_index_at_source by choosing the range
+            // with the later source start rather than attaching the zoom to
+            // the segment that just ended.
+            let Some(&(composition_start, source_start, source_end)) = segments
+                .iter()
+                .filter(|&&(_, start, end)| {
+                    suggestion.center_time + 1e-9 >= start && suggestion.center_time <= end + 1e-9
                 })
+                .max_by(|a, b| a.1.total_cmp(&b.1))
             else {
                 continue;
             };
-            let start = suggestion.start.max(source_start);
-            let end = suggestion.end.min(source_end);
+            let mut start = suggestion.start.max(source_start);
+            let mut end = suggestion.end.min(source_end);
+            // A valid interaction close to a trim/cut boundary can lose most
+            // of its pre/post-roll. Refit the minimum useful duration inside
+            // the selected segment instead of dropping the detection.
+            if end - start < zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS
+                && source_end - source_start >= zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS
+            {
+                let half = zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS * 0.5;
+                start = (suggestion.center_time - half).max(source_start);
+                end = (start + zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS).min(source_end);
+                start = (end - zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS).max(source_start);
+            }
             if end - start < zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS {
                 continue;
             }

@@ -142,10 +142,37 @@ pub fn suggest_zooms(
         suggestions.truncate(limit);
     }
     suggestions.sort_by(|a, b| a.suggestion.start.total_cmp(&b.suggestion.start));
+    separate_overlapping_suggestions(&mut suggestions);
     suggestions
         .into_iter()
         .map(|scored| scored.suggestion)
         .collect()
+}
+
+/// Keep distinct interactions from causing one another to be discarded by
+/// the non-overlapping zoom track. Long click post-rolls commonly overlap the
+/// next click even though the clicks are far enough apart to form two
+/// sessions. Split that overlap only when both clips can remain useful.
+fn separate_overlapping_suggestions(suggestions: &mut [ScoredSuggestion]) {
+    for index in 1..suggestions.len() {
+        let (before, after) = suggestions.split_at_mut(index);
+        let previous = &mut before[index - 1].suggestion;
+        let next = &mut after[0].suggestion;
+        if previous.end <= next.start {
+            continue;
+        }
+
+        let earliest_boundary =
+            (previous.start + MIN_SUGGESTED_ZOOM_SECONDS).max(previous.center_time);
+        let latest_boundary = (next.end - MIN_SUGGESTED_ZOOM_SECONDS).min(next.center_time);
+        if earliest_boundary > latest_boundary {
+            continue;
+        }
+        let interaction_midpoint = (previous.center_time + next.center_time) * 0.5;
+        let boundary = interaction_midpoint.clamp(earliest_boundary, latest_boundary);
+        previous.end = boundary;
+        next.start = boundary;
+    }
 }
 
 fn pointer_scale(sidecar: &PointerSidecar, width: f64, height: f64) -> Option<(f64, f64)> {
@@ -669,6 +696,21 @@ mod tests {
         assert!(suggestions[0].end <= suggestions[1].end);
         assert_eq!(suggestions[0].scale, AUTO_ZOOM_SCALE);
         assert_eq!(suggestions[1].scale, AUTO_ZOOM_SCALE);
+    }
+
+    #[test]
+    fn adjacent_click_sessions_keep_non_overlapping_suggestions() {
+        let mut data = sidecar();
+        data.clicks
+            .extend([click(3.0, 400.0, 300.0), click(4.3, 1_500.0, 700.0)]);
+
+        let suggestions = suggest_zooms(&data, W, H, 10.0);
+
+        assert_eq!(suggestions.len(), 2);
+        assert!(suggestions[0].end <= suggestions[1].start);
+        assert!(suggestions
+            .iter()
+            .all(|suggestion| suggestion.end - suggestion.start >= MIN_SUGGESTED_ZOOM_SECONDS));
     }
 
     #[test]

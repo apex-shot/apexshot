@@ -316,10 +316,11 @@ impl PointerSidecar {
 
     /// Return a pointer frame in the encoded video's pixel coordinate space.
     ///
-    /// Pointer tracking uses the selected area's coordinates, but PipeWire can
-    /// encode that area at a different scale (for example on a HiDPI monitor
-    /// or after an output-size limit). Keeping this conversion next to the
-    /// sidecar ensures the preview and export use the same coordinates.
+    /// Pointer tracking uses global logical Shell coordinates. They are
+    /// translated to the capture rectangle when the sidecar is written, but
+    /// PipeWire can encode that rectangle at a different scale (for example on
+    /// a HiDPI monitor or after an output-size limit). Keeping this conversion
+    /// next to the sidecar ensures the preview and export use the same pixels.
     pub fn presented_in_video_at(
         &self,
         t: f64,
@@ -623,6 +624,41 @@ mod tests {
 
         let ripples = sidecar.click_ripples_in_video_at(0.0, 0.32, 1920.0, 1080.0);
         assert_eq!(ripples, vec![(960.0, 540.0, 0.0)]);
+    }
+
+    #[test]
+    fn negative_monitor_origin_translates_before_hidpi_scaling() {
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: -1280,
+                y: -200,
+                w: 1280,
+                h: 800,
+            },
+        );
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: -640.0,
+            y: 200.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.clicks.push(ClickSample {
+            t: 0.0,
+            x: -640.0,
+            y: 200.0,
+            button: 1,
+        });
+
+        sidecar.subtract_region();
+        let frame = sidecar
+            .presented_in_video_at(0.0, CursorMotion::default(), 2560.0, 1600.0)
+            .unwrap();
+        assert_eq!((frame.x, frame.y), (1280.0, 800.0));
+        assert_eq!(
+            sidecar.click_ripples_in_video_at(0.0, 0.32, 2560.0, 1600.0),
+            vec![(1280.0, 800.0, 0.0)]
+        );
     }
 
     #[test]

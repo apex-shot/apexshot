@@ -43,6 +43,15 @@ const DBUS_INTERFACE = `
       <arg type="s" name="kind" direction="out"/>
       <arg type="b" name="valid" direction="out"/>
     </method>
+    <method name="GetMonitorGeometryAt">
+      <arg type="i" name="x" direction="in"/>
+      <arg type="i" name="y" direction="in"/>
+      <arg type="i" name="monitor_x" direction="out"/>
+      <arg type="i" name="monitor_y" direction="out"/>
+      <arg type="i" name="width" direction="out"/>
+      <arg type="i" name="height" direction="out"/>
+      <arg type="b" name="valid" direction="out"/>
+    </method>
   </interface>
 </node>`;
 
@@ -213,6 +222,16 @@ export class ShellOverlayService {
     GetPointerSnapshot() {
         this._readPointer();
         return [this._x, this._y, this._cursorKind, true];
+    }
+
+    GetMonitorGeometryAt(x, y) {
+        const monitors = Main.layoutManager.monitors ?? [];
+        const monitor = monitors.find(item =>
+            x >= item.x && x < item.x + item.width &&
+            y >= item.y && y < item.y + item.height);
+        if (!monitor)
+            return [0, 0, 0, 0, false];
+        return [monitor.x, monitor.y, monitor.width, monitor.height, true];
     }
 
     _setupCursorTracking() {
