@@ -314,6 +314,27 @@ impl PointerSidecar {
         })
     }
 
+    /// Return a pointer frame in the encoded video's pixel coordinate space.
+    ///
+    /// Pointer tracking uses the selected area's coordinates, but PipeWire can
+    /// encode that area at a different scale (for example on a HiDPI monitor
+    /// or after an output-size limit). Keeping this conversion next to the
+    /// sidecar ensures the preview and export use the same coordinates.
+    pub fn presented_in_video_at(
+        &self,
+        t: f64,
+        motion: CursorMotion,
+        video_width: f64,
+        video_height: f64,
+    ) -> Option<CursorFrame> {
+        let mut frame = self.presented_at(t, motion)?;
+        (frame.x, frame.y) = self.map_to_video(frame.x, frame.y, video_width, video_height);
+        for (x, y, _) in &mut frame.trail {
+            (*x, *y) = self.map_to_video(*x, *y, video_width, video_height);
+        }
+        Some(frame)
+    }
+
     /// Cursor position after applying the configured motion smoothing, without
     /// decorative effects such as sway. Camera tracking uses this same path so
     /// the viewport and rendered cursor never react to different pointer data.
@@ -470,6 +491,34 @@ impl PointerSidecar {
         }
         ripples
     }
+
+    /// Return click-ripple positions in encoded-video pixels. See
+    /// [`Self::presented_in_video_at`] for why area recordings need this.
+    pub fn click_ripples_in_video_at(
+        &self,
+        t: f64,
+        window: f64,
+        video_width: f64,
+        video_height: f64,
+    ) -> Vec<(f64, f64, f64)> {
+        self.click_ripples_at(t, window)
+            .into_iter()
+            .map(|(x, y, progress)| {
+                let (x, y) = self.map_to_video(x, y, video_width, video_height);
+                (x, y, progress)
+            })
+            .collect()
+    }
+
+    fn map_to_video(&self, x: f64, y: f64, video_width: f64, video_height: f64) -> (f64, f64) {
+        if !self.region.is_area() || video_width <= 0.0 || video_height <= 0.0 {
+            return (x, y);
+        }
+        (
+            x * video_width / self.region.w as f64,
+            y * video_height / self.region.h as f64,
+        )
+    }
 }
 
 fn pointer_sidecars_directory() -> PathBuf {
@@ -540,6 +589,40 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&sidecar).unwrap()).unwrap();
         assert_eq!(loaded.source, PointerDataSource::InferredFromVideo);
         assert!(!loaded.can_render_cursor_overlay());
+    }
+
+    #[test]
+    fn area_pointer_and_click_coordinates_scale_to_video_pixels() {
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 200,
+                y: 100,
+                w: 960,
+                h: 540,
+            },
+        );
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 480.0,
+            y: 270.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.clicks.push(ClickSample {
+            t: 0.0,
+            x: 480.0,
+            y: 270.0,
+            button: 1,
+        });
+
+        let frame = sidecar
+            .presented_in_video_at(0.0, CursorMotion::default(), 1920.0, 1080.0)
+            .unwrap();
+        assert_eq!((frame.x, frame.y), (960.0, 540.0));
+        assert!(frame.trail.is_empty());
+
+        let ripples = sidecar.click_ripples_in_video_at(0.0, 0.32, 1920.0, 1080.0);
+        assert_eq!(ripples, vec![(960.0, 540.0, 0.0)]);
     }
 
     #[test]

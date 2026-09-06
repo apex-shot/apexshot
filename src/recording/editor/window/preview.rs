@@ -745,12 +745,20 @@ fn draw_preview_overlays(
         .as_ref()
         .filter(|sidecar| sidecar.can_render_cursor_overlay())
     {
-        if let Some(mut frame) = sidecar.presented_at(source_t, cursor_motion(state.cursor)) {
+        if let Some(mut frame) = sidecar.presented_in_video_at(
+            source_t,
+            cursor_motion(state.cursor),
+            state.metadata.width as f64,
+            state.metadata.height as f64,
+        ) {
             frame.alpha *= state.cursor_hide_alpha_for_source(source_t);
             let cursor = overlay_cursor(state.cursor, zoom);
-            for (x, y, progress) in
-                sidecar.click_ripples_at(source_t, cursor.click_window_seconds())
-            {
+            for (x, y, progress) in sidecar.click_ripples_in_video_at(
+                source_t,
+                cursor.click_window_seconds(),
+                state.metadata.width as f64,
+                state.metadata.height as f64,
+            ) {
                 let (px, py) = source_to_zoomed_point(x, y, view, w, h);
                 crate::recording::editor::cursor_sprite::draw_click(
                     cr,

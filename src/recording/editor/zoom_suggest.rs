@@ -33,6 +33,13 @@ const MAX_CLUSTER_RADIUS_PX: f64 = 40.0;
 const MAX_CLUSTER_SPAN_SECONDS: f64 = 2.5;
 const PRE_ROLL_SECONDS: f64 = 0.35;
 const POST_ROLL_SECONDS: f64 = 1.1;
+// A short series of clicks is usually one workflow, even when the pointer
+// moves between controls. Auto zoom follows that movement with its dead zone.
+const CLICK_SESSION_GAP_SECONDS: f64 = 1.25;
+const MAX_CLICK_SESSION_SPAN_SECONDS: f64 = 4.5;
+const CLICK_SESSION_PRE_ROLL_SECONDS: f64 = 0.6;
+const CLICK_SESSION_POST_ROLL_SECONDS: f64 = 2.5;
+const MAX_CLICK_SESSION_SECONDS: f64 = 5.5;
 const SECONDS_PER_SUGGESTION: f64 = 6.0;
 const CLICK_CONFIDENCE: f64 = 100.0;
 
@@ -115,8 +122,13 @@ pub fn suggest_zooms(
     let cluster_radius = (diagonal * CLUSTER_RADIUS_DIAGONAL_FRACTION)
         .clamp(MIN_CLUSTER_RADIUS_PX, MAX_CLUSTER_RADIUS_PX);
 
-    let mut landings = detect_landings(&samples, still_radius, arrival_distance);
-    landings.extend(clicks);
+    // Clicks are unambiguous user intent. When present, keep the detector from
+    // introducing unrelated hover landings into the same interaction session.
+    let mut landings = if clicks.is_empty() {
+        detect_landings(&samples, still_radius, arrival_distance)
+    } else {
+        clicks
+    };
     landings.sort_by(|a, b| a.start.total_cmp(&b.start));
     let clusters = cluster_landings(landings, cluster_radius);
     let mut suggestions: Vec<ScoredSuggestion> = clusters
@@ -295,10 +307,20 @@ fn cluster_landings(landings: Vec<Landing>, cluster_radius: f64) -> Vec<LandingC
         let should_merge = clusters.last().is_some_and(|cluster| {
             let first = cluster.landings.first().expect("cluster is non-empty");
             let last = cluster.landings.last().expect("cluster is non-empty");
-            let center = median_landing_position(&cluster.landings);
-            landing.start - last.end <= CLUSTER_MERGE_GAP_SECONDS
-                && landing.end - first.start <= MAX_CLUSTER_SPAN_SECONDS
-                && point_distance(landing.center, center) <= cluster_radius
+            let click_session =
+                landing.is_click && cluster.landings.iter().all(|existing| existing.is_click);
+            if click_session {
+                // Controls in one workflow can be far apart. The generated
+                // Auto clip follows the recorded pointer instead of holding a
+                // fixed focus point, so position is deliberately not a gate.
+                landing.start - last.end <= CLICK_SESSION_GAP_SECONDS
+                    && landing.end - first.start <= MAX_CLICK_SESSION_SPAN_SECONDS
+            } else {
+                let center = median_landing_position(&cluster.landings);
+                landing.start - last.end <= CLUSTER_MERGE_GAP_SECONDS
+                    && landing.end - first.start <= MAX_CLUSTER_SPAN_SECONDS
+                    && point_distance(landing.center, center) <= cluster_radius
+            }
         });
         if should_merge {
             clusters
@@ -333,18 +355,34 @@ fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option
         median(focus.iter().map(|landing| landing.center.1).collect()),
     );
     let center_time = median(focus.iter().map(|landing| landing.start).collect());
+    let is_click_session = !clicks.is_empty();
+    let pre_roll = if is_click_session {
+        CLICK_SESSION_PRE_ROLL_SECONDS
+    } else {
+        PRE_ROLL_SECONDS
+    };
+    let post_roll = if is_click_session {
+        CLICK_SESSION_POST_ROLL_SECONDS
+    } else {
+        POST_ROLL_SECONDS
+    };
+    let max_duration = if is_click_session {
+        MAX_CLICK_SESSION_SECONDS
+    } else {
+        MAX_SUGGESTED_ZOOM_SECONDS
+    };
 
-    let mut start = (first.start - PRE_ROLL_SECONDS).max(0.0);
-    let mut end = (last.end + POST_ROLL_SECONDS).min(total_seconds);
+    let mut start = (first.start - pre_roll).max(0.0);
+    let mut end = (last.end + post_roll).min(total_seconds);
     let desired_minimum = MIN_AUTO_ZOOM_SECONDS.min(total_seconds);
     if end - start < desired_minimum {
         end = (start + desired_minimum).min(total_seconds);
         start = (end - desired_minimum).max(0.0);
     }
-    if end - start > MAX_SUGGESTED_ZOOM_SECONDS {
-        start = (center_time - PRE_ROLL_SECONDS).max(0.0);
-        end = (start + MAX_SUGGESTED_ZOOM_SECONDS).min(total_seconds);
-        start = (end - MAX_SUGGESTED_ZOOM_SECONDS).max(0.0);
+    if end - start > max_duration {
+        start = (center_time - pre_roll).max(0.0);
+        end = (start + max_duration).min(total_seconds);
+        start = (end - max_duration).max(0.0);
     }
     if end - start < MIN_SUGGESTED_ZOOM_SECONDS {
         return None;
@@ -439,6 +477,10 @@ mod tests {
             y,
             kind: CursorKind::Default,
         }
+    }
+
+    fn click(t: f64, x: f64, y: f64) -> ClickSample {
+        ClickSample { t, x, y, button: 1 }
     }
 
     fn add_landing(
@@ -596,6 +638,37 @@ mod tests {
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].center, (801.0, 500.0));
         assert_eq!(suggestions[0].scale, REPEATED_INTERACTION_ZOOM_SCALE);
+    }
+
+    #[test]
+    fn related_moving_clicks_create_one_cursor_following_session() {
+        let mut data = sidecar();
+        data.clicks.extend([
+            click(1.466_893_129, 1_313.0, 296.0),
+            click(2.552_951_679, 441.0, 91.0),
+        ]);
+
+        let suggestions = suggest_zooms(&data, W, H, 12.0);
+
+        assert_eq!(suggestions.len(), 1);
+        assert!((suggestions[0].start - 0.866_893_129).abs() < 0.000_001);
+        assert!((suggestions[0].end - 5.052_951_679).abs() < 0.000_001);
+        assert_eq!(suggestions[0].center, (877.0, 193.5));
+        assert_eq!(suggestions[0].scale, REPEATED_INTERACTION_ZOOM_SCALE);
+    }
+
+    #[test]
+    fn delayed_click_starts_a_new_session() {
+        let mut data = sidecar();
+        data.clicks
+            .extend([click(2.0, 400.0, 300.0), click(3.3, 1_500.0, 700.0)]);
+
+        let suggestions = suggest_zooms(&data, W, H, 12.0);
+
+        assert_eq!(suggestions.len(), 2);
+        assert!(suggestions[0].end <= suggestions[1].end);
+        assert_eq!(suggestions[0].scale, AUTO_ZOOM_SCALE);
+        assert_eq!(suggestions[1].scale, AUTO_ZOOM_SCALE);
     }
 
     #[test]

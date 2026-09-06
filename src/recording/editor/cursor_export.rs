@@ -53,11 +53,19 @@ pub fn write_rgba_track(
         let view = (crop_x + zx as f64, crop_y + zy as f64, zw as f64, zh as f64);
         let mut overlay_cursor = cursor;
         overlay_cursor.size = cursor_sprite::overlay_scale(cursor.size, scale);
-        if let Some(mut frame) = sidecar.presented_at(source_t, motion) {
+        if let Some(mut frame) = sidecar.presented_in_video_at(
+            source_t,
+            motion,
+            state.metadata.width as f64,
+            state.metadata.height as f64,
+        ) {
             frame.alpha *= state.cursor_hide_alpha_for_source(source_t);
-            for (x, y, progress) in
-                sidecar.click_ripples_at(source_t, overlay_cursor.click_window_seconds())
-            {
+            for (x, y, progress) in sidecar.click_ripples_in_video_at(
+                source_t,
+                overlay_cursor.click_window_seconds(),
+                state.metadata.width as f64,
+                state.metadata.height as f64,
+            ) {
                 let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
                 cursor_sprite::draw_click(&cr, px, py, progress, overlay_cursor, frame.alpha);
             }
