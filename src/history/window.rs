@@ -422,4 +422,5 @@ pub fn build_history_window(app: &Application) {
     window.set_child(Some(&window_overlay));
 
     window.present();
+    crate::update_ui::present_if_needed(&window_overlay);
 }

@@ -2,6 +2,7 @@ use std::sync::mpsc::Sender;
 
 #[derive(Debug, Clone)]
 pub enum TrayAction {
+    OpenUpdate(String),
     CaptureArea,
     CaptureCrosshair,
     CaptureScreen,
@@ -21,6 +22,7 @@ pub enum TrayAction {
 pub struct ApexShotTray {
     tx: Sender<TrayAction>,
     recording: bool,
+    update: Option<crate::update::UpdateInfo>,
 }
 
 impl ApexShotTray {
@@ -28,6 +30,7 @@ impl ApexShotTray {
         Self {
             tx,
             recording: false,
+            update: None,
         }
     }
 
@@ -37,6 +40,10 @@ impl ApexShotTray {
 
     pub fn set_recording(&mut self, recording: bool) {
         self.recording = recording;
+    }
+
+    pub fn set_update_available(&mut self, update: crate::update::UpdateInfo) {
+        self.update = Some(update);
     }
 }
 
@@ -160,7 +167,27 @@ impl ksni::Tray for ApexShotTray {
                 .into()
             };
         }
-        vec![
+        let mut menu = Vec::new();
+        if let Some(update) = &self.update {
+            let label = crate::i18n::tfmt(
+                "Update available · v{version}",
+                &[("version", &update.version)],
+            );
+            let release_url = update.release_url.clone();
+            menu.push(
+                StandardItem {
+                    label,
+                    activate: Box::new(move |tray: &mut Self| {
+                        tray.send(TrayAction::OpenUpdate(release_url.clone()))
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            menu.push(MenuItem::Separator);
+        }
+
+        menu.extend([
             item!(
                 &crate::i18n::t("Capture Area"),
                 idle,
@@ -212,7 +239,8 @@ impl ksni::Tray for ApexShotTray {
             item!(&crate::i18n::t("Settings"), idle, TrayAction::OpenSettings),
             MenuItem::Separator,
             item!(&crate::i18n::t("Quit"), true, TrayAction::Quit),
-        ]
+        ]);
+        menu
     }
 }
 

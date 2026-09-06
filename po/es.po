@@ -2164,3 +2164,12 @@ msgstr "Bolígrafo"
 msgid "Choose the solid color used when Background is set to plain color"
 msgstr ""
 "Elige el color liso que se utilizará cuando la opción «Fondo» esté configurada en «color liso»"
+
+msgid "ApexShot update available"
+msgstr "Hay una actualización de ApexShot disponible"
+
+msgid "Update available · v{version}"
+msgstr "Actualización disponible · v{version}"
+
+msgid "Version {version} is ready. Open the ApexShot menu to view it."
+msgstr "La versión {version} está lista. Abre el menú de ApexShot para verla."

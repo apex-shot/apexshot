@@ -42,6 +42,8 @@ pub use recording_handlers::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DaemonAction {
+    UpdateAvailable(crate::update::UpdateInfo),
+    OpenUpdate(String),
     CaptureArea,
     CaptureCrosshair,
     CaptureScreen,
@@ -74,6 +76,7 @@ pub enum DaemonAction {
 impl From<TrayAction> for DaemonAction {
     fn from(action: TrayAction) -> Self {
         match action {
+            TrayAction::OpenUpdate(url) => Self::OpenUpdate(url),
             TrayAction::CaptureArea => Self::CaptureArea,
             TrayAction::CaptureCrosshair => Self::CaptureCrosshair,
             TrayAction::CaptureScreen => Self::CaptureScreen,
@@ -480,6 +483,13 @@ pub(super) async fn run_daemon_inner(
         eprintln!("[daemon] Tray icon disabled by settings.");
         None
     };
+
+    // Updates are deliberately checked after the tray is live. A newer release
+    // adds a persistent menu item and one low-friction desktop notification.
+    let update_tx = action_tx.clone();
+    crate::update::spawn_update_check(move |update| {
+        let _ = update_tx.send(DaemonAction::UpdateAvailable(update));
+    });
 
     {
         let signal_tx = action_tx.clone();

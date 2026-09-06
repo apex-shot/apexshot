@@ -716,6 +716,7 @@ fn build_settings_window(app: &Application) {
     );
 
     window.present();
+    crate::update_ui::present_if_needed(&window_overlay);
 }
 
 /// Wire every settings control so any edit flips Save from grey → orange (ready).

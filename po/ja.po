@@ -2123,3 +2123,12 @@ msgstr "ペン"
 
 msgid "Choose the solid color used when Background is set to plain color"
 msgstr "「背景」が「単色」に設定されている場合に使用する単色を選択してください"
+
+msgid "ApexShot update available"
+msgstr "ApexShot のアップデートを利用できます"
+
+msgid "Update available · v{version}"
+msgstr "アップデートを利用できます · v{version}"
+
+msgid "Version {version} is ready. Open the ApexShot menu to view it."
+msgstr "バージョン {version} の準備ができました。ApexShot メニューを開いて確認してください。"

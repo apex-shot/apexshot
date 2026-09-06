@@ -2169,3 +2169,12 @@ msgstr "Stift"
 msgid "Choose the solid color used when Background is set to plain color"
 msgstr ""
 "Wählen Sie die Volltonfarbe aus, die verwendet wird, wenn „Hintergrund“ auf „Einfarbig“ eingestellt ist"
+
+msgid "ApexShot update available"
+msgstr "Ein ApexShot-Update ist verfügbar"
+
+msgid "Update available · v{version}"
+msgstr "Update verfügbar · v{version}"
+
+msgid "Version {version} is ready. Open the ApexShot menu to view it."
+msgstr "Version {version} ist bereit. Öffne das ApexShot-Menü, um sie anzusehen."

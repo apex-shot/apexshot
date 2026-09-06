@@ -2159,3 +2159,12 @@ msgstr "Caneta"
 msgid "Choose the solid color used when Background is set to plain color"
 msgstr ""
 "Escolha a cor sólida a ser usada quando a opção “Fundo” estiver definida como “cor lisa”"
+
+msgid "ApexShot update available"
+msgstr "Atualização do ApexShot disponível"
+
+msgid "Update available · v{version}"
+msgstr "Atualização disponível · v{version}"
+
+msgid "Version {version} is ready. Open the ApexShot menu to view it."
+msgstr "A versão {version} está pronta. Abra o menu do ApexShot para vê-la."

@@ -29,6 +29,8 @@ pub mod qr;
 pub mod recording;
 pub mod settings;
 mod typography;
+pub mod update;
+pub mod update_ui;
 pub mod usage_telemetry;
 pub mod utils;
 

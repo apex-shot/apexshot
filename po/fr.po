@@ -2167,3 +2167,12 @@ msgstr "Stylo"
 msgid "Choose the solid color used when Background is set to plain color"
 msgstr ""
 "Choisissez la couleur unie à utiliser lorsque l'option « Arrière-plan » est réglée sur « Couleur unie »."
+
+msgid "ApexShot update available"
+msgstr "Une mise à jour d’ApexShot est disponible"
+
+msgid "Update available · v{version}"
+msgstr "Mise à jour disponible · v{version}"
+
+msgid "Version {version} is ready. Open the ApexShot menu to view it."
+msgstr "La version {version} est prête. Ouvrez le menu ApexShot pour la consulter."

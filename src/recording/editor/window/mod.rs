@@ -291,6 +291,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     window.set_child(Some(&shell));
     wire_close_persist(&window, state.clone(), exporting.clone());
     window.present();
+    crate::update_ui::present_if_needed(&shell);
 }
 
 fn wire_close_persist(

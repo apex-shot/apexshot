@@ -2323,6 +2323,7 @@ fn setup_editor_window_full(
     });
 
     window.present();
+    crate::update_ui::present_if_needed(&root_overlay);
     if annotate_config.always_on_top {
         set_window_always_on_top(
             &window,

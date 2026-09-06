@@ -2139,3 +2139,12 @@ msgstr "قلم"
 
 msgid "Choose the solid color used when Background is set to plain color"
 msgstr "اختر اللون المستخدم عند ضبط الخلفية على لون موحّد"
+
+msgid "ApexShot update available"
+msgstr "يتوفر تحديث لـ ApexShot"
+
+msgid "Update available · v{version}"
+msgstr "يتوفر تحديث · الإصدار {version}"
+
+msgid "Version {version} is ready. Open the ApexShot menu to view it."
+msgstr "الإصدار {version} جاهز. افتح قائمة ApexShot لعرضه."

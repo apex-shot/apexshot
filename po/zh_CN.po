@@ -2120,3 +2120,12 @@ msgstr "笔"
 
 msgid "Choose the solid color used when Background is set to plain color"
 msgstr "当“背景”设置为“纯色”时，选择要使用的纯色"
+
+msgid "ApexShot update available"
+msgstr "有可用的 ApexShot 更新"
+
+msgid "Update available · v{version}"
+msgstr "有可用更新 · v{version}"
+
+msgid "Version {version} is ready. Open the ApexShot menu to view it."
+msgstr "版本 {version} 已准备就绪。打开 ApexShot 菜单即可查看。"

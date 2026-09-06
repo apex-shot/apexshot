@@ -14,6 +14,25 @@ pub(super) fn dispatch_daemon_action(
     let state_clone = state.clone();
     let action_tx_clone = action_tx.clone();
     match action {
+        DaemonAction::UpdateAvailable(update) => {
+            if let Some(handle) = tray_handle {
+                handle.update(|tray| tray.set_update_available(update.clone()));
+            }
+            crate::utils::notify::desktop_notification(
+                &crate::i18n::t("ApexShot update available"),
+                &crate::i18n::tfmt(
+                    "Version {version} is ready. Open the ApexShot menu to view it.",
+                    &[("version", &update.version)],
+                ),
+            );
+        }
+        DaemonAction::OpenUpdate(url) => {
+            tokio::task::spawn_blocking(move || {
+                if let Err(err) = crate::utils::open::open_url(&url) {
+                    eprintln!("[update] Could not open release page: {err}");
+                }
+            });
+        }
         DaemonAction::CaptureArea => {
             tokio::task::spawn_blocking(move || capture_handlers::handle_capture_area(state_clone));
         }
