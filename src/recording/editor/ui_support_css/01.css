@@ -156,12 +156,59 @@
             }
 
             /* ── Scrollbar ── */
+            .recording-editor-root scrollbar,
+            .recording-editor-root scrollbar.overlay-indicator {
+                padding: 0;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
+
+            .recording-editor-root scrollbar.vertical {
+                min-width: 6px;
+            }
+
+            .recording-editor-root scrollbar.horizontal {
+                min-height: 6px;
+            }
+
+            .recording-editor-root scrollbar.vertical:hover,
+            .recording-editor-root scrollbar.vertical.hovering,
+            .recording-editor-root scrollbar.vertical.dragging {
+                min-width: 10px;
+            }
+
+            .recording-editor-root scrollbar.horizontal:hover,
+            .recording-editor-root scrollbar.horizontal.hovering,
+            .recording-editor-root scrollbar.horizontal.dragging {
+                min-height: 10px;
+            }
+
+            .recording-editor-root scrollbar contents,
+            .recording-editor-root scrollbar trough {
+                min-width: 0;
+                min-height: 0;
+                padding: 0;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
+
             .recording-editor-root scrollbar slider {
                 background-color: alpha(white, 0.18);
                 border-radius: 999px;
-                min-width: 12px;
-                min-height: 12px;
+                min-width: 5px;
+                min-height: 5px;
+                margin: 0;
+                padding: 0;
                 border: none;
+            }
+
+            .recording-editor-root scrollbar:hover slider,
+            .recording-editor-root scrollbar.hovering slider,
+            .recording-editor-root scrollbar.dragging slider {
+                min-width: 8px;
+                min-height: 8px;
             }
 
             .recording-editor-root scrollbar slider:hover {
@@ -170,11 +217,6 @@
 
             .recording-editor-root scrollbar slider:active {
                 background-color: alpha(white, 0.35);
-            }
-
-            .recording-editor-root scrollbar trough {
-                background: transparent;
-                border: none;
             }
 
             /* ── Title bar ── */

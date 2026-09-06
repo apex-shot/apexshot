@@ -1053,6 +1053,8 @@ struct FillSlider {
     max: Rc<Cell<f64>>,
     step: Rc<Cell<f64>>,
     enabled: Rc<Cell<bool>>,
+    hovered: Rc<Cell<bool>>,
+    dragging: Rc<Cell<bool>>,
     listeners: Rc<RefCell<Vec<Rc<dyn Fn(&FillSlider)>>>>,
 }
 
@@ -1069,6 +1071,8 @@ impl FillSlider {
             max: Rc::new(Cell::new(1.0)),
             step: Rc::new(Cell::new(0.05)),
             enabled: Rc::new(Cell::new(true)),
+            hovered: Rc::new(Cell::new(false)),
+            dragging: Rc::new(Cell::new(false)),
             listeners: Rc::new(RefCell::new(Vec::new())),
         };
         area.set_draw_func({
@@ -1082,7 +1086,11 @@ impl FillSlider {
         drag.set_button(1);
         drag.connect_drag_begin({
             let slider = slider.clone();
-            move |gesture, x, _| slider.apply_x(gesture, x)
+            move |gesture, x, _| {
+                slider.dragging.set(true);
+                slider.area.queue_draw();
+                slider.apply_x(gesture, x);
+            }
         });
         drag.connect_drag_update({
             let slider = slider.clone();
@@ -1093,7 +1101,30 @@ impl FillSlider {
                 slider.apply_x(gesture, start + dx);
             }
         });
+        drag.connect_drag_end({
+            let slider = slider.clone();
+            move |_, _, _| {
+                slider.dragging.set(false);
+                slider.area.queue_draw();
+            }
+        });
         area.add_controller(drag);
+        let motion = EventControllerMotion::new();
+        motion.connect_enter({
+            let slider = slider.clone();
+            move |_, _, _| {
+                slider.hovered.set(true);
+                slider.area.queue_draw();
+            }
+        });
+        motion.connect_leave({
+            let slider = slider.clone();
+            move |_| {
+                slider.hovered.set(false);
+                slider.area.queue_draw();
+            }
+        });
+        area.add_controller(motion);
         area.set_cursor(gdk::Cursor::from_name("ew-resize", None).as_ref());
         slider
     }
@@ -1127,6 +1158,10 @@ impl FillSlider {
     fn set_sensitive(&self, sensitive: bool) {
         self.enabled.set(sensitive);
         self.area.set_sensitive(sensitive);
+        if !sensitive {
+            self.hovered.set(false);
+            self.dragging.set(false);
+        }
         self.area.queue_draw();
     }
 
@@ -1171,37 +1206,56 @@ impl FillSlider {
         }
         let light = widget_is_light(widget);
         let enabled = if self.enabled.get() { 1.0 } else { 0.42 };
+        let hot = self.enabled.get() && (self.hovered.get() || self.dragging.get());
+        let active = self.enabled.get() && self.dragging.get();
         let min = self.min.get();
         let max = self.max.get();
         let progress = ((self.value.get() - min) / (max - min).max(1e-9)).clamp(0.0, 1.0);
         let radius = 8.0;
+        let (track_a, fill_a, text_a, handle_a) = if light {
+            if active {
+                (0.16, 0.28, 0.88, 0.95)
+            } else if hot {
+                (0.13, 0.22, 0.82, 0.92)
+            } else {
+                (0.10, 0.16, 0.72, 0.82)
+            }
+        } else if active {
+            (0.12, 0.22, 0.92, 1.0)
+        } else if hot {
+            (0.10, 0.18, 0.86, 0.95)
+        } else {
+            (0.07, 0.12, 0.72, 0.82)
+        };
         fill_slider_rounded_rect(cr, 0.0, 0.0, w, h, radius);
         if light {
-            cr.set_source_rgba(0.11, 0.13, 0.16, 0.10 * enabled);
+            cr.set_source_rgba(0.11, 0.13, 0.16, track_a * enabled);
         } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.07 * enabled);
+            cr.set_source_rgba(1.0, 1.0, 1.0, track_a * enabled);
         }
         let _ = cr.fill();
 
-        // Allow the marker to overlay the value text, but stop at its right
-        // edge rather than running into the slider's rounded outer edge.
-        let tick_x = 1.5 + progress * (w - 15.5);
-        let fill_w = tick_x;
+        // Fill covers the track; the handle sits inside it, inset from the
+        // trailing rounded edge so it reads as a grabber, not a border.
+        let handle_inset = radius;
+        let fill_w = progress * w;
+        let tick_x =
+            (fill_w - handle_inset).clamp(handle_inset, (w - handle_inset).max(handle_inset));
         let show_fill = progress > 0.0;
         if show_fill {
             fill_slider_rounded_rect(cr, 0.0, 0.0, fill_w, h, radius);
             if light {
-                cr.set_source_rgba(0.11, 0.13, 0.16, 0.16 * enabled);
+                cr.set_source_rgba(0.11, 0.13, 0.16, fill_a * enabled);
             } else {
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.12 * enabled);
+                cr.set_source_rgba(1.0, 1.0, 1.0, fill_a * enabled);
             }
             let _ = cr.fill();
         }
 
         if light {
-            cr.set_source_rgba(0.15, 0.16, 0.18, 0.72 * enabled);
+            cr.set_source_rgba(0.15, 0.16, 0.18, text_a * enabled);
         } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.72 * enabled);
+            cr.set_source_rgba(1.0, 1.0, 1.0, text_a * enabled);
         }
         cr.select_font_face(
             crate::typography::UI_FONT_FAMILY,
@@ -1220,12 +1274,12 @@ impl FillSlider {
 
         // Draw the marker after text so it can travel over the label/value
         // instead of being trapped inside a reserved text gutter.
-        cr.set_line_width(1.5);
+        cr.set_line_width(if hot { 2.0 } else { 1.5 });
         cr.set_line_cap(gtk4::cairo::LineCap::Round);
         if light {
-            cr.set_source_rgba(0.15, 0.16, 0.18, 0.82 * enabled);
+            cr.set_source_rgba(0.15, 0.16, 0.18, handle_a * enabled);
         } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * enabled);
+            cr.set_source_rgba(1.0, 1.0, 1.0, handle_a * enabled);
         }
         cr.move_to(tick_x, h * 0.28);
         cr.line_to(tick_x, h * 0.72);

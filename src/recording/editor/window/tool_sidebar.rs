@@ -7,8 +7,8 @@ use crate::recording::editor::model::{
 };
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
-    GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay, PolicyType,
-    ScrolledWindow, Switch, ToggleButton, Widget, Window,
+    EventControllerMotion, GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay,
+    PolicyType, ScrolledWindow, Switch, ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
