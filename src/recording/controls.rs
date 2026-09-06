@@ -945,11 +945,13 @@ mod tests {
 
     #[test]
     fn selected_area_pointer_region_takes_precedence_over_monitor_geometry() {
-        let mut config = super::RecordingConfig::default();
-        config.x = Some(250);
-        config.y = Some(-40);
-        config.width = Some(640);
-        config.height = Some(360);
+        let config = super::RecordingConfig {
+            x: Some(250),
+            y: Some(-40),
+            width: Some(640),
+            height: Some(360),
+            ..Default::default()
+        };
         let monitor = CaptureRegion {
             x: 0,
             y: -200,

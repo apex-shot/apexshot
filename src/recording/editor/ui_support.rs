@@ -41,7 +41,9 @@ mod tests {
         assert!(RECORDING_EDITOR_CSS
             .contains(".recording-editor-root scale.recording-editor-timeline-zoom slider"));
         assert!(RECORDING_EDITOR_CSS.contains("box-shadow: none;"));
-        assert!(RECORDING_EDITOR_CSS.contains(".recording-editor-root scrollbar.vertical {\n                min-width: 6px;"));
+        assert!(RECORDING_EDITOR_CSS.contains(
+            ".recording-editor-root scrollbar.vertical {\n                min-width: 6px;"
+        ));
         assert!(RECORDING_EDITOR_CSS.contains(
             ".recording-editor-root scrollbar slider {\n                background-color: alpha(white, 0.18);\n                border-radius: 999px;\n                min-width: 5px;"
         ));
