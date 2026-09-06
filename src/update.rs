@@ -140,7 +140,7 @@ pub fn check_for_update() -> Option<UpdateInfo> {
     // affect installed builds or make a network request.
     if std::env::var_os("APEXSHOT_UPDATE_PREVIEW").is_some() {
         return Some(UpdateInfo {
-            version: "0.2.35".to_string(),
+            version: "0.2.36".to_string(),
             release_url: RELEASES_URL.to_string(),
         });
     }
@@ -194,7 +194,7 @@ pub fn spawn_update_check(on_update: impl FnOnce(UpdateInfo) + Send + 'static) {
 pub fn cached_update() -> Option<UpdateInfo> {
     if std::env::var_os("APEXSHOT_UPDATE_PREVIEW").is_some() {
         return Some(UpdateInfo {
-            version: "0.2.35".to_string(),
+            version: "0.2.36".to_string(),
             release_url: RELEASES_URL.to_string(),
         });
     }
@@ -263,16 +263,16 @@ mod tests {
 
     #[test]
     fn compares_release_versions_numerically() {
-        assert!(is_newer_version("v0.2.35", "0.2.34"));
+        assert!(is_newer_version("v0.2.36", "0.2.35"));
         assert!(is_newer_version("1.10.0", "1.9.9"));
-        assert!(!is_newer_version("0.2.34", "0.2.34"));
-        assert!(!is_newer_version("0.2.33", "0.2.34"));
+        assert!(!is_newer_version("0.2.35", "0.2.35"));
+        assert!(!is_newer_version("0.2.34", "0.2.35"));
     }
 
     #[test]
     fn ignores_invalid_versions() {
-        assert!(!is_newer_version("next", "0.2.34"));
-        assert!(!is_newer_version("0.2.35", "development"));
+        assert!(!is_newer_version("next", "0.2.35"));
+        assert!(!is_newer_version("0.2.36", "development"));
     }
 
     #[test]
@@ -283,10 +283,10 @@ mod tests {
     #[test]
     fn newer_release_is_not_held_by_an_old_snooze() {
         let state = UpdateCheckState {
-            dismissed_version: Some("0.2.34".into()),
+            dismissed_version: Some("0.2.35".into()),
             prompt_snoozed_until_unix: now_unix().saturating_add(60),
             ..Default::default()
         };
-        assert_ne!(state.dismissed_version.as_deref(), Some("0.2.35"));
+        assert_ne!(state.dismissed_version.as_deref(), Some("0.2.36"));
     }
 }

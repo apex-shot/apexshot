@@ -23,19 +23,19 @@
   </content_rating>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.34/media/capture-area.png</image>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/capture-area.png</image>
       <caption>Select a screen area to capture</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.34/media/video-recording.png</image>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/video-recording.png</image>
       <caption>Configure a screen recording</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.34/media/video-editor.png</image>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/video-editor.png</image>
       <caption>Edit a recorded video</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.34/media/setting-tray.png</image>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/setting-tray.png</image>
       <caption>Configure capture settings and tray actions</caption>
     </screenshot>
   </screenshots>
@@ -48,6 +48,11 @@
     <binary>apexshot</binary>
   </provides>
   <releases>
+    <release version="0.2.35" date="2026-09-07">
+      <description>
+        <p>Video editor redesign with crop, clips, cursor, and auto-zoom, plus in-app update notifications and UI localization.</p>
+      </description>
+    </release>
     <release version="0.2.34" date="2026-08-03">
       <description>
         <p>Initial portal-only Flatpak packaging work: Flatpak feature flag, host-escape gates, Screenshot/ScreenCast portals, telemetry opt-in.</p>

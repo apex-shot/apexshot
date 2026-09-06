@@ -1,5 +1,5 @@
 Name:           apexshot
-Version:        0.2.34
+Version:        0.2.35
 Release:        1%{?dist}
 Summary:        Linux screenshot, annotation, OCR, and screen recording tool
 License:        GPL-3.0-or-later
@@ -135,6 +135,11 @@ fi
 %{_datadir}/apexshot/
 
 %changelog
+* Mon Sep 07 2026 codegoddy <codegoddy@gmail.com> - 0.2.35-1
+- Video editor redesign with crop, clips, cursor, and auto-zoom
+- In-app update notifications and UI localization
+- GNOME pointer accuracy and portal-only Flatpak packaging
+
 * Mon Aug 03 2026 codegoddy <codegoddy@gmail.com> - 0.2.34-1
 - History window for screenshots, recordings, and cloud uploads
 - Image editor redesign and chrome polish
