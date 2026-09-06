@@ -874,6 +874,47 @@ fn suggest_zoom_clips_skips_regions_overlapping_existing_zooms() {
 }
 
 #[test]
+fn suggest_zoom_clips_keeps_adjacent_click_sessions() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 400.0, 300.0), (4.3, 1500.0, 700.0)]);
+
+    assert_eq!(state.suggest_zoom_clips(), 2);
+    assert_eq!(state.zoom_clips.len(), 2);
+    assert!(state.zoom_clips[0].end <= state.zoom_clips[1].start);
+}
+
+#[test]
+fn suggest_zoom_clips_refits_click_near_trim_boundary() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
+    state.set_trim_end(6.0);
+
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].start - 4.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 6.0).abs() < 1e-9);
+}
+
+#[test]
+fn suggest_zoom_clips_assigns_exact_cut_click_to_following_segment() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 800.0, 500.0)]);
+    state.add_cut(4.0);
+
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].start - 4.0).abs() < 1e-9);
+}
+
+#[test]
+fn suggest_zoom_clips_uses_cut_boundary_tolerance() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(4.0 - 5e-10, 800.0, 500.0)]);
+    state.add_cut(4.0);
+
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].start - 4.0).abs() < 1e-9);
+}
+
+#[test]
 fn suggest_zoom_clips_skips_landings_outside_kept_segments() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0), (8.0, 960.0, 540.0)]);
