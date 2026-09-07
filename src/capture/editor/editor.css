@@ -2101,6 +2101,13 @@
                 padding: 16px;
             }
 
+            /* Motion borrows the recording editor's 288px sidebar controls.
+             * The widget does not expand horizontally, so this establishes the
+             * panel width without relying on unsupported GTK max-width CSS. */
+            .editor-motion-inspector {
+                min-width: 288px;
+            }
+
             .editor-inspector-placeholder {
                 color: rgba(255, 255, 255, 0.62);
                 font-size: 11px;

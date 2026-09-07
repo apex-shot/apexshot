@@ -1254,6 +1254,83 @@ fn settings_clamp_click_style_and_duration() {
 }
 
 #[test]
+fn motion_blur_uses_shutter_cap_and_apexshot_raster_budget() {
+    let settings = MotionBlurSettings {
+        enabled: true,
+        zoom_strength: 0.8,
+        shutter_angle: 360.0,
+        transform_temporal_exposure_cap: 0.02,
+        transform_trail_opacity: 0.4,
+        ..MotionBlurSettings::default()
+    };
+    let export = settings.transform_trail(30.0, MotionBlurBudgetMode::FullQuality);
+    let preview = settings.transform_trail(30.0, MotionBlurBudgetMode::LivePreviewPlayback);
+    assert_eq!(export.len(), 3);
+    assert!(matches!(preview.len(), 3 | 5));
+    assert!(export.iter().all(|sample| sample.offset_seconds < 0.0));
+    assert!(export
+        .iter()
+        .all(|sample| sample.offset_seconds >= -0.02 - f64::EPSILON));
+    assert!(export
+        .windows(2)
+        .all(|samples| samples[0].opacity <= samples[1].opacity));
+}
+
+#[test]
+fn motion_blur_amount_honors_enablement_multiplier_and_cap() {
+    let disabled = MotionBlurSettings {
+        enabled: false,
+        zoom_strength: 1.0,
+        ..MotionBlurSettings::default()
+    };
+    assert_eq!(disabled.effective_zoom_amount(), 0.0);
+
+    let enabled = MotionBlurSettings {
+        enabled: true,
+        zoom_strength: 0.8,
+        zoom_blur_amount_multiplier: 2.0,
+        zoom_blur_max_amount: 0.65,
+        ..MotionBlurSettings::default()
+    };
+    assert!((enabled.effective_zoom_amount() - 0.65).abs() < 1e-12);
+}
+
+#[test]
+fn motion_blur_uses_recovered_shotbase_setting_bounds() {
+    let settings = MotionBlurSettings {
+        cursor_strength: 50.0,
+        zoom_strength: 50.0,
+        capture_movement_strength: 50.0,
+        shutter_angle: 500.0,
+        zoom_blur_amount_multiplier: 50.0,
+        zoom_blur_max_amount: 500.0,
+        transform_temporal_exposure_cap: 50.0,
+        transform_trail_opacity: 1.0,
+        ..MotionBlurSettings::default()
+    }
+    .clamped();
+
+    assert_eq!(settings.cursor_strength, 5.0);
+    assert_eq!(settings.zoom_strength, 5.0);
+    assert_eq!(settings.capture_movement_strength, 5.0);
+    assert_eq!(settings.shutter_angle, 360.0);
+    assert_eq!(settings.zoom_blur_amount_multiplier, 3.0);
+    assert_eq!(settings.zoom_blur_max_amount, 120.0);
+    assert_eq!(settings.transform_temporal_exposure_cap, 8.0);
+    assert_eq!(settings.transform_trail_opacity, 0.4);
+}
+
+#[test]
+fn motion_projection_uses_aspect_invariant_depth_ratio() {
+    let perspective = 0.18;
+    let wide = card_depth(800.0, 450.0, perspective) / 800.0_f64.hypot(450.0);
+    let square = card_depth(600.0, 600.0, perspective) / 600.0_f64.hypot(600.0);
+    let tall = card_depth(360.0, 640.0, perspective) / 360.0_f64.hypot(640.0);
+    assert!((wide - square).abs() < 1e-12);
+    assert!((square - tall).abs() < 1e-12);
+}
+
+#[test]
 fn motion_preset_matching_is_derived_from_knobs() {
     let mut settings = CursorSettings::default();
     assert!(settings.matching_motion_preset().is_none());

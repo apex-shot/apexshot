@@ -513,6 +513,12 @@ pub const MAX_MOTION_DURATION_SECONDS: f64 = 10.0;
 pub const DEFAULT_MOTION_END_SCALE: f64 = 1.12;
 pub const DEFAULT_MOTION_END_ROTATION_Y: f64 = 8.0;
 pub const DEFAULT_MOTION_END_PERSPECTIVE: f64 = 0.18;
+/// Recovered from Shotbase's Motion transform-timing editor defaults.
+pub const DEFAULT_MOTION_TRANSITION_SECONDS: f64 = 1.2;
+pub const DEFAULT_MOTION_EASING_X1: f64 = 0.25;
+pub const DEFAULT_MOTION_EASING_Y1: f64 = 1.0;
+pub const DEFAULT_MOTION_EASING_X2: f64 = 0.50;
+pub const DEFAULT_MOTION_EASING_Y2: f64 = 1.0;
 pub const MOTION_EXPORT_FPS: u32 = 30;
 pub const MIN_MOTION_SEGMENT_SECONDS: f64 = 0.25;
 pub const DEFAULT_MOTION_SEGMENT_SECONDS: f64 = 1.8;
@@ -564,11 +570,75 @@ impl Default for MotionTransform {
     }
 }
 
+/// Shotbase's global `MotionEffectTransformTiming`: a transition duration and
+/// cubic-Bézier control points shared by the Motion effects track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionEffectTransformTiming {
+    pub transition_duration: f64,
+    pub easing_x1: f64,
+    pub easing_y1: f64,
+    pub easing_x2: f64,
+    pub easing_y2: f64,
+}
+
+impl Default for MotionEffectTransformTiming {
+    fn default() -> Self {
+        Self {
+            transition_duration: DEFAULT_MOTION_TRANSITION_SECONDS,
+            easing_x1: DEFAULT_MOTION_EASING_X1,
+            easing_y1: DEFAULT_MOTION_EASING_Y1,
+            easing_x2: DEFAULT_MOTION_EASING_X2,
+            easing_y2: DEFAULT_MOTION_EASING_Y2,
+        }
+    }
+}
+
+impl MotionEffectTransformTiming {
+    pub fn clamped(self) -> Self {
+        Self {
+            transition_duration: self.transition_duration.clamp(
+                MIN_ZOOM_EASE_MS as f64 / 1000.0,
+                MAX_ZOOM_EASE_MS as f64 / 1000.0,
+            ),
+            easing_x1: self.easing_x1.clamp(0.0, 1.0),
+            easing_y1: self.easing_y1.clamp(0.0, 1.0),
+            easing_x2: self.easing_x2.clamp(0.0, 1.0),
+            easing_y2: self.easing_y2.clamp(0.0, 1.0),
+        }
+    }
+
+    fn apply(self, progress: f64) -> f64 {
+        cubic_bezier_ease(self.clamped(), progress)
+    }
+}
+
 /// One timed camera move. Slice 1 stores these but does not yet author them.
+///
+/// The field set mirrors the recovered Shotbase `MotionEffectSegment` schema:
+/// `zoomMode`, `intensity`, `zoom`, `zoomAnchorX/Y`, `positionX/Y`,
+/// `rotationX/Y/Z`, and `isDisabled`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MotionZoomMode {
+    /// A user-authored zoom anchor and transform.
+    #[default]
+    Manual,
+    /// Reserved for pointer-track follow data; static image Motion has no
+    /// cursor track to solve, so it currently evaluates as Manual.
+    Auto,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MotionSegment {
     pub start: f64,
     pub end: f64,
+    pub zoom_mode: MotionZoomMode,
+    /// Effect strength. This is preserved separately from zoom exactly as in
+    /// Shotbase, even though the current inspector does not expose it yet.
+    pub intensity: f64,
+    /// Source-artboard anchor for camera zoom, in normalized coordinates.
+    pub zoom_anchor_x: f64,
+    pub zoom_anchor_y: f64,
+    pub is_disabled: bool,
     pub from: MotionTransform,
     pub to: MotionTransform,
     pub ease_ms: u32,
@@ -580,7 +650,7 @@ impl MotionSegment {
         (self.end - self.start).max(0.0)
     }
 
-    /// Shotbase-style still → Motion default: push in and yaw a few degrees.
+    /// ApexShot's default still → Motion move.
     pub fn default_cinematic(duration: f64) -> Self {
         let end = DEFAULT_MOTION_SEGMENT_SECONDS
             .min(duration.max(MIN_MOTION_SEGMENT_SECONDS))
@@ -588,52 +658,147 @@ impl MotionSegment {
         Self {
             start: 0.0,
             end,
+            zoom_mode: MotionZoomMode::Manual,
+            intensity: 1.0,
+            zoom_anchor_x: 0.5,
+            zoom_anchor_y: 0.5,
+            is_disabled: false,
             from: MotionTransform::default(),
             to: MotionTransform {
                 scale: DEFAULT_MOTION_END_SCALE,
                 rotation_y: DEFAULT_MOTION_END_ROTATION_Y,
-                perspective: DEFAULT_MOTION_END_PERSPECTIVE,
                 ..MotionTransform::default()
             },
-            ease_ms: DEFAULT_ZOOM_EASE_MS,
+            ease_ms: (DEFAULT_MOTION_TRANSITION_SECONDS * 1000.0) as u32,
             easing: ZoomEasing::Glide,
         }
     }
 
     pub fn sample(&self, time: f64) -> MotionTransform {
+        if self.is_disabled {
+            return self.from;
+        }
+        let target = self.target_transform();
         let span = self.duration();
         if span <= f64::EPSILON {
-            return self.to;
+            return target;
         }
-        // Same shape as zoom clips: ease into the pose, hold, ease out.
-        // ease_ms=0 used to stretch the curve across the whole clip, which
-        // made Glide/Smooth/Snappy look identical on a slow 1.8s move.
         let ease = (self.ease_ms as f64 / 1000.0).clamp(0.0, span / 2.0);
         if ease <= f64::EPSILON {
             let local = ((time - self.start) / span).clamp(0.0, 1.0);
-            return lerp_transform(self.from, self.to, motion_easing_apply(self.easing, local));
+            return lerp_transform(self.from, target, motion_easing_apply(self.easing, local));
         }
         if time < self.start + ease {
             let alpha = ((time - self.start) / ease).clamp(0.0, 1.0);
-            return lerp_transform(self.from, self.to, motion_easing_apply(self.easing, alpha));
+            return lerp_transform(self.from, target, motion_easing_apply(self.easing, alpha));
         }
-        self.to
+        target
+    }
+
+    fn sample_with_timing(
+        &self,
+        time: f64,
+        transform_timing: MotionEffectTransformTiming,
+    ) -> MotionTransform {
+        if self.is_disabled {
+            return self.from;
+        }
+        let target = self.target_transform();
+        let span = self.duration();
+        if span <= f64::EPSILON {
+            return target;
+        }
+        // Shotbase applies one timing curve to the entire Motion effects
+        // track. The old non-Glide presets remain compatibility overrides for
+        // users who have explicitly selected them in ApexShot.
+        let is_shotbase_timing = self.easing == ZoomEasing::Glide;
+        let configured_duration = if is_shotbase_timing {
+            transform_timing.clamped().transition_duration
+        } else {
+            self.ease_ms as f64 / 1000.0
+        };
+        // A Motion transform enters once then holds its end pose; unlike the
+        // legacy zoom clip it is not a symmetric in/out animation.
+        let ease = configured_duration.clamp(0.0, span);
+        if ease <= f64::EPSILON {
+            let local = ((time - self.start) / span).clamp(0.0, 1.0);
+            let progress = if is_shotbase_timing {
+                transform_timing.apply(local)
+            } else {
+                motion_easing_apply(self.easing, local)
+            };
+            return lerp_transform(self.from, target, progress);
+        }
+        if time < self.start + ease {
+            let alpha = ((time - self.start) / ease).clamp(0.0, 1.0);
+            let progress = if is_shotbase_timing {
+                transform_timing.apply(alpha)
+            } else {
+                motion_easing_apply(self.easing, alpha)
+            };
+            return lerp_transform(self.from, target, progress);
+        }
+        target
+    }
+
+    /// Shotbase stores segment intensity separately from its camera values.
+    /// Treat it as the blend from the pose entering the segment to the
+    /// authored target, so zero is a true no-op and one is the full move.
+    fn target_transform(&self) -> MotionTransform {
+        lerp_transform(self.from, self.to, self.intensity.clamp(0.0, 1.0))
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MotionTextAnimation {
-    Fade,
-    Slide,
+    None,
+    Typewriter,
+    SlideFromLeft,
+    SlideFromRight,
+    SlideTop,
+    SlideBottom,
 }
 
 impl MotionTextAnimation {
-    pub const ALL: [Self; 2] = [Self::Fade, Self::Slide];
+    /// Cases recovered from Shotbase `TextEffectPreset` metadata.
+    pub const ALL: [Self; 6] = [
+        Self::None,
+        Self::Typewriter,
+        Self::SlideFromLeft,
+        Self::SlideFromRight,
+        Self::SlideTop,
+        Self::SlideBottom,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Fade => "Fade",
-            Self::Slide => "Slide",
+            Self::None => "None",
+            Self::Typewriter => "Typewriter",
+            Self::SlideFromLeft => "From left",
+            Self::SlideFromRight => "From right",
+            Self::SlideTop => "From top",
+            Self::SlideBottom => "From bottom",
+        }
+    }
+}
+
+/// Shotbase stores this as the text effect `scope` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionTextScope {
+    Character,
+    Word,
+    Line,
+}
+
+impl MotionTextScope {
+    /// Cases recovered from Shotbase's `TextEffectScope` metadata.
+    pub const ALL: [Self; 3] = [Self::Character, Self::Word, Self::Line];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Character => "Character",
+            Self::Word => "Word",
+            Self::Line => "Line",
         }
     }
 }
@@ -641,7 +806,20 @@ impl MotionTextAnimation {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionTextStyle {
     pub alpha: f64,
+    pub offset_x: f64,
     pub offset_y: f64,
+    pub reveal: f64,
+}
+
+/// Where a Motion text annotation is authored. These are the two coordinate
+/// spaces named by Shotbase's `MotionTextSegment.annotationCoordinateSpace`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MotionTextCoordinateSpace {
+    /// Coordinates are normalized to the moving image card.
+    #[default]
+    MotionCanvasLocal,
+    /// Coordinates are normalized to the untransformed source image.
+    CanonicalSource,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -650,6 +828,10 @@ pub struct MotionTextSegment {
     pub end: f64,
     pub text: String,
     pub animation: MotionTextAnimation,
+    pub scope: MotionTextScope,
+    pub typewriter_time: f64,
+    pub is_disabled: bool,
+    pub annotation_coordinate_space: MotionTextCoordinateSpace,
     pub pos_x: f64,
     pub pos_y: f64,
     pub size: f64,
@@ -661,36 +843,179 @@ impl MotionTextSegment {
     }
 
     pub fn sample(&self, time: f64) -> Option<MotionTextStyle> {
-        if time < self.start || time > self.end {
+        if self.is_disabled || time < self.start || time > self.end {
             return None;
         }
         let span = self.duration();
         if span <= f64::EPSILON {
             return Some(MotionTextStyle {
                 alpha: 1.0,
+                offset_x: 0.0,
                 offset_y: 0.0,
+                reveal: 1.0,
             });
         }
         let local = time - self.start;
-        let fade = 0.28_f64.min(span / 3.0).max(0.05);
-        let alpha = if local < fade {
-            (local / fade).clamp(0.0, 1.0)
-        } else if local > span - fade {
-            ((span - local) / fade).clamp(0.0, 1.0)
-        } else {
-            1.0
+        let transition = 0.28_f64.min(span / 3.0).max(0.05);
+        let progress = (local / transition).clamp(0.0, 1.0);
+        let entrance = 1.0 - (1.0 - progress).powi(3);
+        let distance = 36.0 * (1.0 - entrance);
+        let (alpha, offset_x, offset_y, reveal) = match self.animation {
+            MotionTextAnimation::None => (1.0, 0.0, 0.0, 1.0),
+            MotionTextAnimation::Typewriter => (
+                1.0,
+                0.0,
+                0.0,
+                (local / self.typewriter_time.max(0.05)).clamp(0.0, 1.0),
+            ),
+            MotionTextAnimation::SlideFromLeft => (entrance, -distance, 0.0, 1.0),
+            MotionTextAnimation::SlideFromRight => (entrance, distance, 0.0, 1.0),
+            MotionTextAnimation::SlideTop => (entrance, 0.0, -distance, 1.0),
+            MotionTextAnimation::SlideBottom => (entrance, 0.0, distance, 1.0),
         };
-        let offset_y = match self.animation {
-            MotionTextAnimation::Fade => 0.0,
-            MotionTextAnimation::Slide => {
-                if local < fade {
-                    36.0 * (1.0 - local / fade)
-                } else {
-                    0.0
-                }
+        Some(MotionTextStyle { alpha, offset_x, offset_y, reveal })
+    }
+}
+
+/// Motion blur configuration whose field order and clamp bounds were recovered
+/// from Shotbase's `MotionBlurSettings` metadata and implementation.
+///
+/// The temporal composition policy below is ApexShot's current policy; it is
+/// deliberately not described as a byte-for-byte Shotbase reconstruction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionBlurSettings {
+    pub enabled: bool,
+    pub cursor_strength: f64,
+    pub zoom_strength: f64,
+    pub capture_movement_strength: f64,
+    pub shutter_angle: f64,
+    pub zoom_blur_amount_multiplier: f64,
+    pub zoom_blur_max_amount: f64,
+    pub transform_temporal_exposure_cap: f64,
+    pub transform_trail_opacity: f64,
+}
+
+impl Default for MotionBlurSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            // These are ApexShot defaults. Shotbase's construction defaults
+            // have not yet been recovered from the stripped application.
+            cursor_strength: 0.4,
+            zoom_strength: 0.0,
+            capture_movement_strength: 0.35,
+            shutter_angle: 180.0,
+            zoom_blur_amount_multiplier: 1.0,
+            zoom_blur_max_amount: 1.0,
+            transform_temporal_exposure_cap: 1.0 / 24.0,
+            transform_trail_opacity: 0.28,
+        }
+    }
+}
+
+/// A past transform sample contributing to the Motion trail. The current
+/// transform remains sharp; these are composited oldest-first below it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionBlurSample {
+    pub offset_seconds: f64,
+    pub opacity: f64,
+}
+
+/// Motion blur quality mode recovered from Shotbase's `MotionBlurBudgetMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionBlurBudgetMode {
+    LivePreviewPlayback,
+    FullQuality,
+}
+
+impl MotionBlurBudgetMode {
+    /// ApexShot's raster fallback budget. In the recovered Shotbase compositor,
+    /// `livePreviewPlayback` drives the 3/5 temporal CIColorMatrix path,
+    /// whereas `fullQuality` uses Core Image motion/zoom filters rather than
+    /// the same trail loop. We retain a small export trail here because this
+    /// renderer has no Core Image equivalent.
+    fn apexshot_temporal_sample_limit(self) -> usize {
+        match self {
+            Self::LivePreviewPlayback => 5,
+            Self::FullQuality => 3,
+        }
+    }
+}
+
+impl MotionBlurSettings {
+    pub fn clamped(self) -> Self {
+        let finite = |value: f64, fallback: f64| {
+            if value.is_finite() {
+                value
+            } else {
+                fallback
             }
         };
-        Some(MotionTextStyle { alpha, offset_y })
+        Self {
+            enabled: self.enabled,
+            cursor_strength: finite(self.cursor_strength, 0.0).clamp(0.0, 5.0),
+            zoom_strength: finite(self.zoom_strength, 0.0).clamp(0.0, 5.0),
+            capture_movement_strength: finite(self.capture_movement_strength, 0.0).clamp(0.0, 5.0),
+            shutter_angle: finite(self.shutter_angle, 0.0).clamp(0.0, 360.0),
+            zoom_blur_amount_multiplier: finite(self.zoom_blur_amount_multiplier, 0.0)
+                .clamp(0.0, 3.0),
+            zoom_blur_max_amount: finite(self.zoom_blur_max_amount, 0.0).clamp(0.0, 120.0),
+            transform_temporal_exposure_cap: finite(self.transform_temporal_exposure_cap, 0.0)
+                .clamp(0.0, 8.0),
+            transform_trail_opacity: finite(self.transform_trail_opacity, 0.0).clamp(0.0, 0.4),
+        }
+    }
+
+    /// Strength of the still-image camera move. Cursor/capture strengths are
+    /// intentionally excluded: there is no corresponding moving source in a
+    /// Motion still, so applying them would incorrectly blur a static card.
+    pub fn effective_zoom_amount(self) -> f64 {
+        let settings = self.clamped();
+        if !settings.enabled {
+            return 0.0;
+        }
+        (settings.zoom_strength * settings.zoom_blur_amount_multiplier)
+            .min(settings.zoom_blur_max_amount)
+    }
+
+    /// Build ApexShot's bounded, past-looking raster fallback. Shotbase uses
+    /// a temporal 3/5-sample path only for `livePreviewPlayback`; its full
+    /// quality path applies `CIMotionBlur` and `CIZoomBlur`, neither of which
+    /// is available to this Cairo renderer.
+    pub fn transform_trail(
+        self,
+        frame_rate: f64,
+        budget: MotionBlurBudgetMode,
+    ) -> Vec<MotionBlurSample> {
+        let settings = self.clamped();
+        let amount = settings.effective_zoom_amount();
+        if amount < 0.001 || settings.shutter_angle <= 0.0 || settings.transform_trail_opacity <= 0.0 {
+            return Vec::new();
+        }
+        let frame_duration = 1.0 / frame_rate.max(1.0);
+        let exposure = (frame_duration * settings.shutter_angle / 360.0)
+            .min(settings.transform_temporal_exposure_cap);
+        if exposure <= f64::EPSILON {
+            return Vec::new();
+        }
+        let max_samples = budget.apexshot_temporal_sample_limit();
+        let sample_count = if max_samples == 3 || amount <= 0.5 {
+            3
+        } else {
+            max_samples
+        };
+        (1..=sample_count)
+            .rev()
+            .map(|index| {
+                let progress = index as f64 / sample_count as f64;
+                MotionBlurSample {
+                    offset_seconds: -exposure * progress,
+                    // Recent samples are stronger. The sharp current card is
+                    // painted afterwards, matching Shotbase's sharp overlay.
+                    opacity: settings.transform_trail_opacity * amount * (1.0 - progress * 0.65),
+                }
+            })
+            .collect()
     }
 }
 
@@ -711,6 +1036,32 @@ fn motion_easing_apply(easing: ZoomEasing, t: f64) -> f64 {
     }
 }
 
+fn cubic_bezier_ease(timing: MotionEffectTransformTiming, progress: f64) -> f64 {
+    let progress = progress.clamp(0.0, 1.0);
+    if progress <= f64::EPSILON || (1.0 - progress) <= f64::EPSILON {
+        return progress;
+    }
+
+    let sample = |u: f64, p1: f64, p2: f64| {
+        let inverse = 1.0 - u;
+        3.0 * inverse * inverse * u * p1 + 3.0 * inverse * u * u * p2 + u * u * u
+    };
+
+    // The X component represents time, so solve it before sampling Y. The
+    // editor constrains both X coordinates to [0, 1], making bisection stable.
+    let mut low = 0.0;
+    let mut high = 1.0;
+    for _ in 0..24 {
+        let midpoint = (low + high) * 0.5;
+        if sample(midpoint, timing.easing_x1, timing.easing_x2) < progress {
+            low = midpoint;
+        } else {
+            high = midpoint;
+        }
+    }
+    sample((low + high) * 0.5, timing.easing_y1, timing.easing_y2)
+}
+
 fn lerp_transform(from: MotionTransform, to: MotionTransform, t: f64) -> MotionTransform {
     let t = t.clamp(0.0, 1.0);
     MotionTransform {
@@ -729,7 +1080,13 @@ pub struct MotionState {
     pub duration: f64,
     pub segments: Vec<MotionSegment>,
     pub playhead: f64,
+    /// Shotbase's compositor-level `perspectiveIntensity`. It is deliberately
+    /// independent of timed effect segments so every camera move shares one
+    /// projection depth.
+    pub perspective_intensity: f64,
     pub motion_blur: f64,
+    pub motion_blur_settings: MotionBlurSettings,
+    pub transform_timing: MotionEffectTransformTiming,
     pub selected: Option<usize>,
     pub text_segments: Vec<MotionTextSegment>,
     pub selected_text: Option<usize>,
@@ -741,7 +1098,10 @@ impl Default for MotionState {
             duration: DEFAULT_MOTION_DURATION_SECONDS,
             segments: Vec::new(),
             playhead: 0.0,
+            perspective_intensity: DEFAULT_MOTION_END_PERSPECTIVE,
             motion_blur: 0.0,
+            motion_blur_settings: MotionBlurSettings::default(),
+            transform_timing: MotionEffectTransformTiming::default(),
             selected: None,
             text_segments: Vec::new(),
             selected_text: None,
@@ -790,6 +1150,7 @@ impl MotionState {
                 self.selected_text = None;
             }
         }
+        self.reconcile_effect_segments();
     }
 
     pub fn seed_default_cinematic(&mut self) {
@@ -850,17 +1211,22 @@ impl MotionState {
         self.segments.push(MotionSegment {
             start,
             end,
+            zoom_mode: MotionZoomMode::Manual,
+            intensity: 1.0,
+            zoom_anchor_x: 0.5,
+            zoom_anchor_y: 0.5,
+            is_disabled: false,
             from: MotionTransform::default(),
             to: MotionTransform {
                 scale: DEFAULT_MOTION_END_SCALE,
                 rotation_y: DEFAULT_MOTION_END_ROTATION_Y,
-                perspective: DEFAULT_MOTION_END_PERSPECTIVE,
                 ..MotionTransform::default()
             },
-            ease_ms: DEFAULT_ZOOM_EASE_MS,
+            ease_ms: (DEFAULT_MOTION_TRANSITION_SECONDS * 1000.0) as u32,
             easing: ZoomEasing::Glide,
         });
         self.segments.sort_by(|a, b| a.start.total_cmp(&b.start));
+        self.reconcile_effect_segments();
         let index = self
             .segments
             .iter()
@@ -874,6 +1240,19 @@ impl MotionState {
         self.segments
             .iter()
             .position(|segment| time >= segment.start && time <= segment.end)
+    }
+
+    /// Find the nearest meaningful timeline edge for an effect segment. The
+    /// visual timeline deliberately stays uncluttered; this supplies the
+    /// Shotbase-style magnetic behavior behind it.
+    pub fn snap_effect_time(&self, time: f64, tolerance: f64, excluding: Option<usize>) -> f64 {
+        self.snap_time(time, tolerance, excluding, None)
+    }
+
+    /// Text uses the same shared timeline magnetism as camera effects, while
+    /// ignoring the segment currently being dragged or trimmed.
+    pub fn snap_text_time(&self, time: f64, tolerance: f64, excluding: Option<usize>) -> f64 {
+        self.snap_time(time, tolerance, None, excluding)
     }
 
     pub fn remove_selected(&mut self) -> bool {
@@ -893,6 +1272,7 @@ impl MotionState {
             return false;
         }
         self.segments.remove(index);
+        self.reconcile_effect_segments();
         if !self.segments.is_empty() {
             self.selected = Some(index.min(self.segments.len() - 1));
         }
@@ -920,6 +1300,13 @@ impl MotionState {
             segment.start = start;
             segment.end = end;
         }
+        self.segments.sort_by(|a, b| a.start.total_cmp(&b.start));
+        self.reconcile_effect_segments();
+        let index = self
+            .segments
+            .iter()
+            .position(|segment| (segment.start - start).abs() < 1e-6)
+            .unwrap_or(index.min(self.segments.len().saturating_sub(1)));
         self.selected = Some(index);
         self.selected_text = None;
     }
@@ -945,12 +1332,41 @@ impl MotionState {
         if let Some(segment) = self.selected_segment_mut() {
             segment.to.scale = scale.clamp(1.0, 3.0);
         }
+        self.reconcile_effect_segments();
+    }
+
+    pub fn set_selected_zoom_mode(&mut self, zoom_mode: MotionZoomMode) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.zoom_mode = zoom_mode;
+        }
+    }
+
+    pub fn set_selected_intensity(&mut self, intensity: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.intensity = intensity.clamp(0.0, 1.0);
+        }
+        self.reconcile_effect_segments();
+    }
+
+    pub fn set_selected_zoom_anchor(&mut self, x: f64, y: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.zoom_anchor_x = x.clamp(0.0, 1.0);
+            segment.zoom_anchor_y = y.clamp(0.0, 1.0);
+        }
+    }
+
+    pub fn set_selected_disabled(&mut self, is_disabled: bool) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.is_disabled = is_disabled;
+        }
+        self.reconcile_effect_segments();
     }
 
     pub fn set_selected_end_yaw(&mut self, yaw: f64) {
         if let Some(segment) = self.selected_segment_mut() {
             segment.to.rotation_y = yaw.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
         }
+        self.reconcile_effect_segments();
     }
 
     pub fn set_selected_easing(&mut self, easing: ZoomEasing) {
@@ -960,8 +1376,18 @@ impl MotionState {
     }
 
     pub fn set_selected_ease_ms(&mut self, ease_ms: u32) {
+        let ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
         if let Some(segment) = self.selected_segment_mut() {
-            segment.ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
+            segment.ease_ms = ease_ms;
+        }
+        self.transform_timing.transition_duration = ease_ms as f64 / 1000.0;
+    }
+
+    pub fn set_transform_timing(&mut self, timing: MotionEffectTransformTiming) {
+        self.transform_timing = timing.clamped();
+        let ease_ms = (self.transform_timing.transition_duration * 1000.0).round() as u32;
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.ease_ms = ease_ms;
         }
     }
 
@@ -969,34 +1395,55 @@ impl MotionState {
         if let Some(segment) = self.selected_segment_mut() {
             segment.to.rotation_x = pitch.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
         }
+        self.reconcile_effect_segments();
     }
 
     pub fn set_selected_end_roll(&mut self, roll: f64) {
         if let Some(segment) = self.selected_segment_mut() {
             segment.to.rotation_z = roll.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
         }
+        self.reconcile_effect_segments();
     }
 
     pub fn set_selected_perspective(&mut self, perspective: f64) {
+        self.perspective_intensity = perspective.clamp(0.0, 1.0);
+        let perspective_intensity = self.perspective_intensity;
         if let Some(segment) = self.selected_segment_mut() {
-            segment.to.perspective = perspective.clamp(0.0, 1.0);
+            // Retain this value for legacy in-memory segment consumers, but
+            // rendering reads the global compositor perspective above.
+            segment.to.perspective = perspective_intensity;
         }
+        self.reconcile_effect_segments();
     }
 
     pub fn set_selected_end_pos_x(&mut self, pos_x: f64) {
         if let Some(segment) = self.selected_segment_mut() {
             segment.to.pos_x = pos_x.clamp(MIN_MOTION_POS, MAX_MOTION_POS);
         }
+        self.reconcile_effect_segments();
     }
 
     pub fn set_selected_end_pos_y(&mut self, pos_y: f64) {
         if let Some(segment) = self.selected_segment_mut() {
             segment.to.pos_y = pos_y.clamp(MIN_MOTION_POS, MAX_MOTION_POS);
         }
+        self.reconcile_effect_segments();
     }
 
     pub fn set_motion_blur(&mut self, motion_blur: f64) {
         self.motion_blur = motion_blur.clamp(0.0, 1.0);
+        self.motion_blur_settings.enabled = self.motion_blur > 0.0;
+        self.motion_blur_settings.zoom_strength = self.motion_blur;
+    }
+
+    /// The scalar used by ApexShot's current still-image renderer. It is a
+    /// compatibility projection of Shotbase's separate blur strengths.
+    pub fn effective_motion_blur(&self) -> f64 {
+        if self.motion_blur_settings.enabled {
+            self.motion_blur_settings.zoom_strength.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
     }
 
     pub fn text_index_at(&self, time: f64) -> Option<usize> {
@@ -1055,7 +1502,11 @@ impl MotionState {
             start,
             end,
             text: "Title".into(),
-            animation: MotionTextAnimation::Fade,
+            animation: MotionTextAnimation::None,
+            scope: MotionTextScope::Character,
+            typewriter_time: 0.6,
+            is_disabled: false,
+            annotation_coordinate_space: MotionTextCoordinateSpace::MotionCanvasLocal,
             pos_x: DEFAULT_MOTION_TEXT_POS_X,
             pos_y: DEFAULT_MOTION_TEXT_POS_Y,
             size: DEFAULT_MOTION_TEXT_SIZE,
@@ -1126,6 +1577,30 @@ impl MotionState {
         }
     }
 
+    pub fn set_selected_text_scope(&mut self, scope: MotionTextScope) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.scope = scope;
+            }
+        }
+    }
+
+    pub fn set_selected_text_typewriter_time(&mut self, typewriter_time: f64) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.typewriter_time = typewriter_time.max(0.0);
+            }
+        }
+    }
+
+    pub fn set_selected_text_disabled(&mut self, is_disabled: bool) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.is_disabled = is_disabled;
+            }
+        }
+    }
+
     pub fn set_selected_text_pos(&mut self, pos_x: f64, pos_y: f64) {
         if let Some(index) = self.selected_text {
             if let Some(segment) = self.text_segments.get_mut(index) {
@@ -1145,19 +1620,99 @@ impl MotionState {
 
     pub fn sample(&self, time: f64) -> MotionTransform {
         let time = time.clamp(0.0, self.duration.max(0.0));
-        if let Some(segment) = self
+        let transform = if let Some(segment) = self
             .segments
             .iter()
             .find(|segment| time >= segment.start && time <= segment.end)
         {
-            return segment.sample(time);
+            segment.sample_with_timing(time, self.transform_timing)
+        } else {
+            self.segments
+                .iter()
+                .rev()
+                .find(|segment| time > segment.end && !segment.is_disabled)
+                .map(MotionSegment::target_transform)
+                .unwrap_or_default()
+        };
+        MotionTransform {
+            perspective: self.perspective_intensity,
+            ..transform
         }
+    }
+
+    /// Source-artboard zoom focus for the active camera move. The anchor is
+    /// deliberately sampled alongside the transform because Shotbase keeps it
+    /// on `MotionEffectSegment`, not in the global compositor configuration.
+    pub fn zoom_anchor_at(&self, time: f64) -> (f64, f64) {
+        let time = time.clamp(0.0, self.duration.max(0.0));
         self.segments
             .iter()
-            .rev()
-            .find(|segment| time > segment.end)
-            .map(|segment| segment.to)
-            .unwrap_or_default()
+            .find(|segment| time >= segment.start && time <= segment.end && !segment.is_disabled)
+            .or_else(|| {
+                self.segments
+                    .iter()
+                    .rev()
+                    .find(|segment| time > segment.end && !segment.is_disabled)
+            })
+            .map(|segment| {
+                (
+                    segment.zoom_anchor_x.clamp(0.0, 1.0),
+                    segment.zoom_anchor_y.clamp(0.0, 1.0),
+                )
+            })
+            .unwrap_or((0.5, 0.5))
+    }
+
+    /// Preserve a single camera through every effect segment. Shotbase stores
+    /// effect segments as a reconciled track: the next segment begins at the
+    /// pose left by the preceding segment, including across an intentional
+    /// timeline gap. Without this, adding a second move visibly snaps the card
+    /// back to its identity transform.
+    fn reconcile_effect_segments(&mut self) {
+        let mut previous = MotionTransform::default();
+        for segment in &mut self.segments {
+            segment.from = previous;
+            if !segment.is_disabled {
+                previous = segment.target_transform();
+            }
+        }
+    }
+
+    fn snap_time(
+        &self,
+        time: f64,
+        tolerance: f64,
+        excluding_effect: Option<usize>,
+        excluding_text: Option<usize>,
+    ) -> f64 {
+        let time = time.clamp(0.0, self.duration);
+        let tolerance = tolerance.max(0.0);
+        let mut nearest = time;
+        let mut distance = tolerance;
+        let mut consider = |candidate: f64| {
+            let candidate = candidate.clamp(0.0, self.duration);
+            let candidate_distance = (candidate - time).abs();
+            if candidate_distance <= distance {
+                nearest = candidate;
+                distance = candidate_distance;
+            }
+        };
+        consider(0.0);
+        consider(self.duration);
+        consider(self.playhead);
+        for (index, segment) in self.segments.iter().enumerate() {
+            if Some(index) != excluding_effect {
+                consider(segment.start);
+                consider(segment.end);
+            }
+        }
+        for (index, segment) in self.text_segments.iter().enumerate() {
+            if Some(index) != excluding_text {
+                consider(segment.start);
+                consider(segment.end);
+            }
+        }
+        nearest
     }
 }
 

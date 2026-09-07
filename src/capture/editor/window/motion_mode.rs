@@ -7,8 +7,8 @@
 use gtk4::cairo::Context;
 use gtk4::{
     gdk, glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, Entry, EventControllerKey, GestureClick, GestureDrag, Grid, Label, Orientation,
-    Overlay, Scale, Stack, ToggleButton,
+    DrawingArea, Entry, EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Grid,
+    Label, Orientation, Overlay, Stack, ToggleButton,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -22,13 +22,14 @@ use crate::capture::editor::state::EditorState;
 use crate::config::{load_config, save_config};
 use crate::i18n::t;
 use crate::recording::editor::model::{
-    MotionState, MotionTextAnimation, ZoomEasing, DEFAULT_MOTION_DURATION_SECONDS,
-    DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y, DEFAULT_MOTION_TEXT_SIZE,
-    DEFAULT_ZOOM_EASE_MS, MAX_MOTION_DURATION_SECONDS, MAX_MOTION_POS, MAX_MOTION_TEXT_POS,
+    MotionEffectTransformTiming, MotionState, MotionTextAnimation, MotionTextScope, ZoomEasing,
+    DEFAULT_MOTION_DURATION_SECONDS, DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y,
+    DEFAULT_MOTION_TEXT_SIZE, MAX_MOTION_DURATION_SECONDS, MAX_MOTION_POS, MAX_MOTION_TEXT_POS,
     MAX_MOTION_TEXT_SIZE, MAX_MOTION_YAW, MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS,
     MIN_MOTION_POS, MIN_MOTION_TEXT_POS, MIN_MOTION_TEXT_SIZE, MIN_MOTION_YAW, MIN_ZOOM_EASE_MS,
     MOTION_SCALE_PRESETS,
 };
+use crate::recording::editor::window::tool_sidebar::FillSlider;
 
 pub(super) const MOTION_PAGE: &str = "motion";
 pub(super) const STATIC_PAGE: &str = "static";
@@ -48,41 +49,62 @@ pub(super) struct MotionModeParts {
     #[allow(dead_code)]
     pub timeline_card: GtkBox,
     pub ruler: DrawingArea,
+    pub source_track: DrawingArea,
     pub motion_track: DrawingArea,
     pub text_track: DrawingArea,
     pub playhead_overlay: DrawingArea,
     pub page: GtkBox,
     pub inspector: GtkBox,
-    pub duration_slider: Scale,
+    pub duration_slider: FillSlider,
     pub duration_value: Label,
-    pub blur_slider: Scale,
+    pub blur_slider: FillSlider,
     pub blur_value: Label,
+    pub blur_shutter_slider: FillSlider,
+    pub blur_shutter_value: Label,
+    pub blur_trail_slider: FillSlider,
+    pub blur_trail_value: Label,
     pub clip_box: GtkBox,
     pub text_box: GtkBox,
     pub text_entry: Entry,
-    pub text_pos_x_slider: Scale,
+    pub text_pos_x_slider: FillSlider,
     pub text_pos_x_value: Label,
-    pub text_pos_y_slider: Scale,
+    pub text_pos_y_slider: FillSlider,
     pub text_pos_y_value: Label,
-    pub text_size_slider: Scale,
+    pub text_size_slider: FillSlider,
     pub text_size_value: Label,
     pub text_anim_buttons: Vec<(MotionTextAnimation, ToggleButton)>,
+    pub text_scope_buttons: Vec<(MotionTextScope, ToggleButton)>,
     pub clip_hint: Label,
     pub scale_chips: Vec<Button>,
-    pub yaw_slider: Scale,
+    pub intensity_slider: FillSlider,
+    pub intensity_value: Label,
+    pub zoom_anchor_x_slider: FillSlider,
+    pub zoom_anchor_x_value: Label,
+    pub zoom_anchor_y_slider: FillSlider,
+    pub zoom_anchor_y_value: Label,
+    pub yaw_slider: FillSlider,
     pub yaw_value: Label,
-    pub pitch_slider: Scale,
+    pub pitch_slider: FillSlider,
     pub pitch_value: Label,
-    pub roll_slider: Scale,
+    pub roll_slider: FillSlider,
     pub roll_value: Label,
-    pub perspective_slider: Scale,
+    pub perspective_slider: FillSlider,
     pub perspective_value: Label,
-    pub pos_x_slider: Scale,
+    pub pos_x_slider: FillSlider,
     pub pos_x_value: Label,
-    pub pos_y_slider: Scale,
+    pub pos_y_slider: FillSlider,
     pub pos_y_value: Label,
-    pub ease_slider: Scale,
+    pub ease_slider: FillSlider,
     pub ease_value: Label,
+    pub easing_x1_slider: FillSlider,
+    pub easing_x1_value: Label,
+    pub easing_y1_slider: FillSlider,
+    pub easing_y1_value: Label,
+    pub easing_x2_slider: FillSlider,
+    pub easing_x2_value: Label,
+    pub easing_y2_slider: FillSlider,
+    pub easing_y2_value: Label,
+    pub reset_timing_btn: Button,
     pub easing_buttons: Vec<(ZoomEasing, ToggleButton)>,
     pub delete_btn: Button,
     pub inspector_syncing: Rc<Cell<bool>>,
@@ -219,44 +241,49 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
     duration_value.add_css_class("editor-inspector-title");
     duration_value.set_xalign(0.0);
 
-    let duration_slider = Scale::with_range(
-        Orientation::Horizontal,
-        MIN_MOTION_DURATION_SECONDS,
-        MAX_MOTION_DURATION_SECONDS,
-        0.5,
-    );
+    let duration_slider =
+        FillSlider::new_with_value_text(&t("Duration"), |value, _, _| format_duration_label(value));
+    duration_slider.set_range(MIN_MOTION_DURATION_SECONDS, MAX_MOTION_DURATION_SECONDS);
+    duration_slider.set_increments(0.5, 1.0);
     duration_slider.set_value(DEFAULT_MOTION_DURATION_SECONDS);
-    duration_slider.set_draw_value(false);
-    duration_slider.set_hexpand(true);
-    duration_slider.add_css_class("editor-toolbar-size-slider");
 
     let inspector = GtkBox::new(Orientation::Vertical, 12);
     inspector.add_css_class("editor-inspector-placeholder-shell");
+    inspector.add_css_class("editor-motion-inspector");
     inspector.set_hexpand(false);
     inspector.set_vexpand(false);
     let duration_title = Label::new(Some(&t("Duration")));
     duration_title.add_css_class("editor-inspector-title");
     duration_title.set_xalign(0.0);
+    duration_title.set_visible(false);
+    duration_value.set_visible(false);
     inspector.append(&duration_title);
     inspector.append(&duration_value);
-    inspector.append(&duration_slider);
+    inspector.append(&duration_slider.widget());
 
-    let blur_header = GtkBox::new(Orientation::Horizontal, 8);
-    let blur_label = Label::new(Some(&t("Motion blur")));
-    blur_label.add_css_class("recording-editor-zoom-kicker");
-    blur_label.set_xalign(0.0);
-    blur_label.set_hexpand(true);
     let blur_value = Label::new(Some("0%"));
-    blur_value.add_css_class("recording-editor-zoom-kicker");
-    blur_header.append(&blur_label);
-    blur_header.append(&blur_value);
-    inspector.append(&blur_header);
-    let blur_slider = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.01);
+    let blur_slider = FillSlider::new(&t("Motion blur"));
+    blur_slider.set_range(0.0, 1.0);
+    blur_slider.set_increments(0.01, 0.1);
     blur_slider.set_value(0.0);
-    blur_slider.set_draw_value(false);
-    blur_slider.set_hexpand(true);
-    blur_slider.add_css_class("editor-toolbar-size-slider");
-    inspector.append(&blur_slider);
+    inspector.append(&blur_slider.widget());
+
+    let blur_shutter_value = Label::new(Some("180°"));
+    let blur_shutter_slider =
+        FillSlider::new_with_value_text(&t("Blur shutter"), |value, _, _| format!("{value:.0}°"));
+    blur_shutter_slider.set_range(0.0, 360.0);
+    blur_shutter_slider.set_increments(5.0, 15.0);
+    blur_shutter_slider.set_value(180.0);
+    inspector.append(&blur_shutter_slider.widget());
+
+    let blur_trail_value = Label::new(Some("28%"));
+    let blur_trail_slider = FillSlider::new_with_value_text(&t("Blur trail"), |value, _, _| {
+        format!("{:.0}%", value * 100.0)
+    });
+    blur_trail_slider.set_range(0.0, 0.4);
+    blur_trail_slider.set_increments(0.01, 0.04);
+    blur_trail_slider.set_value(0.28);
+    inspector.append(&blur_trail_slider.widget());
 
     let clip_hint = Label::new(Some(&t(
         "Click a clip, or double-click a track to add a move or text",
@@ -300,76 +327,84 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
         .collect();
     clip_box.append(&chips);
 
-    let yaw_header = GtkBox::new(Orientation::Horizontal, 8);
-    let yaw_label = Label::new(Some(&t("Yaw")));
-    yaw_label.add_css_class("recording-editor-zoom-kicker");
-    yaw_label.set_xalign(0.0);
-    yaw_label.set_hexpand(true);
+    let (intensity_header, intensity_value, intensity_slider) =
+        span_slider_row(&t("Intensity"), 1.0, 0.0, 1.0);
+    clip_box.append(&intensity_header);
+    clip_box.append(&intensity_slider.widget());
+
+    let (zoom_anchor_x_header, zoom_anchor_x_value, zoom_anchor_x_slider) =
+        span_slider_row(&t("Anchor X"), 0.5, 0.0, 1.0);
+    clip_box.append(&zoom_anchor_x_header);
+    clip_box.append(&zoom_anchor_x_slider.widget());
+    let (zoom_anchor_y_header, zoom_anchor_y_value, zoom_anchor_y_slider) =
+        span_slider_row(&t("Anchor Y"), 0.5, 0.0, 1.0);
+    clip_box.append(&zoom_anchor_y_header);
+    clip_box.append(&zoom_anchor_y_slider.widget());
+
     let yaw_value = Label::new(Some("8°"));
-    yaw_value.add_css_class("recording-editor-zoom-kicker");
-    yaw_header.append(&yaw_label);
-    yaw_header.append(&yaw_value);
-    clip_box.append(&yaw_header);
+    yaw_value.set_visible(false);
     let yaw_slider =
-        Scale::with_range(Orientation::Horizontal, MIN_MOTION_YAW, MAX_MOTION_YAW, 1.0);
+        FillSlider::new_with_value_text(&t("Yaw"), |value, _, _| format!("{value:.0}°"));
+    yaw_slider.set_range(MIN_MOTION_YAW, MAX_MOTION_YAW);
+    yaw_slider.set_increments(1.0, 5.0);
     yaw_slider.set_value(8.0);
-    yaw_slider.set_draw_value(false);
-    yaw_slider.set_hexpand(true);
-    yaw_slider.add_css_class("editor-toolbar-size-slider");
-    clip_box.append(&yaw_slider);
+    clip_box.append(&yaw_value);
+    clip_box.append(&yaw_slider.widget());
 
     let (pitch_header, pitch_value, pitch_slider) = angle_slider_row(&t("Pitch"), 0.0);
     clip_box.append(&pitch_header);
-    clip_box.append(&pitch_slider);
+    clip_box.append(&pitch_slider.widget());
     let (roll_header, roll_value, roll_slider) = angle_slider_row(&t("Roll"), 0.0);
     clip_box.append(&roll_header);
-    clip_box.append(&roll_slider);
+    clip_box.append(&roll_slider.widget());
 
-    let perspective_header = GtkBox::new(Orientation::Horizontal, 8);
-    let perspective_label = Label::new(Some(&t("Perspective")));
-    perspective_label.add_css_class("recording-editor-zoom-kicker");
-    perspective_label.set_xalign(0.0);
-    perspective_label.set_hexpand(true);
     let perspective_value = Label::new(Some("18%"));
-    perspective_value.add_css_class("recording-editor-zoom-kicker");
-    perspective_header.append(&perspective_label);
-    perspective_header.append(&perspective_value);
-    clip_box.append(&perspective_header);
-    let perspective_slider = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.01);
+    perspective_value.set_visible(false);
+    let perspective_slider = FillSlider::new(&t("Perspective"));
+    perspective_slider.set_range(0.0, 1.0);
+    perspective_slider.set_increments(0.01, 0.1);
     perspective_slider.set_value(0.18);
-    perspective_slider.set_draw_value(false);
-    perspective_slider.set_hexpand(true);
-    perspective_slider.add_css_class("editor-toolbar-size-slider");
-    clip_box.append(&perspective_slider);
+    clip_box.append(&perspective_value);
+    clip_box.append(&perspective_slider.widget());
 
     let (pos_x_header, pos_x_value, pos_x_slider) = percent_slider_row(&t("X"), 0.0);
     clip_box.append(&pos_x_header);
-    clip_box.append(&pos_x_slider);
+    clip_box.append(&pos_x_slider.widget());
     let (pos_y_header, pos_y_value, pos_y_slider) = percent_slider_row(&t("Y"), 0.0);
     clip_box.append(&pos_y_header);
-    clip_box.append(&pos_y_slider);
+    clip_box.append(&pos_y_slider.widget());
 
-    let ease_header = GtkBox::new(Orientation::Horizontal, 8);
-    let ease_label = Label::new(Some(&t("Ease")));
-    ease_label.add_css_class("recording-editor-zoom-kicker");
-    ease_label.set_xalign(0.0);
-    ease_label.set_hexpand(true);
-    let ease_value = Label::new(Some("600ms"));
-    ease_value.add_css_class("recording-editor-zoom-kicker");
-    ease_header.append(&ease_label);
-    ease_header.append(&ease_value);
-    clip_box.append(&ease_header);
-    let ease_slider = Scale::with_range(
-        Orientation::Horizontal,
-        MIN_ZOOM_EASE_MS as f64,
-        MAX_ZOOM_EASE_MS as f64,
-        20.0,
-    );
-    ease_slider.set_value(DEFAULT_ZOOM_EASE_MS as f64);
-    ease_slider.set_draw_value(false);
-    ease_slider.set_hexpand(true);
-    ease_slider.add_css_class("editor-toolbar-size-slider");
-    clip_box.append(&ease_slider);
+    let ease_value = Label::new(Some("1200ms"));
+    ease_value.set_visible(false);
+    let ease_slider =
+        FillSlider::new_with_value_text(&t("Duration"), |value, _, _| format!("{:.0}ms", value));
+    ease_slider.set_range(MIN_ZOOM_EASE_MS as f64, MAX_ZOOM_EASE_MS as f64);
+    ease_slider.set_increments(20.0, 100.0);
+    ease_slider.set_value(1200.0);
+    clip_box.append(&ease_value);
+    clip_box.append(&ease_slider.widget());
+
+    let (easing_x1_header, easing_x1_value, easing_x1_slider) =
+        span_slider_row(&t("Ease X1"), 0.25, 0.0, 1.0);
+    clip_box.append(&easing_x1_header);
+    clip_box.append(&easing_x1_slider.widget());
+    let (easing_y1_header, easing_y1_value, easing_y1_slider) =
+        span_slider_row(&t("Ease Y1"), 1.0, 0.0, 1.0);
+    clip_box.append(&easing_y1_header);
+    clip_box.append(&easing_y1_slider.widget());
+    let (easing_x2_header, easing_x2_value, easing_x2_slider) =
+        span_slider_row(&t("Ease X2"), 0.50, 0.0, 1.0);
+    clip_box.append(&easing_x2_header);
+    clip_box.append(&easing_x2_slider.widget());
+    let (easing_y2_header, easing_y2_value, easing_y2_slider) =
+        span_slider_row(&t("Ease Y2"), 1.0, 0.0, 1.0);
+    clip_box.append(&easing_y2_header);
+    clip_box.append(&easing_y2_slider.widget());
+    let reset_timing_btn = Button::with_label(&t("Reset"));
+    reset_timing_btn.add_css_class("recording-editor-zoom-easing-btn");
+    reset_timing_btn.set_has_frame(false);
+    reset_timing_btn.set_halign(gtk4::Align::Start);
+    clip_box.append(&reset_timing_btn);
 
     let easing_label = Label::new(Some(&t("Easing")));
     easing_label.add_css_class("recording-editor-zoom-kicker");
@@ -401,7 +436,7 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
     inspector.append(&clip_box);
 
     let text_box = GtkBox::new(Orientation::Vertical, 10);
-    text_box.set_hexpand(true);
+    text_box.set_hexpand(false);
     text_box.set_visible(false);
     let text_title = Label::new(Some(&t("Text")));
     text_title.add_css_class("editor-inspector-title");
@@ -418,7 +453,7 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
         MAX_MOTION_TEXT_POS,
     );
     text_box.append(&text_pos_x_header);
-    text_box.append(&text_pos_x_slider);
+    text_box.append(&text_pos_x_slider.widget());
     let (text_pos_y_header, text_pos_y_value, text_pos_y_slider) = span_slider_row(
         &t("Y"),
         DEFAULT_MOTION_TEXT_POS_Y,
@@ -426,7 +461,7 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
         MAX_MOTION_TEXT_POS,
     );
     text_box.append(&text_pos_y_header);
-    text_box.append(&text_pos_y_slider);
+    text_box.append(&text_pos_y_slider.widget());
     let (text_size_header, text_size_value, text_size_slider) = span_slider_row(
         &t("Size"),
         DEFAULT_MOTION_TEXT_SIZE,
@@ -434,23 +469,26 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
         MAX_MOTION_TEXT_SIZE,
     );
     text_box.append(&text_size_header);
-    text_box.append(&text_size_slider);
+    text_box.append(&text_size_slider.widget());
     let text_anim_label = Label::new(Some(&t("Animation")));
     text_anim_label.add_css_class("recording-editor-zoom-kicker");
     text_anim_label.set_xalign(0.0);
     text_box.append(&text_anim_label);
-    let text_anim_row = GtkBox::new(Orientation::Horizontal, 6);
-    text_anim_row.add_css_class("recording-editor-zoom-easing");
-    text_anim_row.set_hexpand(true);
-    text_anim_row.set_homogeneous(true);
+    let text_anim_grid = Grid::new();
+    text_anim_grid.add_css_class("recording-editor-zoom-easing");
+    text_anim_grid.set_hexpand(true);
+    text_anim_grid.set_column_spacing(6);
+    text_anim_grid.set_row_spacing(6);
+    text_anim_grid.set_column_homogeneous(true);
     let text_anim_buttons: Vec<(MotionTextAnimation, ToggleButton)> = MotionTextAnimation::ALL
         .iter()
-        .map(|&animation| {
+        .enumerate()
+        .map(|(index, &animation)| {
             let button = ToggleButton::with_label(&t(animation.label()));
             button.add_css_class("recording-editor-zoom-easing-btn");
             button.set_has_frame(false);
             button.set_hexpand(true);
-            text_anim_row.append(&button);
+            text_anim_grid.attach(&button, (index % 3) as i32, (index / 3) as i32, 1, 1);
             (animation, button)
         })
         .collect();
@@ -461,7 +499,34 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
             }
         }
     }
-    text_box.append(&text_anim_row);
+    text_box.append(&text_anim_grid);
+    let text_scope_label = Label::new(Some(&t("Scope")));
+    text_scope_label.add_css_class("recording-editor-zoom-kicker");
+    text_scope_label.set_xalign(0.0);
+    text_box.append(&text_scope_label);
+    let text_scope_row = GtkBox::new(Orientation::Horizontal, 6);
+    text_scope_row.add_css_class("recording-editor-zoom-easing");
+    text_scope_row.set_hexpand(true);
+    text_scope_row.set_homogeneous(true);
+    let text_scope_buttons: Vec<(MotionTextScope, ToggleButton)> = MotionTextScope::ALL
+        .iter()
+        .map(|&scope| {
+            let button = ToggleButton::with_label(&t(scope.label()));
+            button.add_css_class("recording-editor-zoom-easing-btn");
+            button.set_has_frame(false);
+            button.set_hexpand(true);
+            text_scope_row.append(&button);
+            (scope, button)
+        })
+        .collect();
+    if let Some((_, first)) = text_scope_buttons.first() {
+        for (index, (_, button)) in text_scope_buttons.iter().enumerate() {
+            if index > 0 {
+                button.set_group(Some(first));
+            }
+        }
+    }
+    text_box.append(&text_scope_row);
     inspector.append(&text_box);
 
     let delete_btn = Button::with_label(&t("Delete"));
@@ -502,6 +567,7 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
             preview,
             timeline_card: timeline.dock,
             ruler: timeline.ruler,
+            source_track: timeline.source_track,
             motion_track: timeline.track,
             text_track: timeline.text_track,
             playhead_overlay: timeline.playhead,
@@ -511,6 +577,10 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
             duration_value,
             blur_slider,
             blur_value,
+            blur_shutter_slider,
+            blur_shutter_value,
+            blur_trail_slider,
+            blur_trail_value,
             clip_box,
             text_box,
             text_entry,
@@ -521,8 +591,15 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
             text_size_slider,
             text_size_value,
             text_anim_buttons,
+            text_scope_buttons,
             clip_hint,
             scale_chips,
+            intensity_slider,
+            intensity_value,
+            zoom_anchor_x_slider,
+            zoom_anchor_x_value,
+            zoom_anchor_y_slider,
+            zoom_anchor_y_value,
             yaw_slider,
             yaw_value,
             pitch_slider,
@@ -537,6 +614,15 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
             pos_y_value,
             ease_slider,
             ease_value,
+            easing_x1_slider,
+            easing_x1_value,
+            easing_y1_slider,
+            easing_y1_value,
+            easing_x2_slider,
+            easing_x2_value,
+            easing_y2_slider,
+            easing_y2_value,
+            reset_timing_btn,
             easing_buttons,
             delete_btn,
             inspector_syncing,
@@ -643,6 +729,7 @@ pub(super) fn wire_motion_controls(
     let redraw = {
         let preview = parts.preview.clone();
         let ruler = parts.ruler.clone();
+        let source_track = parts.source_track.clone();
         let motion_track = parts.motion_track.clone();
         let playhead_overlay = parts.playhead_overlay.clone();
         let playhead_clock = parts.playhead_clock.clone();
@@ -652,6 +739,10 @@ pub(super) fn wire_motion_controls(
         let text_track = parts.text_track.clone();
         let blur_slider = parts.blur_slider.clone();
         let blur_value = parts.blur_value.clone();
+        let blur_shutter_slider = parts.blur_shutter_slider.clone();
+        let blur_shutter_value = parts.blur_shutter_value.clone();
+        let blur_trail_slider = parts.blur_trail_slider.clone();
+        let blur_trail_value = parts.blur_trail_value.clone();
         let clip_box = parts.clip_box.clone();
         let text_box = parts.text_box.clone();
         let text_entry = parts.text_entry.clone();
@@ -662,8 +753,15 @@ pub(super) fn wire_motion_controls(
         let text_size_slider = parts.text_size_slider.clone();
         let text_size_value = parts.text_size_value.clone();
         let text_anim_buttons = parts.text_anim_buttons.clone();
+        let text_scope_buttons = parts.text_scope_buttons.clone();
         let clip_hint = parts.clip_hint.clone();
         let scale_chips = parts.scale_chips.clone();
+        let intensity_slider = parts.intensity_slider.clone();
+        let intensity_value = parts.intensity_value.clone();
+        let zoom_anchor_x_slider = parts.zoom_anchor_x_slider.clone();
+        let zoom_anchor_x_value = parts.zoom_anchor_x_value.clone();
+        let zoom_anchor_y_slider = parts.zoom_anchor_y_slider.clone();
+        let zoom_anchor_y_value = parts.zoom_anchor_y_value.clone();
         let yaw_slider = parts.yaw_slider.clone();
         let yaw_value = parts.yaw_value.clone();
         let pitch_slider = parts.pitch_slider.clone();
@@ -678,6 +776,15 @@ pub(super) fn wire_motion_controls(
         let pos_y_value = parts.pos_y_value.clone();
         let ease_slider = parts.ease_slider.clone();
         let ease_value = parts.ease_value.clone();
+        let easing_x1_slider = parts.easing_x1_slider.clone();
+        let easing_x1_value = parts.easing_x1_value.clone();
+        let easing_y1_slider = parts.easing_y1_slider.clone();
+        let easing_y1_value = parts.easing_y1_value.clone();
+        let easing_x2_slider = parts.easing_x2_slider.clone();
+        let easing_x2_value = parts.easing_x2_value.clone();
+        let easing_y2_slider = parts.easing_y2_slider.clone();
+        let easing_y2_value = parts.easing_y2_value.clone();
+        let reset_timing_btn = parts.reset_timing_btn.clone();
         let easing_buttons = parts.easing_buttons.clone();
         let delete_btn = parts.delete_btn.clone();
         let syncing = parts.inspector_syncing.clone();
@@ -707,12 +814,31 @@ pub(super) fn wire_motion_controls(
             let selected = runtime.motion.selected_segment().cloned();
             let selected_text = runtime.motion.selected_text_segment().cloned();
             let blur = runtime.motion.motion_blur;
+            let blur_settings = runtime.motion.motion_blur_settings.clamped();
+            let perspective_intensity = runtime.motion.perspective_intensity;
+            let transform_timing = runtime.motion.transform_timing;
             drop(runtime);
             syncing.set(true);
             blur_slider.set_value(blur);
             blur_value.set_label(&format!("{:.0}%", blur * 100.0));
+            blur_shutter_slider.set_value(blur_settings.shutter_angle);
+            blur_shutter_value.set_label(&format!("{:.0}°", blur_settings.shutter_angle));
+            blur_trail_slider.set_value(blur_settings.transform_trail_opacity);
+            blur_trail_value.set_label(&format!(
+                "{:.0}%",
+                blur_settings.transform_trail_opacity * 100.0
+            ));
+            easing_x1_slider.set_value(transform_timing.easing_x1);
+            easing_x1_value.set_label(&format!("{:.0}%", transform_timing.easing_x1 * 100.0));
+            easing_y1_slider.set_value(transform_timing.easing_y1);
+            easing_y1_value.set_label(&format!("{:.0}%", transform_timing.easing_y1 * 100.0));
+            easing_x2_slider.set_value(transform_timing.easing_x2);
+            easing_x2_value.set_label(&format!("{:.0}%", transform_timing.easing_x2 * 100.0));
+            easing_y2_slider.set_value(transform_timing.easing_y2);
+            easing_y2_value.set_label(&format!("{:.0}%", transform_timing.easing_y2 * 100.0));
             let has_clip = selected.is_some();
             let has_text = selected_text.is_some();
+            reset_timing_btn.set_sensitive(has_clip);
             clip_box.set_visible(has_clip);
             text_box.set_visible(has_text);
             clip_hint.set_visible(!has_clip && !has_text);
@@ -729,25 +855,37 @@ pub(super) fn wire_motion_controls(
                 for (animation, button) in &text_anim_buttons {
                     button.set_active(*animation == segment.animation);
                 }
+                for (scope, button) in &text_scope_buttons {
+                    button.set_active(*scope == segment.scope);
+                }
                 preview.set_tooltip_text(Some(&t("Drag on the preview to place the title")));
             } else {
                 preview.set_tooltip_text(None);
             }
             if let Some(segment) = selected {
+                intensity_slider.set_value(segment.intensity);
+                intensity_value.set_label(&format!("{:.0}%", segment.intensity * 100.0));
+                zoom_anchor_x_slider.set_value(segment.zoom_anchor_x);
+                zoom_anchor_x_value.set_label(&format!("{:.0}%", segment.zoom_anchor_x * 100.0));
+                zoom_anchor_y_slider.set_value(segment.zoom_anchor_y);
+                zoom_anchor_y_value.set_label(&format!("{:.0}%", segment.zoom_anchor_y * 100.0));
                 yaw_slider.set_value(segment.to.rotation_y);
                 yaw_value.set_label(&format!("{:.0}°", segment.to.rotation_y));
                 pitch_slider.set_value(segment.to.rotation_x);
                 pitch_value.set_label(&format!("{:.0}°", segment.to.rotation_x));
                 roll_slider.set_value(segment.to.rotation_z);
                 roll_value.set_label(&format!("{:.0}°", segment.to.rotation_z));
-                perspective_slider.set_value(segment.to.perspective);
-                perspective_value.set_label(&format!("{:.0}%", segment.to.perspective * 100.0));
+                perspective_slider.set_value(perspective_intensity);
+                perspective_value.set_label(&format!("{:.0}%", perspective_intensity * 100.0));
                 pos_x_slider.set_value(segment.to.pos_x);
                 pos_x_value.set_label(&format!("{:.0}%", segment.to.pos_x * 100.0));
                 pos_y_slider.set_value(segment.to.pos_y);
                 pos_y_value.set_label(&format!("{:.0}%", segment.to.pos_y * 100.0));
-                ease_slider.set_value(segment.ease_ms as f64);
-                ease_value.set_label(&format!("{}ms", segment.ease_ms));
+                ease_slider.set_value(transform_timing.transition_duration * 1000.0);
+                ease_value.set_label(&format!(
+                    "{:.0}ms",
+                    transform_timing.transition_duration * 1000.0
+                ));
                 for (chip, &(_, scale)) in scale_chips.iter().zip(MOTION_SCALE_PRESETS.iter()) {
                     if (segment.to.scale - scale).abs() < 0.03 {
                         chip.add_css_class("recording-editor-timeline-tool-active");
@@ -763,10 +901,24 @@ pub(super) fn wire_motion_controls(
             syncing.set(false);
             preview.queue_draw();
             ruler.queue_draw();
+            source_track.queue_draw();
             motion_track.queue_draw();
             text_track.queue_draw();
             playhead_overlay.queue_draw();
         })
+    };
+
+    // Segment trimming and movement can generate far more pointer updates than
+    // the expensive perspective preview can render. Keep the direct-manipulation
+    // path limited to the lane being dragged; the full preview and inspector
+    // catch up once the pointer is released.
+    let redraw_motion_track = {
+        let motion_track = parts.motion_track.clone();
+        Rc::new(move || motion_track.queue_draw())
+    };
+    let redraw_text_track = {
+        let text_track = parts.text_track.clone();
+        Rc::new(move || text_track.queue_draw())
     };
 
     let request_live_preview = {
@@ -820,6 +972,46 @@ pub(super) fn wire_motion_controls(
         }
     });
 
+    parts.blur_shutter_slider.connect_value_changed({
+        let session = session.runtime.clone();
+        let value_label = parts.blur_shutter_value.clone();
+        let request_live_preview = request_live_preview.clone();
+        let syncing = parts.inspector_syncing.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let shutter = slider.value().clamp(0.0, 360.0);
+            session
+                .borrow_mut()
+                .motion
+                .motion_blur_settings
+                .shutter_angle = shutter;
+            value_label.set_label(&format!("{shutter:.0}°"));
+            request_live_preview();
+        }
+    });
+
+    parts.blur_trail_slider.connect_value_changed({
+        let session = session.runtime.clone();
+        let value_label = parts.blur_trail_value.clone();
+        let request_live_preview = request_live_preview.clone();
+        let syncing = parts.inspector_syncing.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let trail = slider.value().clamp(0.0, 1.0);
+            session
+                .borrow_mut()
+                .motion
+                .motion_blur_settings
+                .transform_trail_opacity = trail;
+            value_label.set_label(&format!("{:.0}%", trail * 100.0));
+            request_live_preview();
+        }
+    });
+
     parts.play_btn.connect_clicked({
         let session = session.runtime.clone();
         let redraw = redraw.clone();
@@ -868,6 +1060,52 @@ pub(super) fn wire_motion_controls(
     });
     parts.ruler.add_controller(ruler_click);
 
+    // The ruler is a scrub surface: dragging anywhere moves the playhead,
+    // rather than requiring a pixel-perfect hit on the thin playhead line.
+    let ruler_drag = GestureDrag::new();
+    ruler_drag.set_button(1);
+    ruler_drag.connect_drag_update({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        move |gesture, offset_x, _| {
+            let Some((start_x, _)) = gesture.start_point() else {
+                return;
+            };
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let mut runtime = session.borrow_mut();
+            let duration = runtime.motion.duration.max(0.001);
+            runtime.motion.playhead =
+                (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
+            drop(runtime);
+            redraw();
+        }
+    });
+    parts.ruler.add_controller(ruler_drag);
+
+    // The source thumbnail lane is an actual scrub target, matching the
+    // timeline's visible source segment instead of being decorative chrome.
+    let source_click = GestureClick::new();
+    source_click.set_button(1);
+    source_click.connect_pressed({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        move |gesture, _, x, _| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let mut runtime = session.borrow_mut();
+            let duration = runtime.motion.duration.max(0.001);
+            runtime.motion.playhead = ((x / width) * duration).clamp(0.0, duration);
+            drop(runtime);
+            redraw();
+        }
+    });
+    parts.source_track.add_controller(source_click);
+
     let track_click = GestureClick::new();
     track_click.set_button(1);
     track_click.connect_pressed({
@@ -880,7 +1118,11 @@ pub(super) fn wire_motion_controls(
                 .unwrap_or(1.0);
             let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
-            let time = ((x / width) * duration).clamp(0.0, duration);
+            let time = runtime.motion.snap_effect_time(
+                ((x / width) * duration).clamp(0.0, duration),
+                (10.0 / width) * duration,
+                None,
+            );
             if n_press >= 2 {
                 if runtime.motion.add_segment_at(time).is_none() {
                     runtime.motion.selected = runtime.motion.segment_index_at(time);
@@ -941,7 +1183,7 @@ pub(super) fn wire_motion_controls(
     drag.connect_drag_update({
         let session = session.runtime.clone();
         let drag_kind = drag_kind.clone();
-        let redraw = redraw.clone();
+        let redraw_motion_track = redraw_motion_track.clone();
         move |gesture, offset_x, _| {
             let Some(kind) = drag_kind.get() else {
                 return;
@@ -955,9 +1197,22 @@ pub(super) fn wire_motion_controls(
                 .unwrap_or(1.0);
             let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
-            let time = (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
+            let raw_time = (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
+            let tolerance = (10.0 / width) * duration;
+            let index = match kind {
+                DragKind::Start(index) | DragKind::End(index) => index,
+                DragKind::Body { index, .. } => index,
+            };
+            let before = runtime
+                .motion
+                .segments
+                .get(index)
+                .map(|segment| (segment.start, segment.end));
             match kind {
                 DragKind::Start(index) => {
+                    let time = runtime
+                        .motion
+                        .snap_effect_time(raw_time, tolerance, Some(index));
                     let end = runtime
                         .motion
                         .segments
@@ -967,6 +1222,9 @@ pub(super) fn wire_motion_controls(
                     runtime.motion.set_segment_range(index, time, end);
                 }
                 DragKind::End(index) => {
+                    let time = runtime
+                        .motion
+                        .snap_effect_time(raw_time, tolerance, Some(index));
                     let start = runtime
                         .motion
                         .segments
@@ -976,15 +1234,36 @@ pub(super) fn wire_motion_controls(
                     runtime.motion.set_segment_range(index, start, time);
                 }
                 DragKind::Body { index, origin } => {
-                    let delta = ((offset_x / width) * duration) as f64;
-                    runtime.motion.move_segment(index, origin + delta);
+                    let delta = (offset_x / width) * duration;
+                    let start =
+                        runtime
+                            .motion
+                            .snap_effect_time(origin + delta, tolerance, Some(index));
+                    runtime.motion.move_segment(index, start);
                 }
             }
+            let changed = before
+                != runtime
+                    .motion
+                    .segments
+                    .get(index)
+                    .map(|segment| (segment.start, segment.end));
             drop(runtime);
+            if changed {
+                redraw_motion_track();
+            }
+        }
+    });
+    drag.connect_drag_end({
+        let drag_kind = drag_kind.clone();
+        let redraw = redraw.clone();
+        move |_, _, _| {
+            drag_kind.set(None);
             redraw();
         }
     });
     parts.motion_track.add_controller(drag);
+    install_track_end_cursor(&parts.motion_track, session.runtime.clone(), false);
 
     let text_click = GestureClick::new();
     text_click.set_button(1);
@@ -998,7 +1277,11 @@ pub(super) fn wire_motion_controls(
                 .unwrap_or(1.0);
             let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
-            let time = ((x / width) * duration).clamp(0.0, duration);
+            let time = runtime.motion.snap_text_time(
+                ((x / width) * duration).clamp(0.0, duration),
+                (10.0 / width) * duration,
+                None,
+            );
             if n_press >= 2 {
                 if runtime.motion.add_text_at(time).is_none() {
                     runtime.motion.selected_text = runtime.motion.text_index_at(time);
@@ -1060,7 +1343,7 @@ pub(super) fn wire_motion_controls(
     text_drag.connect_drag_update({
         let session = session.runtime.clone();
         let text_drag_kind = text_drag_kind.clone();
-        let redraw = redraw.clone();
+        let redraw_text_track = redraw_text_track.clone();
         move |gesture, offset_x, _| {
             let Some(kind) = text_drag_kind.get() else {
                 return;
@@ -1074,9 +1357,22 @@ pub(super) fn wire_motion_controls(
                 .unwrap_or(1.0);
             let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
-            let time = (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
+            let raw_time = (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
+            let tolerance = (10.0 / width) * duration;
+            let index = match kind {
+                DragKind::Start(index) | DragKind::End(index) => index,
+                DragKind::Body { index, .. } => index,
+            };
+            let before = runtime
+                .motion
+                .text_segments
+                .get(index)
+                .map(|segment| (segment.start, segment.end));
             match kind {
                 DragKind::Start(index) => {
+                    let time = runtime
+                        .motion
+                        .snap_text_time(raw_time, tolerance, Some(index));
                     let end = runtime
                         .motion
                         .text_segments
@@ -1086,6 +1382,9 @@ pub(super) fn wire_motion_controls(
                     runtime.motion.set_text_range(index, time, end);
                 }
                 DragKind::End(index) => {
+                    let time = runtime
+                        .motion
+                        .snap_text_time(raw_time, tolerance, Some(index));
                     let start = runtime
                         .motion
                         .text_segments
@@ -1096,14 +1395,35 @@ pub(super) fn wire_motion_controls(
                 }
                 DragKind::Body { index, origin } => {
                     let delta = (offset_x / width) * duration;
-                    runtime.motion.move_text(index, origin + delta);
+                    let start =
+                        runtime
+                            .motion
+                            .snap_text_time(origin + delta, tolerance, Some(index));
+                    runtime.motion.move_text(index, start);
                 }
             }
+            let changed = before
+                != runtime
+                    .motion
+                    .text_segments
+                    .get(index)
+                    .map(|segment| (segment.start, segment.end));
             drop(runtime);
+            if changed {
+                redraw_text_track();
+            }
+        }
+    });
+    text_drag.connect_drag_end({
+        let text_drag_kind = text_drag_kind.clone();
+        let redraw = redraw.clone();
+        move |_, _, _| {
+            text_drag_kind.set(None);
             redraw();
         }
     });
     parts.text_track.add_controller(text_drag);
+    install_track_end_cursor(&parts.text_track, session.runtime.clone(), true);
 
     parts.add_btn.connect_clicked({
         let session = session.runtime.clone();
@@ -1159,6 +1479,22 @@ pub(super) fn wire_motion_controls(
                     .borrow_mut()
                     .motion
                     .set_selected_text_animation(animation);
+                request_live_preview();
+            }
+        });
+    }
+
+    for (scope, button) in &parts.text_scope_buttons {
+        let scope = *scope;
+        button.connect_toggled({
+            let session = session.runtime.clone();
+            let request_live_preview = request_live_preview.clone();
+            let syncing = parts.inspector_syncing.clone();
+            move |button| {
+                if syncing.get() || !button.is_active() {
+                    return;
+                }
+                session.borrow_mut().motion.set_selected_text_scope(scope);
                 request_live_preview();
             }
         });
@@ -1238,13 +1574,27 @@ pub(super) fn wire_motion_controls(
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         Rc::new(move |x: f64, y: f64| {
-            if session.borrow().motion.selected_text.is_none() {
+            let runtime = session.borrow();
+            if runtime.motion.selected_text.is_none() {
                 return;
             }
             let width = preview.allocated_width().max(1) as f64;
             let height = preview.allocated_height().max(1) as f64;
-            let pos_x = (x / width).clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS);
-            let pos_y = (y / height).clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS);
+            let Some(card) = runtime.card.as_ref() else {
+                return;
+            };
+            let transform = runtime.motion.sample(runtime.motion.playhead);
+            let zoom_anchor = runtime.motion.zoom_anchor_at(runtime.motion.playhead);
+            let (pos_x, pos_y) = super::motion_render::view_point_to_motion_text_position(
+                card,
+                width,
+                height,
+                transform,
+                zoom_anchor,
+                x,
+                y,
+            );
+            drop(runtime);
             session
                 .borrow_mut()
                 .motion
@@ -1258,23 +1608,53 @@ pub(super) fn wire_motion_controls(
             request_live_preview();
         })
     };
-    let preview_click = GestureClick::new();
-    preview_click.set_button(1);
-    preview_click.connect_pressed({
-        let place_text = place_text.clone();
-        move |_, _, x, y| place_text(x, y)
-    });
-    parts.preview.add_controller(preview_click);
+    let text_drag_armed = Rc::new(Cell::new(false));
     let preview_drag = GestureDrag::new();
     preview_drag.set_button(1);
+    preview_drag.connect_drag_begin({
+        let session = session.runtime.clone();
+        let preview = parts.preview.clone();
+        let text_drag_armed = text_drag_armed.clone();
+        move |_, x, y| {
+            let runtime = session.borrow();
+            let hit = runtime
+                .motion
+                .selected_text_segment()
+                .and_then(|segment| {
+                    runtime.card.as_ref().map(|card| {
+                        super::motion_render::motion_text_contains_view_point(
+                            card,
+                            preview.allocated_width().max(1) as f64,
+                            preview.allocated_height().max(1) as f64,
+                            runtime.motion.sample(runtime.motion.playhead),
+                            runtime.motion.zoom_anchor_at(runtime.motion.playhead),
+                            segment,
+                            runtime.motion.playhead,
+                            x,
+                            y,
+                        )
+                    })
+                })
+                .unwrap_or(false);
+            text_drag_armed.set(hit);
+        }
+    });
     preview_drag.connect_drag_update({
         let place_text = place_text.clone();
+        let text_drag_armed = text_drag_armed.clone();
         move |gesture, offset_x, offset_y| {
+            if !text_drag_armed.get() {
+                return;
+            }
             let Some((start_x, start_y)) = gesture.start_point() else {
                 return;
             };
             place_text(start_x + offset_x, start_y + offset_y);
         }
+    });
+    preview_drag.connect_drag_end({
+        let text_drag_armed = text_drag_armed.clone();
+        move |_, _, _| text_drag_armed.set(false)
     });
     parts.preview.add_controller(preview_drag);
 
@@ -1292,6 +1672,61 @@ pub(super) fn wire_motion_controls(
                 session.borrow_mut().motion.set_selected_end_scale(scale);
                 redraw();
             }
+        });
+    }
+
+    parts.intensity_slider.connect_value_changed({
+        let session = session.runtime.clone();
+        let intensity_value = parts.intensity_value.clone();
+        let request_live_preview = request_live_preview.clone();
+        let syncing = parts.inspector_syncing.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let value = slider.value();
+            session.borrow_mut().motion.set_selected_intensity(value);
+            intensity_value.set_label(&format!("{:.0}%", value * 100.0));
+            request_live_preview();
+        }
+    });
+
+    for (axis, slider, value_label) in [
+        (
+            0_u8,
+            parts.zoom_anchor_x_slider.clone(),
+            parts.zoom_anchor_x_value.clone(),
+        ),
+        (
+            1_u8,
+            parts.zoom_anchor_y_slider.clone(),
+            parts.zoom_anchor_y_value.clone(),
+        ),
+    ] {
+        let session = session.runtime.clone();
+        let request_live_preview = request_live_preview.clone();
+        let syncing = parts.inspector_syncing.clone();
+        slider.connect_value_changed(move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let value = slider.value();
+            let mut runtime = session.borrow_mut();
+            let (mut x, mut y) = runtime
+                .motion
+                .selected_segment()
+                .map_or((0.5, 0.5), |segment| {
+                    (segment.zoom_anchor_x, segment.zoom_anchor_y)
+                });
+            if axis == 0 {
+                x = value;
+            } else {
+                y = value;
+            }
+            runtime.motion.set_selected_zoom_anchor(x, y);
+            drop(runtime);
+            value_label.set_label(&format!("{:.0}%", value * 100.0));
+            request_live_preview();
         });
     }
 
@@ -1401,6 +1836,65 @@ pub(super) fn wire_motion_controls(
         }
     });
 
+    for (axis, slider, value_label) in [
+        (
+            0_u8,
+            parts.easing_x1_slider.clone(),
+            parts.easing_x1_value.clone(),
+        ),
+        (
+            1_u8,
+            parts.easing_y1_slider.clone(),
+            parts.easing_y1_value.clone(),
+        ),
+        (
+            2_u8,
+            parts.easing_x2_slider.clone(),
+            parts.easing_x2_value.clone(),
+        ),
+        (
+            3_u8,
+            parts.easing_y2_slider.clone(),
+            parts.easing_y2_value.clone(),
+        ),
+    ] {
+        let session = session.runtime.clone();
+        let request_live_preview = request_live_preview.clone();
+        let syncing = parts.inspector_syncing.clone();
+        slider.connect_value_changed(move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let value = slider.value();
+            let mut runtime = session.borrow_mut();
+            let mut timing = runtime.motion.transform_timing;
+            match axis {
+                0 => timing.easing_x1 = value,
+                1 => timing.easing_y1 = value,
+                2 => timing.easing_x2 = value,
+                _ => timing.easing_y2 = value,
+            }
+            runtime.motion.set_transform_timing(timing);
+            drop(runtime);
+            value_label.set_label(&format!("{:.0}%", value * 100.0));
+            request_live_preview();
+        });
+    }
+
+    parts.reset_timing_btn.connect_clicked({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        move |_| {
+            let mut runtime = session.borrow_mut();
+            runtime
+                .motion
+                .set_transform_timing(MotionEffectTransformTiming::default());
+            runtime.motion.set_selected_easing(ZoomEasing::Glide);
+            drop(runtime);
+            redraw();
+        }
+    });
+
     for (easing, button) in &parts.easing_buttons {
         let easing = *easing;
         button.connect_toggled({
@@ -1482,7 +1976,7 @@ pub(super) fn wire_motion_controls(
                     runtime.last_tick = Some(now);
                     runtime.motion.playhead += dt;
                     if runtime.motion.playhead >= runtime.motion.duration {
-                        runtime.motion.playhead = runtime.motion.duration;
+                        runtime.motion.playhead = 0.0;
                         runtime.playing = false;
                         runtime.last_tick = None;
                     }
@@ -1504,6 +1998,64 @@ pub(super) fn wire_motion_controls(
 
     let _ = chrome;
     let _ = last_inspector;
+}
+
+/// Advertise the existing trim handles before a drag starts. Motion and Text
+/// clips both accept edge drags, so the pointer must make those narrow targets
+/// discoverable rather than looking like ordinary timeline space.
+fn install_track_end_cursor(
+    track: &DrawingArea,
+    runtime: Rc<RefCell<MotionRuntime>>,
+    text_track: bool,
+) {
+    let pointer = EventControllerMotion::new();
+    pointer.connect_motion(move |controller, x, _| {
+        let width = controller
+            .widget()
+            .map(|widget| widget.allocated_width().max(1) as f64)
+            .unwrap_or(1.0);
+        let cursor_name = {
+            let runtime = runtime.borrow();
+            let duration = runtime.motion.duration.max(0.001);
+            let time = ((x / width) * duration).clamp(0.0, duration);
+            let edge_seconds = (8.0 / width) * duration;
+            let segments = if text_track {
+                runtime
+                    .motion
+                    .text_segments
+                    .iter()
+                    .map(|segment| (segment.start, segment.end))
+                    .collect::<Vec<_>>()
+            } else {
+                runtime
+                    .motion
+                    .segments
+                    .iter()
+                    .map(|segment| (segment.start, segment.end))
+                    .collect::<Vec<_>>()
+            };
+            segments.iter().find_map(|(start, end)| {
+                if (time - end).abs() <= edge_seconds {
+                    Some("e-resize")
+                } else if (time - start).abs() <= edge_seconds {
+                    Some("w-resize")
+                } else {
+                    None
+                }
+            })
+        };
+        if let Some(widget) = controller.widget() {
+            widget.set_cursor(
+                gdk::Cursor::from_name(cursor_name.unwrap_or("default"), None).as_ref(),
+            );
+        }
+    });
+    pointer.connect_leave(|controller| {
+        if let Some(widget) = controller.widget() {
+            widget.set_cursor(None);
+        }
+    });
+    track.add_controller(pointer);
 }
 
 fn show_confirm(
@@ -1595,62 +2147,38 @@ fn format_duration_label(duration: f64) -> String {
     format!("{duration:.1}s")
 }
 
-fn span_slider_row(title: &str, initial: f64, min: f64, max: f64) -> (GtkBox, Label, Scale) {
+fn span_slider_row(title: &str, initial: f64, min: f64, max: f64) -> (GtkBox, Label, FillSlider) {
     let header = GtkBox::new(Orientation::Horizontal, 8);
-    let label = Label::new(Some(title));
-    label.add_css_class("recording-editor-zoom-kicker");
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
     let value = Label::new(Some(&format!("{:.0}%", initial * 100.0)));
-    value.add_css_class("recording-editor-zoom-kicker");
-    header.append(&label);
-    header.append(&value);
-    let slider = Scale::with_range(Orientation::Horizontal, min, max, 0.01);
+    header.set_visible(false);
+    let slider =
+        FillSlider::new_with_value_text(title, |value, _, _| format!("{:.0}%", value * 100.0));
+    slider.set_range(min, max);
+    slider.set_increments(0.01, 0.1);
     slider.set_value(initial);
-    slider.set_draw_value(false);
-    slider.set_hexpand(true);
-    slider.add_css_class("editor-toolbar-size-slider");
     (header, value, slider)
 }
 
-fn percent_slider_row(title: &str, initial: f64) -> (GtkBox, Label, Scale) {
+fn percent_slider_row(title: &str, initial: f64) -> (GtkBox, Label, FillSlider) {
     let header = GtkBox::new(Orientation::Horizontal, 8);
-    let label = Label::new(Some(title));
-    label.add_css_class("recording-editor-zoom-kicker");
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
     let value = Label::new(Some(&format!("{:.0}%", initial * 100.0)));
-    value.add_css_class("recording-editor-zoom-kicker");
-    header.append(&label);
-    header.append(&value);
-    let slider = Scale::with_range(
-        Orientation::Horizontal,
-        MIN_MOTION_POS,
-        MAX_MOTION_POS,
-        0.01,
-    );
+    header.set_visible(false);
+    let slider =
+        FillSlider::new_with_value_text(title, |value, _, _| format!("{:.0}%", value * 100.0));
+    slider.set_range(MIN_MOTION_POS, MAX_MOTION_POS);
+    slider.set_increments(0.01, 0.1);
     slider.set_value(initial);
-    slider.set_draw_value(false);
-    slider.set_hexpand(true);
-    slider.add_css_class("editor-toolbar-size-slider");
     (header, value, slider)
 }
 
-fn angle_slider_row(title: &str, initial: f64) -> (GtkBox, Label, Scale) {
+fn angle_slider_row(title: &str, initial: f64) -> (GtkBox, Label, FillSlider) {
     let header = GtkBox::new(Orientation::Horizontal, 8);
-    let label = Label::new(Some(title));
-    label.add_css_class("recording-editor-zoom-kicker");
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
     let value = Label::new(Some(&format!("{initial:.0}°")));
-    value.add_css_class("recording-editor-zoom-kicker");
-    header.append(&label);
-    header.append(&value);
-    let slider = Scale::with_range(Orientation::Horizontal, MIN_MOTION_YAW, MAX_MOTION_YAW, 1.0);
+    header.set_visible(false);
+    let slider = FillSlider::new_with_value_text(title, |value, _, _| format!("{value:.0}°"));
+    slider.set_range(MIN_MOTION_YAW, MAX_MOTION_YAW);
+    slider.set_increments(1.0, 5.0);
     slider.set_value(initial);
-    slider.set_draw_value(false);
-    slider.set_hexpand(true);
-    slider.add_css_class("editor-toolbar-size-slider");
     (header, value, slider)
 }
 

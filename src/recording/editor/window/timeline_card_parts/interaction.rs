@@ -163,12 +163,14 @@ fn stop_playback_at_end(
     redraw: &Rc<dyn Fn()>,
 ) {
     playing.set(false);
-    {
+    let seek_to = {
         let mut guard = state.lock().unwrap();
-        guard.playhead_seconds = guard.content_end_seconds();
-    }
+        guard.playhead_seconds = 0.0;
+        guard.source_playhead()
+    };
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.pause();
+        media_file.seek((seek_to * 1_000_000.0) as i64);
     }
     set_play_icon(play_button, "media-playback-start-symbolic");
     redraw();
@@ -216,29 +218,28 @@ pub fn bind_playhead_drag(
     media: Rc<RefCell<Option<MediaFile>>>,
     redraw: Rc<dyn Fn()>,
 ) {
-    let dragging = Rc::new(Cell::new(false));
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
         let state = state.clone();
-        let dragging = dragging.clone();
+        let media = media.clone();
+        let redraw = redraw.clone();
         move |gesture, x, _| {
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
-            dragging.set(near_playhead(&state.lock().unwrap(), width, x));
+            // The whole ruler is a scrub target. A thin playhead is difficult
+            // to grab precisely, especially on a zoomed-out timeline.
+            seek_to_x(&state, &media, width, x);
+            redraw();
         }
     });
     drag.connect_drag_update({
         let state = state.clone();
         let media = media.clone();
-        let dragging = dragging.clone();
         let redraw = redraw.clone();
         move |gesture, offset_x, _| {
-            if !dragging.get() {
-                return;
-            }
             let Some((start_x, _)) = gesture.start_point() else {
                 return;
             };

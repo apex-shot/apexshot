@@ -503,6 +503,11 @@ impl VideoEditState {
         MotionSegment {
             start: clip.start,
             end: clip.end,
+            zoom_mode: super::types::MotionZoomMode::Manual,
+            intensity: 1.0,
+            zoom_anchor_x: 0.5,
+            zoom_anchor_y: 0.5,
+            is_disabled: false,
             from: MotionTransform::default(),
             to: clip.card_pose(),
             ease_ms: clip.ease_ms,

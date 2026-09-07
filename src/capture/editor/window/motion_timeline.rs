@@ -22,6 +22,7 @@ pub(super) struct MotionTimeline {
     pub playhead_clock: Label,
     pub duration_clock: Label,
     pub ruler: DrawingArea,
+    pub source_track: DrawingArea,
     pub track: DrawingArea,
     pub text_track: DrawingArea,
     pub playhead: DrawingArea,
@@ -94,6 +95,18 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
         move |_, cr, width, height| draw_ruler(cr, width, height, &runtime)
     });
 
+    // The source is a real timeline clip, not an implied backdrop. Shotbase
+    // exposes this as ThumbnailTrack/MotionPreviewSegmentView; ApexShot has
+    // one static source, so the lane spans the entire Motion composition.
+    let source_track = DrawingArea::new();
+    source_track.add_css_class("recording-editor-card-zoom-track");
+    source_track.set_hexpand(true);
+    source_track.set_size_request(-1, 48);
+    source_track.set_draw_func({
+        let runtime = runtime.clone();
+        move |_, cr, width, height| draw_source_track(cr, width, height, &runtime)
+    });
+
     let track = DrawingArea::new();
     track.add_css_class("recording-editor-card-zoom-track");
     track.set_hexpand(true);
@@ -116,6 +129,7 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     tracks.add_css_class("recording-editor-card-tracks");
     tracks.set_hexpand(true);
     tracks.append(&ruler);
+    tracks.append(&source_track);
     tracks.append(&track);
     tracks.append(&text_track);
 
@@ -149,10 +163,69 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
         playhead_clock,
         duration_clock,
         ruler,
+        source_track,
         track,
         text_track,
         playhead,
     }
+}
+
+fn draw_source_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) {
+    let runtime = runtime.borrow();
+    let w = width.max(1) as f64;
+    let h = height.max(1) as f64;
+    let inset = 6.0;
+    let x = 0.0;
+    let y = inset;
+    let clip_w = w;
+    let clip_h = (h - inset * 2.0).max(1.0);
+
+    rounded_rect(cr, x, y, clip_w, clip_h, 5.0);
+    cr.set_source_rgba(0.19, 0.23, 0.30, 0.72);
+    let _ = cr.fill();
+
+    let Some(card) = runtime.card.as_ref() else {
+        return;
+    };
+    let _ = cr.save();
+    rounded_rect(cr, x, y, clip_w, clip_h, 5.0);
+    cr.clip();
+    let image_w = card.width().max(1) as f64;
+    let image_h = card.height().max(1) as f64;
+    // Repeated cover thumbnails make the still readable across the full
+    // duration without inventing motion that does not exist in the source.
+    let thumbnail_w: f64 = 92.0;
+    let mut thumbnail_x = x;
+    while thumbnail_x < x + clip_w {
+        let tile_w = thumbnail_w.min(x + clip_w - thumbnail_x);
+        let scale = (tile_w / image_w).max(clip_h / image_h);
+        let painted_w = image_w * scale;
+        let painted_h = image_h * scale;
+        let _ = cr.save();
+        cr.rectangle(thumbnail_x, y, tile_w, clip_h);
+        cr.clip();
+        cr.translate(
+            thumbnail_x + (tile_w - painted_w) / 2.0,
+            y + (clip_h - painted_h) / 2.0,
+        );
+        cr.scale(scale, scale);
+        cr.set_source_surface(card, 0.0, 0.0).ok();
+        let _ = cr.paint_with_alpha(0.82);
+        let _ = cr.restore();
+        thumbnail_x += thumbnail_w;
+    }
+    let _ = cr.restore();
+    cr.set_source_rgba(0.64, 0.74, 0.88, 0.72);
+    rounded_rect(
+        cr,
+        x + 0.5,
+        y + 0.5,
+        (clip_w - 1.0).max(0.0),
+        (clip_h - 1.0).max(0.0),
+        4.5,
+    );
+    cr.set_line_width(1.0);
+    let _ = cr.stroke();
 }
 
 fn icon_button(icon_name: &str, tooltip: &str) -> Button {
