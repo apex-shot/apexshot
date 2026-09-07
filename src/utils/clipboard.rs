@@ -6,6 +6,8 @@
 use std::io::Write;
 use std::path::Path;
 
+use gtk4::prelude::DisplayExt;
+
 /// Copy a file URI to the clipboard as `text/uri-list`.
 ///
 /// On Wayland uses `wl-copy`, on X11 uses `xclip`.
@@ -87,9 +89,11 @@ pub fn copy_uri_to_clipboard(path: &Path) -> Result<(), String> {
 
 /// Copy text to the system clipboard.
 ///
-/// Uses `arboard` directly (in-process, no external command) so the
-/// clipboard content is fully replaced without spawning wl-clipboard
-/// processes that trigger spurious desktop notifications.
+/// Copy text from a background or non-GTK caller.
+///
+/// UI upload flows should use [`copy_text_to_gtk_clipboard`] on GTK's main
+/// thread instead. Invoking `wl-copy` for a text URL causes a visible helper
+/// notification on some desktops.
 pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
@@ -98,6 +102,17 @@ pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
         .set_text(text)
         .map_err(|e| format!("Failed to set clipboard text: {e}"))?;
 
+    Ok(())
+}
+
+/// Copy text through GTK's clipboard on its main thread.
+///
+/// This is the non-command path used by Quick Access and both editors so a
+/// successful upload never launches a visible `wl-copy` helper notification.
+pub fn copy_text_to_gtk_clipboard(text: &str) -> Result<(), String> {
+    let display = gtk4::gdk::Display::default()
+        .ok_or_else(|| "No GTK display is available for clipboard access".to_string())?;
+    display.clipboard().set_text(text);
     Ok(())
 }
 

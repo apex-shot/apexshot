@@ -7,7 +7,7 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea,
-    EventControllerKey, EventControllerMotion, Orientation, Overlay, WidgetPaintable, Window,
+    EventControllerKey, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
@@ -23,7 +23,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /// Messages from the upload worker back to the GTK main loop.
 enum UploadUiEvent {
     /// Upload finished (success or failure). Re-enable the button; dismiss only on success when configured.
-    Finished { dismiss: bool },
+    Finished {
+        dismiss: bool,
+        share_url: Option<String>,
+    },
 }
 
 const PREVIEW_TIMING_ENV: &str = "APEXSHOT_PREVIEW_TIMING";
@@ -102,6 +105,9 @@ const PREVIEW_WIDTH: i32 = 190;
 const PREVIEW_HEIGHT: i32 = 135;
 const PREVIEW_EDGE_MARGIN: i32 = 24;
 const PREVIEW_BOTTOM_SAFE_OFFSET: i32 = 80;
+const PREVIEW_FRAME_INSET: i32 = 5;
+const PREVIEW_CORNER_MARGIN: i32 = 6;
+const PREVIEW_SHADOW_PAD: i32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreviewSide {
@@ -121,6 +127,10 @@ fn preview_dimensions(scale: f64) -> (i32, i32) {
     (width.max(1), height.max(1))
 }
 
+fn preview_chrome_padding() -> i32 {
+    PREVIEW_FRAME_INSET * 2 + PREVIEW_SHADOW_PAD * 2
+}
+
 fn preview_side(position: &str) -> PreviewSide {
     match position {
         "Right" => PreviewSide::Right,
@@ -128,8 +138,74 @@ fn preview_side(position: &str) -> PreviewSide {
     }
 }
 
-fn should_emit_extension_events(multi_display: bool, layer_shell_active: bool) -> bool {
-    multi_display && !layer_shell_active
+fn desktop_value_contains(desktop: Option<&str>, needle: &str) -> bool {
+    desktop
+        .unwrap_or_default()
+        .split([':', ';', ','])
+        .any(|part| part.trim().eq_ignore_ascii_case(needle))
+}
+
+fn is_gnome_wayland_session_from_env(
+    wayland_display: Option<&str>,
+    desktop: Option<&str>,
+    desktop_session: Option<&str>,
+) -> bool {
+    let is_wayland = wayland_display.is_some_and(|value| !value.trim().is_empty());
+    let is_gnome = desktop_value_contains(desktop, "GNOME")
+        || desktop_value_contains(desktop_session, "gnome");
+    is_wayland && is_gnome
+}
+
+fn is_gnome_wayland_session() -> bool {
+    is_gnome_wayland_session_from_env(
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("DESKTOP_SESSION").ok().as_deref(),
+    )
+}
+
+fn should_emit_extension_events(layer_shell_active: bool) -> bool {
+    // Layer-shell surfaces are not MetaWindows, so the GNOME helper cannot
+    // raise them. Regular windows always announce themselves.
+    !layer_shell_active
+}
+
+const PREVIEW_TRACKED_TITLE: &str = "ApexShot Preview";
+const PREVIEW_TRACKED_ROLE: &str = "preview";
+const PREVIEW_TRACKED_NAMESPACE: &str = "apexshot-capture-preview";
+
+fn preview_should_stay_on_top(pinned: bool) -> bool {
+    pinned
+}
+
+fn apply_preview_stacking(
+    window: Option<&Window>,
+    preview_id: &str,
+    emit_extension_events: bool,
+    stay_on_top: bool,
+) {
+    if emit_extension_events {
+        if stay_on_top {
+            crate::gnome_integration::emit_tracked_window_opened(
+                preview_id,
+                std::process::id(),
+                PREVIEW_TRACKED_TITLE,
+                PREVIEW_TRACKED_ROLE,
+                PREVIEW_TRACKED_NAMESPACE,
+            );
+        } else {
+            crate::gnome_integration::emit_tracked_window_closed(preview_id);
+        }
+    }
+
+    let Some(window) = window else {
+        return;
+    };
+    if let Err(err) = request_x11_always_on_top(window, stay_on_top) {
+        if stay_on_top && !is_non_x11_surface_error(&err) {
+            eprintln!("Preview stacking warning: {err}");
+        }
+    }
 }
 
 fn initial_preview_pinned(auto_close_enabled: bool) -> bool {
@@ -258,6 +334,7 @@ fn setup_preview_window(
     probe.log("after-load-config");
     let side = preview_side(&config.quick_access_position);
     let (preview_width, preview_height) = preview_dimensions(config.quick_access_overlay_size);
+    let chrome_pad = preview_chrome_padding();
     let dismiss_action = preview_dismiss_action(&config.quick_access_auto_close_action);
     let dismiss_after_dragging = config.quick_access_close_after_dragging;
     let start_pinned = initial_preview_pinned(config.quick_access_auto_close_enabled);
@@ -268,8 +345,8 @@ fn setup_preview_window(
         .application(app)
         .title(t("ApexShot Preview"))
         .icon_name(crate::app_identity::icon_name())
-        .default_width(preview_width)
-        .default_height(preview_height)
+        .default_width(preview_width + chrome_pad)
+        .default_height(preview_height + chrome_pad)
         .resizable(false)
         .decorated(false)
         .build();
@@ -285,8 +362,7 @@ fn setup_preview_window(
     // and non-layer-shell Wayland compositors. Logging this at startup every
     // time a preview appears creates unnecessary noise in system journals.
 
-    let emit_extension_events =
-        should_emit_extension_events(config.quick_access_multi_display, layer_shell_active);
+    let emit_extension_events = should_emit_extension_events(layer_shell_active);
 
     let probe_map = probe.clone();
     window.connect_map(move |_| {
@@ -338,102 +414,74 @@ fn setup_preview_window(
     probe.log("after-build-preview-area");
     preview_area.set_widget_name("capture-preview-image");
 
-    // Card = vertical box with internal padding, image sits inside with its own radius
-    let card = GtkBox::new(Orientation::Vertical, 0);
-    card.set_widget_name("capture-preview-card");
-    card.set_hexpand(false);
-    card.set_vexpand(false);
-
-    // Image frame: the preview sits inside with its own rounded corners
+    // Image frame: the screenshot sits inside with its own rounded corners
     let image_frame = GtkBox::new(Orientation::Vertical, 0);
     image_frame.set_widget_name("capture-preview-image-frame");
     image_frame.set_overflow(gtk4::Overflow::Hidden);
-    // Explicitly request size on the frame to prevent layout collapse
     image_frame.set_size_request(preview_width, preview_height);
+    image_frame.set_margin_start(PREVIEW_FRAME_INSET);
+    image_frame.set_margin_end(PREVIEW_FRAME_INSET);
+    image_frame.set_margin_top(PREVIEW_FRAME_INSET);
+    image_frame.set_margin_bottom(PREVIEW_FRAME_INSET);
     image_frame.append(&preview_area);
 
-    let (edit_btn, _) = icon_button(
-        crate::capture::editor::window::icon_names::custom::PENCIL_SYMBOLIC,
-        &t("Edit"),
+    let (close_btn, _) = corner_icon_button(
+        crate::capture::editor::window::icon_names::DISMISS_REGULAR,
+        &t("Close"),
+        Align::Start,
+        Align::Start,
     );
-    let (copy_btn, _) = icon_button(
-        crate::capture::editor::window::icon_names::custom::COPY_SYMBOLIC,
-        &t("Copy"),
-    );
-    let (save_btn, _) = icon_button(
-        crate::capture::editor::window::icon_names::SAVE_REGULAR,
-        &t("Save"),
-    );
-    let (upload_btn, _) = icon_button(
-        crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
-        &t("Upload to cloud"),
-    );
-    let (pin_btn, pin_icon) = icon_button(
+    close_btn.set_widget_name("preview-close-btn");
+    close_btn.add_css_class("preview-close-btn");
+
+    let (pin_btn, pin_icon) = corner_icon_button(
         crate::capture::editor::window::icon_names::VIEW_PIN,
         &t("Pin"),
+        Align::End,
+        Align::Start,
     );
+    let (upload_btn, _) = corner_icon_button(
+        crate::capture::editor::window::icon_names::ARROW_EXPORT_UP_REGULAR,
+        &t("Upload to cloud"),
+        Align::Start,
+        Align::End,
+    );
+    let (edit_btn, _) = corner_icon_button(
+        crate::capture::editor::window::icon_names::custom::PENCIL_SYMBOLIC,
+        &t("Edit"),
+        Align::End,
+        Align::End,
+    );
+    let copy_btn = copy_pill_button(&t("Copy"));
 
-    // Floating close button – centered, revealed on hover over the image
-    let close_btn = Button::new();
-    close_btn.set_widget_name("preview-close-btn");
-    close_btn.set_focusable(false);
-    close_btn.set_has_frame(false);
-    close_btn.set_tooltip_text(Some(&t("Close")));
-    close_btn.set_halign(Align::Center);
-    close_btn.set_valign(Align::Center);
-    close_btn.set_opacity(0.0); // hidden until hover
-    let close_label = gtk4::Label::new(Some(&t("Dismiss")));
-    close_label.add_css_class("preview-close-label");
-    close_btn.set_child(Some(&close_label));
+    // Framed card: screenshot with corner actions and a centered Copy pill.
+    let card = Overlay::new();
+    card.set_widget_name("capture-preview-card");
+    card.set_hexpand(false);
+    card.set_vexpand(false);
+    card.set_child(Some(&image_frame));
+    card.add_overlay(&close_btn);
+    card.add_overlay(&pin_btn);
+    card.add_overlay(&upload_btn);
+    card.add_overlay(&edit_btn);
+    card.add_overlay(&copy_btn);
+    card.set_measure_overlay(&close_btn, false);
+    card.set_measure_overlay(&pin_btn, false);
+    card.set_measure_overlay(&upload_btn, false);
+    card.set_measure_overlay(&edit_btn, false);
+    card.set_measure_overlay(&copy_btn, false);
 
-    // Wrap image_frame in an Overlay so the close button floats above it
-    let image_overlay = Overlay::new();
-    image_overlay.set_child(Some(&image_frame));
-    image_overlay.add_overlay(&close_btn);
-    image_overlay.set_measure_overlay(&close_btn, false);
+    let chrome = GtkBox::new(Orientation::Vertical, 0);
+    chrome.set_widget_name("capture-preview-chrome");
+    chrome.set_hexpand(false);
+    chrome.set_vexpand(false);
+    chrome.append(&card);
 
-    // Show/hide close button on hover — does NOT interfere with DragSource on card
-    let hover_ctrl = EventControllerMotion::new();
-    let close_btn_enter = close_btn.downgrade();
-    hover_ctrl.connect_enter(move |_, _, _| {
-        if let Some(btn) = close_btn_enter.upgrade() {
-            btn.set_opacity(1.0);
-        }
-    });
-    let close_btn_leave = close_btn.downgrade();
-    hover_ctrl.connect_leave(move |_| {
-        if let Some(btn) = close_btn_leave.upgrade() {
-            btn.set_opacity(0.0);
-        }
-    });
-    image_overlay.add_controller(hover_ctrl);
-
-    probe.log("before-toolbar-build");
-    let toolbar = GtkBox::new(Orientation::Horizontal, 0);
-    toolbar.add_css_class("preview-tools");
-    toolbar.set_halign(Align::Fill);
-    toolbar.set_hexpand(true);
-
-    edit_btn.set_hexpand(true);
-    copy_btn.set_hexpand(true);
-    save_btn.set_hexpand(true);
-    upload_btn.set_hexpand(true);
-    pin_btn.set_hexpand(true);
-
-    toolbar.append(&edit_btn);
-    toolbar.append(&copy_btn);
-    toolbar.append(&save_btn);
-    toolbar.append(&upload_btn);
-    probe.log("after-toolbar-build");
-
-    probe.log("before-card-assembly");
-    card.append(&image_overlay);
-    card.append(&toolbar);
     probe.log("after-card-assembly");
 
     probe.log("before-window-child-setup");
     if layer_shell_active {
-        window.set_child(Some(&card));
+        window.set_child(Some(&chrome));
     } else {
         // Keep a monitor-sized transparent fallback surface so the card can stay
         // bottom-left even when layer-shell is unavailable.
@@ -466,9 +514,11 @@ fn setup_preview_window(
             })
             .unwrap_or((1280, 720));
 
-        let fallback_window_width = fallback_width.max(preview_width + PREVIEW_EDGE_MARGIN * 2);
-        let fallback_window_height = fallback_height
-            .max(preview_height + (PREVIEW_EDGE_MARGIN * 2) + PREVIEW_BOTTOM_SAFE_OFFSET);
+        let fallback_window_width =
+            fallback_width.max(preview_width + chrome_pad + PREVIEW_EDGE_MARGIN * 2);
+        let fallback_window_height = fallback_height.max(
+            preview_height + chrome_pad + (PREVIEW_EDGE_MARGIN * 2) + PREVIEW_BOTTOM_SAFE_OFFSET,
+        );
         window.set_default_size(fallback_window_width, fallback_window_height);
 
         let fallback_shell = Overlay::new();
@@ -485,25 +535,25 @@ fn setup_preview_window(
         fallback_shell.set_child(Some(&fallback_backdrop));
         fallback_shell.set_size_request(fallback_window_width, fallback_window_height);
 
-        card.set_halign(match side {
+        chrome.set_halign(match side {
             PreviewSide::Left => Align::Start,
             PreviewSide::Right => Align::End,
         });
-        card.set_valign(Align::End);
-        card.set_margin_start(if side == PreviewSide::Left {
+        chrome.set_valign(Align::End);
+        chrome.set_margin_start(if side == PreviewSide::Left {
             PREVIEW_EDGE_MARGIN
         } else {
             0
         });
-        card.set_margin_end(if side == PreviewSide::Right {
+        chrome.set_margin_end(if side == PreviewSide::Right {
             PREVIEW_EDGE_MARGIN
         } else {
             0
         });
-        card.set_margin_top(PREVIEW_EDGE_MARGIN);
-        card.set_margin_bottom(PREVIEW_EDGE_MARGIN + PREVIEW_BOTTOM_SAFE_OFFSET);
-        fallback_shell.add_overlay(&card);
-        fallback_shell.set_measure_overlay(&card, false);
+        chrome.set_margin_top(PREVIEW_EDGE_MARGIN);
+        chrome.set_margin_bottom(PREVIEW_EDGE_MARGIN + PREVIEW_BOTTOM_SAFE_OFFSET);
+        fallback_shell.add_overlay(&chrome);
+        fallback_shell.set_measure_overlay(&chrome, false);
 
         window.set_child(Some(&fallback_shell));
     }
@@ -514,16 +564,19 @@ fn setup_preview_window(
     probe.log("after-window-present");
 
     let use_fallback_input_region = !layer_shell_active;
+    install_fallback_input_region_tracking(&window, &card);
 
     if use_fallback_input_region {
-        install_fallback_input_region_tracking(&window, &card);
-
         let window_fallback_stacking = window.downgrade();
+        let pinned_map = pinned.clone();
         window.connect_map(move |_| {
+            if !preview_should_stay_on_top(pinned_map.load(Ordering::Relaxed)) {
+                return;
+            }
             let window_fallback_stacking = window_fallback_stacking.clone();
             glib::idle_add_local_once(move || {
                 if let Some(window) = window_fallback_stacking.upgrade() {
-                    if let Err(err) = request_x11_always_on_top(&window) {
+                    if let Err(err) = request_x11_always_on_top(&window, true) {
                         if !is_non_x11_surface_error(&err) {
                             eprintln!(
                                 "Preview fallback warning: failed to enable always-on-top persistence: {err}"
@@ -535,9 +588,13 @@ fn setup_preview_window(
         });
 
         let window_fallback_reassert = window.downgrade();
+        let pinned_reassert = pinned.clone();
         window.connect_is_active_notify(move |_| {
+            if !preview_should_stay_on_top(pinned_reassert.load(Ordering::Relaxed)) {
+                return;
+            }
             if let Some(window) = window_fallback_reassert.upgrade() {
-                if let Err(err) = request_x11_always_on_top(&window) {
+                if let Err(err) = request_x11_always_on_top(&window, true) {
                     if !is_non_x11_surface_error(&err) {
                         eprintln!(
                             "Preview fallback warning: failed to reassert always-on-top state: {err}"
@@ -548,12 +605,16 @@ fn setup_preview_window(
         });
 
         let window_fallback_watchdog = window.downgrade();
+        let pinned_watchdog = pinned.clone();
         glib::timeout_add_seconds_local(2, move || {
             let Some(window) = window_fallback_watchdog.upgrade() else {
                 return ControlFlow::Break;
             };
+            if !preview_should_stay_on_top(pinned_watchdog.load(Ordering::Relaxed)) {
+                return ControlFlow::Continue;
+            }
 
-            if let Err(err) = request_x11_always_on_top(&window) {
+            if let Err(err) = request_x11_always_on_top(&window, true) {
                 if is_non_x11_surface_error(&err) {
                     return ControlFlow::Break;
                 }
@@ -567,8 +628,6 @@ fn setup_preview_window(
         });
     }
 
-    // Removed hover tint logic; controls are now always visible in the toolbar
-
     let path_actions = path.clone();
     let window_actions = window.downgrade();
     let card_actions = card.clone();
@@ -580,12 +639,13 @@ fn setup_preview_window(
     let edit_btn_actions = edit_btn.clone();
     let copy_btn_actions = copy_btn.clone();
     let upload_btn_actions = upload_btn.clone();
-    let save_btn_actions = save_btn.clone();
     let close_btn_actions = close_btn.clone();
     let pin_btn_actions = pin_btn.clone();
     let startup_actions = startup;
     let dismiss_action_actions = dismiss_action;
     let start_pinned_actions = start_pinned;
+    let preview_id_actions = preview_id.clone();
+    let emit_extension_events_actions = emit_extension_events;
 
     glib::idle_add_local_once(move || {
         let Some(window) = window_actions.upgrade() else {
@@ -632,8 +692,8 @@ fn setup_preview_window(
                 dismiss_preview_window(&window, dismiss_action_actions);
             }
         });
-        // Keep drag on the full card (same as Ubuntu/GNOME). Toolbar buttons still
-        // win short clicks; only a drag past the threshold starts DND.
+        // Keep drag on the full card. Overlay buttons still win short clicks;
+        // only a drag past the threshold starts DND.
         card_actions.add_controller(drag_source);
 
         let window_weak_close = window.downgrade();
@@ -645,10 +705,16 @@ fn setup_preview_window(
 
         if start_pinned_actions {
             pin_icon_actions.set_icon_name(Some(crate::capture::editor::window::icon_names::PIN));
+            pin_btn_actions.add_css_class("preview-pinned");
+            pin_btn_actions.set_tooltip_text(Some(&t("Unpin")));
         }
         let pin_state = pinned_actions.clone();
         let auto_close_anchor_pin = auto_close_anchor_actions.clone();
         let pin_icon_click = pin_icon_actions.clone();
+        let pin_btn_click = pin_btn_actions.clone();
+        let window_weak_pin = window.downgrade();
+        let preview_id_pin = preview_id_actions.clone();
+        let emit_pin = emit_extension_events_actions;
         pin_btn_actions.connect_clicked(move |_| {
             let now_pinned = !pin_state.load(Ordering::Relaxed);
             pin_state.store(now_pinned, Ordering::Relaxed);
@@ -661,15 +727,26 @@ fn setup_preview_window(
 
             if now_pinned {
                 pin_icon_click.set_icon_name(Some(crate::capture::editor::window::icon_names::PIN));
+                pin_btn_click.add_css_class("preview-pinned");
+                pin_btn_click.set_tooltip_text(Some(&t("Unpin")));
             } else {
                 pin_icon_click
                     .set_icon_name(Some(crate::capture::editor::window::icon_names::VIEW_PIN));
+                pin_btn_click.remove_css_class("preview-pinned");
+                pin_btn_click.set_tooltip_text(Some(&t("Pin")));
             }
+
+            apply_preview_stacking(
+                window_weak_pin.upgrade().as_ref(),
+                &preview_id_pin,
+                emit_pin,
+                preview_should_stay_on_top(now_pinned),
+            );
         });
 
         let path_copy = path_actions.clone();
         copy_btn_actions.connect_clicked(move |_| {
-            if let Err(e) = copy_uri_to_clipboard(&path_copy) {
+            if let Err(e) = copy_screenshot_to_clipboard(&path_copy) {
                 eprintln!("Copy failed: {e}");
             }
         });
@@ -685,9 +762,16 @@ fn setup_preview_window(
         let uploading_poll = uploading.clone();
         glib::timeout_add_local(Duration::from_millis(50), move || {
             match upload_ui_rx.try_recv() {
-                Ok(UploadUiEvent::Finished { dismiss }) => {
+                Ok(UploadUiEvent::Finished { dismiss, share_url }) => {
                     uploading_poll.set(false);
                     upload_btn_poll.set_sensitive(true);
+                    if let Some(share_url) = share_url {
+                        if let Err(error) =
+                            crate::utils::clipboard::copy_text_to_gtk_clipboard(&share_url)
+                        {
+                            eprintln!("[preview] Failed to copy share link: {error}");
+                        }
+                    }
                     if dismiss {
                         if let Some(window) = window_weak_upload_poll.upgrade() {
                             dismiss_preview_window(&window, dismiss_action_upload_poll);
@@ -725,24 +809,22 @@ fn setup_preview_window(
             std::thread::spawn(move || {
                 // Shared upload path (logs + notifications). Auto-upload after
                 // capture uses the same helper so behavior stays consistent.
-                let dismiss =
-                    match crate::cloud::upload::upload_file_with_notifications(&config, &path) {
-                        Ok(_) => {
+                let (dismiss, share_url) =
+                    match crate::cloud::upload::upload_file_with_notifications_without_clipboard(
+                        &config, &path,
+                    ) {
+                        Ok(result) => {
                             // Honor Quick Access "Close window after uploading".
                             // Failed uploads never dismiss the preview.
-                            should_close_preview_after_upload(close_after_upload)
+                            (
+                                should_close_preview_after_upload(close_after_upload),
+                                Some(result.share_url),
+                            )
                         }
-                        Err(_) => false,
+                        Err(_) => (false, None),
                     };
-                let _ = upload_ui_tx.send(UploadUiEvent::Finished { dismiss });
+                let _ = upload_ui_tx.send(UploadUiEvent::Finished { dismiss, share_url });
             });
-        });
-
-        let window_weak_save = window.downgrade();
-        save_btn_actions.connect_clicked(move |_| {
-            if let Some(window) = window_weak_save.upgrade() {
-                window.close();
-            }
         });
 
         let path_edit = path_actions.clone();
@@ -862,20 +944,10 @@ fn setup_preview_window(
         }
     });
 
-    // Emit PreviewOpened with structured metadata so the GNOME extension can
-    // track this preview by preview_id and match the Wayland window by PID.
-    // Skip this when layer_shell_active is true because:
-    // 1. Layer-shell Overlay already keeps the window above everything
-    // 2. Layer-shell surfaces are not exposed as MetaWindow, so the extension can't find it
-    if emit_extension_events {
-        let pid = std::process::id();
-        crate::gnome_integration::emit_tracked_window_opened(
-            &preview_id,
-            pid,
-            "ApexShot Preview",
-            "preview",
-            "apexshot-capture-preview",
-        );
+    // Pin owns always-on-top. Unpinned previews stay in the corner but other
+    // windows can cover them. Editor / capture overlay use their own tracked IDs.
+    if preview_should_stay_on_top(start_pinned) {
+        apply_preview_stacking(Some(&window), &preview_id, emit_extension_events, true);
     }
 
     if let Some(surface) = window.surface() {
@@ -979,94 +1051,116 @@ fn install_preview_css() {
                 box-shadow: none;
             }
 
+            #capture-preview-chrome {
+                background-color: transparent;
+                background-image: none;
+                box-shadow: none;
+                padding: 10px;
+            }
+
             #capture-preview-card {
                 background-color: #141414;
                 border-radius: 16px;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                box-shadow: none;
-                padding: 12px 12px 0 12px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+                padding: 0;
                 outline-width: 0;
             }
 
-            /* Image sits inside with its own rounded corners */
             #capture-preview-image-frame {
                 border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.04);
             }
 
             #capture-preview-image {
                 border-radius: 0;
             }
 
-            /* Toolbar: sits below the image inside the same dark card */
-            .preview-tools {
-                min-height: 48px;
-                background: transparent;
-                margin-top: 4px;
-                margin-bottom: 4px;
-            }
-
-            button.preview-action {
-                min-width: 0;
-                min-height: 40px;
+            button.preview-corner-btn {
+                min-width: 30px;
+                min-height: 30px;
                 padding: 0;
-                margin: 0 4px;
-                border-radius: 8px;
-                border: none;
-                background: transparent;
-                color: rgba(255, 255, 255, 0.7);
-                box-shadow: none;
+                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                background: rgba(18, 18, 18, 0.92);
                 background-image: none;
+                color: rgba(255, 255, 255, 0.92);
+                box-shadow: none;
                 outline-width: 0;
-                transition: all 150ms ease;
+                transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
             }
 
-            button.preview-action:hover {
-                background: rgba(255, 255, 255, 0.1);
-                color: rgba(255, 255, 255, 1.0);
+            button.preview-corner-btn:hover {
+                background: rgba(42, 42, 42, 0.96);
+                background-image: none;
+                color: #ffffff;
             }
 
-            button.preview-action:active {
-                background: rgba(255, 255, 255, 0.15);
-                color: rgba(255, 255, 255, 0.8);
+            button.preview-corner-btn:active {
+                background: rgba(12, 12, 12, 0.96);
+                background-image: none;
+                color: rgba(255, 255, 255, 0.88);
             }
 
-            button.preview-action:focus,
-            button.preview-action:focus-visible {
+            button.preview-corner-btn:focus,
+            button.preview-corner-btn:focus-visible {
                 outline: none;
                 box-shadow: none;
             }
 
-            /* Centered hover-reveal text label over the preview image */
-            #preview-close-btn {
-                min-width: 80px;
-                min-height: 36px;
+            button.preview-corner-btn.preview-pinned {
+                background: rgba(255, 255, 255, 0.16);
+                background-image: none;
+            }
+
+            button.preview-close-btn:hover,
+            button.preview-close-btn:hover:focus {
+                background: #e81123;
+                background-image: none;
+                border-color: transparent;
+                color: #ffffff;
+            }
+
+            button.preview-close-btn:active {
+                background: #c50f1f;
+                background-image: none;
+                color: #ffffff;
+            }
+
+            button.preview-copy-btn {
+                min-width: 72px;
+                min-height: 30px;
                 padding: 0 16px;
-                border-radius: 18px;
-                background: rgba(15, 15, 15, 0.85);
-                border: 1px solid rgba(255, 255, 255, 0.15);
-                color: rgba(255, 255, 255, 0.95);
-                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+                border-radius: 999px;
+                border: none;
+                background: #f3f4f6;
+                background-image: none;
+                color: #111111;
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 0.01em;
+                box-shadow: none;
                 outline-width: 0;
-                transition: background 120ms ease, color 120ms ease, opacity 160ms ease;
+                transition: background 120ms ease, color 120ms ease;
             }
 
-            #preview-close-btn:hover {
-                background: rgba(210, 45, 45, 0.92);
-                color: #fff;
-                border-color: rgba(255, 255, 255, 0.25);
+            button.preview-copy-btn:hover {
+                background: #ffffff;
+                background-image: none;
+                color: #111111;
             }
 
-            #preview-close-btn:active {
-                background: rgba(175, 25, 25, 0.97);
-                color: #fff;
+            button.preview-copy-btn:active {
+                background: #e5e7eb;
+                background-image: none;
+                color: #111111;
             }
 
-            .preview-close-label {
-                font-size: 14px;
-                font-weight: 500;
-                letter-spacing: 0.2px;
-                line-height: 1;
+            button.preview-copy-btn:focus,
+            button.preview-copy-btn:focus-visible {
+                outline: none;
+                box-shadow: none;
             }
             ",
         );
@@ -1081,17 +1175,49 @@ fn install_preview_css() {
 
 fn icon_button(icon_name: &str, tooltip: &str) -> (Button, gtk4::Image) {
     let image = gtk4::Image::from_icon_name(icon_name);
-    // Increase icon size slightly to match reference design
-    image.set_pixel_size(18);
+    image.set_pixel_size(16);
 
     let button = Button::new();
     button.set_child(Some(&image));
     button.set_tooltip_text(Some(tooltip));
     button.set_has_frame(false);
     button.set_focusable(false);
-    button.add_css_class("preview-action");
 
     (button, image)
+}
+
+fn corner_icon_button(
+    icon_name: &str,
+    tooltip: &str,
+    halign: Align,
+    valign: Align,
+) -> (Button, gtk4::Image) {
+    let (button, image) = icon_button(icon_name, tooltip);
+    button.add_css_class("preview-corner-btn");
+    button.set_halign(halign);
+    button.set_valign(valign);
+    if halign == Align::Start {
+        button.set_margin_start(PREVIEW_CORNER_MARGIN);
+    } else if halign == Align::End {
+        button.set_margin_end(PREVIEW_CORNER_MARGIN);
+    }
+    if valign == Align::Start {
+        button.set_margin_top(PREVIEW_CORNER_MARGIN);
+    } else if valign == Align::End {
+        button.set_margin_bottom(PREVIEW_CORNER_MARGIN);
+    }
+    (button, image)
+}
+
+fn copy_pill_button(label: &str) -> Button {
+    let button = Button::with_label(label);
+    button.set_tooltip_text(Some(label));
+    button.set_has_frame(false);
+    button.set_focusable(false);
+    button.set_halign(Align::Center);
+    button.set_valign(Align::Center);
+    button.add_css_class("preview-copy-btn");
+    button
 }
 
 fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
@@ -1100,8 +1226,8 @@ fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
         .map_err(|_| CapturePreviewError::InvalidPath)
 }
 
-fn copy_uri_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> {
-    crate::utils::clipboard::copy_uri_to_clipboard(path).map_err(|e| {
+fn copy_screenshot_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> {
+    crate::utils::clipboard::copy_image_to_clipboard(path).map_err(|e| {
         if e.contains("not found") {
             CapturePreviewError::ClipboardToolNotFound
         } else {
@@ -1115,7 +1241,7 @@ fn copy_uri_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> {
 /// `Widget::allocation()` is parent-relative and can miss window chrome / overlay
 /// offsets. On KDE Wayland that produced a region that did not cover the visible
 /// card, so pointer events passed through (no drag, no toolbar clicks).
-fn card_input_region_rect(window: &Window, card: &GtkBox) -> Option<(i32, i32, i32, i32)> {
+fn card_input_region_rect(window: &Window, card: &Overlay) -> Option<(i32, i32, i32, i32)> {
     let bounds = card.compute_bounds(window)?;
     let x = bounds.x().floor() as i32;
     let y = bounds.y().floor() as i32;
@@ -1129,7 +1255,7 @@ fn card_input_region_rect(window: &Window, card: &GtkBox) -> Option<(i32, i32, i
 
 /// Restrict pointer hit-testing to the preview card on full-surface fallback windows.
 /// Returns `true` when the region was applied to a live surface.
-fn apply_fallback_input_region(window: &Window, card: &GtkBox) -> bool {
+fn apply_fallback_input_region(window: &Window, card: &Overlay) -> bool {
     let Some(surface) = window.surface() else {
         return false;
     };
@@ -1143,7 +1269,7 @@ fn apply_fallback_input_region(window: &Window, card: &GtkBox) -> bool {
     true
 }
 
-fn install_fallback_input_region_tracking(window: &Window, card: &GtkBox) {
+fn install_fallback_input_region_tracking(window: &Window, card: &Overlay) {
     let window_weak = window.downgrade();
     let card_weak = card.downgrade();
     let last_region = Rc::new(RefCell::new(None::<(i32, i32, i32, i32)>));
@@ -1203,7 +1329,7 @@ fn is_non_x11_surface_error(err: &str) -> bool {
     err.contains("surface is not X11")
 }
 
-fn request_x11_always_on_top(window: &Window) -> Result<(), String> {
+fn request_x11_always_on_top(window: &Window, enabled: bool) -> Result<(), String> {
     let surface = window
         .surface()
         .ok_or_else(|| "missing GTK surface".to_string())?;
@@ -1225,15 +1351,34 @@ fn request_x11_always_on_top(window: &Window) -> Result<(), String> {
     let net_wm_state = intern_atom(&conn, b"_NET_WM_STATE")?;
     let net_wm_state_above = intern_atom(&conn, b"_NET_WM_STATE_ABOVE")?;
     let net_wm_state_sticky = intern_atom(&conn, b"_NET_WM_STATE_STICKY")?;
+    let action = if enabled { 1 } else { 0 };
 
-    send_net_wm_state_client_message(&conn, root, xid, net_wm_state, 1, net_wm_state_above, 0)?;
-    send_net_wm_state_client_message(&conn, root, xid, net_wm_state, 1, net_wm_state_sticky, 0)?;
-
-    conn.configure_window(
+    send_net_wm_state_client_message(
+        &conn,
+        root,
         xid,
-        &xproto::ConfigureWindowAux::new().stack_mode(xproto::StackMode::ABOVE),
-    )
-    .map_err(|e| e.to_string())?;
+        net_wm_state,
+        action,
+        net_wm_state_above,
+        0,
+    )?;
+    send_net_wm_state_client_message(
+        &conn,
+        root,
+        xid,
+        net_wm_state,
+        action,
+        net_wm_state_sticky,
+        0,
+    )?;
+
+    if enabled {
+        conn.configure_window(
+            xid,
+            &xproto::ConfigureWindowAux::new().stack_mode(xproto::StackMode::ABOVE),
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     conn.flush().map_err(|e| e.to_string())?;
     Ok(())
@@ -1425,13 +1570,18 @@ fn configure_window_positioning(window: &Window, side: PreviewSide, _preview_wid
         return false;
     }
 
-    // Use the same layer-shell setup on every compositor that supports it
-    // (Ubuntu/GNOME, Fedora KDE Plasma 6+, wlroots, …).
-    //
-    // Ubuntu already used this path and must keep the same anchors, margins,
-    // exclusive_zone(0), and keyboard mode. The Fedora bug was a KDE-only
-    // early-return that forced a full-screen fallback + input-region instead;
-    // that return is intentionally gone so KDE joins this proven path.
+    // GNOME Shell does not expose layer-shell surfaces as MetaWindows, so the
+    // helper extension cannot `make_above()` them. Stay on the regular-window
+    // fallback and let `TrackedWindowOpened` keep the preview on top.
+    if is_gnome_wayland_session() {
+        return false;
+    }
+
+    // Use the same layer-shell setup on compositors that support it
+    // (KDE Plasma 6+, wlroots, …). Ubuntu/GNOME stays on the extension path
+    // above. The Fedora bug was a KDE-only early-return that forced a
+    // full-screen fallback + input-region instead; that return is
+    // intentionally gone so KDE joins this proven path.
     if gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
         window.set_namespace(Some("apexshot-capture-preview"));
@@ -1446,7 +1596,6 @@ fn configure_window_positioning(window: &Window, side: PreviewSide, _preview_wid
         // Do not reserve compositor-managed edge space for it, otherwise some
         // desktops may treat the reserved strip as owned by the preview and
         // block clicks on windows behind it.
-        // Keep exclusive_zone(0) — this is the Ubuntu/GNOME-proven value.
         window.set_exclusive_zone(0);
         window.set_margin(
             Edge::Left,
@@ -1503,10 +1652,33 @@ mod tests {
     }
 
     #[test]
-    fn preview_extension_signals_follow_multi_display_setting() {
-        assert!(should_emit_extension_events(true, false));
-        assert!(!should_emit_extension_events(false, false));
-        assert!(!should_emit_extension_events(true, true));
+    fn preview_extension_signals_are_emitted_without_layer_shell() {
+        assert!(should_emit_extension_events(false));
+        assert!(!should_emit_extension_events(true));
+    }
+
+    #[test]
+    fn preview_skips_layer_shell_on_gnome_wayland() {
+        assert!(is_gnome_wayland_session_from_env(
+            Some("wayland-0"),
+            Some("ubuntu:GNOME"),
+            Some("ubuntu"),
+        ));
+        assert!(is_gnome_wayland_session_from_env(
+            Some("wayland-0"),
+            Some("GNOME"),
+            Some("gnome"),
+        ));
+        assert!(!is_gnome_wayland_session_from_env(
+            Some("wayland-0"),
+            Some("KDE"),
+            Some("plasma"),
+        ));
+        assert!(!is_gnome_wayland_session_from_env(
+            None,
+            Some("ubuntu:GNOME"),
+            Some("ubuntu"),
+        ));
     }
 
     #[test]
@@ -1520,5 +1692,75 @@ mod tests {
         // Upload dismiss is gated only on the setting (not pin state).
         assert!(should_close_preview_after_upload(true));
         assert!(!should_close_preview_after_upload(false));
+    }
+
+    #[test]
+    fn preview_overlay_uses_framed_card_with_corner_actions_and_copy_pill() {
+        let source = include_str!("preview_overlay.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("preview-corner-btn")
+                && production.contains("preview-copy-btn")
+                && production.contains("preview-close-btn")
+                && production.contains("corner_icon_button")
+                && production.contains("copy_pill_button")
+                && production.contains("ARROW_EXPORT_UP_REGULAR")
+                && production.contains("copy_screenshot_to_clipboard")
+                && !production.contains("preview-tools")
+                && !production.contains("preview-close-label"),
+            "quick-access overlay must be a framed screenshot with corner actions and a Copy pill"
+        );
+    }
+
+    #[test]
+    fn preview_chrome_includes_frame_inset_and_shadow_pad() {
+        assert_eq!(
+            preview_chrome_padding(),
+            PREVIEW_FRAME_INSET * 2 + PREVIEW_SHADOW_PAD * 2
+        );
+    }
+
+    #[test]
+    fn preview_gnome_path_skips_layer_shell_and_announces_the_window() {
+        let source = include_str!("preview_overlay.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("if is_gnome_wayland_session()")
+                && production.contains("return false;")
+                && production.contains("emit_tracked_window_opened")
+                && production.contains("should_emit_extension_events(layer_shell_active)"),
+            "GNOME preview must skip layer-shell and announce the window to the helper extension"
+        );
+    }
+
+    #[test]
+    fn pin_owns_always_on_top_and_unpin_releases_it() {
+        assert!(preview_should_stay_on_top(true));
+        assert!(!preview_should_stay_on_top(false));
+
+        let source = include_str!("preview_overlay.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("apply_preview_stacking")
+                && production.contains("emit_tracked_window_closed(preview_id)")
+                && production.contains("request_x11_always_on_top(window, stay_on_top)")
+                && production.contains("preview_should_stay_on_top(now_pinned)")
+                && production.contains("preview_should_stay_on_top(pinned_watchdog.load"),
+            "pin must raise the preview; unpin must drop always-on-top without touching other tracked windows"
+        );
+    }
+
+    #[test]
+    fn preview_button_css_has_no_drop_shadow() {
+        let source = include_str!("preview_overlay.rs");
+        let css = source
+            .split("button.preview-corner-btn {")
+            .nth(1)
+            .and_then(|rest| rest.split("button.preview-copy-btn:focus-visible").next())
+            .unwrap_or("");
+        assert!(
+            css.contains("box-shadow: none") && !css.contains("box-shadow: 0"),
+            "corner and copy buttons must not paint a drop shadow"
+        );
     }
 }

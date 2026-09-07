@@ -59,13 +59,25 @@ pub fn upload_file_with_notifications(
     config: &AppConfig,
     path: &Path,
 ) -> Result<UploadResult, UploadError> {
-    upload_file_with_notifications_replacing(config, path, 0)
+    upload_file_with_notifications_replacing(config, path, 0, true)
+}
+
+/// Run an upload and notify, leaving clipboard ownership to a GTK UI caller.
+///
+/// Quick Access and the editors receive the result on GTK's main thread and
+/// copy there, avoiding command-line clipboard helper notifications.
+pub fn upload_file_with_notifications_without_clipboard(
+    config: &AppConfig,
+    path: &Path,
+) -> Result<UploadResult, UploadError> {
+    upload_file_with_notifications_replacing(config, path, 0, false)
 }
 
 fn upload_file_with_notifications_replacing(
     config: &AppConfig,
     path: &Path,
     replaces_notification_id: u32,
+    copy_share_link: bool,
 ) -> Result<UploadResult, UploadError> {
     let dest = Destination::from_config(config);
     let dest_label = match dest {
@@ -78,11 +90,15 @@ fn upload_file_with_notifications_replacing(
         Ok(result) => {
             eprintln!("[cloud] Upload complete: {}", result.share_url);
             let mut body = result.share_url.to_string();
-            if let Err(e) = crate::utils::clipboard::copy_text_to_clipboard(&result.share_url) {
-                eprintln!("[cloud] Failed to copy share link to clipboard: {e}");
-            } else {
-                body =
-                    crate::i18n::tfmt("Copied to clipboard\n{url}", &[("url", &result.share_url)]);
+            if copy_share_link {
+                if let Err(e) = crate::utils::clipboard::copy_text_to_clipboard(&result.share_url) {
+                    eprintln!("[cloud] Failed to copy share link to clipboard: {e}");
+                } else {
+                    body = crate::i18n::tfmt(
+                        "Copied to clipboard\n{url}",
+                        &[("url", &result.share_url)],
+                    );
+                }
             }
             // Always include the URL in the body so the toast is useful even if
             // the user misses the clipboard.
@@ -125,7 +141,7 @@ pub fn spawn_auto_upload_after_capture(path: PathBuf) {
         path.display()
     );
     std::thread::spawn(move || {
-        let _ = upload_file_with_notifications_replacing(&config, &path, 0);
+        let _ = upload_file_with_notifications_replacing(&config, &path, 0, true);
     });
 }
 

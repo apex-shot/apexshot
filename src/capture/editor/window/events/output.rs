@@ -51,14 +51,21 @@ pub(super) fn wire_output_lifecycle(
     let state_upload = state.clone();
     // Worker completion returns to GTK's main loop so the !Send button can be re-enabled.
     let uploading = Rc::new(Cell::new(false));
-    let (upload_done_tx, upload_done_rx) = std::sync::mpsc::channel::<()>();
+    let (upload_done_tx, upload_done_rx) = std::sync::mpsc::channel::<Option<String>>();
     let upload_btn_poll = upload_btn.clone();
     let uploading_poll = uploading.clone();
     glib::timeout_add_local(Duration::from_millis(50), move || {
         match upload_done_rx.try_recv() {
-            Ok(()) => {
+            Ok(share_url) => {
                 uploading_poll.set(false);
                 upload_btn_poll.set_sensitive(true);
+                if let Some(share_url) = share_url {
+                    if let Err(error) =
+                        crate::utils::clipboard::copy_text_to_gtk_clipboard(&share_url)
+                    {
+                        eprintln!("[editor] Failed to copy share link: {error}");
+                    }
+                }
                 glib::ControlFlow::Continue
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -100,8 +107,12 @@ pub(super) fn wire_output_lifecycle(
         let path = path_upload.clone();
         let upload_done_tx = upload_done_tx.clone();
         std::thread::spawn(move || {
-            let _ = crate::cloud::upload::upload_file_with_notifications(&config, &path);
-            let _ = upload_done_tx.send(());
+            let share_url = crate::cloud::upload::upload_file_with_notifications_without_clipboard(
+                &config, &path,
+            )
+            .ok()
+            .map(|result| result.share_url);
+            let _ = upload_done_tx.send(share_url);
         });
     });
 

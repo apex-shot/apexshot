@@ -10,6 +10,25 @@ const DBUS_INTERFACE = 'org.apexshot.TrackedWindow';
 /// ApexShot announces each window it opens over the session bus, because a
 /// Wayland client cannot raise itself. Windows are matched by PID and title,
 /// then pinned with `make_above()` for as long as ApexShot tracks them.
+/// Keep a tracked MetaWindow in the always-on-top layer.
+/// Exported for unit tests.
+export function applyAlwaysOnTop(window) {
+    if (!window)
+        return false;
+    if (typeof window.get_compositor_private === 'function' && !window.get_compositor_private())
+        return false;
+
+    if (window.minimized && typeof window.unminimize === 'function')
+        window.unminimize();
+    if (!window.above && typeof window.make_above === 'function')
+        window.make_above();
+    // Restack inside the above layer so a newly focused window cannot cover us
+    // without Mutter unsetting the above flag.
+    if (typeof window.raise === 'function')
+        window.raise();
+    return true;
+}
+
 export class PreviewStacker {
     constructor() {
         // trackedId -> {pid, title, window, signalIds}
@@ -18,6 +37,7 @@ export class PreviewStacker {
         this._pending = new Map();
         this._subscriptionId = 0;
         this._windowCreatedId = 0;
+        this._focusWindowId = 0;
         // MetaWindow -> handler id for windows we watch for a late title
         this._titleWatchers = new Map();
     }
@@ -42,6 +62,8 @@ export class PreviewStacker {
 
         this._windowCreatedId = global.display.connect('window-created',
             (display, window) => this._onWindowCreated(window));
+        this._focusWindowId = global.display.connect('notify::focus-window',
+            () => this._raiseTracked());
     }
 
     disable() {
@@ -53,6 +75,11 @@ export class PreviewStacker {
         if (this._windowCreatedId) {
             global.display.disconnect(this._windowCreatedId);
             this._windowCreatedId = 0;
+        }
+
+        if (this._focusWindowId) {
+            global.display.disconnect(this._focusWindowId);
+            this._focusWindowId = 0;
         }
 
         for (const [window, handlerId] of this._titleWatchers)
@@ -82,6 +109,11 @@ export class PreviewStacker {
     }
 
     _onWindowCreated(window) {
+        // A newly mapped window can cover an already-tracked preview even when
+        // Mutter leaves the `above` flag set. Re-raise first, then try to match
+        // any preview that has not found its MetaWindow yet.
+        this._raiseTracked();
+
         if (!window || this._pending.size === 0)
             return;
 
@@ -152,15 +184,13 @@ export class PreviewStacker {
             window.unmake_above();
     }
 
+    _raiseTracked() {
+        for (const tracked of this._tracked.values())
+            this._raise(tracked.window);
+    }
+
     _raise(window) {
-        if (!window.get_compositor_private())
-            return;
-
-        if (window.minimized)
-            window.unminimize();
-
-        if (!window.above)
-            window.make_above();
+        applyAlwaysOnTop(window);
     }
 
     /// Match on PID first, since titles change; fall back to an exact title

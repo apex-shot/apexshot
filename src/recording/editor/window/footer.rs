@@ -241,7 +241,7 @@ fn wire_upload_button(
                     match result {
                         Ok(share_url) => {
                             if let Err(e) =
-                                crate::utils::clipboard::copy_text_to_clipboard(&share_url)
+                                crate::utils::clipboard::copy_text_to_gtk_clipboard(&share_url)
                             {
                                 eprintln!("Failed to copy share link to clipboard: {e}");
                                 crate::utils::notify::desktop_notification(
