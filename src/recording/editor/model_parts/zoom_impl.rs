@@ -32,6 +32,7 @@ impl VideoEditState {
             } else {
                 ZoomMode::Manual
             },
+            ..Default::default()
         });
         self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
         let index = self
@@ -267,6 +268,7 @@ impl VideoEditState {
                 ease_ms: DEFAULT_ZOOM_EASE_MS,
                 easing: ZoomEasing::Glide,
                 mode,
+                ..Default::default()
             });
             added += 1;
         }
@@ -384,6 +386,10 @@ impl VideoEditState {
         {
             clip.easing = ZoomEasing::Glide;
             clip.ease_ms = DEFAULT_ZOOM_EASE_MS;
+            clip.rotation_x = 0.0;
+            clip.rotation_y = 0.0;
+            clip.rotation_z = 0.0;
+            clip.perspective = 0.0;
         }
     }
 
@@ -432,6 +438,77 @@ impl VideoEditState {
             clip.start = start;
             clip.end = end;
         }
+    }
+
+    pub fn set_selected_zoom_yaw(&mut self, yaw: f64) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.rotation_y = yaw.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        }
+    }
+
+    pub fn set_selected_zoom_pitch(&mut self, pitch: f64) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.rotation_x = pitch.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        }
+    }
+
+    pub fn set_selected_zoom_roll(&mut self, roll: f64) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.rotation_z = roll.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        }
+    }
+
+    pub fn set_selected_zoom_perspective(&mut self, perspective: f64) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(clip) = self
+            .selected_zoom
+            .and_then(|index| self.zoom_clips.get_mut(index))
+        {
+            clip.perspective = perspective.clamp(0.0, 1.0);
+        }
+    }
+
+    pub fn eval_zoom_pose(&self, t: f64) -> MotionTransform {
+        if self.zoom_hidden {
+            return MotionTransform::default();
+        }
+        let timeline_t = self.source_to_timeline(t);
+        let Some(clip) = self
+            .zoom_clips
+            .iter()
+            .find(|clip| timeline_t >= clip.start && timeline_t <= clip.end)
+        else {
+            return MotionTransform::default();
+        };
+        MotionSegment {
+            start: clip.start,
+            end: clip.end,
+            from: MotionTransform::default(),
+            to: clip.card_pose(),
+            ease_ms: clip.ease_ms,
+            easing: clip.easing,
+        }
+        .sample(timeline_t)
     }
 
     pub fn eval_zoom(&self, t: f64) -> (f64, (f64, f64)) {

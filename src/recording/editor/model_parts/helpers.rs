@@ -284,6 +284,86 @@ pub fn fit_dimensions(src_w: u32, src_h: u32, box_w: u32, box_h: u32) -> (u32, u
     (width.max(2), height.max(2))
 }
 
+pub fn card_depth(hw: f64, hh: f64, perspective: f64) -> f64 {
+    hw.max(hh) * (2.8 - perspective.clamp(0.0, 1.0) * 1.3).max(1.15)
+}
+
+pub fn project_point(mut x: f64, mut y: f64, transform: MotionTransform, depth: f64) -> (f64, f64) {
+    let mut z = 0.0;
+    let ry = transform.rotation_y.to_radians();
+    let rx = transform.rotation_x.to_radians();
+    let rz = transform.rotation_z.to_radians();
+    let (cos_y, sin_y) = (ry.cos(), ry.sin());
+    let (x2, z2) = (x * cos_y + z * sin_y, -x * sin_y + z * cos_y);
+    x = x2;
+    z = z2;
+    let (cos_x, sin_x) = (rx.cos(), rx.sin());
+    let (y2, z3) = (y * cos_x - z * sin_x, y * sin_x + z * cos_x);
+    y = y2;
+    z = z3;
+    let (cos_z, sin_z) = (rz.cos(), rz.sin());
+    let (x3, y3) = (x * cos_z - y * sin_z, x * sin_z + y * cos_z);
+    x = x3;
+    y = y3;
+    let w = 1.0 / (1.0 + z / depth.max(1.0)).clamp(0.45, 1.85);
+    (x * w, y * w)
+}
+
+pub fn project_card_corners(
+    img_w: f64,
+    img_h: f64,
+    fit: f64,
+    transform: MotionTransform,
+    cx: f64,
+    cy: f64,
+) -> [(f64, f64); 4] {
+    let hw = img_w * fit * transform.scale / 2.0;
+    let hh = img_h * fit * transform.scale / 2.0;
+    let depth = card_depth(hw, hh, transform.perspective);
+    let locals = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)];
+    locals.map(|(x, y)| {
+        let (x, y) = project_point(x, y, transform, depth);
+        (cx + x, cy + y)
+    })
+}
+
+pub fn affine_from_three_points(
+    src: [(f64, f64); 3],
+    dest: [(f64, f64); 3],
+) -> Option<(f64, f64, f64, f64, f64, f64)> {
+    let (x1, y1) = src[0];
+    let (x2, y2) = src[1];
+    let (x3, y3) = src[2];
+    let det = x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2);
+    if det.abs() < 1e-8 {
+        return None;
+    }
+    let (u1, v1) = dest[0];
+    let (u2, v2) = dest[1];
+    let (u3, v3) = dest[2];
+    let xx = (u1 * (y2 - y3) + u2 * (y3 - y1) + u3 * (y1 - y2)) / det;
+    let xy = (u1 * (x3 - x2) + u2 * (x1 - x3) + u3 * (x2 - x1)) / det;
+    let x0 = (u1 * (x2 * y3 - x3 * y2) + u2 * (x3 * y1 - x1 * y3) + u3 * (x1 * y2 - x2 * y1)) / det;
+    let yx = (v1 * (y2 - y3) + v2 * (y3 - y1) + v3 * (y1 - y2)) / det;
+    let yy = (v1 * (x3 - x2) + v2 * (x1 - x3) + v3 * (x2 - x1)) / det;
+    let y0 = (v1 * (x2 * y3 - x3 * y2) + v2 * (x3 * y1 - x1 * y3) + v3 * (x1 * y2 - x2 * y1)) / det;
+    Some((xx, yx, xy, yy, x0, y0))
+}
+
+pub fn motion_clip_matrix(
+    transform: MotionTransform,
+    width: f64,
+    height: f64,
+) -> Option<(f64, f64, f64, f64, f64, f64)> {
+    let width = width.max(2.0);
+    let height = height.max(2.0);
+    let corners = project_card_corners(width, height, 1.0, transform, width / 2.0, height / 2.0);
+    affine_from_three_points(
+        [(0.0, 0.0), (width, 0.0), (0.0, height)],
+        [corners[0], corners[1], corners[3]],
+    )
+}
+
 pub fn even_dimension(value: u32) -> u32 {
     let clamped = value.max(2);
     if clamped.is_multiple_of(2) {

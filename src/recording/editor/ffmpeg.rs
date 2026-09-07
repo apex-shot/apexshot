@@ -874,6 +874,7 @@ mod tests {
                 ease_ms: 200,
                 easing: crate::recording::editor::model::ZoomEasing::Glide,
                 mode: crate::recording::editor::model::ZoomMode::Auto,
+                ..Default::default()
             });
         assert!(state.needs_reencode());
         let args = build_single_convert_args(
@@ -911,6 +912,7 @@ mod tests {
                 ease_ms: 200,
                 easing: crate::recording::editor::model::ZoomEasing::Glide,
                 mode: crate::recording::editor::model::ZoomMode::Manual,
+                ..Default::default()
             });
         let args = build_single_convert_args(
             &state,

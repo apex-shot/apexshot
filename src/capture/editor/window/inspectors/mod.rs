@@ -11,7 +11,9 @@ mod shell;
 mod stroke;
 mod text;
 
-use gtk4::{prelude::*, Box as GtkBox, Button, Label, Orientation, Stack};
+use gtk4::{
+    prelude::*, Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow, Stack,
+};
 
 use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use crate::i18n::t;
@@ -62,6 +64,7 @@ pub(super) struct InspectorContentInputs<'a> {
     pub background_inspector: &'a GtkBox,
     pub colors_inspector: &'a GtkBox,
     pub placeholder_inspector: &'a GtkBox,
+    pub motion_inspector: &'a GtkBox,
     pub copy_btn: &'a Button,
     pub upload_btn: &'a Button,
     pub save_btn: &'a Button,
@@ -144,7 +147,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     inspector_stack.set_vhomogeneous(false);
     inspector_stack.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
     inspector_stack.set_hexpand(false);
-    inspector_stack.set_vexpand(true);
+    inspector_stack.set_vexpand(false);
     input.background_inspector.set_visible(true);
     crop_inspector.set_visible(true);
     pen_inspector.set_visible(true);
@@ -169,8 +172,21 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     inspector_stack.add_named(&number_inspector, Some("number"));
     inspector_stack.add_named(input.colors_inspector, Some("colors"));
     inspector_stack.add_named(input.placeholder_inspector, Some("placeholder"));
+    input.motion_inspector.set_visible(true);
+    inspector_stack.add_named(input.motion_inspector, Some("motion"));
     inspector_stack.set_visible_child_name("placeholder");
-    inspector.append(&inspector_stack);
+
+    let scroll = ScrolledWindow::new();
+    scroll.add_css_class("editor-inspector-scroll");
+    scroll.add_css_class("recording-editor-zoom-scroll");
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    scroll.set_propagate_natural_height(false);
+    scroll.set_propagate_natural_width(false);
+    scroll.set_overlay_scrolling(true);
+    scroll.set_child(Some(&inspector_stack));
+    inspector.append(&scroll);
 
     let sidebar_actions = GtkBox::new(Orientation::Horizontal, 8);
     sidebar_actions.add_css_class("editor-sidebar-actions");
@@ -213,6 +229,23 @@ mod tests {
                 && shell.contains("build_select_inspector(SelectInspectorInputs")
                 && shell.contains("build_crop_inspector(CropInspectorInputs"),
             "inspector shell should dispatch to family-owned panel builders"
+        );
+    }
+
+    #[test]
+    fn inspector_body_scrolls_and_keeps_copy_cloud_done_pinned() {
+        let shell = include_str!("mod.rs");
+        let scroll_at = shell
+            .find("inspector.append(&scroll);")
+            .expect("inspector stack must live in a scroller");
+        let actions_at = shell
+            .find("inspector.append(&sidebar_actions);")
+            .expect("copy/cloud/done stay on the inspector, not in the scroller");
+        assert!(
+            shell.contains("scroll.set_child(Some(&inspector_stack));")
+                && shell.contains("set_propagate_natural_height(false)")
+                && scroll_at < actions_at,
+            "inspector content should scroll; copy, cloud, and Done stay pinned below"
         );
     }
 }

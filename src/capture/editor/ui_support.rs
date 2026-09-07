@@ -731,6 +731,17 @@ mod tests {
     }
 
     #[test]
+    fn inspector_scroller_matches_video_editor_scrollbar_chrome() {
+        let production_source = super::EDITOR_CSS;
+        assert!(
+            production_source.contains(".editor-inspector-scroll,")
+                && production_source.contains(".editor-right-inspector scrollbar.vertical {\n                min-width: 6px;")
+                && production_source.contains(".editor-right-inspector scrollbar slider {\n                background-color: alpha(white, 0.18);\n                border-radius: 999px;"),
+            "image-editor inspector scroll should use the same thin overlay scrollbar as the video editor",
+        );
+    }
+
+    #[test]
     fn inspector_tabs_use_text_only_active_state_and_colors_panel_matches_background_width() {
         let production_source = super::EDITOR_CSS;
         assert!(

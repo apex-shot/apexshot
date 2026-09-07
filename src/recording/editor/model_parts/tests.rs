@@ -148,11 +148,7 @@ fn hidden_zoom_skips_eval_and_clear_zoom_clips() {
 fn inferred_pointer_enables_auto_zoom_without_forcing_cursor_composite() {
     let mut state = VideoEditState::new(metadata());
     attach_pointer(&mut state, 400.0, 300.0);
-    state
-        .sidecar
-        .as_mut()
-        .unwrap()
-        .mark_inferred_from_video();
+    state.sidecar.as_mut().unwrap().mark_inferred_from_video();
 
     assert!(state.supports_auto_zoom());
     assert!(!state.needs_composite());
@@ -439,6 +435,7 @@ fn needs_reencode_when_zoom_or_background_present() {
         ease_ms: 200,
         easing: ZoomEasing::Glide,
         mode: ZoomMode::Auto,
+        ..Default::default()
     });
     assert!(state.needs_reencode());
 
@@ -461,6 +458,7 @@ fn eval_zoom_eases_in_and_out() {
         ease_ms: 200,
         easing: ZoomEasing::Glide,
         mode: ZoomMode::Manual,
+        ..Default::default()
     }];
     let (outside, _) = eval_zoom(&clips, 0.5, 1920.0, 1080.0);
     assert!((outside - 1.0).abs() < 1e-9);
@@ -483,26 +481,16 @@ fn eval_zoom_eases_in_and_out() {
 fn auto_zoom_camera_feathers_edge_following() {
     let center = (960.0, 540.0);
     let inner_right = center.0 + 1920.0 / 2.0 / 2.0 - 1920.0 / 2.0 * 0.22;
-    let barely_outside = recenter_if_near_edge(
-        center,
-        (inner_right + 1.0, center.1),
-        2.0,
-        1920.0,
-        1080.0,
-    );
+    let barely_outside =
+        recenter_if_near_edge(center, (inner_right + 1.0, center.1), 2.0, 1920.0, 1080.0);
     assert!(barely_outside.0 > center.0);
     assert!(
         barely_outside.0 - center.0 < 0.01,
         "camera should ease into following instead of matching cursor velocity immediately"
     );
 
-    let farther_outside = recenter_if_near_edge(
-        center,
-        (inner_right + 57.6, center.1),
-        2.0,
-        1920.0,
-        1080.0,
-    );
+    let farther_outside =
+        recenter_if_near_edge(center, (inner_right + 57.6, center.1), 2.0, 1920.0, 1080.0);
     assert!(farther_outside.0 > barely_outside.0);
     assert!(farther_outside.0 - center.0 < 57.6);
 }
@@ -540,6 +528,7 @@ fn auto_zoom_camera_tracks_the_smoothed_cursor_path() {
         ease_ms: 0,
         easing: ZoomEasing::Glide,
         mode: ZoomMode::Auto,
+        ..Default::default()
     });
 
     let (scale, camera_center) = state.eval_zoom(0.5);
@@ -1198,6 +1187,7 @@ fn overlay_point_tracks_zoom_without_scaling_sprite() {
         ease_ms: 0,
         easing: ZoomEasing::Glide,
         mode: ZoomMode::Auto,
+        ..Default::default()
     });
     let (zoom, center) = state.eval_zoom(1.0);
     assert!((zoom - 2.0).abs() < 1e-9);
@@ -1308,6 +1298,7 @@ fn eval_zoom_uses_easing_curve_during_ease_in() {
         ease_ms: 1000,
         easing,
         mode: ZoomMode::Manual,
+        ..Default::default()
     };
     let linear = eval_zoom(&[clip(ZoomEasing::Linear)], 1.5, 1920.0, 1080.0).0;
     let glide = eval_zoom(&[clip(ZoomEasing::Glide)], 1.5, 1920.0, 1080.0).0;
@@ -1319,6 +1310,24 @@ fn eval_zoom_uses_easing_curve_during_ease_in() {
     assert!(snappy > glide);
     assert!((at_start - 1.0).abs() < 1e-9);
     assert!((at_hold - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn eval_zoom_pose_eases_yaw_like_still_motion() {
+    let mut state = VideoEditState::new(metadata());
+    assert!(state.add_zoom_at_playhead().is_some());
+    state.zoom_clips[0].start = 0.0;
+    state.zoom_clips[0].end = 2.0;
+    state.zoom_clips[0].ease_ms = 600;
+    state.zoom_clips[0].easing = ZoomEasing::Linear;
+    state.set_selected_zoom_yaw(8.0);
+    let start = state.eval_zoom_pose(0.0);
+    let mid = state.eval_zoom_pose(0.3);
+    let hold = state.eval_zoom_pose(1.2);
+    assert!(start.rotation_y.abs() < 1e-6);
+    assert!((mid.rotation_y - 4.0).abs() < 0.2);
+    assert!((hold.rotation_y - 8.0).abs() < 1e-6);
+    assert!(!state.zoom_clips[0].has_card_motion() || state.zoom_clips[0].rotation_y > 0.0);
 }
 
 #[test]

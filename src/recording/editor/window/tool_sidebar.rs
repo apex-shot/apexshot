@@ -2,13 +2,14 @@ use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoEditState,
     ZoomEasing, ZoomMode, CLIP_SPEED_PRESETS, DEFAULT_ZOOM_EASE_MS, MAX_CLICK_DURATION_MS,
-    MAX_CLICK_SCALE, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MAX_ZOOM_EASE_MS, MIN_CLICK_DURATION_MS,
-    MIN_CLICK_SCALE, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, MIN_ZOOM_EASE_MS, ZOOM_SCALE_PRESETS,
+    MAX_CLICK_SCALE, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MAX_MOTION_YAW, MAX_ZOOM_EASE_MS,
+    MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, MIN_MOTION_YAW,
+    MIN_ZOOM_EASE_MS, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
     EventControllerMotion, GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay,
-    PolicyType, ScrolledWindow, Switch, ToggleButton, Widget, Window,
+    PolicyType, Scale, ScrolledWindow, Switch, ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -276,6 +277,83 @@ fn build_zoom_panel(
         }
     });
 
+    let (yaw_header, yaw_value, yaw_slider) = zoom_angle_row(&t("Yaw"), 0.0);
+    yaw_slider.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        let yaw_value = yaw_value.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let value = slider.value();
+            state.lock().unwrap().set_selected_zoom_yaw(value);
+            yaw_value.set_label(&format!("{:.0}°", value));
+            on_change();
+        }
+    });
+    let (pitch_header, pitch_value, pitch_slider) = zoom_angle_row(&t("Pitch"), 0.0);
+    pitch_slider.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        let pitch_value = pitch_value.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let value = slider.value();
+            state.lock().unwrap().set_selected_zoom_pitch(value);
+            pitch_value.set_label(&format!("{:.0}°", value));
+            on_change();
+        }
+    });
+    let (roll_header, roll_value, roll_slider) = zoom_angle_row(&t("Roll"), 0.0);
+    roll_slider.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        let roll_value = roll_value.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let value = slider.value();
+            state.lock().unwrap().set_selected_zoom_roll(value);
+            roll_value.set_label(&format!("{:.0}°", value));
+            on_change();
+        }
+    });
+    let perspective_header = GtkBox::new(Orientation::Horizontal, 8);
+    let perspective_label = Label::new(Some(&t("Perspective")));
+    perspective_label.add_css_class("recording-editor-zoom-kicker");
+    perspective_label.set_xalign(0.0);
+    perspective_label.set_hexpand(true);
+    let perspective_value = Label::new(Some("0%"));
+    perspective_value.add_css_class("recording-editor-zoom-kicker");
+    perspective_header.append(&perspective_label);
+    perspective_header.append(&perspective_value);
+    let perspective_slider = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.01);
+    perspective_slider.set_draw_value(false);
+    perspective_slider.set_hexpand(true);
+    perspective_slider.add_css_class("editor-toolbar-size-slider");
+    perspective_slider.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        let perspective_value = perspective_value.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            let value = slider.value();
+            state.lock().unwrap().set_selected_zoom_perspective(value);
+            perspective_value.set_label(&format!("{:.0}%", value * 100.0));
+            on_change();
+        }
+    });
+
     let footer_delete = delete_tool_button(&t("Delete zoom"));
 
     body.append(&mode_row);
@@ -286,6 +364,14 @@ fn build_zoom_panel(
     body.append(&easing_label);
     body.append(&easing_row);
     body.append(&ease_row.widget);
+    body.append(&yaw_header);
+    body.append(&yaw_slider);
+    body.append(&pitch_header);
+    body.append(&pitch_slider);
+    body.append(&roll_header);
+    body.append(&roll_slider);
+    body.append(&perspective_header);
+    body.append(&perspective_slider);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -380,6 +466,14 @@ fn build_zoom_panel(
         let ease_scale = ease_row.scale.clone();
         let easing_row = easing_row.clone();
         let easing_label = easing_label.clone();
+        let yaw_slider = yaw_slider.clone();
+        let yaw_value = yaw_value.clone();
+        let pitch_slider = pitch_slider.clone();
+        let pitch_value = pitch_value.clone();
+        let roll_slider = roll_slider.clone();
+        let roll_value = roll_value.clone();
+        let perspective_slider = perspective_slider.clone();
+        let perspective_value = perspective_value.clone();
         let reset = reset.clone();
         let footer_delete = footer_delete.clone();
         let syncing = syncing.clone();
@@ -441,6 +535,25 @@ fn build_zoom_panel(
                     .map(|clip| clip.ease_ms as f64)
                     .unwrap_or(DEFAULT_ZOOM_EASE_MS as f64),
             );
+            let yaw = selected.as_ref().map(|clip| clip.rotation_y).unwrap_or(0.0);
+            let pitch = selected.as_ref().map(|clip| clip.rotation_x).unwrap_or(0.0);
+            let roll = selected.as_ref().map(|clip| clip.rotation_z).unwrap_or(0.0);
+            let perspective = selected
+                .as_ref()
+                .map(|clip| clip.perspective)
+                .unwrap_or(0.0);
+            yaw_slider.set_value(yaw);
+            yaw_value.set_label(&format!("{:.0}°", yaw));
+            pitch_slider.set_value(pitch);
+            pitch_value.set_label(&format!("{:.0}°", pitch));
+            roll_slider.set_value(roll);
+            roll_value.set_label(&format!("{:.0}°", roll));
+            perspective_slider.set_value(perspective);
+            perspective_value.set_label(&format!("{:.0}%", perspective * 100.0));
+            yaw_slider.set_sensitive(can_edit);
+            pitch_slider.set_sensitive(can_edit);
+            roll_slider.set_sensitive(can_edit);
+            perspective_slider.set_sensitive(can_edit);
             let selected_preset = selected
                 .as_ref()
                 .map(|clip| nearest_zoom_preset(clip.scale));
@@ -461,6 +574,24 @@ fn build_zoom_panel(
         widget: panel,
         refresh,
     }
+}
+
+fn zoom_angle_row(title: &str, initial: f64) -> (GtkBox, Label, Scale) {
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    let label = Label::new(Some(title));
+    label.add_css_class("recording-editor-zoom-kicker");
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    let value = Label::new(Some(&format!("{initial:.0}°")));
+    value.add_css_class("recording-editor-zoom-kicker");
+    header.append(&label);
+    header.append(&value);
+    let slider = Scale::with_range(Orientation::Horizontal, MIN_MOTION_YAW, MAX_MOTION_YAW, 1.0);
+    slider.set_value(initial);
+    slider.set_draw_value(false);
+    slider.set_hexpand(true);
+    slider.add_css_class("editor-toolbar-size-slider");
+    (header, value, slider)
 }
 
 struct ClipPanel {

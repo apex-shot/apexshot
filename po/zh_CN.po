@@ -2129,3 +2129,81 @@ msgstr "有可用更新 · v{version}"
 
 msgid "Version {version} is ready. Open the ApexShot menu to view it."
 msgstr "版本 {version} 已准备就绪。打开 ApexShot 菜单即可查看。"
+
+msgid "Static"
+msgstr "静态"
+
+msgid "Switch to Static"
+msgstr "切换到静态"
+
+msgid "Switch to Motion"
+msgstr "切换到 Motion"
+
+msgid "Pause"
+msgstr "暂停"
+
+msgid "Continue"
+msgstr "继续"
+
+msgid "Don't show this again"
+msgstr "不再显示"
+
+msgid "Annotations will be applied"
+msgstr "批注将被应用"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. Your original image is not flattened until Done."
+msgstr "Motion 会播放批注快照。返回静态可恢复实时工具。原图在点击完成后才会被拼合。"
+
+msgid "Motion effects will be cleared"
+msgstr "Motion 效果将被清除"
+
+msgid "Motion effect segments can't be edited in Static mode and will be cleared if you continue."
+msgstr "Motion 片段无法在静态模式下编辑，继续将清除它们。"
+
+msgid "Add motion at playhead"
+msgstr "在播放头添加 Motion"
+
+msgid "Click a clip, or double-click a track to add a move or text"
+msgstr "点击片段，或双击轨道以添加运镜或文字"
+
+msgid "Move"
+msgstr "运镜"
+
+msgid "Yaw"
+msgstr "偏航"
+
+msgid "Scale"
+msgstr "缩放"
+
+msgid "Pitch"
+msgstr "俯仰"
+
+msgid "Roll"
+msgstr "翻滚"
+
+msgid "Perspective"
+msgstr "透视"
+
+msgid "Motion blur"
+msgstr "运动模糊"
+
+msgid "X"
+msgstr "X"
+
+msgid "Y"
+msgstr "Y"
+
+msgid "Add text at playhead"
+msgstr "在播放头添加文字"
+
+msgid "Fade"
+msgstr "淡入淡出"
+
+msgid "Slide"
+msgstr "滑入"
+
+msgid "Title"
+msgstr "标题"
+
+msgid "Drag on the preview to place the title"
+msgstr "在预览中拖动以放置标题"

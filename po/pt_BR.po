@@ -2168,3 +2168,81 @@ msgstr "Atualização disponível · v{version}"
 
 msgid "Version {version} is ready. Open the ApexShot menu to view it."
 msgstr "A versão {version} está pronta. Abra o menu do ApexShot para vê-la."
+
+msgid "Static"
+msgstr "Estático"
+
+msgid "Switch to Static"
+msgstr "Mudar para estático"
+
+msgid "Switch to Motion"
+msgstr "Mudar para Motion"
+
+msgid "Pause"
+msgstr "Pausar"
+
+msgid "Continue"
+msgstr "Continuar"
+
+msgid "Don't show this again"
+msgstr "Não mostrar novamente"
+
+msgid "Annotations will be applied"
+msgstr "As anotações serão aplicadas"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. Your original image is not flattened until Done."
+msgstr "O Motion reproduz um instantâneo das suas anotações. Voltar ao estático restaura as ferramentas. A imagem original só é achatada em Concluído."
+
+msgid "Motion effects will be cleared"
+msgstr "Os efeitos de Motion serão removidos"
+
+msgid "Motion effect segments can't be edited in Static mode and will be cleared if you continue."
+msgstr "Os segmentos de Motion não podem ser editados no modo estático e serão removidos se você continuar."
+
+msgid "Add motion at playhead"
+msgstr "Adicionar motion no cursor"
+
+msgid "Click a clip, or double-click a track to add a move or text"
+msgstr "Clique em um clipe, ou dê um duplo clique na faixa para adicionar um movimento ou texto"
+
+msgid "Move"
+msgstr "Movimento"
+
+msgid "Yaw"
+msgstr "Guinada"
+
+msgid "Scale"
+msgstr "Escala"
+
+msgid "Pitch"
+msgstr "Arfagem"
+
+msgid "Roll"
+msgstr "Rolagem"
+
+msgid "Perspective"
+msgstr "Perspectiva"
+
+msgid "Motion blur"
+msgstr "Desfoque de movimento"
+
+msgid "X"
+msgstr "X"
+
+msgid "Y"
+msgstr "Y"
+
+msgid "Add text at playhead"
+msgstr "Adicionar texto na cabeça de reprodução"
+
+msgid "Fade"
+msgstr "Fade"
+
+msgid "Slide"
+msgstr "Deslize"
+
+msgid "Title"
+msgstr "Título"
+
+msgid "Drag on the preview to place the title"
+msgstr "Arraste na prévia para posicionar o título"

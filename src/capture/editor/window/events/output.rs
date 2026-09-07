@@ -39,6 +39,8 @@ pub(super) fn wire_output_lifecycle(
     upload_btn: &Button,
     save_btn: &Button,
     traffic_close: &Button,
+    in_motion: Rc<Cell<bool>>,
+    export_motion: Rc<dyn Fn() -> Result<PathBuf, String>>,
 ) {
     let path_copy = path.to_path_buf();
     copy_btn.connect_clicked(move |_| {
@@ -129,7 +131,37 @@ pub(super) fn wire_output_lifecycle(
         let path_save = path_save.clone();
         let window_save = window_save.clone();
         let app_save = app_save.clone();
+        let in_motion = in_motion.clone();
+        let export_motion = export_motion.clone();
         glib::idle_add_local_once(move || {
+            if in_motion.get() {
+                match export_motion() {
+                    Ok(video_path) => {
+                        let _ = persist_image_session(&path_save, &state_save.lock().unwrap());
+                        crate::utils::notify::desktop_notification(
+                            &crate::i18n::t("Export complete"),
+                            &video_path.display().to_string(),
+                        );
+                        if let Some(window) = window_save.upgrade() {
+                            window.close();
+                        }
+                        if let Some(app) = app_save.upgrade() {
+                            app.quit();
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Failed to export Motion video: {error}");
+                        crate::utils::notify::desktop_notification_important(
+                            &crate::i18n::t("Export failed"),
+                            &error,
+                        );
+                        if let Some(window) = window_save.upgrade() {
+                            window.set_visible(true);
+                        }
+                    }
+                }
+                return;
+            }
             let (image_result, annotation_data) = {
                 let state = state_save.lock().unwrap();
                 let save_result = save_edited_image(&path_save, &state);
@@ -217,11 +249,17 @@ mod tests {
         let handler = &source[start..];
         let flatten = handler.find("save_edited_image").expect("flatten PNG");
         let persist = handler
-            .find("persist_image_session")
+            .rfind("persist_image_session")
             .expect("persist session");
         assert!(
             flatten < persist,
             "Done must flatten before writing the sidecar"
+        );
+        assert!(
+            handler.contains("if in_motion.get()")
+                && handler.contains("export_motion()")
+                && handler.contains("save_edited_image"),
+            "Done in Motion exports MP4; Done in Static still flattens the PNG"
         );
     }
 }

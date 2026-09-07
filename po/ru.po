@@ -2167,3 +2167,81 @@ msgstr "Доступно обновление · v{version}"
 
 msgid "Version {version} is ready. Open the ApexShot menu to view it."
 msgstr "Версия {version} готова. Откройте меню ApexShot, чтобы посмотреть её."
+
+msgid "Static"
+msgstr "Статика"
+
+msgid "Switch to Static"
+msgstr "Перейти к статике"
+
+msgid "Switch to Motion"
+msgstr "Перейти к Motion"
+
+msgid "Pause"
+msgstr "Пауза"
+
+msgid "Continue"
+msgstr "Продолжить"
+
+msgid "Don't show this again"
+msgstr "Больше не показывать"
+
+msgid "Annotations will be applied"
+msgstr "Аннотации будут применены"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. Your original image is not flattened until Done."
+msgstr "Motion воспроизведёт снимок аннотаций. Возврат к статике восстановит инструменты. Исходное изображение не сплющивается до «Готово»."
+
+msgid "Motion effects will be cleared"
+msgstr "Эффекты Motion будут удалены"
+
+msgid "Motion effect segments can't be edited in Static mode and will be cleared if you continue."
+msgstr "Сегменты Motion нельзя править в статике — они будут удалены, если продолжить."
+
+msgid "Add motion at playhead"
+msgstr "Добавить Motion на курсор"
+
+msgid "Click a clip, or double-click a track to add a move or text"
+msgstr "Нажмите клип или дважды нажмите дорожку, чтобы добавить движение или текст"
+
+msgid "Move"
+msgstr "Движение"
+
+msgid "Yaw"
+msgstr "Рыскание"
+
+msgid "Scale"
+msgstr "Масштаб"
+
+msgid "Pitch"
+msgstr "Тангаж"
+
+msgid "Roll"
+msgstr "Крен"
+
+msgid "Perspective"
+msgstr "Перспектива"
+
+msgid "Motion blur"
+msgstr "Размытие в движении"
+
+msgid "X"
+msgstr "X"
+
+msgid "Y"
+msgstr "Y"
+
+msgid "Add text at playhead"
+msgstr "Добавить текст на позицию воспроизведения"
+
+msgid "Fade"
+msgstr "Затухание"
+
+msgid "Slide"
+msgstr "Сдвиг"
+
+msgid "Title"
+msgstr "Заголовок"
+
+msgid "Drag on the preview to place the title"
+msgstr "Перетащите на предпросмотре, чтобы разместить заголовок"

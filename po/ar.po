@@ -2148,3 +2148,81 @@ msgstr "يتوفر تحديث · الإصدار {version}"
 
 msgid "Version {version} is ready. Open the ApexShot menu to view it."
 msgstr "الإصدار {version} جاهز. افتح قائمة ApexShot لعرضه."
+
+msgid "Static"
+msgstr "ثابت"
+
+msgid "Switch to Static"
+msgstr "التبديل إلى الثابت"
+
+msgid "Switch to Motion"
+msgstr "التبديل إلى Motion"
+
+msgid "Pause"
+msgstr "إيقاف مؤقت"
+
+msgid "Continue"
+msgstr "متابعة"
+
+msgid "Don't show this again"
+msgstr "لا تظهر هذا مرة أخرى"
+
+msgid "Annotations will be applied"
+msgstr "سيتم تطبيق التعليقات"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. Your original image is not flattened until Done."
+msgstr "سيشغّل Motion لقطة من تعليقاتك. الرجوع إلى الثابت يعيد الأدوات. لا تُسطَّح الصورة الأصلية حتى تمّ."
+
+msgid "Motion effects will be cleared"
+msgstr "سيتم مسح تأثيرات Motion"
+
+msgid "Motion effect segments can't be edited in Static mode and will be cleared if you continue."
+msgstr "لا يمكن تحرير مقاطع Motion في الوضع الثابت وسيتم مسحها إذا تابعت."
+
+msgid "Add motion at playhead"
+msgstr "إضافة Motion عند رأس التشغيل"
+
+msgid "Click a clip, or double-click a track to add a move or text"
+msgstr "انقر مقطعًا أو انقر نقرًا مزدوجًا على المسار لإضافة حركة أو نص"
+
+msgid "Move"
+msgstr "حركة"
+
+msgid "Yaw"
+msgstr "انعراج"
+
+msgid "Scale"
+msgstr "مقياس"
+
+msgid "Pitch"
+msgstr "ميل"
+
+msgid "Roll"
+msgstr "تدحرج"
+
+msgid "Perspective"
+msgstr "منظور"
+
+msgid "Motion blur"
+msgstr "ضبابية الحركة"
+
+msgid "X"
+msgstr "X"
+
+msgid "Y"
+msgstr "Y"
+
+msgid "Add text at playhead"
+msgstr "أضف نصًا عند رأس التشغيل"
+
+msgid "Fade"
+msgstr "تلاشي"
+
+msgid "Slide"
+msgstr "انزلاق"
+
+msgid "Title"
+msgstr "عنوان"
+
+msgid "Drag on the preview to place the title"
+msgstr "اسحب على المعاينة لوضع العنوان"

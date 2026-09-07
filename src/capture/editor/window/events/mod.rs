@@ -132,6 +132,8 @@ pub(super) struct EventContext {
     pub inverse_direction_toggle: CheckButton,
     pub stroke_size_button: Button,
     pub stroke_size_list: gtk4::Box,
+    pub in_motion: Rc<Cell<bool>>,
+    pub export_motion: Rc<dyn Fn() -> Result<PathBuf, String>>,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -219,6 +221,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         inverse_direction_toggle,
         stroke_size_button,
         stroke_size_list,
+        in_motion,
+        export_motion,
     } = ctx;
 
     let space_pan = SpacePanState::new();
@@ -274,6 +278,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         &upload_btn,
         &save_btn,
         &traffic_close,
+        in_motion,
+        export_motion,
     );
 
     // Tool-mode activation (Select/Crop/Background/Pen/.../Focus). Distinct toggle

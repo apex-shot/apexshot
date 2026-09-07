@@ -2176,3 +2176,81 @@ msgstr "Mise à jour disponible · v{version}"
 
 msgid "Version {version} is ready. Open the ApexShot menu to view it."
 msgstr "La version {version} est prête. Ouvrez le menu ApexShot pour la consulter."
+
+msgid "Static"
+msgstr "Statique"
+
+msgid "Switch to Static"
+msgstr "Passer en statique"
+
+msgid "Switch to Motion"
+msgstr "Passer en Motion"
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Continue"
+msgstr "Continuer"
+
+msgid "Don't show this again"
+msgstr "Ne plus afficher"
+
+msgid "Annotations will be applied"
+msgstr "Les annotations seront appliquées"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. Your original image is not flattened until Done."
+msgstr "Motion lira un instantané de vos annotations. Revenir en statique restaure les outils. L’image d’origine n’est aplatie qu’avec Terminé."
+
+msgid "Motion effects will be cleared"
+msgstr "Les effets Motion seront effacés"
+
+msgid "Motion effect segments can't be edited in Static mode and will be cleared if you continue."
+msgstr "Les segments Motion ne peuvent pas être modifiés en mode statique et seront effacés si vous continuez."
+
+msgid "Add motion at playhead"
+msgstr "Ajouter un mouvement à la tête de lecture"
+
+msgid "Click a clip, or double-click a track to add a move or text"
+msgstr "Cliquez un clip, ou double-cliquez une piste pour ajouter un mouvement ou du texte"
+
+msgid "Move"
+msgstr "Mouvement"
+
+msgid "Yaw"
+msgstr "Lacet"
+
+msgid "Scale"
+msgstr "Échelle"
+
+msgid "Pitch"
+msgstr "Tangage"
+
+msgid "Roll"
+msgstr "Roulis"
+
+msgid "Perspective"
+msgstr "Perspective"
+
+msgid "Motion blur"
+msgstr "Flou de mouvement"
+
+msgid "X"
+msgstr "X"
+
+msgid "Y"
+msgstr "Y"
+
+msgid "Add text at playhead"
+msgstr "Ajouter du texte à la tête de lecture"
+
+msgid "Fade"
+msgstr "Fondu"
+
+msgid "Slide"
+msgstr "Glissement"
+
+msgid "Title"
+msgstr "Titre"
+
+msgid "Drag on the preview to place the title"
+msgstr "Glissez sur l’aperçu pour placer le titre"

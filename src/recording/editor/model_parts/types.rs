@@ -462,12 +462,707 @@ pub struct ZoomClip {
     pub ease_ms: u32,
     pub easing: ZoomEasing,
     pub mode: ZoomMode,
+    pub rotation_x: f64,
+    pub rotation_y: f64,
+    pub rotation_z: f64,
+    pub perspective: f64,
+}
+
+impl Default for ZoomClip {
+    fn default() -> Self {
+        Self {
+            start: 0.0,
+            end: DEFAULT_ZOOM_DURATION_SECONDS,
+            scale: DEFAULT_ZOOM_SCALE,
+            center: (0.0, 0.0),
+            ease_ms: DEFAULT_ZOOM_EASE_MS,
+            easing: ZoomEasing::Glide,
+            mode: ZoomMode::Manual,
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            rotation_z: 0.0,
+            perspective: 0.0,
+        }
+    }
 }
 
 impl ZoomClip {
     pub fn duration(&self) -> f64 {
         (self.end - self.start).max(0.0)
     }
+
+    pub fn card_pose(&self) -> MotionTransform {
+        MotionTransform {
+            rotation_x: self.rotation_x,
+            rotation_y: self.rotation_y,
+            rotation_z: self.rotation_z,
+            perspective: self.perspective,
+            ..MotionTransform::default()
+        }
+    }
+
+    pub fn has_card_motion(&self) -> bool {
+        self.rotation_x.abs() + self.rotation_y.abs() + self.rotation_z.abs() + self.perspective
+            > 0.04
+    }
+}
+
+pub const DEFAULT_MOTION_DURATION_SECONDS: f64 = 3.0;
+pub const MIN_MOTION_DURATION_SECONDS: f64 = 1.0;
+pub const MAX_MOTION_DURATION_SECONDS: f64 = 10.0;
+pub const DEFAULT_MOTION_END_SCALE: f64 = 1.12;
+pub const DEFAULT_MOTION_END_ROTATION_Y: f64 = 8.0;
+pub const DEFAULT_MOTION_END_PERSPECTIVE: f64 = 0.18;
+pub const MOTION_EXPORT_FPS: u32 = 30;
+pub const MIN_MOTION_SEGMENT_SECONDS: f64 = 0.25;
+pub const DEFAULT_MOTION_SEGMENT_SECONDS: f64 = 1.8;
+pub const MIN_MOTION_YAW: f64 = -24.0;
+pub const MAX_MOTION_YAW: f64 = 24.0;
+pub const MIN_MOTION_POS: f64 = -1.0;
+pub const MAX_MOTION_POS: f64 = 1.0;
+pub const DEFAULT_MOTION_TEXT_SECONDS: f64 = 1.6;
+pub const DEFAULT_MOTION_TEXT_POS_X: f64 = 0.5;
+pub const DEFAULT_MOTION_TEXT_POS_Y: f64 = 0.78;
+pub const MIN_MOTION_TEXT_POS: f64 = 0.05;
+pub const MAX_MOTION_TEXT_POS: f64 = 0.95;
+pub const DEFAULT_MOTION_TEXT_SIZE: f64 = 1.0;
+pub const MIN_MOTION_TEXT_SIZE: f64 = 0.5;
+pub const MAX_MOTION_TEXT_SIZE: f64 = 2.2;
+pub const MOTION_SCALE_PRESETS: [(&str, f64); 6] = [
+    ("1.0×", 1.0),
+    ("1.12×", 1.12),
+    ("1.25×", 1.25),
+    ("1.5×", 1.5),
+    ("1.8×", 1.8),
+    ("2.2×", 2.2),
+];
+
+/// Identity camera for a still or the start of a motion segment.
+/// Field names follow Shotbase `orientationRotation*` / `perspectiveIntensity`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionTransform {
+    pub scale: f64,
+    pub rotation_x: f64,
+    pub rotation_y: f64,
+    pub rotation_z: f64,
+    pub perspective: f64,
+    pub pos_x: f64,
+    pub pos_y: f64,
+}
+
+impl Default for MotionTransform {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            rotation_z: 0.0,
+            perspective: 0.0,
+            pos_x: 0.0,
+            pos_y: 0.0,
+        }
+    }
+}
+
+/// One timed camera move. Slice 1 stores these but does not yet author them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MotionSegment {
+    pub start: f64,
+    pub end: f64,
+    pub from: MotionTransform,
+    pub to: MotionTransform,
+    pub ease_ms: u32,
+    pub easing: ZoomEasing,
+}
+
+impl MotionSegment {
+    pub fn duration(&self) -> f64 {
+        (self.end - self.start).max(0.0)
+    }
+
+    /// Shotbase-style still → Motion default: push in and yaw a few degrees.
+    pub fn default_cinematic(duration: f64) -> Self {
+        let end = DEFAULT_MOTION_SEGMENT_SECONDS
+            .min(duration.max(MIN_MOTION_SEGMENT_SECONDS))
+            .max(MIN_MOTION_SEGMENT_SECONDS);
+        Self {
+            start: 0.0,
+            end,
+            from: MotionTransform::default(),
+            to: MotionTransform {
+                scale: DEFAULT_MOTION_END_SCALE,
+                rotation_y: DEFAULT_MOTION_END_ROTATION_Y,
+                perspective: DEFAULT_MOTION_END_PERSPECTIVE,
+                ..MotionTransform::default()
+            },
+            ease_ms: DEFAULT_ZOOM_EASE_MS,
+            easing: ZoomEasing::Glide,
+        }
+    }
+
+    pub fn sample(&self, time: f64) -> MotionTransform {
+        let span = self.duration();
+        if span <= f64::EPSILON {
+            return self.to;
+        }
+        // Same shape as zoom clips: ease into the pose, hold, ease out.
+        // ease_ms=0 used to stretch the curve across the whole clip, which
+        // made Glide/Smooth/Snappy look identical on a slow 1.8s move.
+        let ease = (self.ease_ms as f64 / 1000.0).clamp(0.0, span / 2.0);
+        if ease <= f64::EPSILON {
+            let local = ((time - self.start) / span).clamp(0.0, 1.0);
+            return lerp_transform(self.from, self.to, motion_easing_apply(self.easing, local));
+        }
+        if time < self.start + ease {
+            let alpha = ((time - self.start) / ease).clamp(0.0, 1.0);
+            return lerp_transform(self.from, self.to, motion_easing_apply(self.easing, alpha));
+        }
+        self.to
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionTextAnimation {
+    Fade,
+    Slide,
+}
+
+impl MotionTextAnimation {
+    pub const ALL: [Self; 2] = [Self::Fade, Self::Slide];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fade => "Fade",
+            Self::Slide => "Slide",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionTextStyle {
+    pub alpha: f64,
+    pub offset_y: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MotionTextSegment {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+    pub animation: MotionTextAnimation,
+    pub pos_x: f64,
+    pub pos_y: f64,
+    pub size: f64,
+}
+
+impl MotionTextSegment {
+    pub fn duration(&self) -> f64 {
+        (self.end - self.start).max(0.0)
+    }
+
+    pub fn sample(&self, time: f64) -> Option<MotionTextStyle> {
+        if time < self.start || time > self.end {
+            return None;
+        }
+        let span = self.duration();
+        if span <= f64::EPSILON {
+            return Some(MotionTextStyle {
+                alpha: 1.0,
+                offset_y: 0.0,
+            });
+        }
+        let local = time - self.start;
+        let fade = 0.28_f64.min(span / 3.0).max(0.05);
+        let alpha = if local < fade {
+            (local / fade).clamp(0.0, 1.0)
+        } else if local > span - fade {
+            ((span - local) / fade).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let offset_y = match self.animation {
+            MotionTextAnimation::Fade => 0.0,
+            MotionTextAnimation::Slide => {
+                if local < fade {
+                    36.0 * (1.0 - local / fade)
+                } else {
+                    0.0
+                }
+            }
+        };
+        Some(MotionTextStyle { alpha, offset_y })
+    }
+}
+
+fn motion_easing_apply(easing: ZoomEasing, t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    match easing {
+        ZoomEasing::Linear => t,
+        ZoomEasing::Glide => 1.0 - (1.0 - t).powi(3),
+        ZoomEasing::Smooth => {
+            if t < 0.5 {
+                4.0 * t * t * t
+            } else {
+                1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+            }
+        }
+        // Opposite of Glide so the four buttons are readable on a short ease window.
+        ZoomEasing::Snappy => t.powi(3),
+    }
+}
+
+fn lerp_transform(from: MotionTransform, to: MotionTransform, t: f64) -> MotionTransform {
+    let t = t.clamp(0.0, 1.0);
+    MotionTransform {
+        scale: from.scale + (to.scale - from.scale) * t,
+        rotation_x: from.rotation_x + (to.rotation_x - from.rotation_x) * t,
+        rotation_y: from.rotation_y + (to.rotation_y - from.rotation_y) * t,
+        rotation_z: from.rotation_z + (to.rotation_z - from.rotation_z) * t,
+        perspective: from.perspective + (to.perspective - from.perspective) * t,
+        pos_x: from.pos_x + (to.pos_x - from.pos_x) * t,
+        pos_y: from.pos_y + (to.pos_y - from.pos_y) * t,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MotionState {
+    pub duration: f64,
+    pub segments: Vec<MotionSegment>,
+    pub playhead: f64,
+    pub motion_blur: f64,
+    pub selected: Option<usize>,
+    pub text_segments: Vec<MotionTextSegment>,
+    pub selected_text: Option<usize>,
+}
+
+impl Default for MotionState {
+    fn default() -> Self {
+        Self {
+            duration: DEFAULT_MOTION_DURATION_SECONDS,
+            segments: Vec::new(),
+            playhead: 0.0,
+            motion_blur: 0.0,
+            selected: None,
+            text_segments: Vec::new(),
+            selected_text: None,
+        }
+    }
+}
+
+impl MotionState {
+    pub fn clamp_duration(duration: f64) -> f64 {
+        duration.clamp(MIN_MOTION_DURATION_SECONDS, MAX_MOTION_DURATION_SECONDS)
+    }
+
+    pub fn has_segments(&self) -> bool {
+        !self.segments.is_empty() || !self.text_segments.is_empty()
+    }
+
+    pub fn set_duration(&mut self, duration: f64) {
+        let previous = self.duration;
+        self.duration = Self::clamp_duration(duration);
+        if self.playhead > self.duration {
+            self.playhead = self.duration;
+        }
+        if self.segments.len() == 1 {
+            let segment = &mut self.segments[0];
+            if segment.start.abs() < 1e-6 && (segment.end - previous).abs() < 1e-6 {
+                segment.end = self.duration;
+            }
+        }
+        self.segments
+            .retain(|segment| segment.start < self.duration);
+        for segment in &mut self.segments {
+            segment.end = segment.end.min(self.duration);
+        }
+        if let Some(index) = self.selected {
+            if index >= self.segments.len() {
+                self.selected = None;
+            }
+        }
+        self.text_segments
+            .retain(|segment| segment.start < self.duration);
+        for segment in &mut self.text_segments {
+            segment.end = segment.end.min(self.duration);
+        }
+        if let Some(index) = self.selected_text {
+            if index >= self.text_segments.len() {
+                self.selected_text = None;
+            }
+        }
+    }
+
+    pub fn seed_default_cinematic(&mut self) {
+        if self.segments.is_empty() {
+            self.segments
+                .push(MotionSegment::default_cinematic(self.duration));
+            self.selected = Some(0);
+            self.selected_text = None;
+        }
+    }
+
+    pub fn add_segment_at(&mut self, start: f64) -> Option<usize> {
+        let start = start.clamp(0.0, self.duration);
+        if self.segment_index_at(start).is_some() {
+            return None;
+        }
+        let mut end = (start + DEFAULT_MOTION_SEGMENT_SECONDS).min(self.duration);
+        if end - start < MIN_MOTION_SEGMENT_SECONDS {
+            let start = (self.duration - MIN_MOTION_SEGMENT_SECONDS).max(0.0);
+            end = self.duration;
+            if end - start < MIN_MOTION_SEGMENT_SECONDS
+                || self
+                    .segments
+                    .iter()
+                    .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
+            {
+                return None;
+            }
+            return self.insert_segment(start, end);
+        }
+        if self
+            .segments
+            .iter()
+            .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
+        {
+            if let Some(next_start) = self
+                .segments
+                .iter()
+                .filter(|segment| segment.start >= start)
+                .map(|segment| segment.start)
+                .min_by(|a, b| a.total_cmp(b))
+            {
+                end = next_start;
+            }
+            if end - start < MIN_MOTION_SEGMENT_SECONDS
+                || self
+                    .segments
+                    .iter()
+                    .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
+            {
+                return None;
+            }
+        }
+        self.insert_segment(start, end)
+    }
+
+    fn insert_segment(&mut self, start: f64, end: f64) -> Option<usize> {
+        self.segments.push(MotionSegment {
+            start,
+            end,
+            from: MotionTransform::default(),
+            to: MotionTransform {
+                scale: DEFAULT_MOTION_END_SCALE,
+                rotation_y: DEFAULT_MOTION_END_ROTATION_Y,
+                perspective: DEFAULT_MOTION_END_PERSPECTIVE,
+                ..MotionTransform::default()
+            },
+            ease_ms: DEFAULT_ZOOM_EASE_MS,
+            easing: ZoomEasing::Glide,
+        });
+        self.segments.sort_by(|a, b| a.start.total_cmp(&b.start));
+        let index = self
+            .segments
+            .iter()
+            .position(|segment| (segment.start - start).abs() < 1e-6)?;
+        self.selected = Some(index);
+        self.selected_text = None;
+        Some(index)
+    }
+
+    pub fn segment_index_at(&self, time: f64) -> Option<usize> {
+        self.segments
+            .iter()
+            .position(|segment| time >= segment.start && time <= segment.end)
+    }
+
+    pub fn remove_selected(&mut self) -> bool {
+        if let Some(index) = self.selected_text.take() {
+            if index < self.text_segments.len() {
+                self.text_segments.remove(index);
+                if !self.text_segments.is_empty() {
+                    self.selected_text = Some(index.min(self.text_segments.len() - 1));
+                }
+                return true;
+            }
+        }
+        let Some(index) = self.selected.take() else {
+            return false;
+        };
+        if index >= self.segments.len() {
+            return false;
+        }
+        self.segments.remove(index);
+        if !self.segments.is_empty() {
+            self.selected = Some(index.min(self.segments.len() - 1));
+        }
+        true
+    }
+
+    pub fn set_segment_range(&mut self, index: usize, start: f64, end: f64) {
+        if self.segments.get(index).is_none() {
+            return;
+        }
+        let mut start = start.clamp(0.0, self.duration);
+        let mut end = end.clamp(0.0, self.duration);
+        if end < start {
+            std::mem::swap(&mut start, &mut end);
+        }
+        if end - start < MIN_MOTION_SEGMENT_SECONDS {
+            return;
+        }
+        if self.segments.iter().enumerate().any(|(other, clip)| {
+            other != index && motion_ranges_overlap(start, end, clip.start, clip.end)
+        }) {
+            return;
+        }
+        if let Some(segment) = self.segments.get_mut(index) {
+            segment.start = start;
+            segment.end = end;
+        }
+        self.selected = Some(index);
+        self.selected_text = None;
+    }
+
+    pub fn move_segment(&mut self, index: usize, start: f64) {
+        let Some(segment) = self.segments.get(index).cloned() else {
+            return;
+        };
+        let span = segment.duration();
+        let start = start.clamp(0.0, (self.duration - span).max(0.0));
+        self.set_segment_range(index, start, start + span);
+    }
+
+    pub fn selected_segment(&self) -> Option<&MotionSegment> {
+        self.selected.and_then(|index| self.segments.get(index))
+    }
+
+    pub fn selected_segment_mut(&mut self) -> Option<&mut MotionSegment> {
+        self.selected.and_then(|index| self.segments.get_mut(index))
+    }
+
+    pub fn set_selected_end_scale(&mut self, scale: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.to.scale = scale.clamp(1.0, 3.0);
+        }
+    }
+
+    pub fn set_selected_end_yaw(&mut self, yaw: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.to.rotation_y = yaw.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        }
+    }
+
+    pub fn set_selected_easing(&mut self, easing: ZoomEasing) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.easing = easing;
+        }
+    }
+
+    pub fn set_selected_ease_ms(&mut self, ease_ms: u32) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
+        }
+    }
+
+    pub fn set_selected_end_pitch(&mut self, pitch: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.to.rotation_x = pitch.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        }
+    }
+
+    pub fn set_selected_end_roll(&mut self, roll: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.to.rotation_z = roll.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        }
+    }
+
+    pub fn set_selected_perspective(&mut self, perspective: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.to.perspective = perspective.clamp(0.0, 1.0);
+        }
+    }
+
+    pub fn set_selected_end_pos_x(&mut self, pos_x: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.to.pos_x = pos_x.clamp(MIN_MOTION_POS, MAX_MOTION_POS);
+        }
+    }
+
+    pub fn set_selected_end_pos_y(&mut self, pos_y: f64) {
+        if let Some(segment) = self.selected_segment_mut() {
+            segment.to.pos_y = pos_y.clamp(MIN_MOTION_POS, MAX_MOTION_POS);
+        }
+    }
+
+    pub fn set_motion_blur(&mut self, motion_blur: f64) {
+        self.motion_blur = motion_blur.clamp(0.0, 1.0);
+    }
+
+    pub fn text_index_at(&self, time: f64) -> Option<usize> {
+        self.text_segments
+            .iter()
+            .position(|segment| time >= segment.start && time <= segment.end)
+    }
+
+    pub fn add_text_at(&mut self, start: f64) -> Option<usize> {
+        let start = start.clamp(0.0, self.duration);
+        if self.text_index_at(start).is_some() {
+            return None;
+        }
+        let mut end = (start + DEFAULT_MOTION_TEXT_SECONDS).min(self.duration);
+        if end - start < MIN_MOTION_SEGMENT_SECONDS {
+            let start = (self.duration - MIN_MOTION_SEGMENT_SECONDS).max(0.0);
+            end = self.duration;
+            if end - start < MIN_MOTION_SEGMENT_SECONDS
+                || self
+                    .text_segments
+                    .iter()
+                    .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
+            {
+                return None;
+            }
+            return self.insert_text(start, end);
+        }
+        if self
+            .text_segments
+            .iter()
+            .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
+        {
+            if let Some(next_start) = self
+                .text_segments
+                .iter()
+                .filter(|segment| segment.start >= start)
+                .map(|segment| segment.start)
+                .min_by(|a, b| a.total_cmp(b))
+            {
+                end = next_start;
+            }
+            if end - start < MIN_MOTION_SEGMENT_SECONDS
+                || self
+                    .text_segments
+                    .iter()
+                    .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
+            {
+                return None;
+            }
+        }
+        self.insert_text(start, end)
+    }
+
+    fn insert_text(&mut self, start: f64, end: f64) -> Option<usize> {
+        self.text_segments.push(MotionTextSegment {
+            start,
+            end,
+            text: "Title".into(),
+            animation: MotionTextAnimation::Fade,
+            pos_x: DEFAULT_MOTION_TEXT_POS_X,
+            pos_y: DEFAULT_MOTION_TEXT_POS_Y,
+            size: DEFAULT_MOTION_TEXT_SIZE,
+        });
+        self.text_segments
+            .sort_by(|a, b| a.start.total_cmp(&b.start));
+        let index = self
+            .text_segments
+            .iter()
+            .position(|segment| (segment.start - start).abs() < 1e-6)?;
+        self.selected_text = Some(index);
+        self.selected = None;
+        Some(index)
+    }
+
+    pub fn set_text_range(&mut self, index: usize, start: f64, end: f64) {
+        if self.text_segments.get(index).is_none() {
+            return;
+        }
+        let mut start = start.clamp(0.0, self.duration);
+        let mut end = end.clamp(0.0, self.duration);
+        if end < start {
+            std::mem::swap(&mut start, &mut end);
+        }
+        if end - start < MIN_MOTION_SEGMENT_SECONDS {
+            return;
+        }
+        if self.text_segments.iter().enumerate().any(|(other, clip)| {
+            other != index && motion_ranges_overlap(start, end, clip.start, clip.end)
+        }) {
+            return;
+        }
+        if let Some(segment) = self.text_segments.get_mut(index) {
+            segment.start = start;
+            segment.end = end;
+        }
+        self.selected_text = Some(index);
+        self.selected = None;
+    }
+
+    pub fn move_text(&mut self, index: usize, start: f64) {
+        let Some(segment) = self.text_segments.get(index).cloned() else {
+            return;
+        };
+        let span = segment.duration();
+        let start = start.clamp(0.0, (self.duration - span).max(0.0));
+        self.set_text_range(index, start, start + span);
+    }
+
+    pub fn selected_text_segment(&self) -> Option<&MotionTextSegment> {
+        self.selected_text
+            .and_then(|index| self.text_segments.get(index))
+    }
+
+    pub fn set_selected_text_value(&mut self, text: String) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.text = text;
+            }
+        }
+    }
+
+    pub fn set_selected_text_animation(&mut self, animation: MotionTextAnimation) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.animation = animation;
+            }
+        }
+    }
+
+    pub fn set_selected_text_pos(&mut self, pos_x: f64, pos_y: f64) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.pos_x = pos_x.clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS);
+                segment.pos_y = pos_y.clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS);
+            }
+        }
+    }
+
+    pub fn set_selected_text_size(&mut self, size: f64) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.size = size.clamp(MIN_MOTION_TEXT_SIZE, MAX_MOTION_TEXT_SIZE);
+            }
+        }
+    }
+
+    pub fn sample(&self, time: f64) -> MotionTransform {
+        let time = time.clamp(0.0, self.duration.max(0.0));
+        if let Some(segment) = self
+            .segments
+            .iter()
+            .find(|segment| time >= segment.start && time <= segment.end)
+        {
+            return segment.sample(time);
+        }
+        self.segments
+            .iter()
+            .rev()
+            .find(|segment| time > segment.end)
+            .map(|segment| segment.to)
+            .unwrap_or_default()
+    }
+}
+
+fn motion_ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
+    a0 < b1 && b0 < a1
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -2132,3 +2132,81 @@ msgstr "アップデートを利用できます · v{version}"
 
 msgid "Version {version} is ready. Open the ApexShot menu to view it."
 msgstr "バージョン {version} の準備ができました。ApexShot メニューを開いて確認してください。"
+
+msgid "Static"
+msgstr "静止"
+
+msgid "Switch to Static"
+msgstr "静止に切り替え"
+
+msgid "Switch to Motion"
+msgstr "Motion に切り替え"
+
+msgid "Pause"
+msgstr "一時停止"
+
+msgid "Continue"
+msgstr "続ける"
+
+msgid "Don't show this again"
+msgstr "次回から表示しない"
+
+msgid "Annotations will be applied"
+msgstr "注釈が適用されます"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. Your original image is not flattened until Done."
+msgstr "Motion は注釈のスナップショットを再生します。静止に戻すとツールが復元されます。元の画像は完了するまで統合されません。"
+
+msgid "Motion effects will be cleared"
+msgstr "Motion 効果がクリアされます"
+
+msgid "Motion effect segments can't be edited in Static mode and will be cleared if you continue."
+msgstr "Motion セグメントは静止モードでは編集できず、続行すると削除されます。"
+
+msgid "Add motion at playhead"
+msgstr "再生位置に Motion を追加"
+
+msgid "Click a clip, or double-click a track to add a move or text"
+msgstr "クリップをクリック、またはトラックをダブルクリックして動きやテキストを追加"
+
+msgid "Move"
+msgstr "動き"
+
+msgid "Yaw"
+msgstr "ヨー"
+
+msgid "Scale"
+msgstr "スケール"
+
+msgid "Pitch"
+msgstr "ピッチ"
+
+msgid "Roll"
+msgstr "ロール"
+
+msgid "Perspective"
+msgstr "パース"
+
+msgid "Motion blur"
+msgstr "モーションブラー"
+
+msgid "X"
+msgstr "X"
+
+msgid "Y"
+msgstr "Y"
+
+msgid "Add text at playhead"
+msgstr "再生位置にテキストを追加"
+
+msgid "Fade"
+msgstr "フェード"
+
+msgid "Slide"
+msgstr "スライド"
+
+msgid "Title"
+msgstr "タイトル"
+
+msgid "Drag on the preview to place the title"
+msgstr "プレビューをドラッグしてタイトルを配置"

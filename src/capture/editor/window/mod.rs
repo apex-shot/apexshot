@@ -2,7 +2,7 @@ use gdk4x11::X11Surface;
 use gtk4::gdk;
 use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, DropTarget, Entry, Label, Orientation, Overlay, Popover,
+    DrawingArea, DropTarget, Entry, Label, Orientation, Overlay, Popover, Stack,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -342,6 +342,9 @@ mod empty_state;
 mod events;
 mod footer;
 mod inspectors;
+mod motion_mode;
+mod motion_render;
+mod motion_timeline;
 mod toolbar;
 
 use background_assets::BackgroundAssetCaches;
@@ -523,6 +526,7 @@ fn setup_editor_window_full(
     });
 
     install_editor_css();
+    crate::recording::editor::ui_support::install_recording_editor_css();
     let annotate_config =
         AnnotateRuntimeConfig::from_app_config(&crate::config::load_config().sanitized());
 
@@ -1265,6 +1269,14 @@ fn setup_editor_window_full(
         save_btn.set_sensitive(false);
     }
 
+    let (motion_parts, motion_session) = motion_mode::build_motion_mode(prefers_dark);
+    let motion_session = Rc::new(motion_session);
+    let last_inspector = Rc::new(RefCell::new(String::from("placeholder")));
+    let in_motion = Rc::new(Cell::new(false));
+    if empty_drop_zone {
+        motion_parts.motion_btn.set_sensitive(false);
+    }
+
     let tracked_window_id = next_tracked_window_id("annotate-editor");
     let window_title = "ApexShot Editor";
     let window_namespace = "apexshot-annotate-editor";
@@ -1509,6 +1521,7 @@ fn setup_editor_window_full(
         background_inspector: &background_inspector,
         colors_inspector: &colors_inspector,
         placeholder_inspector: &placeholder_inspector,
+        motion_inspector: &motion_parts.inspector,
         copy_btn: &copy_btn,
         upload_btn: &upload_btn,
         save_btn: &save_btn,
@@ -1521,7 +1534,13 @@ fn setup_editor_window_full(
     canvas_with_toolbar.set_vexpand(true);
     canvas.set_hexpand(true);
     canvas.set_vexpand(true);
-    canvas_with_toolbar.set_child(Some(&canvas));
+    let canvas_stack = Stack::new();
+    canvas_stack.set_hexpand(true);
+    canvas_stack.set_vexpand(true);
+    canvas_stack.add_named(&canvas, Some(motion_mode::STATIC_PAGE));
+    canvas_stack.add_named(&motion_parts.page, Some(motion_mode::MOTION_PAGE));
+    canvas_stack.set_visible_child_name(motion_mode::STATIC_PAGE);
+    canvas_with_toolbar.set_child(Some(&canvas_stack));
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.set_hexpand(true);
@@ -1625,8 +1644,14 @@ fn setup_editor_window_full(
         let inspector_stack = inspector_stack.clone();
         let background_tab_btn = background_tab_btn.clone();
         let colors_tab_btn = colors_tab_btn.clone();
+        let last_inspector = last_inspector.clone();
+        let in_motion = in_motion.clone();
         move |surface| {
-            let show_background = !matches!(surface, "colors" | "placeholder" | "select");
+            if !in_motion.get() && surface != motion_mode::MOTION_PAGE {
+                *last_inspector.borrow_mut() = surface.to_string();
+            }
+            let show_background =
+                !matches!(surface, "colors" | "placeholder" | "select" | "motion");
             let show_colors = surface == "colors";
             inspector_stack.set_visible_child_name(surface);
             if show_background {
@@ -2021,16 +2046,107 @@ fn setup_editor_window_full(
     let root_overlay = Overlay::new();
     root_overlay.set_child(Some(&root));
 
-    chrome::install_window_chrome(chrome::WindowChromeInputs {
+    let window_chrome = chrome::install_window_chrome(chrome::WindowChromeInputs {
         canvas_with_toolbar: &canvas_with_toolbar,
         root_overlay: &root_overlay,
         window: &window,
         toolbar: &toolbar,
+        static_toolbar: &motion_parts.static_toolbar,
         zoom_minus_btn: &zoom_minus_btn,
         zoom_button: &zoom_button,
         zoom_plus_btn: &zoom_plus_btn,
+        motion_btn: &motion_parts.motion_btn,
         history_group: &history_group,
         zoom_popup: &zoom_popup,
+    });
+    motion_mode::install_confirm_overlay(&root_overlay, &motion_parts.confirm_overlay);
+
+    let motion_chrome = Rc::new(motion_mode::MotionModeChrome {
+        mode_stack: window_chrome.mode_stack,
+        canvas_stack: canvas_stack.clone(),
+        bottom_left_stack: window_chrome.bottom_left_stack,
+        motion_control: window_chrome.motion_control,
+        history_control: window_chrome.history_control,
+        inspector_tabs: inspector_tabs.clone(),
+        inspector_stack: inspector_stack.clone(),
+    });
+    motion_mode::wire_motion_controls(
+        &motion_parts,
+        motion_session.as_ref(),
+        motion_chrome.clone(),
+        last_inspector.clone(),
+        in_motion.clone(),
+    );
+
+    let enter_motion = {
+        let state = state.clone();
+        let session = motion_session.clone();
+        let preview = motion_parts.preview.clone();
+        let ruler = motion_parts.ruler.clone();
+        let motion_track = motion_parts.motion_track.clone();
+        let text_track = motion_parts.text_track.clone();
+        let playhead_overlay = motion_parts.playhead_overlay.clone();
+        let motion_chrome = motion_chrome.clone();
+        let last_inspector = last_inspector.clone();
+        let in_motion = in_motion.clone();
+        let duration_slider = motion_parts.duration_slider.clone();
+        let duration_value = motion_parts.duration_value.clone();
+        Rc::new(move || {
+            session.capture_snapshot(&state.lock().unwrap());
+            let duration = session.duration();
+            duration_slider.set_value(duration);
+            duration_value.set_label(&format!("{duration:.1}s"));
+            motion_mode::apply_editor_mode(&motion_chrome, true, last_inspector.borrow().as_str());
+            in_motion.set(true);
+            preview.queue_draw();
+            ruler.queue_draw();
+            motion_track.queue_draw();
+            text_track.queue_draw();
+            playhead_overlay.queue_draw();
+        }) as Rc<dyn Fn()>
+    };
+    let leave_motion = {
+        let session = motion_session.clone();
+        let motion_chrome = motion_chrome.clone();
+        let last_inspector = last_inspector.clone();
+        let in_motion = in_motion.clone();
+        Rc::new(move || {
+            session.clear_snapshot();
+            motion_mode::apply_editor_mode(&motion_chrome, false, last_inspector.borrow().as_str());
+            in_motion.set(false);
+        }) as Rc<dyn Fn()>
+    };
+
+    motion_parts.motion_btn.connect_clicked({
+        let window = window.clone();
+        let confirm = motion_parts.confirm_overlay.clone();
+        let state = state.clone();
+        let session = motion_session.clone();
+        let enter_motion = enter_motion.clone();
+        move |_| {
+            motion_mode::request_enter_motion(
+                &window,
+                &confirm,
+                session.as_ref(),
+                &state,
+                empty_drop_zone,
+                enter_motion.clone(),
+            );
+        }
+    });
+    motion_parts.static_btn.connect_clicked({
+        let window = window.clone();
+        let confirm = motion_parts.confirm_overlay.clone();
+        let session = motion_session.clone();
+        let leave_motion = leave_motion.clone();
+        move |_| {
+            motion_mode::request_leave_motion(
+                &window,
+                &confirm,
+                session.as_ref(),
+                leave_motion.clone(),
+            );
+        }
     });
 
     if empty_drop_zone {
@@ -2320,6 +2436,12 @@ fn setup_editor_window_full(
         inverse_direction_toggle: inverse_direction_toggle.clone(),
         stroke_size_button: stroke_size_button.clone(),
         stroke_size_list: line_inspector_list.clone(),
+        in_motion: in_motion.clone(),
+        export_motion: Rc::new({
+            let session = motion_session.clone();
+            let path = path.clone();
+            move || session.export_mp4(&path)
+        }),
     });
 
     window.present();
@@ -2842,6 +2964,26 @@ mod tests {
                 )
                 && production_source.contains("pub(super) struct CanvasRenderCaches"),
             "PR 10.19 must install canvas draw via canvas_render; caches and draw body live there"
+        );
+    }
+
+    #[test]
+    fn motion_mode_is_wired_in_the_same_window() {
+        let source = include_str!("mod.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("mod motion_mode;")
+                && production.contains("motion_mode::build_motion_mode")
+                && production
+                    .contains("canvas_stack.add_named(&canvas, Some(motion_mode::STATIC_PAGE));")
+                && production.contains(
+                    "canvas_stack.add_named(&motion_parts.page, Some(motion_mode::MOTION_PAGE));"
+                )
+                && production.contains("motion_mode::request_enter_motion")
+                && production.contains("motion_mode::request_leave_motion")
+                && production.contains("session.capture_snapshot")
+                && !production.contains("open_recording_editor"),
+            "Motion must swap the image-editor body in-process, not open the video editor"
         );
     }
 

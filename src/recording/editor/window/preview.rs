@@ -1,6 +1,6 @@
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::{
-    even_crop_rect, format_webcut_time, source_to_zoomed_point, view_to_source,
+    even_crop_rect, format_webcut_time, motion_clip_matrix, source_to_zoomed_point, view_to_source,
     zoom_camera_transform, CursorSettings, VideoBackground, VideoEditState, ZoomClip, ZoomMode,
     WEBCUT_ASPECT_RATIOS,
 };
@@ -81,6 +81,7 @@ fn build_preview_inner(
 
     let clip = Overlay::new();
     clip.add_css_class("recording-editor-preview-clip");
+    clip.add_css_class("recording-editor-preview-clip-motion");
     clip.set_overflow(gtk4::Overflow::Hidden);
     clip.set_hexpand(true);
     clip.set_vexpand(true);
@@ -685,16 +686,17 @@ fn apply_preview_view(
     if clip_w < 2.0 || clip_h < 2.0 {
         return;
     }
-    let (view, src_w, src_h) = {
+    let (view, src_w, src_h, pose) = {
         let state = state.lock().unwrap();
         (
             visible_source_view(&state, playhead, placing),
             state.metadata.width.max(1) as f64,
             state.metadata.height.max(1) as f64,
+            state.eval_zoom_pose(playhead),
         )
     };
     let (tx, ty, sx, sy) = zoom_camera_transform(view, src_w, src_h, clip_w, clip_h);
-    let css = if (sx - 1.0).abs() < 0.002
+    let video_css = if (sx - 1.0).abs() < 0.002
         && (sy - 1.0).abs() < 0.002
         && tx.abs() < 0.5
         && ty.abs() < 0.5
@@ -705,6 +707,25 @@ fn apply_preview_view(
             ".recording-editor-video-zoom-live {{ transform-origin: 0px 0px; transform: translate({tx:.2}px, {ty:.2}px) scale({sx:.4}, {sy:.4}); }}"
         )
     };
+    let card_css = if let Some((xx, yx, xy, yy, x0, y0)) = motion_clip_matrix(pose, clip_w, clip_h)
+    {
+        if (xx - 1.0).abs() < 0.002
+            && yx.abs() < 0.002
+            && xy.abs() < 0.002
+            && (yy - 1.0).abs() < 0.002
+            && x0.abs() < 0.5
+            && y0.abs() < 0.5
+        {
+            ".recording-editor-preview-clip-motion { transform: none; }".to_string()
+        } else {
+            format!(
+                ".recording-editor-preview-clip-motion {{ transform-origin: 0px 0px; transform: matrix({xx:.5}, {yx:.5}, {xy:.5}, {yy:.5}, {x0:.2}, {y0:.2}); }}"
+            )
+        }
+    } else {
+        ".recording-editor-preview-clip-motion { transform: none; }".to_string()
+    };
+    let css = format!("{video_css}\n{card_css}");
     if *last_css.borrow() != css {
         provider.load_from_data(&css);
         last_css.replace(css);

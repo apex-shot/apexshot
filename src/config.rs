@@ -98,6 +98,10 @@ pub struct AppConfig {
     pub annotate_auto_expand: bool,
     pub annotate_show_color_names: bool,
     pub annotate_always_on_top: bool,
+    /// Skip the Static → Motion confirm that annotations will be snapshotted.
+    pub skip_static_to_motion_confirm: bool,
+    /// Skip the Motion → Static confirm that motion segments will be cleared.
+    pub skip_motion_to_static_confirm: bool,
     // Wallpaper settings
     pub wallpaper_mode: String,
     pub wallpaper_dont_change_on_space: bool,
@@ -234,6 +238,8 @@ impl Default for AppConfig {
             annotate_auto_expand: false,
             annotate_show_color_names: false,
             annotate_always_on_top: false,
+            skip_static_to_motion_confirm: false,
+            skip_motion_to_static_confirm: false,
             wallpaper_mode: "Desktop".to_string(),
             wallpaper_dont_change_on_space: false,
             wallpaper_custom_path: String::new(),
@@ -849,6 +855,19 @@ mod tests {
             loaded.annotate_always_on_top,
             original.annotate_always_on_top
         );
+    }
+
+    #[test]
+    fn motion_confirm_skips_round_trip_through_yaml() {
+        let original = AppConfig {
+            skip_static_to_motion_confirm: true,
+            skip_motion_to_static_confirm: true,
+            ..AppConfig::default()
+        };
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+        assert!(loaded.skip_static_to_motion_confirm);
+        assert!(loaded.skip_motion_to_static_confirm);
     }
 
     #[test]

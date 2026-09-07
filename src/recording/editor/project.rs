@@ -114,6 +114,14 @@ pub struct ZoomClipFile {
     #[serde(default)]
     pub easing: ZoomEasingFile,
     pub mode: ZoomModeFile,
+    #[serde(default)]
+    pub rotation_x: f64,
+    #[serde(default)]
+    pub rotation_y: f64,
+    #[serde(default)]
+    pub rotation_z: f64,
+    #[serde(default)]
+    pub perspective: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -322,6 +330,10 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
             ZoomMode::Auto => ZoomModeFile::Auto,
             ZoomMode::Manual => ZoomModeFile::Manual,
         },
+        rotation_x: clip.rotation_x,
+        rotation_y: clip.rotation_y,
+        rotation_z: clip.rotation_z,
+        perspective: clip.perspective,
     }
 }
 
@@ -351,6 +363,10 @@ fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
             ZoomModeFile::Auto => ZoomMode::Auto,
             ZoomModeFile::Manual => ZoomMode::Manual,
         },
+        rotation_x: clip.rotation_x,
+        rotation_y: clip.rotation_y,
+        rotation_z: clip.rotation_z,
+        perspective: clip.perspective,
     }
 }
 
@@ -816,6 +832,7 @@ mod tests {
             ease_ms: 200,
             easing: ZoomEasing::Glide,
             mode: ZoomMode::Manual,
+            ..Default::default()
         });
         state.crop = Some(CropSelection {
             x: 10,
@@ -880,6 +897,7 @@ mod tests {
             ease_ms: 200,
             easing: ZoomEasing::Glide,
             mode: ZoomMode::Auto,
+            ..Default::default()
         });
         assert!(zoomed.session_is_dirty(None));
 
@@ -899,6 +917,7 @@ mod tests {
             ease_ms: 400,
             easing: ZoomEasing::Glide,
             mode: ZoomMode::Manual,
+            ..Default::default()
         });
         persist_video_session(&state);
 
@@ -911,6 +930,7 @@ mod tests {
             ease_ms: 400,
             easing: ZoomEasing::Glide,
             mode: ZoomMode::Auto,
+            ..Default::default()
         });
         persist_video_session(&state);
 
@@ -1018,6 +1038,7 @@ mod tests {
             ease_ms: 400,
             easing: ZoomEasing::Snappy,
             mode: ZoomMode::Manual,
+            ..Default::default()
         });
         state.cursor.click_color = (12, 34, 56);
         state.cursor.click_scale = 1.6;
@@ -1067,6 +1088,7 @@ mod tests {
             ease_ms: 480,
             easing: ZoomEasing::Snappy,
             mode: ZoomMode::Manual,
+            ..Default::default()
         });
         save_project(&video, &state.to_project()).unwrap();
         let loaded = load_project(&video).expect("project should load");

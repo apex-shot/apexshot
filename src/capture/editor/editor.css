@@ -1095,6 +1095,43 @@
                 border-radius: 9px;
             }
 
+            .editor-floating-motion {
+                padding: 6px;
+                background: #0f0f0f;
+                border-radius: 9px;
+            }
+
+            .editor-floating-motion button.editor-footer-zoom-button {
+                min-height: 34px;
+                padding: 0 16px;
+            }
+
+            button.editor-mode-label-button {
+                min-height: 34px;
+                padding: 0 14px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-motion-time-label {
+                padding: 0 10px 0 4px;
+            }
+
+            .editor-motion-timeline {
+                min-height: 40px;
+            }
+
+            .editor-motion-confirm-scrim {
+                background: alpha(#000000, 0.45);
+            }
+
+            .editor-motion-confirm-card {
+                min-width: 360px;
+                padding: 20px 22px 16px;
+                background: #0f0f0f;
+                border-radius: 12px;
+            }
+
             .editor-floating-history button.editor-tool-button {
                 min-width: 34px;
                 min-height: 34px;
@@ -1129,6 +1166,7 @@
 
             .editor-sidebar-actions {
                 padding: 10px 16px 16px;
+                min-height: 24px;
             }
 
             button.editor-sidebar-action-button {
@@ -1306,6 +1344,14 @@
 
             .editor-root.editor-theme-light .editor-floating-history {
                 background: #eef0f5;
+            }
+
+            .editor-root.editor-theme-light .editor-floating-motion {
+                background: #eef0f5;
+            }
+
+            .editor-root.editor-theme-light .editor-motion-confirm-card {
+                background: #ffffff;
             }
 
             .editor-root.editor-theme-light button.editor-floating-zoom-step {
@@ -1540,6 +1586,15 @@
             .editor-root.editor-theme-light .editor-right-inspector {
                 background: alpha(#111827, 0.04);
                 border-left: none;
+            }
+            .editor-root.editor-theme-light .editor-right-inspector scrollbar slider {
+                background-color: alpha(#111827, 0.18);
+            }
+            .editor-root.editor-theme-light .editor-right-inspector scrollbar slider:hover {
+                background-color: alpha(#111827, 0.28);
+            }
+            .editor-root.editor-theme-light .editor-right-inspector scrollbar slider:active {
+                background-color: alpha(#111827, 0.35);
             }
             .editor-root.editor-theme-light .editor-sidebar-utility-controls {
                 border-bottom-color: alpha(#111827, 0.06);
@@ -1944,6 +1999,66 @@
                 background: alpha(black, 0.25);
                 border-left: none;
                 padding: 0;
+            }
+
+            .editor-inspector-scroll,
+            .editor-inspector-scroll > viewport,
+            .editor-inspector-scroll scrollbar {
+                background: transparent;
+                border: none;
+            }
+
+            .editor-right-inspector scrollbar,
+            .editor-right-inspector scrollbar.overlay-indicator {
+                padding: 0;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
+
+            .editor-right-inspector scrollbar.vertical {
+                min-width: 6px;
+            }
+
+            .editor-right-inspector scrollbar.vertical:hover,
+            .editor-right-inspector scrollbar.vertical.hovering,
+            .editor-right-inspector scrollbar.vertical.dragging {
+                min-width: 10px;
+            }
+
+            .editor-right-inspector scrollbar contents,
+            .editor-right-inspector scrollbar trough {
+                min-width: 0;
+                min-height: 0;
+                padding: 0;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
+
+            .editor-right-inspector scrollbar slider {
+                background-color: alpha(white, 0.18);
+                border-radius: 999px;
+                min-width: 5px;
+                min-height: 5px;
+                margin: 0;
+                padding: 0;
+                border: none;
+            }
+
+            .editor-right-inspector scrollbar:hover slider,
+            .editor-right-inspector scrollbar.hovering slider,
+            .editor-right-inspector scrollbar.dragging slider {
+                min-width: 8px;
+                min-height: 8px;
+            }
+
+            .editor-right-inspector scrollbar slider:hover {
+                background-color: alpha(white, 0.28);
+            }
+
+            .editor-right-inspector scrollbar slider:active {
+                background-color: alpha(white, 0.35);
             }
 
             .editor-inspector-title {

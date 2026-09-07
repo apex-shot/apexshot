@@ -2178,3 +2178,81 @@ msgstr "Update verfügbar · v{version}"
 
 msgid "Version {version} is ready. Open the ApexShot menu to view it."
 msgstr "Version {version} ist bereit. Öffne das ApexShot-Menü, um sie anzusehen."
+
+msgid "Static"
+msgstr "Statisch"
+
+msgid "Switch to Static"
+msgstr "Zu Statisch wechseln"
+
+msgid "Switch to Motion"
+msgstr "Zu Motion wechseln"
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Continue"
+msgstr "Weiter"
+
+msgid "Don't show this again"
+msgstr "Nicht mehr anzeigen"
+
+msgid "Annotations will be applied"
+msgstr "Anmerkungen werden angewendet"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. Your original image is not flattened until Done."
+msgstr "Motion spielt eine Momentaufnahme deiner Anmerkungen. Zurück zu Statisch stellt die Werkzeuge wieder her. Das Originalbild wird erst mit Fertig abgeflacht."
+
+msgid "Motion effects will be cleared"
+msgstr "Motion-Effekte werden gelöscht"
+
+msgid "Motion effect segments can't be edited in Static mode and will be cleared if you continue."
+msgstr "Motion-Segmente können im statischen Modus nicht bearbeitet werden und werden gelöscht, wenn du fortfährst."
+
+msgid "Add motion at playhead"
+msgstr "Motion an der Abspielposition hinzufügen"
+
+msgid "Click a clip, or double-click a track to add a move or text"
+msgstr "Klicke einen Clip oder doppelklicke eine Spur, um eine Bewegung oder Text hinzuzufügen"
+
+msgid "Move"
+msgstr "Bewegung"
+
+msgid "Yaw"
+msgstr "Gier"
+
+msgid "Scale"
+msgstr "Skalierung"
+
+msgid "Pitch"
+msgstr "Nick"
+
+msgid "Roll"
+msgstr "Roll"
+
+msgid "Perspective"
+msgstr "Perspektive"
+
+msgid "Motion blur"
+msgstr "Bewegungsunschärfe"
+
+msgid "X"
+msgstr "X"
+
+msgid "Y"
+msgstr "Y"
+
+msgid "Add text at playhead"
+msgstr "Text an der Abspielposition hinzufügen"
+
+msgid "Fade"
+msgstr "Einblenden"
+
+msgid "Slide"
+msgstr "Einschub"
+
+msgid "Title"
+msgstr "Titel"
+
+msgid "Drag on the preview to place the title"
+msgstr "Ziehe auf der Vorschau, um den Titel zu platzieren"
